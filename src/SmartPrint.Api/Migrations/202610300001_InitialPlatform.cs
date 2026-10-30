@@ -233,6 +233,20 @@ public sealed class InitialPlatform : Migration
             CREATE UNIQUE INDEX "IX_PrintJobs_TenantId_JobNumber" ON "PrintJobs" ("TenantId", "JobNumber");
             CREATE INDEX "IX_PrintJobs_TenantId_CreatedUtc" ON "PrintJobs" ("TenantId", "CreatedUtc");
 
+            CREATE TABLE "PrintJobEvents" (
+                "Id" uuid NOT NULL PRIMARY KEY,
+                "TenantId" uuid NOT NULL,
+                "PrintJobId" uuid NOT NULL,
+                "PreviousStatus" varchar(40),
+                "NewStatus" varchar(40) NOT NULL,
+                "ActorType" varchar(24) NOT NULL,
+                "ActorId" uuid,
+                "ReasonCode" varchar(80),
+                "CreatedUtc" timestamptz NOT NULL,
+                CONSTRAINT "FK_PrintJobEvents_PrintJobs_TenantId_PrintJobId" FOREIGN KEY ("TenantId", "PrintJobId") REFERENCES "PrintJobs" ("TenantId", "Id") ON DELETE CASCADE
+            );
+            CREATE INDEX "IX_PrintJobEvents_TenantId_PrintJobId_CreatedUtc" ON "PrintJobEvents" ("TenantId", "PrintJobId", "CreatedUtc");
+
             CREATE TABLE "PrintDocuments" (
                 "Id" uuid NOT NULL PRIMARY KEY,
                 "TenantId" uuid NOT NULL,
@@ -256,6 +270,7 @@ public sealed class InitialPlatform : Migration
     {
         migrationBuilder.Sql("""
             DROP TABLE IF EXISTS "PrintDocuments";
+            DROP TABLE IF EXISTS "PrintJobEvents";
             DROP TABLE IF EXISTS "PrintJobs";
             DROP TABLE IF EXISTS "RefreshTokens";
             DROP TABLE IF EXISTS "CustomerPrintSessions";

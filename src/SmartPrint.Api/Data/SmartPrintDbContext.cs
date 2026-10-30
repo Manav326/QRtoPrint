@@ -18,6 +18,7 @@ public sealed class SmartPrintDbContext(DbContextOptions<SmartPrintDbContext> op
     public DbSet<RefreshToken> RefreshTokens => Set<RefreshToken>();
     public DbSet<PrintJob> PrintJobs => Set<PrintJob>();
     public DbSet<PrintDocument> PrintDocuments => Set<PrintDocument>();
+    public DbSet<PrintJobEvent> PrintJobEvents => Set<PrintJobEvent>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -159,6 +160,21 @@ public sealed class SmartPrintDbContext(DbContextOptions<SmartPrintDbContext> op
                 .HasForeignKey(x => new { x.TenantId, x.PrinterDeviceId })
                 .HasPrincipalKey(x => new { x.TenantId, x.Id })
                 .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        modelBuilder.Entity<PrintJobEvent>(entity =>
+        {
+            entity.ToTable("PrintJobEvents");
+            entity.HasKey(x => x.Id);
+            entity.Property(x => x.PreviousStatus).HasMaxLength(40);
+            entity.Property(x => x.NewStatus).HasMaxLength(40).IsRequired();
+            entity.Property(x => x.ActorType).HasMaxLength(24).IsRequired();
+            entity.Property(x => x.ReasonCode).HasMaxLength(80);
+            entity.HasIndex(x => new { x.TenantId, x.PrintJobId, x.CreatedUtc });
+            entity.HasOne<PrintJob>().WithMany()
+                .HasForeignKey(x => new { x.TenantId, x.PrintJobId })
+                .HasPrincipalKey(x => new { x.TenantId, x.Id })
+                .OnDelete(DeleteBehavior.Cascade);
         });
 
         modelBuilder.Entity<PrintDocument>(entity =>

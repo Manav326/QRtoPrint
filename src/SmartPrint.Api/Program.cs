@@ -805,6 +805,39 @@ shop.MapGet("/print-jobs", async (
 });
 
 
+
+shop.MapGet("/print-jobs/{jobId:guid}/events", async (
+    Guid jobId,
+    ClaimsPrincipal principal,
+    SmartPrintDbContext db,
+    CancellationToken ct) =>
+{
+    if (!TryGetTenantId(principal, out var tenantId))
+    {
+        return Results.Forbid();
+    }
+
+    if (!await db.PrintJobs.AsNoTracking().AnyAsync(job => job.Id == jobId && job.TenantId == tenantId, ct))
+    {
+        return Results.NotFound();
+    }
+
+    var events = await db.PrintJobEvents.AsNoTracking()
+        .Where(item => item.TenantId == tenantId && item.PrintJobId == jobId)
+        .OrderBy(item => item.CreatedUtc)
+        .Select(item => new
+        {
+            item.Id,
+            item.PreviousStatus,
+            item.NewStatus,
+            item.ActorType,
+            item.ReasonCode,
+            item.CreatedUtc
+        })
+        .ToListAsync(ct);
+    return Results.Ok(events);
+});
+
 shop.MapGet("/print-jobs/{jobId:guid}/document", async (
     Guid jobId,
     ClaimsPrincipal principal,
@@ -878,14 +911,38 @@ shop.MapPost("/print-jobs/{jobId:guid}/approve", async (
     var now = DateTimeOffset.UtcNow;
     if (job.QuoteExpiresUtc is null || job.QuoteExpiresUtc <= now)
     {
+        var previousStatus = job.Status;
         job.Status = "QUOTE_EXPIRED";
         job.UpdatedUtc = now;
+        db.PrintJobEvents.Add(new PrintJobEvent
+        {
+            TenantId = job.TenantId,
+            PrintJobId = job.Id,
+            PreviousStatus = previousStatus,
+            NewStatus = job.Status,
+            ActorType = "ShopUser",
+            ActorId = GetActorId(principal),
+            ReasonCode = "QUOTE_EXPIRED_BEFORE_SHOP_APPROVAL",
+            CreatedUtc = now
+        });
         await db.SaveChangesAsync(ct);
         return Results.Conflict(new { code = "quote_expired", message = "The customer must request a new quote before this job can proceed." });
     }
 
+    var previousStatus = job.Status;
     job.Status = "AWAITING_PAYMENT";
     job.UpdatedUtc = now;
+    db.PrintJobEvents.Add(new PrintJobEvent
+    {
+        TenantId = job.TenantId,
+        PrintJobId = job.Id,
+        PreviousStatus = previousStatus,
+        NewStatus = job.Status,
+        ActorType = "ShopUser",
+        ActorId = GetActorId(principal),
+        ReasonCode = "SHOP_APPROVED_AWAITING_PAYMENT",
+        CreatedUtc = now
+    });
     await db.SaveChangesAsync(ct);
     return Results.Ok(new
     {
@@ -931,9 +988,22 @@ shop.MapPost("/print-jobs/{jobId:guid}/reject", async (
         });
     }
 
+    var previousStatus = job.Status;
+    var now = DateTimeOffset.UtcNow;
     job.Status = "REJECTED";
     job.FailureCode = "SHOP_REJECTED";
-    job.UpdatedUtc = DateTimeOffset.UtcNow;
+    job.UpdatedUtc = now;
+    db.PrintJobEvents.Add(new PrintJobEvent
+    {
+        TenantId = job.TenantId,
+        PrintJobId = job.Id,
+        PreviousStatus = previousStatus,
+        NewStatus = job.Status,
+        ActorType = "ShopUser",
+        ActorId = GetActorId(principal),
+        ReasonCode = "SHOP_REJECTED",
+        CreatedUtc = now
+    });
     await db.SaveChangesAsync(ct);
     return Results.Ok(new { job.Id, job.JobNumber, job.Status, job.UpdatedUtc });
 });
@@ -1062,6 +1132,16 @@ publicApi.MapPost("/sessions/current/jobs", async (
         await using var transaction = await db.Database.BeginTransactionAsync(ct);
         db.PrintJobs.Add(job);
         db.PrintDocuments.Add(document);
+        db.PrintJobEvents.Add(new PrintJobEvent
+        {
+            TenantId = job.TenantId,
+            PrintJobId = job.Id,
+            PreviousStatus = null,
+            NewStatus = job.Status,
+            ActorType = "Customer",
+            ReasonCode = "DOCUMENT_UPLOADED",
+            CreatedUtc = now
+        });
         await db.SaveChangesAsync(ct);
         await transaction.CommitAsync(ct);
     }
@@ -1171,8 +1251,19 @@ publicApi.MapPost("/jobs/{jobId:guid}/quote", async (
         job.QuotedAmountMinor = amount;
         job.PricingVersion = pricing.Version;
         job.QuoteExpiresUtc = now.AddMinutes(10);
+        var previousStatus = job.Status;
         job.Status = "AWAITING_CUSTOMER_APPROVAL";
         job.UpdatedUtc = now;
+        db.PrintJobEvents.Add(new PrintJobEvent
+        {
+            TenantId = job.TenantId,
+            PrintJobId = job.Id,
+            PreviousStatus = previousStatus,
+            NewStatus = job.Status,
+            ActorType = "Customer",
+            ReasonCode = "QUOTE_CREATED",
+            CreatedUtc = now
+        });
         await db.SaveChangesAsync(ct);
 
         return Results.Ok(new
@@ -1259,14 +1350,36 @@ publicApi.MapPost("/jobs/{jobId:guid}/accept-quote", async (
 
     if (job.QuoteExpiresUtc is null || job.QuoteExpiresUtc <= now)
     {
+        var previousStatus = job.Status;
         job.Status = "QUOTE_EXPIRED";
         job.UpdatedUtc = now;
+        db.PrintJobEvents.Add(new PrintJobEvent
+        {
+            TenantId = job.TenantId,
+            PrintJobId = job.Id,
+            PreviousStatus = previousStatus,
+            NewStatus = job.Status,
+            ActorType = "Customer",
+            ReasonCode = "QUOTE_EXPIRED_BEFORE_ACCEPTANCE",
+            CreatedUtc = now
+        });
         await db.SaveChangesAsync(ct);
         return Results.Conflict(new { code = "quote_expired", message = "This quote has expired. Request a new quote to continue." });
     }
 
+    var previousStatus = job.Status;
     job.Status = "AWAITING_SHOP_APPROVAL";
     job.UpdatedUtc = now;
+    db.PrintJobEvents.Add(new PrintJobEvent
+    {
+        TenantId = job.TenantId,
+        PrintJobId = job.Id,
+        PreviousStatus = previousStatus,
+        NewStatus = job.Status,
+        ActorType = "Customer",
+        ReasonCode = "CUSTOMER_ACCEPTED_QUOTE",
+        CreatedUtc = now
+    });
     await db.SaveChangesAsync(ct);
     return Results.Ok(new { job.Id, job.JobNumber, job.Status, job.Currency, job.QuotedAmountMinor, job.UpdatedUtc });
 });
@@ -1314,7 +1427,17 @@ publicApi.MapGet("/jobs/{jobId:guid}/status", async (
             item.UpdatedUtc
         })
         .SingleOrDefaultAsync(ct);
-    return job is null ? Results.NotFound() : Results.Ok(job);
+    if (job is null)
+    {
+        return Results.NotFound();
+    }
+
+    var timeline = await db.PrintJobEvents.AsNoTracking()
+        .Where(item => item.TenantId == session.TenantId && item.PrintJobId == jobId)
+        .OrderBy(item => item.CreatedUtc)
+        .Select(item => new { item.NewStatus, item.ActorType, item.CreatedUtc })
+        .ToListAsync(ct);
+    return Results.Ok(new { Job = job, Timeline = timeline });
 });
 
 publicApi.MapPost("/stations/{publicCode}/sessions", async (
@@ -1393,6 +1516,9 @@ publicApi.MapGet("/sessions/current", async (
 
 static bool TryGetTenantId(ClaimsPrincipal principal, out Guid tenantId) =>
     Guid.TryParse(principal.FindFirstValue("tenant_id"), out tenantId);
+
+static Guid? GetActorId(ClaimsPrincipal principal) =>
+    Guid.TryParse(principal.FindFirstValue(JwtRegisteredClaimNames.Sub), out var actorId) ? actorId : null;
 
 static bool IsShopOwner(ClaimsPrincipal principal) =>
     principal.FindAll("shop_role").Any(claim => claim.Value is "ShopOwner" or "ShopManager");

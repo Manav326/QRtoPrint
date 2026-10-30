@@ -9,10 +9,10 @@ import AuthScreen from "./AuthScreen";
 import {
   ApiError, acceptCustomerQuote, approveShopPrintJob, calculateCustomerQuote,
   createCustomerSession, createPrinter, createStation, downloadShopDocument,
-  getCustomerJobStatus, loadShopData, logout, readStoredTokens, rejectShopPrintJob,
+  getCustomerJobStatus, getShopJobEvents, loadShopData, logout, readStoredTokens, rejectShopPrintJob,
   rotateStationCode, storeTokens, updatePrinterActive, updateShopPricing,
   updateShopProfile, updateStationEnabled, uploadCustomerDocument,
-  type AuthTokens, type CustomerJobStatus, type PrinterDevice, type PrintQuoteResult,
+  type AuthTokens, type CustomerJobStatus, type PrinterDevice, type PrintQuoteResult, type ShopJobEvent,
   type QrStation, type ShopPricingProfile, type ShopPrintJob, type ShopProfile,
   type UploadedPrintJob
 } from "./api";
@@ -63,6 +63,7 @@ function ShopConsole({ tokens, onSignOut }: { tokens: AuthTokens; onSignOut: () 
   const [toast, setToast] = useState("");
   const [preview, setPreview] = useState<{ name: string; url: string; mediaType: string } | null>(null);
   const [busyJobId, setBusyJobId] = useState<string | null>(null);
+  const [eventHistory, setEventHistory] = useState<{ job: ShopPrintJob; events: ShopJobEvent[] } | null>(null);
 
   async function reload() {
     setLoading(true);
@@ -208,6 +209,19 @@ function ShopConsole({ tokens, onSignOut }: { tokens: AuthTokens; onSignOut: () 
     }
   }
 
+  async function viewJobHistory(job: ShopPrintJob) {
+    setBusyJobId(job.id);
+    setError("");
+    try {
+      const events = await getShopJobEvents(tokens.accessToken, job.id);
+      setEventHistory({ job, events });
+    } catch (exception) {
+      setError(exception instanceof Error ? exception.message : "Could not load job history.");
+    } finally {
+      setBusyJobId(null);
+    }
+  }
+
   async function approveJob(job: ShopPrintJob) {
     if (!window.confirm(`Approve ${job.jobNumber} for payment? It will not be sent to a printer yet.`)) return;
     setBusyJobId(job.id);
@@ -305,7 +319,7 @@ function ShopConsole({ tokens, onSignOut }: { tokens: AuthTokens; onSignOut: () 
           {active === "QR Stations" && <StationsPage stations={stations} onAdd={() => setModal("station")} onToggle={toggleStation} onGenerate={createFreshStationCode}/>}
           {active === "Pricing" && pricing && <PricingPage pricing={pricing} onSave={savePricing} busy={busy}/>}
           {active === "Settings" && profile && <SettingsPage profile={profile} onSave={saveProfile} busy={busy}/>}
-          {active === "Print Queue" && <PrintQueuePage jobs={printJobs} onPreview={previewJob} onApprove={approveJob} onReject={rejectJob} busyJobId={busyJobId}/>}
+          {active === "Print Queue" && <PrintQueuePage jobs={printJobs} onPreview={previewJob} onApprove={approveJob} onReject={rejectJob} onHistory={viewJobHistory} busyJobId={busyJobId}/>}
           {active === "Customers" && <EmptyModule icon={<Users size={24}/>} title="Customer directory is coming next" text="Customer profiles and print history will be connected to completed print jobs. No sample customer records are shown."/>}
           {active === "Reports" && <EmptyModule icon={<Activity size={24}/>} title="Reports will build from real activity" text="Revenue and print-volume reports will appear when job pricing, payment reconciliation and completion events are connected."/>}
 
@@ -316,6 +330,7 @@ function ShopConsole({ tokens, onSignOut }: { tokens: AuthTokens; onSignOut: () 
       {modal === "printer" && <PrinterModal busy={busy} onClose={() => setModal(null)} onSubmit={submitPrinter}/>}
       {modal === "station" && <StationModal busy={busy} printers={printers.filter(printer => printer.isActive)} onClose={() => setModal(null)} onSubmit={submitStation}/>}
       {preview && <DocumentPreviewModal name={preview.name} url={preview.url} mediaType={preview.mediaType} onClose={() => { URL.revokeObjectURL(preview.url); setPreview(null); }}/>}
+      {eventHistory && <JobHistoryModal job={eventHistory.job} events={eventHistory.events} onClose={() => setEventHistory(null)}/>}
     </div>
   );
 }
@@ -450,11 +465,12 @@ function PricingPage({ pricing, onSave, busy }: {
   </section>;
 }
 
-function PrintQueuePage({ jobs, onPreview, onApprove, onReject, busyJobId }: {
+function PrintQueuePage({ jobs, onPreview, onApprove, onReject, onHistory, busyJobId }: {
   jobs: ShopPrintJob[];
   onPreview: (job: ShopPrintJob) => void;
   onApprove: (job: ShopPrintJob) => void;
   onReject: (job: ShopPrintJob) => void;
+  onHistory: (job: ShopPrintJob) => void;
   busyJobId: string | null;
 }) {
   return <section className="panel queue-panel live-queue-panel">
@@ -468,10 +484,18 @@ function PrintQueuePage({ jobs, onPreview, onApprove, onReject, busyJobId }: {
           <td className="amount-cell">{job.quotedAmountMinor>0?formatMoney(job.quotedAmountMinor,job.currency):"Not quoted"}</td>
           <td><Status label={prettyStatus(job.status)} tone={job.status==="AWAITING_CUSTOMER_APPROVAL"||job.status==="AWAITING_SHOP_APPROVAL"?"amber":job.status==="COMPLETED"?"green":"blue"}/></td>
           <td className="time-cell">{new Date(job.createdUtc).toLocaleString()}</td>
-          <td><div className="queue-actions"><button className="subtle-button" disabled={busyJobId===job.id} onClick={()=>onPreview(job)}>Preview</button>{job.status==="AWAITING_SHOP_APPROVAL"&&<><button className="subtle-button approve-action" disabled={busyJobId===job.id} onClick={()=>onApprove(job)}>Approve</button><button className="subtle-button reject-action" disabled={busyJobId===job.id} onClick={()=>onReject(job)}>Reject</button></>}</div></td>
+          <td><div className="queue-actions"><button className="subtle-button" disabled={busyJobId===job.id} onClick={()=>onPreview(job)}>Preview</button><button className="subtle-button" disabled={busyJobId===job.id} onClick={()=>onHistory(job)}>History</button>{job.status==="AWAITING_SHOP_APPROVAL"&&<><button className="subtle-button approve-action" disabled={busyJobId===job.id} onClick={()=>onApprove(job)}>Approve</button><button className="subtle-button reject-action" disabled={busyJobId===job.id} onClick={()=>onReject(job)}>Reject</button></>}</div></td>
         </tr>)}
       </tbody></table></div>}
   </section>;
+}
+
+
+function JobHistoryModal({job,events,onClose}:{job:ShopPrintJob;events:ShopJobEvent[];onClose:()=>void}) {
+  return <Modal title={job.jobNumber} subtitle={`Audit history · ${job.document.originalFileName}`} onClose={onClose}>
+    <div className="shop-history-list">{events.length===0?<p>No recorded events yet.</p>:events.map(event=><div key={event.id}><i/><span><strong>{prettyStatus(event.newStatus)}</strong><small>{event.actorType==="ShopUser"?"Shop team":event.actorType==="Customer"?"Customer":"System"} · {new Date(event.createdUtc).toLocaleString()}</small>{event.reasonCode&&<small>{event.reasonCode.replaceAll("_"," ").toLowerCase()}</small>}</span></div>)}</div>
+    <div className="modal-actions"><button className="secondary-button" onClick={onClose}>Close history</button></div>
+  </Modal>;
 }
 
 function DocumentPreviewModal({name,url,mediaType,onClose}:{name:string;url:string;mediaType:string;onClose:()=>void}) {
@@ -727,7 +751,8 @@ function CustomerPrintFlow({sessionToken}:{sessionToken:string}) {
     {quote&&quote.status!=="AWAITING_SHOP_APPROVAL"&&!jobStatus&&<button className="customer-flow-button" disabled={busy} onClick={()=>void acceptQuote()}>{busy?<span className="button-spinner"/>:"Accept quote and send to shop"}</button>}
     {jobStatus&&<div className="customer-job-state"><div className="customer-job-state-top"><Status label={prettyStatus(jobStatus.status)} tone={jobStatus.status==="REJECTED"?"red":jobStatus.status==="AWAITING_PAYMENT"?"green":"amber"}/><button className="customer-refresh-status" disabled={busy} onClick={()=>void refreshJobStatus()}>{busy?<span className="button-spinner"/>:"Refresh status"}</button></div>
       <strong>{jobStatus.status==="AWAITING_SHOP_APPROVAL"?"Your request is with the shop":jobStatus.status==="AWAITING_PAYMENT"?"The shop accepted your request":jobStatus.status==="REJECTED"?"The shop could not accept this request":jobStatus.status==="QUOTE_EXPIRED"?"Your quote has expired":"Your request is being reviewed"}</strong>
-      <p>{jobStatus.status==="AWAITING_SHOP_APPROVAL"?"The shop will review your request next. You have not been charged and printing has not started.":jobStatus.status==="AWAITING_PAYMENT"?"The shop approved this quote. Payment setup is not available yet, so no money has been collected and the document has not been printed.":jobStatus.status==="REJECTED"?"Please speak with the shop operator if you need help with this request.":"Check back for the latest request status."}</p>
+      <p>{jobStatus.status==="AWAITING_SHOP_APPROVAL"?"The shop will review your request next. You have not been charged and printing has not started.":jobStatus.status==="AWAITING_PAYMENT"?"The shop approved this quote. Payment setup is not available yet, so no money has been collected and the document has not been printed.":jobStatus.status==="REJECTED"?"Please speak with the shop operator if you need help with this request.":jobStatus.status==="QUOTE_EXPIRED"?"This quote is no longer valid. Please ask the shop for a fresh quote.":"Check back for the latest request status."}</p>
+      {!!jobStatus.timeline?.length&&<div className="customer-state-timeline">{jobStatus.timeline.map((event,index)=><div key={index}><i/><span><strong>{prettyStatus(event.newStatus)}</strong><small>{event.actorType==="ShopUser"?"Shop team":event.actorType==="Customer"?"You":"System"} · {new Date(event.createdUtc).toLocaleString()}</small></span></div>)}</div>}
     </div>}
     <div className="customer-payment-boundary"><ShieldCheck size={15}/><span>{jobStatus?.status==="AWAITING_PAYMENT"?"Shop approval is recorded, but payment collection is not configured. This job cannot be printed until the shop's payment flow is integrated and verified.":quote?"This quote is calculated by the shop's saved rate card. Accepting it sends a request to the shop; it does not collect payment or start printing.":"Your document is validated before pricing. You will see the shop's calculated price before any payment or print approval."}</span></div>
   </section>;

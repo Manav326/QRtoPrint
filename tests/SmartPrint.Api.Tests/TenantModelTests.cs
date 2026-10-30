@@ -23,6 +23,8 @@ public sealed class TenantModelTests
         AssertCompositeForeignKey(job, nameof(PrintJob.TenantId), nameof(PrintJob.CustomerSessionId));
         AssertCompositeForeignKey(job, nameof(PrintJob.TenantId), nameof(PrintJob.QrStationId));
         AssertCompositeForeignKey(job, nameof(PrintJob.TenantId), nameof(PrintJob.PrinterDeviceId));
+        AssertCompositeForeignKey(model.FindEntityType(typeof(PrintJobEvent))!,
+            nameof(PrintJobEvent.TenantId), nameof(PrintJobEvent.PrintJobId));
     }
 
     private static void AssertCompositeForeignKey(Microsoft.EntityFrameworkCore.Metadata.IEntityType entityType, params string[] propertyNames)

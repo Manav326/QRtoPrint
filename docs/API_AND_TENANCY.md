@@ -56,3 +56,13 @@ This increment provisions shops and secure station sessions and registers printe
 - GET /api/v1/shop/print-jobs/{jobId}/document — tenant-authorised document preview. The file is decrypted only after tenant/job access is verified and is served with no-store and nosniff headers.
 
 The payment integration is deliberately not active in this stage. Shop approval does not capture money or authorise physical print execution. Both customer and shop interfaces show that boundary.
+
+
+## Job event history
+
+Every important job transition is written to the tenant-scoped PrintJobEvents table with previous/new status, actor category, reason code and timestamp. A composite database relationship ensures an event cannot be attached to a job in another tenant.
+
+- GET /api/v1/shop/print-jobs/{jobId}/events — shop-side event history for the authenticated tenant.
+- GET /api/v1/public/jobs/{jobId}/status — current job state and a customer-safe timeline for the active session that created the job.
+
+Events currently cover document upload, quote creation, quote expiry, customer quote acceptance, shop approval and shop rejection. Payment and printer transitions are intentionally not emitted until those workflows are implemented and verified.

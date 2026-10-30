@@ -146,3 +146,17 @@ public sealed class PrintDocument
     public string PageSizesJson { get; set; } = "[]";
     public DateTimeOffset CreatedUtc { get; set; } = DateTimeOffset.UtcNow;
 }
+
+
+public sealed class PrintJobEvent
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+    public Guid TenantId { get; set; }
+    public Guid PrintJobId { get; set; }
+    public string? PreviousStatus { get; set; }
+    public string NewStatus { get; set; } = string.Empty;
+    public string ActorType { get; set; } = string.Empty;
+    public Guid? ActorId { get; set; }
+    public string? ReasonCode { get; set; }
+    public DateTimeOffset CreatedUtc { get; set; } = DateTimeOffset.UtcNow;
+}

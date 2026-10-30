@@ -306,6 +306,7 @@ export interface CustomerJobStatus {
   quotedAmountMinor: number;
   quoteExpiresUtc?: string | null;
   updatedUtc: string;
+  timeline?: Array<{ newStatus: string; actorType: string; createdUtc: string }>;
 }
 
 export function acceptCustomerQuote(sessionToken: string, jobId: string) {
@@ -316,10 +317,26 @@ export function acceptCustomerQuote(sessionToken: string, jobId: string) {
 }
 
 export function getCustomerJobStatus(sessionToken: string, jobId: string) {
-  return apiRequest<CustomerJobStatus>(
+  return apiRequest<{
+    job: Omit<CustomerJobStatus, "timeline">;
+    timeline: NonNullable<CustomerJobStatus["timeline"]>;
+  }>(
     `/api/v1/public/jobs/${jobId}/status`,
     { headers: { "X-Print-Session": sessionToken } }
-  );
+  ).then(result => ({ ...result.job, timeline: result.timeline }));
+}
+
+export interface ShopJobEvent {
+  id: string;
+  previousStatus?: string | null;
+  newStatus: string;
+  actorType: string;
+  reasonCode?: string | null;
+  createdUtc: string;
+}
+
+export function getShopJobEvents(token: string, jobId: string) {
+  return apiRequest<ShopJobEvent[]>(`/api/v1/shop/print-jobs/${jobId}/events`, {}, token);
 }
 
 export function approveShopPrintJob(token: string, jobId: string) {
