@@ -1,4 +1,4 @@
-import { useEffect, useState, type FormEvent, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import {
   Activity, ArrowRight, Check, Clock3, Copy, FileText, LayoutDashboard,
   LifeBuoy, LogOut, Menu, Moon, Plus, Printer, QrCode, Settings,
@@ -228,7 +228,7 @@ function ShopConsole({ tokens, onSignOut }: { tokens: AuthTokens; onSignOut: () 
 
           {active === "Overview" && <Overview profile={profile} printers={printers} stations={stations} onNavigate={navAction}/>}
           {active === "Printers" && <PrintersPage printers={printers} onAdd={() => setModal("printer")} onToggle={togglePrinter}/>}
-          {active === "QR Stations" && <StationsPage stations={stations} printers={printers} onAdd={() => setModal("station")} onToggle={toggleStation} onGenerate={createFreshStationCode}/>}
+          {active === "QR Stations" && <StationsPage stations={stations} onAdd={() => setModal("station")} onToggle={toggleStation} onGenerate={createFreshStationCode}/>}
           {active === "Settings" && profile && <SettingsPage profile={profile} onSave={saveProfile} busy={busy}/>}
           {active === "Print Queue" && <EmptyModule icon={<FileText size={24}/>} title="Your print queue will appear here" text="Customer uploads, approvals and physical print states will be shown here once the document and print-job workflow is connected."/>}
           {active === "Customers" && <EmptyModule icon={<Users size={24}/>} title="Customer directory is coming next" text="Customer profiles and print history will be connected to completed print jobs. No sample customer records are shown."/>}
@@ -290,8 +290,8 @@ function PrintersPage({ printers, onAdd, onToggle }: { printers: PrinterDevice[]
   );
 }
 
-function StationsPage({ stations, printers, onAdd, onToggle, onGenerate }: {
-  stations:QrStation[]; printers:PrinterDevice[]; onAdd:()=>void; onToggle:(station:QrStation)=>void; onGenerate:(station:QrStation)=>void;
+function StationsPage({ stations, onAdd, onToggle, onGenerate }: {
+  stations:QrStation[]; onAdd:()=>void; onToggle:(station:QrStation)=>void; onGenerate:(station:QrStation)=>void;
 }) {
   return (
     <section className="panel collection-panel">
