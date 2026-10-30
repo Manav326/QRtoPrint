@@ -1,0 +1,10 @@
+{
+  "name": "qrtoprint",
+  "private": true,
+  "packageManager": "pnpm@10.18.0",
+  "scripts": {
+    "dev": "pnpm --filter @qrtoprint/portal dev",
+    "build": "pnpm --filter @qrtoprint/portal build",
+    "typecheck": "pnpm --filter @qrtoprint/portal typecheck"
+  }
+}
