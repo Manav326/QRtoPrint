@@ -40,6 +40,23 @@ public sealed class TenantModelTests
         AssertCompositeForeignKey(job, nameof(PrintJob.TenantId), nameof(PrintJob.PrinterDeviceId));
         AssertCompositeForeignKey(model.FindEntityType(typeof(PrintJobEvent))!,
             nameof(PrintJobEvent.TenantId), nameof(PrintJobEvent.PrintJobId));
+        AssertCompositeForeignKey(model.FindEntityType(typeof(PrintPayment))!,
+            nameof(PrintPayment.TenantId), nameof(PrintPayment.PrintJobId));
+        AssertCompositeForeignKey(model.FindEntityType(typeof(ShopPaymentProfile))!,
+            nameof(ShopPaymentProfile.TenantId));
+
+        var payment = model.FindEntityType(typeof(PrintPayment))!;
+        var activePaymentIndex = Assert.Single(payment.GetIndexes(), index =>
+            index.Properties.Select(property => property.Name)
+                .SequenceEqual(new[] { nameof(PrintPayment.TenantId), nameof(PrintPayment.PrintJobId) }));
+        Assert.Equal("\"Status\" IN ('AWAITING_CUSTOMER_PAYMENT','CUSTOMER_REPORTED','CASH_AWAITING_PAYMENT')",
+            activePaymentIndex.GetFilter());
+
+        var agent = model.FindEntityType(typeof(AgentDevice))!;
+        var fingerprintIndex = Assert.Single(agent.GetIndexes(), index =>
+            index.Properties.Select(property => property.Name)
+                .SequenceEqual(new[] { nameof(AgentDevice.TenantId), nameof(AgentDevice.FingerprintHash) }));
+        Assert.Equal("\"RevokedUtc\" IS NULL", fingerprintIndex.GetFilter());
     }
 
     private static void AssertCompositeForeignKey(Microsoft.EntityFrameworkCore.Metadata.IEntityType entityType, params string[] propertyNames)

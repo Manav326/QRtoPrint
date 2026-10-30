@@ -60,3 +60,16 @@ public sealed record AgentPrinterDiscoveryRequest(
     bool IsDefault);
 
 public sealed record AgentPrinterSyncRequest(IReadOnlyList<AgentPrinterDiscoveryRequest> Printers);
+
+
+public sealed record ShopPaymentSettingsRequest(
+    bool UpiEnabled,
+    string? UpiId,
+    string? PayeeName,
+    bool CashEnabled);
+
+public sealed record StartPrintPaymentRequest(string Method);
+
+public sealed record ReportPrintPaymentRequest(string ReferenceNumber);
+
+public sealed record RejectPrintPaymentRequest(string Reason);

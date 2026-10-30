@@ -13,12 +13,14 @@ public sealed class SmartPrintDbContext(DbContextOptions<SmartPrintDbContext> op
     public DbSet<AgentEnrollmentCode> AgentEnrollmentCodes => Set<AgentEnrollmentCode>();
     public DbSet<ShopProfile> ShopProfiles => Set<ShopProfile>();
     public DbSet<ShopPricingProfile> ShopPricingProfiles => Set<ShopPricingProfile>();
+    public DbSet<ShopPaymentProfile> ShopPaymentProfiles => Set<ShopPaymentProfile>();
     public DbSet<TenantSubscription> TenantSubscriptions => Set<TenantSubscription>();
     public DbSet<PrinterDevice> PrinterDevices => Set<PrinterDevice>();
     public DbSet<QrStation> QrStations => Set<QrStation>();
     public DbSet<CustomerPrintSession> CustomerPrintSessions => Set<CustomerPrintSession>();
     public DbSet<RefreshToken> RefreshTokens => Set<RefreshToken>();
     public DbSet<PrintJob> PrintJobs => Set<PrintJob>();
+    public DbSet<PrintPayment> PrintPayments => Set<PrintPayment>();
     public DbSet<PrintDocument> PrintDocuments => Set<PrintDocument>();
     public DbSet<PrintJobEvent> PrintJobEvents => Set<PrintJobEvent>();
 
@@ -87,6 +89,15 @@ public sealed class SmartPrintDbContext(DbContextOptions<SmartPrintDbContext> op
             entity.HasKey(x => x.TenantId);
             entity.Property(x => x.Version).IsConcurrencyToken();
             entity.HasOne<Tenant>().WithOne().HasForeignKey<ShopPricingProfile>(x => x.TenantId).OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<ShopPaymentProfile>(entity =>
+        {
+            entity.ToTable("ShopPaymentProfiles");
+            entity.HasKey(x => x.TenantId);
+            entity.Property(x => x.UpiId).HasMaxLength(160);
+            entity.Property(x => x.PayeeName).HasMaxLength(120);
+            entity.HasOne<Tenant>().WithOne().HasForeignKey<ShopPaymentProfile>(x => x.TenantId).OnDelete(DeleteBehavior.Cascade);
         });
 
         modelBuilder.Entity<TenantSubscription>(entity =>
@@ -196,6 +207,28 @@ public sealed class SmartPrintDbContext(DbContextOptions<SmartPrintDbContext> op
                 .HasForeignKey(x => new { x.TenantId, x.PrinterDeviceId })
                 .HasPrincipalKey(x => new { x.TenantId, x.Id })
                 .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        modelBuilder.Entity<PrintPayment>(entity =>
+        {
+            entity.ToTable("PrintPayments");
+            entity.HasKey(x => x.Id);
+            entity.Property(x => x.Method).HasMaxLength(16).IsRequired();
+            entity.Property(x => x.Status).HasMaxLength(32).IsRequired();
+            entity.Property(x => x.Currency).HasMaxLength(3).IsRequired();
+            entity.Property(x => x.UpiIdSnapshot).HasMaxLength(160);
+            entity.Property(x => x.PayeeNameSnapshot).HasMaxLength(120);
+            entity.Property(x => x.PaymentReference).HasMaxLength(100);
+            entity.Property(x => x.RejectionReason).HasMaxLength(300);
+            entity.HasAlternateKey(x => new { x.TenantId, x.Id });
+            entity.HasIndex(x => new { x.TenantId, x.PrintJobId, x.CreatedUtc });
+            entity.HasIndex(x => new { x.TenantId, x.PrintJobId })
+                .IsUnique()
+                .HasFilter("\"Status\" IN ('AWAITING_CUSTOMER_PAYMENT','CUSTOMER_REPORTED','CASH_AWAITING_PAYMENT')");
+            entity.HasOne<PrintJob>().WithMany()
+                .HasForeignKey(x => new { x.TenantId, x.PrintJobId })
+                .HasPrincipalKey(x => new { x.TenantId, x.Id })
+                .OnDelete(DeleteBehavior.Cascade);
         });
 
         modelBuilder.Entity<PrintJobEvent>(entity =>

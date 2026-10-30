@@ -1,6 +1,6 @@
 import { useEffect, useState, type ReactNode } from "react";
 import {
-  Activity, ArrowRight, Check, Clock3, Copy, FileText, FileUp, LayoutDashboard,
+  Activity, ArrowRight, Check, Clock3, Copy, CreditCard, FileText, FileUp, LayoutDashboard,
   LifeBuoy, LogOut, Menu, Moon, Monitor, Plus, Printer, QrCode, Settings,
   ShieldCheck, Sun, Users, Wallet, X
 } from "lucide-react";
@@ -10,15 +10,17 @@ import {
   ApiError, acceptCustomerQuote, approveShopPrintJob, calculateCustomerQuote,
   createAgentEnrollmentCode, createCustomerSession, createPrinter, createStation,
   downloadShopDocument, getCustomerJobStatus, getShopJobEvents, loadShopData,
-  logout, readStoredTokens, rejectShopPrintJob, revokeAgentDevice,
-  rotateStationCode, storeTokens, updatePrinterActive, updateShopPricing,
+  logout, readStoredTokens, rejectShopPrintJob, rejectShopPayment, revokeAgentDevice,
+  reportCustomerUpiPayment, rotateStationCode, startCustomerPayment, storeTokens,
+  updatePrinterActive, updateShopPaymentSettings, updateShopPricing,
   updateShopProfile, updateStationEnabled, uploadCustomerDocument,
+  verifyShopPayment, type CustomerPayment, type ShopPayment, type ShopPaymentSettings,
   type AgentDevice, type AuthTokens, type CustomerJobStatus, type PrinterDevice, type PrintQuoteResult, type ShopJobEvent,
   type QrStation, type ShopPricingProfile, type ShopPrintJob, type ShopProfile,
   type UploadedPrintJob
 } from "./api";
 
-type Section = "Overview" | "Print Queue" | "Printers" | "QR Stations" | "Print Agent" | "Pricing" | "Customers" | "Reports" | "Settings";
+type Section = "Overview" | "Print Queue" | "Printers" | "QR Stations" | "Print Agent" | "Pricing" | "Payments" | "Customers" | "Reports" | "Settings";
 type Modal = "printer" | "station" | null;
 
 const sections: { label: Section; icon: typeof LayoutDashboard }[] = [
@@ -28,6 +30,7 @@ const sections: { label: Section; icon: typeof LayoutDashboard }[] = [
   { label: "QR Stations", icon: QrCode },
   { label: "Print Agent", icon: Monitor },
   { label: "Pricing", icon: Wallet },
+  { label: "Payments", icon: CreditCard },
   { label: "Customers", icon: Users },
   { label: "Reports", icon: Activity },
   { label: "Settings", icon: Settings }
@@ -59,6 +62,8 @@ function ShopConsole({ tokens, onSignOut }: { tokens: AuthTokens; onSignOut: () 
   const [pricing, setPricing] = useState<ShopPricingProfile | null>(null);
   const [printJobs, setPrintJobs] = useState<ShopPrintJob[]>([]);
   const [agentDevices, setAgentDevices] = useState<AgentDevice[]>([]);
+  const [paymentSettings, setPaymentSettings] = useState<ShopPaymentSettings | null>(null);
+  const [payments, setPayments] = useState<ShopPayment[]>([]);
   const [enrollmentCode, setEnrollmentCode] = useState<{ code: string; expiresUtc: string } | null>(null);
   const [agentBusy, setAgentBusy] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -81,6 +86,8 @@ function ShopConsole({ tokens, onSignOut }: { tokens: AuthTokens; onSignOut: () 
       setPricing(snapshot.pricing);
       setPrintJobs(snapshot.printJobs);
       setAgentDevices(snapshot.agentDevices);
+      setPaymentSettings(snapshot.paymentSettings);
+      setPayments(snapshot.payments);
     } catch (exception) {
       if (exception instanceof ApiError && exception.status === 401) {
         storeTokens(null);
@@ -196,6 +203,63 @@ function ShopConsole({ tokens, onSignOut }: { tokens: AuthTokens; onSignOut: () 
       setError(exception instanceof Error ? exception.message : "Could not revoke this agent.");
     } finally {
       setAgentBusy(false);
+    }
+  }
+
+
+  async function savePaymentSettings(values: {
+    upiEnabled: boolean; upiId: string | null; payeeName: string | null; cashEnabled: boolean;
+  }) {
+    setBusy(true);
+    setError("");
+    try {
+      const updated = await updateShopPaymentSettings(tokens.accessToken, values);
+      setPaymentSettings(updated);
+      setToast("Shop payment methods saved. Customer print revenue continues to go directly to your shop.");
+    } catch (exception) {
+      setError(exception instanceof Error ? exception.message : "Could not save shop payment settings.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function verifyPayment(payment: ShopPayment) {
+    const confirmation = payment.method === "UPI"
+      ? `Have you independently confirmed this UPI transaction in your shop's bank/UPI app? Reference: ${payment.paymentReference || "not supplied"}`
+      : "Have you physically received the cash for this print job?";
+    if (!window.confirm(confirmation)) return;
+
+    setBusyJobId(payment.printJobId);
+    setError("");
+    try {
+      await verifyShopPayment(tokens.accessToken, payment.id);
+      setToast("Payment verified. The job is marked paid/authorised; the agent will not print it until the print queue is implemented.");
+      await reload();
+    } catch (exception) {
+      setError(exception instanceof Error ? exception.message : "Could not verify this payment.");
+    } finally {
+      setBusyJobId(null);
+    }
+  }
+
+  async function rejectPayment(payment: ShopPayment) {
+    const reason = window.prompt("Enter why this payment report is being rejected (for example, amount not received or reference not found):");
+    if (reason === null) return;
+    if (reason.trim().length < 3) {
+      setError("A rejection reason of at least 3 characters is required.");
+      return;
+    }
+
+    setBusyJobId(payment.printJobId);
+    setError("");
+    try {
+      await rejectShopPayment(tokens.accessToken, payment.id, reason.trim());
+      setToast("Payment report rejected. The customer can choose a new payment attempt.");
+      await reload();
+    } catch (exception) {
+      setError(exception instanceof Error ? exception.message : "Could not reject this payment.");
+    } finally {
+      setBusyJobId(null);
     }
   }
 
@@ -355,6 +419,7 @@ function ShopConsole({ tokens, onSignOut }: { tokens: AuthTokens; onSignOut: () 
           {active === "QR Stations" && <StationsPage stations={stations} onAdd={() => setModal("station")} onToggle={toggleStation} onGenerate={createFreshStationCode}/>}
           {active === "Print Agent" && <PrintAgentPage agents={agentDevices} enrollmentCode={enrollmentCode} busy={agentBusy} onGenerate={generateAgentCode} onRevoke={revokeAgent}/>}
           {active === "Pricing" && pricing && <PricingPage pricing={pricing} onSave={savePricing} busy={busy}/>}
+          {active === "Payments" && paymentSettings && <PaymentsPage settings={paymentSettings} payments={payments} onSave={savePaymentSettings} onVerify={verifyPayment} onReject={rejectPayment} busy={busy} busyJobId={busyJobId}/>}
           {active === "Settings" && profile && <SettingsPage profile={profile} onSave={saveProfile} busy={busy}/>}
           {active === "Print Queue" && <PrintQueuePage jobs={printJobs} onPreview={previewJob} onApprove={approveJob} onReject={rejectJob} onHistory={viewJobHistory} busyJobId={busyJobId}/>}
           {active === "Customers" && <EmptyModule icon={<Users size={24}/>} title="Customer directory is coming next" text="Customer profiles and print history will be connected to completed print jobs. No sample customer records are shown."/>}
@@ -549,6 +614,59 @@ function PricingPage({ pricing, onSave, busy }: {
   </section>;
 }
 
+
+function PaymentsPage({settings,payments,onSave,onVerify,onReject,busy,busyJobId}:{
+  settings:ShopPaymentSettings;
+  payments:ShopPayment[];
+  onSave:(values:{upiEnabled:boolean;upiId:string|null;payeeName:string|null;cashEnabled:boolean})=>void;
+  onVerify:(payment:ShopPayment)=>void;
+  onReject:(payment:ShopPayment)=>void;
+  busy:boolean;
+  busyJobId:string|null;
+}) {
+  const [upiEnabled,setUpiEnabled]=useState(settings.upiEnabled);
+  const [upiId,setUpiId]=useState(settings.upiId||"");
+  const [payeeName,setPayeeName]=useState(settings.payeeName||"");
+  const [cashEnabled,setCashEnabled]=useState(settings.cashEnabled);
+  useEffect(()=>{
+    setUpiEnabled(settings.upiEnabled);
+    setUpiId(settings.upiId||"");
+    setPayeeName(settings.payeeName||"");
+    setCashEnabled(settings.cashEnabled);
+  },[settings.upiEnabled,settings.upiId,settings.payeeName,settings.cashEnabled]);
+
+  const pending=payments.filter(payment=>payment.status==="AWAITING_CUSTOMER_PAYMENT"||payment.status==="CUSTOMER_REPORTED"||payment.status==="CASH_AWAITING_PAYMENT");
+  return <div className="payments-workspace">
+    <section className="panel payment-settings-panel">
+      <div className="collection-header"><div><h2>Shop payment methods</h2><p>Customer print payments go directly to your own UPI account or are received at your counter.</p></div><span className="setup-count">{(upiEnabled?1:0)+(cashEnabled?1:0)} enabled</span></div>
+      <div className="payment-method-card">
+        <div className="payment-method-heading"><div className="payment-method-icon"><Wallet size={19}/></div><div><strong>UPI · QR and payment app</strong><small>Configure your shop's own UPI ID. Payments are not auto-verified.</small></div><label className="switch"><input type="checkbox" checked={upiEnabled} onChange={event=>setUpiEnabled(event.target.checked)}/><span/></label></div>
+        {upiEnabled&&<div className="payment-settings-fields">
+          <label>Shop UPI ID<input value={upiId} onChange={event=>setUpiId(event.target.value)} placeholder="yourshop@bank"/></label>
+          <label>Payee / business name<input value={payeeName} onChange={event=>setPayeeName(event.target.value)} maxLength={120} placeholder="Name shown in customer's UPI app"/></label>
+        </div>}
+      </div>
+      <div className="payment-method-card">
+        <div className="payment-method-heading"><div className="payment-method-icon"><Printer size={19}/></div><div><strong>Cash at counter</strong><small>Allow customers to select cash and pay in person.</small></div><label className="switch"><input type="checkbox" checked={cashEnabled} onChange={event=>setCashEnabled(event.target.checked)}/><span/></label></div>
+      </div>
+      <div className="payment-security-note"><ShieldCheck size={16}/><span>Smart Print does not receive, hold or route your customer print revenue. Verify every UPI reference against your own bank/UPI app; cash must be physically received. Subscription charges for Smart Print are billed separately.</span></div>
+      <div className="payment-settings-footer"><span>Last updated {new Date(settings.updatedUtc).toLocaleString()}</span><button className="primary-button" disabled={busy||(!upiEnabled&&!cashEnabled)||(upiEnabled&&(!upiId.trim()||!payeeName.trim()))} onClick={()=>onSave({upiEnabled,upiId:upiEnabled?upiId.trim():null,payeeName:upiEnabled?payeeName.trim():null,cashEnabled})}>{busy?<span className="button-spinner"/>:"Save payment methods"}</button></div>
+    </section>
+    <section className="panel payment-review-panel">
+      <div className="collection-header"><div><h2>Payment verification</h2><p>Review UPI references and confirm cash collected before a job becomes payment-authorised.</p></div><span className="setup-count">{pending.length} need review</span></div>
+      {payments.length===0?<EmptyModule icon={<Wallet size={24}/>} title="No print payments yet" text="When customers choose UPI or cash for a shop-approved job, the payment attempt will appear here."/>:
+      <div className="payment-record-list">{payments.map(payment=><article className="payment-record" key={payment.id}>
+        <div className="payment-record-head"><div><strong>{payment.jobNumber}</strong><small>{payment.documentName}</small></div><div className="payment-record-amount">{formatMoney(payment.amountMinor,payment.currency)}</div></div>
+        <div className="payment-record-meta"><span>{payment.method}</span><span>{new Date(payment.createdUtc).toLocaleString()}</span><Status label={payment.status.replaceAll("_"," ")} tone={payment.status==="VERIFIED"?"green":payment.status==="REJECTED"?"red":payment.status==="CUSTOMER_REPORTED"||payment.status==="CASH_AWAITING_PAYMENT"?"amber":"slate"}/></div>
+        {payment.method==="UPI"&&<div className="payment-reference-details"><span>Transaction reference</span><strong>{payment.paymentReference||"Customer has not submitted a reference"}</strong><small>Payee snapshot: {payment.payeeNameSnapshot||"Not recorded"} · {payment.upiIdSnapshot||"No UPI ID snapshot"}</small></div>}
+        {payment.rejectionReason&&<div className="payment-rejection-note">Reason: {payment.rejectionReason}</div>}
+        {(payment.status==="AWAITING_CUSTOMER_PAYMENT"||payment.status==="CUSTOMER_REPORTED"||payment.status==="CASH_AWAITING_PAYMENT")&&<div className="payment-review-actions">{payment.status==="AWAITING_CUSTOMER_PAYMENT"&&<button className="secondary-button reject-action" disabled={busy||busyJobId===payment.printJobId} onClick={()=>onReject(payment)}>Cancel attempt</button>}{payment.status==="CUSTOMER_REPORTED"&&<button className="secondary-button reject-action" disabled={busy||busyJobId===payment.printJobId} onClick={()=>onReject(payment)}>Reject report</button>}<button className="primary-button" disabled={busy||busyJobId===payment.printJobId} onClick={()=>onVerify(payment)}>{busyJobId===payment.printJobId?<span className="button-spinner"/>:payment.method==="UPI"?"Verify in bank app":"Confirm cash received"}</button></div>}
+        {payment.status==="VERIFIED"&&<div className="payment-verified-note"><Check size={14}/> Verified {payment.verifiedUtc?new Date(payment.verifiedUtc).toLocaleString():"by shop"}</div>}
+      </article>)}</div>}
+    </section>
+  </div>;
+}
+
 function PrintQueuePage({ jobs, onPreview, onApprove, onReject, onHistory, busyJobId }: {
   jobs: ShopPrintJob[];
   onPreview: (job: ShopPrintJob) => void;
@@ -702,7 +820,8 @@ function pageDescription(section:Section) {
     "Printers":"Manage connected devices, capabilities and health.",
     "QR Stations":"Create secure customer entry points for each counter.",
     "Print Agent":"Pair the Windows computer that hosts your installed printers.",
-    "Pricing":"Set your mono, colour and duplex rates. Payment collection is a separate step.",
+    "Pricing":"Set your mono, colour and duplex rates.",
+    "Payments":"Configure your shop's payment methods and verify customer print payments.",
     "Customers":"View customer activity and print history.",
     "Reports":"Understand print volume, shop revenue and performance.",
     "Settings":"Configure your shop identity and preferences."
@@ -739,24 +858,32 @@ function CustomerEntry({publicCode}:{publicCode:string}) {
       result?<><div className="entry-success-icon"><Check size={23}/></div><div className="entry-eyebrow">SECURE SESSION CREATED</div><h1>Welcome to {result.shop.displayName}</h1><p>Your phone is connected to this shop's print station.</p>
         <div className="entry-printer-card"><div className="entry-printer-icon"><Printer size={20}/></div><div><strong>{result.printer?.displayName||"Shop print counter"}</strong><span>{result.printer?result.printer.manufacturer+" · "+result.printer.model:"The shop will select a printer for your job."}</span></div><Status label={result.printer?.status||"Session ready"} tone="blue"/></div>
         <div className="entry-session-note"><ShieldCheck size={16}/><span>This session expires at {new Date(result.expiresUtc).toLocaleTimeString([], {hour:"2-digit",minute:"2-digit"})}. Your document access stays limited to this shop session.</span></div>
-        <CustomerPrintFlow sessionToken={result.sessionToken}/>
+        <CustomerPrintFlow sessionToken={result.sessionToken} paymentOptions={result.paymentOptions}/>
       </>:null}
     </main>
     <footer className="customer-entry-footer">© 2026 Smart Print · Secure customer printing</footer>
   </div>;
 }
 
-function CustomerPrintFlow({sessionToken}:{sessionToken:string}) {
+function CustomerPrintFlow({sessionToken,paymentOptions}:{sessionToken:string;paymentOptions:{upiEnabled:boolean;upiId?:string|null;payeeName?:string|null;cashEnabled:boolean}}) {
   const [file,setFile]=useState<File|null>(null);
   const [previewUrl,setPreviewUrl]=useState<string|null>(null);
   const [uploaded,setUploaded]=useState<UploadedPrintJob|null>(null);
   const [quote,setQuote]=useState<PrintQuoteResult|null>(null);
   const [jobStatus,setJobStatus]=useState<CustomerJobStatus|null>(null);
+  const [payment,setPayment]=useState<CustomerPayment|null>(null);
+  const [paymentReference,setPaymentReference]=useState("");
+  const [paymentMethod,setPaymentMethod]=useState<"UPI"|"CASH">(paymentOptions.upiEnabled?"UPI":"CASH");
   const [colourMode,setColourMode]=useState<"Mono"|"Colour">("Mono");
   const [isDuplex,setIsDuplex]=useState(false);
   const [copies,setCopies]=useState(1);
   const [busy,setBusy]=useState(false);
   const [error,setError]=useState("");
+
+  useEffect(()=>{
+    if(!paymentOptions.upiEnabled&&paymentOptions.cashEnabled)setPaymentMethod("CASH");
+    else if(paymentOptions.upiEnabled)setPaymentMethod("UPI");
+  },[paymentOptions.upiEnabled,paymentOptions.cashEnabled]);
 
   useEffect(()=>{
     if(!file){setPreviewUrl(null);return;}
@@ -792,7 +919,9 @@ function CustomerPrintFlow({sessionToken}:{sessionToken:string}) {
     setBusy(true);setError("");
     try {
       const accepted=await acceptCustomerQuote(sessionToken,uploaded.job.id);
-      setJobStatus(await getCustomerJobStatus(sessionToken,uploaded.job.id));
+      const refreshed=await getCustomerJobStatus(sessionToken,uploaded.job.id);
+      setJobStatus(refreshed);
+      setPayment(refreshed.payment ?? null);
       setQuote({...quote,status:accepted.status});
     } catch(exception) {
       setError(exception instanceof ApiError?exception.message:"The quote could not be accepted.");
@@ -802,13 +931,46 @@ function CustomerPrintFlow({sessionToken}:{sessionToken:string}) {
   async function refreshJobStatus() {
     if(!uploaded)return;
     setBusy(true);setError("");
-    try {setJobStatus(await getCustomerJobStatus(sessionToken,uploaded.job.id));}
+    try {
+      const refreshed=await getCustomerJobStatus(sessionToken,uploaded.job.id);
+      setJobStatus(refreshed);
+      setPayment(refreshed.payment ?? null);
+    }
     catch(exception){setError(exception instanceof ApiError?exception.message:"Could not refresh job status.");}
     finally {setBusy(false);}
   }
 
+
+  async function beginPayment(method:"UPI"|"CASH") {
+    if(!uploaded)return;
+    setBusy(true);setError("");
+    try {
+      const attempt=await startCustomerPayment(sessionToken,uploaded.job.id,method);
+      setPayment(attempt);
+      setPaymentMethod(method);
+      const refreshed=await getCustomerJobStatus(sessionToken,uploaded.job.id);
+      setJobStatus(refreshed);
+    } catch(exception) {
+      setError(exception instanceof ApiError?exception.message:"Could not start this payment method.");
+    } finally {setBusy(false);}
+  }
+
+  async function submitPaymentReference() {
+    if(!payment)return;
+    setBusy(true);setError("");
+    try {
+      await reportCustomerUpiPayment(sessionToken,payment.id,paymentReference.trim());
+      setPaymentReference("");
+      const refreshed=await getCustomerJobStatus(sessionToken,uploaded!.job.id);
+      setJobStatus(refreshed);
+      setPayment(refreshed.payment??null);
+    } catch(exception) {
+      setError(exception instanceof ApiError?exception.message:"The payment reference could not be submitted.");
+    } finally {setBusy(false);}
+  }
+
   function chooseFile(next:File|null) {
-    setFile(next);setUploaded(null);setQuote(null);setJobStatus(null);setError("");
+    setFile(next);setUploaded(null);setQuote(null);setJobStatus(null);setPayment(null);setPaymentReference("");setError("");
   }
 
   return <section className="customer-print-flow">
@@ -836,10 +998,33 @@ function CustomerPrintFlow({sessionToken}:{sessionToken:string}) {
     {quote&&quote.status!=="AWAITING_SHOP_APPROVAL"&&!jobStatus&&<button className="customer-flow-button" disabled={busy} onClick={()=>void acceptQuote()}>{busy?<span className="button-spinner"/>:"Accept quote and send to shop"}</button>}
     {jobStatus&&<div className="customer-job-state"><div className="customer-job-state-top"><Status label={prettyStatus(jobStatus.status)} tone={jobStatus.status==="REJECTED"?"red":jobStatus.status==="AWAITING_PAYMENT"?"green":"amber"}/><button className="customer-refresh-status" disabled={busy} onClick={()=>void refreshJobStatus()}>{busy?<span className="button-spinner"/>:"Refresh status"}</button></div>
       <strong>{jobStatus.status==="AWAITING_SHOP_APPROVAL"?"Your request is with the shop":jobStatus.status==="AWAITING_PAYMENT"?"The shop accepted your request":jobStatus.status==="REJECTED"?"The shop could not accept this request":jobStatus.status==="QUOTE_EXPIRED"?"Your quote has expired":"Your request is being reviewed"}</strong>
-      <p>{jobStatus.status==="AWAITING_SHOP_APPROVAL"?"The shop will review your request next. You have not been charged and printing has not started.":jobStatus.status==="AWAITING_PAYMENT"?"The shop approved this quote. Payment setup is not available yet, so no money has been collected and the document has not been printed.":jobStatus.status==="REJECTED"?"Please speak with the shop operator if you need help with this request.":jobStatus.status==="QUOTE_EXPIRED"?"This quote is no longer valid. Please ask the shop for a fresh quote.":"Check back for the latest request status."}</p>
+      <p>{jobStatus.status==="AWAITING_SHOP_APPROVAL"?"The shop will review your request next. No payment has been collected.":jobStatus.status==="AWAITING_PAYMENT"?"The shop approved your quote. Choose one of the payment methods enabled by the shop.":jobStatus.status==="AWAITING_COUNTER_PAYMENT"?"Please pay the shop at the counter. The job is not authorised until the shop confirms receipt.":jobStatus.status==="AWAITING_CUSTOMER_PAYMENT"?"Complete the UPI payment and submit its transaction reference. The shop must independently verify it.":jobStatus.status==="PAYMENT_REPORTED"?"Your UPI reference was sent to the shop. It is not marked paid until the shop verifies the transaction.":jobStatus.status==="PAID_AUTHORISED"?"The shop has verified your payment. The print queue is being prepared; physical printing has not yet started.":jobStatus.status==="PAYMENT_REJECTED"?"The shop could not verify that payment. Check with the shop before trying another method.":jobStatus.status==="REJECTED"?"Please speak with the shop operator if you need help with this request.":jobStatus.status==="QUOTE_EXPIRED"?"This quote is no longer valid. Please ask the shop for a fresh quote.":"Check back for the latest request status."}</p>
       {!!jobStatus.timeline?.length&&<div className="customer-state-timeline">{jobStatus.timeline.map((event,index)=><div key={index}><i/><span><strong>{prettyStatus(event.newStatus)}</strong><small>{event.actorType==="ShopUser"?"Shop team":event.actorType==="Customer"?"You":"System"} · {new Date(event.createdUtc).toLocaleString()}</small></span></div>)}</div>}
+
+      {(jobStatus.status==="AWAITING_PAYMENT"||jobStatus.status==="PAYMENT_REJECTED")&&<div className="customer-pay-panel">
+        <div className="customer-pay-heading"><span>PAY THE SHOP</span><strong>{formatMoney(jobStatus.quotedAmountMinor,jobStatus.currency)}</strong></div>
+        {paymentOptions.upiEnabled&&<button className={paymentMethod==="UPI"?"customer-choice selected":"customer-choice"} onClick={()=>setPaymentMethod("UPI")}>UPI payment</button>}
+        {paymentOptions.cashEnabled&&<button className={paymentMethod==="CASH"?"customer-choice selected":"customer-choice"} onClick={()=>setPaymentMethod("CASH")}>Cash at counter</button>}
+        <button className="customer-flow-button" disabled={busy||(!paymentOptions.upiEnabled&&!paymentOptions.cashEnabled)} onClick={()=>void beginPayment(paymentMethod)}>{busy?<span className="button-spinner"/>:"Continue with "+(paymentMethod==="UPI"?"UPI":"cash at counter")}</button>
+        {!paymentOptions.upiEnabled&&!paymentOptions.cashEnabled&&<p className="customer-flow-error">The shop has not configured a payment method yet. Please speak to the shop operator.</p>}
+      </div>}
+      {payment&&payment.status!=="REJECTED"&&<div className="customer-pay-panel">
+        <div className="customer-pay-heading"><span>{payment.method==="UPI"?"UPI PAYMENT":"CASH AT COUNTER"}</span><strong>{formatMoney(payment.amountMinor,payment.currency)}</strong></div>
+        {payment.method==="UPI"&&payment.status==="AWAITING_CUSTOMER_PAYMENT"&&<div className="customer-upi-details">
+          <div className="customer-upi-qr"><QRCode value={payment.upiUri||"upi://pay?pa="+encodeURIComponent(payment.upiIdSnapshot||"")} size={158}/></div>
+          <strong>{payment.payeeNameSnapshot||paymentOptions.payeeName||"Shop"}</strong>
+          <span>{payment.upiIdSnapshot||paymentOptions.upiId}</span>
+          <a href={payment.upiUri||"#"} className="customer-flow-button customer-upi-open">Open UPI app</a>
+          <label className="customer-reference-field">UPI transaction reference / UTR<input value={paymentReference} maxLength={100} onChange={event=>setPaymentReference(event.target.value)} placeholder="Enter UTR after paying"/></label>
+          <button className="customer-flow-button" disabled={busy||paymentReference.trim().length<4} onClick={()=>void submitPaymentReference()}>{busy?<span className="button-spinner"/>:"Submit payment reference"}</button>
+          <small className="customer-payment-warning">Submitting a UTR is not proof of payment. The shop verifies it in its own UPI/bank app.</small>
+        </div>}
+        {payment.method==="CASH"&&payment.status==="CASH_AWAITING_PAYMENT"&&<p>Pay at the shop counter. The shop will confirm receipt before authorising the job.</p>}
+        {payment.status==="CUSTOMER_REPORTED"&&<p>Your payment reference was received. The shop still needs to verify the transaction.</p>}
+        {payment.status==="VERIFIED"&&<p>Payment verified by the shop. The print job is authorised, but not yet physically printed.</p>}
+      </div>}
     </div>}
-    <div className="customer-payment-boundary"><ShieldCheck size={15}/><span>{jobStatus?.status==="AWAITING_PAYMENT"?"Shop approval is recorded, but payment collection is not configured. This job cannot be printed until the shop's payment flow is integrated and verified.":quote?"This quote is calculated by the shop's saved rate card. Accepting it sends a request to the shop; it does not collect payment or start printing.":"Your document is validated before pricing. You will see the shop's calculated price before any payment or print approval."}</span></div>
+    <div className="customer-payment-boundary"><ShieldCheck size={15}/><span>{jobStatus?.status==="PAID_AUTHORISED"?"The shop has confirmed payment. This job is authorised, but the local print queue has not yet started physical printing.":jobStatus?.status==="AWAITING_PAYMENT"?"The shop approved this quote. Payment is collected by the shop directly and must be verified before the job is authorised.":jobStatus?.status==="PAYMENT_REPORTED"?"Your UPI reference is awaiting the shop's independent bank verification; submitting a reference does not confirm payment.":quote?"This quote is calculated by the shop's saved rate card. Accepting it sends a request to the shop; it does not collect payment or start printing.":"Your document is validated before pricing. You will see the shop's calculated price before any payment or print approval."}</span></div>
   </section>;
 }
 

@@ -132,16 +132,44 @@ export async function registerShop(values: {
   return result.tokens;
 }
 
+export interface ShopPaymentSettings {
+  upiEnabled: boolean;
+  upiId?: string | null;
+  payeeName?: string | null;
+  cashEnabled: boolean;
+  updatedUtc: string;
+}
+
+export interface ShopPayment {
+  id: string;
+  printJobId: string;
+  jobNumber: string;
+  documentName: string;
+  method: "UPI" | "CASH";
+  status: string;
+  amountMinor: number;
+  currency: string;
+  paymentReference?: string | null;
+  upiIdSnapshot?: string | null;
+  payeeNameSnapshot?: string | null;
+  rejectionReason?: string | null;
+  createdUtc: string;
+  updatedUtc: string;
+  verifiedUtc?: string | null;
+}
+
 export async function loadShopData(token: string) {
-  const [profile, printers, stations, pricing, printJobs, agentDevices] = await Promise.all([
+  const [profile, printers, stations, pricing, printJobs, agentDevices, paymentSettings, payments] = await Promise.all([
     apiRequest<ShopProfile>("/api/v1/shop/profile", {}, token),
     apiRequest<PrinterDevice[]>("/api/v1/shop/printers", {}, token),
     apiRequest<QrStation[]>("/api/v1/shop/qr-stations", {}, token),
     apiRequest<ShopPricingProfile>("/api/v1/shop/pricing", {}, token),
     apiRequest<ShopPrintJob[]>("/api/v1/shop/print-jobs", {}, token),
-    apiRequest<AgentDevice[]>("/api/v1/shop/agent-devices", {}, token)
+    apiRequest<AgentDevice[]>("/api/v1/shop/agent-devices", {}, token),
+    apiRequest<ShopPaymentSettings>("/api/v1/shop/payment-settings", {}, token),
+    apiRequest<ShopPayment[]>("/api/v1/shop/payments", {}, token)
   ]);
-  return { profile, printers, stations, pricing, printJobs, agentDevices };
+  return { profile, printers, stations, pricing, printJobs, agentDevices, paymentSettings, payments };
 }
 
 export function createPrinter(token: string, values: {
@@ -213,6 +241,7 @@ export function createCustomerSession(publicCode: string) {
     sessionToken: string;
     shop: { displayName: string; logoUrl?: string | null; accentColor: string; currency: string };
     printer: { displayName: string; manufacturer: string; model: string; status: string; capabilitiesJson: string } | null;
+    paymentOptions: { upiEnabled: boolean; upiId?: string | null; payeeName?: string | null; cashEnabled: boolean };
   }>(`/api/v1/public/stations/${encodeURIComponent(publicCode)}/sessions`, { method: "POST" });
 }
 
@@ -319,6 +348,7 @@ export interface CustomerJobStatus {
   quoteExpiresUtc?: string | null;
   updatedUtc: string;
   timeline?: Array<{ newStatus: string; actorType: string; createdUtc: string }>;
+  payment?: CustomerPayment | null;
 }
 
 export function acceptCustomerQuote(sessionToken: string, jobId: string) {
@@ -332,10 +362,11 @@ export function getCustomerJobStatus(sessionToken: string, jobId: string) {
   return apiRequest<{
     job: Omit<CustomerJobStatus, "timeline">;
     timeline: NonNullable<CustomerJobStatus["timeline"]>;
+    payment?: CustomerPayment | null;
   }>(
     `/api/v1/public/jobs/${jobId}/status`,
     { headers: { "X-Print-Session": sessionToken } }
-  ).then(result => ({ ...result.job, timeline: result.timeline }));
+  ).then(result => ({ ...result.job, timeline: result.timeline, payment: result.payment ?? null }));
 }
 
 export interface ShopJobEvent {
@@ -390,5 +421,66 @@ export function revokeAgentDevice(token: string, agentId: string) {
     `/api/v1/shop/agent-devices/${agentId}/revoke`,
     { method: "PATCH" },
     token
+  );
+}
+
+export function updateShopPaymentSettings(token: string, values: {
+  upiEnabled: boolean;
+  upiId: string | null;
+  payeeName: string | null;
+  cashEnabled: boolean;
+}) {
+  return apiRequest<ShopPaymentSettings>("/api/v1/shop/payment-settings", {
+    method: "PUT",
+    body: JSON.stringify(values)
+  }, token);
+}
+
+export function verifyShopPayment(token: string, paymentId: string) {
+  return apiRequest<{ id: string; status: string; jobNumber: string; jobStatus: string }>(
+    `/api/v1/shop/payments/${paymentId}/verify`,
+    { method: "POST" },
+    token
+  );
+}
+
+export function rejectShopPayment(token: string, paymentId: string, reason: string) {
+  return apiRequest<{ id: string; status: string; rejectionReason: string }>(
+    `/api/v1/shop/payments/${paymentId}/reject`,
+    { method: "POST", body: JSON.stringify({ reason }) },
+    token
+  );
+}
+
+export interface CustomerPayment {
+  id: string;
+  method: "UPI" | "CASH";
+  status: string;
+  amountMinor: number;
+  currency: string;
+  upiIdSnapshot?: string | null;
+  payeeNameSnapshot?: string | null;
+  paymentReference?: string | null;
+  upiUri?: string | null;
+  jobNumber?: string;
+  jobStatus?: string;
+}
+
+export function startCustomerPayment(sessionToken: string, jobId: string, method: "UPI" | "CASH") {
+  return apiRequest<CustomerPayment>(`/api/v1/public/jobs/${jobId}/payments`, {
+    method: "POST",
+    headers: { "X-Print-Session": sessionToken },
+    body: JSON.stringify({ method })
+  });
+}
+
+export function reportCustomerUpiPayment(sessionToken: string, paymentId: string, referenceNumber: string) {
+  return apiRequest<{ id: string; status: string; paymentReference: string; jobStatus: string; message: string }>(
+    `/api/v1/public/payments/${paymentId}/report`,
+    {
+      method: "POST",
+      headers: { "X-Print-Session": sessionToken },
+      body: JSON.stringify({ referenceNumber })
+    }
   );
 }

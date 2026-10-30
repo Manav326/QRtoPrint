@@ -80,3 +80,17 @@ Events currently cover document upload, quote creation, quote expiry, customer q
 Agent authentication uses a per-computer random secret over HTTPS. The Windows client stores the secret using DPAPI LocalMachine encryption. A revoked computer cannot continue to sync. Revoked fingerprints may be enrolled again after revocation; a second active pairing for the same machine/shop is blocked.
 
 The first agent release is inventory and heartbeat only. It does not submit print jobs, capture payments or infer that a spooler-accepted job has physically completed.
+
+
+## Shop-owned print payments
+
+Print payment records are tenant-scoped and linked to the originating print job through a composite foreign key. Each job may have only one active payment attempt at a time. Shop payment settings contain the shop's own UPI payee ID/name and whether cash at counter is enabled. These are separate from Smart Print platform subscription billing.
+
+- GET/PUT /api/v1/shop/payment-settings — read/update shop UPI and cash options.
+- GET /api/v1/shop/payments — list the latest 100 payment attempts for the authenticated shop.
+- POST /api/v1/shop/payments/{paymentId}/verify — owner/manager marks a UPI reference verified or cash physically received. This is an explicit manual action.
+- POST /api/v1/shop/payments/{paymentId}/reject — owner/manager rejects an active attempt with a reason.
+- POST /api/v1/public/jobs/{jobId}/payments — customer starts an enabled UPI or cash attempt after shop approval.
+- POST /api/v1/public/payments/{paymentId}/report — customer submits a UPI reference/UTR. This never marks the payment as paid.
+
+UPI uses a shop-owned UPI ID and payment-intent URI/QR. The platform does not collect customer funds, call a payment gateway, or trust client screenshots/references as proof. The shop must independently verify receipt in its own bank/UPI app. When verification succeeds, the job becomes PAID_AUTHORISED, but physical printing remains disabled until the durable local queue and spooler reconciliation workflow is implemented. Smart Print SaaS subscription payments are independent.

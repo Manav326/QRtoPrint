@@ -185,6 +185,15 @@ auth.MapPost("/register-shop", async (
         DisplayName = businessName,
         UpdatedUtc = now
     });
+    db.ShopPaymentProfiles.Add(new ShopPaymentProfile
+    {
+        TenantId = tenant.Id,
+        UpiEnabled = false,
+        UpiId = null,
+        PayeeName = null,
+        CashEnabled = false,
+        UpdatedUtc = now
+    });
     db.ShopPricingProfiles.Add(new ShopPricingProfile
     {
         TenantId = tenant.Id,
@@ -1308,6 +1317,303 @@ agentApi.MapPost("/printers/sync", async (
     return Results.Ok(new { device.Id, Discovered = normalized.Count, Created = created, Updated = updated, Unavailable = existing.Count(printer => !seenQueues.Contains(printer.QueueName ?? string.Empty)), SyncedUtc = now });
 });
 
+
+shop.MapGet("/payment-settings", async (
+    ClaimsPrincipal principal,
+    SmartPrintDbContext db,
+    CancellationToken ct) =>
+{
+    if (!TryGetTenantId(principal, out var tenantId))
+    {
+        return Results.Forbid();
+    }
+
+    var settings = await db.ShopPaymentProfiles.AsNoTracking()
+        .SingleOrDefaultAsync(item => item.TenantId == tenantId, ct);
+    if (settings is null)
+    {
+        return Results.NotFound();
+    }
+
+    return Results.Ok(new
+    {
+        settings.UpiEnabled,
+        settings.UpiId,
+        settings.PayeeName,
+        settings.CashEnabled,
+        settings.UpdatedUtc
+    });
+});
+
+shop.MapPut("/payment-settings", async (
+    ShopPaymentSettingsRequest request,
+    ClaimsPrincipal principal,
+    SmartPrintDbContext db,
+    CancellationToken ct) =>
+{
+    if (!IsShopOwner(principal) || !TryGetTenantId(principal, out var tenantId))
+    {
+        return Results.Forbid();
+    }
+
+    var upiId = request.UpiId?.Trim();
+    var payeeName = request.PayeeName?.Trim();
+    if (request.UpiEnabled &&
+        (!IsValidUpiId(upiId) || string.IsNullOrWhiteSpace(payeeName) || payeeName.Length > 120))
+    {
+        return Results.ValidationProblem(new Dictionary<string, string[]>
+        {
+            ["upi"] = ["Enter a valid UPI ID and payee/business name before enabling UPI."]
+        });
+    }
+
+    if (upiId is { Length: > 160 })
+    {
+        return Results.ValidationProblem(new Dictionary<string, string[]>
+        {
+            ["upiId"] = ["UPI ID cannot exceed 160 characters."]
+        });
+    }
+
+    if (!request.UpiEnabled && !request.CashEnabled)
+    {
+        return Results.ValidationProblem(new Dictionary<string, string[]>
+        {
+            ["methods"] = ["Enable at least one payment method so customers can pay for approved print jobs."]
+        });
+    }
+
+    var settings = await db.ShopPaymentProfiles.SingleOrDefaultAsync(
+        item => item.TenantId == tenantId, ct);
+    if (settings is null)
+    {
+        return Results.NotFound();
+    }
+
+    settings.UpiEnabled = request.UpiEnabled;
+    settings.UpiId = request.UpiEnabled ? upiId : null;
+    settings.PayeeName = request.UpiEnabled ? payeeName : null;
+    settings.CashEnabled = request.CashEnabled;
+    settings.UpdatedUtc = DateTimeOffset.UtcNow;
+    await db.SaveChangesAsync(ct);
+
+    return Results.Ok(new
+    {
+        settings.UpiEnabled,
+        settings.UpiId,
+        settings.PayeeName,
+        settings.CashEnabled,
+        settings.UpdatedUtc
+    });
+});
+
+shop.MapGet("/payments", async (
+    ClaimsPrincipal principal,
+    SmartPrintDbContext db,
+    CancellationToken ct) =>
+{
+    if (!TryGetTenantId(principal, out var tenantId))
+    {
+        return Results.Forbid();
+    }
+
+    var payments = await (
+        from payment in db.PrintPayments.AsNoTracking()
+        join job in db.PrintJobs.AsNoTracking()
+            on new { payment.TenantId, PrintJobId = payment.PrintJobId }
+            equals new { job.TenantId, PrintJobId = job.Id }
+        join document in db.PrintDocuments.AsNoTracking()
+            on new { payment.TenantId, payment.PrintJobId }
+            equals new { document.TenantId, document.PrintJobId }
+        where payment.TenantId == tenantId
+        orderby payment.CreatedUtc descending
+        select new
+        {
+            payment.Id,
+            payment.PrintJobId,
+            job.JobNumber,
+            DocumentName = document.OriginalFileName,
+            payment.Method,
+            payment.Status,
+            payment.AmountMinor,
+            payment.Currency,
+            payment.PaymentReference,
+            payment.UpiIdSnapshot,
+            payment.PayeeNameSnapshot,
+            payment.RejectionReason,
+            payment.CreatedUtc,
+            payment.UpdatedUtc,
+            payment.VerifiedUtc
+        })
+        .Take(100)
+        .ToListAsync(ct);
+
+    return Results.Ok(payments);
+});
+
+shop.MapPost("/payments/{paymentId:guid}/verify", async (
+    Guid paymentId,
+    ClaimsPrincipal principal,
+    SmartPrintDbContext db,
+    CancellationToken ct) =>
+{
+    if (!IsShopOwner(principal) || !TryGetTenantId(principal, out var tenantId))
+    {
+        return Results.Forbid();
+    }
+
+    await using var transaction = await db.Database.BeginTransactionAsync(ct);
+    var payment = await db.PrintPayments.SingleOrDefaultAsync(
+        item => item.Id == paymentId && item.TenantId == tenantId, ct);
+    if (payment is null)
+    {
+        await transaction.RollbackAsync(ct);
+        return Results.NotFound();
+    }
+
+    if (payment.Status == "VERIFIED")
+    {
+        await transaction.RollbackAsync(ct);
+        return Results.Ok(new { payment.Id, payment.Status, payment.VerifiedUtc, DuplicateRequest = true });
+    }
+
+    var canVerify = payment.Method == "UPI"
+        ? payment.Status is "AWAITING_CUSTOMER_PAYMENT" or "CUSTOMER_REPORTED"
+        : payment.Method == "CASH" && payment.Status == "CASH_AWAITING_PAYMENT";
+    if (!canVerify)
+    {
+        await transaction.RollbackAsync(ct);
+        return Results.Conflict(new
+        {
+            code = "payment_not_ready_for_manual_verification",
+            message = payment.Method == "UPI"
+                ? "Only an active UPI payment attempt can be verified. Check the actual credit in your bank/UPI app first."
+                : "Cash can be marked received only after the shop has physically received it."
+        });
+    }
+
+    var job = await db.PrintJobs.SingleOrDefaultAsync(
+        item => item.Id == payment.PrintJobId && item.TenantId == tenantId, ct);
+    if (job is null)
+    {
+        await transaction.RollbackAsync(ct);
+        return Results.NotFound();
+    }
+
+    var now = DateTimeOffset.UtcNow;
+    payment.Status = "VERIFIED";
+    payment.VerifiedByUserId = GetActorId(principal);
+    payment.VerifiedUtc = now;
+    payment.UpdatedUtc = now;
+    var previousStatus = job.Status;
+    job.Status = "PAID_AUTHORISED";
+    job.UpdatedUtc = now;
+    db.PrintJobEvents.Add(new PrintJobEvent
+    {
+        TenantId = tenantId,
+        PrintJobId = job.Id,
+        PreviousStatus = previousStatus,
+        NewStatus = job.Status,
+        ActorType = "ShopUser",
+        ActorId = GetActorId(principal),
+        ReasonCode = payment.Method == "UPI"
+            ? "UPI_PAYMENT_MANUALLY_VERIFIED"
+            : "CASH_RECEIVED_AT_COUNTER",
+        CreatedUtc = now
+    });
+    await db.SaveChangesAsync(ct);
+    await transaction.CommitAsync(ct);
+
+    return Results.Ok(new
+    {
+        payment.Id,
+        payment.Status,
+        payment.VerifiedUtc,
+        job.Id,
+        job.JobNumber,
+        job.Status,
+        NextStep = "Payment is verified. Printer dispatch is not enabled until the durable local print queue is installed."
+    });
+});
+
+shop.MapPost("/payments/{paymentId:guid}/reject", async (
+    Guid paymentId,
+    RejectPrintPaymentRequest request,
+    ClaimsPrincipal principal,
+    SmartPrintDbContext db,
+    CancellationToken ct) =>
+{
+    if (!IsShopOwner(principal) || !TryGetTenantId(principal, out var tenantId))
+    {
+        return Results.Forbid();
+    }
+
+    var reason = request.Reason?.Trim();
+    if (string.IsNullOrWhiteSpace(reason) || reason.Length is < 3 or > 300)
+    {
+        return Results.ValidationProblem(new Dictionary<string, string[]>
+        {
+            ["reason"] = ["Provide a reason between 3 and 300 characters."]
+        });
+    }
+
+    await using var transaction = await db.Database.BeginTransactionAsync(ct);
+    var payment = await db.PrintPayments.SingleOrDefaultAsync(
+        item => item.Id == paymentId && item.TenantId == tenantId, ct);
+    if (payment is null)
+    {
+        await transaction.RollbackAsync(ct);
+        return Results.NotFound();
+    }
+
+    if (payment.Status == "REJECTED")
+    {
+        await transaction.RollbackAsync(ct);
+        return Results.Ok(new { payment.Id, payment.Status, payment.RejectionReason, DuplicateRequest = true });
+    }
+
+    if (payment.Status is not ("AWAITING_CUSTOMER_PAYMENT" or "CUSTOMER_REPORTED" or "CASH_AWAITING_PAYMENT"))
+    {
+        await transaction.RollbackAsync(ct);
+        return Results.Conflict(new
+        {
+            code = "payment_not_rejectable",
+            message = "Only a payment that is still awaiting payment or verification can be rejected."
+        });
+    }
+
+    var job = await db.PrintJobs.SingleOrDefaultAsync(
+        item => item.Id == payment.PrintJobId && item.TenantId == tenantId, ct);
+    if (job is null)
+    {
+        await transaction.RollbackAsync(ct);
+        return Results.NotFound();
+    }
+
+    var now = DateTimeOffset.UtcNow;
+    payment.Status = "REJECTED";
+    payment.RejectionReason = reason;
+    payment.UpdatedUtc = now;
+    var previousStatus = job.Status;
+    job.Status = "PAYMENT_REJECTED";
+    job.UpdatedUtc = now;
+    db.PrintJobEvents.Add(new PrintJobEvent
+    {
+        TenantId = tenantId,
+        PrintJobId = job.Id,
+        PreviousStatus = previousStatus,
+        NewStatus = job.Status,
+        ActorType = "ShopUser",
+        ActorId = GetActorId(principal),
+        ReasonCode = "SHOP_REJECTED_PAYMENT_REPORT",
+        CreatedUtc = now
+    });
+    await db.SaveChangesAsync(ct);
+    await transaction.CommitAsync(ct);
+
+    return Results.Ok(new { payment.Id, payment.Status, payment.RejectionReason, job.Id, job.Status, job.UpdatedUtc });
+});
+
 var publicApi = app.MapGroup("/api/v1/public").AllowAnonymous();
 
 publicApi.MapPost("/sessions/current/jobs", async (
@@ -1606,6 +1912,256 @@ publicApi.MapPost("/jobs/{jobId:guid}/quote", async (
 });
 
 
+
+publicApi.MapPost("/jobs/{jobId:guid}/payments", async (
+    Guid jobId,
+    StartPrintPaymentRequest request,
+    HttpContext context,
+    SmartPrintDbContext db,
+    CancellationToken ct) =>
+{
+    var rawToken = context.Request.Headers["X-Print-Session"].FirstOrDefault();
+    if (string.IsNullOrWhiteSpace(rawToken))
+    {
+        return Results.Unauthorized();
+    }
+
+    if (request.Method is not ("UPI" or "CASH"))
+    {
+        return Results.ValidationProblem(new Dictionary<string, string[]>
+        {
+            ["method"] = ["Choose UPI or cash at counter."]
+        });
+    }
+
+    var now = DateTimeOffset.UtcNow;
+    var tokenHash = HashOpaqueToken(rawToken);
+    var session = await db.CustomerPrintSessions.AsNoTracking()
+        .Where(item => item.TokenHash == tokenHash && item.Status == "Active" &&
+                       item.RevokedUtc == null && item.ExpiresUtc > now)
+        .Select(item => new { item.Id, item.TenantId })
+        .SingleOrDefaultAsync(ct);
+    if (session is null)
+    {
+        return Results.Unauthorized();
+    }
+
+    var job = await db.PrintJobs.SingleOrDefaultAsync(
+        item => item.Id == jobId && item.TenantId == session.TenantId &&
+                item.CustomerSessionId == session.Id, ct);
+    if (job is null)
+    {
+        return Results.NotFound();
+    }
+
+    if (job.Status is not ("AWAITING_PAYMENT" or "PAYMENT_REJECTED"))
+    {
+        return Results.Conflict(new
+        {
+            code = "job_not_ready_for_payment",
+            message = "The shop must approve the quote before payment can be started."
+        });
+    }
+
+    var settings = await db.ShopPaymentProfiles.AsNoTracking()
+        .SingleOrDefaultAsync(item => item.TenantId == session.TenantId, ct);
+    if (settings is null ||
+        (request.Method == "UPI" && !settings.UpiEnabled) ||
+        (request.Method == "CASH" && !settings.CashEnabled))
+    {
+        return Results.Conflict(new
+        {
+            code = "payment_method_unavailable",
+            message = "The shop has not enabled the selected payment method."
+        });
+    }
+
+    var activePayment = await db.PrintPayments.SingleOrDefaultAsync(
+        item => item.TenantId == session.TenantId &&
+                item.PrintJobId == job.Id &&
+                (item.Status == "AWAITING_CUSTOMER_PAYMENT" ||
+                 item.Status == "CUSTOMER_REPORTED" ||
+                 item.Status == "CASH_AWAITING_PAYMENT"),
+        ct);
+    if (activePayment is not null)
+    {
+        if (activePayment.Method != request.Method)
+        {
+            return Results.Conflict(new
+            {
+                code = "payment_attempt_already_active",
+                message = "A payment attempt is already active. Ask the shop to reject it before selecting another method."
+            });
+        }
+
+        return Results.Ok(BuildPaymentResponse(activePayment, job));
+    }
+
+    var payment = new PrintPayment
+    {
+        TenantId = session.TenantId,
+        PrintJobId = job.Id,
+        Method = request.Method,
+        Status = request.Method == "UPI" ? "AWAITING_CUSTOMER_PAYMENT" : "CASH_AWAITING_PAYMENT",
+        AmountMinor = job.QuotedAmountMinor,
+        Currency = job.Currency,
+        UpiIdSnapshot = request.Method == "UPI" ? settings.UpiId : null,
+        PayeeNameSnapshot = request.Method == "UPI" ? settings.PayeeName : null,
+        CreatedUtc = now,
+        UpdatedUtc = now
+    };
+    var previousStatus = job.Status;
+    job.Status = request.Method == "UPI" ? "AWAITING_CUSTOMER_PAYMENT" : "AWAITING_COUNTER_PAYMENT";
+    job.UpdatedUtc = now;
+    db.PrintPayments.Add(payment);
+    db.PrintJobEvents.Add(new PrintJobEvent
+    {
+        TenantId = job.TenantId,
+        PrintJobId = job.Id,
+        PreviousStatus = previousStatus,
+        NewStatus = job.Status,
+        ActorType = "Customer",
+        ReasonCode = request.Method == "UPI" ? "UPI_PAYMENT_INTENT_CREATED" : "CASH_AT_COUNTER_SELECTED",
+        CreatedUtc = now
+    });
+
+    try
+    {
+        await db.SaveChangesAsync(ct);
+    }
+    catch (DbUpdateException)
+    {
+        return Results.Conflict(new
+        {
+            code = "payment_attempt_already_active",
+            message = "A payment attempt was started at the same time. Refresh the job status and continue with the active attempt."
+        });
+    }
+
+    return Results.Ok(BuildPaymentResponse(payment, job));
+});
+
+publicApi.MapPost("/payments/{paymentId:guid}/report", async (
+    Guid paymentId,
+    ReportPrintPaymentRequest request,
+    HttpContext context,
+    SmartPrintDbContext db,
+    CancellationToken ct) =>
+{
+    var reference = request.ReferenceNumber?.Trim();
+    if (string.IsNullOrWhiteSpace(reference) ||
+        reference.Length is < 4 or > 100 ||
+        reference.Any(character => !char.IsLetterOrDigit(character) && character is not '-' and not '_'))
+    {
+        return Results.ValidationProblem(new Dictionary<string, string[]>
+        {
+            ["referenceNumber"] = ["Enter the UPI transaction reference/UTR (4–100 letters or digits, with optional hyphens/underscores)."]
+        });
+    }
+
+    var rawToken = context.Request.Headers["X-Print-Session"].FirstOrDefault();
+    if (string.IsNullOrWhiteSpace(rawToken))
+    {
+        return Results.Unauthorized();
+    }
+
+    var now = DateTimeOffset.UtcNow;
+    var tokenHash = HashOpaqueToken(rawToken);
+    var session = await db.CustomerPrintSessions.AsNoTracking()
+        .Where(item => item.TokenHash == tokenHash && item.Status == "Active" &&
+                       item.RevokedUtc == null && item.ExpiresUtc > now)
+        .Select(item => new { item.Id, item.TenantId })
+        .SingleOrDefaultAsync(ct);
+    if (session is null)
+    {
+        return Results.Unauthorized();
+    }
+
+    var payment = await db.PrintPayments.SingleOrDefaultAsync(
+        item => item.Id == paymentId && item.TenantId == session.TenantId, ct);
+    if (payment is null)
+    {
+        return Results.NotFound();
+    }
+
+    var job = await db.PrintJobs.SingleOrDefaultAsync(
+        item => item.Id == payment.PrintJobId && item.TenantId == session.TenantId &&
+                item.CustomerSessionId == session.Id, ct);
+    if (job is null)
+    {
+        return Results.NotFound();
+    }
+
+    if (payment.Method != "UPI")
+    {
+        return Results.Conflict(new
+        {
+            code = "payment_not_awaiting_reference",
+            message = "Only an active UPI payment request can receive a transaction reference."
+        });
+    }
+
+    if (payment.Status == "CUSTOMER_REPORTED" &&
+        string.Equals(payment.PaymentReference, reference, StringComparison.Ordinal))
+    {
+        return Results.Ok(new
+        {
+            payment.Id,
+            payment.Method,
+            payment.Status,
+            payment.AmountMinor,
+            payment.Currency,
+            payment.PaymentReference,
+            job.Id,
+            job.JobNumber,
+            job.Status,
+            DuplicateRequest = true,
+            Message = "This reference was already submitted. The shop still needs to verify the transaction."
+        });
+    }
+
+    if (payment.Status != "AWAITING_CUSTOMER_PAYMENT")
+    {
+        return Results.Conflict(new
+        {
+            code = "payment_not_awaiting_reference",
+            message = "This UPI payment is no longer accepting a transaction reference."
+        });
+    }
+
+    payment.PaymentReference = reference;
+    payment.Status = "CUSTOMER_REPORTED";
+    payment.UpdatedUtc = now;
+    var previousStatus = job.Status;
+    job.Status = "PAYMENT_REPORTED";
+    job.UpdatedUtc = now;
+    db.PrintJobEvents.Add(new PrintJobEvent
+    {
+        TenantId = job.TenantId,
+        PrintJobId = job.Id,
+        PreviousStatus = previousStatus,
+        NewStatus = job.Status,
+        ActorType = "Customer",
+        ReasonCode = "CUSTOMER_SUBMITTED_UPI_REFERENCE",
+        CreatedUtc = now
+    });
+    await db.SaveChangesAsync(ct);
+
+    return Results.Ok(new
+    {
+        payment.Id,
+        payment.Method,
+        payment.Status,
+        payment.AmountMinor,
+        payment.Currency,
+        payment.PaymentReference,
+        job.Id,
+        job.JobNumber,
+        job.Status,
+        Message = "The reference was submitted. The shop must verify the payment in its bank/UPI app before printing is authorised."
+    });
+});
+
 publicApi.MapPost("/jobs/{jobId:guid}/accept-quote", async (
     Guid jobId,
     HttpContext context,
@@ -1737,7 +2293,41 @@ publicApi.MapGet("/jobs/{jobId:guid}/status", async (
         .OrderBy(item => item.CreatedUtc)
         .Select(item => new { item.NewStatus, item.ActorType, item.CreatedUtc })
         .ToListAsync(ct);
-    return Results.Ok(new { Job = job, Timeline = timeline });
+    var payment = await db.PrintPayments.AsNoTracking()
+        .Where(item => item.TenantId == session.TenantId && item.PrintJobId == jobId)
+        .OrderByDescending(item => item.CreatedUtc)
+        .Select(item => new
+        {
+            item.Id,
+            item.Method,
+            item.Status,
+            item.AmountMinor,
+            item.Currency,
+            item.UpiIdSnapshot,
+            item.PayeeNameSnapshot,
+            item.PaymentReference,
+            item.RejectionReason,
+            item.CreatedUtc,
+            item.VerifiedUtc
+        })
+        .FirstOrDefaultAsync(ct);
+    var paymentStatus = payment is null ? null : new
+    {
+        payment.Id,
+        payment.Method,
+        payment.Status,
+        payment.AmountMinor,
+        payment.Currency,
+        payment.UpiIdSnapshot,
+        payment.PayeeNameSnapshot,
+        payment.PaymentReference,
+        payment.RejectionReason,
+        payment.CreatedUtc,
+        payment.VerifiedUtc,
+        UpiUri = BuildUpiUri(payment.Id, payment.Method, payment.UpiIdSnapshot,
+            payment.PayeeNameSnapshot, payment.AmountMinor, payment.Currency, job.JobNumber)
+    };
+    return Results.Ok(new { Job = job, Timeline = timeline, Payment = paymentStatus });
 });
 
 publicApi.MapPost("/stations/{publicCode}/sessions", async (
@@ -1774,6 +2364,16 @@ publicApi.MapPost("/stations/{publicCode}/sessions", async (
         Shop = await db.ShopProfiles.AsNoTracking()
             .Where(profile => profile.TenantId == station.TenantId)
             .Select(profile => new { profile.DisplayName, profile.LogoUrl, profile.AccentColor, profile.Currency })
+            .SingleAsync(ct),
+        PaymentOptions = await db.ShopPaymentProfiles.AsNoTracking()
+            .Where(profile => profile.TenantId == station.TenantId)
+            .Select(profile => new
+            {
+                profile.UpiEnabled,
+                profile.UpiId,
+                profile.PayeeName,
+                profile.CashEnabled
+            })
             .SingleAsync(ct),
         Printer = station.PrinterDeviceId is Guid printerId
             ? await db.PrinterDevices.AsNoTracking()
@@ -1851,6 +2451,54 @@ static async Task<AgentDevice?> AuthenticateAgentAsync(
 
 static bool IsShopOwner(ClaimsPrincipal principal) =>
     principal.FindAll("shop_role").Any(claim => claim.Value is "ShopOwner" or "ShopManager");
+
+static bool IsValidUpiId(string? value)
+{
+    if (string.IsNullOrWhiteSpace(value) || value.Length > 160)
+    {
+        return false;
+    }
+
+    var parts = value.Split('@');
+    return parts.Length == 2 &&
+           parts[0].Length is >= 2 and <= 128 &&
+           parts[1].Length is >= 2 and <= 64 &&
+           parts[0].All(character => char.IsLetterOrDigit(character) || character is '.' or '_' or '-') &&
+           parts[1].All(character => char.IsLetterOrDigit(character) || character is '.' or '-');
+}
+
+static string? BuildUpiUri(Guid paymentId, string method, string? upiId, string? payeeName, long amountMinor, string currency, string jobNumber)
+{
+    if (method != "UPI" || string.IsNullOrWhiteSpace(upiId))
+    {
+        return null;
+    }
+
+    return "upi://pay?pa=" + Uri.EscapeDataString(upiId) +
+           "&pn=" + Uri.EscapeDataString(payeeName ?? string.Empty) +
+           "&am=" + (amountMinor / 100m).ToString("0.00", System.Globalization.CultureInfo.InvariantCulture) +
+           "&cu=" + Uri.EscapeDataString(currency) +
+           "&tn=" + Uri.EscapeDataString("Smart Print " + jobNumber) +
+           "&tr=" + Uri.EscapeDataString(paymentId.ToString("N"));
+}
+
+static object BuildPaymentResponse(PrintPayment payment, PrintJob job) =>
+    new
+    {
+        payment.Id,
+        payment.Method,
+        payment.Status,
+        payment.AmountMinor,
+        payment.Currency,
+        payment.UpiIdSnapshot,
+        payment.PayeeNameSnapshot,
+        payment.PaymentReference,
+        UpiUri = BuildUpiUri(payment.Id, payment.Method, payment.UpiIdSnapshot,
+            payment.PayeeNameSnapshot, payment.AmountMinor, payment.Currency, job.JobNumber),
+        job.Id,
+        job.JobNumber,
+        job.Status
+    };
 
 static bool IsHexColor(string value) =>
     value is { Length: 7 } && value[0] == '#' && value[1..].All(Uri.IsHexDigit);
