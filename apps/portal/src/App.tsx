@@ -1,19 +1,20 @@
 import { useEffect, useState, type ReactNode } from "react";
 import {
-  Activity, ArrowRight, Check, Clock3, Copy, FileText, LayoutDashboard,
+  Activity, ArrowRight, Check, Clock3, Copy, FileText, FileUp, LayoutDashboard,
   LifeBuoy, LogOut, Menu, Moon, Plus, Printer, QrCode, Settings,
   ShieldCheck, Sun, Users, Wallet, X
 } from "lucide-react";
 import QRCode from "react-qr-code";
 import AuthScreen from "./AuthScreen";
 import {
-  ApiError, createCustomerSession, createPrinter, createStation,
+  ApiError, calculateCustomerQuote, createCustomerSession, createPrinter, createStation,
   loadShopData, logout, readStoredTokens, rotateStationCode, storeTokens,
-  updatePrinterActive, updateShopProfile, updateStationEnabled,
-  type AuthTokens, type PrinterDevice, type QrStation, type ShopProfile
+  updatePrinterActive, updateShopPricing, updateShopProfile, updateStationEnabled, uploadCustomerDocument,
+  type AuthTokens, type PrinterDevice, type PrintQuoteResult, type QrStation,
+  type ShopPricingProfile, type ShopPrintJob, type ShopProfile, type UploadedPrintJob
 } from "./api";
 
-type Section = "Overview" | "Print Queue" | "Printers" | "QR Stations" | "Customers" | "Reports" | "Settings";
+type Section = "Overview" | "Print Queue" | "Printers" | "QR Stations" | "Pricing" | "Customers" | "Reports" | "Settings";
 type Modal = "printer" | "station" | null;
 
 const sections: { label: Section; icon: typeof LayoutDashboard }[] = [
@@ -21,6 +22,7 @@ const sections: { label: Section; icon: typeof LayoutDashboard }[] = [
   { label: "Print Queue", icon: FileText },
   { label: "Printers", icon: Printer },
   { label: "QR Stations", icon: QrCode },
+  { label: "Pricing", icon: Wallet },
   { label: "Customers", icon: Users },
   { label: "Reports", icon: Activity },
   { label: "Settings", icon: Settings }
@@ -49,6 +51,8 @@ function ShopConsole({ tokens, onSignOut }: { tokens: AuthTokens; onSignOut: () 
   const [profile, setProfile] = useState<ShopProfile | null>(null);
   const [printers, setPrinters] = useState<PrinterDevice[]>([]);
   const [stations, setStations] = useState<QrStation[]>([]);
+  const [pricing, setPricing] = useState<ShopPricingProfile | null>(null);
+  const [printJobs, setPrintJobs] = useState<ShopPrintJob[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [modal, setModal] = useState<Modal>(null);
@@ -63,6 +67,8 @@ function ShopConsole({ tokens, onSignOut }: { tokens: AuthTokens; onSignOut: () 
       setProfile(snapshot.profile);
       setPrinters(snapshot.printers);
       setStations(snapshot.stations);
+      setPricing(snapshot.pricing);
+      setPrintJobs(snapshot.printJobs);
     } catch (exception) {
       if (exception instanceof ApiError && exception.status === 401) {
         storeTokens(null);
@@ -164,6 +170,25 @@ function ShopConsole({ tokens, onSignOut }: { tokens: AuthTokens; onSignOut: () 
     }
   }
 
+  async function savePricing(values: {
+    monoPerSideMinor: number;
+    colourPerSideMinor: number;
+    monoDuplexPerSheetMinor: number;
+    colourDuplexPerSheetMinor: number;
+    minimumChargeMinor: number;
+  }) {
+    setBusy(true);
+    try {
+      const updated = await updateShopPricing(tokens.accessToken, values);
+      setPricing(updated);
+      setToast("Print rate card saved. New quotes will use this pricing version.");
+    } catch (exception) {
+      setError(exception instanceof Error ? exception.message : "Could not save print prices.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   const navAction = (section: Section) => { setActive(section); setSidebarOpen(false); setError(""); };
 
   if (loading && !profile) {
@@ -226,11 +251,12 @@ function ShopConsole({ tokens, onSignOut }: { tokens: AuthTokens; onSignOut: () 
           {error && <div className="inline-error" role="alert"><span>{error}</span><button onClick={() => setError("")} aria-label="Dismiss error"><X size={15}/></button></div>}
           {toast && <div className="inline-success" role="status"><Check size={15}/><span>{toast}</span><button onClick={() => setToast("")} aria-label="Dismiss message"><X size={15}/></button></div>}
 
-          {active === "Overview" && <Overview profile={profile} printers={printers} stations={stations} onNavigate={navAction}/>}
+          {active === "Overview" && <Overview profile={profile} printers={printers} stations={stations} printJobs={printJobs} pricing={pricing} onNavigate={navAction}/>}
           {active === "Printers" && <PrintersPage printers={printers} onAdd={() => setModal("printer")} onToggle={togglePrinter}/>}
           {active === "QR Stations" && <StationsPage stations={stations} onAdd={() => setModal("station")} onToggle={toggleStation} onGenerate={createFreshStationCode}/>}
+          {active === "Pricing" && pricing && <PricingPage pricing={pricing} onSave={savePricing} busy={busy}/>}
           {active === "Settings" && profile && <SettingsPage profile={profile} onSave={saveProfile} busy={busy}/>}
-          {active === "Print Queue" && <EmptyModule icon={<FileText size={24}/>} title="Your print queue will appear here" text="Customer uploads, approvals and physical print states will be shown here once the document and print-job workflow is connected."/>}
+          {active === "Print Queue" && <PrintQueuePage jobs={printJobs} />}
           {active === "Customers" && <EmptyModule icon={<Users size={24}/>} title="Customer directory is coming next" text="Customer profiles and print history will be connected to completed print jobs. No sample customer records are shown."/>}
           {active === "Reports" && <EmptyModule icon={<Activity size={24}/>} title="Reports will build from real activity" text="Revenue and print-volume reports will appear when job pricing, payment reconciliation and completion events are connected."/>}
 
@@ -244,22 +270,30 @@ function ShopConsole({ tokens, onSignOut }: { tokens: AuthTokens; onSignOut: () 
   );
 }
 
-function Overview({ profile, printers, stations, onNavigate }: {
-  profile: ShopProfile | null; printers: PrinterDevice[]; stations: QrStation[]; onNavigate: (section: Section) => void;
+function Overview({ profile, printers, stations, printJobs, pricing, onNavigate }: {
+  profile: ShopProfile | null; printers: PrinterDevice[]; stations: QrStation[];
+  printJobs: ShopPrintJob[]; pricing: ShopPricingProfile | null; onNavigate: (section: Section) => void;
 }) {
   const activePrinters = printers.filter(printer => printer.isActive);
+  const todayKey = new Date().toDateString();
+  const jobsToday = printJobs.filter(job => new Date(job.createdUtc).toDateString() === todayKey);
+  const quotesAwaiting = printJobs.filter(job => job.status === "AWAITING_CUSTOMER_APPROVAL");
   return (
     <>
       <div className="stat-grid">
         <Metric icon={<Printer size={18}/>} label="Registered printers" value={String(printers.length)} note={`${activePrinters.length} enabled for use`} accent="blue"/>
         <Metric icon={<QrCode size={18}/>} label="QR stations" value={String(stations.length)} note={`${stations.filter(station=>station.isEnabled).length} currently enabled`} accent="violet"/>
-        <Metric icon={<FileText size={18}/>} label="Print jobs today" value="—" note="Job workflow not connected yet" accent="amber"/>
-        <Metric icon={<Wallet size={18}/>} label="Today's shop revenue" value="—" note="Payment integration not connected" accent="mint"/>
+        <Metric icon={<FileText size={18}/>} label="Print jobs today" value={String(jobsToday.length)} note="Real customer uploads" accent="amber"/>
+        <Metric icon={<Wallet size={18}/>} label="Quotes awaiting review" value={String(quotesAwaiting.length)} note="Quotes are not collected payments" accent="mint"/>
       </div>
       <div className="dashboard-grid">
         <section className="panel activity-empty-panel">
-          <div className="panel-heading"><div><h2>Shop activity</h2><p>Real print activity will appear here</p></div><span className="neutral-chip">Awaiting first job</span></div>
-          <div className="activity-empty-content"><div className="activity-empty-art"><div className="activity-art-sheet"><FileText size={25}/><i/><i/><i/></div><div className="activity-art-printer"><Printer size={27}/></div><span className="activity-art-spark">✦</span></div><h3>Ready when your first customer is</h3><p>Connect a printer and create a QR station. Your queue and activity insights will start filling in when customer print jobs are enabled.</p><button className="text-action" onClick={() => onNavigate(printers.length ? "QR Stations" : "Printers")}>{printers.length ? "Create your first QR station" : "Add your first printer"} <span>→</span></button></div>
+          <div className="panel-heading"><div><h2>Customer activity</h2><p>Recent uploads and quote requests from your QR stations</p></div><span className="neutral-chip">{printJobs.length} recent jobs</span></div>
+          {printJobs.length===0 ? <div className="activity-empty-content"><div className="activity-empty-art"><div className="activity-art-sheet"><FileText size={25}/><i/><i/><i/></div><div className="activity-art-printer"><Printer size={27}/></div><span className="activity-art-spark">✦</span></div><h3>Ready when your first customer is</h3><p>Set your prices and share a QR station. Customer uploads will appear here as soon as they arrive.</p><button className="text-action" onClick={() => onNavigate(printers.length ? "QR Stations" : "Printers")}>{printers.length ? "Open QR stations" : "Add your first printer"} <span>→</span></button></div> :
+            <div className="activity-job-list">
+              {printJobs.slice(0,4).map(job=><div className="activity-job-row" key={job.id}><div className="activity-job-icon"><FileText size={16}/></div><div className="activity-job-copy"><strong>{job.jobNumber}</strong><span>{job.document.originalFileName} · {job.pageCount} pages</span></div><div className="activity-job-status"><Status label={prettyStatus(job.status)} tone={job.status==="AWAITING_CUSTOMER_APPROVAL"?"amber":"blue"}/><small>{new Date(job.createdUtc).toLocaleTimeString([], {hour:"2-digit",minute:"2-digit"})}</small></div></div>)}
+              <button className="text-action" onClick={()=>onNavigate("Print Queue")}>Open print queue <span>→</span></button>
+            </div>}
         </section>
         <section className="panel printer-panel">
           <div className="panel-heading"><div><h2>Printer setup</h2><p>Registered shop devices</p></div><button className="text-action" onClick={() => onNavigate("Printers")}>Manage <span>→</span></button></div>
@@ -269,11 +303,12 @@ function Overview({ profile, printers, stations, onNavigate }: {
         </section>
       </div>
       <section className="panel setup-panel">
-        <div className="panel-heading"><div><h2>Shop setup checklist</h2><p>Complete these steps before accepting customer print jobs.</p></div><span className="setup-count">{Number(printers.length>0)+Number(stations.length>0)} / 3 complete</span></div>
+        <div className="panel-heading"><div><h2>Shop setup checklist</h2><p>Complete these steps before accepting customer print jobs.</p></div><span className="setup-count">{Number(!!profile?.displayName)+Number(printers.length>0)+Number(stations.length>0)+Number(!!pricing?.isConfigured)} / 4 complete</span></div>
         <div className="setup-checks">
           <SetupCheck complete={!!profile?.displayName} title="Create your shop identity" detail="Your shop name and customer-facing brand." onClick={()=>onNavigate("Settings")}/>
           <SetupCheck complete={printers.length>0} title="Register your printers" detail="Add the printers available at your counter." onClick={()=>onNavigate("Printers")}/>
           <SetupCheck complete={stations.length>0} title="Create your first QR station" detail="Give customers a secure way to connect." onClick={()=>onNavigate("QR Stations")}/>
+          <SetupCheck complete={!!pricing?.isConfigured} title="Set your print prices" detail="Configure mono, colour and duplex rates." onClick={()=>onNavigate("Pricing")}/>
         </div>
       </section>
     </>
@@ -304,6 +339,110 @@ function StationsPage({ stations, onAdd, onToggle, onGenerate }: {
       </article>)}</div>}
     </section>
   );
+}
+
+
+function PricingPage({ pricing, onSave, busy }: {
+  pricing: ShopPricingProfile;
+  onSave: (values: {
+    monoPerSideMinor: number;
+    colourPerSideMinor: number;
+    monoDuplexPerSheetMinor: number;
+    colourDuplexPerSheetMinor: number;
+    minimumChargeMinor: number;
+  }) => void;
+  busy: boolean;
+}) {
+  const [mono,setMono]=useState((pricing.monoPerSideMinor/100).toFixed(2));
+  const [colour,setColour]=useState((pricing.colourPerSideMinor/100).toFixed(2));
+  const [monoDuplex,setMonoDuplex]=useState((pricing.monoDuplexPerSheetMinor/100).toFixed(2));
+  const [colourDuplex,setColourDuplex]=useState((pricing.colourDuplexPerSheetMinor/100).toFixed(2));
+  const [minimum,setMinimum]=useState((pricing.minimumChargeMinor/100).toFixed(2));
+  useEffect(()=>{
+    setMono((pricing.monoPerSideMinor/100).toFixed(2));
+    setColour((pricing.colourPerSideMinor/100).toFixed(2));
+    setMonoDuplex((pricing.monoDuplexPerSheetMinor/100).toFixed(2));
+    setColourDuplex((pricing.colourDuplexPerSheetMinor/100).toFixed(2));
+    setMinimum((pricing.minimumChargeMinor/100).toFixed(2));
+  },[pricing]);
+  const toMinor=(value:string)=>Math.round(Number(value)*100);
+  const valid=[mono,colour,monoDuplex,colourDuplex,minimum].every(value=>value.trim()!==""&&Number.isFinite(Number(value))&&Number(value)>=0);
+  return <section className="panel settings-panel pricing-page">
+    <div className="settings-intro"><div className="settings-icon"><Wallet size={20}/></div><div><h2>Print rate card</h2><p>Set the prices your customers see before they authorise a job.</p></div><span className={pricing.isConfigured?"pricing-status configured":"pricing-status"}>{pricing.isConfigured?"Active rate card":"Not configured"}</span></div>
+    <div className="pricing-disclaimer"><ShieldCheck size={16}/><span>Prices are stored in paise and calculated by the server. Updating this rate card affects new quotes; existing quotes retain their saved price and pricing version.</span></div>
+    <form className="settings-form" onSubmit={event=>{
+      event.preventDefault();
+      if(!valid||toMinor(mono)<=0||toMinor(colour)<=0)return;
+      onSave({
+        monoPerSideMinor:toMinor(mono),
+        colourPerSideMinor:toMinor(colour),
+        monoDuplexPerSheetMinor:toMinor(monoDuplex),
+        colourDuplexPerSheetMinor:toMinor(colourDuplex),
+        minimumChargeMinor:toMinor(minimum)
+      });
+    }}>
+      <div className="pricing-group-heading"><strong>Single-sided printing</strong><span>Price per A4 printed side</span></div>
+      <div className="pricing-input-grid">
+        <label>Black & white <span className="price-input-wrap"><span>₹</span><input type="number" min="0.01" max="1000" step="0.01" value={mono} onChange={e=>setMono(e.target.value)} required/></span></label>
+        <label>Colour <span className="price-input-wrap"><span>₹</span><input type="number" min="0.01" max="1000" step="0.01" value={colour} onChange={e=>setColour(e.target.value)} required/></span></label>
+      </div>
+      <div className="pricing-group-heading"><strong>Double-sided printing</strong><span>Price per physical A4 sheet (two sides)</span></div>
+      <div className="pricing-input-grid">
+        <label>Black & white duplex <span className="price-input-wrap"><span>₹</span><input type="number" min="0" max="1000" step="0.01" value={monoDuplex} onChange={e=>setMonoDuplex(e.target.value)}/></span></label>
+        <label>Colour duplex <span className="price-input-wrap"><span>₹</span><input type="number" min="0" max="1000" step="0.01" value={colourDuplex} onChange={e=>setColourDuplex(e.target.value)}/></span></label>
+      </div>
+      <div className="pricing-group-heading"><strong>Minimum order</strong><span>Applied if the calculated print total is lower</span></div>
+      <label>Minimum job charge <span className="price-input-wrap minimum-price"><span>₹</span><input type="number" min="0" max="100000" step="0.01" value={minimum} onChange={e=>setMinimum(e.target.value)}/></span></label>
+      <div className="settings-summary"><ShieldCheck size={16}/><span>Customer payment gateway setup is separate and is not active yet. This screen configures print quotations only; no money is collected here.</span></div>
+      <div className="settings-actions"><button className="primary-button" disabled={busy||!valid||toMinor(mono)<=0||toMinor(colour)<=0}>{busy?<span className="button-spinner"/>:"Save print prices"}</button></div>
+    </form>
+    <div className="pricing-version-row"><span>Rate card version</span><strong>v{pricing.version}</strong><span>Last updated</span><strong>{new Date(pricing.updatedUtc).toLocaleString()}</strong></div>
+  </section>;
+}
+
+function PrintQueuePage({ jobs }: { jobs: ShopPrintJob[] }) {
+  return <section className="panel queue-panel live-queue-panel">
+    <div className="collection-header"><div><h2>Customer print jobs</h2><p>Jobs created by your shop's QR sessions. Quotes are not evidence of payment or print completion.</p></div><span className="setup-count">{jobs.length} recent jobs</span></div>
+    {jobs.length===0 ? <EmptyModule icon={<FileText size={24}/>} title="Your queue is clear" text="When a customer uploads a document through one of your QR stations, the job and its current state will appear here."/> :
+      <div className="table-scroll"><table><thead><tr><th>JOB</th><th>DOCUMENT</th><th>PRINT SETTINGS</th><th>QUOTE</th><th>STATUS</th><th>CREATED</th></tr></thead><tbody>
+        {jobs.map(job=><tr key={job.id}>
+          <td><strong className="job-id">{job.jobNumber}</strong></td>
+          <td><div className="customer-cell"><strong>{job.document.originalFileName}</strong><span>{formatBytes(job.document.sizeBytes)} · {job.document.mediaType}</span></div></td>
+          <td><div className="detail-cell"><strong>{job.pageCount} pages × {job.copies}</strong><span>{job.colourMode} · {job.paperSize} · {job.isDuplex?"Duplex":"Single-sided"}</span></div></td>
+          <td className="amount-cell">{job.quotedAmountMinor>0?formatMoney(job.quotedAmountMinor,job.currency):"Not quoted"}</td>
+          <td><Status label={prettyStatus(job.status)} tone={job.status==="AWAITING_CUSTOMER_APPROVAL"?"amber":job.status==="COMPLETED"?"green":"blue"}/></td>
+          <td className="time-cell">{new Date(job.createdUtc).toLocaleString()}</td>
+        </tr>)}
+      </tbody></table></div>}
+  </section>;
+}
+
+function prettyStatus(status:string) {
+  const names:Record<string,string>={
+    AWAITING_CONFIGURATION:"Configure options",
+    AWAITING_CUSTOMER_APPROVAL:"Quote awaiting customer",
+    UPLOADED:"Uploaded",
+    VALIDATING:"Validating",
+    ANALYSING:"Analysing",
+    AWAITING_PAYMENT:"Awaiting payment",
+    AWAITING_COUNTER_PAYMENT:"Pay at counter",
+    AUTHORISED:"Authorised",
+    QUEUED:"Queued",
+    SUBMITTING_TO_SPOOLER:"Sending to printer",
+    SPOOLER_ACCEPTED:"Accepted by spooler",
+    PRINTING:"Printing",
+    COMPLETED:"Completed",
+    OUTPUT_UNCONFIRMED:"Output unconfirmed",
+    FAILED:"Failed",
+    CANCELLED:"Cancelled"
+  };
+  return names[status] || status.replaceAll("_"," ").toLowerCase().replace(/\\b\\w/g,letter=>letter.toUpperCase());
+}
+function formatMoney(minor:number,currency:string) {
+  return new Intl.NumberFormat("en-IN",{style:"currency",currency,minimumFractionDigits:2}).format(minor/100);
+}
+function formatBytes(bytes:number) {
+  return bytes<1024*1024?`${(bytes/1024).toFixed(0)} KB`:`${(bytes/(1024*1024)).toFixed(2)} MB`;
 }
 
 function SettingsPage({ profile, onSave, busy }: { profile:ShopProfile; onSave:(v:{displayName:string;logoUrl:string|null;accentColor:string})=>void; busy:boolean }) {
@@ -382,9 +521,10 @@ function initials(value:string) { return value.trim().split(/\s+/).slice(0,2).ma
 function pageDescription(section:Section) {
   const descriptions:Record<Section,string> = {
     "Overview":"Your shop setup and operations, all in one place.",
-    "Print Queue":"Review, approve and manage customer print jobs.",
+    "Print Queue":"Review real customer uploads and server-calculated print quotes.",
     "Printers":"Manage connected devices, capabilities and health.",
     "QR Stations":"Create secure customer entry points for each counter.",
+    "Pricing":"Set your mono, colour and duplex rates. Payment collection is a separate step.",
     "Customers":"View customer activity and print history.",
     "Reports":"Understand print volume, shop revenue and performance.",
     "Settings":"Configure your shop identity and preferences."
@@ -402,13 +542,118 @@ function CustomerEntry({publicCode}:{publicCode:string}) {
   const [loading,setLoading]=useState(true);
   useEffect(()=>{
     let mounted=true;
-    void createCustomerSession(publicCode).then(value=>{if(mounted){setResult(value);sessionStorage.setItem("qrtoprint.customer-session",value.sessionToken);}})
-      .catch(exception=>{if(mounted)setError(exception instanceof Error?exception.message:"This QR station is unavailable.");})
-      .finally(()=>{if(mounted)setLoading(false);});
+    void createCustomerSession(publicCode).then(value=>{
+      if(mounted){
+        setResult(value);
+        sessionStorage.setItem("qrtoprint.customer-session",value.sessionToken);
+      }
+    }).catch(exception=>{
+      if(mounted)setError(exception instanceof Error?exception.message:"This QR station is unavailable.");
+    }).finally(()=>{if(mounted)setLoading(false);});
     return ()=>{mounted=false;};
   },[publicCode]);
-  return <div className="customer-entry"><div className="customer-entry-glow"/><header className="customer-entry-brand"><div className="brand-mark"><QrCode size={21}/></div><div><div className="brand-name">smart<span>print</span></div><div className="brand-caption">BY QRtoPrint</div></div></header>
-    <main className="customer-entry-card">{loading?<><div className="customer-entry-spinner"><span className="button-spinner"/></div><h1>Connecting to your print shop</h1><p>Creating a secure, time-limited session for this QR station.</p></>:error?<><div className="entry-error-icon"><X size={23}/></div><div className="entry-eyebrow">STATION UNAVAILABLE</div><h1>This QR station can't be reached</h1><p>{error}</p><button className="primary-button" onClick={()=>window.location.reload()}>Try again</button></>:result?<><div className="entry-success-icon"><Check size={23}/></div><div className="entry-eyebrow">SECURE SESSION CREATED</div><h1>Welcome to {result.shop.displayName}</h1><p>Your phone is connected to this shop's print station.</p><div className="entry-printer-card"><div className="entry-printer-icon"><Printer size={20}/></div><div><strong>{result.printer?.displayName||"Shop print counter"}</strong><span>{result.printer?result.printer.manufacturer+" · "+result.printer.model:"The shop will select a printer for your job."}</span></div><Status label={result.printer?.status||"Session ready"} tone="blue"/></div><div className="entry-session-note"><ShieldCheck size={16}/><span>This session expires at {new Date(result.expiresUtc).toLocaleTimeString([], {hour:"2-digit",minute:"2-digit"})}. Your document access stays limited to this shop session.</span></div><div className="entry-next-step"><strong>You're connected.</strong><span>Document upload and print configuration are the next customer workflow being integrated.</span></div></>:null}</main>
+
+  return <div className="customer-entry"><div className="customer-entry-glow"/>
+    <header className="customer-entry-brand"><div className="brand-mark"><QrCode size={21}/></div><div><div className="brand-name">smart<span>print</span></div><div className="brand-caption">BY QRtoPrint</div></div></header>
+    <main className="customer-entry-card">
+      {loading?<><div className="customer-entry-spinner"><span className="button-spinner"/></div><h1>Connecting to your print shop</h1><p>Creating a secure, time-limited session for this QR station.</p></>:
+      error?<><div className="entry-error-icon"><X size={23}/></div><div className="entry-eyebrow">STATION UNAVAILABLE</div><h1>This QR station can't be reached</h1><p>{error}</p><button className="primary-button" onClick={()=>window.location.reload()}>Try again</button></>:
+      result?<><div className="entry-success-icon"><Check size={23}/></div><div className="entry-eyebrow">SECURE SESSION CREATED</div><h1>Welcome to {result.shop.displayName}</h1><p>Your phone is connected to this shop's print station.</p>
+        <div className="entry-printer-card"><div className="entry-printer-icon"><Printer size={20}/></div><div><strong>{result.printer?.displayName||"Shop print counter"}</strong><span>{result.printer?result.printer.manufacturer+" · "+result.printer.model:"The shop will select a printer for your job."}</span></div><Status label={result.printer?.status||"Session ready"} tone="blue"/></div>
+        <div className="entry-session-note"><ShieldCheck size={16}/><span>This session expires at {new Date(result.expiresUtc).toLocaleTimeString([], {hour:"2-digit",minute:"2-digit"})}. Your document access stays limited to this shop session.</span></div>
+        <CustomerPrintFlow sessionToken={result.sessionToken}/>
+      </>:null}
+    </main>
     <footer className="customer-entry-footer">© 2026 Smart Print · Secure customer printing</footer>
   </div>;
+}
+
+function CustomerPrintFlow({sessionToken}:{sessionToken:string}) {
+  const [file,setFile]=useState<File|null>(null);
+  const [previewUrl,setPreviewUrl]=useState<string|null>(null);
+  const [uploaded,setUploaded]=useState<UploadedPrintJob|null>(null);
+  const [quote,setQuote]=useState<PrintQuoteResult|null>(null);
+  const [colourMode,setColourMode]=useState<"Mono"|"Colour">("Mono");
+  const [isDuplex,setIsDuplex]=useState(false);
+  const [copies,setCopies]=useState(1);
+  const [busy,setBusy]=useState(false);
+  const [error,setError]=useState("");
+
+  useEffect(()=>{
+    if(!file){setPreviewUrl(null);return;}
+    const url=URL.createObjectURL(file);
+    setPreviewUrl(url);
+    return ()=>URL.revokeObjectURL(url);
+  },[file]);
+
+  async function upload() {
+    if(!file)return;
+    setBusy(true);
+    setError("");
+    setQuote(null);
+    try {
+      const created=await uploadCustomerDocument(sessionToken,file);
+      setUploaded(created);
+    } catch(exception) {
+      setError(exception instanceof ApiError?exception.message:"The document could not be uploaded.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function getQuote() {
+    if(!uploaded)return;
+    setBusy(true);
+    setError("");
+    try {
+      const calculated=await calculateCustomerQuote(sessionToken,uploaded.job.id,{
+        colourMode,
+        paperSize:"A4",
+        isDuplex,
+        copies
+      });
+      setQuote(calculated);
+    } catch(exception) {
+      setError(exception instanceof ApiError?exception.message:"The shop could not calculate a quote.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function chooseFile(next:File|null) {
+    setFile(next);
+    setUploaded(null);
+    setQuote(null);
+    setError("");
+  }
+
+  return <section className="customer-print-flow">
+    <div className="customer-flow-heading"><div><span>STEP 1</span><h2>Add your document</h2></div><span className="upload-limit">PDF, JPG or PNG · Up to 20 MB</span></div>
+    <label className="customer-upload-zone">
+      <input type="file" accept=".pdf,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png" onChange={event=>chooseFile(event.target.files?.[0]||null)}/>
+      <span className="customer-upload-icon"><FileUp size={21}/></span>
+      <strong>{file?file.name:"Choose a document to print"}</strong>
+      <small>{file?formatBytes(file.size)+" · Select another file to replace":"Tap to browse files on your phone"}</small>
+    </label>
+    {previewUrl&&file&&<div className="customer-file-preview">
+      <div className="customer-file-label"><FileText size={15}/><span>Document preview</span></div>
+      {file.type==="application/pdf"?<iframe src={previewUrl} title="PDF document preview"/>:<img src={previewUrl} alt="Selected document preview"/>}
+    </div>}
+    {file&&!uploaded&&<button className="customer-flow-button" disabled={busy} onClick={()=>void upload()}>{busy?<span className="button-spinner"/>:<><UploadIcon/>Upload document</>}</button>}
+    {uploaded&&<>
+      <div className="uploaded-document-card"><div className="uploaded-document-icon"><FileText size={18}/></div><div><strong>{uploaded.document.originalFileName}</strong><span>{uploaded.job.pageCount} {uploaded.job.pageCount===1?"page":"pages"} · {formatBytes(uploaded.document.sizeBytes)} · Validated</span></div><Status label="Uploaded" tone="green"/></div>
+      <div className="customer-flow-heading customer-config-heading"><div><span>STEP 2</span><h2>Choose print settings</h2></div></div>
+      <div className="customer-option-group"><span>Colour mode</span><div className="customer-choice-row"><button className={colourMode==="Mono"?"customer-choice selected":"customer-choice"} onClick={()=>{setColourMode("Mono");setQuote(null);}}>Black & white</button><button className={colourMode==="Colour"?"customer-choice selected":"customer-choice"} onClick={()=>{setColourMode("Colour");setQuote(null);}}>Colour</button></div></div>
+      <div className="customer-option-grid"><label>Copies<input type="number" min="1" max="100" value={copies} onChange={event=>{setCopies(Math.max(1,Math.min(100,Number(event.target.value)||1)));setQuote(null);}}/></label><label className="customer-duplex-toggle"><input type="checkbox" checked={isDuplex} onChange={event=>{setIsDuplex(event.target.checked);setQuote(null);}}/><span><strong>Double-sided</strong><small>Print on both sides of each sheet</small></span></label></div>
+      <div className="customer-paper-note"><Check size={14}/> A4 paper · Page order preserved · {colourMode==="Mono"?"Black & white":"Colour"} printing</div>
+      <button className="customer-flow-button" disabled={busy||copies<1} onClick={()=>void getQuote()}>{busy?<span className="button-spinner"/>:"Calculate print price"}</button>
+    </>}
+    {error&&<div className="customer-flow-error" role="alert">{error}</div>}
+    {quote&&<div className="customer-quote-card"><div><span>YOUR PRINT QUOTE</span><strong>{formatMoney(quote.quotedAmountMinor,quote.currency)}</strong><small>{quote.pageCount} pages · {quote.copies} copies · {quote.colourMode} · {quote.isDuplex?"Duplex":"Single-sided"}</small></div><div className="quote-validity"><ShieldCheck size={15}/><span>Valid until {new Date(quote.quoteExpiresUtc).toLocaleTimeString([], {hour:"2-digit",minute:"2-digit"})}</span></div></div>}
+    <div className="customer-payment-boundary"><ShieldCheck size={15}/><span>{quote?"Your quote is calculated by the shop's saved rate card. Payment and shop approval are not connected yet; nothing has been charged or printed.":"Your document is validated before pricing. You will see the shop's calculated price before any payment or print approval."}</span></div>
+  </section>;
+}
+
+function UploadIcon() {
+  return <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M12 16V4m0 0L7 9m5-5 5 5"/><path d="M4 16v3a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-3"/></svg>;
 }
