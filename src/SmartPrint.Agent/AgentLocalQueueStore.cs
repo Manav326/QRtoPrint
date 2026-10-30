@@ -65,6 +65,26 @@ public sealed class AgentLocalQueueStore
             ?? throw new InvalidDataException("A local print queue manifest is invalid.");
     }
 
+    private IReadOnlyList<AgentLocalQueueEntry> ReadEntries()
+    {
+        var result = new List<AgentLocalQueueEntry>();
+        foreach (var path in Directory.EnumerateFiles(queueRoot, "*.json", SearchOption.TopDirectoryOnly))
+        {
+            var entry = JsonSerializer.Deserialize<AgentLocalQueueEntry>(File.ReadAllText(path, Encoding.UTF8), JsonOptions);
+            if (entry is not null) result.Add(entry);
+        }
+        return result.OrderBy(x => x.ReceivedUtc).ToArray();
+    }
+
+    public IReadOnlyList<AgentLocalQueueEntry> GetAcknowledgedJobs() =>
+        ReadEntries().Where(x => x.State == "ACKNOWLEDGED").ToArray();
+
+    public IReadOnlyList<AgentLocalQueueEntry> GetInterruptedSubmissions() =>
+        ReadEntries().Where(x => x.State == "SUBMITTING").ToArray();
+
+    public IReadOnlyList<AgentLocalQueueEntry> GetSpoolerTrackingJobs() =>
+        ReadEntries().Where(x => x.State == "SPOOLER_ACCEPTED" && x.SpoolerJobId is > 0).ToArray();
+
     public IReadOnlyList<AgentLocalQueueEntry> GetPendingAcknowledgements()
     {
         var entries = new List<AgentLocalQueueEntry>();
@@ -210,6 +230,76 @@ public sealed class AgentLocalQueueStore
         }
 
         await SaveManifestAsync(entry with { State = "ACKNOWLEDGED" }, cancellationToken);
+    }
+
+
+    public async Task MarkSubmissionStartedAsync(Guid jobId, string spoolerJobName, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(spoolerJobName) || spoolerJobName.Length > 180)
+            throw new ArgumentException("A stable Windows spooler document name is required.", nameof(spoolerJobName));
+        var entry = Find(jobId) ?? throw new FileNotFoundException("The local print job does not exist.");
+        if (entry.State == "SUBMITTING" && entry.SpoolerJobName == spoolerJobName) return;
+        if (entry.State != "ACKNOWLEDGED")
+            throw new InvalidOperationException($"Cannot submit a local job in state {entry.State}.");
+        await SaveManifestAsync(entry with
+        {
+            State = "SUBMITTING", SpoolerJobName = spoolerJobName, SpoolerJobId = null,
+            SpoolerSubmittedUtc = null, SpoolerStatus = "SUBMISSION_STARTED", FailureCode = null
+        }, ct);
+    }
+
+    public async Task MarkSpoolerAcceptedAsync(Guid jobId, int spoolerJobId, string spoolerJobName, CancellationToken ct)
+    {
+        if (spoolerJobId <= 0) throw new ArgumentOutOfRangeException(nameof(spoolerJobId));
+        var entry = Find(jobId) ?? throw new FileNotFoundException("The local print job does not exist.");
+        if (entry.State == "SPOOLER_ACCEPTED" && entry.SpoolerJobId == spoolerJobId) return;
+        if (entry.State != "SUBMITTING")
+            throw new InvalidOperationException($"Cannot mark a local job spooler accepted from state {entry.State}.");
+        await SaveManifestAsync(entry with
+        {
+            State = "SPOOLER_ACCEPTED", SpoolerJobId = spoolerJobId,
+            SpoolerJobName = spoolerJobName, SpoolerSubmittedUtc = DateTimeOffset.UtcNow,
+            SpoolerStatus = "QUEUED", FailureCode = null
+        }, ct);
+    }
+
+    public async Task MarkReadyAfterBlockedAsync(Guid jobId, string reasonCode, CancellationToken ct)
+    {
+        var entry = Find(jobId) ?? throw new FileNotFoundException("The local print job does not exist.");
+        if (entry.State == "ACKNOWLEDGED") return;
+        if (entry.State != "SUBMITTING")
+            throw new InvalidOperationException($"Cannot safely unblock a local job from state {entry.State}.");
+        await SaveManifestAsync(entry with
+        {
+            State = "ACKNOWLEDGED", SpoolerJobId = null, SpoolerJobName = null,
+            SpoolerSubmittedUtc = null, SpoolerStatus = "BLOCKED_BEFORE_SUBMISSION",
+            FailureCode = reasonCode
+        }, ct);
+    }
+
+    public async Task MarkOutputUnconfirmedAsync(Guid jobId, string reasonCode, CancellationToken ct)
+    {
+        var entry = Find(jobId) ?? throw new FileNotFoundException("The local print job does not exist.");
+        if (entry.State == "OUTPUT_UNCONFIRMED") return;
+        if (entry.State is not ("SUBMITTING" or "SPOOLER_ACCEPTED"))
+            throw new InvalidOperationException($"Cannot reconcile a local job from state {entry.State}.");
+        await SaveManifestAsync(entry with { State = "OUTPUT_UNCONFIRMED", SpoolerStatus = "OUTPUT_UNCONFIRMED", FailureCode = reasonCode }, ct);
+    }
+
+    public async Task MarkOutputConfirmedAsync(Guid jobId, CancellationToken ct)
+    {
+        var entry = Find(jobId) ?? throw new FileNotFoundException("The local print job does not exist.");
+        if (entry.State == "OUTPUT_CONFIRMED") return;
+        if (entry.State is not ("SPOOLER_ACCEPTED" or "OUTPUT_UNCONFIRMED"))
+            throw new InvalidOperationException($"Cannot confirm local output from state {entry.State}.");
+        await SaveManifestAsync(entry with { State = "OUTPUT_CONFIRMED", SpoolerStatus = "SHOP_CONFIRMED_OUTPUT" }, ct);
+    }
+
+    public async Task UpdateSpoolerStatusAsync(Guid jobId, string status, CancellationToken ct)
+    {
+        var entry = Find(jobId) ?? throw new FileNotFoundException("The local print job does not exist.");
+        if (entry.State != "SPOOLER_ACCEPTED") return;
+        await SaveManifestAsync(entry with { SpoolerStatus = status }, ct);
     }
 
     public byte[] ReadDocument(Guid jobId)

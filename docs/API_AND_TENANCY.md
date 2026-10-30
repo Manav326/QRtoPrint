@@ -118,4 +118,23 @@ After shop-side manual payment verification, an owner/manager assigns the job to
 
 The Windows agent stores the document encrypted with DPAPI LocalMachine under its protected ProgramData queue directory. Its manifest tracks ACK_PENDING and ACKNOWLEDGED so an interrupted acknowledgement is retried after restart. Temporary and orphaned files are cleaned during service startup. The cloud status changes to LOCAL_QUEUE_READY only after the agent confirms verified local storage.
 
-**This increment does not submit documents to a physical printer.** A secured local copy is not proof of spooler acceptance or paper output. Physical spooler execution, per-job print settings, duplicate submission prevention and uncertain-output reconciliation remain a separate gated stage.
+A secured local copy is not proof of spooler acceptance or paper output. Physical spooler acceptance is still distinct from actual paper completion; only a shop operator can confirm output after inspecting the sheets.
+
+
+## Physical printing and output reconciliation
+
+Physical printing is a local Windows Agent action, never a cloud-to-printer command.
+
+- POST /api/v1/shop/print-jobs/{jobId}/dispatch — owner-authorised action available only after verified payment, secure local receipt, and a live assigned queue. It changes LOCAL_QUEUE_READY to PRINT_AUTHORISED and creates a stable per-job spooler document name.
+- POST /api/v1/agent/jobs/print-claim — the paired agent proves the locally stored SHA-256/size and claims only explicitly authorised jobs for its own live queue. The five-minute lease is re-claimable by that same agent only when expired and its local manifest still proves no submission started.
+- POST /api/v1/agent/jobs/{jobId}/spooler-accepted — records Windows spooler job ID/name after GDI EndDoc succeeds. The stable document name supports restart reconciliation.
+- POST /api/v1/agent/jobs/{jobId}/spooler-status — records queue status and page counters. Spooler status never automatically changes the job to COMPLETED.
+- POST /api/v1/agent/jobs/{jobId}/print-blocked — returns a failure known to have occurred before StartDoc to LOCAL_QUEUE_READY so the shop can correct the issue and explicitly retry.
+- POST /api/v1/agent/jobs/{jobId}/output-unconfirmed — records a post-submission uncertain outcome and permanently blocks automatic resubmission.
+- POST /api/v1/shop/print-jobs/{jobId}/confirm-output — owner confirms the actual paper output only after inspecting the physical pages; then the job becomes COMPLETED.
+
+The Windows Agent rasterises PDFs with PDFium and JPEG/PNG with SkiaSharp, validates A4/A5/Letter/Legal paper availability, colour and duplex support against the installed driver, and uses Windows GDI/Print Spooler. Requested copies are expanded in software as collated copies so the driver cannot multiply them a second time. Unsupported settings are blocked before StartDoc.
+
+The durable local manifest is written as SUBMITTING before the first spooler call. After an agent restart it searches the spooler by the stable document name. If a matching spooler job exists it records the existing job; if the outcome cannot be proven, the job is marked OUTPUT_UNCONFIRMED. The system never automatically submits again after a submission may have begun.
+
+Spooler acceptance or disappearance from the Windows queue is not proof of physical paper output. Actual hardware behaviour still requires validation against the shop's specific printer models and installed drivers.

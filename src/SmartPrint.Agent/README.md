@@ -28,4 +28,6 @@ To remove the Windows Service, run scripts\uninstall-agent-service.ps1 from an e
 - Claims only paid/authorised jobs assigned to one of this agent's live printer queues. The claim has a three-minute lease and a tenant/agent ownership check.
 - Downloads documents only while the lease is active, verifies the source SHA-256 and size, writes an encrypted local document plus durable manifest, and then acknowledges local receipt to the cloud.
 - Retries ACK_PENDING acknowledgements after restart and reuses an already stored job rather than downloading a second local copy.
-- Does not submit or re-submit print jobs to the Windows spooler. Physical spooler execution, print-setting application, output verification and uncertain-output recovery remain disabled until the spooler executor is implemented and tested against real hardware.
+- Executes only shop-authorised jobs after proving the matching protected local document. It rasterises PDF/JPEG/PNG, applies supported paper/colour/duplex settings through the installed driver and submits a single job to the Windows spooler.
+- Persists SUBMITTING before the first spooler call, reconciles the stable document name after restart, and never automatically resubmits an uncertain attempt.
+- Reports spooler acceptance and queue status separately from physical completion. Only the shop operator can confirm that the requested pages actually came out.

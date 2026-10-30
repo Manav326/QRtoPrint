@@ -84,6 +84,85 @@ public sealed class AgentLocalQueueStoreTests
         }
     }
 
+
+    [Fact]
+    public async Task SpoolerSubmissionTransitionsAreDurableAndNotAutomaticallyRequeued()
+    {
+        var root = CreateTemporaryDirectory();
+        try
+        {
+            var store = new AgentLocalQueueStore(root);
+            await store.InitializeAsync(CancellationToken.None);
+            var bytes = "One source document"u8.ToArray();
+            var job = CreateJob(bytes);
+            await store.EnqueueAsync(job, bytes, CancellationToken.None);
+            await store.MarkAcknowledgedAsync(job.Id, CancellationToken.None);
+            Assert.Single(store.GetAcknowledgedJobs());
+
+            await store.MarkSubmissionStartedAsync(job.Id, "SmartPrint-Test-StableName", CancellationToken.None);
+            Assert.Equal("SUBMITTING", store.Find(job.Id)!.State);
+            Assert.Single(store.GetInterruptedSubmissions());
+            Assert.Empty(store.GetAcknowledgedJobs());
+
+            await store.MarkSpoolerAcceptedAsync(job.Id, 123, "SmartPrint-Test-StableName", CancellationToken.None);
+            Assert.Equal("SPOOLER_ACCEPTED", store.Find(job.Id)!.State);
+            Assert.Single(store.GetSpoolerTrackingJobs());
+            Assert.Empty(store.GetInterruptedSubmissions());
+
+            await store.UpdateSpoolerStatusAsync(job.Id, "PRINTING", CancellationToken.None);
+            Assert.Equal("PRINTING", store.Find(job.Id)!.SpoolerStatus);
+            await store.MarkOutputUnconfirmedAsync(job.Id, "SPOOLER_JOB_NO_LONGER_VISIBLE", CancellationToken.None);
+            Assert.Equal("OUTPUT_UNCONFIRMED", store.Find(job.Id)!.State);
+            Assert.Empty(store.GetAcknowledgedJobs());
+            Assert.Empty(store.GetSpoolerTrackingJobs());
+        }
+        finally { Directory.Delete(root, recursive: true); }
+    }
+
+    [Fact]
+    public async Task PreSubmissionBlockReturnsJobToAcknowledgedStateForExplicitRetry()
+    {
+        var root = CreateTemporaryDirectory();
+        try
+        {
+            var store = new AgentLocalQueueStore(root);
+            await store.InitializeAsync(CancellationToken.None);
+            var bytes = "Retry-safe document"u8.ToArray();
+            var job = CreateJob(bytes);
+            await store.EnqueueAsync(job, bytes, CancellationToken.None);
+            await store.MarkAcknowledgedAsync(job.Id, CancellationToken.None);
+            await store.MarkSubmissionStartedAsync(job.Id, "SmartPrint-Test-Retry", CancellationToken.None);
+            await store.MarkReadyAfterBlockedAsync(job.Id, "PRINTER_OFFLINE", CancellationToken.None);
+            Assert.Equal("ACKNOWLEDGED", store.Find(job.Id)!.State);
+            Assert.Single(store.GetAcknowledgedJobs());
+            Assert.Empty(store.GetInterruptedSubmissions());
+        }
+        finally { Directory.Delete(root, recursive: true); }
+    }
+
+
+    [Fact]
+    public async Task ShopOutputConfirmationStopsLocalSpoolerMonitoring()
+    {
+        var root = CreateTemporaryDirectory();
+        try
+        {
+            var store = new AgentLocalQueueStore(root);
+            await store.InitializeAsync(CancellationToken.None);
+            var bytes = "Output checked"u8.ToArray();
+            var job = CreateJob(bytes);
+            await store.EnqueueAsync(job, bytes, CancellationToken.None);
+            await store.MarkAcknowledgedAsync(job.Id, CancellationToken.None);
+            await store.MarkSubmissionStartedAsync(job.Id, "SmartPrint-OutputChecked", CancellationToken.None);
+            await store.MarkSpoolerAcceptedAsync(job.Id, 456, "SmartPrint-OutputChecked", CancellationToken.None);
+            await store.MarkOutputConfirmedAsync(job.Id, CancellationToken.None);
+
+            Assert.Equal("OUTPUT_CONFIRMED", store.Find(job.Id)!.State);
+            Assert.Empty(store.GetSpoolerTrackingJobs());
+        }
+        finally { Directory.Delete(root, recursive: true); }
+    }
+
     private static AgentClaimedJob CreateJob(byte[] content)
     {
         var hash = Convert.ToHexString(SHA256.HashData(content)).ToLowerInvariant();

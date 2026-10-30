@@ -293,6 +293,14 @@ export interface ShopPrintJob {
   claimedByAgentDeviceId?: string | null;
   agentLeaseExpiresUtc?: string | null;
   localQueueReceivedUtc?: string | null;
+  printDispatchLeaseExpiresUtc?: string | null;
+  spoolerJobId?: number | null;
+  spoolerJobName?: string | null;
+  spoolerStatus?: string | null;
+  spoolerSubmittedUtc?: string | null;
+  spoolerObservedUtc?: string | null;
+  outputConfirmedUtc?: string | null;
+  failureCode?: string | null;
   document: { originalFileName: string; mediaType: string; sizeBytes: number };
 }
 
@@ -416,6 +424,17 @@ export function assignShopPrintJobPrinter(token: string, jobId: string, printerD
     method: "PATCH",
     body: JSON.stringify({ printerDeviceId })
   }, token);
+}
+
+
+export function dispatchShopPrintJob(token: string, jobId: string) {
+  return apiRequest<{ id: string; jobNumber: string; status: string; printerName: string; queueName: string; agentId: string; spoolerJobName: string }>(
+    `/api/v1/shop/print-jobs/${jobId}/dispatch`, { method: "POST" }, token);
+}
+
+export function confirmShopPrintOutput(token: string, jobId: string) {
+  return apiRequest<{ id: string; status: string; outputConfirmedUtc: string }>(
+    `/api/v1/shop/print-jobs/${jobId}/confirm-output`, { method: "POST" }, token);
 }
 
 export function getShopJobEvents(token: string, jobId: string) {

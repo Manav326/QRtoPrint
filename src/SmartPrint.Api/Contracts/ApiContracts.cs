@@ -81,3 +81,10 @@ public sealed record ResumeCustomerSessionRequest(string PublicCode);
 public sealed record AssignPrintJobPrinterRequest(Guid PrinterDeviceId);
 
 public sealed record AgentJobReceivedRequest(string Sha256, long SizeBytes);
+
+
+public sealed record AgentLocalQueueProof(Guid JobId, string Sha256, long SizeBytes);
+public sealed record AgentPrintClaimRequest(IReadOnlyList<AgentLocalQueueProof> LocalJobs);
+public sealed record AgentSpoolerAcceptedRequest(int SpoolerJobId, string SpoolerJobName, string SpoolerStatus);
+public sealed record AgentPrintBlockedRequest(string ReasonCode, string Message);
+public sealed record AgentSpoolerStatusRequest(int SpoolerJobId, string SpoolerStatus, int PagesPrinted, int TotalPages);

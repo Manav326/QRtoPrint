@@ -52,6 +52,15 @@ public sealed class TenantModelTests
                 {
                     nameof(PrintJob.TenantId), nameof(PrintJob.ClaimedByAgentDeviceId), nameof(PrintJob.Status)
                 }));
+        Assert.Contains(job.GetIndexes(), index =>
+            index.Properties.Select(property => property.Name)
+                .SequenceEqual(new[]
+                {
+                    nameof(PrintJob.TenantId), nameof(PrintJob.Status), nameof(PrintJob.PrintDispatchLeaseExpiresUtc)
+                }));
+        Assert.Equal(0, job.FindProperty(nameof(PrintJob.PrintDispatchAttempts))!.GetDefaultValue());
+        Assert.Equal(180, job.FindProperty(nameof(PrintJob.SpoolerJobName))!.GetMaxLength());
+        Assert.Equal(80, job.FindProperty(nameof(PrintJob.SpoolerStatus))!.GetMaxLength());
         AssertCompositeForeignKey(model.FindEntityType(typeof(PrintJobEvent))!,
             nameof(PrintJobEvent.TenantId), nameof(PrintJobEvent.PrintJobId));
         AssertCompositeForeignKey(model.FindEntityType(typeof(PrintPayment))!,

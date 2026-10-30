@@ -1,3 +1,4 @@
+using System.ComponentModel;
 using System.Net;
 using System.Net.Http.Json;
 using System.Security.Cryptography;
@@ -10,6 +11,7 @@ public sealed class Worker(
     AgentCredentialStore credentialStore,
     WindowsPrinterDiscovery printerDiscovery,
     AgentLocalQueueStore localQueueStore,
+    WindowsPrintExecutor printExecutor,
     IConfiguration configuration) : BackgroundService
 {
     private readonly TimeSpan pollInterval = TimeSpan.FromSeconds(
@@ -82,6 +84,10 @@ public sealed class Worker(
                     {
                         logger.LogInformation("Synchronized {PrinterCount} Windows printer queues with the shop.", printers.Count);
                         await ProcessLocalQueueHandoffAsync(client, credentials, stoppingToken);
+                        await ReconcileInterruptedSubmissionsAsync(client, credentials, stoppingToken);
+                        await RetrySpoolerReceiptsAsync(client, credentials, stoppingToken);
+                        await ProcessAuthorizedPrintJobsAsync(client, credentials, stoppingToken);
+                        await MonitorSpoolerJobsAsync(client, credentials, stoppingToken);
                     }
                     else
                     {
@@ -251,6 +257,176 @@ public sealed class Worker(
         }
 
         logger.LogWarning("Local queue receipt for job {JobId} was not acknowledged (HTTP {StatusCode}); it will be retried.", jobId, (int)response.StatusCode);
+    }
+
+
+    private async Task ReconcileInterruptedSubmissionsAsync(HttpClient client, AgentCredentials credentials, CancellationToken ct)
+    {
+        foreach (var entry in localQueueStore.GetInterruptedSubmissions())
+        {
+            ct.ThrowIfCancellationRequested();
+            try
+            {
+                if (string.IsNullOrWhiteSpace(entry.QueueName) || string.IsNullOrWhiteSpace(entry.SpoolerJobName))
+                {
+                    await localQueueStore.MarkOutputUnconfirmedAsync(entry.JobId, "INTERRUPTED_PRINT_METADATA_MISSING", ct);
+                    await ReportOutputUnconfirmedAsync(client, credentials, entry.JobId, "INTERRUPTED_PRINT_METADATA_MISSING", "The local manifest is missing its printer queue or spooler name.", ct);
+                    continue;
+                }
+                var found = printExecutor.FindJobByDocumentName(entry.QueueName, entry.SpoolerJobName);
+                if (found is null)
+                {
+                    await localQueueStore.MarkOutputUnconfirmedAsync(entry.JobId, "AGENT_RESTART_DURING_PRINT_SUBMISSION", ct);
+                    await ReportOutputUnconfirmedAsync(client, credentials, entry.JobId, "AGENT_RESTART_DURING_PRINT_SUBMISSION", "The agent restarted after submission began and no matching spooler job remains. Automatic retry is disabled.", ct);
+                    continue;
+                }
+                await localQueueStore.MarkSpoolerAcceptedAsync(entry.JobId, found.JobId, entry.SpoolerJobName, ct);
+                await ReportSpoolerAcceptedAsync(client, credentials, entry.JobId, found.JobId, entry.SpoolerJobName, found.Status, ct);
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
+            catch (Exception ex) { logger.LogError(ex, "Could not reconcile interrupted submission for {JobNumber}.", entry.JobNumber); }
+        }
+    }
+
+    private async Task RetrySpoolerReceiptsAsync(HttpClient client, AgentCredentials credentials, CancellationToken ct)
+    {
+        foreach (var entry in localQueueStore.GetSpoolerTrackingJobs())
+        {
+            ct.ThrowIfCancellationRequested();
+            if (entry.SpoolerJobId is > 0 && !string.IsNullOrWhiteSpace(entry.SpoolerJobName))
+                await ReportSpoolerAcceptedAsync(client, credentials, entry.JobId, entry.SpoolerJobId.Value, entry.SpoolerJobName, entry.SpoolerStatus ?? "QUEUED", ct);
+        }
+    }
+
+    private async Task ProcessAuthorizedPrintJobsAsync(HttpClient client, AgentCredentials credentials, CancellationToken ct)
+    {
+        var proofs = localQueueStore.GetAcknowledgedJobs().Select(x => new AgentLocalQueueProof(x.JobId, x.Sha256, x.SizeBytes)).Take(100).ToArray();
+        if (proofs.Length == 0) return;
+        using var response = await SendAgentRequestAsync(client, credentials, "api/v1/agent/jobs/print-claim", new AgentPrintClaimRequest(proofs), ct);
+        if (!response.IsSuccessStatusCode)
+        {
+            logger.LogWarning("Print dispatch claim returned HTTP {StatusCode}.", (int)response.StatusCode);
+            return;
+        }
+        var result = await response.Content.ReadFromJsonAsync<AgentPrintClaimResponse>(ct);
+        if (result?.Jobs is null) return;
+
+        foreach (var job in result.Jobs)
+        {
+            ct.ThrowIfCancellationRequested();
+            var entry = localQueueStore.Find(job.Id);
+            if (entry is null || entry.State != "ACKNOWLEDGED" ||
+                !string.Equals(entry.QueueName, job.QueueName, StringComparison.OrdinalIgnoreCase) ||
+                string.IsNullOrWhiteSpace(job.SpoolerJobName))
+            {
+                await ReportOutputUnconfirmedAsync(client, credentials, job.Id, "LOCAL_QUEUE_PROOF_MISMATCH", "The local queue item no longer matches the print assignment.", CancellationToken.None);
+                continue;
+            }
+            try
+            {
+                await localQueueStore.MarkSubmissionStartedAsync(job.Id, job.SpoolerJobName, ct);
+                var bytes = localQueueStore.ReadDocument(job.Id);
+                SpoolerPrintReceipt receipt;
+                try { receipt = printExecutor.Print(entry with { SpoolerJobName = job.SpoolerJobName }, bytes, ct); }
+                finally { CryptographicOperations.ZeroMemory(bytes); }
+
+                await localQueueStore.MarkSpoolerAcceptedAsync(job.Id, receipt.JobId, receipt.DocumentName, ct);
+                await ReportSpoolerAcceptedAsync(client, credentials, job.Id, receipt.JobId, receipt.DocumentName, "QUEUED", ct);
+            }
+            catch (PrintExecutionBlockedException ex)
+            {
+                await localQueueStore.MarkReadyAfterBlockedAsync(job.Id, ex.ReasonCode, CancellationToken.None);
+                await ReportPrintBlockedAsync(client, credentials, job.Id, ex.ReasonCode, ex.Message, CancellationToken.None);
+                logger.LogWarning(ex, "Pre-submission print block for {JobNumber}.", job.JobNumber);
+            }
+            catch (PrintSubmissionUncertainException ex)
+            {
+                await localQueueStore.MarkOutputUnconfirmedAsync(job.Id, ex.ReasonCode, CancellationToken.None);
+                await ReportOutputUnconfirmedAsync(client, credentials, job.Id, ex.ReasonCode, ex.Message, CancellationToken.None);
+                logger.LogError(ex, "Uncertain spooler outcome for {JobNumber}; no automatic retry.", job.JobNumber);
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
+            {
+                try { await localQueueStore.MarkOutputUnconfirmedAsync(job.Id, "AGENT_STOPPED_DURING_PRINT", CancellationToken.None); } catch (Exception persistError) { logger.LogCritical(persistError, "Could not persist interrupted print state."); }
+                await ReportOutputUnconfirmedAsync(client, credentials, job.Id, "AGENT_STOPPED_DURING_PRINT", "The agent stopped during printing. Inspect the physical output before retrying.", CancellationToken.None);
+                throw;
+            }
+            catch (Exception ex)
+            {
+                try { await localQueueStore.MarkOutputUnconfirmedAsync(job.Id, "UNEXPECTED_PRINT_EXECUTION_ERROR", CancellationToken.None); } catch (Exception persistError) { logger.LogCritical(persistError, "Could not persist uncertain print state."); }
+                await ReportOutputUnconfirmedAsync(client, credentials, job.Id, "UNEXPECTED_PRINT_EXECUTION_ERROR", ex.Message, CancellationToken.None);
+                logger.LogError(ex, "Unexpected print executor error for {JobNumber}; no retry.", job.JobNumber);
+            }
+        }
+    }
+
+    private async Task MonitorSpoolerJobsAsync(HttpClient client, AgentCredentials credentials, CancellationToken ct)
+    {
+        foreach (var entry in localQueueStore.GetSpoolerTrackingJobs())
+        {
+            ct.ThrowIfCancellationRequested();
+            if (entry.SpoolerJobId is not > 0 || string.IsNullOrWhiteSpace(entry.QueueName)) continue;
+            try
+            {
+                var found = printExecutor.GetJob(entry.QueueName, entry.SpoolerJobId.Value);
+                if (found is null)
+                {
+                    await localQueueStore.MarkOutputUnconfirmedAsync(entry.JobId, "SPOOLER_JOB_NO_LONGER_VISIBLE", ct);
+                    await ReportOutputUnconfirmedAsync(client, credentials, entry.JobId, "SPOOLER_JOB_NO_LONGER_VISIBLE", "Windows no longer lists the spooler job; check actual paper output.", ct);
+                    continue;
+                }
+                await localQueueStore.UpdateSpoolerStatusAsync(entry.JobId, found.Status, ct);
+                using var status = await SendAgentRequestAsync(client, credentials, $"api/v1/agent/jobs/{entry.JobId}/spooler-status",
+                    new AgentSpoolerStatusRequest(found.JobId, found.Status, found.PagesPrinted, found.TotalPages), ct);
+                if (!status.IsSuccessStatusCode)
+                {
+                    logger.LogWarning("Spooler status returned HTTP {StatusCode}.", (int)status.StatusCode);
+                }
+                else
+                {
+                    var cloudState = await status.Content.ReadFromJsonAsync<AgentCloudSpoolerStatusResponse>(ct);
+                    if (cloudState?.Status == "COMPLETED")
+                        await localQueueStore.MarkOutputConfirmedAsync(entry.JobId, ct);
+                }
+            }
+            catch (Win32Exception ex) { logger.LogWarning(ex, "Could not inspect Windows print job {SpoolerJobId}.", entry.SpoolerJobId); }
+            catch (Exception ex) { logger.LogWarning(ex, "Spooler monitor error for {JobNumber}.", entry.JobNumber); }
+        }
+    }
+
+    private async Task ReportSpoolerAcceptedAsync(HttpClient client, AgentCredentials credentials, Guid jobId, int spoolerId, string spoolerName, string status, CancellationToken ct)
+    {
+        using var response = await SendAgentRequestAsync(client, credentials, $"api/v1/agent/jobs/{jobId}/spooler-accepted",
+            new AgentSpoolerAcceptedRequest(spoolerId, spoolerName, status), ct);
+        if (!response.IsSuccessStatusCode)
+        {
+            logger.LogWarning("Spooler acceptance for {JobId} returned HTTP {StatusCode}; will retry.", jobId, (int)response.StatusCode);
+            return;
+        }
+        var cloudState = await response.Content.ReadFromJsonAsync<AgentCloudSpoolerStatusResponse>(ct);
+        if (cloudState?.Status == "COMPLETED")
+            await localQueueStore.MarkOutputConfirmedAsync(jobId, ct);
+    }
+
+    private async Task ReportPrintBlockedAsync(HttpClient client, AgentCredentials credentials, Guid jobId, string code, string message, CancellationToken ct)
+    {
+        using var response = await SendAgentRequestAsync(client, credentials, $"api/v1/agent/jobs/{jobId}/print-blocked",
+            new AgentPrintBlockedRequest(code, message.Length > 300 ? message[..300] : message), ct);
+        if (!response.IsSuccessStatusCode) logger.LogWarning("Print block for {JobId} returned HTTP {StatusCode}.", jobId, (int)response.StatusCode);
+    }
+
+    private async Task ReportOutputUnconfirmedAsync(HttpClient client, AgentCredentials credentials, Guid jobId, string code, string message, CancellationToken ct)
+    {
+        using var response = await SendAgentRequestAsync(client, credentials, $"api/v1/agent/jobs/{jobId}/output-unconfirmed",
+            new AgentPrintBlockedRequest(code, message.Length > 300 ? message[..300] : message), ct);
+        if (!response.IsSuccessStatusCode)
+        {
+            logger.LogWarning("Output reconciliation for {JobId} returned HTTP {StatusCode}.", jobId, (int)response.StatusCode);
+            return;
+        }
+        var cloudState = await response.Content.ReadFromJsonAsync<AgentCloudSpoolerStatusResponse>(ct);
+        if (cloudState?.Status == "COMPLETED")
+            await localQueueStore.MarkOutputConfirmedAsync(jobId, ct);
     }
 
     private static async Task<HttpResponseMessage> SendAgentGetRequestAsync(

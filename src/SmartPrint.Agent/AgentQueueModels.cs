@@ -46,4 +46,20 @@ public sealed record AgentLocalQueueEntry(
     string DocumentPath,
     string State,
     DateTimeOffset ReceivedUtc,
-    DateTimeOffset LeaseExpiresUtc);
+    DateTimeOffset LeaseExpiresUtc,
+    int? SpoolerJobId = null,
+    string? SpoolerJobName = null,
+    DateTimeOffset? SpoolerSubmittedUtc = null,
+    string? SpoolerStatus = null,
+    string? FailureCode = null);
+
+public sealed record AgentLocalQueueProof(Guid JobId, string Sha256, long SizeBytes);
+public sealed record AgentPrintClaimRequest(IReadOnlyList<AgentLocalQueueProof> LocalJobs);
+public sealed record AgentPrintClaimResponse(IReadOnlyList<AgentPrintClaimedJob> Jobs, DateTimeOffset ClaimedUtc);
+public sealed record AgentPrintClaimedJob(Guid Id, string JobNumber, string Status, string QueueName, string SpoolerJobName, DateTimeOffset LeaseExpiresUtc);
+public sealed record AgentSpoolerAcceptedRequest(int SpoolerJobId, string SpoolerJobName, string SpoolerStatus);
+public sealed record AgentPrintBlockedRequest(string ReasonCode, string Message);
+public sealed record AgentSpoolerStatusRequest(int SpoolerJobId, string SpoolerStatus, int PagesPrinted, int TotalPages);
+public sealed record WindowsSpoolerJob(int JobId, string DocumentName, string Status, uint StatusFlags, int PagesPrinted, int TotalPages);
+
+public sealed record AgentCloudSpoolerStatusResponse(Guid Id, string Status, bool? DuplicateRequest = null);

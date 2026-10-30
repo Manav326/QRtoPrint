@@ -134,6 +134,14 @@ public sealed class PrintJob
     public DateTimeOffset? AgentClaimedUtc { get; set; }
     public DateTimeOffset? LocalQueueReceivedUtc { get; set; }
     public int AgentDispatchAttempts { get; set; }
+    public DateTimeOffset? PrintDispatchLeaseExpiresUtc { get; set; }
+    public int PrintDispatchAttempts { get; set; }
+    public int? SpoolerJobId { get; set; }
+    public string? SpoolerJobName { get; set; }
+    public string? SpoolerStatus { get; set; }
+    public DateTimeOffset? SpoolerSubmittedUtc { get; set; }
+    public DateTimeOffset? SpoolerObservedUtc { get; set; }
+    public DateTimeOffset? OutputConfirmedUtc { get; set; }
     public string? FailureCode { get; set; }
     public DateTimeOffset CreatedUtc { get; set; } = DateTimeOffset.UtcNow;
     public DateTimeOffset UpdatedUtc { get; set; } = DateTimeOffset.UtcNow;
