@@ -24,3 +24,15 @@ jobs:
       - run: pnpm install --no-frozen-lockfile
       - run: pnpm typecheck
       - run: pnpm build
+
+  dotnet:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+      - name: Build cloud API
+        run: dotnet build src/SmartPrint.Api/SmartPrint.Api.csproj --configuration Release
+      - name: Build Windows Print Agent
+        run: dotnet build src/SmartPrint.Agent/SmartPrint.Agent.csproj --configuration Release
