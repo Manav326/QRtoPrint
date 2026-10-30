@@ -122,12 +122,14 @@ export async function registerShop(values: {
 }
 
 export async function loadShopData(token: string) {
-  const [profile, printers, stations] = await Promise.all([
+  const [profile, printers, stations, pricing, printJobs] = await Promise.all([
     apiRequest<ShopProfile>("/api/v1/shop/profile", {}, token),
     apiRequest<PrinterDevice[]>("/api/v1/shop/printers", {}, token),
-    apiRequest<QrStation[]>("/api/v1/shop/qr-stations", {}, token)
+    apiRequest<QrStation[]>("/api/v1/shop/qr-stations", {}, token),
+    apiRequest<ShopPricingProfile>("/api/v1/shop/pricing", {}, token),
+    apiRequest<ShopPrintJob[]>("/api/v1/shop/print-jobs", {}, token)
   ]);
-  return { profile, printers, stations };
+  return { profile, printers, stations, pricing, printJobs };
 }
 
 export function createPrinter(token: string, values: {
@@ -200,4 +202,93 @@ export function createCustomerSession(publicCode: string) {
     shop: { displayName: string; logoUrl?: string | null; accentColor: string; currency: string };
     printer: { displayName: string; manufacturer: string; model: string; status: string; capabilitiesJson: string } | null;
   }>(`/api/v1/public/stations/${encodeURIComponent(publicCode)}/sessions`, { method: "POST" });
+}
+
+export interface ShopPricingProfile {
+  isConfigured: boolean;
+  monoPerSideMinor: number;
+  colourPerSideMinor: number;
+  monoDuplexPerSheetMinor: number;
+  colourDuplexPerSheetMinor: number;
+  minimumChargeMinor: number;
+  version: number;
+  updatedUtc: string;
+}
+
+export interface ShopPrintJob {
+  id: string;
+  jobNumber: string;
+  status: string;
+  pageCount: number;
+  copies: number;
+  colourMode: string;
+  paperSize: string;
+  isDuplex: boolean;
+  currency: string;
+  quotedAmountMinor: number;
+  quoteExpiresUtc?: string | null;
+  createdUtc: string;
+  document: { originalFileName: string; mediaType: string; sizeBytes: number };
+}
+
+export interface UploadedPrintJob {
+  job: { id: string; jobNumber: string; status: string; pageCount: number; copies: number; currency: string; quotedAmountMinor: number; createdUtc: string };
+  document: { id: string; originalFileName: string; mediaType: string; sizeBytes: number; sha256: string; pageSizesJson: string };
+  duplicateRequest: boolean;
+}
+
+export interface PrintQuoteResult {
+  id: string;
+  jobNumber: string;
+  status: string;
+  pageCount: number;
+  copies: number;
+  colourMode: string;
+  paperSize: string;
+  isDuplex: boolean;
+  currency: string;
+  quotedAmountMinor: number;
+  amountMajor: number;
+  pricingVersion: number;
+  quoteExpiresUtc: string;
+}
+
+
+export function updateShopPricing(token: string, values: {
+  monoPerSideMinor: number;
+  colourPerSideMinor: number;
+  monoDuplexPerSheetMinor: number;
+  colourDuplexPerSheetMinor: number;
+  minimumChargeMinor: number;
+}) {
+  return apiRequest<ShopPricingProfile>("/api/v1/shop/pricing", {
+    method: "PUT",
+    body: JSON.stringify(values)
+  }, token);
+}
+
+export function uploadCustomerDocument(sessionToken: string, file: File) {
+  const form = new FormData();
+  form.append("file", file, file.name);
+  return apiRequest<UploadedPrintJob>("/api/v1/public/sessions/current/jobs", {
+    method: "POST",
+    headers: {
+      "X-Print-Session": sessionToken,
+      "Idempotency-Key": crypto.randomUUID()
+    },
+    body: form
+  });
+}
+
+export function calculateCustomerQuote(sessionToken: string, jobId: string, values: {
+  colourMode: "Mono" | "Colour";
+  paperSize: "A4";
+  isDuplex: boolean;
+  copies: number;
+}) {
+  return apiRequest<PrintQuoteResult>(`/api/v1/public/jobs/${jobId}/quote`, {
+    method: "POST",
+    headers: { "X-Print-Session": sessionToken },
+    body: JSON.stringify(values)
+  });
 }
