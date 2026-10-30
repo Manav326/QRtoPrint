@@ -18,7 +18,8 @@ A printed QR identifies a shop station; it does not authorise printing by itself
 - Allowlist file formats and validate signatures, not only extensions.
 - Enforce file size, page count, decompression and processing-time limits.
 - Store files outside public web roots; use opaque identifiers and short-lived authorised access.
-- Encrypt cloud transfer and storage; protect local files with Windows ACLs and shop-scoped directories.
+- Encrypt cloud transfer and documents at rest using AES-256-GCM with a deployment-specific 32-byte key; protect the key in a secret store and files with Windows ACLs/shop-scoped directories.
+- The document storage format is versioned (`QSP1`); never reuse the development key in production.
 - Scan uploads where configured and isolate conversion/rendering processes.
 - Apply explicit retention and deletion policies. Never log document contents or public file URLs.
 - Prevent path traversal, archive bombs, malicious Office content and unsafe preview rendering.

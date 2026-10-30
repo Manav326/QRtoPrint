@@ -83,6 +83,7 @@ public sealed class SmartPrintDbContext(DbContextOptions<SmartPrintDbContext> op
             entity.Property(x => x.QueueName).HasMaxLength(160);
             entity.Property(x => x.CapabilitiesJson).HasColumnType("jsonb").IsRequired();
             entity.Property(x => x.Status).HasMaxLength(24).IsRequired();
+            entity.HasAlternateKey(x => new { x.TenantId, x.Id });
             entity.HasIndex(x => new { x.TenantId, x.IsActive });
             entity.HasOne<Tenant>().WithMany().HasForeignKey(x => x.TenantId).OnDelete(DeleteBehavior.Cascade);
         });
@@ -95,9 +96,13 @@ public sealed class SmartPrintDbContext(DbContextOptions<SmartPrintDbContext> op
             entity.Property(x => x.PublicCodeHash).HasMaxLength(64).IsRequired();
             entity.Property(x => x.PublicCodeHint).HasMaxLength(8).IsRequired();
             entity.HasIndex(x => x.PublicCodeHash).IsUnique();
+            entity.HasAlternateKey(x => new { x.TenantId, x.Id });
             entity.HasIndex(x => new { x.TenantId, x.IsEnabled });
             entity.HasOne<Tenant>().WithMany().HasForeignKey(x => x.TenantId).OnDelete(DeleteBehavior.Cascade);
-            entity.HasOne<PrinterDevice>().WithMany().HasForeignKey(x => x.PrinterDeviceId).OnDelete(DeleteBehavior.SetNull);
+            entity.HasOne<PrinterDevice>().WithMany()
+                .HasForeignKey(x => new { x.TenantId, x.PrinterDeviceId })
+                .HasPrincipalKey(x => new { x.TenantId, x.Id })
+                .OnDelete(DeleteBehavior.Restrict);
         });
 
         modelBuilder.Entity<CustomerPrintSession>(entity =>
@@ -107,9 +112,13 @@ public sealed class SmartPrintDbContext(DbContextOptions<SmartPrintDbContext> op
             entity.Property(x => x.TokenHash).HasMaxLength(64).IsRequired();
             entity.Property(x => x.Status).HasMaxLength(24).IsRequired();
             entity.HasIndex(x => x.TokenHash).IsUnique();
+            entity.HasAlternateKey(x => new { x.TenantId, x.Id });
             entity.HasIndex(x => new { x.TenantId, x.ExpiresUtc });
             entity.HasOne<Tenant>().WithMany().HasForeignKey(x => x.TenantId).OnDelete(DeleteBehavior.Cascade);
-            entity.HasOne<QrStation>().WithMany().HasForeignKey(x => x.QrStationId).OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne<QrStation>().WithMany()
+                .HasForeignKey(x => new { x.TenantId, x.QrStationId })
+                .HasPrincipalKey(x => new { x.TenantId, x.Id })
+                .OnDelete(DeleteBehavior.Cascade);
         });
 
         modelBuilder.Entity<RefreshToken>(entity =>
@@ -138,9 +147,18 @@ public sealed class SmartPrintDbContext(DbContextOptions<SmartPrintDbContext> op
             entity.HasIndex(x => new { x.TenantId, x.IdempotencyKey }).IsUnique();
             entity.HasIndex(x => new { x.TenantId, x.JobNumber }).IsUnique();
             entity.HasOne<Tenant>().WithMany().HasForeignKey(x => x.TenantId).OnDelete(DeleteBehavior.Cascade);
-            entity.HasOne<CustomerPrintSession>().WithMany().HasForeignKey(x => x.CustomerSessionId).OnDelete(DeleteBehavior.Restrict);
-            entity.HasOne<QrStation>().WithMany().HasForeignKey(x => x.QrStationId).OnDelete(DeleteBehavior.Restrict);
-            entity.HasOne<PrinterDevice>().WithMany().HasForeignKey(x => x.PrinterDeviceId).OnDelete(DeleteBehavior.SetNull);
+            entity.HasOne<CustomerPrintSession>().WithMany()
+                .HasForeignKey(x => new { x.TenantId, x.CustomerSessionId })
+                .HasPrincipalKey(x => new { x.TenantId, x.Id })
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<QrStation>().WithMany()
+                .HasForeignKey(x => new { x.TenantId, x.QrStationId })
+                .HasPrincipalKey(x => new { x.TenantId, x.Id })
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<PrinterDevice>().WithMany()
+                .HasForeignKey(x => new { x.TenantId, x.PrinterDeviceId })
+                .HasPrincipalKey(x => new { x.TenantId, x.Id })
+                .OnDelete(DeleteBehavior.Restrict);
         });
 
         modelBuilder.Entity<PrintDocument>(entity =>

@@ -10,10 +10,20 @@ public sealed record DocumentAnalysis(
     string MediaType,
     string Extension);
 
-public sealed class DocumentStorage(IConfiguration configuration, IWebHostEnvironment environment)
+public sealed class DocumentStorage : IDisposable
 {
     private const long MaximumFileBytes = 20 * 1024 * 1024;
     private const int MaximumPages = 500;
+    private readonly IConfiguration configuration;
+    private readonly IWebHostEnvironment environment;
+    private readonly byte[] encryptionKey;
+
+    public DocumentStorage(IConfiguration configuration, IWebHostEnvironment environment)
+    {
+        this.configuration = configuration;
+        this.environment = environment;
+        encryptionKey = LoadEncryptionKey(configuration, environment);
+    }
 
     public async Task<StoredDocument> ValidateAndStoreAsync(
         Guid tenantId,
@@ -47,6 +57,7 @@ public sealed class DocumentStorage(IConfiguration configuration, IWebHostEnviro
         var storageKey = $"{tenantId:N}/{documentId:N}{extension}";
         var fullPath = ResolveStoragePath(storageKey);
         Directory.CreateDirectory(Path.GetDirectoryName(fullPath)!);
+        var encryptedBytes = Encrypt(bytes, encryptionKey);
 
         await using (var output = new FileStream(
             fullPath,
@@ -56,7 +67,7 @@ public sealed class DocumentStorage(IConfiguration configuration, IWebHostEnviro
             bufferSize: 64 * 1024,
             FileOptions.Asynchronous | FileOptions.WriteThrough))
         {
-            await output.WriteAsync(bytes, cancellationToken);
+            await output.WriteAsync(encryptedBytes, cancellationToken);
             await output.FlushAsync(cancellationToken);
         }
 
@@ -73,10 +84,88 @@ public sealed class DocumentStorage(IConfiguration configuration, IWebHostEnviro
         return Task.CompletedTask;
     }
 
-    public FileStream OpenRead(string storageKey)
+    public MemoryStream OpenRead(string storageKey)
     {
         var path = ResolveStoragePath(storageKey);
-        return new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read, 64 * 1024, FileOptions.Asynchronous | FileOptions.SequentialScan);
+        var encryptedBytes = File.ReadAllBytes(path);
+        var plaintext = Decrypt(encryptedBytes, encryptionKey);
+        return new MemoryStream(plaintext, writable: false);
+    }
+
+    public void Dispose() => CryptographicOperations.ZeroMemory(encryptionKey);
+
+    private static byte[] LoadEncryptionKey(IConfiguration configuration, IWebHostEnvironment environment)
+    {
+        var configured = configuration["Documents:EncryptionKey"];
+        if (string.IsNullOrWhiteSpace(configured) && environment.IsDevelopment())
+        {
+            configured = Convert.ToBase64String(Convert.FromHexString(
+                "0123456789ABCDEFFEDCBA98765432100123456789ABCDEFFEDCBA9876543210"));
+        }
+
+        if (string.IsNullOrWhiteSpace(configured))
+        {
+            throw new InvalidOperationException("Documents:EncryptionKey is required outside Development.");
+        }
+
+        byte[] key;
+        try
+        {
+            key = Convert.FromBase64String(configured);
+        }
+        catch (FormatException)
+        {
+            throw new InvalidOperationException("Documents:EncryptionKey must be a base64-encoded 32-byte key.");
+        }
+
+        if (key.Length != 32)
+        {
+            CryptographicOperations.ZeroMemory(key);
+            throw new InvalidOperationException("Documents:EncryptionKey must decode to exactly 32 bytes.");
+        }
+
+        return key;
+    }
+
+    private static byte[] Encrypt(byte[] plaintext, byte[] key)
+    {
+        var nonce = RandomNumberGenerator.GetBytes(12);
+        var tag = new byte[16];
+        var ciphertext = new byte[plaintext.Length];
+        using var aes = new AesGcm(key, tag.Length);
+        aes.Encrypt(nonce, plaintext, ciphertext, tag);
+
+        var output = new byte[4 + nonce.Length + tag.Length + ciphertext.Length];
+        "QSP1"u8.CopyTo(output);
+        nonce.CopyTo(output, 4);
+        tag.CopyTo(output, 4 + nonce.Length);
+        ciphertext.CopyTo(output, 4 + nonce.Length + tag.Length);
+        return output;
+    }
+
+    private static byte[] Decrypt(byte[] encrypted, byte[] key)
+    {
+        const int headerLength = 4 + 12 + 16;
+        if (encrypted.Length < headerLength || !encrypted.AsSpan(0, 4).SequenceEqual("QSP1"u8))
+        {
+            throw new InvalidDataException("The stored document has an unsupported encrypted format.");
+        }
+
+        var nonce = encrypted.AsSpan(4, 12);
+        var tag = encrypted.AsSpan(16, 16);
+        var ciphertext = encrypted.AsSpan(headerLength);
+        var plaintext = new byte[ciphertext.Length];
+        using var aes = new AesGcm(key, 16);
+        try
+        {
+            aes.Decrypt(nonce, ciphertext, tag, plaintext);
+            return plaintext;
+        }
+        catch (CryptographicException)
+        {
+            CryptographicOperations.ZeroMemory(plaintext);
+            throw new InvalidDataException("The stored document could not be authenticated or decrypted.");
+        }
     }
 
     private string ResolveStoragePath(string storageKey)

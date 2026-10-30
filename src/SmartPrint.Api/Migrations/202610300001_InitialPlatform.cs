@@ -152,7 +152,8 @@ public sealed class InitialPlatform : Migration
                 "LastSeenUtc" timestamptz,
                 "CreatedUtc" timestamptz NOT NULL,
                 "UpdatedUtc" timestamptz NOT NULL,
-                CONSTRAINT "FK_PrinterDevices_Tenants_TenantId" FOREIGN KEY ("TenantId") REFERENCES "Tenants" ("Id") ON DELETE CASCADE
+                CONSTRAINT "FK_PrinterDevices_Tenants_TenantId" FOREIGN KEY ("TenantId") REFERENCES "Tenants" ("Id") ON DELETE CASCADE,
+                CONSTRAINT "AK_PrinterDevices_TenantId_Id" UNIQUE ("TenantId", "Id")
             );
             CREATE INDEX "IX_PrinterDevices_TenantId_IsActive" ON "PrinterDevices" ("TenantId", "IsActive");
 
@@ -166,7 +167,8 @@ public sealed class InitialPlatform : Migration
                 "IsEnabled" boolean NOT NULL,
                 "CreatedUtc" timestamptz NOT NULL,
                 CONSTRAINT "FK_QrStations_Tenants_TenantId" FOREIGN KEY ("TenantId") REFERENCES "Tenants" ("Id") ON DELETE CASCADE,
-                CONSTRAINT "FK_QrStations_PrinterDevices_PrinterDeviceId" FOREIGN KEY ("PrinterDeviceId") REFERENCES "PrinterDevices" ("Id") ON DELETE SET NULL
+                CONSTRAINT "FK_QrStations_PrinterDevices_TenantId_PrinterDeviceId" FOREIGN KEY ("TenantId", "PrinterDeviceId") REFERENCES "PrinterDevices" ("TenantId", "Id") ON DELETE RESTRICT,
+                CONSTRAINT "AK_QrStations_TenantId_Id" UNIQUE ("TenantId", "Id")
             );
             CREATE UNIQUE INDEX "IX_QrStations_PublicCodeHash" ON "QrStations" ("PublicCodeHash");
             CREATE INDEX "IX_QrStations_TenantId_IsEnabled" ON "QrStations" ("TenantId", "IsEnabled");
@@ -181,7 +183,8 @@ public sealed class InitialPlatform : Migration
                 "ExpiresUtc" timestamptz NOT NULL,
                 "RevokedUtc" timestamptz,
                 CONSTRAINT "FK_CustomerPrintSessions_Tenants_TenantId" FOREIGN KEY ("TenantId") REFERENCES "Tenants" ("Id") ON DELETE CASCADE,
-                CONSTRAINT "FK_CustomerPrintSessions_QrStations_QrStationId" FOREIGN KEY ("QrStationId") REFERENCES "QrStations" ("Id") ON DELETE CASCADE
+                CONSTRAINT "FK_CustomerPrintSessions_QrStations_TenantId_QrStationId" FOREIGN KEY ("TenantId", "QrStationId") REFERENCES "QrStations" ("TenantId", "Id") ON DELETE CASCADE,
+                CONSTRAINT "AK_CustomerPrintSessions_TenantId_Id" UNIQUE ("TenantId", "Id")
             );
             CREATE UNIQUE INDEX "IX_CustomerPrintSessions_TokenHash" ON "CustomerPrintSessions" ("TokenHash");
             CREATE INDEX "IX_CustomerPrintSessions_TenantId_ExpiresUtc" ON "CustomerPrintSessions" ("TenantId", "ExpiresUtc");
@@ -222,9 +225,9 @@ public sealed class InitialPlatform : Migration
                 "UpdatedUtc" timestamptz NOT NULL,
                 CONSTRAINT "FK_PrintJobs_Tenants_TenantId" FOREIGN KEY ("TenantId") REFERENCES "Tenants" ("Id") ON DELETE CASCADE,
                 CONSTRAINT "AK_PrintJobs_TenantId_Id" UNIQUE ("TenantId", "Id"),
-                CONSTRAINT "FK_PrintJobs_QrStations_QrStationId" FOREIGN KEY ("QrStationId") REFERENCES "QrStations" ("Id") ON DELETE RESTRICT,
-                CONSTRAINT "FK_PrintJobs_PrinterDevices_PrinterDeviceId" FOREIGN KEY ("PrinterDeviceId") REFERENCES "PrinterDevices" ("Id") ON DELETE SET NULL,
-                CONSTRAINT "FK_PrintJobs_CustomerPrintSessions_CustomerSessionId" FOREIGN KEY ("CustomerSessionId") REFERENCES "CustomerPrintSessions" ("Id") ON DELETE RESTRICT
+                CONSTRAINT "FK_PrintJobs_QrStations_TenantId_QrStationId" FOREIGN KEY ("TenantId", "QrStationId") REFERENCES "QrStations" ("TenantId", "Id") ON DELETE RESTRICT,
+                CONSTRAINT "FK_PrintJobs_PrinterDevices_TenantId_PrinterDeviceId" FOREIGN KEY ("TenantId", "PrinterDeviceId") REFERENCES "PrinterDevices" ("TenantId", "Id") ON DELETE RESTRICT,
+                CONSTRAINT "FK_PrintJobs_CustomerPrintSessions_TenantId_CustomerSessionId" FOREIGN KEY ("TenantId", "CustomerSessionId") REFERENCES "CustomerPrintSessions" ("TenantId", "Id") ON DELETE RESTRICT
             );
             CREATE UNIQUE INDEX "IX_PrintJobs_TenantId_IdempotencyKey" ON "PrintJobs" ("TenantId", "IdempotencyKey");
             CREATE UNIQUE INDEX "IX_PrintJobs_TenantId_JobNumber" ON "PrintJobs" ("TenantId", "JobNumber");
