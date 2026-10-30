@@ -1,23 +1,24 @@
 import { useEffect, useState, type ReactNode } from "react";
 import {
   Activity, ArrowRight, Check, Clock3, Copy, FileText, FileUp, LayoutDashboard,
-  LifeBuoy, LogOut, Menu, Moon, Plus, Printer, QrCode, Settings,
+  LifeBuoy, LogOut, Menu, Moon, Monitor, Plus, Printer, QrCode, Settings,
   ShieldCheck, Sun, Users, Wallet, X
 } from "lucide-react";
 import QRCode from "react-qr-code";
 import AuthScreen from "./AuthScreen";
 import {
   ApiError, acceptCustomerQuote, approveShopPrintJob, calculateCustomerQuote,
-  createCustomerSession, createPrinter, createStation, downloadShopDocument,
-  getCustomerJobStatus, getShopJobEvents, loadShopData, logout, readStoredTokens, rejectShopPrintJob,
+  createAgentEnrollmentCode, createCustomerSession, createPrinter, createStation,
+  downloadShopDocument, getCustomerJobStatus, getShopJobEvents, loadShopData,
+  logout, readStoredTokens, rejectShopPrintJob, revokeAgentDevice,
   rotateStationCode, storeTokens, updatePrinterActive, updateShopPricing,
   updateShopProfile, updateStationEnabled, uploadCustomerDocument,
-  type AuthTokens, type CustomerJobStatus, type PrinterDevice, type PrintQuoteResult, type ShopJobEvent,
+  type AgentDevice, type AuthTokens, type CustomerJobStatus, type PrinterDevice, type PrintQuoteResult, type ShopJobEvent,
   type QrStation, type ShopPricingProfile, type ShopPrintJob, type ShopProfile,
   type UploadedPrintJob
 } from "./api";
 
-type Section = "Overview" | "Print Queue" | "Printers" | "QR Stations" | "Pricing" | "Customers" | "Reports" | "Settings";
+type Section = "Overview" | "Print Queue" | "Printers" | "QR Stations" | "Print Agent" | "Pricing" | "Customers" | "Reports" | "Settings";
 type Modal = "printer" | "station" | null;
 
 const sections: { label: Section; icon: typeof LayoutDashboard }[] = [
@@ -25,6 +26,7 @@ const sections: { label: Section; icon: typeof LayoutDashboard }[] = [
   { label: "Print Queue", icon: FileText },
   { label: "Printers", icon: Printer },
   { label: "QR Stations", icon: QrCode },
+  { label: "Print Agent", icon: Monitor },
   { label: "Pricing", icon: Wallet },
   { label: "Customers", icon: Users },
   { label: "Reports", icon: Activity },
@@ -56,6 +58,9 @@ function ShopConsole({ tokens, onSignOut }: { tokens: AuthTokens; onSignOut: () 
   const [stations, setStations] = useState<QrStation[]>([]);
   const [pricing, setPricing] = useState<ShopPricingProfile | null>(null);
   const [printJobs, setPrintJobs] = useState<ShopPrintJob[]>([]);
+  const [agentDevices, setAgentDevices] = useState<AgentDevice[]>([]);
+  const [enrollmentCode, setEnrollmentCode] = useState<{ code: string; expiresUtc: string } | null>(null);
+  const [agentBusy, setAgentBusy] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [modal, setModal] = useState<Modal>(null);
@@ -75,6 +80,7 @@ function ShopConsole({ tokens, onSignOut }: { tokens: AuthTokens; onSignOut: () 
       setStations(snapshot.stations);
       setPricing(snapshot.pricing);
       setPrintJobs(snapshot.printJobs);
+      setAgentDevices(snapshot.agentDevices);
     } catch (exception) {
       if (exception instanceof ApiError && exception.status === 401) {
         storeTokens(null);
@@ -160,6 +166,36 @@ function ShopConsole({ tokens, onSignOut }: { tokens: AuthTokens; onSignOut: () 
       setToast("New QR code generated. The previous code is now invalid.");
     } catch (exception) {
       setError(exception instanceof Error ? exception.message : "Could not generate a QR code.");
+    }
+  }
+
+  async function generateAgentCode() {
+    setAgentBusy(true);
+    setError("");
+    setEnrollmentCode(null);
+    try {
+      const code = await createAgentEnrollmentCode(tokens.accessToken);
+      setEnrollmentCode(code);
+      setToast("One-time pairing code generated. It expires in 10 minutes.");
+    } catch (exception) {
+      setError(exception instanceof Error ? exception.message : "Could not generate an agent pairing code.");
+    } finally {
+      setAgentBusy(false);
+    }
+  }
+
+  async function revokeAgent(agent: AgentDevice) {
+    if (!window.confirm(`Revoke the Print Agent on ${agent.deviceName}? It will no longer be able to report printers or connect to this shop.`)) return;
+    setAgentBusy(true);
+    setError("");
+    try {
+      await revokeAgentDevice(tokens.accessToken, agent.id);
+      setToast("Agent access revoked.");
+      await reload();
+    } catch (exception) {
+      setError(exception instanceof Error ? exception.message : "Could not revoke this agent.");
+    } finally {
+      setAgentBusy(false);
     }
   }
 
@@ -317,6 +353,7 @@ function ShopConsole({ tokens, onSignOut }: { tokens: AuthTokens; onSignOut: () 
           {active === "Overview" && <Overview profile={profile} printers={printers} stations={stations} printJobs={printJobs} pricing={pricing} onNavigate={navAction}/>}
           {active === "Printers" && <PrintersPage printers={printers} onAdd={() => setModal("printer")} onToggle={togglePrinter}/>}
           {active === "QR Stations" && <StationsPage stations={stations} onAdd={() => setModal("station")} onToggle={toggleStation} onGenerate={createFreshStationCode}/>}
+          {active === "Print Agent" && <PrintAgentPage agents={agentDevices} enrollmentCode={enrollmentCode} busy={agentBusy} onGenerate={generateAgentCode} onRevoke={revokeAgent}/>}
           {active === "Pricing" && pricing && <PricingPage pricing={pricing} onSave={savePricing} busy={busy}/>}
           {active === "Settings" && profile && <SettingsPage profile={profile} onSave={saveProfile} busy={busy}/>}
           {active === "Print Queue" && <PrintQueuePage jobs={printJobs} onPreview={previewJob} onApprove={approveJob} onReject={rejectJob} onHistory={viewJobHistory} busyJobId={busyJobId}/>}
@@ -385,7 +422,7 @@ function PrintersPage({ printers, onAdd, onToggle }: { printers: PrinterDevice[]
     <section className="panel collection-panel">
       <div className="collection-header"><div><h2>Your printers</h2><p>Register different printer manufacturers in the same shop workspace.</p></div><button className="primary-button" onClick={onAdd}><Plus size={16}/> Add printer</button></div>
       {printers.length===0 ? <EmptyModule icon={<Printer size={24}/>} title="No printers registered yet" text="Add your first printer. It will appear here as awaiting local-agent discovery until the Windows Print Agent reports its capabilities and live status." actionLabel="Add your first printer" onAction={onAdd}/> :
-      <div className="printer-grid">{printers.map(printer=><article className="printer-card" key={printer.id}><div className="printer-card-top"><div className="printer-card-icon"><Printer size={20}/></div><Status label={printer.status} tone={printer.status.toLowerCase()==="ready"?"green":"slate"}/></div><h3>{printer.displayName}</h3><p>{printer.manufacturer} · {printer.model}</p><div className="printer-meta"><span>{printer.connectionType}</span><span>{printer.queueName || printer.connectionAddress || "Connection not verified"}</span></div><div className="printer-card-footer"><span className={printer.isActive?"enabled-label":"disabled-label"}>{printer.isActive?"Enabled":"Disabled"}</span><button className="subtle-button" onClick={()=>onToggle(printer)}>{printer.isActive?"Disable":"Enable"}</button></div></article>)}</div>}
+      <div className="printer-grid">{printers.map(printer=><article className="printer-card" key={printer.id}><div className="printer-card-top"><div className="printer-card-icon"><Printer size={20}/></div><Status label={printer.status} tone={printer.status.toLowerCase()==="ready"?"green":"slate"}/></div><h3>{printer.displayName}</h3><p>{printer.manufacturer} · {printer.model}</p><div className="printer-meta"><span>{printer.connectionType}{printer.isDefault?" · Default Windows queue":""}</span><span>{printer.queueName || printer.connectionAddress || "Connection not verified"}</span></div><div className="printer-card-footer"><span className={printer.isActive?"enabled-label":"disabled-label"}>{printer.isActive?"Enabled":"Disabled"}</span><button className="subtle-button" onClick={()=>onToggle(printer)}>{printer.isActive?"Disable":"Enable"}</button></div></article>)}</div>}
     </section>
   );
 }
@@ -406,6 +443,53 @@ function StationsPage({ stations, onAdd, onToggle, onGenerate }: {
   );
 }
 
+
+
+function PrintAgentPage({agents,enrollmentCode,busy,onGenerate,onRevoke}:{
+  agents:AgentDevice[];
+  enrollmentCode:{code:string;expiresUtc:string}|null;
+  busy:boolean;
+  onGenerate:()=>void;
+  onRevoke:(agent:AgentDevice)=>void;
+}) {
+  return <div className="agent-page">
+    <section className="panel agent-pairing-panel">
+      <div className="agent-intro">
+        <div className="agent-hero-icon"><Monitor size={22}/></div>
+        <div><div className="eyebrow"><span className="eyebrow-line"/>LOCAL PRINT CONNECTIVITY</div><h2>Connect your shop computer</h2><p>Pair the Windows computer where your printers are installed. The agent reports printer inventory and health without exposing the agent secret in the browser.</p></div>
+      </div>
+      <div className="agent-steps">
+        <div><span>01</span><strong>Generate a pairing code</strong><small>One-time code, valid for 10 minutes.</small></div>
+        <div><span>02</span><strong>Run the agent on Windows</strong><small>Open an elevated PowerShell and run the pairing command.</small></div>
+        <div><span>03</span><strong>Watch printer discovery</strong><small>Installed Windows queues appear in your printer list after the next sync.</small></div>
+      </div>
+      {enrollmentCode&&<div className="agent-code-panel">
+        <div><span>ONE-TIME PAIRING CODE</span><strong>{enrollmentCode.code}</strong><small>Expires {new Date(enrollmentCode.expiresUtc).toLocaleTimeString([], {hour:"2-digit",minute:"2-digit"})}</small></div>
+        <button className="secondary-button" onClick={()=>void copyText(enrollmentCode.code)}><Copy size={14}/> Copy code</button>
+      </div>}
+      <div className="agent-command-panel">
+        <div><span>1 · PAIR THIS COMPUTER</span><code>.\scripts\pair-agent.ps1 -ApiBaseUrl "YOUR_API_URL" -AgentExePath ".\SmartPrint.Agent.exe"</code></div>
+        <button className="secondary-button" onClick={()=>void copyText('.\scripts\pair-agent.ps1 -ApiBaseUrl "YOUR_API_URL" -AgentExePath ".\SmartPrint.Agent.exe"')}><Copy size={14}/> Copy command</button>
+      </div>
+      <div className="agent-command-panel">
+        <div><span>2 · INSTALL THE WINDOWS SERVICE</span><code>.\scripts\install-agent-service.ps1 -AgentExePath ".\SmartPrint.Agent.exe"</code></div>
+        <button className="secondary-button" onClick={()=>void copyText('.\scripts\install-agent-service.ps1 -AgentExePath ".\SmartPrint.Agent.exe"')}><Copy size={14}/> Copy command</button>
+      </div>
+      <div className="agent-security-note"><ShieldCheck size={16}/><span>The pairing code expires after 10 minutes. The agent secret is returned only once and stored on the Windows machine using DPAPI LocalMachine encryption. Revoke a computer here if it is replaced or lost.</span></div>
+      <div className="agent-generate-row"><span>Pairing codes are single use. Generating a new one does not revoke already paired computers.</span><button className="primary-button" disabled={busy} onClick={onGenerate}>{busy?<span className="button-spinner"/>:<><Plus size={15}/> Generate pairing code</>}</button></div>
+    </section>
+    <section className="panel agent-device-panel">
+      <div className="collection-header"><div><h2>Paired Windows computers</h2><p>Agent connection history and the number of discovered printer queues.</p></div><span className="setup-count">{agents.filter(agent=>!agent.revokedUtc).length} active</span></div>
+      {agents.length===0?<div className="agent-empty"><Monitor size={25}/><strong>No Windows computer paired yet</strong><span>Generate a pairing code above and run the agent on the computer connected to your printers.</span></div>:
+        <div className="agent-device-list">{agents.map(agent=><article className="agent-device-card" key={agent.id}>
+          <div className="agent-device-icon"><Monitor size={19}/></div>
+          <div className="agent-device-copy"><strong>{agent.deviceName}</strong><span>{agent.printerCount} printer {agent.printerCount===1?"queue":"queues"} discovered · Paired {new Date(agent.createdUtc).toLocaleDateString()}</span><small>{agent.lastSeenUtc?("Last contact "+new Date(agent.lastSeenUtc).toLocaleString()):"No heartbeat received yet"}</small></div>
+          <Status label={agent.revokedUtc?"Revoked":agent.status} tone={agent.revokedUtc?"red":agent.status==="Online"?"green":"slate"}/>
+          {!agent.revokedUtc&&<button className="subtle-button reject-action" disabled={busy} onClick={()=>onRevoke(agent)}>Revoke</button>}
+        </article>)}</div>}
+    </section>
+  </div>;
+}
 
 function PricingPage({ pricing, onSave, busy }: {
   pricing: ShopPricingProfile;
@@ -617,6 +701,7 @@ function pageDescription(section:Section) {
     "Print Queue":"Review real customer uploads and server-calculated print quotes.",
     "Printers":"Manage connected devices, capabilities and health.",
     "QR Stations":"Create secure customer entry points for each counter.",
+    "Print Agent":"Pair the Windows computer that hosts your installed printers.",
     "Pricing":"Set your mono, colour and duplex rates. Payment collection is a separate step.",
     "Customers":"View customer activity and print history.",
     "Reports":"Understand print volume, shop revenue and performance.",

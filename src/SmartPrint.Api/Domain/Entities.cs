@@ -59,6 +59,8 @@ public sealed class PrinterDevice
 {
     public Guid Id { get; set; } = Guid.NewGuid();
     public Guid TenantId { get; set; }
+    public Guid? AgentDeviceId { get; set; }
+    public bool IsDefault { get; set; }
     public string DisplayName { get; set; } = string.Empty;
     public string Manufacturer { get; set; } = string.Empty;
     public string Model { get; set; } = string.Empty;
@@ -159,4 +161,29 @@ public sealed class PrintJobEvent
     public Guid? ActorId { get; set; }
     public string? ReasonCode { get; set; }
     public DateTimeOffset CreatedUtc { get; set; } = DateTimeOffset.UtcNow;
+}
+
+
+public sealed class AgentDevice
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+    public Guid TenantId { get; set; }
+    public string DeviceName { get; set; } = string.Empty;
+    public string FingerprintHash { get; set; } = string.Empty;
+    public string SecretHash { get; set; } = string.Empty;
+    public string Status { get; set; } = "Online";
+    public DateTimeOffset CreatedUtc { get; set; } = DateTimeOffset.UtcNow;
+    public DateTimeOffset? LastSeenUtc { get; set; }
+    public DateTimeOffset? RevokedUtc { get; set; }
+}
+
+public sealed class AgentEnrollmentCode
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+    public Guid TenantId { get; set; }
+    public string CodeHash { get; set; } = string.Empty;
+    public DateTimeOffset CreatedUtc { get; set; } = DateTimeOffset.UtcNow;
+    public DateTimeOffset ExpiresUtc { get; set; } = DateTimeOffset.UtcNow.AddMinutes(10);
+    public DateTimeOffset? UsedUtc { get; set; }
+    public Guid? CreatedByUserId { get; set; }
 }

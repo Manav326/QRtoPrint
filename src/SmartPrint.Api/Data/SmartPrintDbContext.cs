@@ -9,6 +9,8 @@ public sealed class SmartPrintDbContext(DbContextOptions<SmartPrintDbContext> op
     : IdentityDbContext<AppUser, IdentityRole<Guid>, Guid>(options)
 {
     public DbSet<Tenant> Tenants => Set<Tenant>();
+    public DbSet<AgentDevice> AgentDevices => Set<AgentDevice>();
+    public DbSet<AgentEnrollmentCode> AgentEnrollmentCodes => Set<AgentEnrollmentCode>();
     public DbSet<ShopProfile> ShopProfiles => Set<ShopProfile>();
     public DbSet<ShopPricingProfile> ShopPricingProfiles => Set<ShopPricingProfile>();
     public DbSet<TenantSubscription> TenantSubscriptions => Set<TenantSubscription>();
@@ -39,6 +41,32 @@ public sealed class SmartPrintDbContext(DbContextOptions<SmartPrintDbContext> op
             entity.Property(x => x.BusinessName).HasMaxLength(180).IsRequired();
             entity.Property(x => x.Status).HasMaxLength(24).IsRequired();
             entity.HasIndex(x => x.Slug).IsUnique();
+        });
+
+        modelBuilder.Entity<AgentDevice>(entity =>
+        {
+            entity.ToTable("AgentDevices");
+            entity.HasKey(x => x.Id);
+            entity.HasAlternateKey(x => new { x.TenantId, x.Id });
+            entity.Property(x => x.DeviceName).HasMaxLength(160).IsRequired();
+            entity.Property(x => x.FingerprintHash).HasMaxLength(64).IsRequired();
+            entity.Property(x => x.SecretHash).HasMaxLength(64).IsRequired();
+            entity.Property(x => x.Status).HasMaxLength(24).IsRequired();
+            entity.HasIndex(x => new { x.TenantId, x.FingerprintHash })
+                .IsUnique()
+                .HasFilter("\"RevokedUtc\" IS NULL");
+            entity.HasIndex(x => new { x.TenantId, x.Status });
+            entity.HasOne<Tenant>().WithMany().HasForeignKey(x => x.TenantId).OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<AgentEnrollmentCode>(entity =>
+        {
+            entity.ToTable("AgentEnrollmentCodes");
+            entity.HasKey(x => x.Id);
+            entity.Property(x => x.CodeHash).HasMaxLength(64).IsRequired();
+            entity.HasIndex(x => x.CodeHash).IsUnique();
+            entity.HasIndex(x => new { x.TenantId, x.ExpiresUtc, x.UsedUtc });
+            entity.HasOne<Tenant>().WithMany().HasForeignKey(x => x.TenantId).OnDelete(DeleteBehavior.Cascade);
         });
 
         modelBuilder.Entity<ShopProfile>(entity =>
@@ -77,6 +105,7 @@ public sealed class SmartPrintDbContext(DbContextOptions<SmartPrintDbContext> op
             entity.ToTable("PrinterDevices");
             entity.HasKey(x => x.Id);
             entity.Property(x => x.DisplayName).HasMaxLength(160).IsRequired();
+            entity.Property(x => x.IsDefault).HasDefaultValue(false);
             entity.Property(x => x.Manufacturer).HasMaxLength(80).IsRequired();
             entity.Property(x => x.Model).HasMaxLength(120).IsRequired();
             entity.Property(x => x.ConnectionType).HasMaxLength(24).IsRequired();
@@ -85,7 +114,14 @@ public sealed class SmartPrintDbContext(DbContextOptions<SmartPrintDbContext> op
             entity.Property(x => x.CapabilitiesJson).HasColumnType("jsonb").IsRequired();
             entity.Property(x => x.Status).HasMaxLength(24).IsRequired();
             entity.HasAlternateKey(x => new { x.TenantId, x.Id });
+            entity.HasIndex(x => new { x.TenantId, x.AgentDeviceId, x.QueueName })
+                .IsUnique()
+                .HasFilter("\"AgentDeviceId\" IS NOT NULL AND \"QueueName\" IS NOT NULL");
             entity.HasIndex(x => new { x.TenantId, x.IsActive });
+            entity.HasOne<AgentDevice>().WithMany()
+                .HasForeignKey(x => new { x.TenantId, x.AgentDeviceId })
+                .HasPrincipalKey(x => new { x.TenantId, x.Id })
+                .OnDelete(DeleteBehavior.Restrict);
             entity.HasOne<Tenant>().WithMany().HasForeignKey(x => x.TenantId).OnDelete(DeleteBehavior.Cascade);
         });
 

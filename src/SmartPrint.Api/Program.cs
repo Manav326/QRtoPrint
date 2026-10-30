@@ -427,6 +427,7 @@ shop.MapGet("/printers", async (ClaimsPrincipal principal, SmartPrintDbContext d
         return Results.Forbid();
     }
 
+    var onlineAfter = DateTimeOffset.UtcNow.AddMinutes(-2);
     var printers = await db.PrinterDevices.AsNoTracking()
         .Where(printer => printer.TenantId == tenantId)
         .OrderBy(printer => printer.DisplayName)
@@ -439,8 +440,14 @@ shop.MapGet("/printers", async (ClaimsPrincipal principal, SmartPrintDbContext d
             printer.ConnectionType,
             printer.ConnectionAddress,
             printer.QueueName,
+            printer.IsDefault,
             printer.CapabilitiesJson,
-            printer.Status,
+            Status = printer.Status == "AgentRevoked"
+                ? "AgentRevoked"
+                : printer.AgentDeviceId != null &&
+                  (printer.LastSeenUtc == null || printer.LastSeenUtc < onlineAfter)
+                    ? "AgentOffline"
+                    : printer.Status,
             printer.IsActive,
             printer.LastSeenUtc
         })
@@ -1008,6 +1015,299 @@ shop.MapPost("/print-jobs/{jobId:guid}/reject", async (
     return Results.Ok(new { job.Id, job.JobNumber, job.Status, job.UpdatedUtc });
 });
 
+
+var shopAgents = app.MapGroup("/api/v1/shop").RequireAuthorization();
+
+shopAgents.MapPost("/agent-enrollment-codes", async (
+    ClaimsPrincipal principal,
+    SmartPrintDbContext db,
+    CancellationToken ct) =>
+{
+    if (!IsShopOwner(principal) || !TryGetTenantId(principal, out var tenantId))
+    {
+        return Results.Forbid();
+    }
+
+    var now = DateTimeOffset.UtcNow;
+    var code = Microsoft.AspNetCore.WebUtilities.WebEncoders.Base64UrlEncode(RandomNumberGenerator.GetBytes(24));
+    var enrollment = new AgentEnrollmentCode
+    {
+        TenantId = tenantId,
+        CodeHash = HashOpaqueToken(code),
+        CreatedUtc = now,
+        ExpiresUtc = now.AddMinutes(10),
+        CreatedByUserId = GetActorId(principal)
+    };
+
+    db.AgentEnrollmentCodes.Add(enrollment);
+    await db.SaveChangesAsync(ct);
+    return Results.Created("/api/v1/shop/agent-devices", new CreateAgentEnrollmentCodeResponse(code, enrollment.ExpiresUtc));
+});
+
+shopAgents.MapGet("/agent-devices", async (
+    ClaimsPrincipal principal,
+    SmartPrintDbContext db,
+    CancellationToken ct) =>
+{
+    if (!TryGetTenantId(principal, out var tenantId))
+    {
+        return Results.Forbid();
+    }
+
+    var now = DateTimeOffset.UtcNow;
+    var onlineAfter = now.AddMinutes(-2);
+    var devices = await db.AgentDevices.AsNoTracking()
+        .Where(device => device.TenantId == tenantId)
+        .OrderByDescending(device => device.LastSeenUtc)
+        .Select(device => new
+        {
+            device.Id,
+            device.DeviceName,
+            Status = device.RevokedUtc != null ? "Revoked" :
+                device.LastSeenUtc != null && device.LastSeenUtc >= onlineAfter ? "Online" : "Offline",
+            device.CreatedUtc,
+            device.LastSeenUtc,
+            device.RevokedUtc,
+            PrinterCount = db.PrinterDevices.Count(printer =>
+                printer.TenantId == tenantId && printer.AgentDeviceId == device.Id)
+        })
+        .ToListAsync(ct);
+    return Results.Ok(devices);
+});
+
+shopAgents.MapPatch("/agent-devices/{agentId:guid}/revoke", async (
+    Guid agentId,
+    ClaimsPrincipal principal,
+    SmartPrintDbContext db,
+    CancellationToken ct) =>
+{
+    if (!IsShopOwner(principal) || !TryGetTenantId(principal, out var tenantId))
+    {
+        return Results.Forbid();
+    }
+
+    var device = await db.AgentDevices.SingleOrDefaultAsync(
+        item => item.Id == agentId && item.TenantId == tenantId, ct);
+    if (device is null)
+    {
+        return Results.NotFound();
+    }
+
+    if (device.RevokedUtc is null)
+    {
+        device.RevokedUtc = DateTimeOffset.UtcNow;
+        device.Status = "Revoked";
+        await db.PrinterDevices.Where(printer => printer.TenantId == tenantId && printer.AgentDeviceId == agentId)
+            .ExecuteUpdateAsync(update => update.SetProperty(printer => printer.Status, "AgentRevoked"), ct);
+        await db.SaveChangesAsync(ct);
+    }
+
+    return Results.Ok(new { device.Id, device.Status, device.RevokedUtc });
+});
+
+var agentApi = app.MapGroup("/api/v1/agent").AllowAnonymous();
+
+agentApi.MapPost("/enroll", async (
+    AgentEnrollmentRequest request,
+    SmartPrintDbContext db,
+    CancellationToken ct) =>
+{
+    if (string.IsNullOrWhiteSpace(request.Code) || request.Code.Length > 100 ||
+        string.IsNullOrWhiteSpace(request.Fingerprint) ||
+        request.Fingerprint.Length > 256 ||
+        string.IsNullOrWhiteSpace(request.DeviceName) ||
+        request.DeviceName.Trim().Length > 160)
+    {
+        return Results.ValidationProblem(new Dictionary<string, string[]>
+        {
+            ["enrollment"] = ["A valid enrollment code, device fingerprint and device name are required."]
+        });
+    }
+
+    var now = DateTimeOffset.UtcNow;
+    var codeHash = HashOpaqueToken(request.Code.Trim());
+    await using var transaction = await db.Database.BeginTransactionAsync(ct);
+    var enrollment = await db.AgentEnrollmentCodes.SingleOrDefaultAsync(
+        item => item.CodeHash == codeHash && item.UsedUtc == null && item.ExpiresUtc > now, ct);
+    if (enrollment is null)
+    {
+        await transaction.RollbackAsync(ct);
+        return Results.Unauthorized();
+    }
+
+    var fingerprintHash = HashOpaqueToken(request.Fingerprint);
+    if (await db.AgentDevices.AnyAsync(
+        device => device.TenantId == enrollment.TenantId &&
+                  device.FingerprintHash == fingerprintHash && device.RevokedUtc == null, ct))
+    {
+        await transaction.RollbackAsync(ct);
+        return Results.Conflict(new
+        {
+            code = "agent_already_enrolled",
+            message = "This Windows computer is already paired with this shop. Revoke the previous pairing before enrolling it again."
+        });
+    }
+
+    var claimed = await db.AgentEnrollmentCodes
+        .Where(item => item.Id == enrollment.Id && item.UsedUtc == null && item.ExpiresUtc > now)
+        .ExecuteUpdateAsync(update => update.SetProperty(item => item.UsedUtc, now), ct);
+    if (claimed != 1)
+    {
+        await transaction.RollbackAsync(ct);
+        return Results.Unauthorized();
+    }
+
+    var rawSecret = Microsoft.AspNetCore.WebUtilities.WebEncoders.Base64UrlEncode(RandomNumberGenerator.GetBytes(32));
+    var device = new AgentDevice
+    {
+        TenantId = enrollment.TenantId,
+        DeviceName = request.DeviceName.Trim(),
+        FingerprintHash = fingerprintHash,
+        SecretHash = HashOpaqueToken(rawSecret),
+        Status = "Online",
+        CreatedUtc = now,
+        LastSeenUtc = now
+    };
+    db.AgentDevices.Add(device);
+    await db.SaveChangesAsync(ct);
+    await transaction.CommitAsync(ct);
+    return Results.Created("/api/v1/agent/heartbeat",
+        new AgentEnrollmentResponse(device.Id, rawSecret, device.CreatedUtc));
+});
+
+agentApi.MapPost("/heartbeat", async (
+    HttpContext context,
+    SmartPrintDbContext db,
+    AgentHeartbeatRequest request,
+    CancellationToken ct) =>
+{
+    var device = await AuthenticateAgentAsync(context, db, ct);
+    if (device is null)
+    {
+        return Results.Unauthorized();
+    }
+
+    var now = DateTimeOffset.UtcNow;
+    device.Status = "Online";
+    device.LastSeenUtc = now;
+    await db.SaveChangesAsync(ct);
+    return Results.Ok(new { device.Id, device.Status, device.LastSeenUtc, AgentVersion = request.Version });
+});
+
+agentApi.MapPost("/printers/sync", async (
+    HttpContext context,
+    SmartPrintDbContext db,
+    AgentPrinterSyncRequest request,
+    CancellationToken ct) =>
+{
+    var device = await AuthenticateAgentAsync(context, db, ct);
+    if (device is null)
+    {
+        return Results.Unauthorized();
+    }
+
+    if (request.Printers is null || request.Printers.Count > 100)
+    {
+        return Results.ValidationProblem(new Dictionary<string, string[]>
+        {
+            ["printers"] = ["A maximum of 100 discovered printer queues can be synchronized."]
+        });
+    }
+
+    var validStatuses = new[] { "Ready", "Busy", "Offline", "Paused", "Error", "Unknown" };
+    var normalized = request.Printers
+        .Where(printer => printer is not null &&
+                          !string.IsNullOrWhiteSpace(printer.QueueName) &&
+                          printer.QueueName.Length <= 160 &&
+                          !string.IsNullOrWhiteSpace(printer.DriverName) &&
+                          printer.DriverName.Length <= 160 &&
+                          (printer.PortName?.Length ?? 0) <= 255 &&
+                          validStatuses.Contains(printer.Status, StringComparer.Ordinal))
+        .GroupBy(printer => printer.QueueName.Trim(), StringComparer.OrdinalIgnoreCase)
+        .Select(group => group.First())
+        .ToList();
+
+    if (normalized.Count != request.Printers.Count)
+    {
+        return Results.ValidationProblem(new Dictionary<string, string[]>
+        {
+            ["printers"] = ["Each discovered queue must have a unique name, supported status and valid driver/port metadata."]
+        });
+    }
+
+    var now = DateTimeOffset.UtcNow;
+    var existing = await db.PrinterDevices
+        .Where(printer => printer.TenantId == device.TenantId &&
+                          printer.AgentDeviceId == device.Id)
+        .ToListAsync(ct);
+    var seenQueues = normalized.Select(printer => printer.QueueName).ToHashSet(StringComparer.OrdinalIgnoreCase);
+    var created = 0;
+    var updated = 0;
+
+    foreach (var discovered in normalized)
+    {
+        var printer = await db.PrinterDevices.FirstOrDefaultAsync(item =>
+            item.TenantId == device.TenantId &&
+            item.AgentDeviceId == device.Id &&
+            item.QueueName == discovered.QueueName, ct);
+
+        printer ??= await db.PrinterDevices.FirstOrDefaultAsync(item =>
+            item.TenantId == device.TenantId &&
+            item.QueueName == discovered.QueueName &&
+            (item.AgentDeviceId == null ||
+             db.AgentDevices.Any(previousAgent =>
+                 previousAgent.Id == item.AgentDeviceId &&
+                 previousAgent.TenantId == device.TenantId &&
+                 previousAgent.RevokedUtc != null)), ct);
+
+        if (printer is null)
+        {
+            printer = new PrinterDevice
+            {
+                TenantId = device.TenantId,
+                AgentDeviceId = device.Id,
+                DisplayName = discovered.QueueName.Trim(),
+                Manufacturer = "Windows",
+                Model = discovered.DriverName.Trim(),
+                ConnectionType = "WindowsQueue",
+                ConnectionAddress = string.IsNullOrWhiteSpace(discovered.PortName) ? null : discovered.PortName.Trim(),
+                QueueName = discovered.QueueName.Trim(),
+                IsDefault = discovered.IsDefault,
+                CapabilitiesJson = "{}",
+                IsActive = true,
+                CreatedUtc = now
+            };
+            db.PrinterDevices.Add(printer);
+            created++;
+        }
+        else
+        {
+            printer.AgentDeviceId = device.Id;
+            printer.DisplayName = discovered.QueueName.Trim();
+            printer.Manufacturer = "Windows";
+            printer.Model = discovered.DriverName.Trim();
+            printer.ConnectionType = "WindowsQueue";
+            printer.ConnectionAddress = string.IsNullOrWhiteSpace(discovered.PortName) ? null : discovered.PortName.Trim();
+            updated++;
+        }
+
+        printer.Status = discovered.Status;
+        printer.LastSeenUtc = now;
+        printer.UpdatedUtc = now;
+    }
+
+    foreach (var printer in existing.Where(printer => !seenQueues.Contains(printer.QueueName ?? string.Empty)))
+    {
+        printer.Status = "Unavailable";
+        printer.UpdatedUtc = now;
+    }
+
+    device.Status = "Online";
+    device.LastSeenUtc = now;
+    await db.SaveChangesAsync(ct);
+    return Results.Ok(new { device.Id, Discovered = normalized.Count, Created = created, Updated = updated, Unavailable = existing.Count(printer => !seenQueues.Contains(printer.QueueName ?? string.Empty)), SyncedUtc = now });
+});
+
 var publicApi = app.MapGroup("/api/v1/public").AllowAnonymous();
 
 publicApi.MapPost("/sessions/current/jobs", async (
@@ -1519,6 +1819,35 @@ static bool TryGetTenantId(ClaimsPrincipal principal, out Guid tenantId) =>
 
 static Guid? GetActorId(ClaimsPrincipal principal) =>
     Guid.TryParse(principal.FindFirstValue(JwtRegisteredClaimNames.Sub), out var actorId) ? actorId : null;
+
+static async Task<AgentDevice?> AuthenticateAgentAsync(
+    HttpContext context,
+    SmartPrintDbContext db,
+    CancellationToken cancellationToken)
+{
+    if (!Guid.TryParse(context.Request.Headers["X-Print-Agent-Id"].FirstOrDefault(), out var agentId))
+    {
+        return null;
+    }
+
+    var secret = context.Request.Headers["X-Print-Agent-Secret"].FirstOrDefault();
+    if (string.IsNullOrWhiteSpace(secret) || secret.Length > 256)
+    {
+        return null;
+    }
+
+    var device = await db.AgentDevices.SingleOrDefaultAsync(
+        item => item.Id == agentId && item.RevokedUtc == null && item.Status != "Revoked",
+        cancellationToken);
+    if (device is null)
+    {
+        return null;
+    }
+
+    var suppliedHash = Convert.FromHexString(HashOpaqueToken(secret));
+    var storedHash = Convert.FromHexString(device.SecretHash);
+    return CryptographicOperations.FixedTimeEquals(suppliedHash, storedHash) ? device : null;
+}
 
 static bool IsShopOwner(ClaimsPrincipal principal) =>
     principal.FindAll("shop_role").Any(claim => claim.Value is "ShopOwner" or "ShopManager");

@@ -30,6 +30,7 @@ export interface PrinterDevice {
   capabilitiesJson: string;
   status: string;
   isActive: boolean;
+  isDefault: boolean;
   lastSeenUtc?: string | null;
 }
 
@@ -41,6 +42,16 @@ export interface QrStation {
   isEnabled: boolean;
   createdUtc: string;
   publicUrl?: string;
+}
+
+export interface AgentDevice {
+  id: string;
+  deviceName: string;
+  status: string;
+  createdUtc: string;
+  lastSeenUtc?: string | null;
+  revokedUtc?: string | null;
+  printerCount: number;
 }
 
 export class ApiError extends Error {
@@ -122,14 +133,15 @@ export async function registerShop(values: {
 }
 
 export async function loadShopData(token: string) {
-  const [profile, printers, stations, pricing, printJobs] = await Promise.all([
+  const [profile, printers, stations, pricing, printJobs, agentDevices] = await Promise.all([
     apiRequest<ShopProfile>("/api/v1/shop/profile", {}, token),
     apiRequest<PrinterDevice[]>("/api/v1/shop/printers", {}, token),
     apiRequest<QrStation[]>("/api/v1/shop/qr-stations", {}, token),
     apiRequest<ShopPricingProfile>("/api/v1/shop/pricing", {}, token),
-    apiRequest<ShopPrintJob[]>("/api/v1/shop/print-jobs", {}, token)
+    apiRequest<ShopPrintJob[]>("/api/v1/shop/print-jobs", {}, token),
+    apiRequest<AgentDevice[]>("/api/v1/shop/agent-devices", {}, token)
   ]);
-  return { profile, printers, stations, pricing, printJobs };
+  return { profile, printers, stations, pricing, printJobs, agentDevices };
 }
 
 export function createPrinter(token: string, values: {
@@ -365,4 +377,18 @@ export async function downloadShopDocument(token: string, jobId: string): Promis
     throw new ApiError(message, response.status);
   }
   return response.blob();
+}
+
+export function createAgentEnrollmentCode(token: string) {
+  return apiRequest<{ code: string; expiresUtc: string }>("/api/v1/shop/agent-enrollment-codes", {
+    method: "POST"
+  }, token);
+}
+
+export function revokeAgentDevice(token: string, agentId: string) {
+  return apiRequest<{ id: string; status: string; revokedUtc: string }>(
+    `/api/v1/shop/agent-devices/${agentId}/revoke`,
+    { method: "PATCH" },
+    token
+  );
 }

@@ -66,3 +66,17 @@ Every important job transition is written to the tenant-scoped PrintJobEvents ta
 - GET /api/v1/public/jobs/{jobId}/status — current job state and a customer-safe timeline for the active session that created the job.
 
 Events currently cover document upload, quote creation, quote expiry, customer quote acceptance, shop approval and shop rejection. Payment and printer transitions are intentionally not emitted until those workflows are implemented and verified.
+
+
+## Windows agent pairing and discovery
+
+- POST /api/v1/shop/agent-enrollment-codes — shop owner/manager issues a 10-minute, single-use pairing code.
+- GET /api/v1/shop/agent-devices — lists paired agent computers and discovered printer counts.
+- PATCH /api/v1/shop/agent-devices/{agentId}/revoke — revokes an agent identity and marks its discovered printers as agent-revoked.
+- POST /api/v1/agent/enroll — consumes a single-use code and returns a one-time secret. The server stores only the secret hash.
+- POST /api/v1/agent/heartbeat — records a paired agent's last contact.
+- POST /api/v1/agent/printers/sync — upserts Windows printer queues for the authenticated agent and marks missing queues unavailable.
+
+Agent authentication uses a per-computer random secret over HTTPS. The Windows client stores the secret using DPAPI LocalMachine encryption. A revoked computer cannot continue to sync. Revoked fingerprints may be enrolled again after revocation; a second active pairing for the same machine/shop is blocked.
+
+The first agent release is inventory and heartbeat only. It does not submit print jobs, capture payments or infer that a spooler-accepted job has physically completed.

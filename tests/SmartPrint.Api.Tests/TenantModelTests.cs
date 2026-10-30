@@ -14,6 +14,21 @@ public sealed class TenantModelTests
         using var db = new SmartPrintDbContext(options);
         var model = db.Model;
 
+        var agent = model.FindEntityType(typeof(AgentDevice))!;
+        Assert.Contains(agent.GetKeys(), key =>
+            key.Properties.Select(property => property.Name)
+                .SequenceEqual(new[] { nameof(AgentDevice.TenantId), nameof(AgentDevice.Id) }));
+        var fingerprintIndex = Assert.Single(agent.GetIndexes(), index =>
+            index.Properties.Select(property => property.Name)
+                .SequenceEqual(new[] { nameof(AgentDevice.TenantId), nameof(AgentDevice.FingerprintHash) }));
+        Assert.Equal("\"RevokedUtc\" IS NULL", fingerprintIndex.GetFilter());
+
+        var enrollment = model.FindEntityType(typeof(AgentEnrollmentCode))!;
+        Assert.Contains(enrollment.GetForeignKeys(), foreignKey =>
+            foreignKey.Properties.Select(property => property.Name)
+                .SequenceEqual(new[] { nameof(AgentEnrollmentCode.TenantId) }));
+        AssertCompositeForeignKey(model.FindEntityType(typeof(PrinterDevice))!,
+            nameof(PrinterDevice.TenantId), nameof(PrinterDevice.AgentDeviceId));
         AssertCompositeForeignKey(model.FindEntityType(typeof(QrStation))!,
             nameof(QrStation.TenantId), nameof(QrStation.PrinterDeviceId));
         AssertCompositeForeignKey(model.FindEntityType(typeof(CustomerPrintSession))!,

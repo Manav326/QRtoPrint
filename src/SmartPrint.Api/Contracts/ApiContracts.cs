@@ -42,3 +42,21 @@ public sealed record RegisterShopResponse(
     string BusinessName,
     string SubscriptionStatus,
     TokenResponse Tokens);
+
+
+public sealed record CreateAgentEnrollmentCodeResponse(string Code, DateTimeOffset ExpiresUtc);
+
+public sealed record AgentEnrollmentRequest(string Code, string Fingerprint, string DeviceName);
+
+public sealed record AgentEnrollmentResponse(Guid AgentDeviceId, string AgentSecret, DateTimeOffset CreatedUtc);
+
+public sealed record AgentHeartbeatRequest(string Version, string OperatingSystem);
+
+public sealed record AgentPrinterDiscoveryRequest(
+    string QueueName,
+    string DriverName,
+    string PortName,
+    string Status,
+    bool IsDefault);
+
+public sealed record AgentPrinterSyncRequest(IReadOnlyList<AgentPrinterDiscoveryRequest> Printers);
