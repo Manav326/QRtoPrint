@@ -914,7 +914,7 @@ shop.MapPatch("/print-jobs/{jobId:guid}/printer", async (
         TenantId = tenantId,
         PrintJobId = job.Id,
         PreviousStatus = previousStatus,
-        NewStatus = previousStatus,
+        NewStatus = job.Status,
         ActorType = "ShopUser",
         ActorId = GetActorId(principal),
         ReasonCode = previousStatus == "LOCAL_QUEUE_CLAIMED"
