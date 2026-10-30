@@ -105,3 +105,17 @@ UPI uses a shop-owned UPI ID and payment-intent URI/QR. The platform does not co
 
 
 Payment verification, rejection and UPI reference submission use an optimistic concurrency token on each payment row. If two customer/shop actions race, only the first update can persist; the losing request receives HTTP 409 with `payment_state_changed` and must refresh. Payment state, job state and the corresponding audit event are saved together for shop verification/rejection.
+
+
+## Agent local queue handoff
+
+After shop-side manual payment verification, an owner/manager assigns the job to a printer queue reported by an online paired Windows agent.
+
+- PATCH /api/v1/shop/print-jobs/{jobId}/printer — assigns a paid/authorised job to an active printer queue on a paired, recently online agent. An expired local-queue claim can be reassigned; a job already secured locally cannot be silently moved.
+- POST /api/v1/agent/jobs/claim — an authenticated agent claims up to five paid jobs assigned to one of its own live queues. The server grants a three-minute lease and records the claiming agent.
+- GET /api/v1/agent/jobs/{jobId}/document — streams the decrypted original only to the paired agent holding the active job lease. Responses are non-cacheable and carry the source SHA-256 and size.
+- POST /api/v1/agent/jobs/{jobId}/received — confirms the local agent has stored the exact original (matching the server SHA-256 and byte count). This acknowledgement is idempotent for the same agent.
+
+The Windows agent stores the document encrypted with DPAPI LocalMachine under its protected ProgramData queue directory. Its manifest tracks ACK_PENDING and ACKNOWLEDGED so an interrupted acknowledgement is retried after restart. Temporary and orphaned files are cleaned during service startup. The cloud status changes to LOCAL_QUEUE_READY only after the agent confirms verified local storage.
+
+**This increment does not submit documents to a physical printer.** A secured local copy is not proof of spooler acceptance or paper output. Physical spooler execution, per-job print settings, duplicate submission prevention and uncertain-output reconciliation remain a separate gated stage.

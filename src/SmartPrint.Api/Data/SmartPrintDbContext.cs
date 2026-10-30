@@ -184,6 +184,10 @@ public sealed class SmartPrintDbContext(DbContextOptions<SmartPrintDbContext> op
             entity.ToTable("PrintJobs");
             entity.HasKey(x => x.Id);
             entity.HasAlternateKey(x => new { x.TenantId, x.Id });
+            entity.HasOne<AgentDevice>().WithMany()
+                .HasForeignKey(x => new { x.TenantId, x.ClaimedByAgentDeviceId })
+                .HasPrincipalKey(x => new { x.TenantId, x.Id })
+                .OnDelete(DeleteBehavior.Restrict);
             entity.Property(x => x.JobNumber).HasMaxLength(32).IsRequired();
             entity.Property(x => x.Status).HasMaxLength(40).IsRequired();
             entity.Property(x => x.IdempotencyKey).HasMaxLength(100).IsRequired();
@@ -191,9 +195,12 @@ public sealed class SmartPrintDbContext(DbContextOptions<SmartPrintDbContext> op
             entity.Property(x => x.PaperSize).HasMaxLength(12).IsRequired();
             entity.Property(x => x.Currency).HasMaxLength(3).IsRequired();
             entity.Property(x => x.FailureCode).HasMaxLength(80);
+            entity.Property(x => x.AgentDispatchAttempts).HasDefaultValue(0);
             entity.HasIndex(x => new { x.TenantId, x.CreatedUtc });
             entity.HasIndex(x => new { x.TenantId, x.IdempotencyKey }).IsUnique();
             entity.HasIndex(x => new { x.TenantId, x.JobNumber }).IsUnique();
+            entity.HasIndex(x => new { x.TenantId, x.Status, x.PrinterDeviceId, x.AgentLeaseExpiresUtc });
+            entity.HasIndex(x => new { x.TenantId, x.ClaimedByAgentDeviceId, x.Status });
             entity.HasOne<Tenant>().WithMany().HasForeignKey(x => x.TenantId).OnDelete(DeleteBehavior.Cascade);
             entity.HasOne<CustomerPrintSession>().WithMany()
                 .HasForeignKey(x => new { x.TenantId, x.CustomerSessionId })

@@ -38,6 +38,20 @@ public sealed class TenantModelTests
         AssertCompositeForeignKey(job, nameof(PrintJob.TenantId), nameof(PrintJob.CustomerSessionId));
         AssertCompositeForeignKey(job, nameof(PrintJob.TenantId), nameof(PrintJob.QrStationId));
         AssertCompositeForeignKey(job, nameof(PrintJob.TenantId), nameof(PrintJob.PrinterDeviceId));
+        AssertCompositeForeignKey(job, nameof(PrintJob.TenantId), nameof(PrintJob.ClaimedByAgentDeviceId));
+        Assert.Contains(job.GetIndexes(), index =>
+            index.Properties.Select(property => property.Name)
+                .SequenceEqual(new[]
+                {
+                    nameof(PrintJob.TenantId), nameof(PrintJob.Status),
+                    nameof(PrintJob.PrinterDeviceId), nameof(PrintJob.AgentLeaseExpiresUtc)
+                }));
+        Assert.Contains(job.GetIndexes(), index =>
+            index.Properties.Select(property => property.Name)
+                .SequenceEqual(new[]
+                {
+                    nameof(PrintJob.TenantId), nameof(PrintJob.ClaimedByAgentDeviceId), nameof(PrintJob.Status)
+                }));
         AssertCompositeForeignKey(model.FindEntityType(typeof(PrintJobEvent))!,
             nameof(PrintJobEvent.TenantId), nameof(PrintJobEvent.PrintJobId));
         AssertCompositeForeignKey(model.FindEntityType(typeof(PrintPayment))!,

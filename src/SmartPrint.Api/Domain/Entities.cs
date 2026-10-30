@@ -116,6 +116,7 @@ public sealed class PrintJob
     public Guid TenantId { get; set; }
     public Guid QrStationId { get; set; }
     public Guid? PrinterDeviceId { get; set; }
+    public Guid? ClaimedByAgentDeviceId { get; set; }
     public Guid CustomerSessionId { get; set; }
     public string JobNumber { get; set; } = string.Empty;
     public string Status { get; set; } = "Uploaded";
@@ -129,6 +130,10 @@ public sealed class PrintJob
     public DateTimeOffset? QuoteExpiresUtc { get; set; }
     public string Currency { get; set; } = "INR";
     public long QuotedAmountMinor { get; set; }
+    public DateTimeOffset? AgentLeaseExpiresUtc { get; set; }
+    public DateTimeOffset? AgentClaimedUtc { get; set; }
+    public DateTimeOffset? LocalQueueReceivedUtc { get; set; }
+    public int AgentDispatchAttempts { get; set; }
     public string? FailureCode { get; set; }
     public DateTimeOffset CreatedUtc { get; set; } = DateTimeOffset.UtcNow;
     public DateTimeOffset UpdatedUtc { get; set; } = DateTimeOffset.UtcNow;

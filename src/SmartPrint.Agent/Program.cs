@@ -18,6 +18,7 @@ builder.Services.AddHttpClient("cloud", client =>
 });
 builder.Services.AddSingleton<AgentCredentialStore>();
 builder.Services.AddSingleton<WindowsPrinterDiscovery>();
+builder.Services.AddSingleton<AgentLocalQueueStore>();
 builder.Services.AddHostedService<Worker>();
 
 await builder.Build().RunAsync();

@@ -24,5 +24,8 @@ To remove the Windows Service, run scripts\uninstall-agent-service.ps1 from an e
 - Sends printer inventory to the paired shop tenant using agent-specific authentication headers.
 - Refreshes agent heartbeat and printer status every 30 seconds (configurable from 10 to 300 seconds).
 - Marks previously discovered queues unavailable when they disappear from that computer's WMI inventory.
-- Stores the agent secret encrypted using DPAPI LocalMachine and restricts the identity directory/file ACL to SYSTEM and local Administrators.
-- Does not submit or re-submit print jobs. Spooler execution and uncertain-output recovery remain blocked until payment authorisation and a durable local print queue are implemented.
+- Stores the agent secret and locally received print documents encrypted using DPAPI LocalMachine. The protected queue directory is restricted to SYSTEM and local Administrators.
+- Claims only paid/authorised jobs assigned to one of this agent's live printer queues. The claim has a three-minute lease and a tenant/agent ownership check.
+- Downloads documents only while the lease is active, verifies the source SHA-256 and size, writes an encrypted local document plus durable manifest, and then acknowledges local receipt to the cloud.
+- Retries ACK_PENDING acknowledgements after restart and reuses an already stored job rather than downloading a second local copy.
+- Does not submit or re-submit print jobs to the Windows spooler. Physical spooler execution, print-setting application, output verification and uncertain-output recovery remain disabled until the spooler executor is implemented and tested against real hardware.

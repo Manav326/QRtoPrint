@@ -76,3 +76,8 @@ public sealed record RejectPrintPaymentRequest(string Reason);
 
 
 public sealed record ResumeCustomerSessionRequest(string PublicCode);
+
+
+public sealed record AssignPrintJobPrinterRequest(Guid PrinterDeviceId);
+
+public sealed record AgentJobReceivedRequest(string Sha256, long SizeBytes);

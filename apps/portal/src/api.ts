@@ -31,6 +31,7 @@ export interface PrinterDevice {
   status: string;
   isActive: boolean;
   isDefault: boolean;
+  agentDeviceId?: string | null;
   lastSeenUtc?: string | null;
 }
 
@@ -286,6 +287,12 @@ export interface ShopPrintJob {
   quotedAmountMinor: number;
   quoteExpiresUtc?: string | null;
   createdUtc: string;
+  printerDeviceId?: string | null;
+  printerName?: string | null;
+  queueName?: string | null;
+  claimedByAgentDeviceId?: string | null;
+  agentLeaseExpiresUtc?: string | null;
+  localQueueReceivedUtc?: string | null;
   document: { originalFileName: string; mediaType: string; sizeBytes: number };
 }
 
@@ -393,6 +400,22 @@ export interface ShopJobEvent {
   actorType: string;
   reasonCode?: string | null;
   createdUtc: string;
+}
+
+
+export function assignShopPrintJobPrinter(token: string, jobId: string, printerDeviceId: string) {
+  return apiRequest<{
+    id: string;
+    status: string;
+    printerDeviceId: string;
+    printerName: string;
+    queueName?: string | null;
+    agentDeviceId: string;
+    updatedUtc: string;
+  }>(`/api/v1/shop/print-jobs/${jobId}/printer`, {
+    method: "PATCH",
+    body: JSON.stringify({ printerDeviceId })
+  }, token);
 }
 
 export function getShopJobEvents(token: string, jobId: string) {
