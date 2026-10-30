@@ -1,0 +1,15 @@
+node_modules/
+.pnpm-store/
+dist/
+build/
+coverage/
+.env
+.env.*
+!.env.example
+bin/
+obj/
+.vscode/
+.idea/
+*.user
+*.suo
+.DS_Store
