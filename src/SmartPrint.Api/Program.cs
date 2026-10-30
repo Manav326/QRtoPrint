@@ -911,14 +911,14 @@ shop.MapPost("/print-jobs/{jobId:guid}/approve", async (
     var now = DateTimeOffset.UtcNow;
     if (job.QuoteExpiresUtc is null || job.QuoteExpiresUtc <= now)
     {
-        var previousStatus = job.Status;
+        var expiredFromStatus = job.Status;
         job.Status = "QUOTE_EXPIRED";
         job.UpdatedUtc = now;
         db.PrintJobEvents.Add(new PrintJobEvent
         {
             TenantId = job.TenantId,
             PrintJobId = job.Id,
-            PreviousStatus = previousStatus,
+            PreviousStatus = expiredFromStatus,
             NewStatus = job.Status,
             ActorType = "ShopUser",
             ActorId = GetActorId(principal),
@@ -1350,14 +1350,14 @@ publicApi.MapPost("/jobs/{jobId:guid}/accept-quote", async (
 
     if (job.QuoteExpiresUtc is null || job.QuoteExpiresUtc <= now)
     {
-        var previousStatus = job.Status;
+        var expiredFromStatus = job.Status;
         job.Status = "QUOTE_EXPIRED";
         job.UpdatedUtc = now;
         db.PrintJobEvents.Add(new PrintJobEvent
         {
             TenantId = job.TenantId,
             PrintJobId = job.Id,
-            PreviousStatus = previousStatus,
+            PreviousStatus = expiredFromStatus,
             NewStatus = job.Status,
             ActorType = "Customer",
             ReasonCode = "QUOTE_EXPIRED_BEFORE_ACCEPTANCE",

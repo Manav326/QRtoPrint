@@ -35,3 +35,5 @@ jobs:
         run: dotnet build src/SmartPrint.Api/SmartPrint.Api.csproj --configuration Release
       - name: Build Windows Print Agent
         run: dotnet build src/SmartPrint.Agent/SmartPrint.Agent.csproj --configuration Release
+      - name: Run API unit and model tests
+        run: dotnet test tests/SmartPrint.Api.Tests/SmartPrint.Api.Tests.csproj --configuration Release
