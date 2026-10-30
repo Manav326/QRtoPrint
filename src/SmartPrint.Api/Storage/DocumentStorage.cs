@@ -108,8 +108,8 @@ public sealed class DocumentStorage(IConfiguration configuration, IWebHostEnviro
                 using var document = PdfDocument.Open(new MemoryStream(bytes, writable: false));
                 var pages = document.GetPages().Select(page => new
                 {
-                    widthPoints = decimal.Round(page.Width, 2),
-                    heightPoints = decimal.Round(page.Height, 2),
+                    widthPoints = Math.Round(page.Width, 2),
+                    heightPoints = Math.Round(page.Height, 2),
                     orientation = page.Width > page.Height ? "Landscape" : page.Width < page.Height ? "Portrait" : "Square"
                 }).ToArray();
 
