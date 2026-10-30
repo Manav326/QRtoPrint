@@ -13,6 +13,7 @@ using Microsoft.IdentityModel.Tokens;
 using SmartPrint.Api.Contracts;
 using SmartPrint.Api.Data;
 using SmartPrint.Api.Domain;
+using SmartPrint.Api.Pricing;
 using SmartPrint.Api.Security;
 using SmartPrint.Api.Storage;
 
@@ -1021,35 +1022,13 @@ publicApi.MapPost("/jobs/{jobId:guid}/quote", async (
 
     try
     {
-        var copies = (long)request.Copies;
-        var pages = (long)job.PageCount;
-        long amount;
-        if (request.IsDuplex)
-        {
-            var sheets = checked(((pages + 1) / 2) * copies);
-            var rate = request.ColourMode == "Colour"
-                ? pricing.ColourDuplexPerSheetMinor
-                : pricing.MonoDuplexPerSheetMinor;
-            if (rate <= 0)
-            {
-                return Results.Conflict(new
-                {
-                    code = "duplex_pricing_not_configured",
-                    message = "Duplex printing is not currently priced by this shop."
-                });
-            }
-            amount = checked(sheets * rate);
-        }
-        else
-        {
-            var impressions = checked(pages * copies);
-            var rate = request.ColourMode == "Colour"
-                ? pricing.ColourPerSideMinor
-                : pricing.MonoPerSideMinor;
-            amount = checked(impressions * rate);
-        }
+        var amount = PricingCalculator.Calculate(
+            job.PageCount,
+            request.Copies,
+            request.ColourMode,
+            request.IsDuplex,
+            pricing);
 
-        amount = Math.Max(amount, pricing.MinimumChargeMinor);
         job.ColourMode = request.ColourMode;
         job.PaperSize = request.PaperSize;
         job.IsDuplex = request.IsDuplex;
@@ -1079,13 +1058,25 @@ publicApi.MapPost("/jobs/{jobId:guid}/quote", async (
             job.QuoteExpiresUtc
         });
     }
+    catch (DuplexPricingNotConfiguredException exception)
+    {
+        return Results.Conflict(new { code = "duplex_pricing_not_configured", message = exception.Message });
+    }
     catch (OverflowException)
     {
-        return Results.UnprocessableEntity(new
-        {
-            code = "quote_overflow",
-            message = "The requested print configuration exceeds the pricing limit."
-        });
+        return Results.UnprocessableEntity(new { code = "quote_overflow", message = "The requested print configuration exceeds the pricing limit." });
+    }
+    catch (ArgumentOutOfRangeException exception)
+    {
+        return Results.ValidationProblem(new Dictionary<string, string[]> { ["printOptions"] = [exception.Message] });
+    }
+    catch (ArgumentException exception)
+    {
+        return Results.ValidationProblem(new Dictionary<string, string[]> { ["printOptions"] = [exception.Message] });
+    }
+    catch (InvalidOperationException exception)
+    {
+        return Results.Conflict(new { code = "pricing_not_available", message = exception.Message });
     }
 });
 
