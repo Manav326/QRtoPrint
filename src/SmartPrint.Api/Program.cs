@@ -355,6 +355,7 @@ shop.MapGet("/profile", async (ClaimsPrincipal principal, SmartPrintDbContext db
             tenant.Slug,
             tenant.BusinessName,
             tenant.Status,
+            OwnerName = principal.FindFirstValue("display_name") ?? "Shop owner",
             profile.DisplayName,
             profile.LogoUrl,
             profile.AccentColor,
@@ -595,6 +596,63 @@ shop.MapPost("/qr-stations", async (
         station.IsEnabled,
         PublicUrl = $"{portalBase}/s/{publicCode}"
     });
+});
+
+shop.MapPost("/qr-stations/{stationId:guid}/rotate-code", async (
+    Guid stationId,
+    ClaimsPrincipal principal,
+    SmartPrintDbContext db,
+    IConfiguration configuration,
+    CancellationToken ct) =>
+{
+    if (!IsShopOwner(principal) || !TryGetTenantId(principal, out var tenantId))
+    {
+        return Results.Forbid();
+    }
+
+    var station = await db.QrStations.SingleOrDefaultAsync(
+        item => item.Id == stationId && item.TenantId == tenantId, ct);
+    if (station is null)
+    {
+        return Results.NotFound();
+    }
+
+    var publicCode = Microsoft.AspNetCore.WebUtilities.WebEncoders.Base64UrlEncode(RandomNumberGenerator.GetBytes(24));
+    station.PublicCodeHash = HashOpaqueToken(publicCode);
+    station.PublicCodeHint = publicCode[^4..];
+    await db.SaveChangesAsync(ct);
+
+    var portalBase = (configuration["PublicPortal:BaseUrl"] ?? "http://localhost:3000").TrimEnd('/');
+    return Results.Ok(new
+    {
+        station.Id,
+        station.PublicCodeHint,
+        PublicUrl = $"${portalBase}/s/${publicCode}"
+    });
+});
+
+shop.MapPatch("/qr-stations/{stationId:guid}/enabled", async (
+    Guid stationId,
+    bool isEnabled,
+    ClaimsPrincipal principal,
+    SmartPrintDbContext db,
+    CancellationToken ct) =>
+{
+    if (!IsShopOwner(principal) || !TryGetTenantId(principal, out var tenantId))
+    {
+        return Results.Forbid();
+    }
+
+    var station = await db.QrStations.SingleOrDefaultAsync(
+        item => item.Id == stationId && item.TenantId == tenantId, ct);
+    if (station is null)
+    {
+        return Results.NotFound();
+    }
+
+    station.IsEnabled = isEnabled;
+    await db.SaveChangesAsync(ct);
+    return Results.Ok(new { station.Id, station.IsEnabled });
 });
 
 var publicApi = app.MapGroup("/api/v1/public").AllowAnonymous();
