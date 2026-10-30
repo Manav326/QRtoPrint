@@ -795,10 +795,7 @@ function prettyStatus(status:string) {
     OUTPUT_UNCONFIRMED:"Output unconfirmed",
     QUEUED:"Queued",
     SUBMITTING_TO_SPOOLER:"Sending to printer",
-    SPOOLER_ACCEPTED:"Accepted by spooler",
-    PRINTING:"Printing",
     COMPLETED:"Completed",
-    OUTPUT_UNCONFIRMED:"Output unconfirmed",
     FAILED:"Failed",
     CANCELLED:"Cancelled"
   };
