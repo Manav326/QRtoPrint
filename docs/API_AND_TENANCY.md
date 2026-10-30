@@ -102,3 +102,6 @@ UPI uses a shop-owned UPI ID and payment-intent URI/QR. The platform does not co
 - If the stored token is expired, revoked, belongs to another station, or the QR station has been disabled, the customer app discards it and creates a fresh session through the normal QR entry route.
 - The customer app stores only the opaque active session token and print-job metadata/quote in sessionStorage for the current browser tab. Uploaded document bytes remain on the API's protected storage; they are not copied into browser storage. On reload, the app re-reads job status, timeline and payment status from the API rather than trusting cached payment state.
 - Session storage is tab-scoped and is not a permanent customer account or cross-device recovery mechanism. The existing customer session expiry remains enforced.
+
+
+Payment verification, rejection and UPI reference submission use an optimistic concurrency token on each payment row. If two customer/shop actions race, only the first update can persist; the losing request receives HTTP 409 with `payment_state_changed` and must refresh. Payment state, job state and the corresponding audit event are saved together for shop verification/rejection.

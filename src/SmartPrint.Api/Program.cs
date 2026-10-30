@@ -1521,8 +1521,20 @@ shop.MapPost("/payments/{paymentId:guid}/verify", async (
             : "CASH_RECEIVED_AT_COUNTER",
         CreatedUtc = now
     });
-    await db.SaveChangesAsync(ct);
-    await transaction.CommitAsync(ct);
+    try
+    {
+        await db.SaveChangesAsync(ct);
+        await transaction.CommitAsync(ct);
+    }
+    catch (DbUpdateConcurrencyException)
+    {
+        await transaction.RollbackAsync(ct);
+        return Results.Conflict(new
+        {
+            code = "payment_state_changed",
+            message = "Another shop action updated this payment first. Refresh the payment list before taking another action."
+        });
+    }
 
     return Results.Ok(new
     {
@@ -1608,8 +1620,20 @@ shop.MapPost("/payments/{paymentId:guid}/reject", async (
         ReasonCode = "SHOP_REJECTED_PAYMENT_REPORT",
         CreatedUtc = now
     });
-    await db.SaveChangesAsync(ct);
-    await transaction.CommitAsync(ct);
+    try
+    {
+        await db.SaveChangesAsync(ct);
+        await transaction.CommitAsync(ct);
+    }
+    catch (DbUpdateConcurrencyException)
+    {
+        await transaction.RollbackAsync(ct);
+        return Results.Conflict(new
+        {
+            code = "payment_state_changed",
+            message = "Another shop action updated this payment first. Refresh the payment list before taking another action."
+        });
+    }
 
     return Results.Ok(new
     {
@@ -2153,7 +2177,18 @@ publicApi.MapPost("/payments/{paymentId:guid}/report", async (
         ReasonCode = "CUSTOMER_SUBMITTED_UPI_REFERENCE",
         CreatedUtc = now
     });
-    await db.SaveChangesAsync(ct);
+    try
+    {
+        await db.SaveChangesAsync(ct);
+    }
+    catch (DbUpdateConcurrencyException)
+    {
+        return Results.Conflict(new
+        {
+            code = "payment_state_changed",
+            message = "The payment changed while you were submitting the reference. Refresh the job status before trying again."
+        });
+    }
 
     return Results.Ok(new
     {

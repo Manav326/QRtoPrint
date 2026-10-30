@@ -51,6 +51,7 @@ public sealed class TenantModelTests
                 .SequenceEqual(new[] { nameof(PrintPayment.TenantId), nameof(PrintPayment.PrintJobId) }));
         Assert.Equal("\"Status\" IN ('AWAITING_CUSTOMER_PAYMENT','CUSTOMER_REPORTED','CASH_AWAITING_PAYMENT')",
             activePaymentIndex.GetFilter());
+        Assert.True(payment.FindProperty(nameof(PrintPayment.UpdatedUtc))!.IsConcurrencyToken);
 
         var agent = model.FindEntityType(typeof(AgentDevice))!;
         var fingerprintIndex = Assert.Single(agent.GetIndexes(), index =>

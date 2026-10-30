@@ -220,6 +220,7 @@ public sealed class SmartPrintDbContext(DbContextOptions<SmartPrintDbContext> op
             entity.Property(x => x.PayeeNameSnapshot).HasMaxLength(120);
             entity.Property(x => x.PaymentReference).HasMaxLength(100);
             entity.Property(x => x.RejectionReason).HasMaxLength(300);
+            entity.Property(x => x.UpdatedUtc).IsConcurrencyToken();
             entity.HasAlternateKey(x => new { x.TenantId, x.Id });
             entity.HasIndex(x => new { x.TenantId, x.PrintJobId, x.CreatedUtc });
             entity.HasIndex(x => new { x.TenantId, x.PrintJobId })
