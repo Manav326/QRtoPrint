@@ -245,6 +245,23 @@ export function createCustomerSession(publicCode: string) {
   }>(`/api/v1/public/stations/${encodeURIComponent(publicCode)}/sessions`, { method: "POST" });
 }
 
+
+export function resumeCustomerSession(sessionToken: string, publicCode: string) {
+  return apiRequest<{
+    id: string;
+    status: string;
+    expiresUtc: string;
+    sessionToken: string;
+    shop: { displayName: string; logoUrl?: string | null; accentColor: string; currency: string };
+    paymentOptions: { upiEnabled: boolean; upiId?: string | null; payeeName?: string | null; cashEnabled: boolean };
+    printer: { displayName: string; manufacturer: string; model: string; status: string; capabilitiesJson: string } | null;
+  }>("/api/v1/public/sessions/current/resume", {
+    method: "POST",
+    headers: { "X-Print-Session": sessionToken },
+    body: JSON.stringify({ publicCode })
+  });
+}
+
 export interface ShopPricingProfile {
   isConfigured: boolean;
   monoPerSideMinor: number;

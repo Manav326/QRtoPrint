@@ -11,7 +11,7 @@ import {
   createAgentEnrollmentCode, createCustomerSession, createPrinter, createStation,
   downloadShopDocument, getCustomerJobStatus, getShopJobEvents, loadShopData,
   logout, readStoredTokens, rejectShopPrintJob, rejectShopPayment, revokeAgentDevice,
-  reportCustomerUpiPayment, rotateStationCode, startCustomerPayment, storeTokens,
+  reportCustomerUpiPayment, resumeCustomerSession, rotateStationCode, startCustomerPayment, storeTokens,
   updatePrinterActive, updateShopPaymentSettings, updateShopPricing,
   updateShopProfile, updateStationEnabled, uploadCustomerDocument,
   verifyShopPayment, type CustomerPayment, type ShopPayment, type ShopPaymentSettings,
@@ -839,7 +839,15 @@ function CustomerEntry({publicCode}:{publicCode:string}) {
   const [loading,setLoading]=useState(true);
   useEffect(()=>{
     let mounted=true;
-    void createCustomerSession(publicCode).then(value=>{
+    const storedToken=sessionStorage.getItem("qrtoprint.customer-session");
+    const resume=storedToken
+      ? resumeCustomerSession(storedToken,publicCode).catch(()=>{
+          sessionStorage.removeItem("qrtoprint.customer-session");
+          return null;
+        })
+      : Promise.resolve(null);
+
+    void resume.then(existing=>existing??createCustomerSession(publicCode)).then(value=>{
       if(mounted){
         setResult(value);
         sessionStorage.setItem("qrtoprint.customer-session",value.sessionToken);
@@ -865,11 +873,29 @@ function CustomerEntry({publicCode}:{publicCode:string}) {
   </div>;
 }
 
+
+type StoredCustomerDraft = {
+  sessionToken: string;
+  uploaded: UploadedPrintJob;
+  quote: PrintQuoteResult | null;
+};
+
+function readStoredCustomerDraft(sessionToken:string):StoredCustomerDraft|null {
+  try {
+    const raw=sessionStorage.getItem("qrtoprint.customer-active-job");
+    if(!raw)return null;
+    const draft=JSON.parse(raw) as StoredCustomerDraft;
+    return draft.sessionToken===sessionToken&&draft.uploaded?.job?.id?draft:null;
+  } catch {
+    return null;
+  }
+}
+
 function CustomerPrintFlow({sessionToken,paymentOptions}:{sessionToken:string;paymentOptions:{upiEnabled:boolean;upiId?:string|null;payeeName?:string|null;cashEnabled:boolean}}) {
   const [file,setFile]=useState<File|null>(null);
   const [previewUrl,setPreviewUrl]=useState<string|null>(null);
-  const [uploaded,setUploaded]=useState<UploadedPrintJob|null>(null);
-  const [quote,setQuote]=useState<PrintQuoteResult|null>(null);
+  const [uploaded,setUploaded]=useState<UploadedPrintJob|null>(()=>readStoredCustomerDraft(sessionToken)?.uploaded??null);
+  const [quote,setQuote]=useState<PrintQuoteResult|null>(()=>readStoredCustomerDraft(sessionToken)?.quote??null);
   const [jobStatus,setJobStatus]=useState<CustomerJobStatus|null>(null);
   const [payment,setPayment]=useState<CustomerPayment|null>(null);
   const [paymentReference,setPaymentReference]=useState("");
@@ -884,6 +910,36 @@ function CustomerPrintFlow({sessionToken,paymentOptions}:{sessionToken:string;pa
     if(!paymentOptions.upiEnabled&&paymentOptions.cashEnabled)setPaymentMethod("CASH");
     else if(paymentOptions.upiEnabled)setPaymentMethod("UPI");
   },[paymentOptions.upiEnabled,paymentOptions.cashEnabled]);
+
+  useEffect(()=>{
+    if(!uploaded){
+      sessionStorage.removeItem("qrtoprint.customer-active-job");
+      return;
+    }
+    sessionStorage.setItem("qrtoprint.customer-active-job",JSON.stringify({
+      sessionToken,
+      uploaded,
+      quote
+    } satisfies StoredCustomerDraft));
+  },[sessionToken,uploaded,quote]);
+
+  useEffect(()=>{
+    if(!uploaded)return;
+    let active=true;
+    void getCustomerJobStatus(sessionToken,uploaded.job.id).then(refreshed=>{
+      if(!active)return;
+      if(refreshed.status==="Uploaded"){
+        setJobStatus(null);
+        setPayment(null);
+        return;
+      }
+      setJobStatus(refreshed);
+      setPayment(refreshed.payment??null);
+    }).catch(exception=>{
+      if(active)setError(exception instanceof ApiError?exception.message:"Could not restore this print request.");
+    });
+    return ()=>{active=false;};
+  },[sessionToken,uploaded?.job.id]);
 
   useEffect(()=>{
     if(!file){setPreviewUrl(null);return;}
@@ -978,8 +1034,8 @@ function CustomerPrintFlow({sessionToken,paymentOptions}:{sessionToken:string;pa
     <label className="customer-upload-zone">
       <input type="file" accept=".pdf,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png" onChange={event=>chooseFile(event.target.files?.[0]||null)}/>
       <span className="customer-upload-icon"><FileUp size={21}/></span>
-      <strong>{file?file.name:"Choose a document to print"}</strong>
-      <small>{file?formatBytes(file.size)+" · Select another file to replace":"Tap to browse files on your phone"}</small>
+      <strong>{file?file.name:uploaded?"Your uploaded document is ready to continue":"Choose a document to print"}</strong>
+      <small>{file?formatBytes(file.size)+" · Select another file to replace":uploaded?"Your upload and current request are saved in this browser session":"Tap to browse files on your phone"}</small>
     </label>
     {previewUrl&&file&&<div className="customer-file-preview"><div className="customer-file-label"><FileText size={15}/><span>Document preview</span></div>{file.type==="application/pdf"?<iframe src={previewUrl} title="PDF document preview"/>:<img src={previewUrl} alt="Selected document preview"/>}</div>}
     {file&&!uploaded&&<button className="customer-flow-button" disabled={busy} onClick={()=>void upload()}>{busy?<span className="button-spinner"/>:<><UploadIcon/>Upload document</>}</button>}
@@ -995,7 +1051,8 @@ function CustomerPrintFlow({sessionToken,paymentOptions}:{sessionToken:string;pa
     </>}
     {error&&<div className="customer-flow-error" role="alert">{error}</div>}
     {quote&&<div className="customer-quote-card"><div><span>YOUR PRINT QUOTE</span><strong>{formatMoney(quote.quotedAmountMinor,quote.currency)}</strong><small>{quote.pageCount} pages · {quote.copies} copies · {quote.colourMode} · {quote.isDuplex?"Duplex":"Single-sided"}</small></div><div className="quote-validity"><ShieldCheck size={15}/><span>Valid until {new Date(quote.quoteExpiresUtc).toLocaleTimeString([], {hour:"2-digit",minute:"2-digit"})}</span></div></div>}
-    {quote&&quote.status!=="AWAITING_SHOP_APPROVAL"&&!jobStatus&&<button className="customer-flow-button" disabled={busy} onClick={()=>void acceptQuote()}>{busy?<span className="button-spinner"/>:"Accept quote and send to shop"}</button>}
+    {quote&&quote.status!=="AWAITING_SHOP_APPROVAL"&&(!jobStatus||jobStatus.status==="AWAITING_CUSTOMER_APPROVAL")&&<button className="customer-flow-button" disabled={busy} onClick={()=>void acceptQuote()}>{busy?<span className="button-spinner"/>:"Accept quote and send to shop"}</button>}
+      {jobStatus?.status==="QUOTE_EXPIRED"&&<button className="customer-flow-button" disabled={busy} onClick={()=>{setQuote(null);setJobStatus(null);setPayment(null);}}>Request a fresh quote</button>}
     {jobStatus&&<div className="customer-job-state"><div className="customer-job-state-top"><Status label={prettyStatus(jobStatus.status)} tone={jobStatus.status==="REJECTED"?"red":jobStatus.status==="AWAITING_PAYMENT"?"green":"amber"}/><button className="customer-refresh-status" disabled={busy} onClick={()=>void refreshJobStatus()}>{busy?<span className="button-spinner"/>:"Refresh status"}</button></div>
       <strong>{jobStatus.status==="AWAITING_SHOP_APPROVAL"?"Your request is with the shop":jobStatus.status==="AWAITING_PAYMENT"?"The shop accepted your request":jobStatus.status==="REJECTED"?"The shop could not accept this request":jobStatus.status==="QUOTE_EXPIRED"?"Your quote has expired":"Your request is being reviewed"}</strong>
       <p>{jobStatus.status==="AWAITING_SHOP_APPROVAL"?"The shop will review your request next. No payment has been collected.":jobStatus.status==="AWAITING_PAYMENT"?"The shop approved your quote. Choose one of the payment methods enabled by the shop.":jobStatus.status==="AWAITING_COUNTER_PAYMENT"?"Please pay the shop at the counter. The job is not authorised until the shop confirms receipt.":jobStatus.status==="AWAITING_CUSTOMER_PAYMENT"?"Complete the UPI payment and submit its transaction reference. The shop must independently verify it.":jobStatus.status==="PAYMENT_REPORTED"?"Your UPI reference was sent to the shop. It is not marked paid until the shop verifies the transaction.":jobStatus.status==="PAID_AUTHORISED"?"The shop has verified your payment. The print queue is being prepared; physical printing has not yet started.":jobStatus.status==="PAYMENT_REJECTED"?"The shop could not verify that payment. Check with the shop before trying another method.":jobStatus.status==="REJECTED"?"Please speak with the shop operator if you need help with this request.":jobStatus.status==="QUOTE_EXPIRED"?"This quote is no longer valid. Please ask the shop for a fresh quote.":"Check back for the latest request status."}</p>

@@ -2338,6 +2338,79 @@ publicApi.MapGet("/jobs/{jobId:guid}/status", async (
     return Results.Ok(new { Job = job, Timeline = timeline, Payment = paymentStatus });
 });
 
+
+publicApi.MapPost("/sessions/current/resume", async (
+    ResumeCustomerSessionRequest request,
+    HttpContext context,
+    SmartPrintDbContext db,
+    CancellationToken ct) =>
+{
+    var rawToken = context.Request.Headers["X-Print-Session"].FirstOrDefault();
+    if (string.IsNullOrWhiteSpace(rawToken) ||
+        string.IsNullOrWhiteSpace(request.PublicCode) ||
+        request.PublicCode.Length > 160)
+    {
+        return Results.Unauthorized();
+    }
+
+    var tokenHash = HashOpaqueToken(rawToken);
+    var codeHash = HashOpaqueToken(request.PublicCode);
+    var now = DateTimeOffset.UtcNow;
+    var station = await db.QrStations.AsNoTracking()
+        .Where(item => item.PublicCodeHash == codeHash && item.IsEnabled)
+        .Select(item => new { item.Id, item.TenantId, item.PrinterDeviceId })
+        .SingleOrDefaultAsync(ct);
+    if (station is null)
+    {
+        return Results.NotFound(new { code = "station_not_available", message = "This print station is unavailable." });
+    }
+
+    var session = await db.CustomerPrintSessions.AsNoTracking()
+        .SingleOrDefaultAsync(item =>
+            item.TokenHash == tokenHash &&
+            item.TenantId == station.TenantId &&
+            item.QrStationId == station.Id &&
+            item.Status == "Active" &&
+            item.RevokedUtc == null &&
+            item.ExpiresUtc > now, ct);
+    if (session is null)
+    {
+        return Results.Unauthorized();
+    }
+
+    var shopProfile = await db.ShopProfiles.AsNoTracking()
+        .Where(profile => profile.TenantId == station.TenantId)
+        .Select(profile => new { profile.DisplayName, profile.LogoUrl, profile.AccentColor, profile.Currency })
+        .SingleAsync(ct);
+    var paymentOptions = await db.ShopPaymentProfiles.AsNoTracking()
+        .Where(profile => profile.TenantId == station.TenantId)
+        .Select(profile => new
+        {
+            profile.UpiEnabled,
+            profile.UpiId,
+            profile.PayeeName,
+            profile.CashEnabled
+        })
+        .SingleAsync(ct);
+    var printer = station.PrinterDeviceId is Guid printerId
+        ? await db.PrinterDevices.AsNoTracking()
+            .Where(item => item.Id == printerId && item.TenantId == station.TenantId && item.IsActive)
+            .Select(item => new { item.DisplayName, item.Manufacturer, item.Model, item.Status, item.CapabilitiesJson })
+            .SingleOrDefaultAsync(ct)
+        : null;
+
+    return Results.Ok(new
+    {
+        session.Id,
+        session.Status,
+        session.ExpiresUtc,
+        SessionToken = rawToken,
+        Shop = shopProfile,
+        PaymentOptions = paymentOptions,
+        Printer = printer
+    });
+}).RequireRateLimiting("qr-session");
+
 publicApi.MapPost("/stations/{publicCode}/sessions", async (
     string publicCode,
     SmartPrintDbContext db,

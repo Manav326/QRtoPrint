@@ -94,3 +94,11 @@ Print payment records are tenant-scoped and linked to the originating print job 
 - POST /api/v1/public/payments/{paymentId}/report — customer submits a UPI reference/UTR. This never marks the payment as paid.
 
 UPI uses a shop-owned UPI ID and payment-intent URI/QR. The platform does not collect customer funds, call a payment gateway, or trust client screenshots/references as proof. The shop must independently verify receipt in its own bank/UPI app. When verification succeeds, the job becomes PAID_AUTHORISED, but physical printing remains disabled until the durable local queue and spooler reconciliation workflow is implemented. Smart Print SaaS subscription payments are independent.
+
+
+## Customer session recovery
+
+- POST /api/v1/public/sessions/current/resume — accepts the existing X-Print-Session token plus the QR station's public code. It resumes only an unexpired, active session belonging to that same enabled station and tenant, and returns the same session token, shop identity, payment options and assigned printer.
+- If the stored token is expired, revoked, belongs to another station, or the QR station has been disabled, the customer app discards it and creates a fresh session through the normal QR entry route.
+- The customer app stores only the opaque active session token and print-job metadata/quote in sessionStorage for the current browser tab. Uploaded document bytes remain on the API's protected storage; they are not copied into browser storage. On reload, the app re-reads job status, timeline and payment status from the API rather than trusting cached payment state.
+- Session storage is tab-scoped and is not a permanent customer account or cross-device recovery mechanism. The existing customer session expiry remains enforced.
