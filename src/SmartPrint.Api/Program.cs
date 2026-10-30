@@ -1529,9 +1529,9 @@ shop.MapPost("/payments/{paymentId:guid}/verify", async (
         payment.Id,
         payment.Status,
         payment.VerifiedUtc,
-        job.Id,
-        job.JobNumber,
-        job.Status,
+        JobId = job.Id,
+        JobNumber = job.JobNumber,
+        JobStatus = job.Status,
         NextStep = "Payment is verified. Printer dispatch is not enabled until the durable local print queue is installed."
     });
 });
@@ -1611,7 +1611,15 @@ shop.MapPost("/payments/{paymentId:guid}/reject", async (
     await db.SaveChangesAsync(ct);
     await transaction.CommitAsync(ct);
 
-    return Results.Ok(new { payment.Id, payment.Status, payment.RejectionReason, job.Id, job.Status, job.UpdatedUtc });
+    return Results.Ok(new
+    {
+        payment.Id,
+        payment.Status,
+        payment.RejectionReason,
+        JobId = job.Id,
+        JobStatus = job.Status,
+        job.UpdatedUtc
+    });
 });
 
 var publicApi = app.MapGroup("/api/v1/public").AllowAnonymous();
@@ -2112,9 +2120,9 @@ publicApi.MapPost("/payments/{paymentId:guid}/report", async (
             payment.AmountMinor,
             payment.Currency,
             payment.PaymentReference,
-            job.Id,
-            job.JobNumber,
-            job.Status,
+            JobId = job.Id,
+            JobNumber = job.JobNumber,
+            JobStatus = job.Status,
             DuplicateRequest = true,
             Message = "This reference was already submitted. The shop still needs to verify the transaction."
         });
@@ -2155,9 +2163,9 @@ publicApi.MapPost("/payments/{paymentId:guid}/report", async (
         payment.AmountMinor,
         payment.Currency,
         payment.PaymentReference,
-        job.Id,
-        job.JobNumber,
-        job.Status,
+        JobId = job.Id,
+        JobNumber = job.JobNumber,
+        JobStatus = job.Status,
         Message = "The reference was submitted. The shop must verify the payment in its bank/UPI app before printing is authorised."
     });
 });
@@ -2495,9 +2503,9 @@ static object BuildPaymentResponse(PrintPayment payment, PrintJob job) =>
         payment.PaymentReference,
         UpiUri = BuildUpiUri(payment.Id, payment.Method, payment.UpiIdSnapshot,
             payment.PayeeNameSnapshot, payment.AmountMinor, payment.Currency, job.JobNumber),
-        job.Id,
-        job.JobNumber,
-        job.Status
+        JobId = job.Id,
+        JobNumber = job.JobNumber,
+        JobStatus = job.Status
     };
 
 static bool IsHexColor(string value) =>
