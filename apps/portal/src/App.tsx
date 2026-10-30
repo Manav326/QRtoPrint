@@ -1,9 +1,9 @@
-import { useMemo, useState } from "react";
+import { useMemo, useState, type ReactNode } from "react";
 import {
-  Activity, ArrowDownRight, ArrowUpRight, Bell, Check, ChevronDown, CircleHelp,
-  Clock3, Command, CreditCard, FileText, Filter, LayoutDashboard, LifeBuoy,
-  Menu, Moon, MoreHorizontal, Printer, QrCode, Search, Settings, ShieldCheck,
-  Sun, Users, Wallet, Wifi, X
+  Activity, ArrowDownRight, ArrowUpRight, Bell, Check, ChevronDown,
+  Clock3, FileText, Filter, LayoutDashboard, LifeBuoy, Menu, Moon,
+  MoreHorizontal, Printer, QrCode, Search, Settings, ShieldCheck, Sun,
+  Users, Wallet, X
 } from "lucide-react";
 
 type Section = "Overview" | "Print Queue" | "Printers" | "QR Stations" | "Customers" | "Reports" | "Settings";
@@ -161,7 +161,7 @@ function App() {
   );
 }
 
-function Metric({icon,label,value,change,note,trend,accent}:{icon:React.ReactNode;label:string;value:string;change:string;note:string;trend:"up"|"down"|"neutral";accent:string}) {
+function Metric({icon,label,value,change,note,trend,accent}:{icon:ReactNode;label:string;value:string;change:string;note:string;trend:"up"|"down"|"neutral";accent:string}) {
   return <section className="metric-card"><div className="metric-top"><div className={"metric-icon "+accent}>{icon}</div><button className="icon-button metric-more" aria-label={"More about "+label}><MoreHorizontal size={17}/></button></div><div className="metric-label">{label}</div><div className="metric-value">{value}</div><div className="metric-foot"><span className={"metric-change "+trend}>{trend==="up"?<ArrowUpRight size={13}/>:trend==="down"?<ArrowDownRight size={13}/>:<Activity size={13}/>} {change}</span><span>{note}</span></div></section>;
 }
 function Device({name,detail,state,tone}:{name:string;detail:string;state:string;tone:string}) {
