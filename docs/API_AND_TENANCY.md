@@ -46,3 +46,13 @@ ASPNETCORE_ENVIRONMENT=Development uses a local PostgreSQL connection fallback f
 ## Current boundary
 
 This increment provisions shops and secure station sessions and registers printer metadata. It does not yet implement file upload, document conversion, price calculation, payment collection, physical printer discovery or print submission. Those remain separate workstreams and must use this tenant/session foundation.
+
+## Quote acceptance and shop review
+
+- POST /api/v1/public/jobs/{jobId}/accept-quote — accepts a current quote from the same unexpired customer session and advances it to AWAITING_SHOP_APPROVAL.
+- GET /api/v1/public/jobs/{jobId}/status — returns status only for the active customer session that created the job.
+- POST /api/v1/shop/print-jobs/{jobId}/approve — shop owner/manager approval advances the request to AWAITING_PAYMENT, never directly to printing.
+- POST /api/v1/shop/print-jobs/{jobId}/reject — rejects a customer-accepted request awaiting shop review.
+- GET /api/v1/shop/print-jobs/{jobId}/document — tenant-authorised document preview. The file is decrypted only after tenant/job access is verified and is served with no-store and nosniff headers.
+
+The payment integration is deliberately not active in this stage. Shop approval does not capture money or authorise physical print execution. Both customer and shop interfaces show that boundary.

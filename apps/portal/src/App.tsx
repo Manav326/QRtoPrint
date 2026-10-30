@@ -7,11 +7,14 @@ import {
 import QRCode from "react-qr-code";
 import AuthScreen from "./AuthScreen";
 import {
-  ApiError, calculateCustomerQuote, createCustomerSession, createPrinter, createStation,
-  loadShopData, logout, readStoredTokens, rotateStationCode, storeTokens,
-  updatePrinterActive, updateShopPricing, updateShopProfile, updateStationEnabled, uploadCustomerDocument,
-  type AuthTokens, type PrinterDevice, type PrintQuoteResult, type QrStation,
-  type ShopPricingProfile, type ShopPrintJob, type ShopProfile, type UploadedPrintJob
+  ApiError, acceptCustomerQuote, approveShopPrintJob, calculateCustomerQuote,
+  createCustomerSession, createPrinter, createStation, downloadShopDocument,
+  getCustomerJobStatus, loadShopData, logout, readStoredTokens, rejectShopPrintJob,
+  rotateStationCode, storeTokens, updatePrinterActive, updateShopPricing,
+  updateShopProfile, updateStationEnabled, uploadCustomerDocument,
+  type AuthTokens, type CustomerJobStatus, type PrinterDevice, type PrintQuoteResult,
+  type QrStation, type ShopPricingProfile, type ShopPrintJob, type ShopProfile,
+  type UploadedPrintJob
 } from "./api";
 
 type Section = "Overview" | "Print Queue" | "Printers" | "QR Stations" | "Pricing" | "Customers" | "Reports" | "Settings";
@@ -58,6 +61,8 @@ function ShopConsole({ tokens, onSignOut }: { tokens: AuthTokens; onSignOut: () 
   const [modal, setModal] = useState<Modal>(null);
   const [busy, setBusy] = useState(false);
   const [toast, setToast] = useState("");
+  const [preview, setPreview] = useState<{ name: string; url: string; mediaType: string } | null>(null);
+  const [busyJobId, setBusyJobId] = useState<string | null>(null);
 
   async function reload() {
     setLoading(true);
@@ -189,6 +194,50 @@ function ShopConsole({ tokens, onSignOut }: { tokens: AuthTokens; onSignOut: () 
     }
   }
 
+  async function previewJob(job: ShopPrintJob) {
+    setBusyJobId(job.id);
+    setError("");
+    try {
+      const blob = await downloadShopDocument(tokens.accessToken, job.id);
+      const url = URL.createObjectURL(blob);
+      setPreview({ name: job.document.originalFileName, url, mediaType: blob.type || job.document.mediaType });
+    } catch (exception) {
+      setError(exception instanceof Error ? exception.message : "Could not open the document.");
+    } finally {
+      setBusyJobId(null);
+    }
+  }
+
+  async function approveJob(job: ShopPrintJob) {
+    if (!window.confirm(`Approve ${job.jobNumber} for payment? It will not be sent to a printer yet.`)) return;
+    setBusyJobId(job.id);
+    setError("");
+    try {
+      const result = await approveShopPrintJob(tokens.accessToken, job.id);
+      setToast(result.nextStep || "Shop approval saved. This job is awaiting verified payment.");
+      await reload();
+    } catch (exception) {
+      setError(exception instanceof Error ? exception.message : "Could not approve this job.");
+    } finally {
+      setBusyJobId(null);
+    }
+  }
+
+  async function rejectJob(job: ShopPrintJob) {
+    if (!window.confirm(`Reject ${job.jobNumber}? The customer will see that the shop declined the request.`)) return;
+    setBusyJobId(job.id);
+    setError("");
+    try {
+      await rejectShopPrintJob(tokens.accessToken, job.id);
+      setToast("The print request was rejected.");
+      await reload();
+    } catch (exception) {
+      setError(exception instanceof Error ? exception.message : "Could not reject this job.");
+    } finally {
+      setBusyJobId(null);
+    }
+  }
+
   const navAction = (section: Section) => { setActive(section); setSidebarOpen(false); setError(""); };
 
   if (loading && !profile) {
@@ -256,7 +305,7 @@ function ShopConsole({ tokens, onSignOut }: { tokens: AuthTokens; onSignOut: () 
           {active === "QR Stations" && <StationsPage stations={stations} onAdd={() => setModal("station")} onToggle={toggleStation} onGenerate={createFreshStationCode}/>}
           {active === "Pricing" && pricing && <PricingPage pricing={pricing} onSave={savePricing} busy={busy}/>}
           {active === "Settings" && profile && <SettingsPage profile={profile} onSave={saveProfile} busy={busy}/>}
-          {active === "Print Queue" && <PrintQueuePage jobs={printJobs} />}
+          {active === "Print Queue" && <PrintQueuePage jobs={printJobs} onPreview={previewJob} onApprove={approveJob} onReject={rejectJob} busyJobId={busyJobId}/>}
           {active === "Customers" && <EmptyModule icon={<Users size={24}/>} title="Customer directory is coming next" text="Customer profiles and print history will be connected to completed print jobs. No sample customer records are shown."/>}
           {active === "Reports" && <EmptyModule icon={<Activity size={24}/>} title="Reports will build from real activity" text="Revenue and print-volume reports will appear when job pricing, payment reconciliation and completion events are connected."/>}
 
@@ -266,6 +315,7 @@ function ShopConsole({ tokens, onSignOut }: { tokens: AuthTokens; onSignOut: () 
 
       {modal === "printer" && <PrinterModal busy={busy} onClose={() => setModal(null)} onSubmit={submitPrinter}/>}
       {modal === "station" && <StationModal busy={busy} printers={printers.filter(printer => printer.isActive)} onClose={() => setModal(null)} onSubmit={submitStation}/>}
+      {preview && <DocumentPreviewModal name={preview.name} url={preview.url} mediaType={preview.mediaType} onClose={() => { URL.revokeObjectURL(preview.url); setPreview(null); }}/>}
     </div>
   );
 }
@@ -400,27 +450,46 @@ function PricingPage({ pricing, onSave, busy }: {
   </section>;
 }
 
-function PrintQueuePage({ jobs }: { jobs: ShopPrintJob[] }) {
+function PrintQueuePage({ jobs, onPreview, onApprove, onReject, busyJobId }: {
+  jobs: ShopPrintJob[];
+  onPreview: (job: ShopPrintJob) => void;
+  onApprove: (job: ShopPrintJob) => void;
+  onReject: (job: ShopPrintJob) => void;
+  busyJobId: string | null;
+}) {
   return <section className="panel queue-panel live-queue-panel">
-    <div className="collection-header"><div><h2>Customer print jobs</h2><p>Jobs created by your shop's QR sessions. Quotes are not evidence of payment or print completion.</p></div><span className="setup-count">{jobs.length} recent jobs</span></div>
+    <div className="collection-header"><div><h2>Customer print jobs</h2><p>Review real requests. Shop approval moves a job to payment; it does not trigger physical printing.</p></div><span className="setup-count">{jobs.length} recent jobs</span></div>
     {jobs.length===0 ? <EmptyModule icon={<FileText size={24}/>} title="Your queue is clear" text="When a customer uploads a document through one of your QR stations, the job and its current state will appear here."/> :
-      <div className="table-scroll"><table><thead><tr><th>JOB</th><th>DOCUMENT</th><th>PRINT SETTINGS</th><th>QUOTE</th><th>STATUS</th><th>CREATED</th></tr></thead><tbody>
+      <div className="table-scroll"><table><thead><tr><th>JOB</th><th>DOCUMENT</th><th>PRINT SETTINGS</th><th>QUOTE</th><th>STATUS</th><th>CREATED</th><th>ACTIONS</th></tr></thead><tbody>
         {jobs.map(job=><tr key={job.id}>
           <td><strong className="job-id">{job.jobNumber}</strong></td>
           <td><div className="customer-cell"><strong>{job.document.originalFileName}</strong><span>{formatBytes(job.document.sizeBytes)} · {job.document.mediaType}</span></div></td>
           <td><div className="detail-cell"><strong>{job.pageCount} pages × {job.copies}</strong><span>{job.colourMode} · {job.paperSize} · {job.isDuplex?"Duplex":"Single-sided"}</span></div></td>
           <td className="amount-cell">{job.quotedAmountMinor>0?formatMoney(job.quotedAmountMinor,job.currency):"Not quoted"}</td>
-          <td><Status label={prettyStatus(job.status)} tone={job.status==="AWAITING_CUSTOMER_APPROVAL"?"amber":job.status==="COMPLETED"?"green":"blue"}/></td>
+          <td><Status label={prettyStatus(job.status)} tone={job.status==="AWAITING_CUSTOMER_APPROVAL"||job.status==="AWAITING_SHOP_APPROVAL"?"amber":job.status==="COMPLETED"?"green":"blue"}/></td>
           <td className="time-cell">{new Date(job.createdUtc).toLocaleString()}</td>
+          <td><div className="queue-actions"><button className="subtle-button" disabled={busyJobId===job.id} onClick={()=>onPreview(job)}>Preview</button>{job.status==="AWAITING_SHOP_APPROVAL"&&<><button className="subtle-button approve-action" disabled={busyJobId===job.id} onClick={()=>onApprove(job)}>Approve</button><button className="subtle-button reject-action" disabled={busyJobId===job.id} onClick={()=>onReject(job)}>Reject</button></>}</div></td>
         </tr>)}
       </tbody></table></div>}
   </section>;
+}
+
+function DocumentPreviewModal({name,url,mediaType,onClose}:{name:string;url:string;mediaType:string;onClose:()=>void}) {
+  const isPdf=mediaType==="application/pdf";
+  return <Modal title={name} subtitle="Private shop document preview. The encrypted original remains in protected shop storage." onClose={onClose}>
+    <div className="shop-document-preview">{isPdf?<iframe src={url} title={name}/>:<img src={url} alt={name}/>}</div>
+    <div className="modal-actions"><button className="secondary-button" onClick={onClose}>Close preview</button></div>
+  </Modal>;
 }
 
 function prettyStatus(status:string) {
   const names:Record<string,string>={
     AWAITING_CONFIGURATION:"Configure options",
     AWAITING_CUSTOMER_APPROVAL:"Quote awaiting customer",
+    QUOTE_EXPIRED:"Quote expired",
+    AWAITING_SHOP_APPROVAL:"Awaiting shop approval",
+    REJECTED:"Rejected",
+
     UPLOADED:"Uploaded",
     VALIDATING:"Validating",
     ANALYSING:"Analysing",
@@ -573,6 +642,7 @@ function CustomerPrintFlow({sessionToken}:{sessionToken:string}) {
   const [previewUrl,setPreviewUrl]=useState<string|null>(null);
   const [uploaded,setUploaded]=useState<UploadedPrintJob|null>(null);
   const [quote,setQuote]=useState<PrintQuoteResult|null>(null);
+  const [jobStatus,setJobStatus]=useState<CustomerJobStatus|null>(null);
   const [colourMode,setColourMode]=useState<"Mono"|"Colour">("Mono");
   const [isDuplex,setIsDuplex]=useState(false);
   const [copies,setCopies]=useState(1);
@@ -588,43 +658,48 @@ function CustomerPrintFlow({sessionToken}:{sessionToken:string}) {
 
   async function upload() {
     if(!file)return;
-    setBusy(true);
-    setError("");
-    setQuote(null);
+    setBusy(true);setError("");setQuote(null);setJobStatus(null);
     try {
       const created=await uploadCustomerDocument(sessionToken,file);
       setUploaded(created);
     } catch(exception) {
       setError(exception instanceof ApiError?exception.message:"The document could not be uploaded.");
-    } finally {
-      setBusy(false);
-    }
+    } finally {setBusy(false);}
   }
 
   async function getQuote() {
     if(!uploaded)return;
-    setBusy(true);
-    setError("");
+    setBusy(true);setError("");setJobStatus(null);
     try {
-      const calculated=await calculateCustomerQuote(sessionToken,uploaded.job.id,{
-        colourMode,
-        paperSize:"A4",
-        isDuplex,
-        copies
-      });
+      const calculated=await calculateCustomerQuote(sessionToken,uploaded.job.id,{colourMode,paperSize:"A4",isDuplex,copies});
       setQuote(calculated);
     } catch(exception) {
       setError(exception instanceof ApiError?exception.message:"The shop could not calculate a quote.");
-    } finally {
-      setBusy(false);
-    }
+    } finally {setBusy(false);}
+  }
+
+  async function acceptQuote() {
+    if(!uploaded||!quote)return;
+    setBusy(true);setError("");
+    try {
+      const accepted=await acceptCustomerQuote(sessionToken,uploaded.job.id);
+      setJobStatus(await getCustomerJobStatus(sessionToken,uploaded.job.id));
+      setQuote({...quote,status:accepted.status});
+    } catch(exception) {
+      setError(exception instanceof ApiError?exception.message:"The quote could not be accepted.");
+    } finally {setBusy(false);}
+  }
+
+  async function refreshJobStatus() {
+    if(!uploaded)return;
+    setBusy(true);setError("");
+    try {setJobStatus(await getCustomerJobStatus(sessionToken,uploaded.job.id));}
+    catch(exception){setError(exception instanceof ApiError?exception.message:"Could not refresh job status.");}
+    finally {setBusy(false);}
   }
 
   function chooseFile(next:File|null) {
-    setFile(next);
-    setUploaded(null);
-    setQuote(null);
-    setError("");
+    setFile(next);setUploaded(null);setQuote(null);setJobStatus(null);setError("");
   }
 
   return <section className="customer-print-flow">
@@ -635,22 +710,26 @@ function CustomerPrintFlow({sessionToken}:{sessionToken:string}) {
       <strong>{file?file.name:"Choose a document to print"}</strong>
       <small>{file?formatBytes(file.size)+" · Select another file to replace":"Tap to browse files on your phone"}</small>
     </label>
-    {previewUrl&&file&&<div className="customer-file-preview">
-      <div className="customer-file-label"><FileText size={15}/><span>Document preview</span></div>
-      {file.type==="application/pdf"?<iframe src={previewUrl} title="PDF document preview"/>:<img src={previewUrl} alt="Selected document preview"/>}
-    </div>}
+    {previewUrl&&file&&<div className="customer-file-preview"><div className="customer-file-label"><FileText size={15}/><span>Document preview</span></div>{file.type==="application/pdf"?<iframe src={previewUrl} title="PDF document preview"/>:<img src={previewUrl} alt="Selected document preview"/>}</div>}
     {file&&!uploaded&&<button className="customer-flow-button" disabled={busy} onClick={()=>void upload()}>{busy?<span className="button-spinner"/>:<><UploadIcon/>Upload document</>}</button>}
     {uploaded&&<>
       <div className="uploaded-document-card"><div className="uploaded-document-icon"><FileText size={18}/></div><div><strong>{uploaded.document.originalFileName}</strong><span>{uploaded.job.pageCount} {uploaded.job.pageCount===1?"page":"pages"} · {formatBytes(uploaded.document.sizeBytes)} · Validated</span></div><Status label="Uploaded" tone="green"/></div>
-      <div className="customer-flow-heading customer-config-heading"><div><span>STEP 2</span><h2>Choose print settings</h2></div></div>
-      <div className="customer-option-group"><span>Colour mode</span><div className="customer-choice-row"><button className={colourMode==="Mono"?"customer-choice selected":"customer-choice"} onClick={()=>{setColourMode("Mono");setQuote(null);}}>Black & white</button><button className={colourMode==="Colour"?"customer-choice selected":"customer-choice"} onClick={()=>{setColourMode("Colour");setQuote(null);}}>Colour</button></div></div>
-      <div className="customer-option-grid"><label>Copies<input type="number" min="1" max="100" value={copies} onChange={event=>{setCopies(Math.max(1,Math.min(100,Number(event.target.value)||1)));setQuote(null);}}/></label><label className="customer-duplex-toggle"><input type="checkbox" checked={isDuplex} onChange={event=>{setIsDuplex(event.target.checked);setQuote(null);}}/><span><strong>Double-sided</strong><small>Print on both sides of each sheet</small></span></label></div>
-      <div className="customer-paper-note"><Check size={14}/> A4 paper · Page order preserved · {colourMode==="Mono"?"Black & white":"Colour"} printing</div>
-      <button className="customer-flow-button" disabled={busy||copies<1} onClick={()=>void getQuote()}>{busy?<span className="button-spinner"/>:"Calculate print price"}</button>
+      {!quote&&!jobStatus&&<>
+        <div className="customer-flow-heading customer-config-heading"><div><span>STEP 2</span><h2>Choose print settings</h2></div></div>
+        <div className="customer-option-group"><span>Colour mode</span><div className="customer-choice-row"><button className={colourMode==="Mono"?"customer-choice selected":"customer-choice"} onClick={()=>{setColourMode("Mono");setQuote(null);}}>Black & white</button><button className={colourMode==="Colour"?"customer-choice selected":"customer-choice"} onClick={()=>{setColourMode("Colour");setQuote(null);}}>Colour</button></div></div>
+        <div className="customer-option-grid"><label>Copies<input type="number" min="1" max="100" value={copies} onChange={event=>{setCopies(Math.max(1,Math.min(100,Number(event.target.value)||1)));setQuote(null);}}/></label><label className="customer-duplex-toggle"><input type="checkbox" checked={isDuplex} onChange={event=>{setIsDuplex(event.target.checked);setQuote(null);}}/><span><strong>Double-sided</strong><small>Print on both sides of each sheet</small></span></label></div>
+        <div className="customer-paper-note"><Check size={14}/> A4 paper · Page order preserved · {colourMode==="Mono"?"Black & white":"Colour"} printing</div>
+        <button className="customer-flow-button" disabled={busy||copies<1} onClick={()=>void getQuote()}>{busy?<span className="button-spinner"/>:"Calculate print price"}</button>
+      </>}
     </>}
     {error&&<div className="customer-flow-error" role="alert">{error}</div>}
     {quote&&<div className="customer-quote-card"><div><span>YOUR PRINT QUOTE</span><strong>{formatMoney(quote.quotedAmountMinor,quote.currency)}</strong><small>{quote.pageCount} pages · {quote.copies} copies · {quote.colourMode} · {quote.isDuplex?"Duplex":"Single-sided"}</small></div><div className="quote-validity"><ShieldCheck size={15}/><span>Valid until {new Date(quote.quoteExpiresUtc).toLocaleTimeString([], {hour:"2-digit",minute:"2-digit"})}</span></div></div>}
-    <div className="customer-payment-boundary"><ShieldCheck size={15}/><span>{quote?"Your quote is calculated by the shop's saved rate card. Payment and shop approval are not connected yet; nothing has been charged or printed.":"Your document is validated before pricing. You will see the shop's calculated price before any payment or print approval."}</span></div>
+    {quote&&quote.status!=="AWAITING_SHOP_APPROVAL"&&!jobStatus&&<button className="customer-flow-button" disabled={busy} onClick={()=>void acceptQuote()}>{busy?<span className="button-spinner"/>:"Accept quote and send to shop"}</button>}
+    {jobStatus&&<div className="customer-job-state"><div className="customer-job-state-top"><Status label={prettyStatus(jobStatus.status)} tone={jobStatus.status==="REJECTED"?"red":jobStatus.status==="AWAITING_PAYMENT"?"green":"amber"}/><button className="customer-refresh-status" disabled={busy} onClick={()=>void refreshJobStatus()}>{busy?<span className="button-spinner"/>:"Refresh status"}</button></div>
+      <strong>{jobStatus.status==="AWAITING_SHOP_APPROVAL"?"Your request is with the shop":jobStatus.status==="AWAITING_PAYMENT"?"The shop accepted your request":jobStatus.status==="REJECTED"?"The shop could not accept this request":jobStatus.status==="QUOTE_EXPIRED"?"Your quote has expired":"Your request is being reviewed"}</strong>
+      <p>{jobStatus.status==="AWAITING_SHOP_APPROVAL"?"The shop will review your request next. You have not been charged and printing has not started.":jobStatus.status==="AWAITING_PAYMENT"?"The shop approved this quote. Payment setup is not available yet, so no money has been collected and the document has not been printed.":jobStatus.status==="REJECTED"?"Please speak with the shop operator if you need help with this request.":"Check back for the latest request status."}</p>
+    </div>}
+    <div className="customer-payment-boundary"><ShieldCheck size={15}/><span>{jobStatus?.status==="AWAITING_PAYMENT"?"Shop approval is recorded, but payment collection is not configured. This job cannot be printed until the shop's payment flow is integrated and verified.":quote?"This quote is calculated by the shop's saved rate card. Accepting it sends a request to the shop; it does not collect payment or start printing.":"Your document is validated before pricing. You will see the shop's calculated price before any payment or print approval."}</span></div>
   </section>;
 }
 

@@ -292,3 +292,60 @@ export function calculateCustomerQuote(sessionToken: string, jobId: string, valu
     body: JSON.stringify(values)
   });
 }
+
+export interface CustomerJobStatus {
+  id: string;
+  jobNumber: string;
+  status: string;
+  pageCount: number;
+  copies: number;
+  colourMode: string;
+  paperSize: string;
+  isDuplex: boolean;
+  currency: string;
+  quotedAmountMinor: number;
+  quoteExpiresUtc?: string | null;
+  updatedUtc: string;
+}
+
+export function acceptCustomerQuote(sessionToken: string, jobId: string) {
+  return apiRequest<{ id: string; jobNumber: string; status: string; currency: string; quotedAmountMinor: number; updatedUtc: string }>(
+    `/api/v1/public/jobs/${jobId}/accept-quote`,
+    { method: "POST", headers: { "X-Print-Session": sessionToken } }
+  );
+}
+
+export function getCustomerJobStatus(sessionToken: string, jobId: string) {
+  return apiRequest<CustomerJobStatus>(
+    `/api/v1/public/jobs/${jobId}/status`,
+    { headers: { "X-Print-Session": sessionToken } }
+  );
+}
+
+export function approveShopPrintJob(token: string, jobId: string) {
+  return apiRequest<{ id: string; jobNumber: string; status: string; updatedUtc: string; nextStep?: string }>(
+    `/api/v1/shop/print-jobs/${jobId}/approve`,
+    { method: "POST" },
+    token
+  );
+}
+
+export function rejectShopPrintJob(token: string, jobId: string) {
+  return apiRequest<{ id: string; jobNumber: string; status: string; updatedUtc: string }>(
+    `/api/v1/shop/print-jobs/${jobId}/reject`,
+    { method: "POST" },
+    token
+  );
+}
+
+export async function downloadShopDocument(token: string, jobId: string): Promise<Blob> {
+  const response = await fetch(`${apiBase}/api/v1/shop/print-jobs/${jobId}/document`, {
+    headers: { Accept: "application/pdf,image/jpeg,image/png", Authorization: `Bearer ${token}` },
+    cache: "no-store"
+  });
+  if (!response.ok) {
+    const message = response.status === 404 ? "This job document is no longer available." : `Document preview failed (${response.status}).`;
+    throw new ApiError(message, response.status);
+  }
+  return response.blob();
+}

@@ -804,6 +804,140 @@ shop.MapGet("/print-jobs", async (
     return Results.Ok(jobs);
 });
 
+
+shop.MapGet("/print-jobs/{jobId:guid}/document", async (
+    Guid jobId,
+    ClaimsPrincipal principal,
+    HttpContext context,
+    SmartPrintDbContext db,
+    DocumentStorage storage,
+    CancellationToken ct) =>
+{
+    if (!TryGetTenantId(principal, out var tenantId))
+    {
+        return Results.Forbid();
+    }
+
+    var document = await db.PrintDocuments.AsNoTracking()
+        .Where(item => item.TenantId == tenantId && item.PrintJobId == jobId)
+        .Select(item => new { item.StorageKey, item.MediaType })
+        .SingleOrDefaultAsync(ct);
+    if (document is null)
+    {
+        return Results.NotFound();
+    }
+
+    MemoryStream content;
+    try
+    {
+        content = storage.OpenRead(document.StorageKey);
+    }
+    catch (IOException)
+    {
+        return Results.Problem(statusCode: StatusCodes.Status500InternalServerError, title: "The stored document could not be opened.");
+    }
+
+    context.Response.Headers["Cache-Control"] = "private, no-store";
+    context.Response.Headers["X-Content-Type-Options"] = "nosniff";
+    context.Response.Headers["Content-Security-Policy"] = "sandbox";
+    return Results.File(content, document.MediaType, enableRangeProcessing: false);
+});
+
+shop.MapPost("/print-jobs/{jobId:guid}/approve", async (
+    Guid jobId,
+    ClaimsPrincipal principal,
+    SmartPrintDbContext db,
+    CancellationToken ct) =>
+{
+    if (!IsShopOwner(principal) || !TryGetTenantId(principal, out var tenantId))
+    {
+        return Results.Forbid();
+    }
+
+    var job = await db.PrintJobs.SingleOrDefaultAsync(
+        item => item.Id == jobId && item.TenantId == tenantId, ct);
+    if (job is null)
+    {
+        return Results.NotFound();
+    }
+
+    if (job.Status == "AWAITING_PAYMENT")
+    {
+        return Results.Ok(new { job.Id, job.JobNumber, job.Status, job.UpdatedUtc, DuplicateRequest = true });
+    }
+
+    if (job.Status != "AWAITING_SHOP_APPROVAL")
+    {
+        return Results.Conflict(new
+        {
+            code = "job_not_ready_for_shop_approval",
+            message = "The customer must accept a valid quote before the shop can approve this job."
+        });
+    }
+
+    var now = DateTimeOffset.UtcNow;
+    if (job.QuoteExpiresUtc is null || job.QuoteExpiresUtc <= now)
+    {
+        job.Status = "QUOTE_EXPIRED";
+        job.UpdatedUtc = now;
+        await db.SaveChangesAsync(ct);
+        return Results.Conflict(new { code = "quote_expired", message = "The customer must request a new quote before this job can proceed." });
+    }
+
+    job.Status = "AWAITING_PAYMENT";
+    job.UpdatedUtc = now;
+    await db.SaveChangesAsync(ct);
+    return Results.Ok(new
+    {
+        job.Id,
+        job.JobNumber,
+        job.Status,
+        job.Currency,
+        job.QuotedAmountMinor,
+        job.UpdatedUtc,
+        NextStep = "Payment collection is not configured yet. This job cannot be sent to a printer."
+    });
+});
+
+shop.MapPost("/print-jobs/{jobId:guid}/reject", async (
+    Guid jobId,
+    ClaimsPrincipal principal,
+    SmartPrintDbContext db,
+    CancellationToken ct) =>
+{
+    if (!IsShopOwner(principal) || !TryGetTenantId(principal, out var tenantId))
+    {
+        return Results.Forbid();
+    }
+
+    var job = await db.PrintJobs.SingleOrDefaultAsync(
+        item => item.Id == jobId && item.TenantId == tenantId, ct);
+    if (job is null)
+    {
+        return Results.NotFound();
+    }
+
+    if (job.Status == "REJECTED")
+    {
+        return Results.Ok(new { job.Id, job.JobNumber, job.Status, DuplicateRequest = true });
+    }
+
+    if (job.Status != "AWAITING_SHOP_APPROVAL")
+    {
+        return Results.Conflict(new
+        {
+            code = "job_not_ready_for_rejection",
+            message = "Only jobs accepted by the customer and awaiting shop approval can be rejected here."
+        });
+    }
+
+    job.Status = "REJECTED";
+    job.FailureCode = "SHOP_REJECTED";
+    job.UpdatedUtc = DateTimeOffset.UtcNow;
+    await db.SaveChangesAsync(ct);
+    return Results.Ok(new { job.Id, job.JobNumber, job.Status, job.UpdatedUtc });
+});
+
 var publicApi = app.MapGroup("/api/v1/public").AllowAnonymous();
 
 publicApi.MapPost("/sessions/current/jobs", async (
@@ -1078,6 +1212,109 @@ publicApi.MapPost("/jobs/{jobId:guid}/quote", async (
     {
         return Results.Conflict(new { code = "pricing_not_available", message = exception.Message });
     }
+});
+
+
+publicApi.MapPost("/jobs/{jobId:guid}/accept-quote", async (
+    Guid jobId,
+    HttpContext context,
+    SmartPrintDbContext db,
+    CancellationToken ct) =>
+{
+    var rawToken = context.Request.Headers["X-Print-Session"].FirstOrDefault();
+    if (string.IsNullOrWhiteSpace(rawToken))
+    {
+        return Results.Unauthorized();
+    }
+
+    var tokenHash = HashOpaqueToken(rawToken);
+    var now = DateTimeOffset.UtcNow;
+    var session = await db.CustomerPrintSessions.AsNoTracking()
+        .Where(item => item.TokenHash == tokenHash && item.Status == "Active" &&
+                       item.RevokedUtc == null && item.ExpiresUtc > now)
+        .Select(item => new { item.Id, item.TenantId })
+        .SingleOrDefaultAsync(ct);
+    if (session is null)
+    {
+        return Results.Unauthorized();
+    }
+
+    var job = await db.PrintJobs.SingleOrDefaultAsync(
+        item => item.Id == jobId && item.TenantId == session.TenantId &&
+                item.CustomerSessionId == session.Id, ct);
+    if (job is null)
+    {
+        return Results.NotFound();
+    }
+
+    if (job.Status == "AWAITING_SHOP_APPROVAL")
+    {
+        return Results.Ok(new { job.Id, job.JobNumber, job.Status, job.UpdatedUtc, DuplicateRequest = true });
+    }
+
+    if (job.Status != "AWAITING_CUSTOMER_APPROVAL")
+    {
+        return Results.Conflict(new { code = "quote_not_awaiting_acceptance", message = "This job does not have a quote awaiting your acceptance." });
+    }
+
+    if (job.QuoteExpiresUtc is null || job.QuoteExpiresUtc <= now)
+    {
+        job.Status = "QUOTE_EXPIRED";
+        job.UpdatedUtc = now;
+        await db.SaveChangesAsync(ct);
+        return Results.Conflict(new { code = "quote_expired", message = "This quote has expired. Request a new quote to continue." });
+    }
+
+    job.Status = "AWAITING_SHOP_APPROVAL";
+    job.UpdatedUtc = now;
+    await db.SaveChangesAsync(ct);
+    return Results.Ok(new { job.Id, job.JobNumber, job.Status, job.Currency, job.QuotedAmountMinor, job.UpdatedUtc });
+});
+
+publicApi.MapGet("/jobs/{jobId:guid}/status", async (
+    Guid jobId,
+    HttpContext context,
+    SmartPrintDbContext db,
+    CancellationToken ct) =>
+{
+    var rawToken = context.Request.Headers["X-Print-Session"].FirstOrDefault();
+    if (string.IsNullOrWhiteSpace(rawToken))
+    {
+        return Results.Unauthorized();
+    }
+
+    var tokenHash = HashOpaqueToken(rawToken);
+    var now = DateTimeOffset.UtcNow;
+    var session = await db.CustomerPrintSessions.AsNoTracking()
+        .Where(item => item.TokenHash == tokenHash && item.Status == "Active" &&
+                       item.RevokedUtc == null && item.ExpiresUtc > now)
+        .Select(item => new { item.Id, item.TenantId })
+        .SingleOrDefaultAsync(ct);
+    if (session is null)
+    {
+        return Results.Unauthorized();
+    }
+
+    var job = await db.PrintJobs.AsNoTracking()
+        .Where(item => item.Id == jobId && item.TenantId == session.TenantId &&
+                       item.CustomerSessionId == session.Id)
+        .Select(item => new
+        {
+            item.Id,
+            item.JobNumber,
+            item.Status,
+            item.PageCount,
+            item.Copies,
+            item.ColourMode,
+            item.PaperSize,
+            item.IsDuplex,
+            item.Currency,
+            item.QuotedAmountMinor,
+            item.QuoteExpiresUtc,
+            item.UpdatedUtc
+        })
+        .SingleOrDefaultAsync(ct);
+    return job is null ? Results.NotFound() : Results.Ok(job);
 });
 
 publicApi.MapPost("/stations/{publicCode}/sessions", async (
