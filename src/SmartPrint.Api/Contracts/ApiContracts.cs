@@ -8,7 +8,6 @@ public sealed record RegisterShopRequest(
 
 public sealed record LoginRequest(string Email, string Password);
 public sealed record RefreshRequest(string RefreshToken);
-
 public sealed record ShopProfileRequest(string DisplayName, string? LogoUrl, string AccentColor);
 
 public sealed record CreatePrinterRequest(
@@ -21,6 +20,15 @@ public sealed record CreatePrinterRequest(
     string? CapabilitiesJson);
 
 public sealed record CreateQrStationRequest(string DisplayName, Guid? PrinterDeviceId);
+
+public sealed record ShopPricingRequest(
+    long MonoPerSideMinor,
+    long ColourPerSideMinor,
+    long MonoDuplexPerSheetMinor,
+    long ColourDuplexPerSheetMinor,
+    long MinimumChargeMinor);
+
+public sealed record PrintQuoteRequest(string ColourMode, string PaperSize, bool IsDuplex, int Copies);
 
 public sealed record TokenResponse(
     string TokenType,

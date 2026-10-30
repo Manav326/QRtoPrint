@@ -7,12 +7,14 @@ using System.Threading.RateLimiting;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.RateLimiting;
+using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 using SmartPrint.Api.Contracts;
 using SmartPrint.Api.Data;
 using SmartPrint.Api.Domain;
 using SmartPrint.Api.Security;
+using SmartPrint.Api.Storage;
 
 var builder = WebApplication.CreateBuilder(args);
 var connectionString = builder.Configuration.GetConnectionString("SmartPrint")
@@ -71,12 +73,22 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
     });
 builder.Services.AddAuthorization();
 builder.Services.AddScoped<TokenIssuer>();
-builder.Services.AddRateLimiter(options => options.AddFixedWindowLimiter("qr-session", limiter =>
+builder.Services.AddSingleton<DocumentStorage>();
+builder.Services.AddRateLimiter(options =>
 {
-    limiter.PermitLimit = 30;
-    limiter.Window = TimeSpan.FromMinutes(1);
-    limiter.QueueLimit = 0;
-}));
+    options.AddFixedWindowLimiter("qr-session", limiter =>
+    {
+        limiter.PermitLimit = 30;
+        limiter.Window = TimeSpan.FromMinutes(1);
+        limiter.QueueLimit = 0;
+    });
+    options.AddFixedWindowLimiter("document-upload", limiter =>
+    {
+        limiter.PermitLimit = 8;
+        limiter.Window = TimeSpan.FromMinutes(1);
+        limiter.QueueLimit = 0;
+    });
+});
 builder.Services.AddCors(options => options.AddPolicy("web", policy => policy
     .WithOrigins(
         "https://print.thinkwithsujeet.in",
@@ -170,6 +182,13 @@ auth.MapPost("/register-shop", async (
     {
         TenantId = tenant.Id,
         DisplayName = businessName,
+        UpdatedUtc = now
+    });
+    db.ShopPricingProfiles.Add(new ShopPricingProfile
+    {
+        TenantId = tenant.Id,
+        IsConfigured = false,
+        Version = 1,
         UpdatedUtc = now
     });
     db.TenantSubscriptions.Add(new TenantSubscription
@@ -655,7 +674,421 @@ shop.MapPatch("/qr-stations/{stationId:guid}/enabled", async (
     return Results.Ok(new { station.Id, station.IsEnabled });
 });
 
+
+shop.MapGet("/pricing", async (
+    ClaimsPrincipal principal,
+    SmartPrintDbContext db,
+    CancellationToken ct) =>
+{
+    if (!TryGetTenantId(principal, out var tenantId))
+    {
+        return Results.Forbid();
+    }
+
+    var pricing = await db.ShopPricingProfiles.AsNoTracking()
+        .SingleOrDefaultAsync(item => item.TenantId == tenantId, ct);
+    return pricing is null
+        ? Results.NotFound()
+        : Results.Ok(new
+        {
+            pricing.IsConfigured,
+            pricing.MonoPerSideMinor,
+            pricing.ColourPerSideMinor,
+            pricing.MonoDuplexPerSheetMinor,
+            pricing.ColourDuplexPerSheetMinor,
+            pricing.MinimumChargeMinor,
+            pricing.Version,
+            pricing.UpdatedUtc
+        });
+});
+
+shop.MapPut("/pricing", async (
+    ShopPricingRequest request,
+    ClaimsPrincipal principal,
+    SmartPrintDbContext db,
+    CancellationToken ct) =>
+{
+    if (!IsShopOwner(principal) || !TryGetTenantId(principal, out var tenantId))
+    {
+        return Results.Forbid();
+    }
+
+    const long maximumRateMinor = 100_000;
+    const long maximumMinimumChargeMinor = 10_000_000;
+    var rates = new[]
+    {
+        request.MonoPerSideMinor,
+        request.ColourPerSideMinor,
+        request.MonoDuplexPerSheetMinor,
+        request.ColourDuplexPerSheetMinor
+    };
+    if (rates.Any(amount => amount < 0 || amount > maximumRateMinor) ||
+        request.MinimumChargeMinor < 0 || request.MinimumChargeMinor > maximumMinimumChargeMinor ||
+        request.MonoPerSideMinor == 0 || request.ColourPerSideMinor == 0)
+    {
+        return Results.ValidationProblem(new Dictionary<string, string[]>
+        {
+            ["pricing"] = ["Set positive mono and colour per-side prices, non-negative duplex prices and a valid minimum charge. Prices use paise for INR."]
+        });
+    }
+
+    var pricing = await db.ShopPricingProfiles.SingleOrDefaultAsync(item => item.TenantId == tenantId, ct);
+    if (pricing is null)
+    {
+        return Results.NotFound();
+    }
+
+    pricing.MonoPerSideMinor = request.MonoPerSideMinor;
+    pricing.ColourPerSideMinor = request.ColourPerSideMinor;
+    pricing.MonoDuplexPerSheetMinor = request.MonoDuplexPerSheetMinor;
+    pricing.ColourDuplexPerSheetMinor = request.ColourDuplexPerSheetMinor;
+    pricing.MinimumChargeMinor = request.MinimumChargeMinor;
+    pricing.IsConfigured = true;
+    pricing.Version++;
+    pricing.UpdatedUtc = DateTimeOffset.UtcNow;
+    await db.SaveChangesAsync(ct);
+
+    return Results.Ok(new
+    {
+        pricing.IsConfigured,
+        pricing.MonoPerSideMinor,
+        pricing.ColourPerSideMinor,
+        pricing.MonoDuplexPerSheetMinor,
+        pricing.ColourDuplexPerSheetMinor,
+        pricing.MinimumChargeMinor,
+        pricing.Version,
+        pricing.UpdatedUtc
+    });
+});
+
+shop.MapGet("/print-jobs", async (
+    ClaimsPrincipal principal,
+    SmartPrintDbContext db,
+    CancellationToken ct) =>
+{
+    if (!TryGetTenantId(principal, out var tenantId))
+    {
+        return Results.Forbid();
+    }
+
+    var jobs = await (
+        from job in db.PrintJobs.AsNoTracking()
+        join document in db.PrintDocuments.AsNoTracking()
+            on new { job.TenantId, PrintJobId = job.Id } equals new { document.TenantId, document.PrintJobId }
+        where job.TenantId == tenantId
+        orderby job.CreatedUtc descending
+        select new
+        {
+            job.Id,
+            job.JobNumber,
+            job.Status,
+            job.PageCount,
+            job.Copies,
+            job.ColourMode,
+            job.PaperSize,
+            job.IsDuplex,
+            job.Currency,
+            job.QuotedAmountMinor,
+            job.QuoteExpiresUtc,
+            job.CreatedUtc,
+            Document = new
+            {
+                document.OriginalFileName,
+                document.MediaType,
+                document.SizeBytes
+            }
+        })
+        .Take(100)
+        .ToListAsync(ct);
+    return Results.Ok(jobs);
+});
+
 var publicApi = app.MapGroup("/api/v1/public").AllowAnonymous();
+
+publicApi.MapPost("/sessions/current/jobs", async (
+    HttpContext context,
+    SmartPrintDbContext db,
+    DocumentStorage storage,
+    CancellationToken ct) =>
+{
+    var rawToken = context.Request.Headers["X-Print-Session"].FirstOrDefault();
+    var idempotencyKey = context.Request.Headers["Idempotency-Key"].FirstOrDefault();
+    if (string.IsNullOrWhiteSpace(rawToken) ||
+        string.IsNullOrWhiteSpace(idempotencyKey) ||
+        idempotencyKey.Length > 100)
+    {
+        return Results.BadRequest(new
+        {
+            code = "session_and_idempotency_required",
+            message = "A valid print session and Idempotency-Key are required."
+        });
+    }
+
+    var tokenHash = HashOpaqueToken(rawToken);
+    var now = DateTimeOffset.UtcNow;
+    var session = await db.CustomerPrintSessions.AsNoTracking()
+        .Where(item => item.TokenHash == tokenHash && item.Status == "Active" &&
+                       item.RevokedUtc == null && item.ExpiresUtc > now)
+        .Select(item => new { item.Id, item.TenantId, item.QrStationId })
+        .SingleOrDefaultAsync(ct);
+    if (session is null)
+    {
+        return Results.Unauthorized();
+    }
+
+    var existing = await db.PrintJobs.AsNoTracking()
+        .Where(job => job.TenantId == session.TenantId && job.IdempotencyKey == idempotencyKey)
+        .Select(job => new { job.Id, job.CustomerSessionId, job.JobNumber, job.Status, job.PageCount, job.CreatedUtc })
+        .SingleOrDefaultAsync(ct);
+    if (existing is not null)
+    {
+        if (existing.CustomerSessionId != session.Id)
+        {
+            return Results.Conflict(new { code = "idempotency_key_reused", message = "This request key has already been used for another customer session." });
+        }
+
+        var existingDocument = await db.PrintDocuments.AsNoTracking()
+            .Where(document => document.TenantId == session.TenantId && document.PrintJobId == existing.Id)
+            .Select(document => new { document.OriginalFileName, document.MediaType, document.SizeBytes })
+            .SingleOrDefaultAsync(ct);
+        return Results.Ok(new { Job = existing, Document = existingDocument, DuplicateRequest = true });
+    }
+
+    if (!context.Request.HasFormContentType)
+    {
+        return Results.BadRequest(new { code = "multipart_form_required", message = "Upload the document using multipart/form-data." });
+    }
+
+    var form = await context.Request.ReadFormAsync(ct);
+    if (form.Files.Count != 1)
+    {
+        return Results.BadRequest(new { code = "one_file_required", message = "Upload one document per print job." });
+    }
+
+    var file = form.Files[0];
+    if (file.Length is <= 0 or > 20 * 1024 * 1024)
+    {
+        return Results.Problem(statusCode: StatusCodes.Status413PayloadTooLarge, title: "File size must be between 1 byte and 20 MB.");
+    }
+
+    var originalName = file.FileName.Split('/', '\\').LastOrDefault() ?? string.Empty;
+    originalName = new string(originalName.Where(character => !char.IsControl(character)).ToArray()).Trim();
+    if (string.IsNullOrWhiteSpace(originalName))
+    {
+        return Results.BadRequest(new { code = "invalid_file_name", message = "The uploaded file name is invalid." });
+    }
+    originalName = originalName[..Math.Min(originalName.Length, 255)];
+
+    var documentId = Guid.NewGuid();
+    StoredDocument stored;
+    try
+    {
+        await using var input = file.OpenReadStream();
+        stored = await storage.ValidateAndStoreAsync(
+            session.TenantId, documentId, originalName, input, file.Length, ct);
+    }
+    catch (DocumentValidationException exception)
+    {
+        return Results.UnprocessableEntity(new { code = "document_not_supported", message = exception.Message });
+    }
+
+    var job = new PrintJob
+    {
+        TenantId = session.TenantId,
+        QrStationId = session.QrStationId,
+        CustomerSessionId = session.Id,
+        JobNumber = $"SP-{now:yyMMdd}-{Guid.NewGuid().ToString("N")[..8].ToUpperInvariant()}",
+        Status = "AWAITING_CONFIGURATION",
+        IdempotencyKey = idempotencyKey,
+        PageCount = stored.Analysis.PageCount,
+        Copies = 1,
+        Currency = "INR",
+        QuotedAmountMinor = 0,
+        CreatedUtc = now,
+        UpdatedUtc = now
+    };
+    var document = new PrintDocument
+    {
+        Id = documentId,
+        TenantId = session.TenantId,
+        PrintJobId = job.Id,
+        OriginalFileName = originalName,
+        MediaType = stored.Analysis.MediaType,
+        FileExtension = stored.Analysis.Extension,
+        SizeBytes = stored.SizeBytes,
+        Sha256 = stored.Sha256,
+        StorageKey = stored.StorageKey,
+        PageSizesJson = stored.Analysis.PageSizesJson,
+        CreatedUtc = now
+    };
+
+    try
+    {
+        await using var transaction = await db.Database.BeginTransactionAsync(ct);
+        db.PrintJobs.Add(job);
+        db.PrintDocuments.Add(document);
+        await db.SaveChangesAsync(ct);
+        await transaction.CommitAsync(ct);
+    }
+    catch
+    {
+        await storage.DeleteAsync(stored.StorageKey);
+        throw;
+    }
+
+    return Results.Created($"/api/v1/public/jobs/{job.Id}", new
+    {
+        Job = new
+        {
+            job.Id,
+            job.JobNumber,
+            job.Status,
+            job.PageCount,
+            job.Copies,
+            job.Currency,
+            job.QuotedAmountMinor,
+            job.CreatedUtc
+        },
+        Document = new
+        {
+            document.Id,
+            document.OriginalFileName,
+            document.MediaType,
+            document.SizeBytes,
+            document.Sha256,
+            document.PageSizesJson
+        },
+        DuplicateRequest = false
+    });
+})
+.WithMetadata(new RequestSizeLimitAttribute(21 * 1024 * 1024))
+.RequireRateLimiting("document-upload");
+
+publicApi.MapPost("/jobs/{jobId:guid}/quote", async (
+    Guid jobId,
+    PrintQuoteRequest request,
+    HttpContext context,
+    SmartPrintDbContext db,
+    CancellationToken ct) =>
+{
+    var rawToken = context.Request.Headers["X-Print-Session"].FirstOrDefault();
+    if (string.IsNullOrWhiteSpace(rawToken))
+    {
+        return Results.Unauthorized();
+    }
+
+    var now = DateTimeOffset.UtcNow;
+    var tokenHash = HashOpaqueToken(rawToken);
+    var session = await db.CustomerPrintSessions.AsNoTracking()
+        .Where(item => item.TokenHash == tokenHash && item.Status == "Active" &&
+                       item.RevokedUtc == null && item.ExpiresUtc > now)
+        .Select(item => new { item.Id, item.TenantId })
+        .SingleOrDefaultAsync(ct);
+    if (session is null)
+    {
+        return Results.Unauthorized();
+    }
+
+    var job = await db.PrintJobs.SingleOrDefaultAsync(
+        item => item.Id == jobId && item.TenantId == session.TenantId &&
+                item.CustomerSessionId == session.Id, ct);
+    if (job is null)
+    {
+        return Results.NotFound();
+    }
+
+    if (job.PageCount <= 0 || job.PageCount > 500 ||
+        request.Copies is < 1 or > 100 ||
+        request.PaperSize != "A4" ||
+        request.ColourMode is not ("Mono" or "Colour"))
+    {
+        return Results.ValidationProblem(new Dictionary<string, string[]>
+        {
+            ["printOptions"] = ["This release supports 1–100 copies, A4 paper and Mono or Colour mode."]
+        });
+    }
+
+    var pricing = await db.ShopPricingProfiles.AsNoTracking()
+        .SingleOrDefaultAsync(item => item.TenantId == session.TenantId && item.IsConfigured, ct);
+    if (pricing is null)
+    {
+        return Results.Conflict(new
+        {
+            code = "shop_pricing_not_configured",
+            message = "This shop has not configured its print prices yet. Please ask the shop operator."
+        });
+    }
+
+    try
+    {
+        var copies = (long)request.Copies;
+        var pages = (long)job.PageCount;
+        long amount;
+        if (request.IsDuplex)
+        {
+            var sheets = checked(((pages + 1) / 2) * copies);
+            var rate = request.ColourMode == "Colour"
+                ? pricing.ColourDuplexPerSheetMinor
+                : pricing.MonoDuplexPerSheetMinor;
+            if (rate <= 0)
+            {
+                return Results.Conflict(new
+                {
+                    code = "duplex_pricing_not_configured",
+                    message = "Duplex printing is not currently priced by this shop."
+                });
+            }
+            amount = checked(sheets * rate);
+        }
+        else
+        {
+            var impressions = checked(pages * copies);
+            var rate = request.ColourMode == "Colour"
+                ? pricing.ColourPerSideMinor
+                : pricing.MonoPerSideMinor;
+            amount = checked(impressions * rate);
+        }
+
+        amount = Math.Max(amount, pricing.MinimumChargeMinor);
+        job.ColourMode = request.ColourMode;
+        job.PaperSize = request.PaperSize;
+        job.IsDuplex = request.IsDuplex;
+        job.Copies = request.Copies;
+        job.Currency = "INR";
+        job.QuotedAmountMinor = amount;
+        job.PricingVersion = pricing.Version;
+        job.QuoteExpiresUtc = now.AddMinutes(10);
+        job.Status = "AWAITING_CUSTOMER_APPROVAL";
+        job.UpdatedUtc = now;
+        await db.SaveChangesAsync(ct);
+
+        return Results.Ok(new
+        {
+            job.Id,
+            job.JobNumber,
+            job.Status,
+            job.PageCount,
+            job.Copies,
+            job.ColourMode,
+            job.PaperSize,
+            job.IsDuplex,
+            job.Currency,
+            job.QuotedAmountMinor,
+            AmountMajor = amount / 100m,
+            job.PricingVersion,
+            job.QuoteExpiresUtc
+        });
+    }
+    catch (OverflowException)
+    {
+        return Results.UnprocessableEntity(new
+        {
+            code = "quote_overflow",
+            message = "The requested print configuration exceeds the pricing limit."
+        });
+    }
+});
+
 publicApi.MapPost("/stations/{publicCode}/sessions", async (
     string publicCode,
     SmartPrintDbContext db,

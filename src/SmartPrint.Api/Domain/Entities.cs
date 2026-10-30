@@ -30,6 +30,19 @@ public sealed class ShopProfile
     public DateTimeOffset UpdatedUtc { get; set; } = DateTimeOffset.UtcNow;
 }
 
+public sealed class ShopPricingProfile
+{
+    public Guid TenantId { get; set; }
+    public bool IsConfigured { get; set; }
+    public long MonoPerSideMinor { get; set; }
+    public long ColourPerSideMinor { get; set; }
+    public long MonoDuplexPerSheetMinor { get; set; }
+    public long ColourDuplexPerSheetMinor { get; set; }
+    public long MinimumChargeMinor { get; set; }
+    public int Version { get; set; } = 1;
+    public DateTimeOffset UpdatedUtc { get; set; } = DateTimeOffset.UtcNow;
+}
+
 public sealed class TenantSubscription
 {
     public Guid Id { get; set; } = Guid.NewGuid();
@@ -107,9 +120,29 @@ public sealed class PrintJob
     public string IdempotencyKey { get; set; } = string.Empty;
     public int PageCount { get; set; }
     public int Copies { get; set; } = 1;
+    public string ColourMode { get; set; } = "Mono";
+    public string PaperSize { get; set; } = "A4";
+    public bool IsDuplex { get; set; }
+    public int? PricingVersion { get; set; }
+    public DateTimeOffset? QuoteExpiresUtc { get; set; }
     public string Currency { get; set; } = "INR";
     public long QuotedAmountMinor { get; set; }
     public string? FailureCode { get; set; }
     public DateTimeOffset CreatedUtc { get; set; } = DateTimeOffset.UtcNow;
     public DateTimeOffset UpdatedUtc { get; set; } = DateTimeOffset.UtcNow;
+}
+
+public sealed class PrintDocument
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+    public Guid TenantId { get; set; }
+    public Guid PrintJobId { get; set; }
+    public string OriginalFileName { get; set; } = string.Empty;
+    public string MediaType { get; set; } = string.Empty;
+    public string FileExtension { get; set; } = string.Empty;
+    public long SizeBytes { get; set; }
+    public string Sha256 { get; set; } = string.Empty;
+    public string StorageKey { get; set; } = string.Empty;
+    public string PageSizesJson { get; set; } = "[]";
+    public DateTimeOffset CreatedUtc { get; set; } = DateTimeOffset.UtcNow;
 }

@@ -20,6 +20,9 @@ Passwords are handled by ASP.NET Core Identity's password hasher and validation 
 - PATCH /api/v1/shop/printers/{printerId}/active (shop owner/manager)
 - GET /api/v1/shop/qr-stations
 - POST /api/v1/shop/qr-stations (shop owner/manager)
+- GET /api/v1/shop/pricing
+- PUT /api/v1/shop/pricing (shop owner/manager)
+- GET /api/v1/shop/print-jobs (latest 100 jobs)
 
 Tenant IDs are derived from the authenticated token. Printer IDs supplied for station assignment are checked against the same tenant. Printer status is server-owned and starts as Unknown.
 

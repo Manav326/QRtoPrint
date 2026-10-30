@@ -111,6 +111,19 @@ public sealed class InitialPlatform : Migration
                 CONSTRAINT "FK_ShopProfiles_Tenants_TenantId" FOREIGN KEY ("TenantId") REFERENCES "Tenants" ("Id") ON DELETE CASCADE
             );
 
+            CREATE TABLE "ShopPricingProfiles" (
+                "TenantId" uuid NOT NULL PRIMARY KEY,
+                "IsConfigured" boolean NOT NULL,
+                "MonoPerSideMinor" bigint NOT NULL,
+                "ColourPerSideMinor" bigint NOT NULL,
+                "MonoDuplexPerSheetMinor" bigint NOT NULL,
+                "ColourDuplexPerSheetMinor" bigint NOT NULL,
+                "MinimumChargeMinor" bigint NOT NULL,
+                "Version" integer NOT NULL,
+                "UpdatedUtc" timestamptz NOT NULL,
+                CONSTRAINT "FK_ShopPricingProfiles_Tenants_TenantId" FOREIGN KEY ("TenantId") REFERENCES "Tenants" ("Id") ON DELETE CASCADE
+            );
+
             CREATE TABLE "TenantSubscriptions" (
                 "Id" uuid NOT NULL PRIMARY KEY,
                 "TenantId" uuid NOT NULL,
@@ -197,12 +210,18 @@ public sealed class InitialPlatform : Migration
                 "IdempotencyKey" varchar(100) NOT NULL,
                 "PageCount" integer NOT NULL,
                 "Copies" integer NOT NULL,
+                "ColourMode" varchar(12) NOT NULL,
+                "PaperSize" varchar(12) NOT NULL,
+                "IsDuplex" boolean NOT NULL,
+                "PricingVersion" integer,
+                "QuoteExpiresUtc" timestamptz,
                 "Currency" varchar(3) NOT NULL,
                 "QuotedAmountMinor" bigint NOT NULL,
                 "FailureCode" varchar(80),
                 "CreatedUtc" timestamptz NOT NULL,
                 "UpdatedUtc" timestamptz NOT NULL,
                 CONSTRAINT "FK_PrintJobs_Tenants_TenantId" FOREIGN KEY ("TenantId") REFERENCES "Tenants" ("Id") ON DELETE CASCADE,
+                CONSTRAINT "AK_PrintJobs_TenantId_Id" UNIQUE ("TenantId", "Id"),
                 CONSTRAINT "FK_PrintJobs_QrStations_QrStationId" FOREIGN KEY ("QrStationId") REFERENCES "QrStations" ("Id") ON DELETE RESTRICT,
                 CONSTRAINT "FK_PrintJobs_PrinterDevices_PrinterDeviceId" FOREIGN KEY ("PrinterDeviceId") REFERENCES "PrinterDevices" ("Id") ON DELETE SET NULL,
                 CONSTRAINT "FK_PrintJobs_CustomerPrintSessions_CustomerSessionId" FOREIGN KEY ("CustomerSessionId") REFERENCES "CustomerPrintSessions" ("Id") ON DELETE RESTRICT
@@ -210,18 +229,37 @@ public sealed class InitialPlatform : Migration
             CREATE UNIQUE INDEX "IX_PrintJobs_TenantId_IdempotencyKey" ON "PrintJobs" ("TenantId", "IdempotencyKey");
             CREATE UNIQUE INDEX "IX_PrintJobs_TenantId_JobNumber" ON "PrintJobs" ("TenantId", "JobNumber");
             CREATE INDEX "IX_PrintJobs_TenantId_CreatedUtc" ON "PrintJobs" ("TenantId", "CreatedUtc");
+
+            CREATE TABLE "PrintDocuments" (
+                "Id" uuid NOT NULL PRIMARY KEY,
+                "TenantId" uuid NOT NULL,
+                "PrintJobId" uuid NOT NULL,
+                "OriginalFileName" varchar(255) NOT NULL,
+                "MediaType" varchar(100) NOT NULL,
+                "FileExtension" varchar(8) NOT NULL,
+                "SizeBytes" bigint NOT NULL,
+                "Sha256" varchar(64) NOT NULL,
+                "StorageKey" varchar(200) NOT NULL,
+                "PageSizesJson" jsonb NOT NULL,
+                "CreatedUtc" timestamptz NOT NULL,
+                CONSTRAINT "FK_PrintDocuments_PrintJobs_TenantId_PrintJobId" FOREIGN KEY ("TenantId", "PrintJobId") REFERENCES "PrintJobs" ("TenantId", "Id") ON DELETE CASCADE
+            );
+            CREATE UNIQUE INDEX "IX_PrintDocuments_TenantId_PrintJobId" ON "PrintDocuments" ("TenantId", "PrintJobId");
+            CREATE INDEX "IX_PrintDocuments_TenantId_Sha256" ON "PrintDocuments" ("TenantId", "Sha256");
             """);
     }
 
     protected override void Down(MigrationBuilder migrationBuilder)
     {
         migrationBuilder.Sql("""
+            DROP TABLE IF EXISTS "PrintDocuments";
             DROP TABLE IF EXISTS "PrintJobs";
             DROP TABLE IF EXISTS "RefreshTokens";
             DROP TABLE IF EXISTS "CustomerPrintSessions";
             DROP TABLE IF EXISTS "QrStations";
             DROP TABLE IF EXISTS "PrinterDevices";
             DROP TABLE IF EXISTS "TenantSubscriptions";
+            DROP TABLE IF EXISTS "ShopPricingProfiles";
             DROP TABLE IF EXISTS "ShopProfiles";
             DROP TABLE IF EXISTS "AspNetUserTokens";
             DROP TABLE IF EXISTS "AspNetUserRoles";

@@ -10,12 +10,14 @@ public sealed class SmartPrintDbContext(DbContextOptions<SmartPrintDbContext> op
 {
     public DbSet<Tenant> Tenants => Set<Tenant>();
     public DbSet<ShopProfile> ShopProfiles => Set<ShopProfile>();
+    public DbSet<ShopPricingProfile> ShopPricingProfiles => Set<ShopPricingProfile>();
     public DbSet<TenantSubscription> TenantSubscriptions => Set<TenantSubscription>();
     public DbSet<PrinterDevice> PrinterDevices => Set<PrinterDevice>();
     public DbSet<QrStation> QrStations => Set<QrStation>();
     public DbSet<CustomerPrintSession> CustomerPrintSessions => Set<CustomerPrintSession>();
     public DbSet<RefreshToken> RefreshTokens => Set<RefreshToken>();
     public DbSet<PrintJob> PrintJobs => Set<PrintJob>();
+    public DbSet<PrintDocument> PrintDocuments => Set<PrintDocument>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -48,6 +50,14 @@ public sealed class SmartPrintDbContext(DbContextOptions<SmartPrintDbContext> op
             entity.Property(x => x.Currency).HasMaxLength(3).IsRequired();
             entity.Property(x => x.TimeZone).HasMaxLength(80).IsRequired();
             entity.HasOne<Tenant>().WithOne().HasForeignKey<ShopProfile>(x => x.TenantId).OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<ShopPricingProfile>(entity =>
+        {
+            entity.ToTable("ShopPricingProfiles");
+            entity.HasKey(x => x.TenantId);
+            entity.Property(x => x.Version).IsConcurrencyToken();
+            entity.HasOne<Tenant>().WithOne().HasForeignKey<ShopPricingProfile>(x => x.TenantId).OnDelete(DeleteBehavior.Cascade);
         });
 
         modelBuilder.Entity<TenantSubscription>(entity =>
@@ -116,9 +126,12 @@ public sealed class SmartPrintDbContext(DbContextOptions<SmartPrintDbContext> op
         {
             entity.ToTable("PrintJobs");
             entity.HasKey(x => x.Id);
+            entity.HasAlternateKey(x => new { x.TenantId, x.Id });
             entity.Property(x => x.JobNumber).HasMaxLength(32).IsRequired();
             entity.Property(x => x.Status).HasMaxLength(40).IsRequired();
             entity.Property(x => x.IdempotencyKey).HasMaxLength(100).IsRequired();
+            entity.Property(x => x.ColourMode).HasMaxLength(12).IsRequired();
+            entity.Property(x => x.PaperSize).HasMaxLength(12).IsRequired();
             entity.Property(x => x.Currency).HasMaxLength(3).IsRequired();
             entity.Property(x => x.FailureCode).HasMaxLength(80);
             entity.HasIndex(x => new { x.TenantId, x.CreatedUtc });
@@ -128,6 +141,22 @@ public sealed class SmartPrintDbContext(DbContextOptions<SmartPrintDbContext> op
             entity.HasOne<CustomerPrintSession>().WithMany().HasForeignKey(x => x.CustomerSessionId).OnDelete(DeleteBehavior.Restrict);
             entity.HasOne<QrStation>().WithMany().HasForeignKey(x => x.QrStationId).OnDelete(DeleteBehavior.Restrict);
             entity.HasOne<PrinterDevice>().WithMany().HasForeignKey(x => x.PrinterDeviceId).OnDelete(DeleteBehavior.SetNull);
+        });
+
+        modelBuilder.Entity<PrintDocument>(entity =>
+        {
+            entity.ToTable("PrintDocuments");
+            entity.HasKey(x => x.Id);
+            entity.Property(x => x.OriginalFileName).HasMaxLength(255).IsRequired();
+            entity.Property(x => x.MediaType).HasMaxLength(100).IsRequired();
+            entity.Property(x => x.FileExtension).HasMaxLength(8).IsRequired();
+            entity.Property(x => x.Sha256).HasMaxLength(64).IsRequired();
+            entity.Property(x => x.StorageKey).HasMaxLength(200).IsRequired();
+            entity.Property(x => x.PageSizesJson).HasColumnType("jsonb").IsRequired();
+            entity.HasIndex(x => new { x.TenantId, x.PrintJobId }).IsUnique();
+            entity.HasIndex(x => new { x.TenantId, x.Sha256 });
+            entity.HasOne<PrintJob>().WithOne().HasForeignKey<PrintDocument>(x => new { x.TenantId, x.PrintJobId })
+                .HasPrincipalKey<PrintJob>(x => new { x.TenantId, x.Id }).OnDelete(DeleteBehavior.Cascade);
         });
     }
 }
