@@ -1524,17 +1524,18 @@ shop.MapPost("/payments/{paymentId:guid}/verify", async (
     try
     {
         await db.SaveChangesAsync(ct);
-        await transaction.CommitAsync(ct);
     }
     catch (DbUpdateConcurrencyException)
     {
         await transaction.RollbackAsync(ct);
         return Results.Conflict(new
         {
-            code = "payment_state_changed",
-            message = "Another shop action updated this payment first. Refresh the payment list before taking another action."
+            code = "payment_changed_concurrently",
+            message = "Another shop action changed this payment. Refresh the payment list before trying again."
         });
     }
+
+    await transaction.CommitAsync(ct);
 
     return Results.Ok(new
     {
@@ -1623,17 +1624,18 @@ shop.MapPost("/payments/{paymentId:guid}/reject", async (
     try
     {
         await db.SaveChangesAsync(ct);
-        await transaction.CommitAsync(ct);
     }
     catch (DbUpdateConcurrencyException)
     {
         await transaction.RollbackAsync(ct);
         return Results.Conflict(new
         {
-            code = "payment_state_changed",
-            message = "Another shop action updated this payment first. Refresh the payment list before taking another action."
+            code = "payment_changed_concurrently",
+            message = "Another shop action changed this payment. Refresh the payment list before trying again."
         });
     }
+
+    await transaction.CommitAsync(ct);
 
     return Results.Ok(new
     {
@@ -2185,8 +2187,8 @@ publicApi.MapPost("/payments/{paymentId:guid}/report", async (
     {
         return Results.Conflict(new
         {
-            code = "payment_state_changed",
-            message = "The payment changed while you were submitting the reference. Refresh the job status before trying again."
+            code = "payment_changed_concurrently",
+            message = "This payment changed while the reference was being submitted. Refresh the job status before trying again."
         });
     }
 

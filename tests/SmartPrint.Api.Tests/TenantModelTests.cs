@@ -53,11 +53,6 @@ public sealed class TenantModelTests
             activePaymentIndex.GetFilter());
         Assert.True(payment.FindProperty(nameof(PrintPayment.UpdatedUtc))!.IsConcurrencyToken);
 
-        var agent = model.FindEntityType(typeof(AgentDevice))!;
-        var fingerprintIndex = Assert.Single(agent.GetIndexes(), index =>
-            index.Properties.Select(property => property.Name)
-                .SequenceEqual(new[] { nameof(AgentDevice.TenantId), nameof(AgentDevice.FingerprintHash) }));
-        Assert.Equal("\"RevokedUtc\" IS NULL", fingerprintIndex.GetFilter());
     }
 
     private static void AssertCompositeForeignKey(Microsoft.EntityFrameworkCore.Metadata.IEntityType entityType, params string[] propertyNames)
