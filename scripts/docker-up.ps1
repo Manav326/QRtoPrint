@@ -140,7 +140,7 @@ if (-not $imagesPulled -and (Get-Command gh -ErrorAction SilentlyContinue)) {
     }
 }
 if (-not $imagesPulled) { throw "GHCR images could not be pulled. Sign in with GitHub CLI or verify package access, then retry." }
-docker compose --env-file $envPath -f $composeFile up -d --no-build
+docker compose --env-file $envPath -f $composeFile up -d --no-build --remove-orphans
 if ($LASTEXITCODE -ne 0) { throw "Production stack failed to start." }
 
 $apiHealthy = $false

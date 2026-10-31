@@ -119,7 +119,7 @@ docker compose --env-file $envPath -f $composeFile config --quiet
 if ($LASTEXITCODE -ne 0) { throw "Local Cloudflare Compose configuration is invalid." }
 
 Write-Host "Building and starting the local database, API, portal and Cloudflare Tunnel..." -ForegroundColor Cyan
-docker compose --env-file $envPath -f $composeFile up -d --build
+docker compose --env-file $envPath -f $composeFile up -d --build --remove-orphans
 if ($LASTEXITCODE -ne 0) {
     docker compose --env-file $envPath -f $composeFile logs --tail 100
     throw "Local stack failed to build or start."
