@@ -355,6 +355,16 @@ public sealed class AgentLocalQueueStore
     }
 
 
+    public async Task UpdateRejectedPagesAsync(Guid jobId, IReadOnlyList<int> rejectedPageNumbers, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(rejectedPageNumbers);
+        var entry = Find(jobId) ?? throw new FileNotFoundException("The local print job does not exist.");
+        var pages = rejectedPageNumbers.Distinct().Order().ToArray();
+        if (pages.Length != rejectedPageNumbers.Count || pages.Any(page => page < 1 || page > entry.PageCount))
+            throw new InvalidDataException("The server returned an invalid rejected-page selection.");
+        await SaveManifestAsync(entry with { RejectedPageNumbers = pages }, ct);
+    }
+
     public async Task MarkSubmissionStartedAsync(Guid jobId, string spoolerJobName, CancellationToken ct)
     {
         if (string.IsNullOrWhiteSpace(spoolerJobName) || spoolerJobName.Length > 180)
