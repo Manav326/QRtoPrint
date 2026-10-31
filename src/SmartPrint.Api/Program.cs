@@ -1423,7 +1423,7 @@ shop.MapGet("/customers", async (
                 customer.SessionCount,
                 PrintJobCount = statistics?.PrintJobCount ?? 0,
                 CompletedJobCount = statistics?.CompletedJobCount ?? 0,
-                statistics?.LastPrintUtc
+                LastPrintUtc = statistics?.LastPrintUtc
             };
         }).ToList()
     });
