@@ -632,3 +632,92 @@ export function reportCustomerUpiPayment(sessionToken: string, paymentId: string
     }
   );
 }
+
+
+export interface PlatformPlanVersion {
+  id: string;
+  version: number;
+  status: "Draft" | "Published" | "Retired" | string;
+  currency: string;
+  monthlyPriceMinor: number | null;
+  annualPriceMinor: number | null;
+  maxPrinters: number | null;
+  maxAgentDevices: number | null;
+  maxQrStations: number | null;
+  maxMonthlyPrintJobs: number | null;
+  maxDocumentBytes: number | null;
+  cloudAssistedPrintingEnabled: boolean;
+  whiteLabelEnabled: boolean;
+  advancedReportsEnabled: boolean;
+  createdUtc: string;
+  updatedUtc: string;
+  publishedUtc: string | null;
+}
+
+export interface PlatformPlan {
+  id: string;
+  code: string;
+  name: string;
+  description: string | null;
+  isActive: boolean;
+  isSystemPlan: boolean;
+  createdUtc: string;
+  updatedUtc: string;
+  versions: PlatformPlanVersion[];
+}
+
+export interface PlatformPlanVersionInput {
+  currency: string;
+  monthlyPriceMinor: number | null;
+  annualPriceMinor: number | null;
+  maxPrinters: number | null;
+  maxAgentDevices: number | null;
+  maxQrStations: number | null;
+  maxMonthlyPrintJobs: number | null;
+  maxDocumentBytes: number | null;
+  cloudAssistedPrintingEnabled: boolean;
+  whiteLabelEnabled: boolean;
+  advancedReportsEnabled: boolean;
+}
+
+export function getPlatformPlans(token: string) {
+  return apiRequest<PlatformPlan[]>("/api/v1/platform/plans", {}, token);
+}
+
+export function createPlatformPlan(token: string, values: {
+  code: string;
+  name: string;
+  description?: string;
+  version: PlatformPlanVersionInput;
+}) {
+  return apiRequest<PlatformPlan>("/api/v1/platform/plans", {
+    method: "POST",
+    body: JSON.stringify(values)
+  }, token);
+}
+
+export function updatePlatformPlan(token: string, planId: string, values: {
+  name: string;
+  description?: string;
+  isActive: boolean;
+}) {
+  return apiRequest<PlatformPlan>(`/api/v1/platform/plans/${planId}`, {
+    method: "PUT",
+    body: JSON.stringify(values)
+  }, token);
+}
+
+export function savePlatformPlanDraft(token: string, planId: string, values: PlatformPlanVersionInput) {
+  return apiRequest<PlatformPlanVersion>(`/api/v1/platform/plans/${planId}/draft`, {
+    method: "PUT",
+    body: JSON.stringify(values)
+  }, token);
+}
+
+export function publishPlatformPlanVersion(token: string, planId: string, version: number) {
+  return apiRequest<PlatformPlanVersion>(
+    `/api/v1/platform/plans/${planId}/versions/${version}/publish`,
+    { method: "POST" },
+    token
+  );
+}
