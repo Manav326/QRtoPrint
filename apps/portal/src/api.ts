@@ -439,19 +439,39 @@ export function logout(token: string) {
   }, token);
 }
 
-function nativeCustomerAuthorizationHeaders(): Record<string, string> {
+async function nativeCustomerAuthorizationHeaders(): Promise<Record<string, string>> {
   try {
     const bridge = (window as Window & {
-      SmartPrintNative?: { getCustomerAccessToken?: () => string };
+      SmartPrintNative?: {
+        postMessage: (message: string) => void;
+        addEventListener: (type: string, listener: (event: MessageEvent) => void) => void;
+        removeEventListener: (type: string, listener: (event: MessageEvent) => void) => void;
+      };
     }).SmartPrintNative;
-    const token = bridge?.getCustomerAccessToken?.();
+    if (!bridge?.postMessage || !bridge.addEventListener || !bridge.removeEventListener) return {};
+    const token = await new Promise<string>((resolve) => {
+      let settled = false;
+      const finish = (value: string) => {
+        if (settled) return;
+        settled = true;
+        window.clearTimeout(timeout);
+        bridge.removeEventListener("message", onMessage);
+        resolve(value);
+      };
+      const onMessage = (event: MessageEvent) => finish(
+        typeof event.data === "string" ? event.data : ""
+      );
+      const timeout = window.setTimeout(() => finish(""), 1200);
+      bridge.addEventListener("message", onMessage);
+      bridge.postMessage("getCustomerAccessToken");
+    });
     return token ? { Authorization: `Bearer ${token}` } : {};
   } catch {
     return {};
   }
 }
 
-export function createCustomerSession(publicCode: string) {
+export async function createCustomerSession(publicCode: string) {
   return apiRequest<{
     id: string;
     status: string;
@@ -463,7 +483,7 @@ export function createCustomerSession(publicCode: string) {
     localAgent: { agentDeviceId: string; endpoints: string[] } | null;
   }>(`/api/v1/public/stations/${encodeURIComponent(publicCode)}/sessions`, {
     method: "POST",
-    headers: nativeCustomerAuthorizationHeaders()
+    headers: await nativeCustomerAuthorizationHeaders()
   });
 }
 
