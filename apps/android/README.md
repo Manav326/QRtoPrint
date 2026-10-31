@@ -11,6 +11,13 @@ The customer-facing app is **SmartPrint by QuantaEdge**. QRtoPrint remains the r
 - Export one file or an entire folder tree into a user-selected Android File Manager destination. Multiple selected files export together as a ZIP archive that preserves their original filenames.
 - Open/share files with other Android apps.
 - The customer portal's file picker can select a saved PDF/JPG/JPEG/PNG from this library.
+
+## Print batches and saved PDF editing
+
+Select 2–20 PDF, JPG, JPEG or PNG files in one library folder and choose **Prepare batch PDF**. The native app combines them in the displayed selection order into one print-ready PDF, preserving the original source files. PDF pages are rasterized at up to a 2,000-pixel long edge during composition; each image becomes one page. The combined PDF is limited to the existing print-upload contract of 20 MB and 500 pages. The individual source selection may total up to 100 MB, but the resulting PDF must fit the 20 MB upload limit. If it does not, preparation fails and the originals are left untouched. Attach the resulting PDF in the normal customer print page; the shop still calculates one quote and follows its existing review/payment/dispatch lifecycle.
+
+Saved PDFs also expose **Edit PDF pages** from the file menu. Customers can preview a page, rotate by 90 degrees, move pages up/down, remove unwanted pages and save a new edited copy. The original PDF is never overwritten. The editor uses Android's PDF renderer and rasterizes edited pages, so this is a convenient document-correction workflow rather than lossless vector PDF editing.
+
 - The native navigation uses custom SmartPrint vector icons for Home, My Files, Scan & Print and Activity; the Scan & Print explainer uses matching scan, QR and printer icons.
 - The native navigation uses SmartPrint vector icons for Home, My Files, Scan & Print and Activity; the Scan & Print explainer uses matching document-scan, QR and printer icons.
 
@@ -55,4 +62,4 @@ The CI Android job also uploads JVM and emulator test reports as `qrtoprint-andr
 ## Automated Android UI tests
 
 The CI Android job also launches an Android 15 (API 35) emulator and runs
-`connectedDebugAndroidTest`. Current instrumented coverage includes SmartPrint home/navigation, global guest-account entry, the Scan & Print explanation, nested-folder operations, scanner permission explanation, encrypted account-token storage and document/photo PDF operations. The latest passing CI run is [41216111944](https://github.com/Manav326/QRtoPrint/actions/runs/41216111944). This remains emulator/API/unit coverage; it does not replace physical-device camera, Google Play services scanner, file-manager provider, shop Wi-Fi, payment or printer validation.
+`connectedDebugAndroidTest`. Current instrumented coverage includes SmartPrint home/navigation, global guest-account entry, Scan & Print explanation, nested-folder operations, scanner permission explanation, encrypted account-token storage, mixed PDF/image batch composition and saved-PDF page edits. The latest passing CI run is [41216111944](https://github.com/Manav326/QRtoPrint/actions/runs/41216111944). This remains emulator/API/unit coverage; it does not replace physical-device camera, Google Play services scanner, file-manager provider, shop Wi-Fi, payment or printer validation.
