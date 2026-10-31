@@ -1245,6 +1245,32 @@ function CustomerPrintFlow({sessionToken,paymentOptions}:{sessionToken:string;pa
   }
 
 
+  // Keep the customer informed as the shop reviews, verifies payment and prints.
+  // Terminal states stop polling; transient network failures are retried silently.
+  useEffect(()=>{
+    if(!uploaded||!jobStatus)return;
+    const liveStates=new Set([
+      "AWAITING_SHOP_APPROVAL","AWAITING_PAYMENT","AWAITING_COUNTER_PAYMENT",
+      "AWAITING_CUSTOMER_PAYMENT","PAYMENT_REPORTED","PAYMENT_REJECTED",
+      "PAID_AUTHORISED","LOCAL_QUEUE_CLAIMED","LOCAL_QUEUE_READY",
+      "PRINT_AUTHORISED","PRINT_SUBMITTING","SPOOLER_ACCEPTED","PRINTING",
+      "OUTPUT_UNCONFIRMED"
+    ]);
+    if(!liveStates.has(jobStatus.status))return;
+    let active=true;
+    const timer=window.setInterval(()=>{
+      void getCustomerJobStatus(sessionToken,uploaded.job.id).then(refreshed=>{
+        if(!active)return;
+        setJobStatus(refreshed);
+        setPayment(refreshed.payment??null);
+      }).catch(()=>{/* Retry on the next interval without interrupting the flow. */});
+    },8000);
+    return ()=>{
+      active=false;
+      window.clearInterval(timer);
+    };
+  },[sessionToken,uploaded?.job.id,jobStatus?.status]);
+
   async function beginPayment(method:"UPI"|"CASH") {
     if(!uploaded)return;
     setBusy(true);setError("");
