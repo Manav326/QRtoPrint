@@ -88,6 +88,8 @@ class MainActivity : AppCompatActivity() {
     private var accountCreateMode = false
     private var editingPdf: File? = null
     private val selectedFilePaths = linkedSetOf<String>()
+    private val chooserSelectedFilePaths = linkedSetOf<String>()
+    private var fileChooserAllowsMultiple = false
 
     private lateinit var importFiles: ActivityResultLauncher<Array<String>>
     private lateinit var importTree: ActivityResultLauncher<Uri?>
@@ -776,7 +778,7 @@ class MainActivity : AppCompatActivity() {
     private fun showPicker() {
         pickerMode = true
         pickerPath = ""
-        toolbar.title = "Choose a document"
+        toolbar.title = if (fileChooserAllowsMultiple) "Choose documents" else "Choose a document"
         toolbar.setNavigationIcon(android.R.drawable.ic_media_previous)
         toolbar.setNavigationOnClickListener { cancelPicker() }
         navigation.visibility = View.GONE
@@ -871,6 +873,34 @@ class MainActivity : AppCompatActivity() {
         val folder = try { store.folder(path) } catch (_: Exception) { store.root }
         val entries = store.list(folder)
         val selectedHere = entries.filter { !it.isDirectory && selectedFilePaths.contains(it.canonicalPath) }
+        val chooserSelection = if (isPicker && fileChooserAllowsMultiple) selectedChooserFiles() else emptyList()
+        if (isPicker && fileChooserAllowsMultiple) {
+            val selectionCard = card()
+            val selectionContent = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                setPadding(dp(14), dp(12), dp(14), dp(12))
+            }
+            selectionContent.addView(text(chooserSelection.size.toString() + " selected", 14, R.color.qp_text, true))
+            val selectionActions = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+            val validSelection = PrintBatchSelectionPolicy.validationError(chooserSelection) == null
+            selectionActions.addView(button("Attach selected files", true).apply {
+                isEnabled = validSelection
+                alpha = if (validSelection) 1f else 0.45f
+                setOnClickListener { chooseFiles(chooserSelection) }
+            }, LinearLayout.LayoutParams(0, dp(44), 1f))
+            selectionActions.addView(button("Clear", false).apply {
+                isEnabled = chooserSelection.isNotEmpty()
+                setOnClickListener { chooserSelectedFilePaths.clear(); refreshLibrary() }
+            }, LinearLayout.LayoutParams(0, dp(44), 0.38f).apply { marginStart = dp(8) })
+            selectionContent.addView(selectionActions, linearParams().apply { topMargin = dp(8) })
+            selectionContent.addView(text(
+                if (chooserSelection.isEmpty()) "Select files from this folder or browse into subfolders; your selection is kept as you browse."
+                else "Original files stay separate and upload as one print batch for individual shop review.",
+                11, R.color.qp_muted, false
+            ).apply { setPadding(0, dp(7), 0, 0) })
+            selectionCard.addView(selectionContent)
+            column.addView(selectionCard, linearParams().apply { bottomMargin = dp(12) })
+        }
         if (!isPicker && selectedHere.isNotEmpty()) {
             val selectionCard = card()
             val selectionContent = LinearLayout(this).apply {
@@ -888,15 +918,15 @@ class MainActivity : AppCompatActivity() {
                         it.length() in 1..(20L * 1024L * 1024L)
                 } &&
                 selectedHere.sumOf { it.length() } <= DocumentBatchComposer.MAX_SOURCE_BYTES
-            selectionActions.addView(button("Prepare batch PDF", true).apply {
+            selectionActions.addView(button("Combine into one PDF", true).apply {
                 isEnabled = supportedBatch
                 alpha = if (supportedBatch) 1f else 0.45f
                 setOnClickListener { preparePrintBatch(selectedHere) }
             }, LinearLayout.LayoutParams(0, dp(44), 1f).apply { marginStart = dp(8) })
             selectionContent.addView(selectionActions, linearParams().apply { topMargin = dp(8) })
             selectionContent.addView(text(
-                if (supportedBatch) "Selected PDFs and photos become one ordered print-ready PDF. Original files stay unchanged."
-                else "Select 2–20 PDF/JPG/PNG files, each up to 20 MB and 100 MB total, to prepare one print batch.",
+                if (supportedBatch) "Creates one combined PDF. For separately reviewable print files, use Select multiple files after scanning a shop QR code."
+                else "Select 2–20 PDF/JPG/PNG files, each up to 20 MB and 100 MB total, to combine them into one PDF.",
                 11, R.color.qp_muted, false
             ).apply { setPadding(0, dp(7), 0, 0) })
             selectionCard.addView(selectionContent)
@@ -939,7 +969,14 @@ class MainActivity : AppCompatActivity() {
         details.addView(text(info, 12, R.color.qp_muted, false).apply { setPadding(0, dp(3), 0, 0) })
         row.addView(details, LinearLayout.LayoutParams(0, -2, 1f).apply { marginStart = dp(12) })
 
-        if (isPicker && !file.isDirectory) {
+        if (isPicker && fileChooserAllowsMultiple && !file.isDirectory) {
+            val selected = CheckBox(this).apply {
+                isChecked = chooserSelectedFilePaths.contains(file.canonicalPath)
+                contentDescription = "Select " + file.name
+                setOnCheckedChangeListener { _, checked -> setChooserFileSelected(file, checked) }
+            }
+            row.addView(selected, LinearLayout.LayoutParams(dp(42), dp(44)))
+        } else if (isPicker && !file.isDirectory) {
             row.addView(button("Select", true).apply {
                 minWidth = dp(72)
                 setOnClickListener { chooseFile(file) }
@@ -974,7 +1011,8 @@ class MainActivity : AppCompatActivity() {
             if (file.isDirectory) {
                 if (isPicker) pickerPath = store.pathOf(file) else folderPath = store.pathOf(file)
                 refreshLibrary()
-            } else if (isPicker) chooseFile(file) else openDocument(file)
+            } else if (isPicker && fileChooserAllowsMultiple) setChooserFileSelected(file, !chooserSelectedFilePaths.contains(file.canonicalPath))
+            else if (isPicker) chooseFile(file) else openDocument(file)
         }
         if (!isPicker) {
             outer.setOnLongClickListener {
@@ -1336,6 +1374,8 @@ class MainActivity : AppCompatActivity() {
             ): Boolean {
                 fileCallback?.onReceiveValue(null)
                 fileCallback = callback
+                fileChooserAllowsMultiple = params.mode == FileChooserParams.MODE_OPEN_MULTIPLE
+                chooserSelectedFilePaths.clear()
                 showPicker()
                 return true
             }
@@ -1422,27 +1462,58 @@ class MainActivity : AppCompatActivity() {
             }.show()
     }
 
-    private fun chooseFile(file: File) {
-        if (!DocumentNamePolicy.isPrintable(file.name, file.length())) {
-            toast("Printing accepts PDF, JPG and PNG files up to 20 MB.")
+    private fun selectedChooserFiles(): List<File> = chooserSelectedFilePaths.mapNotNull { path ->
+        runCatching { File(path).canonicalFile }.getOrNull()
+    }.filter { it.isFile }
+
+    private fun setChooserFileSelected(file: File, checked: Boolean) {
+        val path = file.canonicalPath
+        if (!checked) {
+            chooserSelectedFilePaths.remove(path)
+            refreshLibrary()
             return
         }
+        val candidate = selectedChooserFiles().filterNot { it.canonicalPath == path } + file
+        val error = PrintBatchSelectionPolicy.validationError(candidate)
+        if (error != null) {
+            toast(error)
+            return
+        }
+        chooserSelectedFilePaths.add(path)
+        refreshLibrary()
+    }
+
+    private fun chooseFile(file: File) = chooseFiles(listOf(file))
+
+    private fun chooseFiles(files: List<File>) {
         val callback = fileCallback
         if (callback == null) { toast("Open a document field in the print page first."); return }
+        val error = PrintBatchSelectionPolicy.validationError(files)
+        if (error != null) { toast(error); return }
+        if (!fileChooserAllowsMultiple && files.size != 1) {
+            toast("This print field accepts one document at a time.")
+            return
+        }
         try {
-            val uri = FileProvider.getUriForFile(this, "$packageName.documents", file)
+            val uris = files.map { file ->
+                FileProvider.getUriForFile(this, "$packageName.documents", file)
+            }.toTypedArray()
             fileCallback = null
+            chooserSelectedFilePaths.clear()
+            fileChooserAllowsMultiple = false
             showPrint()
-            callback.onReceiveValue(arrayOf(uri))
+            callback.onReceiveValue(uris)
         } catch (e: Exception) {
             cancelPicker()
-            toast("Could not attach the document: ${message(e)}")
+            toast("Could not attach the selected documents: " + message(e))
         }
     }
 
     private fun cancelPicker() {
         fileCallback?.onReceiveValue(null)
         fileCallback = null
+        chooserSelectedFilePaths.clear()
+        fileChooserAllowsMultiple = false
         showPrint()
     }
 
