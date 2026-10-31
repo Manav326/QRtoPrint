@@ -6,8 +6,9 @@ import {
 } from "lucide-react";
 import QRCode from "react-qr-code";
 import AuthScreen from "./AuthScreen";
+import PlatformAdminConsole from "./PlatformAdminConsole";
 import {
-  ApiError, acceptCustomerQuote, approveShopPrintJob, assignShopPrintJobPrinter, calculateCustomerQuote, getShopReportSummary,
+  ApiError, isPlatformAdminSession, acceptCustomerQuote, approveShopPrintJob, assignShopPrintJobPrinter, calculateCustomerQuote, getShopReportSummary,
   confirmShopPrintOutput, dispatchShopPrintJob,
   createAgentEnrollmentCode, createCustomerSession, createPrinter, createStation,
   downloadShopDocument, getCustomerJobStatus, getShopJobEvents, loadShopData,
@@ -50,7 +51,10 @@ export default function App() {
     return <AuthScreen onAuthenticated={setTokens} />;
   }
 
-  return <ShopConsole tokens={tokens} onSignOut={() => { storeTokens(null); setTokens(null); }} />;
+  const onSignOut = () => { storeTokens(null); setTokens(null); };
+  return isPlatformAdminSession(tokens)
+    ? <PlatformAdminConsole tokens={tokens} onSignOut={onSignOut}/>
+    : <ShopConsole tokens={tokens} onSignOut={onSignOut}/>;
 }
 
 function ShopConsole({ tokens, onSignOut }: { tokens: AuthTokens; onSignOut: () => void }) {
