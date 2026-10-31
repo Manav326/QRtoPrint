@@ -1791,6 +1791,8 @@ function CustomerPrintFlow({sessionToken,paymentOptions,localAgent,localReady}:{
     setFiles(unique);setSelectedFileIndex(0);setError("");
   }
 
+  const pendingFilesCount=files.filter(candidate=>!uploadedFileFingerprints.includes(customerFileFingerprint(candidate))).length;
+
   return <section className="customer-print-flow">
     <div className="customer-flow-heading"><div><span>STEP 1</span><h2>Add your documents</h2></div><span className="upload-limit">PDF, JPG or PNG · Up to 20 files / 50 MB per batch</span></div>
     {localAgent?.endpoints.length? <div className="customer-upload-modes">
@@ -1821,6 +1823,13 @@ function CustomerPrintFlow({sessionToken,paymentOptions,localAgent,localReady}:{
     {files.length>0&&uploadMode==="LOCAL"&&localAgent&&<small className="customer-upload-local-note">{localReady?"Your files travel over shop Wi-Fi. The cloud receives only job, quote and payment metadata.":"Tap Check shop Wi-Fi above first to grant the browser permission."}</small>}
     {files.length>0&&uploadMode==="CLOUD"&&localAgent&&<small className="customer-upload-local-note">Cloud-assisted fallback: files are uploaded encrypted to the API before being transferred to the shop computer.</small>}
     {uploaded&&<>
+      {uploadedBatch.length>1&&<div className="customer-uploaded-batch">
+        <div className="customer-uploaded-batch-head"><strong>Batch review · {uploadedBatch.length} files</strong><span>Each document is quoted, paid and managed independently.</span></div>
+        {uploadedBatch.map((item,index)=><button type="button" key={item.job.id} className={uploaded.job.id===item.job.id?"customer-uploaded-batch-item active":"customer-uploaded-batch-item"} onClick={()=>selectUploadedFile(item)}>
+          <span className="batch-file-index">{index+1}</span><span className="batch-file-copy"><strong>{item.document.originalFileName}</strong><small>{formatBytes(item.document.sizeBytes)} · {item.job.pageCount} {item.job.pageCount===1?"page":"pages"}</small></span>
+          <Status label={item.job.id===uploaded.job.id?"Selected":"Uploaded"} tone={item.job.id===uploaded.job.id?"blue":"green"}/>
+        </button>)}
+      </div>}
       <div className="uploaded-document-card"><div className="uploaded-document-icon"><FileText size={18}/></div><div><strong>{uploaded.document.originalFileName}</strong><span>{uploaded.job.pageCount} {uploaded.job.pageCount===1?"page":"pages"} · {formatBytes(uploaded.document.sizeBytes)} · Validated</span></div><Status label="Uploaded" tone="green"/></div>
       {!quote&&!jobStatus&&<>
         <div className="customer-flow-heading customer-config-heading"><div><span>STEP 2</span><h2>Choose print settings</h2></div></div>
