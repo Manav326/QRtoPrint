@@ -467,7 +467,9 @@ export interface ShopCustomerJob {
   currency: string;
   quotedAmountMinor: number;
   rejectedPageNumbersJson: string;
+  outputType: string;
   outputConfirmedUtc?: string | null;
+  outputCompletedUtc?: string | null;
   document: { originalFileName: string; mediaType: string; sizeBytes: number };
   payment?: {
     status: string;
