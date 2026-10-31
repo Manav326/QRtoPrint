@@ -32,9 +32,9 @@ services:
       Documents__EncryptionKey: ${DOCUMENTS_ENCRYPTION_KEY:-MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=}
       Documents__StorageRoot: /var/lib/qrtoprint/documents
       Database__ApplyMigrationsOnStartup: "true"
-      PublicPortal__BaseUrl: ${LOCAL_PORTAL_ORIGIN:-http://localhost:3000}
-      Cors__AllowedOrigins__0: "http://localhost:3000"
-      Cors__AllowedOrigins__1: ${LOCAL_PORTAL_ORIGIN:-http://localhost:3000}
+      PublicPortal__BaseUrl: http://${LOCAL_LAN_IP:-192.168.31.47}:3000
+      Cors__AllowedOrigins__0: "http://${LOCAL_LAN_IP:-192.168.31.47}:3000"
+      Cors__AllowedOrigins__1: "http://localhost:3000"
     ports:
       - "8080:8080"
     volumes:
@@ -55,7 +55,7 @@ services:
       context: .
       dockerfile: apps/portal/Dockerfile
       args:
-        VITE_API_BASE_URL: ${LOCAL_API_BASE_URL:-http://localhost:8080}
+        VITE_API_BASE_URL: http://${LOCAL_LAN_IP:-192.168.31.47}:8080
     restart: unless-stopped
     ports:
       - "3000:80"
