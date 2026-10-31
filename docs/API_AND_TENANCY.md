@@ -26,6 +26,22 @@ Platform administrator accounts are provisioned offline using `scripts/bootstrap
 
 These routes require the platform-admin authorization policy. A shop user cannot access them, even if a platform claim is mistakenly added to a tenant-scoped token.
 
+### Platform subscription plan catalogue
+
+Platform-admin-only plan management is available under the same unscoped platform authorization policy:
+
+- GET /api/v1/platform/plans — lists plans and their version history.
+- POST /api/v1/platform/plans — creates a non-system plan and its first draft version.
+- PUT /api/v1/platform/plans/{planId} — updates plan metadata and whether it is available for future assignment.
+- PUT /api/v1/platform/plans/{planId}/draft — saves the current draft or starts the next version; published versions are never edited in place.
+- POST /api/v1/platform/plans/{planId}/versions/{versionNumber}/publish — publishes a draft only after at least one monthly or annual price is explicitly set. Zero is a valid explicit free price.
+
+Prices are integer minor currency units with a required three-letter currency code. A blank price means that billing interval is not configured; zero explicitly means free. Nullable quotas mean no configured cap; positive integer quotas cover printers, agent computers, QR stations, monthly print jobs and maximum document bytes. Feature flags are centrally stored for cloud-assisted printing, white-label and advanced reports.
+
+Plan versions are immutable after publication. A subscription's nullable PlanVersionId references the exact version used for its terms. The additive migration seeds a protected TRIAL plan/version and maps existing TRIAL subscriptions to it without adding a price or a quota. The TRIAL code and system plan are not editable through the catalogue. Legacy non-trial subscription rows remain valid with a null PlanVersionId pending an explicit migration/assignment policy.
+
+The catalogue is a configuration foundation, not a payment implementation. Publishing a plan does not bill a shop or assign a subscription; plan assignment, runtime quota enforcement, subscription invoices, platform payment reconciliation, renewals, dunning and refunds remain separate work. Do not use shop-owned print-payment settings or records for SaaS subscription charges.
+
 ### Authenticated shop endpoints
 
 - GET /api/v1/shop/profile
