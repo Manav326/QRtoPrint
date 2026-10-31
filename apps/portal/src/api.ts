@@ -461,7 +461,7 @@ async function nativeCustomerAuthorizationHeaders(): Promise<Record<string, stri
       const onMessage = (event: MessageEvent) => finish(
         typeof event.data === "string" ? event.data : ""
       );
-      const timeout = window.setTimeout(() => finish(""), 1200);
+      const timeout = window.setTimeout(() => finish(""), 10000);
       bridge.addEventListener("message", onMessage);
       bridge.postMessage("getCustomerAccessToken");
     });
