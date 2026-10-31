@@ -1279,7 +1279,8 @@ shop.MapGet("/reports/summary", async (
 
     var verifiedPayments = db.PrintPayments.AsNoTracking().Where(payment =>
         payment.TenantId == tenantId &&
-        payment.Status == "VERIFIED" &&
+        (payment.Status == "VERIFIED" || payment.Status == "PARTIALLY_REFUNDED") &&
+        payment.AmountMinor > payment.RefundedAmountMinor &&
         payment.VerifiedUtc != null &&
         payment.VerifiedUtc >= fromUtc &&
         payment.VerifiedUtc < toUtc);
@@ -1291,7 +1292,7 @@ shop.MapGet("/reports/summary", async (
             method = group.Key.Method,
             currency = group.Key.Currency,
             paymentCount = group.Count(),
-            amountMinor = group.Sum(payment => payment.AmountMinor)
+            amountMinor = group.Sum(payment => payment.AmountMinor - payment.RefundedAmountMinor)
         })
         .OrderBy(group => group.currency)
         .ThenBy(group => group.method)
@@ -1462,7 +1463,8 @@ shop.MapPost("/print-jobs/{jobId:guid}/dispatch", async (Guid jobId, ClaimsPrinc
               agent.RevokedUtc == null && agent.LastSeenUtc != null && agent.LastSeenUtc >= onlineAfter
         select new { printer.DisplayName, printer.QueueName, printer.OutputMode, AgentId = agent.Id }
     ).SingleOrDefaultAsync(ct);
-    var verified = await db.PrintPayments.AnyAsync(x => x.TenantId == tenantId && x.PrintJobId == job.Id && x.Status == "VERIFIED", ct);
+    var verified = await db.PrintPayments.AnyAsync(x => x.TenantId == tenantId && x.PrintJobId == job.Id &&
+        (x.Status == "VERIFIED" || x.Status == "PARTIALLY_REFUNDED"), ct);
     if (ready is null || !verified)
         return Results.Conflict(new { code = "print_prerequisites_not_met", message = "Verified payment and the same paired computer's live printer queue are required." });
 
@@ -1851,6 +1853,8 @@ shop.MapPost("/print-jobs/{jobId:guid}/refund", async (
     if (duplicate is not null)
     {
         await tx.RollbackAsync(ct);
+        if (duplicate.PrintJobId != jobId)
+            return Results.Conflict(new { code = "refund_idempotency_key_reused", message = "This refund request key is already associated with another print file." });
         return Results.Ok(new { duplicate.Id, duplicate.PrintJobId, duplicate.PrintPaymentId, duplicate.AmountMinor, duplicate.Currency, duplicate.Method, duplicate.Status, duplicate.Reference, duplicate.Reason, duplicate.RefundedUtc, DuplicateRequest = true });
     }
     var job = await db.PrintJobs.SingleOrDefaultAsync(x => x.Id == jobId && x.TenantId == tenantId, ct);
