@@ -13,7 +13,6 @@ import android.content.res.ColorStateList
 import android.view.View
 import android.view.ViewGroup
 import android.webkit.CookieManager
-import android.webkit.JavascriptInterface
 import android.webkit.SslErrorHandler
 import android.webkit.ValueCallback
 import android.webkit.WebChromeClient
@@ -40,6 +39,8 @@ import androidx.core.view.ViewCompat
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.documentfile.provider.DocumentFile
+import androidx.webkit.WebViewCompat
+import androidx.webkit.WebViewFeature
 import com.google.android.material.appbar.MaterialToolbar
 import com.google.android.material.bottomnavigation.BottomNavigationView
 import com.google.android.material.button.MaterialButton
@@ -237,7 +238,6 @@ class MainActivity : AppCompatActivity() {
             menu.add(Menu.NONE, SCAN_PRINT, 2, "Scan & Print").setIcon(android.R.drawable.ic_menu_camera)
             menu.add(Menu.NONE, ACTIVITY, 3, "Activity").setIcon(android.R.drawable.ic_menu_recent_history)
             labelVisibilityMode = BottomNavigationView.LABEL_VISIBILITY_LABELED
-            itemHorizontalTranslationEnabled = false
             backgroundTintList = ColorStateList.valueOf(getColor(R.color.qp_card))
             itemIconTintList = ColorStateList(
                 arrayOf(intArrayOf(android.R.attr.state_checked), intArrayOf()),
@@ -395,12 +395,7 @@ class MainActivity : AppCompatActivity() {
         return scroll
     }
 
-    private fun accountServiceUrl(): String {
-        val current = portalUrl?.let { Uri.parse(it) }
-        return if (current != null && !current.host.isNullOrBlank()) {
-            "${current.scheme}://${current.authority}"
-        } else BuildConfig.SERVICE_BASE_URL
-    }
+    private fun accountServiceUrl(): String = BuildConfig.SERVICE_BASE_URL
 
     private fun authenticateCustomer(name: String, email: String, password: String, create: Boolean) {
         toast(if (create) "Creating your SmartPrint account…" else "Signing in…")
@@ -1008,11 +1003,45 @@ class MainActivity : AppCompatActivity() {
     private fun ensureWebView(): WebView {
         webView?.let { return it }
         val view = WebView(this)
-        view.addJavascriptInterface(object {
-            @JavascriptInterface
-            fun getCustomerAccessToken(): String =
-                customerAccountStore.read()?.accessToken.orEmpty()
-        }, "SmartPrintNative")
+        val trustedPage = Uri.parse(portalUrl ?: BuildConfig.SERVICE_BASE_URL)
+        val trustedOrigin = "${trustedPage.scheme}://${trustedPage.authority}"
+        if (trustedPage.scheme in setOf("https", "http") &&
+            WebViewFeature.isFeatureSupported(WebViewFeature.WEB_MESSAGE_LISTENER)) {
+            WebViewCompat.addWebMessageListener(
+                view,
+                "SmartPrintNative",
+                setOf(trustedOrigin)
+            ) { _, message, sourceOrigin, isMainFrame, replyProxy ->
+                // Only the trusted top-level shop page may request a customer token.
+                // Third-party frames and all other messages receive no credentials.
+                if (isMainFrame &&
+                    sourceOrigin.scheme == trustedPage.scheme &&
+                    sourceOrigin.host.equals(trustedPage.host, true) &&
+                    sourceOrigin.port == trustedPage.port &&
+                    message.data == "getCustomerAccessToken") {
+                    Thread {
+                        val token = try {
+                            var auth = customerAccountStore.read()
+                            if (auth != null) {
+                                val expiry = runCatching {
+                                    java.time.Instant.parse(auth.accessTokenExpiresUtc)
+                                }.getOrNull()
+                                if (expiry == null || expiry.isBefore(java.time.Instant.now().plusSeconds(90))) {
+                                    auth = CustomerAccountClient.refresh(BuildConfig.SERVICE_BASE_URL, auth)
+                                    customerAccountStore.save(auth)
+                                }
+                                auth.accessToken
+                            } else ""
+                        } catch (_: Exception) {
+                            ""
+                        }
+                        runOnUiThread {
+                            if (!isFinishing && !isDestroyed) replyProxy.postMessage(token)
+                        }
+                    }.start()
+                }
+            }
+        }
         view.settings.apply {
             javaScriptEnabled = true
             domStorageEnabled = true
