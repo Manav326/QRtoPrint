@@ -18,13 +18,22 @@ public sealed record AgentClaimedJob(
     string MediaType,
     long SizeBytes,
     string Sha256,
-    DateTimeOffset LeaseExpiresUtc);
+    DateTimeOffset LeaseExpiresUtc,
+    string StorageMode = "CLOUD");
 
 public sealed record AgentJobClaimResponse(
     IReadOnlyList<AgentClaimedJob> Jobs,
     DateTimeOffset ClaimedUtc);
 
 public sealed record AgentJobReceivedRequest(string Sha256, long SizeBytes);
+
+public sealed record LocalPrintUploadCompletionRequest(
+    int PageCount,
+    string PageSizesJson,
+    string FileExtension,
+    string MediaType,
+    long SizeBytes,
+    string Sha256);
 
 public sealed record AgentLocalQueueEntry(
     Guid JobId,

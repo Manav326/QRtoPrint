@@ -136,7 +136,7 @@ export class ApiError extends Error {
   }
 }
 
-const apiBase = (import.meta.env.VITE_API_BASE_URL || "http://localhost:8080").replace(/\/$/, "");
+const apiBase = (import.meta.env.VITE_API_BASE_URL || "").replace(/\/$/, "");
 
 let refreshInFlight: Promise<AuthTokens | null> | null = null;
 
@@ -587,6 +587,145 @@ export async function uploadCustomerDocument(sessionToken: string, file: File) {
 
   sessionStorage.removeItem(storageKey);
   return uploaded;
+}
+
+type CustomerLocalAgentApi = { agentDeviceId: string; endpoints: string[] };
+
+function customerLocalUploadAttemptStorageKeys(sessionToken: string, file: File) {
+  const key = customerUploadAttemptStorageKey(sessionToken, file) + ".local";
+  return { idempotency: key + ".key", grant: key + ".grant" };
+}
+
+function createLocalUploadGrantToken(): string {
+  const bytes = crypto.getRandomValues(new Uint8Array(32));
+  let binary = "";
+  for (const byte of bytes) binary += String.fromCharCode(byte);
+  return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
+}
+
+function isPrivateLocalAgentEndpoint(value: string): URL | null {
+  try {
+    const endpoint = new URL(value);
+    const octets = endpoint.hostname.split(".").map(Number);
+    const privateIpv4 = octets.length === 4 &&
+      octets.every(part => Number.isInteger(part) && part >= 0 && part <= 255) &&
+      (octets[0] === 10 ||
+        (octets[0] === 172 && octets[1] >= 16 && octets[1] <= 31) ||
+        (octets[0] === 192 && octets[1] === 168));
+    if (endpoint.protocol !== "http:" || endpoint.port !== "17842" ||
+        endpoint.username || endpoint.password || endpoint.pathname !== "/" ||
+        endpoint.search || endpoint.hash || !privateIpv4) return null;
+    return endpoint;
+  } catch {
+    return null;
+  }
+}
+
+export async function uploadCustomerDocumentLocally(
+  sessionToken: string,
+  file: File,
+  localAgent: CustomerLocalAgentApi
+): Promise<UploadedPrintJob> {
+  const keys = customerLocalUploadAttemptStorageKeys(sessionToken, file);
+  const idempotencyKey = sessionStorage.getItem(keys.idempotency) || crypto.randomUUID();
+  const grantToken = sessionStorage.getItem(keys.grant) || createLocalUploadGrantToken();
+  sessionStorage.setItem(keys.idempotency, idempotencyKey);
+  sessionStorage.setItem(keys.grant, grantToken);
+
+  const digest = await crypto.subtle.digest("SHA-256", await file.arrayBuffer());
+  const sha256 = Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, "0")).join("");
+  let ticket: {
+    id: string;
+    printJobId: string;
+    jobNumber: string;
+    agentDeviceId: string;
+    expiresUtc: string;
+    completed: boolean;
+  };
+  try {
+    ticket = await apiRequest<{
+      id: string;
+      printJobId: string;
+      jobNumber: string;
+      agentDeviceId: string;
+      expiresUtc: string;
+      completed: boolean;
+    }>("/api/v1/public/sessions/current/local-upload-tickets", {
+      method: "POST",
+      headers: {
+        "X-Print-Session": sessionToken,
+        "Idempotency-Key": idempotencyKey
+      },
+      body: JSON.stringify({
+        originalFileName: file.name,
+        sizeBytes: file.size,
+        sha256,
+        grantToken
+      })
+    });
+  } catch (exception) {
+    if (exception instanceof ApiError && exception.status === 409 && /expired/i.test(exception.message)) {
+      sessionStorage.removeItem(keys.idempotency);
+      sessionStorage.removeItem(keys.grant);
+    }
+    throw exception;
+  }
+
+  if (ticket.agentDeviceId !== localAgent.agentDeviceId) {
+    sessionStorage.removeItem(keys.idempotency);
+    sessionStorage.removeItem(keys.grant);
+    throw new ApiError("The assigned shop computer changed. Refresh the QR session and retry.", 409);
+  }
+
+  const form = new FormData();
+  form.append("file", file, file.name);
+  let lastError: Error | null = null;
+  for (const value of localAgent.endpoints.slice(0, 8)) {
+    const endpoint = isPrivateLocalAgentEndpoint(value);
+    if (!endpoint) continue;
+    const controller = new AbortController();
+    const timeout = window.setTimeout(() => controller.abort(), 90_000);
+    try {
+      const response = await fetch(`${endpoint.origin}/api/v1/local/uploads/${encodeURIComponent(ticket.id)}`, {
+        method: "POST",
+        mode: "cors",
+        cache: "no-store",
+        credentials: "omit",
+        headers: { "X-Print-Upload-Grant": grantToken },
+        body: form,
+        signal: controller.signal,
+        targetAddressSpace: "local"
+      } as RequestInit & { targetAddressSpace: "local" });
+
+      const raw = await response.text();
+      let payload: unknown = null;
+      if (raw) {
+        try { payload = JSON.parse(raw); } catch { payload = raw; }
+      }
+      if (!response.ok) {
+        const body = payload as { title?: string; detail?: string; message?: string } | null;
+        lastError = new ApiError(body?.detail || body?.message || body?.title || `Local upload failed (${response.status}).`, response.status);
+        continue;
+      }
+
+      sessionStorage.removeItem(keys.idempotency);
+      sessionStorage.removeItem(keys.grant);
+      return payload as UploadedPrintJob;
+    } catch (exception) {
+      lastError = exception instanceof Error
+        ? exception
+        : new Error("Could not connect to the shop's local print computer.");
+    } finally {
+      window.clearTimeout(timeout);
+    }
+  }
+
+  if (lastError instanceof ApiError && lastError.status === 409 &&
+      /expired/i.test(lastError.message)) {
+    sessionStorage.removeItem(keys.idempotency);
+    sessionStorage.removeItem(keys.grant);
+  }
+  throw lastError ?? new ApiError("No reachable private shop computer was found. Connect to the shop Wi-Fi and try again.", 0);
 }
 
 export function calculateCustomerQuote(sessionToken: string, jobId: string, values: {

@@ -25,6 +25,7 @@ public sealed class SmartPrintDbContext(DbContextOptions<SmartPrintDbContext> op
     public DbSet<PrintJob> PrintJobs => Set<PrintJob>();
     public DbSet<PrintPayment> PrintPayments => Set<PrintPayment>();
     public DbSet<PrintDocument> PrintDocuments => Set<PrintDocument>();
+    public DbSet<LocalPrintUploadTicket> LocalPrintUploadTickets => Set<LocalPrintUploadTicket>();
     public DbSet<PrintJobEvent> PrintJobEvents => Set<PrintJobEvent>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
@@ -333,11 +334,54 @@ public sealed class SmartPrintDbContext(DbContextOptions<SmartPrintDbContext> op
             entity.Property(x => x.FileExtension).HasMaxLength(8).IsRequired();
             entity.Property(x => x.Sha256).HasMaxLength(64).IsRequired();
             entity.Property(x => x.StorageKey).HasMaxLength(200).IsRequired();
+            entity.Property(x => x.StorageMode).HasMaxLength(20).IsRequired();
             entity.Property(x => x.PageSizesJson).HasColumnType("jsonb").IsRequired();
+            entity.HasOne<AgentDevice>().WithMany()
+                .HasForeignKey(x => new { x.TenantId, x.AgentDeviceId })
+                .HasPrincipalKey(x => new { x.TenantId, x.Id })
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasIndex(x => new { x.TenantId, x.AgentDeviceId })
+                .HasFilter("\\"AgentDeviceId\\" IS NOT NULL");
             entity.HasIndex(x => new { x.TenantId, x.PrintJobId }).IsUnique();
             entity.HasIndex(x => new { x.TenantId, x.Sha256 });
             entity.HasOne<PrintJob>().WithOne().HasForeignKey<PrintDocument>(x => new { x.TenantId, x.PrintJobId })
                 .HasPrincipalKey<PrintJob>(x => new { x.TenantId, x.Id }).OnDelete(DeleteBehavior.Cascade);
+
+
+        modelBuilder.Entity<LocalPrintUploadTicket>(entity =>
+        {
+            entity.ToTable("LocalPrintUploadTickets");
+            entity.HasKey(x => x.Id);
+            entity.Property(x => x.JobNumber).HasMaxLength(32).IsRequired();
+            entity.Property(x => x.IdempotencyKey).HasMaxLength(100).IsRequired();
+            entity.Property(x => x.GrantHash).HasMaxLength(64).IsRequired();
+            entity.Property(x => x.OriginalFileName).HasMaxLength(255).IsRequired();
+            entity.Property(x => x.MediaType).HasMaxLength(100).IsRequired();
+            entity.Property(x => x.FileExtension).HasMaxLength(8).IsRequired();
+            entity.Property(x => x.Sha256).HasMaxLength(64).IsRequired();
+            entity.HasIndex(x => x.GrantHash).IsUnique();
+            entity.HasIndex(x => new { x.TenantId, x.CustomerSessionId, x.IdempotencyKey }).IsUnique();
+            entity.HasIndex(x => new { x.TenantId, x.PrintJobId }).IsUnique();
+            entity.HasIndex(x => new { x.TenantId, x.AgentDeviceId, x.ExpiresUtc, x.CompletedUtc });
+            entity.HasIndex(x => new { x.TenantId, x.QrStationId });
+            entity.HasIndex(x => new { x.TenantId, x.PrinterDeviceId });
+            entity.HasOne<Tenant>().WithMany().HasForeignKey(x => x.TenantId).OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne<CustomerPrintSession>().WithMany()
+                .HasForeignKey(x => new { x.TenantId, x.CustomerSessionId })
+                .HasPrincipalKey(x => new { x.TenantId, x.Id })
+                .OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne<QrStation>().WithMany()
+                .HasForeignKey(x => new { x.TenantId, x.QrStationId })
+                .HasPrincipalKey(x => new { x.TenantId, x.Id })
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<PrinterDevice>().WithMany()
+                .HasForeignKey(x => new { x.TenantId, x.PrinterDeviceId })
+                .HasPrincipalKey(x => new { x.TenantId, x.Id })
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<AgentDevice>().WithMany()
+                .HasForeignKey(x => new { x.TenantId, x.AgentDeviceId })
+                .HasPrincipalKey(x => new { x.TenantId, x.Id })
+                .OnDelete(DeleteBehavior.Restrict);
         });
     }
 }

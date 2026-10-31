@@ -1,0 +1,15 @@
+**/node_modules
+**/dist
+**/bin
+**/obj
+**/coverage
+.git
+.github
+.env
+.env.*
+!.env.example
+.vscode
+.idea
+.DS_Store
+*.user
+*.suo

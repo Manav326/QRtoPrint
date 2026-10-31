@@ -43,3 +43,57 @@ jobs:
         run: dotnet test tests/SmartPrint.Api.Tests/SmartPrint.Api.Tests.csproj --configuration Release
       - name: Run Windows Agent local queue tests
         run: dotnet test tests/SmartPrint.Agent.Tests/SmartPrint.Agent.Tests.csproj --configuration Release
+      - name: Publish self-contained Windows Agent
+        run: dotnet publish src/SmartPrint.Agent/SmartPrint.Agent.csproj --configuration Release --runtime win-x64 --self-contained true --output artifacts/agent
+      - name: Add Agent setup scripts and guide
+        shell: pwsh
+        run: |
+          Copy-Item scripts/pair-agent.ps1, scripts/install-agent-service.ps1, scripts/uninstall-agent-service.ps1, src/SmartPrint.Agent/appsettings.example.json, src/SmartPrint.Agent/README.md artifacts/agent/
+      - name: Upload Windows Agent package
+        uses: actions/upload-artifact@v4
+        with:
+          name: qrtoprint-agent-win-x64
+          path: artifacts/agent/
+          if-no-files-found: error
+          retention-days: 30
+
+  publish-containers:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: [portal, dotnet]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build and publish API image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile.api
+          platforms: linux/amd64
+          push: true
+          tags: |
+            ghcr.io/manav326/qrtoprint-api:latest
+            ghcr.io/manav326/qrtoprint-api:sha-${{ github.sha }}
+          cache-from: type=gha,scope=qrtoprint-api
+          cache-to: type=gha,mode=max,scope=qrtoprint-api
+      - name: Build and publish portal image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: apps/portal/Dockerfile
+          platforms: linux/amd64
+          push: true
+          tags: |
+            ghcr.io/manav326/qrtoprint-portal:latest
+            ghcr.io/manav326/qrtoprint-portal:sha-${{ github.sha }}
+          cache-from: type=gha,scope=qrtoprint-portal
+          cache-to: type=gha,mode=max,scope=qrtoprint-portal

@@ -10,9 +10,11 @@ This is a Windows Service. It pairs with one shop using a single-use enrollment 
 
    .\scripts\pair-agent.ps1 -ApiBaseUrl "https://YOUR-SMART-PRINT-API-HOST" -AgentExePath ".\SmartPrint.Agent.exe"
 
-4. Install and start the Windows Service:
+4. Install and start the Windows Service, setting the exact customer portal HTTPS origin for Local Network Access CORS:
 
-   .\scripts\install-agent-service.ps1 -AgentExePath ".\SmartPrint.Agent.exe"
+   .\scripts\install-agent-service.ps1 -AgentExePath ".\SmartPrint.Agent.exe" -CustomerPortalOrigin "https://print.thinkwithsujeet.in"
+
+The installer writes this origin to the Agent's adjacent `appsettings.json`, enables the local status and direct-upload endpoint, and opens TCP 17842 through Windows Firewall on Private network profiles only. Re-run the install command after changing the customer portal origin.
 
 5. Return to the Print Agent screen in the shop workspace. The computer should report its next heartbeat and installed printer queues.
 
@@ -20,7 +22,9 @@ To remove the Windows Service, run scripts\uninstall-agent-service.ps1 from an e
 
 ## Current capabilities
 
-The local HTTP endpoint is currently a discovery/health milestone only. Direct customer document upload over shop Wi-Fi is not enabled yet; the existing upload, quote, payment and job-authorisation lifecycle remains cloud-assisted until the local document lifecycle is integrated and tested end to end.
+Direct customer document upload over shop Wi-Fi is implemented. The customer portal obtains a one-use upload grant from the API, sends document bytes to this paired Agent, and the Agent validates the hash and document structure before storing the file in its DPAPI-protected local queue. The API retains only job/document metadata, SHA-256, page analysis and quote/payment/dispatch state. The same PrintJob is later authorised by the shop and claimed by this Agent after manual payment verification; the cloud is not asked to download a LOCAL_AGENT document.
+
+The cloud-assisted upload path remains available as a customer-selected fallback. Local upload requires an HTTPS customer portal origin, browser Local Network Access permission, a Windows Private network profile, and `Agent:LocalApi:AllowedOrigins` configured to the exact portal origin. The installer sets this origin through `-CustomerPortalOrigin`.
 
 - Queries Win32_Printer through WMI for installed queue name, driver, port, status and default queue.
 - Sends printer inventory to the paired shop tenant using agent-specific authentication headers.

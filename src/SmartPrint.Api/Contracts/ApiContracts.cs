@@ -83,6 +83,20 @@ public sealed record ResumeCustomerSessionRequest(string PublicCode);
 
 public sealed record AssignPrintJobPrinterRequest(Guid PrinterDeviceId);
 
+public sealed record CreateLocalPrintUploadTicketRequest(
+    string OriginalFileName,
+    long SizeBytes,
+    string Sha256,
+    string GrantToken);
+
+public sealed record LocalPrintUploadCompletionRequest(
+    int PageCount,
+    string PageSizesJson,
+    string FileExtension,
+    string MediaType,
+    long SizeBytes,
+    string Sha256);
+
 public sealed record AgentJobReceivedRequest(string Sha256, long SizeBytes);
 
 

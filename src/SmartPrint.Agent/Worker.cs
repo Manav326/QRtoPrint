@@ -164,9 +164,19 @@ public sealed class Worker(
                     {
                         throw new FileNotFoundException("The local queue manifest exists but its protected document is missing.", existing.DocumentPath);
                     }
+                    if (job.StorageMode == "LOCAL_AGENT")
+                    {
+                        await localQueueStore.UpdateFromClaimAsync(job, cancellationToken);
+                    }
                 }
                 else
                 {
+                    if (job.StorageMode == "LOCAL_AGENT")
+                    {
+                        logger.LogError("Local-only document {JobNumber} is missing from this Agent's protected queue. It will not be downloaded from the cloud.", job.JobNumber);
+                        continue;
+                    }
+
                     using var documentResponse = await SendAgentGetRequestAsync(
                         client,
                         credentials,

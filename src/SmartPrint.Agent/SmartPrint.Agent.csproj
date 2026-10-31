@@ -14,4 +14,7 @@
     <PackageReference Include="SkiaSharp" Version="3.119.1" />
     <PackageReference Include="SkiaSharp.NativeAssets.Win32" Version="3.119.1" />
   </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="../SmartPrint.Documents/SmartPrint.Documents.csproj" />
+  </ItemGroup>
 </Project>

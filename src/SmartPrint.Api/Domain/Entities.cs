@@ -222,8 +222,34 @@ public sealed class PrintDocument
     public long SizeBytes { get; set; }
     public string Sha256 { get; set; } = string.Empty;
     public string StorageKey { get; set; } = string.Empty;
+    public string StorageMode { get; set; } = "CLOUD";
+    public Guid? AgentDeviceId { get; set; }
     public string PageSizesJson { get; set; } = "[]";
     public DateTimeOffset CreatedUtc { get; set; } = DateTimeOffset.UtcNow;
+}
+
+public sealed class LocalPrintUploadTicket
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+    public Guid TenantId { get; set; }
+    public Guid CustomerSessionId { get; set; }
+    public Guid QrStationId { get; set; }
+    public Guid PrinterDeviceId { get; set; }
+    public Guid AgentDeviceId { get; set; }
+    public Guid PrintJobId { get; set; } = Guid.NewGuid();
+    public string JobNumber { get; set; } = string.Empty;
+    public string IdempotencyKey { get; set; } = string.Empty;
+    public string GrantHash { get; set; } = string.Empty;
+    public string OriginalFileName { get; set; } = string.Empty;
+    public string MediaType { get; set; } = string.Empty;
+    public string FileExtension { get; set; } = string.Empty;
+    public long SizeBytes { get; set; }
+    public string Sha256 { get; set; } = string.Empty;
+    public DateTimeOffset CreatedUtc { get; set; } = DateTimeOffset.UtcNow;
+    public DateTimeOffset ExpiresUtc { get; set; } = DateTimeOffset.UtcNow.AddMinutes(10);
+    public DateTimeOffset? ClaimedUtc { get; set; }
+    public DateTimeOffset? ClaimLeaseExpiresUtc { get; set; }
+    public DateTimeOffset? CompletedUtc { get; set; }
 }
 
 

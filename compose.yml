@@ -1,0 +1,90 @@
+name: qrtoprint
+
+services:
+  db:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-qrtoprint}
+      POSTGRES_USER: ${POSTGRES_USER:-qrtoprint}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+    volumes:
+      - qrtoprint_database:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-qrtoprint} -d ${POSTGRES_DB:-qrtoprint}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
+  api:
+    image: ghcr.io/manav326/qrtoprint-api:${IMAGE_TAG:-latest}
+    build:
+      context: .
+      dockerfile: Dockerfile.api
+    restart: unless-stopped
+    init: true
+    environment:
+      ASPNETCORE_ENVIRONMENT: Production
+      ASPNETCORE_URLS: http://+:8080
+      ASPNETCORE_FORWARDEDHEADERS_ENABLED: "true"
+      ConnectionStrings__SmartPrint: "Host=db;Port=5432;Database=${POSTGRES_DB:-qrtoprint};Username=${POSTGRES_USER:-qrtoprint};Password=${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}"
+      Authentication__SigningKey: ${AUTH_SIGNING_KEY:?Set AUTH_SIGNING_KEY in .env}
+      Documents__EncryptionKey: ${DOCUMENTS_ENCRYPTION_KEY:?Set DOCUMENTS_ENCRYPTION_KEY in .env}
+      Documents__StorageRoot: /var/lib/qrtoprint/documents
+      Database__ApplyMigrationsOnStartup: "true"
+      Cors__AllowedOrigins__0: "https://${PORTAL_DOMAIN:?Set PORTAL_DOMAIN in .env}"
+    volumes:
+      - qrtoprint_documents:/var/lib/qrtoprint/documents
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl --fail --silent http://127.0.0.1:8080/health/ready || exit 1"]
+      interval: 20s
+      timeout: 5s
+      retries: 10
+      start_period: 45s
+
+  portal:
+    image: ghcr.io/manav326/qrtoprint-portal:${IMAGE_TAG:-latest}
+    build:
+      context: .
+      dockerfile: apps/portal/Dockerfile
+    restart: unless-stopped
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1/ || exit 1"]
+      interval: 20s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    environment:
+      PORTAL_DOMAIN: ${PORTAL_DOMAIN:?Set PORTAL_DOMAIN in .env}
+      API_DOMAIN: ${API_DOMAIN:?Set API_DOMAIN in .env}
+      ACME_EMAIL: ${ACME_EMAIL:?Set ACME_EMAIL in .env}
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - qrtoprint_caddy_data:/data
+      - qrtoprint_caddy_config:/config
+    depends_on:
+      portal:
+        condition: service_healthy
+      api:
+        condition: service_healthy
+
+volumes:
+  qrtoprint_database:
+  qrtoprint_documents:
+  qrtoprint_caddy_data:
+  qrtoprint_caddy_config:

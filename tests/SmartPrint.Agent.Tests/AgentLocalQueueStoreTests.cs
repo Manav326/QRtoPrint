@@ -41,6 +41,90 @@ public sealed class AgentLocalQueueStoreTests
     }
 
     [Fact]
+    public async Task LocalUploadIsStagedUntilPaidJobClaimUpdatesItsPrintSettings()
+    {
+        var root = CreateTemporaryDirectory();
+        try
+        {
+            var store = new AgentLocalQueueStore(root);
+            await store.InitializeAsync(CancellationToken.None);
+            var bytes = "Local-only customer document"u8.ToArray();
+            var upload = CreateJob(bytes) with
+            {
+                Status = "LOCAL_UPLOAD_STAGED",
+                StorageMode = "LOCAL_AGENT",
+                Copies = 1,
+                ColourMode = "Mono",
+                IsDuplex = false
+            };
+
+            var staged = await store.EnqueueLocalUploadAsync(upload, bytes, CancellationToken.None);
+
+            Assert.Equal("LOCAL_UPLOAD_STAGED", staged.State);
+            Assert.Empty(store.GetAcknowledgedJobs());
+            Assert.Empty(store.GetPendingAcknowledgements());
+            Assert.True(bytes.AsSpan().SequenceEqual(store.ReadDocument(upload.Id)));
+
+            var paidClaim = upload with
+            {
+                Status = "LOCAL_QUEUE_CLAIMED",
+                Copies = 3,
+                ColourMode = "Colour",
+                IsDuplex = true,
+                QuotedAmountMinor = 900,
+                LeaseExpiresUtc = DateTimeOffset.UtcNow.AddMinutes(3)
+            };
+            await store.UpdateFromClaimAsync(paidClaim, CancellationToken.None);
+
+            var refreshed = store.Find(upload.Id)!;
+            Assert.Equal("ACK_PENDING", refreshed.State);
+            Assert.Single(store.GetPendingAcknowledgements());
+            Assert.Equal(3, refreshed.Copies);
+            Assert.Equal("Colour", refreshed.ColourMode);
+            Assert.True(refreshed.IsDuplex);
+            Assert.Equal(900, refreshed.QuotedAmountMinor);
+            Assert.Empty(store.GetAcknowledgedJobs());
+
+            await store.MarkAcknowledgedAsync(upload.Id, CancellationToken.None);
+            Assert.Equal("ACKNOWLEDGED", store.Find(upload.Id)!.State);
+            Assert.Single(store.GetAcknowledgedJobs());
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task LocalUploadCannotBeClaimedByADifferentPrinter()
+    {
+        var root = CreateTemporaryDirectory();
+        try
+        {
+            var store = new AgentLocalQueueStore(root);
+            await store.InitializeAsync(CancellationToken.None);
+            var bytes = "Printer-bound local document"u8.ToArray();
+            var upload = CreateJob(bytes) with { StorageMode = "LOCAL_AGENT" };
+            await store.EnqueueLocalUploadAsync(upload, bytes, CancellationToken.None);
+
+            var changedAssignment = upload with
+            {
+                PrinterDeviceId = Guid.NewGuid(),
+                QueueName = "Different Windows Queue"
+            };
+
+            await Assert.ThrowsAsync<InvalidDataException>(() =>
+                store.UpdateFromClaimAsync(changedAssignment, CancellationToken.None));
+            Assert.Equal("LOCAL_UPLOAD_STAGED", store.Find(upload.Id)!.State);
+            Assert.True(bytes.AsSpan().SequenceEqual(store.ReadDocument(upload.Id)));
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
     public async Task RejectsChangedContentForAnExistingJobId()
     {
         var root = CreateTemporaryDirectory();

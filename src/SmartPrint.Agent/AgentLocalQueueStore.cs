@@ -101,9 +101,22 @@ public sealed class AgentLocalQueueStore
         return entries.OrderBy(entry => entry.ReceivedUtc).ToArray();
     }
 
-    public async Task<AgentLocalQueueEntry> EnqueueAsync(
+    public Task<AgentLocalQueueEntry> EnqueueAsync(
         AgentClaimedJob job,
         ReadOnlyMemory<byte> documentBytes,
+        CancellationToken cancellationToken) =>
+        EnqueueCoreAsync(job, documentBytes, "ACK_PENDING", cancellationToken);
+
+    public Task<AgentLocalQueueEntry> EnqueueLocalUploadAsync(
+        AgentClaimedJob job,
+        ReadOnlyMemory<byte> documentBytes,
+        CancellationToken cancellationToken) =>
+        EnqueueCoreAsync(job, documentBytes, "LOCAL_UPLOAD_STAGED", cancellationToken);
+
+    private async Task<AgentLocalQueueEntry> EnqueueCoreAsync(
+        AgentClaimedJob job,
+        ReadOnlyMemory<byte> documentBytes,
+        string initialState,
         CancellationToken cancellationToken)
     {
         if (job.Id == Guid.Empty ||
@@ -200,7 +213,7 @@ public sealed class AgentLocalQueueStore
             job.Currency,
             job.QuotedAmountMinor,
             documentPath,
-            "ACK_PENDING",
+            initialState,
             DateTimeOffset.UtcNow,
             job.LeaseExpiresUtc);
 
@@ -216,6 +229,41 @@ public sealed class AgentLocalQueueStore
         }
     }
 
+    public async Task UpdateFromClaimAsync(AgentClaimedJob job, CancellationToken cancellationToken)
+    {
+        var entry = Find(job.Id)
+            ?? throw new FileNotFoundException("The pre-staged local upload is missing from the protected queue.");
+        if (!string.Equals(entry.Sha256, job.Sha256, StringComparison.OrdinalIgnoreCase) ||
+            entry.SizeBytes != job.SizeBytes ||
+            entry.PrinterDeviceId != job.PrinterDeviceId ||
+            !string.Equals(entry.QueueName, job.QueueName, StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidDataException("The paid job no longer matches the local upload, assigned printer or queue.");
+        }
+        if (entry.State is not ("LOCAL_UPLOAD_STAGED" or "ACK_PENDING" or "ACKNOWLEDGED"))
+        {
+            throw new InvalidOperationException($"Cannot update print options for a local upload in state {entry.State}.");
+        }
+        if (!File.Exists(entry.DocumentPath))
+        {
+            throw new FileNotFoundException("The pre-staged local upload is missing its protected document.", entry.DocumentPath);
+        }
+
+        await SaveManifestAsync(entry with
+        {
+            State = "ACK_PENDING",
+            PrinterName = job.PrinterName,
+            PageCount = job.PageCount,
+            Copies = job.Copies,
+            ColourMode = job.ColourMode,
+            PaperSize = job.PaperSize,
+            IsDuplex = job.IsDuplex,
+            Currency = job.Currency,
+            QuotedAmountMinor = job.QuotedAmountMinor,
+            LeaseExpiresUtc = job.LeaseExpiresUtc
+        }, cancellationToken);
+    }
+
     public async Task MarkAcknowledgedAsync(Guid jobId, CancellationToken cancellationToken)
     {
         var entry = Find(jobId);
@@ -227,6 +275,10 @@ public sealed class AgentLocalQueueStore
         if (entry.State == "ACKNOWLEDGED")
         {
             return;
+        }
+        if (entry.State is not ("ACK_PENDING" or "LOCAL_UPLOAD_STAGED"))
+        {
+            throw new InvalidOperationException($"Cannot acknowledge a local queue item in state {entry.State}.");
         }
 
         await SaveManifestAsync(entry with { State = "ACKNOWLEDGED" }, cancellationToken);

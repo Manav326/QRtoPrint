@@ -103,17 +103,35 @@ builder.Services.AddRateLimiter(options =>
         limiter.QueueLimit = 0;
     });
 });
-builder.Services.AddCors(options => options.AddPolicy("web", policy => policy
-    .WithOrigins(
+var configuredCorsOrigins = builder.Configuration.GetSection("Cors:AllowedOrigins")
+    .Get<string[]>()?
+    .Where(origin => !string.IsNullOrWhiteSpace(origin))
+    .Distinct(StringComparer.OrdinalIgnoreCase)
+    .ToArray();
+var corsOrigins = configuredCorsOrigins is { Length: > 0 }
+    ? configuredCorsOrigins
+    : new[]
+    {
         "https://print.thinkwithsujeet.in",
         "https://shops.thinkwithsujeet.in",
         "https://admin.thinkwithsujeet.in",
         "http://localhost:3000",
-        "http://localhost:3001")
+        "http://localhost:3001"
+    };
+builder.Services.AddCors(options => options.AddPolicy("web", policy => policy
+    .WithOrigins(corsOrigins)
     .AllowAnyHeader()
     .AllowAnyMethod()));
 
 var app = builder.Build();
+
+if (builder.Configuration.GetValue<bool>("Database:ApplyMigrationsOnStartup"))
+{
+    await using var migrationScope = app.Services.CreateAsyncScope();
+    var migrationDb = migrationScope.ServiceProvider.GetRequiredService<SmartPrintDbContext>();
+    await migrationDb.Database.MigrateAsync();
+}
+
 if (bootstrapPlatformAdmin)
 {
     await PlatformAdminBootstrap.RunAsync(app.Services);
@@ -1283,6 +1301,11 @@ shop.MapPatch("/print-jobs/{jobId:guid}/printer", async (
         });
     }
 
+    var localDocument = await db.PrintDocuments.AsNoTracking()
+        .Where(item => item.TenantId == tenantId && item.PrintJobId == job.Id)
+        .Select(item => new { item.StorageMode, item.AgentDeviceId })
+        .SingleOrDefaultAsync(ct);
+
     var onlineAfter = now.AddMinutes(-2);
     var printer = await db.PrinterDevices.AsNoTracking()
         .Where(item => item.Id == request.PrinterDeviceId &&
@@ -1307,6 +1330,16 @@ shop.MapPatch("/print-jobs/{jobId:guid}/printer", async (
         {
             code = "printer_not_available",
             message = "Select a printer on a paired, online computer with a recent heartbeat and a ready or busy Windows queue."
+        });
+    }
+
+    if (localDocument?.StorageMode == "LOCAL_AGENT" &&
+        (job.PrinterDeviceId != printer.Id || localDocument.AgentDeviceId != printer.AgentDeviceId))
+    {
+        return Results.Conflict(new
+        {
+            code = "local_document_printer_locked",
+            message = "A LAN-only document can only be printed on the same Windows computer and printer it was uploaded to. The customer must upload again for a different printer."
         });
     }
 
@@ -1469,11 +1502,16 @@ shop.MapGet("/print-jobs/{jobId:guid}/document", async (
 
     var document = await db.PrintDocuments.AsNoTracking()
         .Where(item => item.TenantId == tenantId && item.PrintJobId == jobId)
-        .Select(item => new { item.StorageKey, item.MediaType })
+        .Select(item => new { item.StorageKey, item.StorageMode, item.MediaType })
         .SingleOrDefaultAsync(ct);
     if (document is null)
     {
         return Results.NotFound();
+    }
+
+    if (document.StorageMode == "LOCAL_AGENT")
+    {
+        return Results.Conflict(new { code = "document_stored_on_local_agent", message = "This document is stored only on the shop's Windows Print Agent; cloud preview is not available." });
     }
 
     MemoryStream content;
@@ -1865,7 +1903,8 @@ agentApi.MapPost("/jobs/claim", async (
             DocumentName = document.OriginalFileName,
             document.MediaType,
             document.SizeBytes,
-            document.Sha256
+            document.Sha256,
+            document.StorageMode
         })
         .Take(5)
         .ToListAsync(ct);
@@ -1941,6 +1980,7 @@ agentApi.MapPost("/jobs/claim", async (
             candidate.MediaType,
             candidate.SizeBytes,
             candidate.Sha256,
+            candidate.StorageMode,
             LeaseExpiresUtc = leaseExpiresUtc
         });
     }
@@ -1978,6 +2018,7 @@ agentApi.MapGet("/jobs/{jobId:guid}/document", async (
         select new
         {
             printDocument.StorageKey,
+            printDocument.StorageMode,
             printDocument.MediaType,
             printDocument.Sha256,
             printDocument.SizeBytes,
@@ -1988,6 +2029,11 @@ agentApi.MapGet("/jobs/{jobId:guid}/document", async (
     if (document is null)
     {
         return Results.NotFound();
+    }
+
+    if (document.StorageMode == "LOCAL_AGENT")
+    {
+        return Results.Conflict(new { code = "document_stored_on_local_agent", message = "This document was uploaded directly to the shop's local agent and is not stored in cloud document storage." });
     }
 
     MemoryStream content;
@@ -2093,6 +2139,381 @@ agentApi.MapPost("/jobs/{jobId:guid}/received", async (
     return Results.Ok(new { job.Id, job.JobNumber, job.Status, job.LocalQueueReceivedUtc, DuplicateRequest = false });
 });
 
+
+agentApi.MapPost("/local-uploads/{ticketId:guid}/claim", async (
+    Guid ticketId,
+    HttpContext context,
+    SmartPrintDbContext db,
+    CancellationToken ct) =>
+{
+    var device = await AuthenticateAgentAsync(context, db, ct);
+    if (device is null) return Results.Unauthorized();
+
+    var rawGrant = context.Request.Headers["X-Print-Upload-Grant"].FirstOrDefault();
+    if (string.IsNullOrWhiteSpace(rawGrant) || rawGrant.Length is < 40 or > 128)
+    {
+        return Results.Unauthorized();
+    }
+
+    var ticket = await db.LocalPrintUploadTickets.SingleOrDefaultAsync(
+        item => item.Id == ticketId &&
+                item.TenantId == device.TenantId &&
+                item.AgentDeviceId == device.Id,
+        ct);
+    if (ticket is null) return Results.NotFound();
+
+    byte[] suppliedGrantHash;
+    byte[] storedGrantHash;
+    try
+    {
+        suppliedGrantHash = Convert.FromHexString(HashOpaqueToken(rawGrant));
+        storedGrantHash = Convert.FromHexString(ticket.GrantHash);
+    }
+    catch (FormatException)
+    {
+        return Results.Unauthorized();
+    }
+    if (!CryptographicOperations.FixedTimeEquals(suppliedGrantHash, storedGrantHash))
+    {
+        return Results.Unauthorized();
+    }
+
+    if (ticket.CompletedUtc is not null)
+    {
+        var completedJob = await db.PrintJobs.AsNoTracking()
+            .SingleOrDefaultAsync(item => item.Id == ticket.PrintJobId && item.TenantId == device.TenantId, ct);
+        var completedDocument = await db.PrintDocuments.AsNoTracking()
+            .SingleOrDefaultAsync(item => item.PrintJobId == ticket.PrintJobId && item.TenantId == device.TenantId, ct);
+        if (completedJob is null || completedDocument is null) return Results.Conflict();
+
+        return Results.Ok(new
+        {
+            AlreadyCompleted = true,
+            UploadResult = new
+            {
+                Job = new
+                {
+                    completedJob.Id,
+                    completedJob.JobNumber,
+                    completedJob.Status,
+                    completedJob.PageCount,
+                    completedJob.Copies,
+                    completedJob.Currency,
+                    completedJob.QuotedAmountMinor,
+                    completedJob.CreatedUtc
+                },
+                Document = new
+                {
+                    completedDocument.Id,
+                    completedDocument.OriginalFileName,
+                    completedDocument.MediaType,
+                    completedDocument.SizeBytes,
+                    completedDocument.Sha256,
+                    completedDocument.PageSizesJson
+                },
+                DuplicateRequest = true
+            }
+        });
+    }
+
+    var now = DateTimeOffset.UtcNow;
+    if (ticket.ExpiresUtc <= now)
+    {
+        return Results.Conflict(new { code = "local_upload_ticket_expired", message = "The upload ticket expired. Ask the customer to start a new upload." });
+    }
+
+    var stationPrinter = await db.PrinterDevices.AsNoTracking()
+        .Where(item => item.Id == ticket.PrinterDeviceId &&
+                       item.TenantId == device.TenantId &&
+                       item.AgentDeviceId == device.Id &&
+                       item.IsActive &&
+                       !string.IsNullOrWhiteSpace(item.QueueName))
+        .Select(item => new { item.Id, item.DisplayName, item.QueueName })
+        .SingleOrDefaultAsync(ct);
+    if (stationPrinter is null)
+    {
+        return Results.Conflict(new { code = "local_upload_printer_unavailable", message = "The QR station's assigned printer is no longer attached to this paired computer." });
+    }
+
+    ticket.ClaimedUtc ??= now;
+    ticket.ClaimLeaseExpiresUtc = ticket.ExpiresUtc;
+    await db.SaveChangesAsync(ct);
+
+    return Results.Ok(new
+    {
+        AlreadyCompleted = false,
+        ticket.Id,
+        ticket.PrintJobId,
+        ticket.JobNumber,
+        ticket.AgentDeviceId,
+        PrinterDeviceId = stationPrinter.Id,
+        PrinterName = stationPrinter.DisplayName,
+        QueueName = stationPrinter.QueueName,
+        ticket.OriginalFileName,
+        ticket.FileExtension,
+        ticket.MediaType,
+        ticket.SizeBytes,
+        ticket.Sha256,
+        ticket.ExpiresUtc
+    });
+});
+
+agentApi.MapPost("/local-uploads/{ticketId:guid}/complete", async (
+    Guid ticketId,
+    LocalPrintUploadCompletionRequest request,
+    HttpContext context,
+    SmartPrintDbContext db,
+    TenantEntitlementService entitlements,
+    CancellationToken ct) =>
+{
+    var device = await AuthenticateAgentAsync(context, db, ct);
+    if (device is null) return Results.Unauthorized();
+
+    var rawGrant = context.Request.Headers["X-Print-Upload-Grant"].FirstOrDefault();
+    if (string.IsNullOrWhiteSpace(rawGrant) || rawGrant.Length is < 40 or > 128)
+    {
+        return Results.Unauthorized();
+    }
+
+    var ticket = await db.LocalPrintUploadTickets.AsNoTracking()
+        .SingleOrDefaultAsync(item =>
+            item.Id == ticketId &&
+            item.TenantId == device.TenantId &&
+            item.AgentDeviceId == device.Id, ct);
+    if (ticket is null) return Results.NotFound();
+
+    byte[] suppliedGrantHash;
+    byte[] storedGrantHash;
+    try
+    {
+        suppliedGrantHash = Convert.FromHexString(HashOpaqueToken(rawGrant));
+        storedGrantHash = Convert.FromHexString(ticket.GrantHash);
+    }
+    catch (FormatException)
+    {
+        return Results.Unauthorized();
+    }
+    if (!CryptographicOperations.FixedTimeEquals(suppliedGrantHash, storedGrantHash))
+    {
+        return Results.Unauthorized();
+    }
+
+    if (ticket.CompletedUtc is not null)
+    {
+        var completedJob = await db.PrintJobs.AsNoTracking()
+            .SingleOrDefaultAsync(item => item.Id == ticket.PrintJobId && item.TenantId == device.TenantId, ct);
+        var completedDocument = await db.PrintDocuments.AsNoTracking()
+            .SingleOrDefaultAsync(item => item.PrintJobId == ticket.PrintJobId && item.TenantId == device.TenantId, ct);
+        if (completedJob is null || completedDocument is null) return Results.Conflict();
+
+        return Results.Ok(new
+        {
+            AlreadyCompleted = true,
+            UploadResult = new
+            {
+                Job = new
+                {
+                    completedJob.Id,
+                    completedJob.JobNumber,
+                    completedJob.Status,
+                    completedJob.PageCount,
+                    completedJob.Copies,
+                    completedJob.Currency,
+                    completedJob.QuotedAmountMinor,
+                    completedJob.CreatedUtc
+                },
+                Document = new
+                {
+                    completedDocument.Id,
+                    completedDocument.OriginalFileName,
+                    completedDocument.MediaType,
+                    completedDocument.SizeBytes,
+                    completedDocument.Sha256,
+                    completedDocument.PageSizesJson
+                },
+                DuplicateRequest = true
+            }
+        });
+    }
+
+    var sha = request.Sha256?.Trim().ToLowerInvariant();
+    if (request.PageCount is < 1 or > 500 ||
+        request.PageSizesJson is null ||
+        request.PageSizesJson.Length is < 2 or > 200_000 ||
+        !string.Equals(request.FileExtension, ticket.FileExtension, StringComparison.OrdinalIgnoreCase) ||
+        !string.Equals(request.MediaType, ticket.MediaType, StringComparison.OrdinalIgnoreCase) ||
+        request.SizeBytes != ticket.SizeBytes ||
+        !string.Equals(sha, ticket.Sha256, StringComparison.OrdinalIgnoreCase))
+    {
+        return Results.UnprocessableEntity(new { code = "local_document_validation_mismatch", message = "The local agent's file analysis does not match the document the customer authorised for upload." });
+    }
+
+    try
+    {
+        using var parsedSizes = JsonDocument.Parse(request.PageSizesJson);
+        if (parsedSizes.RootElement.ValueKind != JsonValueKind.Array ||
+            parsedSizes.RootElement.GetArrayLength() != request.PageCount)
+        {
+            return Results.UnprocessableEntity(new { code = "local_document_page_analysis_invalid", message = "The local agent returned invalid document page analysis." });
+        }
+    }
+    catch (JsonException)
+    {
+        return Results.UnprocessableEntity(new { code = "local_document_page_analysis_invalid", message = "The local agent returned invalid document page analysis." });
+    }
+
+    var now = DateTimeOffset.UtcNow;
+    if (ticket.ExpiresUtc <= now || ticket.ClaimLeaseExpiresUtc is null || ticket.ClaimLeaseExpiresUtc <= now)
+    {
+        return Results.Conflict(new { code = "local_upload_claim_expired", message = "The local upload grant expired before the document could be finalised." });
+    }
+
+    var subscription = await entitlements.GetForTenantAsync(device.TenantId, ct);
+    if (!subscription.IsAccessActive)
+    {
+        return Results.Problem(statusCode: StatusCodes.Status403Forbidden, title: "This shop's trial or subscription period is no longer active.");
+    }
+    if (!PlanEntitlementRules.AllowsDocument(subscription.MaxDocumentBytes, ticket.SizeBytes))
+    {
+        return Results.Problem(statusCode: StatusCodes.Status413PayloadTooLarge, title: "This document exceeds the maximum size configured for this shop's plan.");
+    }
+
+    await using var transaction = await db.Database.BeginTransactionAsync(ct);
+    var completed = await db.LocalPrintUploadTickets
+        .Where(item => item.Id == ticket.Id &&
+                       item.TenantId == device.TenantId &&
+                       item.AgentDeviceId == device.Id &&
+                       item.CompletedUtc == null &&
+                       item.ExpiresUtc > now &&
+                       item.ClaimLeaseExpiresUtc > now)
+        .ExecuteUpdateAsync(update => update.SetProperty(item => item.CompletedUtc, now), ct);
+
+    if (completed != 1)
+    {
+        await transaction.RollbackAsync(ct);
+        var existingJob = await db.PrintJobs.AsNoTracking()
+            .SingleOrDefaultAsync(item => item.Id == ticket.PrintJobId && item.TenantId == device.TenantId, ct);
+        var existingDocument = await db.PrintDocuments.AsNoTracking()
+            .SingleOrDefaultAsync(item => item.PrintJobId == ticket.PrintJobId && item.TenantId == device.TenantId, ct);
+        if (existingJob is null || existingDocument is null)
+        {
+            return Results.Conflict(new { code = "local_upload_ticket_not_claimed", message = "The upload ticket is no longer claimable by this Agent." });
+        }
+
+        return Results.Ok(new
+        {
+            AlreadyCompleted = true,
+            UploadResult = new
+            {
+                Job = new
+                {
+                    existingJob.Id,
+                    existingJob.JobNumber,
+                    existingJob.Status,
+                    existingJob.PageCount,
+                    existingJob.Copies,
+                    existingJob.Currency,
+                    existingJob.QuotedAmountMinor,
+                    existingJob.CreatedUtc
+                },
+                Document = new
+                {
+                    existingDocument.Id,
+                    existingDocument.OriginalFileName,
+                    existingDocument.MediaType,
+                    existingDocument.SizeBytes,
+                    existingDocument.Sha256,
+                    existingDocument.PageSizesJson
+                },
+                DuplicateRequest = true
+            }
+        });
+    }
+
+    await entitlements.AcquireQuotaLockAsync(device.TenantId, TenantQuotaResource.MonthlyPrintJob, ct);
+    var quota = await entitlements.CheckCapacityAsync(device.TenantId, TenantQuotaResource.MonthlyPrintJob, ct);
+    if (!quota.Allowed)
+    {
+        await transaction.RollbackAsync(ct);
+        return Results.Conflict(new { code = quota.Code, message = quota.Message, current = quota.Current, maximum = quota.Maximum });
+    }
+
+    var job = new PrintJob
+    {
+        Id = ticket.PrintJobId,
+        TenantId = ticket.TenantId,
+        QrStationId = ticket.QrStationId,
+        PrinterDeviceId = ticket.PrinterDeviceId,
+        CustomerSessionId = ticket.CustomerSessionId,
+        JobNumber = ticket.JobNumber,
+        Status = "AWAITING_CONFIGURATION",
+        IdempotencyKey = $"LOCAL-{ticket.Id:N}",
+        PageCount = request.PageCount,
+        Copies = 1,
+        Currency = "INR",
+        QuotedAmountMinor = 0,
+        CreatedUtc = now,
+        UpdatedUtc = now
+    };
+    var printDocument = new PrintDocument
+    {
+        TenantId = ticket.TenantId,
+        PrintJobId = job.Id,
+        OriginalFileName = ticket.OriginalFileName,
+        MediaType = ticket.MediaType,
+        FileExtension = ticket.FileExtension,
+        SizeBytes = ticket.SizeBytes,
+        Sha256 = ticket.Sha256,
+        StorageKey = string.Empty,
+        StorageMode = "LOCAL_AGENT",
+        AgentDeviceId = device.Id,
+        PageSizesJson = request.PageSizesJson,
+        CreatedUtc = now
+    };
+    db.PrintJobs.Add(job);
+    db.PrintDocuments.Add(printDocument);
+    db.PrintJobEvents.Add(new PrintJobEvent
+    {
+        TenantId = job.TenantId,
+        PrintJobId = job.Id,
+        PreviousStatus = null,
+        NewStatus = job.Status,
+        ActorType = "Customer",
+        ReasonCode = "DOCUMENT_UPLOADED_TO_LOCAL_AGENT",
+        CreatedUtc = now
+    });
+    await db.SaveChangesAsync(ct);
+    await transaction.CommitAsync(ct);
+
+    return Results.Ok(new
+    {
+        AlreadyCompleted = false,
+        UploadResult = new
+        {
+            Job = new
+            {
+                job.Id,
+                job.JobNumber,
+                job.Status,
+                job.PageCount,
+                job.Copies,
+                job.Currency,
+                job.QuotedAmountMinor,
+                job.CreatedUtc
+            },
+            Document = new
+            {
+                printDocument.Id,
+                printDocument.OriginalFileName,
+                printDocument.MediaType,
+                printDocument.SizeBytes,
+                printDocument.Sha256,
+                printDocument.PageSizesJson
+            },
+            DuplicateRequest = false
+        }
+    });
+});
 
 agentApi.MapPost("/jobs/print-claim", async (AgentPrintClaimRequest request, HttpContext context, SmartPrintDbContext db, CancellationToken ct) =>
 {
@@ -2998,6 +3419,171 @@ publicApi.MapPost("/sessions/current/jobs", async (
 })
 .WithMetadata(new RequestSizeLimitAttribute(21 * 1024 * 1024))
 .RequireRateLimiting("document-upload");
+
+publicApi.MapPost("/sessions/current/local-upload-tickets", async (
+    CreateLocalPrintUploadTicketRequest request,
+    HttpContext context,
+    SmartPrintDbContext db,
+    TenantEntitlementService entitlements,
+    CancellationToken ct) =>
+{
+    var rawToken = context.Request.Headers["X-Print-Session"].FirstOrDefault();
+    var idempotencyKey = context.Request.Headers["Idempotency-Key"].FirstOrDefault();
+    if (string.IsNullOrWhiteSpace(rawToken) ||
+        string.IsNullOrWhiteSpace(idempotencyKey) || idempotencyKey.Length > 100 ||
+        string.IsNullOrWhiteSpace(request.GrantToken) || request.GrantToken.Length is < 40 or > 128)
+    {
+        return Results.BadRequest(new { code = "local_upload_ticket_request_invalid", message = "A live print session, idempotency key and one-use upload grant are required." });
+    }
+
+    var originalName = request.OriginalFileName?.Split('/', '\\').LastOrDefault() ?? string.Empty;
+    originalName = new string(originalName.Where(character => !char.IsControl(character)).ToArray()).Trim();
+    if (string.IsNullOrWhiteSpace(originalName))
+    {
+        return Results.BadRequest(new { code = "invalid_file_name", message = "The uploaded document name is invalid." });
+    }
+    originalName = originalName[..Math.Min(originalName.Length, 255)];
+    var extension = Path.GetExtension(originalName).ToLowerInvariant();
+    var mediaType = extension switch
+    {
+        ".pdf" => "application/pdf",
+        ".jpg" or ".jpeg" => "image/jpeg",
+        ".png" => "image/png",
+        _ => null
+    };
+    var sha = request.Sha256?.Trim().ToLowerInvariant();
+    if (mediaType is null || request.SizeBytes is <= 0 or > 20L * 1024 * 1024 ||
+        string.IsNullOrWhiteSpace(sha) || sha.Length != 64 || sha.Any(character => !Uri.IsHexDigit(character)))
+    {
+        return Results.UnprocessableEntity(new { code = "document_not_supported", message = "Local upload supports PDF, JPG/JPEG and PNG files up to 20 MB with a valid SHA-256 digest." });
+    }
+
+    var now = DateTimeOffset.UtcNow;
+    var session = await db.CustomerPrintSessions.AsNoTracking()
+        .Where(item => item.TokenHash == HashOpaqueToken(rawToken) && item.Status == "Active" &&
+                       item.RevokedUtc == null && item.ExpiresUtc > now)
+        .Select(item => new { item.Id, item.TenantId, item.QrStationId })
+        .SingleOrDefaultAsync(ct);
+    if (session is null) return Results.Unauthorized();
+
+    var grantHash = HashOpaqueToken(request.GrantToken);
+    var existing = await db.LocalPrintUploadTickets.AsNoTracking()
+        .SingleOrDefaultAsync(item =>
+            item.TenantId == session.TenantId &&
+            item.CustomerSessionId == session.Id &&
+            item.IdempotencyKey == idempotencyKey, ct);
+    if (existing is not null)
+    {
+        var existingGrantHash = Convert.FromHexString(existing.GrantHash);
+        var suppliedGrantHash = Convert.FromHexString(grantHash);
+        if (!CryptographicOperations.FixedTimeEquals(existingGrantHash, suppliedGrantHash) ||
+            existing.SizeBytes != request.SizeBytes ||
+            !string.Equals(existing.Sha256, sha, StringComparison.OrdinalIgnoreCase) ||
+            existing.OriginalFileName != originalName)
+        {
+            return Results.Conflict(new { code = "local_upload_idempotency_conflict", message = "This upload attempt key is already associated with a different document." });
+        }
+
+        if (existing.CompletedUtc is null && existing.ExpiresUtc <= now)
+        {
+            return Results.Conflict(new { code = "local_upload_ticket_expired", message = "This local upload attempt expired. Start a new upload attempt." });
+        }
+
+        return Results.Ok(new
+        {
+            existing.Id,
+            existing.PrintJobId,
+            existing.JobNumber,
+            existing.AgentDeviceId,
+            existing.ExpiresUtc,
+            Completed = existing.CompletedUtc != null
+        });
+    }
+
+    var stationPrinter = await (
+        from station in db.QrStations.AsNoTracking()
+        join printer in db.PrinterDevices.AsNoTracking()
+            on new { station.TenantId, PrinterId = station.PrinterDeviceId!.Value }
+            equals new { printer.TenantId, PrinterId = printer.Id }
+        join agent in db.AgentDevices.AsNoTracking()
+            on new { printer.TenantId, AgentId = printer.AgentDeviceId!.Value }
+            equals new { agent.TenantId, AgentId = agent.Id }
+        where station.Id == session.QrStationId &&
+              station.TenantId == session.TenantId &&
+              station.IsEnabled &&
+              station.PrinterDeviceId != null &&
+              printer.IsActive &&
+              printer.AgentDeviceId != null &&
+              !string.IsNullOrWhiteSpace(printer.QueueName) &&
+              agent.RevokedUtc == null &&
+              agent.LastSeenUtc != null &&
+              agent.LastSeenUtc >= now.AddMinutes(-2)
+        select new
+        {
+            station.Id,
+            PrinterDeviceId = printer.Id,
+            AgentDeviceId = agent.Id,
+            agent.LocalEndpointsJson
+        }
+    ).SingleOrDefaultAsync(ct);
+
+    if (stationPrinter is null ||
+        AgentLocalEndpointRules.Normalize(ReadLocalAgentEndpoints(stationPrinter.LocalEndpointsJson)).Count == 0)
+    {
+        return Results.Conflict(new
+        {
+            code = "local_print_agent_unavailable",
+            message = "This QR station does not have a recently connected Windows Print Agent and printer. Use cloud-assisted upload or ask the shop operator."
+        });
+    }
+
+    var subscription = await entitlements.GetForTenantAsync(session.TenantId, ct);
+    if (!subscription.IsAccessActive)
+    {
+        return Results.Problem(statusCode: StatusCodes.Status403Forbidden, title: "This shop's trial or subscription period is no longer active.");
+    }
+    if (!PlanEntitlementRules.AllowsDocument(subscription.MaxDocumentBytes, request.SizeBytes))
+    {
+        return Results.Problem(statusCode: StatusCodes.Status413PayloadTooLarge, title: "This document exceeds the maximum size configured for this shop's plan.");
+    }
+
+    var quota = await entitlements.CheckCapacityAsync(session.TenantId, TenantQuotaResource.MonthlyPrintJob, ct);
+    if (!quota.Allowed)
+    {
+        return Results.Conflict(new { code = quota.Code, message = quota.Message, current = quota.Current, maximum = quota.Maximum });
+    }
+
+    var ticket = new LocalPrintUploadTicket
+    {
+        TenantId = session.TenantId,
+        CustomerSessionId = session.Id,
+        QrStationId = session.QrStationId,
+        PrinterDeviceId = stationPrinter.PrinterDeviceId,
+        AgentDeviceId = stationPrinter.AgentDeviceId,
+        JobNumber = $"SP-{now:yyMMdd}-{Guid.NewGuid().ToString("N")[..8].ToUpperInvariant()}",
+        IdempotencyKey = idempotencyKey,
+        GrantHash = grantHash,
+        OriginalFileName = originalName,
+        MediaType = mediaType,
+        FileExtension = extension,
+        SizeBytes = request.SizeBytes,
+        Sha256 = sha,
+        CreatedUtc = now,
+        ExpiresUtc = now.AddMinutes(15)
+    };
+    db.LocalPrintUploadTickets.Add(ticket);
+    await db.SaveChangesAsync(ct);
+
+    return Results.Created($"/api/v1/public/sessions/current/local-upload-tickets/{ticket.Id}", new
+    {
+        ticket.Id,
+        ticket.PrintJobId,
+        ticket.JobNumber,
+        ticket.AgentDeviceId,
+        ticket.ExpiresUtc,
+        Completed = false
+    });
+}).RequireRateLimiting("document-upload");
 
 publicApi.MapPost("/jobs/{jobId:guid}/quote", async (
     Guid jobId,
@@ -3909,5 +4495,7 @@ static string Slugify(string value)
 
 static string HashOpaqueToken(string token) =>
     Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(token))).ToLowerInvariant();
+
+await app.RunAsync();
 
 public partial class Program { }

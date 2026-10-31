@@ -1,0 +1,15 @@
+FROM node:22-alpine AS build
+WORKDIR /workspace
+RUN corepack enable && corepack prepare pnpm@10.18.0 --activate
+COPY . .
+RUN pnpm install --no-frozen-lockfile
+ARG VITE_API_BASE_URL=
+ENV VITE_API_BASE_URL=${VITE_API_BASE_URL}
+RUN pnpm --filter @qrtoprint/portal build
+
+FROM nginx:alpine AS runtime
+COPY apps/portal/nginx.conf /etc/nginx/conf.d/default.conf
+COPY --from=build /workspace/apps/portal/dist/ /usr/share/nginx/html/
+EXPOSE 80
+HEALTHCHECK --interval=20s --timeout=5s --start-period=10s --retries=5 \
+    CMD wget -q -O /dev/null http://127.0.0.1/ || exit 1

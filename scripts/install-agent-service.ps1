@@ -1,7 +1,10 @@
 [CmdletBinding()]
 param(
     [Parameter(Mandatory = $true)]
-    [string]$AgentExePath
+    [string]$AgentExePath,
+
+    [Parameter()]
+    [string]$CustomerPortalOrigin = "https://print.thinkwithsujeet.in"
 )
 
 $ErrorActionPreference = "Stop"
@@ -12,6 +15,32 @@ if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administra
 }
 
 $resolvedExe = (Resolve-Path -LiteralPath $AgentExePath).Path
+$portalUri = $null
+if (-not [Uri]::TryCreate($CustomerPortalOrigin.TrimEnd('/'), [UriKind]::Absolute, [ref]$portalUri)) {
+    throw "Provide the HTTPS customer portal origin, e.g. https://print.thinkwithsujeet.in."
+}
+if (($portalUri.Scheme -ne "https" -and $portalUri.Host -notin @("localhost", "127.0.0.1")) -or
+    $portalUri.AbsolutePath -ne "/" -or $portalUri.Query -or $portalUri.Fragment -or $portalUri.UserInfo) {
+    throw "The customer portal origin must be HTTPS (HTTP is allowed only for localhost development)."
+}
+$allowedOrigin = $portalUri.GetLeftPart([UriPartial]::Authority)
+$settingsPath = Join-Path (Split-Path -Parent $resolvedExe) "appsettings.json"
+$settings = if (Test-Path -LiteralPath $settingsPath) {
+    Get-Content -LiteralPath $settingsPath -Raw | ConvertFrom-Json
+} else {
+    [PSCustomObject]@{}
+}
+if (-not $settings.PSObject.Properties["Agent"] -or $null -eq $settings.Agent) {
+    $settings | Add-Member -NotePropertyName Agent -NotePropertyValue ([PSCustomObject]@{}) -Force
+}
+if (-not $settings.Agent.PSObject.Properties["LocalApi"] -or $null -eq $settings.Agent.LocalApi) {
+    $settings.Agent | Add-Member -NotePropertyName LocalApi -NotePropertyValue ([PSCustomObject]@{}) -Force
+}
+$settings.Agent.LocalApi | Add-Member -NotePropertyName Enabled -NotePropertyValue $true -Force
+$settings.Agent.LocalApi | Add-Member -NotePropertyName AllowedOrigins -NotePropertyValue @($allowedOrigin) -Force
+$settings | ConvertTo-Json -Depth 20 | Set-Content -LiteralPath $settingsPath -Encoding utf8
+Write-Host "Configured the local Agent API CORS origin: $allowedOrigin"
+
 $serviceName = "QRtoPrintSmartPrintAgent"
 $binaryPath = '"' + $resolvedExe + '"'
 $existing = Get-Service -Name $serviceName -ErrorAction SilentlyContinue

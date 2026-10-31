@@ -1,0 +1,25 @@
+FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
+WORKDIR /source
+COPY . .
+RUN dotnet restore src/SmartPrint.Api/SmartPrint.Api.csproj
+RUN dotnet publish src/SmartPrint.Api/SmartPrint.Api.csproj \
+    --configuration Release \
+    --no-restore \
+    --output /app/publish \
+    /p:UseAppHost=false
+
+FROM mcr.microsoft.com/dotnet/aspnet:10.0 AS runtime
+WORKDIR /app
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends curl \
+    && rm -rf /var/lib/apt/lists/* \
+    && mkdir -p /var/lib/qrtoprint/documents \
+    && chown -R app:app /var/lib/qrtoprint
+COPY --from=build --chown=app:app /app/publish/ ./
+ENV ASPNETCORE_URLS=http://+:8080
+ENV ASPNETCORE_FORWARDEDHEADERS_ENABLED=true
+EXPOSE 8080
+USER app
+HEALTHCHECK --interval=20s --timeout=5s --start-period=30s --retries=5 \
+    CMD curl --fail --silent http://127.0.0.1:8080/health/ready || exit 1
+ENTRYPOINT ["dotnet", "SmartPrint.Api.dll"]

@@ -15,7 +15,7 @@ import {
   logout, readStoredTokens, rejectShopPrintJob, rejectShopPayment, revokeAgentDevice,
   reportCustomerUpiPayment, renewCustomerPrintSession, resumeCustomerSession, rotateStationCode, startCustomerPayment, storeTokens,
   updatePrinterActive, updateShopPaymentSettings, updateShopPricing,
-  updateShopProfile, updateStationEnabled, uploadCustomerDocument,
+  updateShopProfile, updateStationEnabled, uploadCustomerDocument, uploadCustomerDocumentLocally,
   verifyShopPayment, type CustomerPayment, type ShopPayment, type ShopPaymentSettings,
   type AgentDevice, type AuthTokens, type CustomerJobStatus, type PrinterDevice, type PrintQuoteResult, type ShopJobEvent,
   type QrStation, type ShopPricingProfile, type ShopPrintJob, type ShopProfile, type ShopReportSummary, type ShopSubscriptionSummary,
@@ -1082,6 +1082,8 @@ function CustomerEntry({publicCode}:{publicCode:string}) {
   const [result,setResult]=useState<Awaited<ReturnType<typeof createCustomerSession>>|null>(null);
   const [error,setError]=useState("");
   const [loading,setLoading]=useState(true);
+  const [localReady,setLocalReady]=useState(false);
+  useEffect(()=>{setLocalReady(false);},[result?.localAgent?.agentDeviceId]);
   useEffect(()=>{
     let mounted=true;
     const storedToken=sessionStorage.getItem("qrtoprint.customer-session");
@@ -1145,8 +1147,8 @@ function CustomerEntry({publicCode}:{publicCode:string}) {
       result?<><div className="entry-success-icon"><Check size={23}/></div><div className="entry-eyebrow">SECURE SESSION CREATED</div><h1>Welcome to {result.shop.displayName}</h1><p>Your phone is connected to this shop's print station.</p>
         <div className="entry-printer-card"><div className="entry-printer-icon"><Printer size={20}/></div><div><strong>{result.printer?.displayName||"Shop print counter"}</strong><span>{result.printer?result.printer.manufacturer+" · "+result.printer.model:"The shop will select a printer for your job."}</span></div><Status label={result.printer?.status||"Session ready"} tone="blue"/></div>
         <div className="entry-session-note"><ShieldCheck size={16}/><span>This session expires at {new Date(result.expiresUtc).toLocaleTimeString([], {hour:"2-digit",minute:"2-digit"})}. Your document access stays limited to this shop session.</span></div>
-        <CustomerLocalConnection localAgent={result.localAgent}/>
-        <CustomerPrintFlow sessionToken={result.sessionToken} paymentOptions={result.paymentOptions}/>
+        <CustomerLocalConnection localAgent={result.localAgent} onReady={setLocalReady}/>
+        <CustomerPrintFlow sessionToken={result.sessionToken} paymentOptions={result.paymentOptions} localAgent={result.localAgent} localReady={localReady}/>
       </>:null}
     </main>
     <footer className="customer-entry-footer">© 2026 Smart Print · Secure customer printing</footer>
@@ -1157,7 +1159,7 @@ function CustomerEntry({publicCode}:{publicCode:string}) {
 type CustomerLocalAgent = NonNullable<Awaited<ReturnType<typeof createCustomerSession>>["localAgent"]>;
 type LocalAgentCheckStatus = "idle" | "checking" | "connected" | "unavailable" | "denied";
 
-function CustomerLocalConnection({localAgent}:{localAgent:CustomerLocalAgent|null}) {
+function CustomerLocalConnection({localAgent,onReady}:{localAgent:CustomerLocalAgent|null;onReady:(ready:boolean)=>void}) {
   const [permissionState,setPermissionState]=useState<PermissionState|"unknown">("unknown");
   const [checkStatus,setCheckStatus]=useState<LocalAgentCheckStatus>("idle");
   const [message,setMessage]=useState("");
@@ -1165,6 +1167,7 @@ function CustomerLocalConnection({localAgent}:{localAgent:CustomerLocalAgent|nul
   async function checkConnection() {
     if(!localAgent)return;
     setCheckStatus("checking");
+    onReady(false);
     setMessage("Checking the shop computer. No document is sent by this check.");
 
     let validEndpointCount=0;
@@ -1215,7 +1218,8 @@ function CustomerLocalConnection({localAgent}:{localAgent:CustomerLocalAgent|nul
            status.protocolVersion===1 &&
            status.status==="LOCAL_ENDPOINT_READY") {
           setCheckStatus("connected");
-          setMessage("This phone can reach the shop computer. Your document will still use the current cloud-assisted upload.");
+          onReady(true);
+          setMessage("This phone can reach the shop computer. You can upload directly over shop Wi-Fi.");
           return;
         }
       } catch {
@@ -1226,6 +1230,7 @@ function CustomerLocalConnection({localAgent}:{localAgent:CustomerLocalAgent|nul
     }
 
     setCheckStatus("unavailable");
+    onReady(false);
     setMessage(validEndpointCount===0
       ? "The shop has not announced a usable local address. The regular upload remains available."
       : "Could not reach the shop computer. Connect this phone to the shop Wi-Fi and allow Local network access if your browser asks. The regular upload remains available.");
@@ -1240,6 +1245,7 @@ function CustomerLocalConnection({localAgent}:{localAgent:CustomerLocalAgent|nul
       setPermissionState(permissionStatus.state);
       if(permissionStatus.state==="denied") {
         setCheckStatus("denied");
+        onReady(false);
         setMessage("Local network access is blocked for this site. Enable it in browser site settings, or continue with the regular upload.");
       } else if(permissionStatus.state==="prompt") {
         setCheckStatus("idle");
@@ -1261,7 +1267,7 @@ function CustomerLocalConnection({localAgent}:{localAgent:CustomerLocalAgent|nul
       active=false;
       permissionStatus?.removeEventListener("change",updatePermission);
     };
-  },[localAgent?.agentDeviceId]);
+  },[localAgent?.agentDeviceId,onReady]);
 
   if(!localAgent?.endpoints.length)return null;
 
@@ -1306,7 +1312,7 @@ function readStoredCustomerDraft(sessionToken:string):StoredCustomerDraft|null {
   }
 }
 
-function CustomerPrintFlow({sessionToken,paymentOptions}:{sessionToken:string;paymentOptions:{upiEnabled:boolean;upiId?:string|null;payeeName?:string|null;cashEnabled:boolean}}) {
+function CustomerPrintFlow({sessionToken,paymentOptions,localAgent,localReady}:{sessionToken:string;paymentOptions:{upiEnabled:boolean;upiId?:string|null;payeeName?:string|null;cashEnabled:boolean};localAgent:CustomerLocalAgent|null;localReady:boolean}) {
   const [file,setFile]=useState<File|null>(null);
   const [previewUrl,setPreviewUrl]=useState<string|null>(null);
   const [uploaded,setUploaded]=useState<UploadedPrintJob|null>(()=>readStoredCustomerDraft(sessionToken)?.uploaded??null);
@@ -1320,6 +1326,12 @@ function CustomerPrintFlow({sessionToken,paymentOptions}:{sessionToken:string;pa
   const [copies,setCopies]=useState(1);
   const [busy,setBusy]=useState(false);
   const [error,setError]=useState("");
+  const [uploadMode,setUploadMode]=useState<"LOCAL"|"CLOUD">(localAgent?.endpoints.length?"LOCAL":"CLOUD");
+
+  useEffect(()=>{
+    if(!localAgent?.endpoints.length)setUploadMode("CLOUD");
+    else setUploadMode(current=>current==="CLOUD"?"LOCAL":current);
+  },[localAgent?.agentDeviceId]);
 
   useEffect(()=>{
     if(!paymentOptions.upiEnabled&&paymentOptions.cashEnabled)setPaymentMethod("CASH");
@@ -1368,9 +1380,15 @@ function CustomerPrintFlow({sessionToken,paymentOptions}:{sessionToken:string;pa
 
   async function upload() {
     if(!file)return;
+    if(uploadMode==="LOCAL"&&!localReady) {
+      setError("Check shop Wi-Fi access above before starting a direct local upload.");
+      return;
+    }
     setBusy(true);setError("");setQuote(null);setJobStatus(null);
     try {
-      const created=await uploadCustomerDocument(sessionToken,file);
+      const created=uploadMode==="LOCAL"&&localAgent
+        ? await uploadCustomerDocumentLocally(sessionToken,file,localAgent)
+        : await uploadCustomerDocument(sessionToken,file);
       setUploaded(created);
     } catch(exception) {
       setError(exception instanceof ApiError?exception.message:"The document could not be uploaded.");
@@ -1475,6 +1493,10 @@ function CustomerPrintFlow({sessionToken,paymentOptions}:{sessionToken:string;pa
 
   return <section className="customer-print-flow">
     <div className="customer-flow-heading"><div><span>STEP 1</span><h2>Add your document</h2></div><span className="upload-limit">PDF, JPG or PNG · Up to 20 MB</span></div>
+    {localAgent?.endpoints.length? <div className="customer-upload-modes">
+      <button type="button" className={uploadMode==="LOCAL"?"customer-upload-mode selected":"customer-upload-mode"} onClick={()=>setUploadMode("LOCAL")}><strong>Shop Wi-Fi</strong><small>Document stays on the shop computer</small></button>
+      <button type="button" className={uploadMode==="CLOUD"?"customer-upload-mode selected":"customer-upload-mode"} onClick={()=>setUploadMode("CLOUD")}><strong>Cloud-assisted</strong><small>Encrypted upload through the API</small></button>
+    </div>:null}
     <label className="customer-upload-zone">
       <input type="file" accept=".pdf,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png" onChange={event=>chooseFile(event.target.files?.[0]||null)}/>
       <span className="customer-upload-icon"><FileUp size={21}/></span>
@@ -1482,7 +1504,9 @@ function CustomerPrintFlow({sessionToken,paymentOptions}:{sessionToken:string;pa
       <small>{file?formatBytes(file.size)+" · Select another file to replace":uploaded?"Your upload and current request are saved in this browser session":"Tap to browse files on your phone"}</small>
     </label>
     {previewUrl&&file&&<div className="customer-file-preview"><div className="customer-file-label"><FileText size={15}/><span>Document preview</span></div>{file.type==="application/pdf"?<iframe src={previewUrl} title="PDF document preview"/>:<img src={previewUrl} alt="Selected document preview"/>}</div>}
-    {file&&!uploaded&&<button className="customer-flow-button" disabled={busy} onClick={()=>void upload()}>{busy?<span className="button-spinner"/>:<><UploadIcon/>Upload document</>}</button>}
+    {file&&!uploaded&&<button className="customer-flow-button" disabled={busy||(uploadMode==="LOCAL"&&!localReady)} onClick={()=>void upload()}>{busy?<span className="button-spinner"/>:<><UploadIcon/>{uploadMode==="LOCAL"&&localAgent?"Upload directly to shop":"Upload document"}</>}</button>}
+    {file&&!uploaded&&uploadMode==="LOCAL"&&localAgent&&<small className="customer-upload-local-note">{localReady?"Your file travels over shop Wi-Fi. The cloud receives only the job, quote and payment metadata.":"Tap Check shop Wi-Fi above first to grant the browser permission."}</small>}
+    {file&&!uploaded&&uploadMode==="CLOUD"&&localAgent&&<small className="customer-upload-local-note">Cloud-assisted fallback: the encrypted file is uploaded to the API before being transferred to the shop computer.</small>}
     {uploaded&&<>
       <div className="uploaded-document-card"><div className="uploaded-document-icon"><FileText size={18}/></div><div><strong>{uploaded.document.originalFileName}</strong><span>{uploaded.job.pageCount} {uploaded.job.pageCount===1?"page":"pages"} · {formatBytes(uploaded.document.sizeBytes)} · Validated</span></div><Status label="Uploaded" tone="green"/></div>
       {!quote&&!jobStatus&&<>
