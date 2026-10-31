@@ -1,6 +1,5 @@
 package in.thinkwithsujeet.qrtoprint
 
-import android.net.Uri
 import java.net.URI
 
 data class StationQrLink(val url: String, val host: String, val publicCode: String) {
@@ -21,8 +20,7 @@ data class StationQrLink(val url: String, val host: String, val publicCode: Stri
             require(segments.size == 2 && segments[0] == "s" && codePattern.matches(segments[1])) {
                 "This is not a QRtoPrint station URL."
             }
-            val canonical = Uri.Builder().scheme("https").encodedAuthority(host)
-                .appendPath("s").appendPath(segments[1]).build().toString()
+            val canonical = URI("https", null, host, -1, "/s/${segments[1]}", null, null).toASCIIString()
             return StationQrLink(canonical, host!!, segments[1])
         }
     }
