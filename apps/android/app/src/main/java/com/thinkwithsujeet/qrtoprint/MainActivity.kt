@@ -25,6 +25,7 @@ import android.widget.EditText
 import android.text.InputType
 import android.widget.CheckBox
 import android.widget.FrameLayout
+import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.PopupMenu
 import android.widget.ScrollView
@@ -248,7 +249,7 @@ class MainActivity : AppCompatActivity() {
             setBackgroundColor(getColor(R.color.qp_surface))
             elevation = dp(1).toFloat()
             menu.add(Menu.NONE, PROFILE, Menu.NONE, "Account").apply {
-                setIcon(android.R.drawable.ic_menu_myplaces)
+                setIcon(R.drawable.ic_account)
                 setContentDescription("Account")
                 setTooltipText("SmartPrint account")
                 setShowAsAction(android.view.MenuItem.SHOW_AS_ACTION_ALWAYS)
@@ -261,10 +262,22 @@ class MainActivity : AppCompatActivity() {
         content = FrameLayout(this)
         root.addView(content, LinearLayout.LayoutParams(-1, 0, 1f))
         navigation = BottomNavigationView(this).apply {
-            menu.add(Menu.NONE, HOME, 0, "Home").setIcon(android.R.drawable.ic_menu_view)
-            menu.add(Menu.NONE, FILES, 1, "My Files").setIcon(android.R.drawable.ic_menu_agenda)
-            menu.add(Menu.NONE, SCAN_PRINT, 2, "Scan & Print").setIcon(android.R.drawable.ic_menu_camera)
-            menu.add(Menu.NONE, ACTIVITY, 3, "Activity").setIcon(android.R.drawable.ic_menu_recent_history)
+            menu.add(Menu.NONE, HOME, 0, "Home").apply {
+                setIcon(R.drawable.ic_nav_home)
+                setContentDescription("Home")
+            }
+            menu.add(Menu.NONE, FILES, 1, "My Files").apply {
+                setIcon(R.drawable.ic_nav_files)
+                setContentDescription("My Files")
+            }
+            menu.add(Menu.NONE, SCAN_PRINT, 2, "Scan & Print").apply {
+                setIcon(R.drawable.ic_nav_scan_print)
+                setContentDescription("Scan and Print")
+            }
+            menu.add(Menu.NONE, ACTIVITY, 3, "Activity").apply {
+                setIcon(R.drawable.ic_nav_activity)
+                setContentDescription("Activity")
+            }
             labelVisibilityMode = BottomNavigationView.LABEL_VISIBILITY_LABELED
             backgroundTintList = ColorStateList.valueOf(getColor(R.color.qp_card))
             itemIconTintList = ColorStateList(
@@ -577,22 +590,49 @@ class MainActivity : AppCompatActivity() {
         column.addView(text("How it works", 18, R.color.qp_text, true).apply {
             setPadding(dp(2), dp(22), 0, dp(10))
         })
-        val steps = listOf(
-            Triple("01", "Prepare", "Scan paper pages or import PDFs and photos. Arrange your collection before you visit."),
-            Triple("02", "Connect", "Scan the QR code shown by the print shop. SmartPrint opens that shop's secure print session."),
-            Triple("03", "Review & collect", "Choose available print settings, review the server-calculated quote, pay and follow job progress.")
+        data class JourneyStep(
+            val number: String,
+            val icon: Int,
+            val title: String,
+            val description: String
         )
-        steps.forEach { (number, title, description) ->
+        val steps = listOf(
+            JourneyStep(
+                "01", R.drawable.ic_document_scan, "Prepare",
+                "Scan paper pages or import PDFs and photos. Arrange your collection before you visit."
+            ),
+            JourneyStep(
+                "02", R.drawable.ic_nav_scan_print, "Connect",
+                "Scan the QR code shown by the print shop. SmartPrint opens that shop's secure print session."
+            ),
+            JourneyStep(
+                "03", R.drawable.ic_print, "Review & collect",
+                "Choose available print settings, review the server-calculated quote, pay and follow job progress."
+            )
+        )
+        steps.forEach { item ->
             val step = card()
             val row = LinearLayout(this).apply {
                 orientation = LinearLayout.HORIZONTAL
                 gravity = Gravity.CENTER_VERTICAL
                 setPadding(dp(15), dp(15), dp(15), dp(15))
             }
-            row.addView(text(number, 15, R.color.qp_primary, true), LinearLayout.LayoutParams(dp(42), -2))
+            row.addView(journeyIcon(item.icon), LinearLayout.LayoutParams(dp(48), dp(48)).apply {
+                marginEnd = dp(14)
+            })
             val copy = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-            copy.addView(text(title, 15, R.color.qp_text, true))
-            copy.addView(text(description, 13, R.color.qp_muted, false).apply { setPadding(0, dp(4), 0, 0) })
+            val heading = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+            }
+            heading.addView(text(item.number, 11, R.color.qp_primary, true))
+            heading.addView(text(item.title, 15, R.color.qp_text, true).apply {
+                setPadding(dp(9), 0, 0, 0)
+            })
+            copy.addView(heading)
+            copy.addView(text(item.description, 13, R.color.qp_muted, false).apply {
+                setPadding(0, dp(5), 0, 0)
+            })
             row.addView(copy, LinearLayout.LayoutParams(0, -2, 1f))
             step.addView(row)
             column.addView(step, linearParams().apply { bottomMargin = dp(9) })
@@ -604,6 +644,17 @@ class MainActivity : AppCompatActivity() {
         column.addView(button("Prepare documents first", false).apply { setOnClickListener { showFiles() } },
             linearParams().apply { topMargin = dp(13) })
         return scroll
+    }
+
+    private fun journeyIcon(resourceId: Int): ImageView = ImageView(this).apply {
+        setImageResource(resourceId)
+        imageTintList = ColorStateList.valueOf(getColor(R.color.qp_primary))
+        background = android.graphics.drawable.GradientDrawable().apply {
+            setColor(getColor(R.color.qp_soft))
+            cornerRadius = dp(15).toFloat()
+        }
+        setPadding(dp(12), dp(12), dp(12), dp(12))
+        importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
     }
 
     private fun showActivity() {
