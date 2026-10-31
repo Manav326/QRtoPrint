@@ -29,6 +29,11 @@ else {
     New-Service -Name $serviceName -BinaryPathName $binaryPath -DisplayName "QRtoPrint Smart Print Agent" -Description "Secure local printer inventory and cloud heartbeat service for QRtoPrint." -StartupType Automatic | Out-Null
 }
 
+$firewallRuleName = "QRtoPrint Smart Print Agent Local API"
+Get-NetFirewallRule -DisplayName $firewallRuleName -ErrorAction SilentlyContinue | Remove-NetFirewallRule
+New-NetFirewallRule -DisplayName $firewallRuleName -Direction Inbound -Action Allow -Protocol TCP -LocalPort 17842 -Program $resolvedExe -Profile Private -Description "Allows same-private-network devices to reach the QRtoPrint local agent status endpoint." | Out-Null
+
 Start-Service -Name $serviceName
 Write-Host "QRtoPrint Smart Print Agent is installed and running." -ForegroundColor Green
+Write-Host "The local status endpoint listens on TCP 17842 for Private network profiles only."
 Write-Host "Use Get-Service $serviceName to inspect the service state."

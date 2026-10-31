@@ -56,6 +56,7 @@ public sealed class SmartPrintDbContext(DbContextOptions<SmartPrintDbContext> op
             entity.Property(x => x.DeviceName).HasMaxLength(160).IsRequired();
             entity.Property(x => x.FingerprintHash).HasMaxLength(64).IsRequired();
             entity.Property(x => x.SecretHash).HasMaxLength(64).IsRequired();
+            entity.Property(x => x.LocalEndpointsJson).HasColumnType("jsonb").IsRequired();
             entity.Property(x => x.Status).HasMaxLength(24).IsRequired();
             entity.HasIndex(x => new { x.TenantId, x.FingerprintHash })
                 .IsUnique()

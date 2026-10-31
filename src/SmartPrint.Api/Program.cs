@@ -1677,11 +1677,17 @@ shopAgents.MapGet("/agent-devices", async (
             device.CreatedUtc,
             device.LastSeenUtc,
             device.RevokedUtc,
+            device.LocalEndpointsJson,
             PrinterCount = db.PrinterDevices.Count(printer =>
                 printer.TenantId == tenantId && printer.AgentDeviceId == device.Id)
         })
         .ToListAsync(ct);
-    return Results.Ok(devices);
+    return Results.Ok(devices.Select(device => new
+    {
+        device.Id, device.DeviceName, device.Status, device.CreatedUtc,
+        device.LastSeenUtc, device.RevokedUtc, device.PrinterCount,
+        LocalEndpoints = ReadLocalAgentEndpoints(device.LocalEndpointsJson)
+    }));
 });
 
 shopAgents.MapPatch("/agent-devices/{agentId:guid}/revoke", async (
@@ -2300,10 +2306,12 @@ agentApi.MapPost("/heartbeat", async (
     }
 
     var now = DateTimeOffset.UtcNow;
+    var localEndpoints = AgentLocalEndpointRules.Normalize(request.LocalEndpoints);
+    device.LocalEndpointsJson = JsonSerializer.Serialize(localEndpoints);
     device.Status = "Online";
     device.LastSeenUtc = now;
     await db.SaveChangesAsync(ct);
-    return Results.Ok(new { device.Id, device.Status, device.LastSeenUtc, AgentVersion = request.Version });
+    return Results.Ok(new { device.Id, device.Status, device.LastSeenUtc, AgentVersion = request.Version, LocalEndpoints = localEndpoints });
 });
 
 agentApi.MapPost("/printers/sync", async (
@@ -3660,7 +3668,8 @@ publicApi.MapPost("/sessions/current/resume", async (
         SessionToken = rawToken,
         Shop = shopProfile,
         PaymentOptions = paymentOptions,
-        Printer = printer
+        Printer = printer,
+        LocalAgent = await GetLocalAgentInfoAsync(db, station.TenantId, station.PrinterDeviceId, now, ct)
     });
 }).RequireRateLimiting("qr-session");
 
@@ -3709,6 +3718,7 @@ publicApi.MapPost("/stations/{publicCode}/sessions", async (
                 profile.CashEnabled
             })
             .SingleAsync(ct),
+        LocalAgent = await GetLocalAgentInfoAsync(db, station.TenantId, station.PrinterDeviceId, now, ct),
         Printer = station.PrinterDeviceId is Guid printerId
             ? await db.PrinterDevices.AsNoTracking()
                 .Where(printer => printer.Id == printerId && printer.TenantId == station.TenantId && printer.IsActive)
@@ -3745,8 +3755,49 @@ publicApi.MapGet("/sessions/current", async (
         .Where(profile => profile.TenantId == session.TenantId)
         .Select(profile => new { profile.DisplayName, profile.LogoUrl, profile.AccentColor, profile.Currency })
         .SingleAsync(ct);
-    return Results.Ok(new { session.Id, session.ExpiresUtc, Shop = shopProfile });
+    var stationPrinterId = await db.QrStations.AsNoTracking()
+        .Where(station => station.Id == session.QrStationId && station.TenantId == session.TenantId && station.IsEnabled)
+        .Select(station => station.PrinterDeviceId)
+        .SingleOrDefaultAsync(ct);
+    var localAgent = await GetLocalAgentInfoAsync(db, session.TenantId, stationPrinterId, now, ct);
+    return Results.Ok(new { session.Id, session.ExpiresUtc, Shop = shopProfile, LocalAgent = localAgent });
 });
+
+
+static string[] ReadLocalAgentEndpoints(string? json)
+{
+    try
+    {
+        return JsonSerializer.Deserialize<string[]>(string.IsNullOrWhiteSpace(json) ? "[]" : json)
+            ?? Array.Empty<string>();
+    }
+    catch (JsonException)
+    {
+        return Array.Empty<string>();
+    }
+}
+
+static async Task<object?> GetLocalAgentInfoAsync(
+    SmartPrintDbContext db, Guid tenantId, Guid? printerDeviceId, DateTimeOffset now, CancellationToken ct)
+{
+    if (printerDeviceId is not Guid assignedPrinterId) return null;
+
+    var agent = await (
+        from printer in db.PrinterDevices.AsNoTracking()
+        join device in db.AgentDevices.AsNoTracking()
+            on new { printer.TenantId, AgentId = printer.AgentDeviceId!.Value }
+            equals new { device.TenantId, AgentId = device.Id }
+        where printer.Id == assignedPrinterId && printer.TenantId == tenantId &&
+              printer.IsActive && printer.AgentDeviceId != null &&
+              device.RevokedUtc == null && device.LastSeenUtc != null &&
+              device.LastSeenUtc >= now.AddMinutes(-2)
+        select new { device.Id, device.LocalEndpointsJson }
+    ).SingleOrDefaultAsync(ct);
+
+    if (agent is null) return null;
+    var endpoints = ReadLocalAgentEndpoints(agent.LocalEndpointsJson);
+    return endpoints.Length == 0 ? null : new { AgentDeviceId = agent.Id, Endpoints = endpoints };
+}
 
 static bool TryGetTenantId(ClaimsPrincipal principal, out Guid tenantId) =>
     Guid.TryParse(principal.FindFirstValue("tenant_id"), out tenantId);

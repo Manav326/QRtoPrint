@@ -134,6 +134,8 @@ Events cover document upload, quote creation and expiry, customer quote acceptan
 
 Agent authentication uses a per-computer random secret over HTTPS. The Windows client stores the secret using DPAPI LocalMachine encryption. A revoked computer cannot continue to sync. Revoked fingerprints may be enrolled again after revocation; a second active pairing for the same machine/shop is blocked.
 
+The Windows Agent also exposes a read-only local status endpoint at `http://<private-LAN-IPv4>:17842/api/v1/local/status`. Its CORS allowlist is configured through `Agent:LocalApi:AllowedOrigins`; the installer allows TCP 17842 through Windows Firewall on the Private profile only. The endpoint returns only the agent ID, protocol version and readiness state. The authenticated heartbeat publishes validated RFC1918 IPv4 endpoints, and QR session responses include them only when the station's assigned printer belongs to a recently online, non-revoked agent. This is LAN discovery and readiness checking only; it does not yet accept local customer documents.
+
 The Windows Agent is not inventory-only. It claims paid jobs assigned to its own live printer queues, retrieves the original document over its authenticated channel, verifies the original SHA-256 and byte count, persists the document in an encrypted DPAPI-protected local queue, and submits only jobs explicitly authorised by the shop. It reports spooler state and uncertain outcomes to the API. It does not capture payments or infer that a spooler-accepted job has physically completed. The durable queue, print submission and output-reconciliation lifecycle is described below.
 
 

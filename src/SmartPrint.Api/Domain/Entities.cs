@@ -248,6 +248,7 @@ public sealed class AgentDevice
     public string DeviceName { get; set; } = string.Empty;
     public string FingerprintHash { get; set; } = string.Empty;
     public string SecretHash { get; set; } = string.Empty;
+    public string LocalEndpointsJson { get; set; } = "[]";
     public string Status { get; set; } = "Online";
     public DateTimeOffset CreatedUtc { get; set; } = DateTimeOffset.UtcNow;
     public DateTimeOffset? LastSeenUtc { get; set; }

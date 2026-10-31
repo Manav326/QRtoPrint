@@ -12,6 +12,7 @@ public sealed class Worker(
     WindowsPrinterDiscovery printerDiscovery,
     AgentLocalQueueStore localQueueStore,
     WindowsPrintExecutor printExecutor,
+    LocalAgentApiState localAgentApiState,
     IConfiguration configuration) : BackgroundService
 {
     private readonly TimeSpan pollInterval = TimeSpan.FromSeconds(
@@ -62,7 +63,10 @@ public sealed class Worker(
                     new
                     {
                         version = typeof(Worker).Assembly.GetName().Version?.ToString() ?? "1.0.0",
-                        operatingSystem = Environment.OSVersion.VersionString
+                        operatingSystem = Environment.OSVersion.VersionString,
+                        localEndpoints = localAgentApiState.IsRunning
+                            ? LocalNetworkEndpointDiscovery.Discover(configuration.GetValue<int?>("Agent:LocalApi:Port") ?? LocalNetworkEndpointDiscovery.DefaultPort)
+                            : Array.Empty<string>()
                     },
                     stoppingToken);
 

@@ -20,8 +20,13 @@ To remove the Windows Service, run scripts\uninstall-agent-service.ps1 from an e
 
 ## Current capabilities
 
+The local HTTP endpoint is currently a discovery/health milestone only. Direct customer document upload over shop Wi-Fi is not enabled yet; the existing upload, quote, payment and job-authorisation lifecycle remains cloud-assisted until the local document lifecycle is integrated and tested end to end.
+
 - Queries Win32_Printer through WMI for installed queue name, driver, port, status and default queue.
 - Sends printer inventory to the paired shop tenant using agent-specific authentication headers.
+- Exposes a read-only local status endpoint at `http://<shop-computer-LAN-IP>:17842/api/v1/local/status`. It returns only the paired agent ID, protocol version and readiness state; it does not expose the agent secret, queue or documents.
+- Reports up to eight RFC1918 IPv4 endpoint addresses in the authenticated cloud heartbeat. The customer session receives endpoints only for its assigned printer's recently online, non-revoked agent.
+- The installer adds a Windows Firewall inbound rule for TCP 17842 on the Private network profile only. Keep shop computers on a trusted Private network profile and configure `Agent:LocalApi:AllowedOrigins` to the exact customer portal origin(s).
 - Refreshes agent heartbeat and printer status every 30 seconds (configurable from 10 to 300 seconds).
 - Marks previously discovered queues unavailable when they disappear from that computer's WMI inventory.
 - Stores the agent secret and locally received print documents encrypted using DPAPI LocalMachine. The protected queue directory is restricted to SYSTEM and local Administrators.

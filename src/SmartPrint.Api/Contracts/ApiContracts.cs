@@ -50,7 +50,10 @@ public sealed record AgentEnrollmentRequest(string Code, string Fingerprint, str
 
 public sealed record AgentEnrollmentResponse(Guid AgentDeviceId, string AgentSecret, DateTimeOffset CreatedUtc);
 
-public sealed record AgentHeartbeatRequest(string Version, string OperatingSystem);
+public sealed record AgentHeartbeatRequest(
+    string Version,
+    string OperatingSystem,
+    IReadOnlyList<string>? LocalEndpoints = null);
 
 public sealed record AgentPrinterDiscoveryRequest(
     string QueueName,

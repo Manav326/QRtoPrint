@@ -126,6 +126,7 @@ export interface AgentDevice {
   lastSeenUtc?: string | null;
   revokedUtc?: string | null;
   printerCount: number;
+  localEndpoints?: string[];
 }
 
 export class ApiError extends Error {
@@ -446,6 +447,7 @@ export function createCustomerSession(publicCode: string) {
     shop: { displayName: string; logoUrl?: string | null; accentColor: string; currency: string };
     printer: { displayName: string; manufacturer: string; model: string; status: string; capabilitiesJson: string } | null;
     paymentOptions: { upiEnabled: boolean; upiId?: string | null; payeeName?: string | null; cashEnabled: boolean };
+    localAgent: { agentDeviceId: string; endpoints: string[] } | null;
   }>(`/api/v1/public/stations/${encodeURIComponent(publicCode)}/sessions`, { method: "POST" });
 }
 
@@ -466,6 +468,7 @@ export function resumeCustomerSession(sessionToken: string, publicCode: string) 
     shop: { displayName: string; logoUrl?: string | null; accentColor: string; currency: string };
     paymentOptions: { upiEnabled: boolean; upiId?: string | null; payeeName?: string | null; cashEnabled: boolean };
     printer: { displayName: string; manufacturer: string; model: string; status: string; capabilitiesJson: string } | null;
+    localAgent: { agentDeviceId: string; endpoints: string[] } | null;
   }>("/api/v1/public/sessions/current/resume", {
     method: "POST",
     headers: { "X-Print-Session": sessionToken },

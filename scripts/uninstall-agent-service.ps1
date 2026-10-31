@@ -8,6 +8,9 @@ if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administra
     throw "Run this script from PowerShell as Administrator."
 }
 
+$firewallRuleName = "QRtoPrint Smart Print Agent Local API"
+Get-NetFirewallRule -DisplayName $firewallRuleName -ErrorAction SilentlyContinue | Remove-NetFirewallRule
+
 $serviceName = "QRtoPrintSmartPrintAgent"
 $service = Get-Service -Name $serviceName -ErrorAction SilentlyContinue
 if (-not $service) {
