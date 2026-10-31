@@ -144,6 +144,159 @@ public sealed class WindowsPrintExecutor
         }
     }
 
+    public string GetPdfExportPath(AgentLocalQueueEntry entry, string exportDirectory)
+    {
+        if (string.IsNullOrWhiteSpace(exportDirectory))
+            throw new ArgumentException("A PDF export directory is required.", nameof(exportDirectory));
+        var root = Path.GetFullPath(exportDirectory);
+        var jobPart = SafeFilePart(entry.JobNumber, 48);
+        var documentStem = SafeFilePart(Path.GetFileNameWithoutExtension(entry.DocumentName), 120);
+        return Path.Combine(root, $"{jobPart}_{documentStem}.pdf");
+    }
+
+    public PdfExportReceipt ExportPdf(
+        AgentLocalQueueEntry entry,
+        byte[] bytes,
+        string exportDirectory,
+        CancellationToken cancellationToken)
+    {
+        if (bytes.LongLength != entry.SizeBytes ||
+            !CryptographicOperations.FixedTimeEquals(SHA256.HashData(bytes), Convert.FromHexString(entry.Sha256)))
+            throw new PrintExecutionBlockedException("LOCAL_DOCUMENT_INTEGRITY_MISMATCH", "The local document does not match the verified upload.");
+
+        using var raster = OpenDocument(bytes, entry.MediaType, entry.ColourMode == "Mono");
+        if (raster.PageCount is <= 0 or > 500)
+            throw new PrintExecutionBlockedException("INVALID_PAGE_COUNT", "The document contains an unsupported number of pages.");
+
+        Directory.CreateDirectory(exportDirectory);
+        var outputPath = GetPdfExportPath(entry, exportDirectory);
+        if (File.Exists(outputPath))
+            return ReadExistingPdfExport(outputPath);
+
+        var temporaryPath = outputPath + "." + Guid.NewGuid().ToString("N") + ".tmp";
+        try
+        {
+            using (var output = new FileStream(
+                temporaryPath, FileMode.CreateNew, FileAccess.Write, FileShare.None, 64 * 1024,
+                FileOptions.SequentialScan | FileOptions.WriteThrough))
+            {
+                using var pdf = SKDocument.CreatePdf(output)
+                    ?? throw new PrintExecutionBlockedException("PDF_EXPORT_CREATE_FAILED", "The PDF document could not be created.");
+                const int dpi = 300;
+                for (var copy = 0; copy < entry.Copies; copy++)
+                {
+                    for (var pageIndex = 0; pageIndex < raster.PageCount; pageIndex++)
+                    {
+                        cancellationToken.ThrowIfCancellationRequested();
+                        using var page = raster.RenderPage(pageIndex, dpi);
+                        using var bitmap = new SKBitmap(new SKImageInfo(
+                            page.Width, page.Height, SKColorType.Bgra8888, SKAlphaType.Opaque));
+                        var pixels = bitmap.GetPixels();
+                        if (pixels == IntPtr.Zero)
+                            throw new PrintExecutionBlockedException("PDF_EXPORT_BITMAP_FAILED", "The page bitmap could not be allocated.");
+                        Marshal.Copy(page.Pixels, 0, pixels, page.Pixels.Length);
+                        using var image = SKImage.FromBitmap(bitmap)
+                            ?? throw new PrintExecutionBlockedException("PDF_EXPORT_IMAGE_FAILED", "The rendered page could not be encoded.");
+
+                        var (paperWidth, paperHeight) = PdfPageSize(entry.PaperSize, page.Width > page.Height);
+                        var canvas = pdf.BeginPage(paperWidth, paperHeight);
+                        var scale = Math.Min(paperWidth / page.Width, paperHeight / page.Height);
+                        var width = page.Width * scale;
+                        var height = page.Height * scale;
+                        var destination = new SKRect(
+                            (paperWidth - width) / 2f,
+                            (paperHeight - height) / 2f,
+                            (paperWidth + width) / 2f,
+                            (paperHeight + height) / 2f);
+                        canvas.Clear(SKColors.White);
+                        canvas.DrawImage(image, destination);
+                        canvas.Flush();
+                        pdf.EndPage();
+                    }
+                }
+                pdf.Close();
+            }
+
+            var info = new FileInfo(temporaryPath);
+            if (!info.Exists || info.Length <= 0)
+                throw new PrintExecutionBlockedException("PDF_EXPORT_EMPTY", "The PDF export did not produce a file.");
+            byte[] hash;
+            using (var read = new FileStream(temporaryPath, FileMode.Open, FileAccess.Read, FileShare.Read))
+                hash = SHA256.HashData(read);
+            try
+            {
+                File.Move(temporaryPath, outputPath, overwrite: false);
+            }
+            catch (IOException) when (File.Exists(outputPath))
+            {
+                if (File.Exists(temporaryPath)) File.Delete(temporaryPath);
+                return ReadExistingPdfExport(outputPath);
+            }
+            return new PdfExportReceipt(
+                Path.GetFileName(outputPath),
+                outputPath,
+                info.Length,
+                Convert.ToHexString(hash).ToLowerInvariant());
+        }
+        catch (PrintExecutionBlockedException)
+        {
+            if (File.Exists(temporaryPath)) File.Delete(temporaryPath);
+            throw;
+        }
+        catch (OperationCanceledException)
+        {
+            if (File.Exists(temporaryPath)) File.Delete(temporaryPath);
+            throw;
+        }
+        catch (Exception exception)
+        {
+            if (File.Exists(temporaryPath)) File.Delete(temporaryPath);
+            if (File.Exists(outputPath))
+                throw new PrintSubmissionUncertainException("PDF_EXPORT_OUTCOME_UNCERTAIN", "The PDF file may already have been created. Reconcile the output before retrying.", exception);
+            throw new PrintExecutionBlockedException("PDF_EXPORT_FAILED", "The PDF could not be saved to the configured shop export folder.", exception);
+        }
+    }
+
+    public PdfExportReceipt ReadExistingPdfExport(string outputPath)
+    {
+        if (!File.Exists(outputPath))
+            throw new FileNotFoundException("The expected PDF export does not exist.", outputPath);
+        using var stream = new FileStream(outputPath, FileMode.Open, FileAccess.Read, FileShare.Read);
+        Span<byte> header = stackalloc byte[5];
+        if (stream.Read(header) != 5 || !header.SequenceEqual("%PDF-"u8))
+            throw new PrintExecutionBlockedException("PDF_EXPORT_FILE_INVALID", "An existing file at the PDF export path is not a valid PDF.");
+        stream.Position = 0;
+        var size = stream.Length;
+        var hash = SHA256.HashData(stream);
+        return new PdfExportReceipt(
+            Path.GetFileName(outputPath),
+            Path.GetFullPath(outputPath),
+            size,
+            Convert.ToHexString(hash).ToLowerInvariant());
+    }
+
+    private static (float Width, float Height) PdfPageSize(string paperSize, bool landscape)
+    {
+        var (width, height) = paperSize.Trim().ToUpperInvariant() switch
+        {
+            "A4" => (595.276f, 841.89f),
+            "A5" => (419.528f, 595.276f),
+            "LETTER" => (612f, 792f),
+            "LEGAL" => (612f, 1008f),
+            _ => throw new PrintExecutionBlockedException("PAPER_SIZE_UNSUPPORTED", $"Paper '{paperSize}' is not supported for PDF export.")
+        };
+        return landscape ? (height, width) : (width, height);
+    }
+
+    private static string SafeFilePart(string value, int maximumLength)
+    {
+        var invalid = Path.GetInvalidFileNameChars();
+        var safe = new string((value ?? string.Empty).Select(character =>
+            invalid.Contains(character) || char.IsControl(character) ? '_' : character).ToArray()).Trim(' ', '.');
+        if (string.IsNullOrWhiteSpace(safe)) safe = "document";
+        return safe.Length <= maximumLength ? safe : safe[..maximumLength];
+    }
+
     public WindowsSpoolerJob? FindJobByDocumentName(string queueName, string documentName)
     {
         using var handle = OpenQueue(queueName);

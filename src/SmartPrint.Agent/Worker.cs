@@ -17,6 +17,7 @@ public sealed class Worker(
 {
     private readonly TimeSpan pollInterval = TimeSpan.FromSeconds(
         Math.Clamp(configuration.GetValue<int?>("Agent:PollIntervalSeconds") ?? 30, 10, 300));
+    private readonly string pdfExportDirectory = ResolvePdfExportDirectory(configuration);
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
@@ -105,6 +106,9 @@ public sealed class Worker(
                     {
                         logger.LogInformation("Synchronized {PrinterCount} Windows printer queues with the shop.", printers.Count);
                         await ProcessLocalQueueHandoffAsync(client, credentials, stoppingToken);
+                        await ReconcileLegacyPdfQueueJobsAsync(client, credentials, stoppingToken);
+                        await ReconcileInterruptedPdfExportsAsync(client, credentials, stoppingToken);
+                        await RetryPendingPdfExportReceiptsAsync(client, credentials, stoppingToken);
                         await ReconcileInterruptedSubmissionsAsync(client, credentials, stoppingToken);
                         await RetrySpoolerReceiptsAsync(client, credentials, stoppingToken);
                         await ProcessAuthorizedPrintJobsAsync(client, credentials, stoppingToken);
@@ -396,49 +400,176 @@ public sealed class Worker(
         {
             ct.ThrowIfCancellationRequested();
             var entry = localQueueStore.Find(job.Id);
-            if (entry is null || entry.State != "ACKNOWLEDGED" ||
+            var isPdfExport = job.OutputMode == PrinterOutputModeRules.PdfExport ||
+                entry?.OutputMode == PrinterOutputModeRules.PdfExport ||
+                PrinterOutputModeRules.IsPdfExport(job.QueueName, entry?.PrinterName);
+            var localStateValid = entry is not null &&
+                (entry.State == "ACKNOWLEDGED" ||
+                 (isPdfExport && entry.State == "OUTPUT_UNCONFIRMED"));
+            if (entry is null || !localStateValid ||
                 !string.Equals(entry.QueueName, job.QueueName, StringComparison.OrdinalIgnoreCase) ||
                 string.IsNullOrWhiteSpace(job.SpoolerJobName))
             {
-                await ReportOutputUnconfirmedAsync(client, credentials, job.Id, "LOCAL_QUEUE_PROOF_MISMATCH", "The local queue item no longer matches the print assignment.", CancellationToken.None);
+                await ReportOutputUnconfirmedAsync(client, credentials, job.Id, "LOCAL_QUEUE_PROOF_MISMATCH", "The local queue item no longer matches the output assignment.", CancellationToken.None);
                 continue;
             }
             try
             {
+                if (isPdfExport)
+                {
+                    var exportEntry = entry with { OutputMode = PrinterOutputModeRules.PdfExport };
+                    var destination = printExecutor.GetPdfExportPath(exportEntry, pdfExportDirectory);
+                    await localQueueStore.MarkPdfExportStartedAsync(job.Id, destination, ct);
+                    var documentBytes = localQueueStore.ReadDocument(job.Id);
+                    PdfExportReceipt receipt;
+                    try { receipt = printExecutor.ExportPdf(exportEntry, documentBytes, pdfExportDirectory, ct); }
+                    finally { CryptographicOperations.ZeroMemory(documentBytes); }
+
+                    await localQueueStore.MarkPdfExportedAsync(job.Id, receipt, ct);
+                    await ReportPdfExportedAsync(client, credentials, job.Id, receipt, ct);
+                    logger.LogInformation("Job {JobNumber} was exported as {FileName} to {OutputPath}.", job.JobNumber, receipt.FileName, receipt.OutputPath);
+                    continue;
+                }
+
                 await localQueueStore.MarkSubmissionStartedAsync(job.Id, job.SpoolerJobName, ct);
                 var bytes = localQueueStore.ReadDocument(job.Id);
-                SpoolerPrintReceipt receipt;
-                try { receipt = printExecutor.Print(entry with { SpoolerJobName = job.SpoolerJobName }, bytes, ct); }
+                SpoolerPrintReceipt spoolerReceipt;
+                try { spoolerReceipt = printExecutor.Print(entry with { SpoolerJobName = job.SpoolerJobName }, bytes, ct); }
                 finally { CryptographicOperations.ZeroMemory(bytes); }
 
-                await localQueueStore.MarkSpoolerAcceptedAsync(job.Id, receipt.JobId, receipt.DocumentName, ct);
-                await ReportSpoolerAcceptedAsync(client, credentials, job.Id, receipt.JobId, receipt.DocumentName, "QUEUED", ct);
+                await localQueueStore.MarkSpoolerAcceptedAsync(job.Id, spoolerReceipt.JobId, spoolerReceipt.DocumentName, ct);
+                await ReportSpoolerAcceptedAsync(client, credentials, job.Id, spoolerReceipt.JobId, spoolerReceipt.DocumentName, "QUEUED", ct);
             }
             catch (PrintExecutionBlockedException ex)
             {
                 await localQueueStore.MarkReadyAfterBlockedAsync(job.Id, ex.ReasonCode, CancellationToken.None);
                 await ReportPrintBlockedAsync(client, credentials, job.Id, ex.ReasonCode, ex.Message, CancellationToken.None);
-                logger.LogWarning(ex, "Pre-submission print block for {JobNumber}.", job.JobNumber);
+                logger.LogWarning(ex, "Pre-submission output block for {JobNumber}.", job.JobNumber);
             }
             catch (PrintSubmissionUncertainException ex)
             {
-                await localQueueStore.MarkOutputUnconfirmedAsync(job.Id, ex.ReasonCode, CancellationToken.None);
+                await localQueueStore.MarkOutputUnconfirmedAsync(
+                    job.Id, ex.ReasonCode, CancellationToken.None,
+                    isPdfExport ? PrinterOutputModeRules.PdfExport : null);
                 await ReportOutputUnconfirmedAsync(client, credentials, job.Id, ex.ReasonCode, ex.Message, CancellationToken.None);
-                logger.LogError(ex, "Uncertain spooler outcome for {JobNumber}; no automatic retry.", job.JobNumber);
+                logger.LogError(ex, "Uncertain output for {JobNumber}; no automatic retry.", job.JobNumber);
             }
             catch (OperationCanceledException) when (ct.IsCancellationRequested)
             {
-                try { await localQueueStore.MarkOutputUnconfirmedAsync(job.Id, "AGENT_STOPPED_DURING_PRINT", CancellationToken.None); } catch (Exception persistError) { logger.LogCritical(persistError, "Could not persist interrupted print state."); }
-                await ReportOutputUnconfirmedAsync(client, credentials, job.Id, "AGENT_STOPPED_DURING_PRINT", "The agent stopped during printing. Inspect the physical output before retrying.", CancellationToken.None);
+                try
+                {
+                    await localQueueStore.MarkOutputUnconfirmedAsync(
+                        job.Id, "AGENT_STOPPED_DURING_OUTPUT", CancellationToken.None,
+                        isPdfExport ? PrinterOutputModeRules.PdfExport : null);
+                }
+                catch (Exception persistError) { logger.LogCritical(persistError, "Could not persist interrupted output state."); }
+                await ReportOutputUnconfirmedAsync(client, credentials, job.Id, "AGENT_STOPPED_DURING_OUTPUT", "The agent stopped during output. Inspect the saved PDF or physical printer output before retrying.", CancellationToken.None);
                 throw;
             }
             catch (Exception ex)
             {
-                try { await localQueueStore.MarkOutputUnconfirmedAsync(job.Id, "UNEXPECTED_PRINT_EXECUTION_ERROR", CancellationToken.None); } catch (Exception persistError) { logger.LogCritical(persistError, "Could not persist uncertain print state."); }
-                await ReportOutputUnconfirmedAsync(client, credentials, job.Id, "UNEXPECTED_PRINT_EXECUTION_ERROR", ex.Message, CancellationToken.None);
-                logger.LogError(ex, "Unexpected print executor error for {JobNumber}; no retry.", job.JobNumber);
+                try
+                {
+                    await localQueueStore.MarkOutputUnconfirmedAsync(
+                        job.Id, isPdfExport ? "PDF_EXPORT_OUTCOME_UNCERTAIN" : "UNEXPECTED_PRINT_EXECUTION_ERROR",
+                        CancellationToken.None, isPdfExport ? PrinterOutputModeRules.PdfExport : null);
+                }
+                catch (Exception persistError) { logger.LogCritical(persistError, "Could not persist uncertain output state."); }
+                await ReportOutputUnconfirmedAsync(
+                    client, credentials, job.Id,
+                    isPdfExport ? "PDF_EXPORT_OUTCOME_UNCERTAIN" : "UNEXPECTED_PRINT_EXECUTION_ERROR",
+                    ex.Message, CancellationToken.None);
+                logger.LogError(ex, "Unexpected output execution error for {JobNumber}; no automatic retry.", job.JobNumber);
             }
         }
+    }
+
+    private async Task ReconcileLegacyPdfQueueJobsAsync(HttpClient client, AgentCredentials credentials, CancellationToken ct)
+    {
+        foreach (var entry in localQueueStore.GetLegacyPdfQueueJobs())
+        {
+            ct.ThrowIfCancellationRequested();
+            try
+            {
+                await localQueueStore.MarkOutputUnconfirmedAsync(
+                    entry.JobId, "LEGACY_MICROSOFT_PDF_DIALOG_INTERRUPTED", ct,
+                    PrinterOutputModeRules.PdfExport);
+                await ReportOutputUnconfirmedAsync(
+                    client, credentials, entry.JobId, "LEGACY_MICROSOFT_PDF_DIALOG_INTERRUPTED",
+                    "The previous Microsoft Print to PDF attempt used an interactive Windows Save As dialog and cannot be reconciled by the background service. Confirm that no PDF was saved before retrying with direct PDF export.",
+                    ct);
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
+            catch (Exception ex) { logger.LogError(ex, "Could not reconcile legacy PDF printer job {JobNumber}.", entry.JobNumber); }
+        }
+    }
+
+    private async Task ReconcileInterruptedPdfExportsAsync(HttpClient client, AgentCredentials credentials, CancellationToken ct)
+    {
+        foreach (var entry in localQueueStore.GetPdfExportRecoveryJobs())
+        {
+            ct.ThrowIfCancellationRequested();
+            try
+            {
+                if (string.IsNullOrWhiteSpace(entry.OutputFilePath)) continue;
+                if (File.Exists(entry.OutputFilePath))
+                {
+                    var receipt = printExecutor.ReadExistingPdfExport(entry.OutputFilePath);
+                    await localQueueStore.MarkPdfExportedAsync(entry.JobId, receipt, ct);
+                    await ReportPdfExportedAsync(client, credentials, entry.JobId, receipt, ct);
+                }
+                else
+                {
+                    await localQueueStore.MarkPdfExportReadyToRetryAsync(entry.JobId, ct);
+                }
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
+            catch (Exception ex)
+            {
+                logger.LogError(ex, "Could not reconcile PDF export for {JobNumber}; no automatic overwrite will occur.", entry.JobNumber);
+            }
+        }
+    }
+
+    private async Task RetryPendingPdfExportReceiptsAsync(HttpClient client, AgentCredentials credentials, CancellationToken ct)
+    {
+        foreach (var entry in localQueueStore.GetPendingPdfExportReceipts())
+        {
+            ct.ThrowIfCancellationRequested();
+            if (string.IsNullOrWhiteSpace(entry.OutputFilePath) ||
+                string.IsNullOrWhiteSpace(entry.OutputFileName) ||
+                string.IsNullOrWhiteSpace(entry.OutputFileSha256) ||
+                entry.OutputFileSizeBytes is not > 0) continue;
+            await ReportPdfExportedAsync(client, credentials, entry.JobId,
+                new PdfExportReceipt(entry.OutputFileName, entry.OutputFilePath,
+                    entry.OutputFileSizeBytes.Value, entry.OutputFileSha256), ct);
+        }
+    }
+
+    private async Task ReportPdfExportedAsync(
+        HttpClient client, AgentCredentials credentials, Guid jobId, PdfExportReceipt receipt, CancellationToken ct)
+    {
+        using var response = await SendAgentRequestAsync(
+            client, credentials, $"api/v1/agent/jobs/{jobId}/pdf-exported",
+            new AgentPdfExportedRequest(receipt.FileName, receipt.OutputPath, receipt.SizeBytes, receipt.Sha256), ct);
+        if (response.IsSuccessStatusCode)
+        {
+            var entry = localQueueStore.Find(jobId);
+            if (entry?.State == "PDF_EXPORTED")
+                await localQueueStore.MarkPdfExportReceiptReportedAsync(jobId, ct);
+        }
+        else logger.LogWarning("PDF export receipt for {JobId} returned HTTP {StatusCode}; it will be retried.", jobId, (int)response.StatusCode);
+    }
+
+    private static string ResolvePdfExportDirectory(IConfiguration configuration)
+    {
+        var configured = configuration["Agent:PdfExportDirectory"];
+        if (!string.IsNullOrWhiteSpace(configured))
+            return Path.GetFullPath(Environment.ExpandEnvironmentVariables(configured.Trim()));
+        var publicDocuments = Environment.GetFolderPath(Environment.SpecialFolder.CommonDocuments);
+        if (string.IsNullOrWhiteSpace(publicDocuments))
+            publicDocuments = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "QRtoPrint", "Exports");
+        return Path.Combine(publicDocuments, "QRtoPrint Exports");
     }
 
     private async Task MonitorSpoolerJobsAsync(HttpClient client, AgentCredentials credentials, CancellationToken ct)

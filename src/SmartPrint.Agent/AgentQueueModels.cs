@@ -19,7 +19,8 @@ public sealed record AgentClaimedJob(
     long SizeBytes,
     string Sha256,
     DateTimeOffset LeaseExpiresUtc,
-    string StorageMode = "CLOUD");
+    string StorageMode = "CLOUD",
+    string OutputMode = PrinterOutputModeRules.Physical);
 
 public sealed record AgentJobClaimResponse(
     IReadOnlyList<AgentClaimedJob> Jobs,
@@ -60,12 +61,19 @@ public sealed record AgentLocalQueueEntry(
     string? SpoolerJobName = null,
     DateTimeOffset? SpoolerSubmittedUtc = null,
     string? SpoolerStatus = null,
-    string? FailureCode = null);
+    string? FailureCode = null,
+    string OutputMode = PrinterOutputModeRules.Physical,
+    string? OutputFilePath = null,
+    string? OutputFileName = null,
+    string? OutputFileSha256 = null,
+    long? OutputFileSizeBytes = null);
 
 public sealed record AgentLocalQueueProof(Guid JobId, string Sha256, long SizeBytes);
 public sealed record AgentPrintClaimRequest(IReadOnlyList<AgentLocalQueueProof> LocalJobs);
 public sealed record AgentPrintClaimResponse(IReadOnlyList<AgentPrintClaimedJob> Jobs, DateTimeOffset ClaimedUtc);
-public sealed record AgentPrintClaimedJob(Guid Id, string JobNumber, string Status, string QueueName, string SpoolerJobName, DateTimeOffset LeaseExpiresUtc);
+public sealed record AgentPrintClaimedJob(Guid Id, string JobNumber, string Status, string QueueName, string SpoolerJobName, DateTimeOffset LeaseExpiresUtc, string OutputMode = PrinterOutputModeRules.Physical);
+public sealed record AgentPdfExportedRequest(string FileName, string OutputPath, long SizeBytes, string Sha256);
+public sealed record PdfExportReceipt(string FileName, string OutputPath, long SizeBytes, string Sha256);
 public sealed record AgentSpoolerAcceptedRequest(int SpoolerJobId, string SpoolerJobName, string SpoolerStatus);
 public sealed record AgentPrintBlockedRequest(string ReasonCode, string Message);
 public sealed record AgentSpoolerStatusRequest(int SpoolerJobId, string SpoolerStatus, int PagesPrinted, int TotalPages);

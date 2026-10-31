@@ -60,7 +60,8 @@ public sealed record AgentPrinterDiscoveryRequest(
     string DriverName,
     string PortName,
     string Status,
-    bool IsDefault);
+    bool IsDefault,
+    string OutputMode = "PHYSICAL");
 
 public sealed record AgentPrinterSyncRequest(IReadOnlyList<AgentPrinterDiscoveryRequest> Printers);
 
@@ -105,3 +106,6 @@ public sealed record AgentPrintClaimRequest(IReadOnlyList<AgentLocalQueueProof> 
 public sealed record AgentSpoolerAcceptedRequest(int SpoolerJobId, string SpoolerJobName, string SpoolerStatus);
 public sealed record AgentPrintBlockedRequest(string ReasonCode, string Message);
 public sealed record AgentSpoolerStatusRequest(int SpoolerJobId, string SpoolerStatus, int PagesPrinted, int TotalPages);
+
+
+public sealed record AgentPdfExportedRequest(string FileName, string OutputPath, long SizeBytes, string Sha256);

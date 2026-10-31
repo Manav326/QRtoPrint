@@ -39,7 +39,8 @@ public sealed class WindowsPrinterDiscovery(ILogger<WindowsPrinterDiscovery> log
                         string.IsNullOrWhiteSpace(driver) ? "Unknown driver" : driver.Trim(),
                         port?.Trim() ?? string.Empty,
                         MapStatus(printerStatus, offline),
-                        isDefault));
+                        isDefault,
+                        PrinterOutputModeRules.Detect(name, driver)));
                 }
             }
         }

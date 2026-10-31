@@ -187,6 +187,7 @@ public sealed class SmartPrintDbContext(DbContextOptions<SmartPrintDbContext> op
             entity.Property(x => x.Manufacturer).HasMaxLength(80).IsRequired();
             entity.Property(x => x.Model).HasMaxLength(120).IsRequired();
             entity.Property(x => x.ConnectionType).HasMaxLength(24).IsRequired();
+            entity.Property(x => x.OutputMode).HasMaxLength(20).IsRequired();
             entity.Property(x => x.ConnectionAddress).HasMaxLength(255);
             entity.Property(x => x.QueueName).HasMaxLength(160);
             entity.Property(x => x.CapabilitiesJson).HasColumnType("jsonb").IsRequired();
@@ -266,6 +267,10 @@ public sealed class SmartPrintDbContext(DbContextOptions<SmartPrintDbContext> op
             entity.Property(x => x.PrintDispatchAttempts).HasDefaultValue(0);
             entity.Property(x => x.SpoolerJobName).HasMaxLength(180);
             entity.Property(x => x.SpoolerStatus).HasMaxLength(80);
+            entity.Property(x => x.OutputType).HasMaxLength(20).IsRequired();
+            entity.Property(x => x.OutputFilePath).HasMaxLength(1024);
+            entity.Property(x => x.OutputFileName).HasMaxLength(255);
+            entity.Property(x => x.OutputSha256).HasMaxLength(64);
             entity.HasIndex(x => new { x.TenantId, x.CreatedUtc });
             entity.HasIndex(x => new { x.TenantId, x.IdempotencyKey }).IsUnique();
             entity.HasIndex(x => new { x.TenantId, x.JobNumber }).IsUnique();

@@ -98,6 +98,7 @@ export interface PrinterDevice {
   manufacturer: string;
   model: string;
   connectionType: string;
+  outputMode: "PHYSICAL" | "PDF_EXPORT" | string;
   connectionAddress?: string | null;
   queueName?: string | null;
   capabilitiesJson: string;
@@ -514,6 +515,13 @@ export interface ShopPrintJob {
   spoolerObservedUtc?: string | null;
   outputConfirmedUtc?: string | null;
   failureCode?: string | null;
+  outputMode?: "PHYSICAL" | "PDF_EXPORT" | string;
+  outputType?: "PHYSICAL" | "PDF_EXPORT" | string;
+  outputFilePath?: string | null;
+  outputFileName?: string | null;
+  outputSha256?: string | null;
+  outputSizeBytes?: number | null;
+  outputCompletedUtc?: string | null;
   document: { originalFileName: string; mediaType: string; sizeBytes: number };
 }
 
@@ -805,6 +813,14 @@ export function assignShopPrintJobPrinter(token: string, jobId: string, printerD
 export function dispatchShopPrintJob(token: string, jobId: string) {
   return apiRequest<{ id: string; jobNumber: string; status: string; printerName: string; queueName: string; agentId: string; spoolerJobName: string }>(
     `/api/v1/shop/print-jobs/${jobId}/dispatch`, { method: "POST" }, token);
+}
+
+export function retryShopPdfExport(token: string, jobId: string) {
+  return apiRequest<{ id: string; jobNumber: string; status: string; outputMode: string; printerName: string }>(
+    `/api/v1/shop/print-jobs/${jobId}/retry-pdf-export`,
+    { method: "POST" },
+    token
+  );
 }
 
 export function confirmShopPrintOutput(token: string, jobId: string) {

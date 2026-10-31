@@ -761,6 +761,7 @@ shop.MapGet("/printers", async (ClaimsPrincipal principal, SmartPrintDbContext d
             printer.Manufacturer,
             printer.Model,
             printer.ConnectionType,
+            printer.OutputMode,
             printer.ConnectionAddress,
             printer.QueueName,
             printer.IsDefault,
@@ -852,6 +853,7 @@ shop.MapPost("/printers", async (
         printer.Manufacturer,
         printer.Model,
         printer.ConnectionType,
+        printer.OutputMode,
         printer.ConnectionAddress,
         printer.QueueName,
         printer.CapabilitiesJson,
@@ -1181,6 +1183,16 @@ shop.MapGet("/print-jobs", async (
             job.SpoolerObservedUtc,
             job.OutputConfirmedUtc,
             job.FailureCode,
+            OutputMode = db.PrinterDevices
+                .Where(printer => printer.TenantId == tenantId && printer.Id == job.PrinterDeviceId)
+                .Select(printer => printer.OutputMode)
+                .FirstOrDefault(),
+            job.OutputType,
+            job.OutputFilePath,
+            job.OutputFileName,
+            job.OutputSha256,
+            job.OutputSizeBytes,
+            job.OutputCompletedUtc,
             Document = new
             {
                 document.OriginalFileName,
@@ -1421,7 +1433,7 @@ shop.MapPost("/print-jobs/{jobId:guid}/dispatch", async (Guid jobId, ClaimsPrinc
               printer.LastSeenUtc != null && printer.LastSeenUtc >= onlineAfter &&
               (printer.Status == "Ready" || printer.Status == "Busy") &&
               agent.RevokedUtc == null && agent.LastSeenUtc != null && agent.LastSeenUtc >= onlineAfter
-        select new { printer.DisplayName, printer.QueueName, AgentId = agent.Id }
+        select new { printer.DisplayName, printer.QueueName, printer.OutputMode, AgentId = agent.Id }
     ).SingleOrDefaultAsync(ct);
     var verified = await db.PrintPayments.AnyAsync(x => x.TenantId == tenantId && x.PrintJobId == job.Id && x.Status == "VERIFIED", ct);
     if (ready is null || !verified)
@@ -1429,7 +1441,10 @@ shop.MapPost("/print-jobs/{jobId:guid}/dispatch", async (Guid jobId, ClaimsPrinc
 
     var previous = job.Status;
     job.Status = "PRINT_AUTHORISED";
-    job.SpoolerJobName = $"SmartPrint-{job.JobNumber}-{job.Id:N}";
+    job.OutputType = ready.OutputMode;
+    job.SpoolerJobName = ready.OutputMode == "PDF_EXPORT"
+        ? $"PDF-EXPORT-{job.JobNumber}-{job.Id:N}"
+        : $"SmartPrint-{job.JobNumber}-{job.Id:N}";
     job.SpoolerJobId = null;
     job.SpoolerStatus = "AWAITING_AGENT";
     job.PrintDispatchLeaseExpiresUtc = null;
@@ -1439,10 +1454,80 @@ shop.MapPost("/print-jobs/{jobId:guid}/dispatch", async (Guid jobId, ClaimsPrinc
     {
         TenantId = tenantId, PrintJobId = job.Id, PreviousStatus = previous, NewStatus = job.Status,
         ActorType = "ShopUser", ActorId = GetActorId(principal),
-        ReasonCode = "SHOP_EXPLICITLY_AUTHORISED_PHYSICAL_PRINT", CreatedUtc = now
+        ReasonCode = ready.OutputMode == "PDF_EXPORT"
+            ? "SHOP_EXPLICITLY_AUTHORISED_PDF_EXPORT"
+            : "SHOP_EXPLICITLY_AUTHORISED_PHYSICAL_PRINT",
+        CreatedUtc = now
     });
     await db.SaveChangesAsync(ct);
-    return Results.Ok(new { job.Id, job.JobNumber, job.Status, PrinterName = ready.DisplayName, ready.QueueName, ready.AgentId, job.SpoolerJobName });
+    return Results.Ok(new
+    {
+        job.Id, job.JobNumber, job.Status, PrinterName = ready.DisplayName,
+        ready.QueueName, ready.OutputMode, ready.AgentId, job.SpoolerJobName
+    });
+});
+
+shop.MapPost("/print-jobs/{jobId:guid}/retry-pdf-export", async (
+    Guid jobId, ClaimsPrincipal principal, SmartPrintDbContext db, CancellationToken ct) =>
+{
+    if (!IsShopOwner(principal) || !TryGetTenantId(principal, out var tenantId)) return Results.Forbid();
+    var job = await db.PrintJobs.SingleOrDefaultAsync(item => item.Id == jobId && item.TenantId == tenantId, ct);
+    if (job is null) return Results.NotFound();
+
+    var printerIsPdfExport = job.PrinterDeviceId is Guid assignedPrinterId &&
+        await db.PrinterDevices.AnyAsync(printer =>
+            printer.Id == assignedPrinterId && printer.TenantId == tenantId &&
+            printer.OutputMode == "PDF_EXPORT", ct);
+    if (job.Status != "OUTPUT_UNCONFIRMED" ||
+        (job.OutputType != "PDF_EXPORT" && !printerIsPdfExport))
+        return Results.Conflict(new { code = "pdf_export_not_recoverable", message = "Only an output-unconfirmed job assigned to a PDF export destination can be retried." });
+    if (job.PrinterDeviceId is not Guid printerId || job.ClaimedByAgentDeviceId is not Guid agentId ||
+        job.LocalQueueReceivedUtc is null)
+        return Results.Conflict(new { code = "pdf_export_local_copy_missing", message = "The original protected local document and assigned Agent are required." });
+
+    var now = DateTimeOffset.UtcNow;
+    var onlineAfter = now.AddMinutes(-2);
+    var output = await (
+        from printer in db.PrinterDevices.AsNoTracking()
+        join agent in db.AgentDevices.AsNoTracking()
+            on new { printer.TenantId, AgentId = printer.AgentDeviceId!.Value }
+            equals new { agent.TenantId, AgentId = agent.Id }
+        where printer.Id == printerId && printer.TenantId == tenantId &&
+              printer.AgentDeviceId == agentId && printer.OutputMode == "PDF_EXPORT" &&
+              printer.IsActive && printer.LastSeenUtc != null && printer.LastSeenUtc >= onlineAfter &&
+              agent.RevokedUtc == null && agent.LastSeenUtc != null && agent.LastSeenUtc >= onlineAfter
+        select new { printer.DisplayName }
+    ).SingleOrDefaultAsync(ct);
+    var verified = await db.PrintPayments.AnyAsync(payment =>
+        payment.TenantId == tenantId && payment.PrintJobId == job.Id && payment.Status == "VERIFIED", ct);
+    if (output is null || !verified)
+        return Results.Conflict(new { code = "pdf_export_prerequisites_not_met", message = "Verified payment and the same paired computer's live PDF export destination are required." });
+
+    var previous = job.Status;
+    job.Status = "LOCAL_QUEUE_READY";
+    job.OutputType = "PDF_EXPORT";
+    job.OutputFilePath = null;
+    job.OutputFileName = null;
+    job.OutputSha256 = null;
+    job.OutputSizeBytes = null;
+    job.OutputCompletedUtc = null;
+    job.OutputConfirmedUtc = null;
+    job.SpoolerJobId = null;
+    job.SpoolerJobName = null;
+    job.SpoolerSubmittedUtc = null;
+    job.SpoolerObservedUtc = null;
+    job.PrintDispatchLeaseExpiresUtc = null;
+    job.FailureCode = null;
+    job.SpoolerStatus = null;
+    job.UpdatedUtc = now;
+    db.PrintJobEvents.Add(new PrintJobEvent
+    {
+        TenantId = tenantId, PrintJobId = job.Id, PreviousStatus = previous, NewStatus = job.Status,
+        ActorType = "ShopUser", ActorId = GetActorId(principal),
+        ReasonCode = "SHOP_CONFIRMED_NO_PDF_FILE_AND_RETRY_REQUESTED", CreatedUtc = now
+    });
+    await db.SaveChangesAsync(ct);
+    return Results.Ok(new { job.Id, job.JobNumber, job.Status, OutputMode = "PDF_EXPORT", PrinterName = output.DisplayName });
 });
 
 shop.MapPost("/print-jobs/{jobId:guid}/confirm-output", async (Guid jobId, ClaimsPrincipal principal, SmartPrintDbContext db, CancellationToken ct) =>
@@ -1450,6 +1535,8 @@ shop.MapPost("/print-jobs/{jobId:guid}/confirm-output", async (Guid jobId, Claim
     if (!IsShopOwner(principal) || !TryGetTenantId(principal, out var tenantId)) return Results.Forbid();
     var job = await db.PrintJobs.SingleOrDefaultAsync(x => x.Id == jobId && x.TenantId == tenantId, ct);
     if (job is null) return Results.NotFound();
+    if (job.OutputType == "PDF_EXPORT")
+        return Results.Conflict(new { code = "pdf_export_not_physical_output", message = "PDF exports are confirmed when the local PDF file is saved and verified. Physical paper-output confirmation does not apply." });
     if (job.Status == "COMPLETED" && job.OutputConfirmedUtc != null)
         return Results.Ok(new { job.Id, job.Status, job.OutputConfirmedUtc, DuplicateRequest = true });
     if (job.Status is not ("SPOOLER_ACCEPTED" or "PRINTING" or "OUTPUT_UNCONFIRMED"))
@@ -1927,6 +2014,7 @@ agentApi.MapPost("/jobs/claim", async (
             job.PrinterDeviceId,
             PrinterName = printer.DisplayName,
             QueueName = printer.QueueName,
+            OutputMode = printer.OutputMode,
             DocumentName = document.OriginalFileName,
             document.MediaType,
             document.SizeBytes,
@@ -2008,6 +2096,7 @@ agentApi.MapPost("/jobs/claim", async (
             candidate.SizeBytes,
             candidate.Sha256,
             candidate.StorageMode,
+            candidate.OutputMode,
             LeaseExpiresUtc = leaseExpiresUtc
         });
     }
@@ -2609,7 +2698,7 @@ agentApi.MapPost("/jobs/print-claim", async (AgentPrintClaimRequest request, Htt
                   (printer.Status == "Ready" || printer.Status == "Busy") &&
                   db.AgentDevices.Any(a => a.Id == device.Id && a.TenantId == device.TenantId && a.RevokedUtc == null && a.LastSeenUtc != null && a.LastSeenUtc >= onlineAfter) &&
                   db.PrintPayments.Any(pay => pay.TenantId == job.TenantId && pay.PrintJobId == job.Id && pay.Status == "VERIFIED")
-            select new { job.Id, job.JobNumber, job.Status, job.SpoolerJobName, QueueName = printer.QueueName }
+            select new { job.Id, job.JobNumber, job.Status, job.SpoolerJobName, QueueName = printer.QueueName, OutputMode = printer.OutputMode }
         ).SingleOrDefaultAsync(ct);
         if (candidate is null || string.IsNullOrWhiteSpace(candidate.SpoolerJobName)) continue;
 
@@ -2640,11 +2729,67 @@ agentApi.MapPost("/jobs/print-claim", async (AgentPrintClaimRequest request, Htt
                 ? "AGENT_CLAIMED_EXPLICIT_PRINT_DISPATCH"
                 : "AGENT_RECLAIMED_EXPIRED_PRINT_LEASE", CreatedUtc = now
         });
-        claimed.Add(new { candidate.Id, candidate.JobNumber, Status = "PRINT_SUBMITTING", candidate.QueueName, candidate.SpoolerJobName, LeaseExpiresUtc = lease });
+        claimed.Add(new
+        {
+            candidate.Id, candidate.JobNumber, Status = "PRINT_SUBMITTING",
+            candidate.QueueName, candidate.SpoolerJobName, candidate.OutputMode, LeaseExpiresUtc = lease
+        });
     }
     await db.SaveChangesAsync(ct);
     await tx.CommitAsync(ct);
     return Results.Ok(new { Jobs = claimed, ClaimedUtc = now });
+});
+
+agentApi.MapPost("/jobs/{jobId:guid}/pdf-exported", async (
+    Guid jobId, AgentPdfExportedRequest request, HttpContext context, SmartPrintDbContext db, CancellationToken ct) =>
+{
+    var device = await AuthenticateAgentAsync(context, db, ct);
+    if (device is null) return Results.Unauthorized();
+    if (string.IsNullOrWhiteSpace(request.FileName) || request.FileName.Length > 255 ||
+        request.FileName != Path.GetFileName(request.FileName) ||
+        string.IsNullOrWhiteSpace(request.OutputPath) || request.OutputPath.Length > 1024 ||
+        request.OutputPath.Any(char.IsControl) ||
+        request.SizeBytes is <= 0 or > 1_000_000_000 ||
+        request.Sha256 is not { Length: 64 } || !request.Sha256.All(Uri.IsHexDigit))
+        return Results.BadRequest(new { code = "invalid_pdf_export_receipt" });
+
+    var job = await db.PrintJobs.SingleOrDefaultAsync(item => item.Id == jobId && item.TenantId == device.TenantId, ct);
+    if (job is null) return Results.NotFound();
+    if (job.Status == "COMPLETED" && job.OutputType == "PDF_EXPORT" &&
+        job.ClaimedByAgentDeviceId == device.Id &&
+        string.Equals(job.OutputSha256, request.Sha256, StringComparison.OrdinalIgnoreCase) &&
+        string.Equals(job.OutputFilePath, request.OutputPath, StringComparison.OrdinalIgnoreCase))
+        return Results.Ok(new { job.Id, job.Status, job.OutputFilePath, DuplicateRequest = true });
+
+    if (job.Status != "PRINT_SUBMITTING" || job.ClaimedByAgentDeviceId != device.Id ||
+        job.PrinterDeviceId is not Guid printerId ||
+        !await db.PrinterDevices.AnyAsync(printer =>
+            printer.Id == printerId && printer.TenantId == device.TenantId &&
+            printer.AgentDeviceId == device.Id && printer.OutputMode == "PDF_EXPORT", ct))
+        return Results.Conflict(new { code = "pdf_export_dispatch_lease_invalid", message = "This Agent does not own an active PDF export dispatch for the selected destination." });
+
+    var now = DateTimeOffset.UtcNow;
+    var previous = job.Status;
+    job.Status = "COMPLETED";
+    job.OutputType = "PDF_EXPORT";
+    job.OutputFilePath = request.OutputPath;
+    job.OutputFileName = request.FileName;
+    job.OutputSha256 = request.Sha256.ToLowerInvariant();
+    job.OutputSizeBytes = request.SizeBytes;
+    job.OutputCompletedUtc = now;
+    job.OutputConfirmedUtc = null;
+    job.PrintDispatchLeaseExpiresUtc = null;
+    job.SpoolerStatus = "PDF_FILE_SAVED";
+    job.SpoolerObservedUtc = now;
+    job.FailureCode = null;
+    job.UpdatedUtc = now;
+    db.PrintJobEvents.Add(new PrintJobEvent
+    {
+        TenantId = device.TenantId, PrintJobId = job.Id, PreviousStatus = previous, NewStatus = job.Status,
+        ActorType = "PrintAgent", ActorId = device.Id, ReasonCode = "LOCAL_PDF_EXPORT_CREATED_AND_VERIFIED", CreatedUtc = now
+    });
+    await db.SaveChangesAsync(ct);
+    return Results.Ok(new { job.Id, job.Status, job.OutputFilePath, job.OutputFileName, job.OutputSha256, job.OutputSizeBytes, job.OutputCompletedUtc });
 });
 
 agentApi.MapPost("/jobs/{jobId:guid}/spooler-accepted", async (Guid jobId, AgentSpoolerAcceptedRequest request, HttpContext context, SmartPrintDbContext db, CancellationToken ct) =>
@@ -2721,11 +2866,27 @@ agentApi.MapPost("/jobs/{jobId:guid}/output-unconfirmed", async (Guid jobId, Age
     var job = await db.PrintJobs.SingleOrDefaultAsync(x => x.Id == jobId && x.TenantId == device.TenantId, ct);
     if (job is null) return Results.NotFound();
     if (job.Status is "OUTPUT_UNCONFIRMED" or "COMPLETED")
-        return Results.Ok(new { job.Id, job.Status, job.FailureCode, DuplicateRequest = true });
+    {
+        if (job.Status == "OUTPUT_UNCONFIRMED" && job.ClaimedByAgentDeviceId == device.Id &&
+            job.PrinterDeviceId is Guid existingPrinterId &&
+            await db.PrinterDevices.AnyAsync(printer =>
+                printer.Id == existingPrinterId && printer.TenantId == device.TenantId &&
+                printer.OutputMode == "PDF_EXPORT", ct))
+        {
+            job.OutputType = "PDF_EXPORT";
+            await db.SaveChangesAsync(ct);
+        }
+        return Results.Ok(new { job.Id, job.Status, job.FailureCode, job.OutputType, DuplicateRequest = true });
+    }
     if (job.Status is not ("PRINT_SUBMITTING" or "SPOOLER_ACCEPTED" or "PRINTING") || job.ClaimedByAgentDeviceId != device.Id)
         return Results.Conflict(new { code = "job_not_reconcilable" });
 
     var previous = job.Status;
+    if (job.PrinterDeviceId is Guid assignedOutputId &&
+        await db.PrinterDevices.AnyAsync(printer =>
+            printer.Id == assignedOutputId && printer.TenantId == device.TenantId &&
+            printer.OutputMode == "PDF_EXPORT", ct))
+        job.OutputType = "PDF_EXPORT";
     job.Status = "OUTPUT_UNCONFIRMED";
     job.FailureCode = reason;
     job.SpoolerStatus = "OUTPUT_UNCONFIRMED";
@@ -2830,6 +2991,7 @@ agentApi.MapPost("/printers/sync", async (
                           printer.QueueName.Length <= 160 &&
                           !string.IsNullOrWhiteSpace(printer.DriverName) &&
                           printer.DriverName.Length <= 160 &&
+                          (printer.OutputMode is "PHYSICAL" or "PDF_EXPORT") &&
                           (printer.PortName?.Length ?? 0) <= 255 &&
                           validStatuses.Contains(printer.Status, StringComparer.Ordinal))
         .GroupBy(printer => printer.QueueName.Trim(), StringComparer.OrdinalIgnoreCase)
@@ -2907,6 +3069,7 @@ agentApi.MapPost("/printers/sync", async (
                 Manufacturer = "Windows",
                 Model = discovered.DriverName.Trim(),
                 ConnectionType = "WindowsQueue",
+                OutputMode = discovered.OutputMode,
                 ConnectionAddress = string.IsNullOrWhiteSpace(discovered.PortName) ? null : discovered.PortName.Trim(),
                 QueueName = discovered.QueueName.Trim(),
                 IsDefault = discovered.IsDefault,
@@ -2924,6 +3087,7 @@ agentApi.MapPost("/printers/sync", async (
             printer.Manufacturer = "Windows";
             printer.Model = discovered.DriverName.Trim();
             printer.ConnectionType = "WindowsQueue";
+            printer.OutputMode = discovered.OutputMode;
             printer.ConnectionAddress = string.IsNullOrWhiteSpace(discovered.PortName) ? null : discovered.PortName.Trim();
             updated++;
         }

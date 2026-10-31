@@ -129,7 +129,8 @@ public sealed class PrinterDevice
     public string Manufacturer { get; set; } = string.Empty;
     public string Model { get; set; } = string.Empty;
     public string ConnectionType { get; set; } = "WindowsQueue";
-    public string? ConnectionAddress { get; set; }
+    public string OutputMode { get; set; } = "PHYSICAL";
+    public string? ConnectionAddress { get; set;}
     public string? QueueName { get; set; }
     public string CapabilitiesJson { get; set; } = "{}";
     public string Status { get; set; } = "Unknown";
@@ -207,6 +208,12 @@ public sealed class PrintJob
     public DateTimeOffset? SpoolerObservedUtc { get; set; }
     public DateTimeOffset? OutputConfirmedUtc { get; set; }
     public string? FailureCode { get; set; }
+    public string OutputType { get; set; } = "PHYSICAL";
+    public string? OutputFilePath { get; set; }
+    public string? OutputFileName { get; set; }
+    public string? OutputSha256 { get; set; }
+    public long? OutputSizeBytes { get; set; }
+    public DateTimeOffset? OutputCompletedUtc { get; set; }
     public DateTimeOffset CreatedUtc { get; set; } = DateTimeOffset.UtcNow;
     public DateTimeOffset UpdatedUtc { get; set; } = DateTimeOffset.UtcNow;
 }

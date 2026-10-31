@@ -77,7 +77,35 @@ public sealed class AgentLocalQueueStore
     }
 
     public IReadOnlyList<AgentLocalQueueEntry> GetAcknowledgedJobs() =>
-        ReadEntries().Where(x => x.State == "ACKNOWLEDGED").ToArray();
+        ReadEntries().Where(entry =>
+            entry.State == "ACKNOWLEDGED" ||
+            (entry.State == "OUTPUT_UNCONFIRMED" &&
+             (entry.OutputMode == PrinterOutputModeRules.PdfExport ||
+              PrinterOutputModeRules.IsPdfExport(entry.QueueName, entry.PrinterName))))
+        .ToArray();
+
+    public IReadOnlyList<AgentLocalQueueEntry> GetLegacyPdfQueueJobs() =>
+        ReadEntries().Where(entry =>
+            PrinterOutputModeRules.IsPdfExport(entry.QueueName, entry.PrinterName) &&
+            (entry.State is "SUBMITTING" or "SPOOLER_ACCEPTED" or "OUTPUT_UNCONFIRMED"))
+        .ToArray();
+
+    public IReadOnlyList<AgentLocalQueueEntry> GetPdfExportRecoveryJobs() =>
+        ReadEntries().Where(entry =>
+            (entry.OutputMode == PrinterOutputModeRules.PdfExport ||
+             PrinterOutputModeRules.IsPdfExport(entry.QueueName, entry.PrinterName)) &&
+            (entry.State is "PDF_EXPORTING" or "OUTPUT_UNCONFIRMED") &&
+            !string.IsNullOrWhiteSpace(entry.OutputFilePath))
+        .ToArray();
+
+    public IReadOnlyList<AgentLocalQueueEntry> GetPendingPdfExportReceipts() =>
+        ReadEntries().Where(entry =>
+            entry.OutputMode == PrinterOutputModeRules.PdfExport &&
+            entry.State == "PDF_EXPORTED" &&
+            !string.IsNullOrWhiteSpace(entry.OutputFilePath) &&
+            !string.IsNullOrWhiteSpace(entry.OutputFileSha256) &&
+            entry.OutputFileSizeBytes is > 0)
+        .ToArray();
 
     public IReadOnlyList<AgentLocalQueueEntry> GetInterruptedSubmissions() =>
         ReadEntries().Where(x => x.State == "SUBMITTING").ToArray();
@@ -218,7 +246,8 @@ public sealed class AgentLocalQueueStore
             documentPath,
             initialState,
             DateTimeOffset.UtcNow,
-            job.LeaseExpiresUtc);
+            job.LeaseExpiresUtc,
+            OutputMode: job.OutputMode);
 
         try
         {
@@ -300,7 +329,8 @@ public sealed class AgentLocalQueueStore
             IsDuplex = job.IsDuplex,
             Currency = job.Currency,
             QuotedAmountMinor = job.QuotedAmountMinor,
-            LeaseExpiresUtc = job.LeaseExpiresUtc
+            LeaseExpiresUtc = job.LeaseExpiresUtc,
+            OutputMode = job.OutputMode
         }, cancellationToken);
     }
 
@@ -340,6 +370,81 @@ public sealed class AgentLocalQueueStore
         }, ct);
     }
 
+    public async Task MarkPdfExportStartedAsync(Guid jobId, string outputPath, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(outputPath) || outputPath.Length > 1024 || !Path.IsPathFullyQualified(outputPath))
+            throw new ArgumentException("A fully qualified PDF export destination is required.", nameof(outputPath));
+        var entry = Find(jobId) ?? throw new FileNotFoundException("The local print job does not exist.");
+        if (entry.State == "PDF_EXPORTING" &&
+            string.Equals(entry.OutputFilePath, outputPath, StringComparison.OrdinalIgnoreCase))
+            return;
+        if (entry.State is not ("ACKNOWLEDGED" or "OUTPUT_UNCONFIRMED"))
+            throw new InvalidOperationException($"Cannot export a local job in state {entry.State}.");
+        await SaveManifestAsync(entry with
+        {
+            State = "PDF_EXPORTING",
+            OutputMode = PrinterOutputModeRules.PdfExport,
+            OutputFilePath = outputPath,
+            OutputFileName = Path.GetFileName(outputPath),
+            OutputFileSha256 = null,
+            OutputFileSizeBytes = null,
+            FailureCode = null,
+            SpoolerJobId = null,
+            SpoolerJobName = null,
+            SpoolerSubmittedUtc = null,
+            SpoolerStatus = null
+        }, ct);
+    }
+
+    public async Task MarkPdfExportedAsync(Guid jobId, PdfExportReceipt receipt, CancellationToken ct)
+    {
+        var entry = Find(jobId) ?? throw new FileNotFoundException("The local print job does not exist.");
+        if ((entry.State is "PDF_EXPORTED" or "PDF_EXPORT_REPORTED") &&
+            string.Equals(entry.OutputFileSha256, receipt.Sha256, StringComparison.OrdinalIgnoreCase))
+            return;
+        if (entry.State is not ("PDF_EXPORTING" or "OUTPUT_UNCONFIRMED"))
+            throw new InvalidOperationException($"Cannot complete a PDF export from state {entry.State}.");
+        await SaveManifestAsync(entry with
+        {
+            State = "PDF_EXPORTED",
+            OutputMode = PrinterOutputModeRules.PdfExport,
+            OutputFilePath = receipt.OutputPath,
+            OutputFileName = receipt.FileName,
+            OutputFileSha256 = receipt.Sha256,
+            OutputFileSizeBytes = receipt.SizeBytes,
+            FailureCode = null
+        }, ct);
+    }
+
+    public async Task MarkPdfExportReceiptReportedAsync(Guid jobId, CancellationToken ct)
+    {
+        var entry = Find(jobId) ?? throw new FileNotFoundException("The local PDF export manifest does not exist.");
+        if (entry.State == "PDF_EXPORT_REPORTED") return;
+        if (entry.State != "PDF_EXPORTED")
+            throw new InvalidOperationException($"Cannot acknowledge a PDF export receipt from state {entry.State}.");
+        await SaveManifestAsync(entry with { State = "PDF_EXPORT_REPORTED" }, ct);
+    }
+
+    public async Task MarkPdfExportReadyToRetryAsync(Guid jobId, CancellationToken ct)
+    {
+        var entry = Find(jobId) ?? throw new FileNotFoundException("The local print job does not exist.");
+        if (entry.State is not ("PDF_EXPORTING" or "OUTPUT_UNCONFIRMED"))
+            throw new InvalidOperationException($"Cannot recover a PDF export from state {entry.State}.");
+        if (!string.IsNullOrWhiteSpace(entry.OutputFilePath) && File.Exists(entry.OutputFilePath))
+            throw new InvalidOperationException("The PDF export file exists; it must be reconciled, not retried.");
+        await SaveManifestAsync(entry with
+        {
+            State = "ACKNOWLEDGED",
+            OutputMode = PrinterOutputModeRules.PdfExport,
+            OutputFilePath = null,
+            OutputFileName = null,
+            OutputFileSha256 = null,
+            OutputFileSizeBytes = null,
+            FailureCode = null,
+            SpoolerStatus = null
+        }, ct);
+    }
+
     public async Task MarkSpoolerAcceptedAsync(Guid jobId, int spoolerJobId, string spoolerJobName, CancellationToken ct)
     {
         if (spoolerJobId <= 0) throw new ArgumentOutOfRangeException(nameof(spoolerJobId));
@@ -359,23 +464,36 @@ public sealed class AgentLocalQueueStore
     {
         var entry = Find(jobId) ?? throw new FileNotFoundException("The local print job does not exist.");
         if (entry.State == "ACKNOWLEDGED") return;
-        if (entry.State != "SUBMITTING")
+        if (entry.State is not ("SUBMITTING" or "PDF_EXPORTING"))
             throw new InvalidOperationException($"Cannot safely unblock a local job from state {entry.State}.");
         await SaveManifestAsync(entry with
         {
             State = "ACKNOWLEDGED", SpoolerJobId = null, SpoolerJobName = null,
             SpoolerSubmittedUtc = null, SpoolerStatus = "BLOCKED_BEFORE_SUBMISSION",
+            OutputFilePath = null, OutputFileName = null, OutputFileSha256 = null, OutputFileSizeBytes = null,
             FailureCode = reasonCode
         }, ct);
     }
 
-    public async Task MarkOutputUnconfirmedAsync(Guid jobId, string reasonCode, CancellationToken ct)
+    public async Task MarkOutputUnconfirmedAsync(
+        Guid jobId,
+        string reasonCode,
+        CancellationToken ct,
+        string? outputMode = null)
     {
         var entry = Find(jobId) ?? throw new FileNotFoundException("The local print job does not exist.");
-        if (entry.State == "OUTPUT_UNCONFIRMED") return;
-        if (entry.State is not ("SUBMITTING" or "SPOOLER_ACCEPTED"))
+        if (entry.State == "OUTPUT_UNCONFIRMED" &&
+            (outputMode is null || entry.OutputMode == outputMode))
+            return;
+        if (entry.State is not ("SUBMITTING" or "SPOOLER_ACCEPTED" or "PDF_EXPORTING" or "OUTPUT_UNCONFIRMED"))
             throw new InvalidOperationException($"Cannot reconcile a local job from state {entry.State}.");
-        await SaveManifestAsync(entry with { State = "OUTPUT_UNCONFIRMED", SpoolerStatus = "OUTPUT_UNCONFIRMED", FailureCode = reasonCode }, ct);
+        await SaveManifestAsync(entry with
+        {
+            State = "OUTPUT_UNCONFIRMED",
+            OutputMode = outputMode ?? entry.OutputMode,
+            SpoolerStatus = "OUTPUT_UNCONFIRMED",
+            FailureCode = reasonCode
+        }, ct);
     }
 
     public async Task MarkOutputConfirmedAsync(Guid jobId, CancellationToken ct)

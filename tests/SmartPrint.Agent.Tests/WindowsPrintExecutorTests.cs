@@ -36,3 +36,49 @@ public sealed class WindowsPrintExecutorTests
         Assert.Equal("LOCAL_DOCUMENT_INTEGRITY_MISMATCH", exception.ReasonCode);
     }
 }
+
+
+public sealed class PdfExportExecutorTests
+{
+    [Fact]
+    public void ExportsImageToAccessiblePdfIdempotentlyWithoutWindowsPrinter()
+    {
+        using var bitmap = new SkiaSharp.SKBitmap(24, 32);
+        bitmap.Erase(SkiaSharp.SKColors.CornflowerBlue);
+        using var image = SkiaSharp.SKImage.FromBitmap(bitmap);
+        using var encoded = image.Encode(SkiaSharp.SKEncodedImageFormat.Png, 100);
+        var bytes = encoded.ToArray();
+        var directory = Path.Combine(Path.GetTempPath(), "qrtoprint-pdf-export-" + Guid.NewGuid().ToString("N"));
+        var entry = new AgentLocalQueueEntry(
+            Guid.NewGuid(), "SP-TEST-PDF-EXPORT", Guid.NewGuid(), "Microsoft Print to PDF",
+            "Microsoft Print to PDF", "sample.png", "image/png",
+            Convert.ToHexString(SHA256.HashData(bytes)).ToLowerInvariant(), bytes.LongLength,
+            1, 2, "Mono", "A4", false, "INR", 300, "unused", "ACKNOWLEDGED",
+            DateTimeOffset.UtcNow, DateTimeOffset.UtcNow.AddMinutes(3),
+            OutputMode: PrinterOutputModeRules.PdfExport);
+
+        try
+        {
+            var executor = new WindowsPrintExecutor();
+            var receipt = executor.ExportPdf(entry, bytes, directory, CancellationToken.None);
+
+            Assert.True(File.Exists(receipt.OutputPath));
+            Assert.True(receipt.FileName.EndsWith(".pdf", StringComparison.OrdinalIgnoreCase));
+            Assert.True(receipt.SizeBytes > 0);
+            Assert.Equal(64, receipt.Sha256.Length);
+            var header = new byte[5];
+            using (var stream = File.OpenRead(receipt.OutputPath))
+                Assert.Equal(5, stream.Read(header));
+            Assert.Equal("%PDF-", System.Text.Encoding.ASCII.GetString(header));
+
+            var retry = executor.ExportPdf(entry, bytes, directory, CancellationToken.None);
+            Assert.Equal(receipt.OutputPath, retry.OutputPath);
+            Assert.Equal(receipt.Sha256, retry.Sha256);
+        }
+        finally
+        {
+            if (Directory.Exists(directory)) Directory.Delete(directory, recursive: true);
+            CryptographicOperations.ZeroMemory(bytes);
+        }
+    }
+}
