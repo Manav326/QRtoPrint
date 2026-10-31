@@ -1,8 +1,8 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import {
-  Activity, ArrowRight, Building2, CheckCircle2, ChevronLeft, ChevronRight,
+  Activity, Building2, CheckCircle2, ChevronLeft, ChevronRight,
   Clock3, LogOut, Moon, Monitor, Printer, RefreshCw, Search, ShieldCheck,
-  Sun, Users
+  Sun
 } from "lucide-react";
 import {
   getPlatformOverview, getPlatformTenants, logout,
@@ -254,7 +254,7 @@ export default function PlatformAdminConsole({
 }
 
 function Metric({ icon, label, value, note, tone }: {
-  icon: React.ReactNode; label: string; value: number; note: string; tone: string;
+  icon: ReactNode; label: string; value: number; note: string; tone: string;
 }) {
   return (
     <section className="metric-card platform-metric-card">
