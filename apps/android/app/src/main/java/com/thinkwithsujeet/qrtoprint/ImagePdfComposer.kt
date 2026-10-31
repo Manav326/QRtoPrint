@@ -72,8 +72,8 @@ object ImagePdfComposer {
 
     private fun sampleSize(width: Int, height: Int): Int {
         var sample = 1
-        while (width / (sample * 2) >= MAX_DECODE_DIMENSION ||
-            height / (sample * 2) >= MAX_DECODE_DIMENSION) {
+        while (width / sample >= MAX_DECODE_DIMENSION ||
+            height / sample >= MAX_DECODE_DIMENSION) {
             sample *= 2
         }
         return sample
