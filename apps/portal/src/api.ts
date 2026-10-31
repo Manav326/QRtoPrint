@@ -435,6 +435,76 @@ export async function loadShopData(token: string) {
   return { profile, printers, stations, pricing, printJobs, agentDevices, paymentSettings, payments, refunds, subscription };
 }
 
+export interface ShopCustomer {
+  id: string;
+  displayName: string;
+  maskedEmail: string;
+  firstSeenUtc: string;
+  lastSeenUtc: string;
+  sessionCount: number;
+  printJobCount: number;
+  completedJobCount: number;
+  lastPrintUtc?: string | null;
+}
+
+export interface ShopCustomerPage {
+  page: number;
+  pageSize: number;
+  totalCount: number;
+  items: ShopCustomer[];
+}
+
+export interface ShopCustomerJob {
+  id: string;
+  jobNumber: string;
+  status: string;
+  createdUtc: string;
+  pageCount: number;
+  copies: number;
+  colourMode: string;
+  paperSize: string;
+  isDuplex: boolean;
+  currency: string;
+  quotedAmountMinor: number;
+  rejectedPageNumbersJson: string;
+  outputConfirmedUtc?: string | null;
+  document: { originalFileName: string; mediaType: string; sizeBytes: number };
+  payment?: {
+    status: string;
+    method: string;
+    amountMinor: number;
+    refundedAmountMinor: number;
+    currency: string;
+    verifiedUtc?: string | null;
+  } | null;
+}
+
+export interface ShopCustomerHistory {
+  customer: { id: string; displayName: string; maskedEmail: string };
+  totalJobs: number;
+  jobs: ShopCustomerJob[];
+}
+
+export function getShopCustomers(token: string, values: {
+  search?: string;
+  page?: number;
+  pageSize?: number;
+}) {
+  const params = new URLSearchParams();
+  if (values.search?.trim()) params.set("search", values.search.trim());
+  params.set("page", String(values.page ?? 1));
+  params.set("pageSize", String(values.pageSize ?? 20));
+  return apiRequest<ShopCustomerPage>(`/api/v1/shop/customers?${params.toString()}`, {}, token);
+}
+
+export function getShopCustomerHistory(token: string, customerId: string, take = 50) {
+  return apiRequest<ShopCustomerHistory>(
+    `/api/v1/shop/customers/${encodeURIComponent(customerId)}/jobs?take=${take}`,
+    {},
+    token
+  );
+}
+
 export function getShopReportSummary(token: string, days: 7 | 30 | 90) {
   return apiRequest<ShopReportSummary>(`/api/v1/shop/reports/summary?days=${days}`, {}, token);
 }
