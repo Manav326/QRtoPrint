@@ -1,6 +1,6 @@
 # SmartPrint by QuantaEdge — implementation tracker
 
-Integration target: `main`. Keep the existing Android document-studio draft PR separate from this shop-review/refund change.
+Integration target: `main`. The initial shop-review/refund work (PR #2), Android document studio/global customer account (PR #1), and native multi-file batch handoff (PR #3) are merged. The current shop customer-directory work is tracked in PR #4 and remains subject to CI and tenant-isolation validation.
 
 ## Implemented in source
 - [x] Multi-file PDF/JPG/JPEG/PNG customer uploads share one batch identifier.
@@ -29,3 +29,14 @@ Integration target: `main`. Keep the existing Android document-studio draft PR s
 - Page selections can be changed before recording. Refunded pages are then permanently excluded.
 - Refunds are blocked after local handoff, Agent claim, spooler activity or output confirmation.
 - Rejecting all pages returns the remaining payment and marks the job `REFUNDED`.
+
+## Shop customer directory — implementation in progress
+
+- [x] Data source is the existing global customer identity linked to a QR print session; no shop-owned duplicate customer account is created.
+- [x] API query filters by the authenticated shop tenant and includes only signed-in global customer accounts linked through that shop's sessions.
+- [x] Guest sessions remain anonymous; historic guest jobs are not silently linked to customer accounts.
+- [x] Shop responses mask the global account email; the full email is not returned to shop users.
+- [x] Customer list supports bounded search and pagination; customer history is limited to jobs from the requesting shop.
+- [ ] CI, API query translation and portal typecheck/build for PR #4.
+- [ ] Exercise two shops with one shared global customer and verify that each shop sees only its own sessions/jobs.
+- [ ] Physical shop operator/accessibility acceptance.

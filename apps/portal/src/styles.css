@@ -689,3 +689,43 @@
 .customer-refund-note{display:flex;align-items:flex-start;gap:9px;margin:10px 0;padding:12px 13px;border:1px solid var(--border);border-radius:12px;background:var(--surface-2);color:var(--muted);font-size:12px;line-height:1.55}
 .customer-refund-note svg{flex:none;color:var(--accent);margin-top:1px}
 .customer-refund-note strong{color:var(--text)}
+
+.customers-workspace{display:flex;flex-direction:column;gap:14px;min-width:0}
+.customers-intro{display:flex;align-items:center;justify-content:space-between;gap:14px}
+.customers-intro h2{font:700 18px Manrope,sans-serif;letter-spacing:-.35px;margin:4px 0 5px;color:var(--text)}
+.customers-intro p{font-size:10px;color:var(--muted);margin:0;line-height:1.55}
+.customers-total{min-width:122px;border:1px solid var(--border);background:var(--surface);border-radius:11px;padding:12px 14px;display:flex;flex-direction:column;gap:3px;text-align:right}
+.customers-total strong{font:700 22px Manrope,sans-serif;color:var(--text)}
+.customers-total span{font-size:8px;color:var(--muted)}
+.customers-toolbar{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.customers-search{min-width:220px;max-width:420px;flex:1}
+.customers-toolbar .primary-button,.customers-toolbar .secondary-button{height:34px}
+.customers-table-panel{padding:0}
+.customers-panel-heading{padding:18px 19px 15px;align-items:center}
+.customers-table td{vertical-align:middle}
+.customers-number{display:block;color:var(--text);font-size:11px}
+.customers-subvalue{display:block;margin-top:3px;color:var(--faint);font-size:8px}
+.customers-date{font-size:9px;color:var(--muted)}
+.customers-history-button{display:inline-flex;align-items:center;gap:5px;border:1px solid var(--border);border-radius:7px;background:var(--surface-2);color:var(--accent);padding:7px 9px;font:600 9px 'DM Sans',sans-serif;cursor:pointer;white-space:nowrap}
+.customers-history-button:hover{border-color:var(--accent)}
+.customers-pagination>div{display:flex;align-items:center;gap:12px}
+.customers-pagination button{border:0;background:transparent;color:var(--accent);font:600 9px 'DM Sans',sans-serif;cursor:pointer}
+.customers-pagination button:disabled{color:var(--faint);cursor:not-allowed}
+.customers-empty{min-height:250px;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:28px}
+.customers-empty-icon{height:50px;width:50px;border-radius:14px;background:var(--accent-soft);color:var(--accent);display:grid;place-items:center;margin-bottom:12px}
+.customers-empty h3{font:700 15px Manrope,sans-serif;margin:0 0 6px;color:var(--text)}
+.customers-empty p{max-width:470px;color:var(--muted);font-size:10px;line-height:1.6;margin:0}
+.customer-history-modal{max-height:min(68vh,650px);overflow:auto}
+.customer-history-summary{display:flex;align-items:baseline;gap:8px;padding:0 0 13px;border-bottom:1px solid var(--border);margin-bottom:12px}
+.customer-history-summary strong{font:700 21px Manrope,sans-serif;color:var(--text)}
+.customer-history-summary span{font-size:9px;color:var(--muted)}
+.customer-history-list{display:flex;flex-direction:column;gap:9px}
+.customer-history-row{border:1px solid var(--border);background:var(--surface-2);border-radius:9px;padding:12px}
+.customer-history-heading{display:flex;align-items:flex-start;justify-content:space-between;gap:12px}
+.customer-history-heading>div{display:flex;flex-direction:column;gap:4px;min-width:0}
+.customer-history-heading strong{color:var(--text);font-size:10px;overflow-wrap:anywhere}
+.customer-history-heading span{color:var(--faint);font-size:8px}
+.customer-history-facts{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-top:11px;color:var(--muted);font-size:9px}
+.customer-history-facts strong{color:var(--text);font-size:10px}
+.customer-history-payment,.customer-history-output{margin-top:7px;color:var(--muted);font-size:8px;line-height:1.5}
+@media(max-width:650px){.customers-intro{align-items:flex-start}.customers-total{min-width:92px;padding:9px 10px}.customers-total strong{font-size:18px}.customers-toolbar{align-items:stretch}.customers-search{max-width:none;flex-basis:100%;height:36px}.customers-toolbar button{flex:1;justify-content:center}.customers-panel-heading{align-items:flex-start;flex-direction:column;padding:14px}.customers-pagination{align-items:flex-start;gap:10px;flex-direction:column}.customers-pagination>div{width:100%;justify-content:space-between}.customer-history-heading{align-items:flex-start;flex-direction:column}.customer-history-modal{max-height:65vh}}

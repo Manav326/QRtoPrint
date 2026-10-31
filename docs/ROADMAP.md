@@ -32,7 +32,7 @@ Acceptance: core tenant and subscription administration exists; automated SaaS b
 - [x] Print-job list, quote review, shop approve/reject, printer assignment, dispatch and output confirmation.
 - [x] Payment attempt review and manual payment verification/rejection.
 - [x] Per-file and per-page rejection with full or proportional partial refunds before computer handoff; rejected pages are omitted from physical print and PDF output.
-- [ ] Full operator role matrix, rich customer directory/history, comprehensive reporting, collection workflow and configurable notification studio.
+- [ ] Rich customer directory/history (implementation in PR #4: tenant-scoped, signed-in SmartPrint customers only, masked emails, and shop-only print history; guest jobs remain anonymous).\n- [ ] Full operator role matrix, comprehensive reporting, collection workflow and configurable notification studio.
 - [ ] Full mobile/tablet and light/dark accessibility/visual-regression audit.
 
 Acceptance: an owner/manager can configure and operate the core shop print workflow; broader shop operations remain in progress.
