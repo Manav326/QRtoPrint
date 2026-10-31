@@ -96,17 +96,21 @@ ASPNETCORE_ENVIRONMENT=Development uses a local PostgreSQL connection fallback f
 
 ## Current boundary
 
-This increment provisions shops and secure station sessions and registers printer metadata. It does not yet implement file upload, document conversion, price calculation, payment collection, physical printer discovery or print submission. Those remain separate workstreams and must use this tenant/session foundation.
+The cloud-assisted print workflow is implemented end to end: a customer uploads one supported document through the public API; the API validates and stores it in protected storage; the shop configures and quotes the request; the customer accepts; the shop approves; the customer starts a UPI or cash payment attempt; the shop manually verifies receipt; and a paired Windows Agent secures the original in its encrypted local queue and performs controlled spooler submission. A shop operator must still confirm the actual paper output.
+
+The current customer upload path is cloud-assisted. The document is sent to the API and stored in protected server storage before the paired agent retrieves it. **Direct shop-Wi-Fi/LAN upload**, where document bytes stay on the shop network and do not pass through cloud document storage, is not implemented yet. Do not describe the current cloud-assisted path as local-only printing.
 
 ## Quote acceptance and shop review
 
-- POST /api/v1/public/jobs/{jobId}/accept-quote — accepts a current quote from the same unexpired customer session and advances it to AWAITING_SHOP_APPROVAL.
-- GET /api/v1/public/jobs/{jobId}/status — returns status only for the active customer session that created the job.
+- POST /api/v1/public/jobs — accepts one multipart document for the active QR session and creates a job in AWAITING_CONFIGURATION. Uploads are subject to the shop's cloud-assisted-printing entitlement, configured maximum size, monthly job quota and upload validation limits.
+- POST /api/v1/public/jobs/{jobId}/quote — calculates a quote from the shop's current pricing and the requested print settings. A new quote is accepted only for a newly uploaded job or a job whose previous quote expired.
+- POST /api/v1/public/jobs/{jobId}/accept-quote — accepts a current quote from the same unexpired customer session and advances it to shop review.
+- GET /api/v1/public/jobs/{jobId}/status — returns status and a customer-safe event timeline only to the active customer session that created the job.
 - POST /api/v1/shop/print-jobs/{jobId}/approve — shop owner/manager approval advances the request to AWAITING_PAYMENT, never directly to printing.
 - POST /api/v1/shop/print-jobs/{jobId}/reject — rejects a customer-accepted request awaiting shop review.
 - GET /api/v1/shop/print-jobs/{jobId}/document — tenant-authorised document preview. The file is decrypted only after tenant/job access is verified and is served with no-store and nosniff headers.
 
-The payment integration is deliberately not active in this stage. Shop approval does not capture money or authorise physical print execution. Both customer and shop interfaces show that boundary.
+Customer print payments use the shop's UPI/cash settings and require a separate manual verification action by the shop. Shop approval alone neither proves payment nor authorises physical print execution.
 
 
 ## Job event history
@@ -116,7 +120,7 @@ Every important job transition is written to the tenant-scoped PrintJobEvents ta
 - GET /api/v1/shop/print-jobs/{jobId}/events — shop-side event history for the authenticated tenant.
 - GET /api/v1/public/jobs/{jobId}/status — current job state and a customer-safe timeline for the active session that created the job.
 
-Events currently cover document upload, quote creation, quote expiry, customer quote acceptance, shop approval and shop rejection. Payment and printer transitions are intentionally not emitted until those workflows are implemented and verified.
+Events cover document upload, quote creation and expiry, customer quote acceptance, shop approval/rejection, manual payment verification, printer assignment and dispatch, agent claim and local receipt, spooler submission/status outcomes, pre-submission blocking, uncertain output and shop-confirmed physical completion. Event history is an operational audit trail; it does not turn spooler status into proof that paper was produced.
 
 
 ## Windows agent pairing and discovery
@@ -130,7 +134,7 @@ Events currently cover document upload, quote creation, quote expiry, customer q
 
 Agent authentication uses a per-computer random secret over HTTPS. The Windows client stores the secret using DPAPI LocalMachine encryption. A revoked computer cannot continue to sync. Revoked fingerprints may be enrolled again after revocation; a second active pairing for the same machine/shop is blocked.
 
-The first agent release is inventory and heartbeat only. It does not submit print jobs, capture payments or infer that a spooler-accepted job has physically completed.
+The Windows Agent is not inventory-only. It claims paid jobs assigned to its own live printer queues, retrieves the original document over its authenticated channel, verifies the original SHA-256 and byte count, persists the document in an encrypted DPAPI-protected local queue, and submits only jobs explicitly authorised by the shop. It reports spooler state and uncertain outcomes to the API. It does not capture payments or infer that a spooler-accepted job has physically completed. The durable queue, print submission and output-reconciliation lifecycle is described below.
 
 
 ## Shop-owned print payments
@@ -144,15 +148,17 @@ Print payment records are tenant-scoped and linked to the originating print job 
 - POST /api/v1/public/jobs/{jobId}/payments — customer starts an enabled UPI or cash attempt after shop approval.
 - POST /api/v1/public/payments/{paymentId}/report — customer submits a UPI reference/UTR. This never marks the payment as paid.
 
-UPI uses a shop-owned UPI ID and payment-intent URI/QR. The platform does not collect customer funds, call a payment gateway, or trust client screenshots/references as proof. The shop must independently verify receipt in its own bank/UPI app. When verification succeeds, the job becomes PAID_AUTHORISED, but physical printing remains disabled until the durable local queue and spooler reconciliation workflow is implemented. Smart Print SaaS subscription payments are independent.
+UPI uses a shop-owned UPI ID and payment-intent URI/QR. The platform does not collect customer funds, call a payment gateway, or trust client screenshots/references as proof. The shop must independently verify receipt in its own bank/UPI app. When verification succeeds, the job becomes PAID_AUTHORISED and may proceed through printer assignment, authenticated agent claim, verified local receipt and explicit shop dispatch. Physical printing is performed by the paired Windows Agent, not by the cloud API. Smart Print SaaS subscription payments are independent.
 
 
 ## Customer session recovery
 
 - POST /api/v1/public/sessions/current/resume — accepts the existing X-Print-Session token plus the QR station's public code. It resumes only an unexpired, active session belonging to that same enabled station and tenant, and returns the same session token, shop identity, payment options and assigned printer.
+- POST /api/v1/public/sessions/current/renew — renews an active, unrevoked, not-yet-expired session. If expiry is within 10 minutes, it extends expiry to 15 minutes from the renewal time; it cannot revive an already expired or revoked session.
+- While the customer print page is active, the portal attempts renewal every five minutes and also checks on page focus/visibility resume when expiry is approaching. A transient renewal failure is retried on a later heartbeat; an expired session must enter the normal QR session flow again.
 - If the stored token is expired, revoked, belongs to another station, or the QR station has been disabled, the customer app discards it and creates a fresh session through the normal QR entry route.
 - The customer app stores only the opaque active session token and print-job metadata/quote in sessionStorage for the current browser tab. Uploaded document bytes remain on the API's protected storage; they are not copied into browser storage. On reload, the app re-reads job status, timeline and payment status from the API rather than trusting cached payment state.
-- Session storage is tab-scoped and is not a permanent customer account or cross-device recovery mechanism. The existing customer session expiry remains enforced.
+- Session storage is tab-scoped and is not a permanent customer account or cross-device recovery mechanism. The 15-minute expiry still applies when a customer page is not actively renewing the session.
 
 
 Payment verification, rejection and UPI reference submission use an optimistic concurrency token on each payment row. If two customer/shop actions race, only the first update can persist; the losing request receives HTTP 409 with `payment_state_changed` and must refresh. Payment state, job state and the corresponding audit event are saved together for shop verification/rejection.
