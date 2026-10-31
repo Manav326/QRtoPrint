@@ -525,8 +525,7 @@ auth.MapPost("/customer-login", async (
     }
 
     var claims = await userManager.GetClaimsAsync(user);
-    if (user.TenantId is not null ||
-        !claims.Any(claim => claim.Type == "customer_role" && claim.Value == "Customer"))
+    if (!CustomerIdentity.IsCustomer(user, claims))
     {
         return Results.Unauthorized();
     }
@@ -635,7 +634,7 @@ auth.MapPost("/refresh", async (
     }
 
     var userClaims = await userManager.GetClaimsAsync(user);
-    var isCustomer = userClaims.Any(claim => claim.Type == "customer_role" && claim.Value == "Customer");
+    var isCustomer = CustomerIdentity.IsCustomer(user, userClaims);
     if (user.TenantId is null &&
         !PlatformAdminAuthorization.IsPlatformAdmin(user.TenantId, userClaims) &&
         !isCustomer)
@@ -679,8 +678,8 @@ customerApi.MapGet("/me", async (
     ClaimsPrincipal principal,
     UserManager<AppUser> userManager) =>
 {
-    if (principal.FindFirstValue("customer_role") != "Customer" ||
-        !Guid.TryParse(principal.FindFirstValue(JwtRegisteredClaimNames.Sub), out var customerId))
+    var customerId = CustomerIdentity.GetCustomerId(principal);
+    if (customerId is null)
     {
         return Results.Forbid();
     }
@@ -4687,10 +4686,7 @@ publicApi.MapPost("/stations/{publicCode}/sessions", async (
     {
         TenantId = station.TenantId,
         QrStationId = station.Id,
-        CustomerUserId = context.User.FindFirstValue("customer_role") == "Customer" &&
-            Guid.TryParse(context.User.FindFirstValue(JwtRegisteredClaimNames.Sub), out var customerUserId)
-                ? customerUserId
-                : null,
+        CustomerUserId = CustomerIdentity.GetCustomerId(context.User),
         TokenHash = HashOpaqueToken(rawToken),
         CreatedUtc = now,
         ExpiresUtc = now.AddMinutes(15)
