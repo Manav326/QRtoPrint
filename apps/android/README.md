@@ -1,6 +1,6 @@
-# QRtoPrint Android
+# SmartPrint by QuantaEdge — Android
 
-The Android app is a customer companion to the existing QRtoPrint portal and API. It does not run its own pricing, payment or print-dispatch backend.
+The Android app is the customer companion for SmartPrint by QuantaEdge and reuses the existing QRtoPrint portal and API. It does not run its own pricing, payment or print-dispatch backend.
 
 ## Local document library
 

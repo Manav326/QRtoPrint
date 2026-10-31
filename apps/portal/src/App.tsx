@@ -537,7 +537,7 @@ function ShopConsole({ tokens, onSignOut }: { tokens: AuthTokens; onSignOut: () 
       <aside className={sidebarOpen ? "sidebar sidebar-open" : "sidebar"}>
         <div className="brand-lockup">
           <div className="brand-mark"><QrCode size={21} strokeWidth={2.4}/></div>
-          <div><div className="brand-name">smart<span>print</span></div><div className="brand-caption">BY QRtoPrint</div></div>
+          <div><div className="brand-name">smart<span>print</span></div><div className="brand-caption">BY QUANTAEDGE</div></div>
           <button className="icon-button sidebar-close" aria-label="Close navigation" onClick={() => setSidebarOpen(false)}><X size={18}/></button>
         </div>
         <div className="workspace-switcher">
@@ -601,7 +601,7 @@ function ShopConsole({ tokens, onSignOut }: { tokens: AuthTokens; onSignOut: () 
           {active === "Customers" && <EmptyModule icon={<Users size={24}/>} title="Customer directory is coming next" text="Customer profiles and print history will be connected to completed print jobs. No sample customer records are shown."/>}
           {active === "Reports" && <ReportsPage token={tokens.accessToken}/>} 
 
-          <footer className="app-footer"><span>© 2026 Smart Print by QRtoPrint</span><span><span className="footer-status"/> API session authenticated</span><span>Made for print shops, with care.</span></footer>
+          <footer className="app-footer"><span>© 2026 SmartPrint by QuantaEdge</span><span><span className="footer-status"/> API session authenticated</span><span>Made for print shops, with care.</span></footer>
         </div>
       </main>
 
@@ -921,7 +921,7 @@ function PaymentsPage({settings,payments,refunds,onSave,onVerify,onReject,busy,b
       <div className="payment-method-card">
         <div className="payment-method-heading"><div className="payment-method-icon"><Printer size={19}/></div><div><strong>Cash at counter</strong><small>Allow customers to select cash and pay in person.</small></div><label className="switch"><input type="checkbox" checked={cashEnabled} onChange={event=>setCashEnabled(event.target.checked)}/><span/></label></div>
       </div>
-      <div className="payment-security-note"><ShieldCheck size={16}/><span>Smart Print does not receive, hold or route your customer print revenue. Verify every UPI reference against your own bank/UPI app; cash must be physically received. Subscription charges for Smart Print are billed separately.</span></div>
+      <div className="payment-security-note"><ShieldCheck size={16}/><span>SmartPrint by QuantaEdge does not receive, hold or route your customer print revenue. Verify every UPI reference against your own bank/UPI app; cash must be physically received. SmartPrint platform subscription charges are billed separately.</span></div>
       <div className="payment-settings-footer"><span>Last updated {new Date(settings.updatedUtc).toLocaleString()}</span><button className="primary-button" disabled={busy||(!upiEnabled&&!cashEnabled)||(upiEnabled&&(!upiId.trim()||!payeeName.trim()))} onClick={()=>onSave({upiEnabled,upiId:upiEnabled?upiId.trim():null,payeeName:upiEnabled?payeeName.trim():null,cashEnabled})}>{busy?<span className="button-spinner"/>:"Save payment methods"}</button></div>
     </section>
     <section className="panel payment-review-panel">
@@ -1283,7 +1283,7 @@ function SubscriptionPage({ summary }: { summary: ShopSubscriptionSummary }) {
             <div><span>Annual plan price</span><strong>{price(plan?.annualPriceMinor, plan?.currency ?? "INR")}</strong></div>
           </div>
           {!entitlements.isAccessActive && (
-            <div className="subscription-legacy-note subscription-expired-note"><ShieldCheck size={15}/><span>This trial or subscription is no longer active. New print requests are paused. Contact the QRtoPrint platform team to restore access.</span></div>
+            <div className="subscription-legacy-note subscription-expired-note"><ShieldCheck size={15}/><span>This trial or subscription is no longer active. New print requests are paused. Contact SmartPrint by QuantaEdge support to restore access.</span></div>
           )}
           {entitlements.isLegacyUnconfigured && entitlements.isAccessActive && (
             <div className="subscription-legacy-note"><ShieldCheck size={15}/><span>This subscription predates plan assignment. Existing shop access is being preserved until its terms are explicitly assigned.</span></div>
@@ -1299,7 +1299,7 @@ function SubscriptionPage({ summary }: { summary: ShopSubscriptionSummary }) {
           </div>
           <div className="subscription-upgrade-note">
             <CreditCard size={15}/>
-            <span>Plan changes and subscription billing are managed by the QRtoPrint platform team. Customer print payments remain separate and continue to be handled by your shop.</span>
+            <span>Plan changes and subscription billing are managed by the SmartPrint by QuantaEdge platform team. Customer print payments remain separate and continue to be handled by your shop.</span>
           </div>
         </section>
       </div>
@@ -1444,7 +1444,7 @@ function CustomerEntry({publicCode}:{publicCode:string}) {
   },[result?.sessionToken,result?.expiresUtc]);
 
   return <div className="customer-entry"><div className="customer-entry-glow"/>
-    <header className="customer-entry-brand"><div className="brand-mark"><QrCode size={21}/></div><div><div className="brand-name">smart<span>print</span></div><div className="brand-caption">BY QRtoPrint</div></div></header>
+    <header className="customer-entry-brand"><div className="brand-mark"><QrCode size={21}/></div><div><div className="brand-name">smart<span>print</span></div><div className="brand-caption">BY QUANTAEDGE</div></div></header>
     <main className="customer-entry-card">
       {loading?<><div className="customer-entry-spinner"><span className="button-spinner"/></div><h1>Connecting to your print shop</h1><p>Creating a secure, time-limited session for this QR station.</p></>:
       error?<><div className="entry-error-icon"><X size={23}/></div><div className="entry-eyebrow">STATION UNAVAILABLE</div><h1>This QR station can't be reached</h1><p>{error}</p><button className="primary-button" onClick={()=>window.location.reload()}>Try again</button></>:
@@ -1455,7 +1455,7 @@ function CustomerEntry({publicCode}:{publicCode:string}) {
         <CustomerPrintFlow sessionToken={result.sessionToken} paymentOptions={result.paymentOptions} localAgent={result.localAgent} localReady={localReady}/>
       </>:null}
     </main>
-    <footer className="customer-entry-footer">© 2026 Smart Print · Secure customer printing</footer>
+    <footer className="customer-entry-footer">© 2026 SmartPrint by QuantaEdge · Secure customer printing</footer>
   </div>;
 }
 
