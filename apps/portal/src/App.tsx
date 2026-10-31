@@ -13,7 +13,7 @@ import {
   createAgentEnrollmentCode, createCustomerSession, createPrinter, createStation,
   downloadShopDocument, getCustomerJobStatus, getShopJobEvents, loadShopData,
   logout, readStoredTokens, rejectShopPrintJob, rejectShopPayment, revokeAgentDevice,
-  reportCustomerUpiPayment, resumeCustomerSession, rotateStationCode, startCustomerPayment, storeTokens,
+  reportCustomerUpiPayment, resetCustomerUploadAttempt, resumeCustomerSession, rotateStationCode, startCustomerPayment, storeTokens,
   updatePrinterActive, updateShopPaymentSettings, updateShopPricing,
   updateShopProfile, updateStationEnabled, uploadCustomerDocument,
   verifyShopPayment, type CustomerPayment, type ShopPayment, type ShopPaymentSettings,
@@ -1274,6 +1274,7 @@ function CustomerPrintFlow({sessionToken,paymentOptions}:{sessionToken:string;pa
   }
 
   function chooseFile(next:File|null) {
+    resetCustomerUploadAttempt(sessionToken);
     setFile(next);setUploaded(null);setQuote(null);setJobStatus(null);setPayment(null);setPaymentReference("");setError("");
   }
 
