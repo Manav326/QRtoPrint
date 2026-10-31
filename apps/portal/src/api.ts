@@ -543,17 +543,34 @@ export function updateShopPricing(token: string, values: {
   }, token);
 }
 
-export function uploadCustomerDocument(sessionToken: string, file: File) {
+function customerUploadAttemptStorageKey(sessionToken: string): string {
+  // Keep one pending upload key per QR session. The key is removed only after
+  // the API confirms success, so a lost response can safely be retried.
+  return `qrtoprint.customer-upload-attempt.${sessionToken.slice(0, 16)}`;
+}
+
+export function resetCustomerUploadAttempt(sessionToken: string): void {
+  sessionStorage.removeItem(customerUploadAttemptStorageKey(sessionToken));
+}
+
+export async function uploadCustomerDocument(sessionToken: string, file: File) {
+  const storageKey = customerUploadAttemptStorageKey(sessionToken);
+  const idempotencyKey = sessionStorage.getItem(storageKey) || crypto.randomUUID();
+  sessionStorage.setItem(storageKey, idempotencyKey);
+
   const form = new FormData();
   form.append("file", file, file.name);
-  return apiRequest<UploadedPrintJob>("/api/v1/public/sessions/current/jobs", {
+  const uploaded = await apiRequest<UploadedPrintJob>("/api/v1/public/sessions/current/jobs", {
     method: "POST",
     headers: {
       "X-Print-Session": sessionToken,
-      "Idempotency-Key": crypto.randomUUID()
+      "Idempotency-Key": idempotencyKey
     },
     body: form
   });
+
+  sessionStorage.removeItem(storageKey);
+  return uploaded;
 }
 
 export function calculateCustomerQuote(sessionToken: string, jobId: string, values: {
