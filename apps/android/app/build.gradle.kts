@@ -4,7 +4,7 @@ plugins {
 }
 android {
     namespace = "com.thinkwithsujeet.qrtoprint"
-    compileSdk = 35
+    compileSdk = 36
     defaultConfig {
         applicationId = "com.thinkwithsujeet.qrtoprint"
         minSdk = 26
