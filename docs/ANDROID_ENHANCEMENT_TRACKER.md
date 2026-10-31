@@ -1,8 +1,8 @@
-# Android Premium Document Studio — Enhancement Tracker
+| AND-17 | Documentation and release boundary | Update Android README, product blueprint/design/roadmap if scope changes; describe formats, permissions, guest/account behaviour, limits and verified/unverified device matrix. Keep Play Store/release signing claims accurate. | In progress | Android README now documents print batches, rasterized saved-PDF editing, 20 MB/500-page output limits and source-preservation behaviour. Update CI evidence after this revision passes. |
 **Scope:** Native Android customer app in `apps/android`  
 **Base:** `main` at `3a0e29c6d97228ebeba7c4da24e3023422920d35`  
 **Working branch:** `feature/android-document-studio-premium-ux`  
-**Status:** Initial implementation complete; product follow-ups and physical-device acceptance remain
+**Status:** Implementation expanding; CI and physical-device acceptance tracked per revision
 
 This tracker is the source of truth for the Android enhancement work. Update each status and its evidence as code, tests and device validation are completed. Do not mark an item complete merely because a screen or API call exists.
 
@@ -68,6 +68,15 @@ The Android app must continue to reuse the existing tenant/station-bound QR sess
 4. Customer sessions are linked to the global account only when a customer starts the QR session while signed in. Guest and earlier sessions are not retroactively linked; email verification and password recovery are not implemented here.
 
 CI/emulator success is development evidence, not production release or Play Store approval.
+
+
+## Current batch/editor implementation (validation pending)
+
+- Selected PDFs/photos from one library folder are combined in their displayed order into a single PDF. This keeps the established API/portal/Agent workflow intact: one uploaded PrintDocument, one quote, one shop review, one payment path and one Agent spooler job.
+- The final combined PDF is capped at 20 MB and 500 pages because those are the current print-job limits. Source selection can total 100 MB, but output must meet the upload limit.
+- PDF pages are rasterized up to a 2,000-pixel long edge when combined or edited. This is not a lossless/vector-preserving merge.
+- Saved PDFs can be previewed, rotated, reordered, have pages removed, and saved as a new copy; the original is never overwritten.
+- New emulator coverage is added for mixed PDF/image batch composition and saved-PDF page editing. The previous successful CI run predates these changes; do not treat this current slice as verified until a new run passes.
 
 ## Guardrails
 
