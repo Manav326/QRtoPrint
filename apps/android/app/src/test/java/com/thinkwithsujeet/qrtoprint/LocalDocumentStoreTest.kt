@@ -62,4 +62,20 @@ class LocalDocumentStoreTest {
         assertFalse(budget.tryTake(depth = 0))
         assertEquals(3, budget.itemsVisited)
     }
+    @Test
+    fun reordersSiblingItemsWithoutRenamingOrChangingContents() {
+        val store = LocalDocumentStore(temporaryFolder.newFolder("private"))
+        val first = store.importFile(ByteArrayInputStream("first".toByteArray()), "first.pdf", "")
+        val second = store.importFile(ByteArrayInputStream("second".toByteArray()), "second.pdf", "")
+
+        assertEquals("first.pdf", store.list(store.root)[0].name)
+        assertTrue(store.reorder(second, -1))
+        assertEquals("second.pdf", store.list(store.root)[0].name)
+        assertEquals("first", first.readText())
+        assertEquals("second", second.readText())
+        assertEquals("first.pdf", first.name)
+        assertEquals("second.pdf", second.name)
+        assertFalse(store.reorder(second, -1))
+    }
+
 }
