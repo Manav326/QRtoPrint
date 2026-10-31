@@ -5,6 +5,7 @@ using SmartPrint.Documents;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Http.Features;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Hosting;
 
@@ -55,6 +56,12 @@ public sealed class LocalAgentApiHostedService(
                                  string.IsNullOrEmpty(uri.UserInfo))
                 .Distinct(StringComparer.OrdinalIgnoreCase)
                 .ToArray() ?? Array.Empty<string>();
+
+            builder.Services.Configure<FormOptions>(options =>
+            {
+                options.MultipartBodyLengthLimit = 21 * 1024 * 1024;
+                options.MemoryBufferThreshold = 21 * 1024 * 1024;
+            });
 
             builder.Services.AddCors(options => options.AddPolicy("CustomerPortal", policy =>
             {
@@ -184,6 +191,7 @@ public sealed class LocalAgentApiHostedService(
                         return Results.BadRequest(new { code = "local_upload_incomplete", message = "The document transfer was incomplete. Retry the upload." });
                     }
                     bytes = memory.ToArray();
+                    CryptographicOperations.ZeroMemory(memory.GetBuffer().AsSpan(0, (int)memory.Length));
                 }
 
                 try
