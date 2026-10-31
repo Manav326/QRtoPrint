@@ -1166,6 +1166,7 @@ shop.MapGet("/print-jobs", async (
         {
             job.Id,
             job.BatchId,
+            job.RejectedPageNumbersJson,
             job.JobNumber,
             job.Status,
             job.PageCount,
@@ -1341,7 +1342,7 @@ shop.MapPatch("/print-jobs/{jobId:guid}/printer", async (
     var hasVerifiedPayment = await db.PrintPayments.AnyAsync(
         payment => payment.TenantId == tenantId &&
                    payment.PrintJobId == job.Id &&
-                   payment.Status == "VERIFIED", ct);
+                   (payment.Status == "VERIFIED" || payment.Status == "PARTIALLY_REFUNDED"), ct);
     var canAssign = hasVerifiedPayment &&
         (job.Status == "PAID_AUTHORISED" ||
          (job.Status == "LOCAL_QUEUE_CLAIMED" &&
@@ -1525,7 +1526,7 @@ shop.MapPost("/print-jobs/{jobId:guid}/retry-pdf-export", async (
         select new { printer.DisplayName }
     ).SingleOrDefaultAsync(ct);
     var verified = await db.PrintPayments.AnyAsync(payment =>
-        payment.TenantId == tenantId && payment.PrintJobId == job.Id && payment.Status == "VERIFIED", ct);
+        payment.TenantId == tenantId && payment.PrintJobId == job.Id && (payment.Status == "VERIFIED" || payment.Status == "PARTIALLY_REFUNDED"), ct);
     if (output is null || !verified)
         return Results.Conflict(new { code = "pdf_export_prerequisites_not_met", message = "Verified payment and the same paired computer's live PDF export destination are required." });
 
@@ -1802,154 +1803,133 @@ shop.MapPost("/print-jobs/{jobId:guid}/reject", async (
     return Results.Ok(new { job.Id, job.JobNumber, job.Status, job.UpdatedUtc });
 });
 
-shop.MapPost("/print-jobs/{jobId:guid}/refund", async (
-    Guid jobId,
-    RecordPrintRefundRequest request,
-    ClaimsPrincipal principal,
-    SmartPrintDbContext db,
-    CancellationToken ct) =>
+shop.MapPost("/print-jobs/{jobId:guid}/refund-preview", async (
+    Guid jobId, PrintRefundPreviewRequest request, ClaimsPrincipal principal, SmartPrintDbContext db, CancellationToken ct) =>
 {
-    if (!IsShopOwner(principal) || !TryGetTenantId(principal, out var tenantId))
+    if (!IsShopOwner(principal) || !TryGetTenantId(principal, out var tenantId)) return Results.Forbid();
+    var job = await db.PrintJobs.AsNoTracking().SingleOrDefaultAsync(x => x.Id == jobId && x.TenantId == tenantId, ct);
+    if (job is null) return Results.NotFound();
+    if (!PrintRefundRules.CanRefundBeforePrintHandoff(job))
+        return Results.Conflict(new { code = "file_not_refundable_after_print_handoff", message = "Page review and refunds must be finalized before the file is handed to the shop computer." });
+    var payment = await db.PrintPayments.AsNoTracking().SingleOrDefaultAsync(
+        x => x.TenantId == tenantId && x.PrintJobId == job.Id && (x.Status == "VERIFIED" || x.Status == "PARTIALLY_REFUNDED"), ct);
+    if (!PrintRefundRules.HasRefundableVerifiedPayment(job, payment))
+        return Results.Conflict(new { code = "verified_payment_not_found", message = "This file has no remaining verified payment to refund." });
+    try
     {
-        return Results.Forbid();
+        var previous = JsonSerializer.Deserialize<int[]>(job.RejectedPageNumbersJson) ?? [];
+        var selected = PrintRefundRules.NormalizeRejectedPages(job.PageCount, request.RejectedPageNumbers, previous);
+        var additional = PrintRefundRules.CalculateAdditionalRefundAmount(payment!.AmountMinor, payment.RefundedAmountMinor, job.PageCount, job.Copies, selected);
+        var cumulative = checked(payment.RefundedAmountMinor + additional);
+        return Results.Ok(new { job.Id, job.PageCount, RejectedPageNumbers = selected, RejectedPageCount = selected.Length,
+            AcceptedPageCount = job.PageCount - selected.Length, OriginalAmountMinor = payment.AmountMinor,
+            PreviouslyRefundedAmountMinor = payment.RefundedAmountMinor, AdditionalRefundAmountMinor = additional,
+            CumulativeRefundAmountMinor = cumulative, RemainingPaidAmountMinor = payment.AmountMinor - cumulative, payment.Currency });
     }
+    catch (Exception ex) when (ex is ArgumentException or InvalidOperationException or OverflowException or JsonException)
+    {
+        return Results.ValidationProblem(new Dictionary<string, string[]> { ["pages"] = [ex.Message] });
+    }
+});
 
+shop.MapPost("/print-jobs/{jobId:guid}/refund", async (
+    Guid jobId, RecordPrintRefundRequest request, ClaimsPrincipal principal, SmartPrintDbContext db, CancellationToken ct) =>
+{
+    if (!IsShopOwner(principal) || !TryGetTenantId(principal, out var tenantId)) return Results.Forbid();
     var reason = request.Reason?.Trim();
     var method = request.RefundMethod?.Trim().ToUpperInvariant();
     var reference = request.RefundReference?.Trim();
+    var key = request.IdempotencyKey?.Trim();
     if (string.IsNullOrWhiteSpace(reason) || reason.Length is < 3 or > 300 ||
         method is not ("UPI" or "CASH") ||
         (method == "UPI" && (string.IsNullOrWhiteSpace(reference) || reference.Length is < 4 or > 100)) ||
-        (reference?.Length > 100) ||
-        !request.ConfirmedSent)
-    {
-        return Results.ValidationProblem(new Dictionary<string, string[]>
-        {
-            ["refund"] = ["Confirm the refund was sent, choose UPI or cash, provide a reason, and enter a UPI refund reference when applicable."]
-        });
-    }
+        reference?.Length > 100 || string.IsNullOrWhiteSpace(key) || key.Length is < 8 or > 100 || !request.ConfirmedSent)
+        return Results.ValidationProblem(new Dictionary<string, string[]> { ["refund"] = ["Confirm the refund was sent, choose UPI or cash, provide a reason and unique key; UPI refunds need a transaction reference."] });
 
-    await using var transaction = await db.Database.BeginTransactionAsync(ct);
-    var job = await db.PrintJobs.SingleOrDefaultAsync(
-        item => item.Id == jobId && item.TenantId == tenantId, ct);
-    if (job is null)
+    await using var tx = await db.Database.BeginTransactionAsync(ct);
+    var duplicate = await db.PrintRefunds.AsNoTracking().SingleOrDefaultAsync(x => x.TenantId == tenantId && x.IdempotencyKey == key, ct);
+    if (duplicate is not null)
     {
-        await transaction.RollbackAsync(ct);
-        return Results.NotFound();
+        await tx.RollbackAsync(ct);
+        return Results.Ok(new { duplicate.Id, duplicate.PrintJobId, duplicate.PrintPaymentId, duplicate.AmountMinor, duplicate.Currency, duplicate.Method, duplicate.Status, duplicate.Reference, duplicate.Reason, duplicate.RefundedUtc, DuplicateRequest = true });
     }
-
-    var existingRefund = await db.PrintRefunds.AsNoTracking()
-        .SingleOrDefaultAsync(item => item.TenantId == tenantId && item.PrintJobId == job.Id, ct);
-    if (existingRefund is not null)
+    var job = await db.PrintJobs.SingleOrDefaultAsync(x => x.Id == jobId && x.TenantId == tenantId, ct);
+    if (job is null) { await tx.RollbackAsync(ct); return Results.NotFound(); }
+    if (!PrintRefundRules.CanRefundBeforePrintHandoff(job))
     {
-        await transaction.RollbackAsync(ct);
-        return Results.Ok(new
-        {
-            existingRefund.Id,
-            existingRefund.PrintJobId,
-            existingRefund.AmountMinor,
-            existingRefund.Currency,
-            existingRefund.Method,
-            existingRefund.Status,
-            DuplicateRequest = true
-        });
+        await tx.RollbackAsync(ct);
+        return Results.Conflict(new { code = "file_not_refundable_after_print_handoff", message = "Page rejection and refunds must be finalized before local computer handoff or printing." });
     }
-
-    if (job.Status != "PAID_AUTHORISED" ||
-        job.LocalQueueReceivedUtc is not null ||
-        job.ClaimedByAgentDeviceId is not null ||
-        job.AgentClaimedUtc is not null ||
-        job.PrintDispatchAttempts > 0 ||
-        job.SpoolerSubmittedUtc is not null ||
-        job.OutputConfirmedUtc is not null)
-    {
-        await transaction.RollbackAsync(ct);
-        return Results.Conflict(new
-        {
-            code = "file_not_refundable_after_print_handoff",
-            message = "A paid file can be rejected and refunded only before it is handed to the shop computer or printing begins."
-        });
-    }
-
     var payment = await db.PrintPayments.SingleOrDefaultAsync(
-        item => item.TenantId == tenantId &&
-                item.PrintJobId == job.Id &&
-                item.Status == "VERIFIED", ct);
-    if (payment is null || payment.AmountMinor <= 0)
+        x => x.TenantId == tenantId && x.PrintJobId == job.Id && (x.Status == "VERIFIED" || x.Status == "PARTIALLY_REFUNDED"), ct);
+    if (!PrintRefundRules.HasRefundableVerifiedPayment(job, payment))
     {
-        await transaction.RollbackAsync(ct);
-        return Results.Conflict(new
+        await tx.RollbackAsync(ct);
+        return Results.Conflict(new { code = "verified_payment_not_found", message = "This file has no remaining verified payment to refund." });
+    }
+
+    int[] rejected;
+    long additional;
+    long cumulative;
+    try
+    {
+        var previous = JsonSerializer.Deserialize<int[]>(job.RejectedPageNumbersJson) ?? [];
+        var selected = request.RejectedPageNumbers ?? Enumerable.Range(1, job.PageCount).ToArray();
+        rejected = PrintRefundRules.NormalizeRejectedPages(job.PageCount, selected, previous);
+        if (rejected.Length == previous.Length)
         {
-            code = "verified_payment_not_found",
-            message = "This file has no verified payment to refund. An unpaid file can be rejected without a refund."
-        });
+            await tx.RollbackAsync(ct);
+            return Results.Conflict(new { code = "no_new_pages_rejected", message = "Select at least one additional page to reject." });
+        }
+        additional = PrintRefundRules.CalculateAdditionalRefundAmount(payment!.AmountMinor, payment.RefundedAmountMinor, job.PageCount, job.Copies, rejected);
+        cumulative = checked(payment.RefundedAmountMinor + additional);
+    }
+    catch (Exception ex) when (ex is ArgumentException or InvalidOperationException or OverflowException or JsonException)
+    {
+        await tx.RollbackAsync(ct);
+        return Results.ValidationProblem(new Dictionary<string, string[]> { ["pages"] = [ex.Message] });
+    }
+    if (additional <= 0)
+    {
+        await tx.RollbackAsync(ct);
+        return Results.Conflict(new { code = "refund_amount_below_one_minor_unit", message = "The selected pages do not produce an additional refund under the original quote." });
     }
 
     var now = DateTimeOffset.UtcNow;
-    var refund = new PrintRefund
-    {
-        TenantId = tenantId,
-        PrintJobId = job.Id,
-        PrintPaymentId = payment.Id,
-        AmountMinor = payment.AmountMinor,
-        Currency = payment.Currency,
-        Method = method!,
-        Status = "RECORDED_AS_SENT",
-        Reference = string.IsNullOrWhiteSpace(reference) ? null : reference,
-        Reason = reason,
-        RefundedByUserId = GetActorId(principal),
-        RefundedUtc = now,
-        CreatedUtc = now
-    };
-
-    payment.Status = "REFUNDED";
-    payment.UpdatedUtc = now;
-    job.Status = "REFUNDED";
-    job.FailureCode = "SHOP_REJECTED_FILE_REFUNDED";
+    var fullyRefunded = cumulative >= payment!.AmountMinor || rejected.Length == job.PageCount;
+    var refund = new PrintRefund { TenantId = tenantId, PrintJobId = job.Id, PrintPaymentId = payment.Id, IdempotencyKey = key!,
+        AmountMinor = additional, Currency = payment.Currency, Method = method!, Status = "RECORDED_AS_SENT",
+        Reference = string.IsNullOrWhiteSpace(reference) ? null : reference, Reason = reason!,
+        RefundedByUserId = GetActorId(principal), RefundedUtc = now, CreatedUtc = now };
+    job.RejectedPageNumbersJson = JsonSerializer.Serialize(rejected);
+    job.Status = fullyRefunded ? "REFUNDED" : "PAID_AUTHORISED";
+    job.FailureCode = fullyRefunded ? "SHOP_REJECTED_FILE_FULLY_REFUNDED" : "SHOP_REJECTED_PAGES_PARTIALLY_REFUNDED";
     job.UpdatedUtc = now;
+    payment.RefundedAmountMinor = cumulative;
+    payment.Status = fullyRefunded ? "REFUNDED" : "PARTIALLY_REFUNDED";
+    payment.UpdatedUtc = now;
     db.PrintRefunds.Add(refund);
-    db.PrintJobEvents.Add(new PrintJobEvent
-    {
-        TenantId = tenantId,
-        PrintJobId = job.Id,
-        PreviousStatus = "PAID_AUTHORISED",
-        NewStatus = "REFUNDED",
-        ActorType = "ShopUser",
-        ActorId = GetActorId(principal),
-        ReasonCode = "SHOP_REJECTED_FILE_REFUND_LOGGED",
-        CreatedUtc = now
-    });
+    db.PrintJobEvents.Add(new PrintJobEvent { TenantId = tenantId, PrintJobId = job.Id, PreviousStatus = "PAID_AUTHORISED",
+        NewStatus = job.Status, ActorType = "ShopUser", ActorId = GetActorId(principal),
+        ReasonCode = fullyRefunded ? "SHOP_FILE_FULLY_REFUNDED" : "SHOP_PAGES_REJECTED_PARTIAL_REFUND_RECORDED", CreatedUtc = now });
 
-    try
-    {
-        await db.SaveChangesAsync(ct);
-    }
+    try { await db.SaveChangesAsync(ct); await tx.CommitAsync(ct); }
     catch (DbUpdateConcurrencyException)
     {
-        await transaction.RollbackAsync(ct);
-        return Results.Conflict(new
-        {
-            code = "refund_recorded_concurrently",
-            message = "The payment changed while the refund was being recorded. Refresh the job before retrying."
-        });
+        await tx.RollbackAsync(ct);
+        return Results.Conflict(new { code = "refund_recorded_concurrently", message = "The payment changed while this refund was recorded. Refresh and preview pages again." });
     }
-
-    await transaction.CommitAsync(ct);
-    return Results.Created($"/api/v1/shop/refunds/{refund.Id}", new
+    catch (DbUpdateException)
     {
-        refund.Id,
-        refund.PrintJobId,
-        refund.PrintPaymentId,
-        job.JobNumber,
-        refund.AmountMinor,
-        refund.Currency,
-        refund.Method,
-        refund.Status,
-        refund.Reference,
-        refund.Reason,
-        refund.RefundedUtc,
-        refund.RefundedByUserId
-    });
+        await tx.RollbackAsync(ct);
+        var raced = await db.PrintRefunds.AsNoTracking().SingleOrDefaultAsync(x => x.TenantId == tenantId && x.IdempotencyKey == key, ct);
+        if (raced is not null) return Results.Ok(new { raced.Id, raced.PrintJobId, raced.PrintPaymentId, raced.AmountMinor, raced.Currency, raced.Method, raced.Status, raced.Reference, raced.Reason, raced.RefundedUtc, DuplicateRequest = true });
+        throw;
+    }
+    return Results.Created($"/api/v1/shop/refunds/{refund.Id}", new { refund.Id, refund.PrintJobId, refund.PrintPaymentId, job.JobNumber,
+        refund.AmountMinor, refund.Currency, refund.Method, refund.Status, refund.Reference, refund.Reason, refund.RefundedUtc,
+        refund.RefundedByUserId, RejectedPageNumbers = rejected, CumulativeRefundAmountMinor = cumulative,
+        RemainingPaidAmountMinor = payment.AmountMinor - cumulative });
 });
 
 var shopAgents = app.MapGroup("/api/v1/shop").RequireAuthorization();
@@ -2168,7 +2148,7 @@ agentApi.MapPost("/jobs/claim", async (
               db.PrintPayments.Any(payment =>
                   payment.TenantId == job.TenantId &&
                   payment.PrintJobId == job.Id &&
-                  payment.Status == "VERIFIED") &&
+                  (payment.Status == "VERIFIED" || payment.Status == "PARTIALLY_REFUNDED")) &&
               availablePrinterIds.Contains(printer.Id) &&
               (job.Status == "PAID_AUTHORISED" ||
                (job.Status == "LOCAL_QUEUE_CLAIMED" &&
@@ -2222,7 +2202,7 @@ agentApi.MapPost("/jobs/claim", async (
                           db.PrintPayments.Any(payment =>
                               payment.TenantId == job.TenantId &&
                               payment.PrintJobId == job.Id &&
-                              payment.Status == "VERIFIED") &&
+                              (payment.Status == "VERIFIED" || payment.Status == "PARTIALLY_REFUNDED")) &&
                           (job.Status == "PAID_AUTHORISED" ||
                            (job.Status == "LOCAL_QUEUE_CLAIMED" &&
                             (job.AgentLeaseExpiresUtc == null || job.AgentLeaseExpiresUtc <= now))))
@@ -2873,8 +2853,8 @@ agentApi.MapPost("/jobs/print-claim", async (AgentPrintClaimRequest request, Htt
                   printer.LastSeenUtc != null && printer.LastSeenUtc >= onlineAfter &&
                   (printer.Status == "Ready" || printer.Status == "Busy") &&
                   db.AgentDevices.Any(a => a.Id == device.Id && a.TenantId == device.TenantId && a.RevokedUtc == null && a.LastSeenUtc != null && a.LastSeenUtc >= onlineAfter) &&
-                  db.PrintPayments.Any(pay => pay.TenantId == job.TenantId && pay.PrintJobId == job.Id && pay.Status == "VERIFIED")
-            select new { job.Id, job.JobNumber, job.Status, job.SpoolerJobName, QueueName = printer.QueueName, OutputMode = printer.OutputMode }
+                  db.PrintPayments.Any(pay => pay.TenantId == job.TenantId && pay.PrintJobId == job.Id && (pay.Status == "VERIFIED" || pay.Status == "PARTIALLY_REFUNDED"))
+            select new { job.Id, job.JobNumber, job.Status, job.SpoolerJobName, job.RejectedPageNumbersJson, QueueName = printer.QueueName, OutputMode = printer.OutputMode }
         ).SingleOrDefaultAsync(ct);
         if (candidate is null || string.IsNullOrWhiteSpace(candidate.SpoolerJobName)) continue;
 
@@ -2888,7 +2868,7 @@ agentApi.MapPost("/jobs/print-claim", async (AgentPrintClaimRequest request, Htt
             db.PrinterDevices.Any(printer => printer.Id == job.PrinterDeviceId && printer.TenantId == device.TenantId &&
                 printer.AgentDeviceId == device.Id && printer.IsActive && printer.QueueName != null && printer.QueueName != "" &&
                 printer.LastSeenUtc != null && printer.LastSeenUtc >= onlineAfter) &&
-            db.PrintPayments.Any(pay => pay.TenantId == job.TenantId && pay.PrintJobId == job.Id && pay.Status == "VERIFIED"))
+            db.PrintPayments.Any(pay => pay.TenantId == job.TenantId && pay.PrintJobId == job.Id && (pay.Status == "VERIFIED" || pay.Status == "PARTIALLY_REFUNDED")))
             .ExecuteUpdateAsync(u => u
                 .SetProperty(job => job.Status, "PRINT_SUBMITTING")
                 .SetProperty(job => job.PrintDispatchLeaseExpiresUtc, lease)
@@ -2908,7 +2888,9 @@ agentApi.MapPost("/jobs/print-claim", async (AgentPrintClaimRequest request, Htt
         claimed.Add(new
         {
             candidate.Id, candidate.JobNumber, Status = "PRINT_SUBMITTING",
-            candidate.QueueName, candidate.SpoolerJobName, candidate.OutputMode, LeaseExpiresUtc = lease
+            candidate.QueueName, candidate.SpoolerJobName, candidate.OutputMode,
+            RejectedPageNumbers = JsonSerializer.Deserialize<int[]>(candidate.RejectedPageNumbersJson) ?? [],
+            LeaseExpiresUtc = lease
         });
     }
     await db.SaveChangesAsync(ct);
@@ -3483,7 +3465,7 @@ shop.MapPost("/payments/{paymentId:guid}/verify", async (
         return Results.NotFound();
     }
 
-    if (payment.Status == "VERIFIED")
+    if ((payment.Status == "VERIFIED" || payment.Status == "PARTIALLY_REFUNDED"))
     {
         await transaction.RollbackAsync(ct);
         return Results.Ok(new { payment.Id, payment.Status, payment.VerifiedUtc, DuplicateRequest = true });

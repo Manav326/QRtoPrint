@@ -95,7 +95,11 @@ public sealed record RecordPrintRefundRequest(
     string RefundMethod,
     string? RefundReference,
     string Reason,
-    bool ConfirmedSent);
+    bool ConfirmedSent,
+    string? IdempotencyKey = null,
+    IReadOnlyList<int>? RejectedPageNumbers = null);
+
+public sealed record PrintRefundPreviewRequest(IReadOnlyList<int> RejectedPageNumbers);
 
 public sealed record LocalPrintUploadCompletionRequest(
     int PageCount,

@@ -186,6 +186,7 @@ public sealed class PrintJob
     public Guid? ClaimedByAgentDeviceId { get; set; }
     public Guid CustomerSessionId { get; set; }
     public Guid? BatchId { get; set; }
+    public string RejectedPageNumbersJson { get; set; } = "[]";
     public string JobNumber { get; set; } = string.Empty;
     public string Status { get; set; } = "Uploaded";
     public string IdempotencyKey { get; set; } = string.Empty;
@@ -320,6 +321,7 @@ public sealed class PrintRefund
     public Guid TenantId { get; set; }
     public Guid PrintJobId { get; set; }
     public Guid PrintPaymentId { get; set; }
+    public string IdempotencyKey { get; set; } = string.Empty;
     public long AmountMinor { get; set; }
     public string Currency { get; set; } = "INR";
     public string Method { get; set; } = string.Empty;
@@ -339,6 +341,7 @@ public sealed class PrintPayment
     public string Method { get; set; } = string.Empty;
     public string Status { get; set; } = string.Empty;
     public long AmountMinor { get; set; }
+    public long RefundedAmountMinor { get; set; }
     public string Currency { get; set; } = "INR";
     public string? UpiIdSnapshot { get; set; }
     public string? PayeeNameSnapshot { get; set; }

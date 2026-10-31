@@ -273,6 +273,7 @@ public sealed class SmartPrintDbContext(DbContextOptions<SmartPrintDbContext> op
             entity.Property(x => x.OutputFilePath).HasMaxLength(1024);
             entity.Property(x => x.OutputFileName).HasMaxLength(255);
             entity.Property(x => x.OutputSha256).HasMaxLength(64);
+            entity.Property(x => x.RejectedPageNumbersJson).HasColumnType("jsonb").HasDefaultValue("[]").IsRequired();
             entity.HasIndex(x => new { x.TenantId, x.CreatedUtc });
             entity.HasIndex(x => new { x.TenantId, x.BatchId });
             entity.HasIndex(x => new { x.TenantId, x.IdempotencyKey }).IsUnique();
@@ -306,6 +307,7 @@ public sealed class SmartPrintDbContext(DbContextOptions<SmartPrintDbContext> op
             entity.Property(x => x.PayeeNameSnapshot).HasMaxLength(120);
             entity.Property(x => x.PaymentReference).HasMaxLength(100);
             entity.Property(x => x.RejectionReason).HasMaxLength(300);
+            entity.Property(x => x.RefundedAmountMinor).HasDefaultValue(0L);
             entity.Property(x => x.UpdatedUtc).IsConcurrencyToken();
             entity.HasAlternateKey(x => new { x.TenantId, x.Id });
             entity.HasIndex(x => new { x.TenantId, x.PrintJobId, x.CreatedUtc });
@@ -327,9 +329,11 @@ public sealed class SmartPrintDbContext(DbContextOptions<SmartPrintDbContext> op
             entity.Property(x => x.Status).HasMaxLength(24).IsRequired();
             entity.Property(x => x.Reference).HasMaxLength(100);
             entity.Property(x => x.Reason).HasMaxLength(300).IsRequired();
+            entity.Property(x => x.IdempotencyKey).HasMaxLength(100).IsRequired();
             entity.HasAlternateKey(x => new { x.TenantId, x.Id });
             entity.HasIndex(x => new { x.TenantId, x.PrintJobId, x.CreatedUtc });
-            entity.HasIndex(x => new { x.TenantId, x.PrintPaymentId }).IsUnique();
+            entity.HasIndex(x => new { x.TenantId, x.PrintPaymentId });
+            entity.HasIndex(x => new { x.TenantId, x.IdempotencyKey }).IsUnique();
             entity.HasOne<PrintJob>().WithMany()
                 .HasForeignKey(x => new { x.TenantId, x.PrintJobId })
                 .HasPrincipalKey(x => new { x.TenantId, x.Id })
