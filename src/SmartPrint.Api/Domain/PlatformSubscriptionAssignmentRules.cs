@@ -19,7 +19,8 @@ public static class PlatformSubscriptionAssignmentRules
         string? requestedInterval,
         DateTimeOffset now,
         out PlatformSubscriptionAssignmentTerms? terms,
-        out string errorCode)
+        out string errorCode,
+        bool paymentConfirmed = false)
     {
         terms = null;
         errorCode = "plan_version_not_assignable";
@@ -54,37 +55,57 @@ public static class PlatformSubscriptionAssignmentRules
             return false;
         }
 
-        if (interval == "MONTHLY" && version.MonthlyPriceMinor == 0)
+        if (interval == "MONTHLY")
         {
-            terms = new PlatformSubscriptionAssignmentTerms(
-                "FREE_PLAN_ASSIGNED",
-                "Active",
-                "Monthly",
-                0,
-                version.Currency,
-                now,
-                now.AddMonths(1));
-            errorCode = string.Empty;
-            return true;
+            if (version.MonthlyPriceMinor == 0)
+            {
+                terms = new PlatformSubscriptionAssignmentTerms(
+                    "FREE_PLAN_ASSIGNED", "Active", "Monthly", 0,
+                    version.Currency, now, now.AddMonths(1));
+                errorCode = string.Empty;
+                return true;
+            }
+            if (version.MonthlyPriceMinor is > 0)
+            {
+                if (!paymentConfirmed)
+                {
+                    errorCode = "paid_plan_requires_verified_payment";
+                    return false;
+                }
+                terms = new PlatformSubscriptionAssignmentTerms(
+                    "PAID_PLAN_ASSIGNED", "Active", "Monthly",
+                    version.MonthlyPriceMinor.Value, version.Currency, now, now.AddMonths(1));
+                errorCode = string.Empty;
+                return true;
+            }
         }
 
-        if (interval == "ANNUAL" && version.AnnualPriceMinor == 0)
+        if (interval == "ANNUAL")
         {
-            terms = new PlatformSubscriptionAssignmentTerms(
-                "FREE_PLAN_ASSIGNED",
-                "Active",
-                "Annual",
-                0,
-                version.Currency,
-                now,
-                now.AddYears(1));
-            errorCode = string.Empty;
-            return true;
+            if (version.AnnualPriceMinor == 0)
+            {
+                terms = new PlatformSubscriptionAssignmentTerms(
+                    "FREE_PLAN_ASSIGNED", "Active", "Annual", 0,
+                    version.Currency, now, now.AddYears(1));
+                errorCode = string.Empty;
+                return true;
+            }
+            if (version.AnnualPriceMinor is > 0)
+            {
+                if (!paymentConfirmed)
+                {
+                    errorCode = "paid_plan_requires_verified_payment";
+                    return false;
+                }
+                terms = new PlatformSubscriptionAssignmentTerms(
+                    "PAID_PLAN_ASSIGNED", "Active", "Annual",
+                    version.AnnualPriceMinor.Value, version.Currency, now, now.AddYears(1));
+                errorCode = string.Empty;
+                return true;
+            }
         }
 
-        errorCode = interval is "MONTHLY" or "ANNUAL"
-            ? "paid_plan_requires_verified_payment"
-            : "billing_interval_not_available";
+        errorCode = "billing_interval_not_available";
         return false;
     }
 }

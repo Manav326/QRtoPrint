@@ -74,6 +74,7 @@ public sealed class PlatformSubscriptionAudit
     public DateTimeOffset PeriodStartUtc { get; set; }
     public DateTimeOffset PeriodEndUtc { get; set; }
     public string Reason { get; set; } = string.Empty;
+    public string? PaymentReference { get; set; }
     public string IdempotencyKey { get; set; } = string.Empty;
     public DateTimeOffset CreatedUtc { get; set; } = DateTimeOffset.UtcNow;
 }

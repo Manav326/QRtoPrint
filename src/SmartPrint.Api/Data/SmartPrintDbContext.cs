@@ -164,6 +164,7 @@ public sealed class SmartPrintDbContext(DbContextOptions<SmartPrintDbContext> op
             entity.Property(x => x.Status).HasMaxLength(24).IsRequired();
             entity.Property(x => x.Currency).HasMaxLength(3).IsRequired();
             entity.Property(x => x.Reason).HasMaxLength(500).IsRequired();
+            entity.Property(x => x.PaymentReference).HasMaxLength(100);
             entity.Property(x => x.IdempotencyKey).HasMaxLength(100).IsRequired();
             entity.HasIndex(x => x.IdempotencyKey).IsUnique();
             entity.HasIndex(x => new { x.TenantId, x.CreatedUtc });
