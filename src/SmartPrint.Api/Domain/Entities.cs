@@ -75,6 +75,7 @@ public sealed class PlatformSubscriptionAudit
     public DateTimeOffset PeriodEndUtc { get; set; }
     public string Reason { get; set; } = string.Empty;
     public string IdempotencyKey { get; set; } = string.Empty;
+    public string? RequestFingerprint { get; set; }
     public DateTimeOffset CreatedUtc { get; set; } = DateTimeOffset.UtcNow;
 }
 

@@ -149,27 +149,13 @@ public static class PlatformSubscriptionEndpoints
                 return Results.Forbid();
             }
 
+            var requestFingerprint = PlatformSubscriptionRequestFingerprint.Create(
+                tenantId, request.PlanVersionId, request.BillingInterval, reason);
             var previousRequest = await db.PlatformSubscriptionAudits.AsNoTracking()
                 .SingleOrDefaultAsync(item => item.IdempotencyKey == idempotencyKey, ct);
             if (previousRequest is not null)
             {
-                if (previousRequest.TenantId != tenantId)
-                {
-                    return Results.Conflict(new { code = "idempotency_key_reused", message = "This key has already been used for a different shop." });
-                }
-
-                return Results.Ok(new
-                {
-                    subscriptionId = previousRequest.AssignedSubscriptionId,
-                    previousSubscriptionId = previousRequest.PreviousSubscriptionId,
-                    planCode = previousRequest.PlanCode,
-                    status = previousRequest.Status,
-                    billingInterval = previousRequest.BillingInterval,
-                    periodStartUtc = previousRequest.PeriodStartUtc,
-                    periodEndUtc = previousRequest.PeriodEndUtc,
-                    eventType = previousRequest.EventType,
-                    duplicateRequest = true
-                });
+                return ExistingRequestResult(previousRequest, tenantId, requestFingerprint);
             }
 
             var candidate = await (
@@ -224,22 +210,7 @@ public static class PlatformSubscriptionEndpoints
             if (previousRequest is not null)
             {
                 await transaction.RollbackAsync(ct);
-                if (previousRequest.TenantId != tenantId)
-                {
-                    return Results.Conflict(new { code = "idempotency_key_reused", message = "This key has already been used for a different shop." });
-                }
-                return Results.Ok(new
-                {
-                    subscriptionId = previousRequest.AssignedSubscriptionId,
-                    previousSubscriptionId = previousRequest.PreviousSubscriptionId,
-                    planCode = previousRequest.PlanCode,
-                    status = previousRequest.Status,
-                    billingInterval = previousRequest.BillingInterval,
-                    periodStartUtc = previousRequest.PeriodStartUtc,
-                    periodEndUtc = previousRequest.PeriodEndUtc,
-                    eventType = previousRequest.EventType,
-                    duplicateRequest = true
-                });
+                return ExistingRequestResult(previousRequest, tenantId, requestFingerprint);
             }
 
             var previousSubscription = await db.TenantSubscriptions
@@ -283,6 +254,7 @@ public static class PlatformSubscriptionEndpoints
                 PeriodEndUtc = terms.PeriodEndUtc,
                 Reason = reason,
                 IdempotencyKey = idempotencyKey,
+                RequestFingerprint = requestFingerprint,
                 CreatedUtc = now
             });
 
@@ -343,6 +315,34 @@ public static class PlatformSubscriptionEndpoints
         });
 
         return platform;
+    }
+
+    private static IResult ExistingRequestResult(
+        PlatformSubscriptionAudit previousRequest,
+        Guid tenantId,
+        string requestFingerprint)
+    {
+        if (!PlatformSubscriptionRequestFingerprint.Matches(previousRequest, tenantId, requestFingerprint))
+        {
+            return Results.Conflict(new
+            {
+                code = "idempotency_key_reused",
+                message = "This idempotency key was already used for a different subscription assignment."
+            });
+        }
+
+        return Results.Ok(new
+        {
+            subscriptionId = previousRequest.AssignedSubscriptionId,
+            previousSubscriptionId = previousRequest.PreviousSubscriptionId,
+            planCode = previousRequest.PlanCode,
+            status = previousRequest.Status,
+            billingInterval = previousRequest.BillingInterval,
+            periodStartUtc = previousRequest.PeriodStartUtc,
+            periodEndUtc = previousRequest.PeriodEndUtc,
+            eventType = previousRequest.EventType,
+            duplicateRequest = true
+        });
     }
 }
 
