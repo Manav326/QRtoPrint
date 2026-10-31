@@ -22,6 +22,10 @@ QRtoPrint is a commercial QR-based printing platform. Independent print shops su
 4. Platform administration: tenant lifecycle, plans, subscriptions, entitlements, platform billing, licences/devices, releases, support, audit and aggregate analytics.
 5. Shared backend: tenant-aware identity, policy, pricing, job orchestration, payment records, document metadata, secure cloud transfer and audit.
 
+## Android companion
+
+The native Android app complements the customer PWA for walk-in customers who prepare documents before reaching a shop. It provides QR scanning, an on-device folder-based document library, Android File Manager import/export and a native saved-file chooser inside the existing customer portal. It reuses the same `/s/{publicCode}` route, station-bound QR sessions, API upload grants, quote, approval, payment and job tracking. The Android app does not replace the Windows Print Agent or provide offline printing.
+
 ## 4. Customer access modes
 
 ### Local Wi-Fi

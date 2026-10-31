@@ -50,6 +50,21 @@ Acceptance: an owner/manager can configure and operate the core shop print workf
 
 Acceptance: both transfer modes use one server-owned job lifecycle. LAN mode requires an online API/Agent and user-granted browser permission; it is not offline printing.
 
+## Workstream 3A — native Android companion
+
+- [x] Native Android project scaffold with pinned Android Gradle Plugin/Kotlin toolchain and Android 8+ baseline (minSdk 26).
+- [x] QR scanning for the existing HTTPS `/s/{publicCode}` station route; session creation and validation remain in the existing API.
+- [x] App-private document library with folders/subfolders, rename, delete, open and share actions.
+- [x] Multi-file and recursive folder import through Android's Storage Access Framework; file and folder export to a user-selected provider.
+- [x] Native saved-document picker integrated with the customer portal's existing single-file upload control.
+- [x] WebView HTTP request filter limiting cleartext traffic to private IPv4 Agent upload endpoints on TCP 17842.
+- [x] JVM tests for QR route validation and print-format/size policy; CI Android debug build and APK artifact.
+- [ ] Instrumented/UI tests on physical Android versions and different file-manager/document providers.
+- [ ] Real shop-Wi-Fi test matrix for Android WebView Local Network Access, private endpoint discovery, client isolation and paired Agent upload.
+- [ ] Signed release bundle, Play Store listing, update channel and production release signing.
+
+Acceptance: Android must reuse the server-owned QR session, quote, approval, payment and output-confirmation lifecycle. CI APK generation is not proof of physical-device or printer compatibility.
+
 ## Workstream 4 — local Windows edge and printer integration
 
 - [x] Windows Service, paired identity, DPAPI LocalMachine credentials and authenticated cloud heartbeat.

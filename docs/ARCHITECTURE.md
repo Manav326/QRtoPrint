@@ -103,3 +103,16 @@ Target thinkwithsujeet.in with separate customer, shop, admin, API and release s
 ## 10. Observability
 
 Use structured logs with correlation IDs, tenant-safe redaction, health endpoints and metrics for queue age, job transitions, agent heartbeat, printer status freshness, upload failures, payment webhook processing and sync lag. Never log document contents, payment secrets or raw access tokens.
+
+
+## Android companion client
+
+The native app in `apps/android` is a customer-side companion, not a second backend:
+
+- Google Play services Code Scanner reads the shop's existing HTTPS `/s/{publicCode}` QR link. The shared API creates and validates the station-bound customer session.
+- The on-device document library stores imported files in app-private storage. Android's Storage Access Framework is used for multi-file import, recursive folder import, single-file export and folder export; the app does not request broad shared-storage permissions.
+- The print portal is hosted in Android WebView and continues to call the same customer APIs. The WebChrome file chooser is backed by the local library through a scoped FileProvider URI.
+- WebView cleartext is restricted in `shouldInterceptRequest` to RFC1918 IPv4 addresses, TCP 17842 and the paired Agent upload route. The shop portal remains HTTPS. The API remains authoritative for upload grants, QR session validation, quote, payment and dispatch.
+- The Android app does not include a local pricing engine, payment verification system or print executor. Physical printing continues on the paired Windows Agent.
+
+The first CI delivery is an unsigned debug APK and JVM tests. Instrumented UI tests, physical Android LAN testing, signed releases and store distribution remain release gates.
