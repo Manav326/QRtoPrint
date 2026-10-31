@@ -44,9 +44,9 @@ CI builds the Android debug APK and runs JVM unit tests. A real-device matrix (Q
 On Windows with GitHub CLI authenticated and Android Debug Bridge (ADB) installed:
 
 ```powershell
-.\\scripts\\download-android-apk.ps1
-.\\scripts\\download-android-apk.ps1 -Install
-.\\scripts\\download-android-apk.ps1 -Install -DeviceSerial "YOUR_DEVICE_SERIAL"
+.\scripts\download-android-apk.ps1
+.\scripts\download-android-apk.ps1 -Install
+.\scripts\download-android-apk.ps1 -Install -DeviceSerial "YOUR_DEVICE_SERIAL"
 ```
 
 The script selects the latest successful main-branch CI run, downloads the `qrtoprint-android-debug` artifact, validates the APK and reports its SHA-256. Use `-Install` only after enabling USB debugging and authorising the device. This is a development debug build, not a Play Store release.

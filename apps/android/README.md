@@ -26,4 +26,4 @@ From repository root:
 gradle --no-daemon -p apps/android :app:testDebugUnitTest :app:assembleDebug
 ```
 
-The CI workflow uploads the unsigned debug APK as `qrtoprint-android-debug`. Debug builds are for development only. Release signing, physical Android/Wi-Fi validation, Play Store listing and distribution are not yet complete.
+The CI workflow uploads the debug APK as `qrtoprint-android-debug`. Download it with `scripts\\download-android-apk.ps1`; add `-Install` to install it on one connected, ADB-authorised Android device. Debug builds are for development only. Release signing, physical Android/Wi-Fi validation, Play Store listing and distribution are not yet complete.
