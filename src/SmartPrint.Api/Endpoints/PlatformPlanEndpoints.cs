@@ -44,6 +44,14 @@ public static class PlatformPlanEndpoints
             SmartPrintDbContext db,
             CancellationToken ct) =>
         {
+            if (request.Version is null)
+            {
+                return Results.ValidationProblem(new Dictionary<string, string[]>
+                {
+                    ["version"] = ["Plan pricing and entitlement settings are required."]
+                });
+            }
+
             var code = request.Code?.Trim().ToUpperInvariant() ?? string.Empty;
             var name = request.Name?.Trim() ?? string.Empty;
             var errors = ValidateMetadata(code, name, request.Description);
