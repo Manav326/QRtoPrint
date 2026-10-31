@@ -1899,12 +1899,19 @@ shop.MapPost("/print-jobs/{jobId:guid}/refund", async (
         return Results.Conflict(new { code = "refund_amount_below_one_minor_unit", message = "The selected pages do not produce an additional refund under the original quote." });
     }
 
+    var refundActorId = GetActorId(principal);
+    if (refundActorId is not Guid actorId)
+    {
+        await tx.RollbackAsync(ct);
+        return Results.Forbid();
+    }
+
     var now = DateTimeOffset.UtcNow;
     var fullyRefunded = cumulative >= payment!.AmountMinor || rejected.Length == job.PageCount;
     var refund = new PrintRefund { TenantId = tenantId, PrintJobId = job.Id, PrintPaymentId = payment.Id, IdempotencyKey = key!,
         AmountMinor = additional, Currency = payment.Currency, Method = method!, Status = "RECORDED_AS_SENT",
         Reference = string.IsNullOrWhiteSpace(reference) ? null : reference, Reason = reason!,
-        RefundedByUserId = GetActorId(principal), RefundedUtc = now, CreatedUtc = now };
+        RefundedByUserId = actorId, RefundedUtc = now, CreatedUtc = now };
     job.RejectedPageNumbersJson = JsonSerializer.Serialize(rejected);
     job.Status = fullyRefunded ? "REFUNDED" : "PAID_AUTHORISED";
     job.FailureCode = fullyRefunded ? "SHOP_REJECTED_FILE_FULLY_REFUNDED" : "SHOP_REJECTED_PAGES_PARTIALLY_REFUNDED";
@@ -1914,7 +1921,7 @@ shop.MapPost("/print-jobs/{jobId:guid}/refund", async (
     payment.UpdatedUtc = now;
     db.PrintRefunds.Add(refund);
     db.PrintJobEvents.Add(new PrintJobEvent { TenantId = tenantId, PrintJobId = job.Id, PreviousStatus = "PAID_AUTHORISED",
-        NewStatus = job.Status, ActorType = "ShopUser", ActorId = GetActorId(principal),
+        NewStatus = job.Status, ActorType = "ShopUser", ActorId = actorId,
         ReasonCode = fullyRefunded ? "SHOP_FILE_FULLY_REFUNDED" : "SHOP_PAGES_REJECTED_PARTIAL_REFUND_RECORDED", CreatedUtc = now });
 
     try { await db.SaveChangesAsync(ct); await tx.CommitAsync(ct); }
