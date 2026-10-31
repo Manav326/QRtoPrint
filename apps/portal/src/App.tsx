@@ -999,11 +999,43 @@ function JobHistoryModal({job,events,onClose}:{job:ShopPrintJob;events:ShopJobEv
   </Modal>;
 }
 
-function DocumentPreviewModal({name,url,mediaType,onClose}:{name:string;url:string;mediaType:string;onClose:()=>void}) {
+function DocumentPreviewModal({name,url,mediaType,job,onClose,onApprove,onReject,onRefund}:{
+  name:string;url:string;mediaType:string;job:ShopPrintJob;onClose:()=>void;onApprove:()=>void;onReject:()=>void;onRefund:()=>void;
+}) {
   const isPdf=mediaType==="application/pdf";
-  return <Modal title={name} subtitle="Private shop document preview. The encrypted original remains in protected shop storage." onClose={onClose}>
+  return <Modal title={name} subtitle={job.batchId? `File review · Batch ${job.batchId.slice(0,8).toUpperCase()}` : "Private shop document preview. The encrypted original remains in protected shop storage."} onClose={onClose}>
     <div className="shop-document-preview">{isPdf?<iframe src={url} title={name}/>:<img src={url} alt={name}/>}</div>
-    <div className="modal-actions"><button className="secondary-button" onClick={onClose}>Close preview</button></div>
+    {job.status==="AWAITING_SHOP_APPROVAL"&&<div className="file-review-note"><Check size={16}/><span>Review this file independently. Accepting or rejecting it will not change any other file in the batch.</span></div>}
+    {job.status==="PAID_AUTHORISED"&&job.payment?.status==="VERIFIED"&&<div className="file-refund-note"><Wallet size={16}/><span>Paid amount: <strong>{formatMoney(job.payment.amountMinor,job.payment.currency)}</strong>. A refund can be recorded while this file has not yet been handed to the shop computer.</span></div>}
+    <div className="modal-actions">
+      {job.status==="AWAITING_SHOP_APPROVAL"&&<><button className="secondary-button reject-action" onClick={onReject}><X size={15}/> Reject this file</button><button className="primary-button" onClick={onApprove}><Check size={15}/> Accept this file</button></>}
+      {job.status==="PAID_AUTHORISED"&&job.payment?.status==="VERIFIED"&&!job.localQueueReceivedUtc&&!job.claimedByAgentDeviceId&&<button className="secondary-button reject-action" onClick={onRefund}><RotateCcw size={15}/> Reject & record refund</button>}
+      <button className="secondary-button" onClick={onClose}>Close preview</button>
+    </div>
+  </Modal>;
+}
+
+function RefundModal({job,busy,onClose,onSubmit}:{
+  job:ShopPrintJob;
+  busy:boolean;
+  onClose:()=>void;
+  onSubmit:(values:{refundMethod:"UPI"|"CASH";refundReference:string|null;reason:string})=>void;
+}) {
+  const [method,setMethod]=useState<"UPI"|"CASH">(job.payment?.method==="CASH"?"CASH":"UPI");
+  const [reference,setReference]=useState("");
+  const [reason,setReason]=useState("Customer rejected this document after shop preview.");
+  const [confirmed,setConfirmed]=useState(false);
+  const amount=job.payment?.amountMinor||0;
+  const canSubmit=amount>0&&reason.trim().length>=3&&confirmed&&(method==="CASH"||reference.trim().length>=4);
+  return <Modal title="Reject file and record refund" subtitle="This refund applies only to this document. Other files in its batch remain unchanged." onClose={onClose}>
+    <div className="refund-summary-card"><div><span>FILE</span><strong>{job.document.originalFileName}</strong></div><div><span>EXACT AMOUNT TO RETURN</span><strong>{formatMoney(amount,job.payment?.currency||job.currency)}</strong></div></div>
+    <form className="refund-form" onSubmit={event=>{event.preventDefault();if(canSubmit)onSubmit({refundMethod:method,refundReference:method==="UPI"?reference.trim():null,reason:reason.trim()});}}>
+      <label>Refund returned by<select value={method} onChange={event=>setMethod(event.target.value as "UPI"|"CASH")}><option value="UPI">UPI transfer</option><option value="CASH">Cash returned at counter</option></select></label>
+      {method==="UPI"&&<label>Refund transaction reference<input value={reference} onChange={event=>setReference(event.target.value)} maxLength={100} placeholder="Enter the refund UPI reference" required/></label>}
+      <label>Reason for rejecting this file<textarea rows={3} maxLength={300} value={reason} onChange={event=>setReason(event.target.value)} required/></label>
+      <label className="refund-confirm-line"><input type="checkbox" checked={confirmed} onChange={event=>setConfirmed(event.target.checked)}/><span>I confirm that I have already returned the exact amount shown above to the customer. I understand that QRtoPrint only records this refund; it does not send money automatically.</span></label>
+      <div className="modal-actions"><button type="button" className="secondary-button" onClick={onClose}>Cancel</button><button className="primary-button" disabled={busy||!canSubmit}>{busy?<span className="button-spinner"/>:"Record refund and reject file"}</button></div>
+    </form>
   </Modal>;
 }
 
