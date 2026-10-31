@@ -1157,15 +1157,60 @@ function CustomerEntry({publicCode}:{publicCode:string}) {
 
 
 type CustomerLocalAgent = NonNullable<Awaited<ReturnType<typeof createCustomerSession>>["localAgent"]>;
-type LocalAgentCheckStatus = "idle" | "checking" | "connected" | "unavailable" | "denied";
+type LocalAgentCheckStatus = "idle" | "checking" | "connected" | "unavailable" | "denied" | "insecure";
+
+function isPrivateIpv4Hostname(hostname:string):boolean {
+  const octets=hostname.split(".").map(Number);
+  return octets.length===4 &&
+    octets.every(part=>Number.isInteger(part)&&part>=0&&part<=255) &&
+    (octets[0]===10 ||
+     (octets[0]===172&&octets[1]>=16&&octets[1]<=31) ||
+     (octets[0]===192&&octets[1]===168));
+}
+
+function isLocalOrLoopbackPortalOrigin(hostname:string):boolean {
+  const value=hostname.toLowerCase().replace(/^\[|\]$/g,"");
+  return value==="localhost" ||
+    value.endsWith(".localhost") ||
+    value==="127.0.0.1" ||
+    value==="::1" ||
+    isPrivateIpv4Hostname(value) ||
+    value.endsWith(".local");
+}
+
+function buildSecureLocalPortalUrl():string|null {
+  try {
+    const url=new URL(window.location.href);
+    if(url.protocol!=="http:"||url.port!=="3000"||!isPrivateIpv4Hostname(url.hostname))return null;
+    url.protocol="https:";
+    url.port="3443";
+    return url.toString();
+  } catch {
+    return null;
+  }
+}
 
 function CustomerLocalConnection({localAgent,onReady}:{localAgent:CustomerLocalAgent|null;onReady:(ready:boolean)=>void}) {
   const [permissionState,setPermissionState]=useState<PermissionState|"unknown">("unknown");
   const [checkStatus,setCheckStatus]=useState<LocalAgentCheckStatus>("idle");
   const [message,setMessage]=useState("");
+  const securePortalUrl=buildSecureLocalPortalUrl();
+  const localOriginDoesNotNeedLnaPermission=isLocalOrLoopbackPortalOrigin(window.location.hostname);
+
+  function requireSecureContext() {
+    setCheckStatus("insecure");
+    onReady(false);
+    setMessage(securePortalUrl
+      ? "This shop page is open over HTTP. Chrome blocks local-network requests from insecure pages without showing a permission prompt. Open the secure shop link below; the certificate must be trusted on this phone."
+      : "This shop page is not a secure HTTPS context. Open the shop's HTTPS customer portal before checking local printing.");
+  }
 
   async function checkConnection() {
     if(!localAgent)return;
+    if(!window.isSecureContext) {
+      requireSecureContext();
+      return;
+    }
     setCheckStatus("checking");
     onReady(false);
     setMessage("Checking the shop computer. No document is sent by this check.");
@@ -1175,12 +1220,6 @@ function CustomerLocalConnection({localAgent,onReady}:{localAgent:CustomerLocalA
       let endpoint:URL;
       try {
         endpoint=new URL(value);
-        const octets=endpoint.hostname.split(".").map(Number);
-        const privateIpv4=octets.length===4 &&
-          octets.every(part=>Number.isInteger(part)&&part>=0&&part<=255) &&
-          (octets[0]===10 ||
-           (octets[0]===172&&octets[1]>=16&&octets[1]<=31) ||
-           (octets[0]===192&&octets[1]===168));
         if(endpoint.protocol!=="http:" ||
            endpoint.port!=="17842" ||
            endpoint.username!=="" ||
@@ -1188,17 +1227,16 @@ function CustomerLocalConnection({localAgent,onReady}:{localAgent:CustomerLocalA
            endpoint.pathname!=="/" ||
            endpoint.search!=="" ||
            endpoint.hash!=="" ||
-           !privateIpv4)continue;
+           !isPrivateIpv4Hostname(endpoint.hostname))continue;
       } catch {
         continue;
       }
 
       validEndpointCount++;
       const controller=new AbortController();
-      const timeout=window.setTimeout(()=>controller.abort(),2500);
+      const timeout=window.setTimeout(()=>controller.abort(),3500);
       try {
-        // The first request is made synchronously from the customer's button
-        // click so browsers can present their Local Network Access prompt.
+        // Start from the user's click when a browser permission prompt is required.
         const response=await fetch(`${endpoint.origin}/api/v1/local/status`,{
           method:"GET",
           mode:"cors",
@@ -1219,11 +1257,11 @@ function CustomerLocalConnection({localAgent,onReady}:{localAgent:CustomerLocalA
            status.status==="LOCAL_ENDPOINT_READY") {
           setCheckStatus("connected");
           onReady(true);
-          setMessage("This phone can reach the shop computer. You can upload directly over shop Wi-Fi.");
+          setMessage("This phone can reach the shop computer. Direct uploads can use shop Wi-Fi.");
           return;
         }
       } catch {
-        // Try the next private address. This read-only check sends no document data.
+        // Continue across the Agent's advertised private addresses.
       } finally {
         window.clearTimeout(timeout);
       }
@@ -1232,12 +1270,26 @@ function CustomerLocalConnection({localAgent,onReady}:{localAgent:CustomerLocalA
     setCheckStatus("unavailable");
     onReady(false);
     setMessage(validEndpointCount===0
-      ? "The shop has not announced a usable local address. The regular upload remains available."
-      : "Could not reach the shop computer. Connect this phone to the shop Wi-Fi and allow Local network access if your browser asks. The regular upload remains available.");
+      ? "The shop Agent has not announced a usable local address. The regular cloud-assisted upload remains available."
+      : "The shop Agent did not respond. Check that its Windows service is running, this network allows device-to-device traffic, and TCP 17842 is allowed on the laptop's Private firewall profile. The regular cloud-assisted upload remains available.");
   }
 
   useEffect(()=>{
-    if(!localAgent?.endpoints.length||!navigator.permissions?.query)return;
+    if(!localAgent?.endpoints.length)return;
+    if(!window.isSecureContext) {
+      requireSecureContext();
+      return;
+    }
+
+    // A private-LAN/loopback portal talking to another private-LAN Agent
+    // stays within the same or a less-private address space. Chrome does not
+    // need to prompt for local-network permission for this local-to-local path.
+    if(localOriginDoesNotNeedLnaPermission) {
+      setPermissionState("unknown");
+      return;
+    }
+    if(!navigator.permissions?.query)return;
+
     let active=true;
     let permissionStatus:PermissionStatus|null=null;
     const updatePermission=()=>{
@@ -1246,9 +1298,10 @@ function CustomerLocalConnection({localAgent,onReady}:{localAgent:CustomerLocalA
       if(permissionStatus.state==="denied") {
         setCheckStatus("denied");
         onReady(false);
-        setMessage("Local network access is blocked for this site. Enable it in browser site settings, or continue with the regular upload.");
+        setMessage("Chrome has blocked Local network access for this public HTTPS site. On Android, open the site information icon beside the address bar → Permissions → Local network access → Allow, then reload this QR page.");
       } else if(permissionStatus.state==="prompt") {
         setCheckStatus("idle");
+        setMessage("Tap Check shop Wi-Fi to request local-network access from Chrome.");
       }
     };
 
@@ -1257,9 +1310,8 @@ function CustomerLocalConnection({localAgent,onReady}:{localAgent:CustomerLocalA
         if(!active)return;
         permissionStatus=status;
         status.addEventListener("change",updatePermission);
-        setPermissionState(status.state);
+        updatePermission();
         if(status.state==="granted")void checkConnection();
-        else if(status.state==="denied")updatePermission();
       })
       .catch(()=>{if(active)setPermissionState("unknown");});
 
@@ -1274,6 +1326,7 @@ function CustomerLocalConnection({localAgent,onReady}:{localAgent:CustomerLocalA
   const label=checkStatus==="checking"?"Checking…":
     checkStatus==="connected"?"Shop computer reachable":
     checkStatus==="denied"?"Browser permission blocked":
+    checkStatus==="insecure"?"HTTPS required":
     checkStatus==="unavailable"?"Not reachable":"Not checked";
   const tone=checkStatus==="connected"?"green":
     checkStatus==="unavailable"||checkStatus==="denied"?"red":"blue";
@@ -1284,15 +1337,19 @@ function CustomerLocalConnection({localAgent,onReady}:{localAgent:CustomerLocalA
       <Status label={label} tone={tone}/>
     </div>
     <p>Check whether this phone can reach the shop's local print computer. This check does not upload your document.</p>
-    {permissionState==="denied"
-      ? <small className="entry-local-agent-message">{message}</small>
-      : <button type="button" className="customer-flow-button" disabled={checkStatus==="checking"} onClick={()=>void checkConnection()}>
-          {checkStatus==="checking"?"Checking shop connection…":checkStatus==="connected"?"Check again":"Check shop Wi-Fi"}
-        </button>}
-    {message&&permissionState!=="denied"&&<small className="entry-local-agent-message">{message}</small>}
+    {checkStatus==="insecure"
+      ? <div className="entry-local-agent-message">
+          <small>{message}</small>
+          {securePortalUrl&&<a className="customer-flow-button" href={securePortalUrl}>Open secure HTTPS shop page</a>}
+        </div>
+      : permissionState==="denied"&&!localOriginDoesNotNeedLnaPermission
+        ? <small className="entry-local-agent-message">{message}</small>
+        : <button type="button" className="customer-flow-button" disabled={checkStatus==="checking"} onClick={()=>void checkConnection()}>
+            {checkStatus==="checking"?"Checking shop connection…":checkStatus==="connected"?"Check again":"Check shop Wi-Fi"}
+          </button>}
+    {message&&checkStatus!=="insecure"&&!(permissionState==="denied"&&!localOriginDoesNotNeedLnaPermission)&&<small className="entry-local-agent-message">{message}</small>}
   </section>;
 }
-
 
 
 type StoredCustomerDraft = {

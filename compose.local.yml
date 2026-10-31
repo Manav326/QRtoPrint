@@ -32,9 +32,10 @@ services:
       Documents__EncryptionKey: ${DOCUMENTS_ENCRYPTION_KEY:-MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=}
       Documents__StorageRoot: /var/lib/qrtoprint/documents
       Database__ApplyMigrationsOnStartup: "true"
-      PublicPortal__BaseUrl: http://${LOCAL_LAN_IP:-192.168.31.47}:3000
-      Cors__AllowedOrigins__0: "http://${LOCAL_LAN_IP:-192.168.31.47}:3000"
-      Cors__AllowedOrigins__1: "http://localhost:3000"
+      PublicPortal__BaseUrl: https://${LOCAL_LAN_IP:-192.168.31.47}:3443
+      Cors__AllowedOrigins__0: "https://${LOCAL_LAN_IP:-192.168.31.47}:3443"
+      Cors__AllowedOrigins__1: "http://${LOCAL_LAN_IP:-192.168.31.47}:3000"
+      Cors__AllowedOrigins__2: "http://localhost:3000"
     ports:
       - "8080:8080"
     volumes:
@@ -55,7 +56,7 @@ services:
       context: .
       dockerfile: apps/portal/Dockerfile
       args:
-        VITE_API_BASE_URL: http://${LOCAL_LAN_IP:-192.168.31.47}:8080
+        VITE_API_BASE_URL: ""
     restart: unless-stopped
     ports:
       - "3000:80"
@@ -69,6 +70,23 @@ services:
       retries: 10
       start_period: 10s
 
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    environment:
+      LOCAL_LAN_IP: ${LOCAL_LAN_IP:-192.168.31.47}
+    ports:
+      - "3443:3443"
+    volumes:
+      - ./Caddyfile.local:/etc/caddy/Caddyfile:ro
+      - qrtoprint_local_caddy_data:/data
+      - qrtoprint_local_caddy_config:/config
+    depends_on:
+      portal:
+        condition: service_healthy
+
 volumes:
   qrtoprint_local_database:
   qrtoprint_local_documents:
+  qrtoprint_local_caddy_data:
+  qrtoprint_local_caddy_config:

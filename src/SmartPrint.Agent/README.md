@@ -4,13 +4,17 @@ This is a Windows Service. It pairs with one shop using a single-use enrollment 
 
 ## Local-only development (no public deployment)
 
-From the repository root, start the local database, API and portal with one command:
+The local portal must be opened through HTTPS for browser-to-Agent access. Chrome blocks Local Network Access from insecure HTTP pages and does not show a permission prompt in that case.
+
+From the repository root on the Windows laptop:
 
 ```powershell
-docker compose -f compose.local.yml up --build -d
+.\scripts\docker-up-local.ps1 -PortalHost "192.168.31.47"
 ```
 
-The Compose file defaults to portal `http://192.168.31.47:3000` and API `http://192.168.31.47:8080`. No public deployment or `.env.local` file is required. Local-only credentials are built into the development Compose configuration and must never be reused in production.
+This starts PostgreSQL, API, portal and a local Caddy HTTPS proxy. It preserves the existing database/document volumes and exports the Caddy public root certificate to `certs/qrtoprint-local-root.crt`. Trust that root certificate on the phone as a CA certificate before opening the portal. Do not delete the persistent `qrtoprint_local_caddy_data` volume unless you intend to replace the local CA and trust the new certificate on every client.
+
+Secure portal: `https://192.168.31.47:3443`. The API is available through that same origin at `/api`; pairing on the laptop still uses `http://localhost:8080`.
 
 Download the Windows Agent package:
 
@@ -20,21 +24,14 @@ $agentDir = Join-Path $env:USERPROFILE "Downloads\QRtoPrintAgent"
 $agentExe = Join-Path $agentDir "SmartPrint.Agent.exe"
 ```
 
-Register a test shop in the local portal, add the Windows printer, and generate a one-time pairing code. Run the following from Administrator PowerShell:
+Pair once if the computer is not already enrolled. To preserve an existing pairing and only update the local portal CORS origin, run Administrator PowerShell:
 
 ```powershell
-& "$agentDir\pair-agent.ps1" -ApiBaseUrl "http://localhost:8080" -AgentExePath $agentExe
-& "$agentDir\install-agent-service.ps1" -AgentExePath $agentExe -CustomerPortalOrigin "http://192.168.31.47:3000" -AllowInsecureLocalDevelopment
+& "$agentDir\install-agent-service.ps1" -AgentExePath $agentExe -CustomerPortalOrigin "https://192.168.31.47:3443"
 Get-Service QRtoPrintSmartPrintAgent
 ```
 
-The Agent is a background Windows Service, not a desktop GUI. It must run on the Windows host to access installed printer queues and the Windows Print Spooler. Its local listener uses TCP 17842. Allow TCP 3000, 8080 and 17842 on the Windows Private firewall profile. Android debug builds connect to the laptop API at `http://192.168.31.47:8080`; release builds remain HTTPS-only.
-
-Stop containers without deleting data using:
-
-```powershell
-docker compose -f compose.local.yml down
-```
+The Agent is a background Windows Service, not a desktop GUI. It must run on the Windows host to access installed printer queues and the Windows Print Spooler. Its LAN listener uses TCP 17842. The portal is served by HTTPS on TCP 3443. Keep the laptop on a Windows Private network profile and allow those ports through the Private firewall. The portal's API calls use the same HTTPS origin, so the phone does not call the API directly on port 8080.
 
 ## Pair and install
 
@@ -58,7 +55,7 @@ To remove the Windows Service, run scripts\uninstall-agent-service.ps1 from an e
 
 Direct customer document upload over shop Wi-Fi is implemented. The customer portal obtains a one-use upload grant from the API, sends document bytes to this paired Agent, and the Agent validates the hash and document structure before storing the file in its DPAPI-protected local queue. The API retains only job/document metadata, SHA-256, page analysis and quote/payment/dispatch state. The same PrintJob is later authorised by the shop and claimed by this Agent after manual payment verification; the cloud is not asked to download a LOCAL_AGENT document.
 
-The cloud-assisted upload path remains available as a customer-selected fallback. Production local upload requires an HTTPS customer portal origin, browser Local Network Access permission, a Windows Private network profile, and `Agent:LocalApi:AllowedOrigins` configured to the exact portal origin. Local development can use HTTP only on a trusted private IPv4 LAN with the explicit `-AllowInsecureLocalDevelopment` switch; do not use that mode on public networks.
+The cloud-assisted upload path remains available as a customer-selected fallback. Local and production browser uploads require a secure HTTPS customer portal origin, any Local Network Access permission required by the browser, a Windows Private network profile, and `Agent:LocalApi:AllowedOrigins` configured to the exact portal origin. Do not use an insecure HTTP portal for direct local uploads.
 
 - Queries Win32_Printer through WMI for installed queue name, driver, port, status and default queue.
 - Sends printer inventory to the paired shop tenant using agent-specific authentication headers.

@@ -1,0 +1,10 @@
+{$LOCAL_LAN_IP}:3443 {
+    tls internal
+    encode zstd gzip
+    header {
+        X-Content-Type-Options "nosniff"
+        Referrer-Policy "strict-origin-when-cross-origin"
+        X-Frame-Options "DENY"
+    }
+    reverse_proxy portal:80
+}

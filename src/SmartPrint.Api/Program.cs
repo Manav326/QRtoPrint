@@ -1000,7 +1000,7 @@ shop.MapPost("/qr-stations/{stationId:guid}/rotate-code", async (
     {
         station.Id,
         station.PublicCodeHint,
-        PublicUrl = $"${portalBase}/s/${publicCode}"
+        PublicUrl = $"{portalBase}/s/{publicCode}"
     });
 });
 

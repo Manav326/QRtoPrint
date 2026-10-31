@@ -145,9 +145,11 @@ jobs:
           POSTGRES_PASSWORD: local-ci-validation-only
           AUTH_SIGNING_KEY: YWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFh
           DOCUMENTS_ENCRYPTION_KEY: YWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWE=
-          LOCAL_PORTAL_ORIGIN: http://localhost:3000
+          LOCAL_LAN_IP: 192.168.31.47
         run: docker compose -f compose.local.yml config --quiet
-      - name: Validate Caddy HTTPS reverse proxy configuration
+      - name: Validate local HTTPS Caddy configuration
+        run: docker run --rm -e LOCAL_LAN_IP=192.168.31.47 -v "$PWD/Caddyfile.local:/etc/caddy/Caddyfile:ro" caddy:2-alpine caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile
+      - name: Validate production Caddy HTTPS reverse proxy configuration
         run: |
           docker run --rm \
             -e PORTAL_DOMAIN=print.thinkwithsujeet.in \

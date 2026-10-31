@@ -53,71 +53,73 @@ The script selects the latest successful main-branch CI run, downloads the `qrto
 
 The same CI run publishes `qrtoprint-android-test-reports` with JVM and emulator test evidence.
 
-## Run everything locally first (no public URL or deployment)
+## Run locally over HTTPS (no public URL or deployment)
 
-Install Docker Desktop and connect the laptop to the same Wi-Fi as the Android phone. The local Compose file defaults to the laptop IP `192.168.31.47` for both the Android API and customer portal.
+Install Docker Desktop and connect the Windows laptop and Android phone to the same trusted Wi-Fi network. Local Agent access from browsers requires a secure HTTPS page; current Chrome versions block local-network requests from an HTTP page without showing a permission prompt.
 
-From the repository root, this is the only command needed to build and start PostgreSQL, API and portal:
+From an elevated or normal PowerShell session in the repository root, run:
 
 ```powershell
-docker compose -f compose.local.yml up --build -d
+.\scripts\docker-up-local.ps1 -PortalHost "192.168.31.47"
 ```
 
-No `.env.local`, GHCR login, public DNS, Caddy or external URL is required. Local-only development credentials are defined in this Compose file; **never reuse them for deployment**. Database and document files persist in Docker named volumes.
+The helper reuses the existing `.env.local` database and encryption secrets, preserves the database and document volumes, builds PostgreSQL/API/portal, adds a local Caddy HTTPS reverse proxy, exports Caddy's public root certificate and attempts to trust it in the current Windows user store. It does not delete or recreate the database. Local-only secrets must never be reused for production.
 
-- Customer/shop portal: http://192.168.31.47:3000
-- Backend API health: http://192.168.31.47:8080/health/ready
-- Android app API base: `http://192.168.31.47:8080` (embedded at portal build time)
+- Secure customer/shop portal: `https://192.168.31.47:3443`
+- API health through the same secure origin: `https://192.168.31.47:3443/health/ready`
+- Agent pairing API (on the laptop): `http://localhost:8080`
+- Agent LAN listener: TCP `17842`
+- Caddy local CA certificate: `certs/qrtoprint-local-root.crt`
 
-If the laptop's LAN IP changes, override it for the Compose command in PowerShell:
+### Trust the local HTTPS certificate on the phone
+
+The local HTTPS certificate is issued by a private Caddy development CA, not a public certificate authority. The phone must trust the exported root certificate before Chrome will treat the portal as a secure context.
+
+1. Transfer `certs/qrtoprint-local-root.crt` from the laptop to the phone (USB or another trusted transfer method).
+2. On Android, open **Settings → Security / Security & privacy → Encryption & credentials → Install a certificate → CA certificate**. Menu names vary by Android manufacturer. Select `qrtoprint-local-root.crt` and complete the Android confirmation. Install it as a CA certificate, not as a Wi-Fi or VPN user certificate.
+3. On the laptop's Chrome, if the secure portal still shows a certificate warning, open **Settings → Privacy and security → Security → Manage certificates → Authorities → Import** and import the same root certificate, trusting it to identify websites.
+4. Open `https://192.168.31.47:3443` on the phone. It should load without a certificate warning. Do not use the legacy `http://192.168.31.47:3000` URL for direct Agent access.
+
+The Caddy root CA is persisted in Docker volume `qrtoprint_local_caddy_data`. Keep that volume: deleting it creates a new CA and requires trusting the replacement certificate again. The CA private key stays in the Docker volume; only its public root certificate is exported.
+
+### Pair / update the Windows Agent's allowed portal origin
+
+Pairing remains against the local API on the same laptop. The pairing you already completed is preserved. From Administrator PowerShell, rerun the installer to update the Agent's exact allowed browser origin to HTTPS:
 
 ```powershell
-$env:LOCAL_LAN_IP = "YOUR_LAPTOP_PRIVATE_IP"
-docker compose -f compose.local.yml up --build -d
-```
-
-### Windows application — Print Agent
-
-The Windows component is a **background Windows Service**, not a visible desktop/tray GUI. It runs on the Windows laptop connected to the printer because it uses the Windows Print Spooler. Its executable is `SmartPrint.Agent.exe`; the latest successful CI publishes it as the `qrtoprint-agent-win-x64` artifact.
-
-From the repository root, download it (GitHub CLI must be installed and authenticated):
-
-```powershell
-.\scripts\download-agent.ps1
 $agentDir = Join-Path $env:USERPROFILE "Downloads\QRtoPrintAgent"
 $agentExe = Join-Path $agentDir "SmartPrint.Agent.exe"
-```
 
-The executable will be at `%USERPROFILE%\Downloads\QRtoPrintAgent\SmartPrint.Agent.exe`. Register a shop in the local portal, add the Windows printer, and generate a one-time pairing code in Print Agent. Then run Administrator PowerShell:
-
-```powershell
-& "$agentDir\pair-agent.ps1" -ApiBaseUrl "http://localhost:8080" -AgentExePath $agentExe
-& "$agentDir\install-agent-service.ps1" -AgentExePath $agentExe -CustomerPortalOrigin "http://192.168.31.47:3000" -AllowInsecureLocalDevelopment
+& "$agentDir\install-agent-service.ps1" -AgentExePath $agentExe -CustomerPortalOrigin "https://192.168.31.47:3443"
 Get-Service QRtoPrintSmartPrintAgent
 ```
 
-The Agent pairs to `localhost:8080` because it runs on the same laptop. The phone reaches the API at `192.168.31.47:8080`; the Agent's direct upload listener is on TCP `17842`. Allow inbound TCP `3000`, `8080` and `17842` on the Windows Private firewall profile. Keep local HTTP testing on trusted Wi-Fi only.
+The Agent continues listening on TCP `17842`; the installer configures its CORS allowlist for the new HTTPS portal origin and opens the Agent port on the Windows Private firewall profile. The local HTTPS proxy also needs inbound TCP `3443` on the Private profile. Keep the Windows Wi-Fi network set to **Private** and allow device-to-device traffic on the router (AP/client isolation must be disabled).
 
-### Android phone
+### Android customer flow
 
-Install the latest CI debug APK using the existing helper (ADB device connected and authorised):
+Use the station QR link generated from the updated local shop portal. If an existing printed QR still opens the old HTTP URL, open its **secure HTTPS shop link** on the page or rotate the station code in the shop portal and print the replacement QR. Rotating a station code invalidates the previous QR.
 
-```powershell
-.\scripts\download-android-apk.ps1 -Install
-```
+Once the phone opens the trusted HTTPS page, tap **Check shop Wi-Fi**. A public HTTPS portal may trigger Chrome's Local network access prompt; allow it. For this local HTTPS portal, both the portal and Agent are on the same private network, so Chrome may not show a separate permission prompt; the status check should simply connect. If Chrome shows a permission as blocked, use the site information icon beside the address bar → Permissions → Local network access → Allow, then reload.
 
-Connect the phone and laptop to the same Wi-Fi and scan a station QR generated by the local shop portal. The Android debug build permits this private-LAN HTTP setup; production release builds continue to require HTTPS.
+Direct LAN uploads keep document bytes on the shop network. The cloud API still coordinates QR sessions, upload grants, metadata, quotes, payment and dispatch; this is not offline printing. Cloud-assisted upload remains available as a fallback.
 
 ### Stop / restart
 
-Stop the containers without deleting local data:
+Stop containers without deleting local data:
 
 ```powershell
-docker compose -f compose.local.yml down
+docker compose --env-file .env.local -f compose.local.yml down
 ```
 
-Run the same `up --build -d` command to restart. Do not use `down -v` unless you intend to erase the local database and documents.
+Restart through the helper:
 
+```powershell
+.\scripts\docker-up-local.ps1 -PortalHost "192.168.31.47"
+```
+
+Do not use `down -v`; that would erase the local database, documents and Caddy CA identity.
+ 
 ## Docker deployment
 
 The production Docker stack runs PostgreSQL, the ASP.NET Core API, the React portal and Caddy (automatic HTTPS). Database migrations are applied at API startup only when the compose setting `Database__ApplyMigrationsOnStartup=true` is enabled. PostgreSQL and cloud document storage use persistent Docker volumes.
