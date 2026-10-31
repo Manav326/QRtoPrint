@@ -1,16 +1,24 @@
-# QRtoPrint Android
+# SmartPrint by QuantaEdge — Android
 
-The Android app is a customer companion to the existing QRtoPrint portal and API. It does not run its own pricing, payment or print-dispatch backend.
+The customer-facing app is **SmartPrint by QuantaEdge**. QRtoPrint remains the repository and technical integration name. The Android app is a customer companion to the existing portal and API. It does not run its own pricing, payment or print-dispatch backend.
 
 ## Local document library
 
 - Documents are copied into app-private storage under `files/documents`.
+- Create nested folders, move files/folders between directories, and reorder sibling items without renaming customer files.
+- Select several local photos and combine them into a PDF; original images remain unchanged.
 - Create nested folders, import multiple files, or import a directory tree using Android's Storage Access Framework.
-- Export one file or an entire folder tree into a user-selected Android File Manager destination.
+- Export one file, multiple selected files, or an entire folder tree into a user-selected Android File Manager destination.
 - Open/share files with other Android apps.
 - The customer portal's file picker can select a saved PDF/JPG/JPEG/PNG from this library.
 
 General library imports allow up to 100 MB per file. The print workflow uses the existing server-supported single-document types and 20 MB hard limit. Files remain on the device until the customer chooses to upload one.
+
+## SmartPrint document capture
+
+The native document-capture action uses Google ML Kit Document Scanner in full mode and requests both PDF and JPEG outputs. The scanner supports multi-page capture and its on-device UI provides document-edge detection, crop/perspective correction, rotation, page ordering and image filters. Google Play services downloads the scanner UI/models when needed; the first launch can require a download, and devices below the scanner's 1.7 GB RAM requirement are not supported. If unavailable, customers can still import photos/PDFs through Android's file picker. Scanned PDF and JPEG pages are saved in a timestamped folder in My files.
+
+Customer sign-in/sign-up is not currently enabled: the API exposes shop-owner authentication but no separate customer identity/account service. The profile therefore keeps guest use available and clearly explains this limitation rather than incorrectly using shop credentials.
 
 ## QR and print flow
 
