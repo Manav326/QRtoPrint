@@ -47,6 +47,16 @@ The production Docker stack runs PostgreSQL, the ASP.NET Core API, the React por
 
 The container images are published to GHCR by the main-branch workflow. If the first image pull reports an authorization error, sign in with a GitHub account that has `read:packages` access (`docker login ghcr.io`); repository owners can make both GHCR packages public once from Package settings to allow anonymous pulls.
 
+### First administrator
+
+After the first deployment is healthy, bootstrap the separate platform administrator:
+
+```powershell
+.\scripts\docker-bootstrap-platform-admin.ps1 -Email "admin@example.com" -DisplayName "Platform Administrator"
+```
+
+The script prompts securely for the password and creates or repairs only a tenantless platform-admin identity. It refuses to elevate an existing shop user.
+
 ### Windows printer computer
 
 Docker does not run the Windows Print Spooler Agent on a Linux server. Install the Windows Agent as a Windows Service on the shop computer physically connected to the printer. Download the current `qrtoprint-agent-win-x64` CI artifact with `scripts\download-agent.ps1`, extract it, then pair and install:
@@ -57,6 +67,16 @@ Docker does not run the Windows Print Spooler Agent on a Linux server. Install t
 ```
 
 The customer phone must open the HTTPS portal while connected to the same shop Wi-Fi/LAN as the Agent and allow the browser's Local Network Access permission. The shop computer must use a Windows Private network profile. Cloud-assisted upload remains available if the local route cannot be reached.
+
+### Backups
+
+Before upgrades or migrations, run an on-demand backup:
+
+```powershell
+.\scripts\docker-backup.ps1
+```
+
+The script pauses API/portal writes, exports PostgreSQL, archives the encrypted cloud-document volume and copies the exact `.env` secrets required to restore the documents. It restarts the services afterwards. Store all three files together in encrypted off-host storage. The Windows Agent's DPAPI-protected local queue remains on the shop computer and needs its own machine-level backup/recovery policy.
 
 ### Operations
 

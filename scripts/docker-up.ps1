@@ -69,9 +69,31 @@ else {
 $composeFile = Join-Path $repoRoot "compose.yml"
 Write-Host ""
 Write-Host "Pulling the published QRtoPrint images from GHCR..." -ForegroundColor Cyan
+$imagesPulled = $false
 docker compose --env-file $envPath -f $composeFile pull
-if ($LASTEXITCODE -ne 0) {
-    Write-Warning "GHCR pull was not available. Building the same API and portal images locally from this checkout."
+$imagesPulled = ($LASTEXITCODE -eq 0)
+
+if (-not $imagesPulled -and (Get-Command gh -ErrorAction SilentlyContinue)) {
+    Write-Warning "GHCR requires authentication. Trying the existing GitHub CLI login..."
+    gh auth status --hostname github.com 2>$null | Out-Null
+    if ($LASTEXITCODE -eq 0) {
+        $ghUser = gh api user --jq .login 2>$null
+        $ghToken = gh auth token --hostname github.com 2>$null
+        if ($LASTEXITCODE -eq 0 -and -not [string]::IsNullOrWhiteSpace($ghUser) -and -not [string]::IsNullOrWhiteSpace($ghToken)) {
+            $ghToken | docker login ghcr.io --username $ghUser --password-stdin | Out-Null
+            $loginExitCode = $LASTEXITCODE
+            $ghToken = $null
+            if ($loginExitCode -eq 0) {
+                docker compose --env-file $envPath -f $composeFile pull
+                $imagesPulled = ($LASTEXITCODE -eq 0)
+            }
+        }
+        $ghToken = $null
+    }
+}
+
+if (-not $imagesPulled) {
+    Write-Warning "Published GHCR images are not accessible. Building the API and portal images locally from this checkout."
     docker compose --env-file $envPath -f $composeFile build
     if ($LASTEXITCODE -ne 0) {
         throw "GHCR pull and local image build both failed. Inspect the Docker build output."
