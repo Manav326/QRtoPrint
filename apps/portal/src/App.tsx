@@ -13,7 +13,7 @@ import {
   createAgentEnrollmentCode, createCustomerSession, createPrinter, createStation,
   downloadShopDocument, getCustomerJobStatus, getShopJobEvents, loadShopData,
   logout, readStoredTokens, rejectShopPrintJob, rejectShopPayment, revokeAgentDevice,
-  reportCustomerUpiPayment, resumeCustomerSession, rotateStationCode, startCustomerPayment, storeTokens,
+  reportCustomerUpiPayment, renewCustomerPrintSession, resumeCustomerSession, rotateStationCode, startCustomerPayment, storeTokens,
   updatePrinterActive, updateShopPaymentSettings, updateShopPricing,
   updateShopProfile, updateStationEnabled, uploadCustomerDocument,
   verifyShopPayment, type CustomerPayment, type ShopPayment, type ShopPaymentSettings,
@@ -1102,6 +1102,40 @@ function CustomerEntry({publicCode}:{publicCode:string}) {
     }).finally(()=>{if(mounted)setLoading(false);});
     return ()=>{mounted=false;};
   },[publicCode]);
+
+  useEffect(()=>{
+    if(!result)return;
+    let active=true;
+    let renewing=false;
+    const renew=()=>{
+      if(renewing)return;
+      renewing=true;
+      void renewCustomerPrintSession(result.sessionToken)
+        .then(session=>{
+          if(active){
+            setResult(current=>current?.sessionToken===result.sessionToken
+              ? {...current,expiresUtc:session.expiresUtc}
+              : current);
+          }
+        })
+        .catch(()=>{/* A temporary offline period is retried on the next foreground check. */})
+        .finally(()=>{renewing=false;});
+    };
+    const checkExpiry=()=>{
+      const expiry=Date.parse(result.expiresUtc);
+      if(!Number.isFinite(expiry)||expiry<=Date.now()+10*60*1000)renew();
+    };
+    const timer=window.setInterval(renew,5*60*1000);
+    const onVisibility=()=>{if(document.visibilityState==="visible")checkExpiry();};
+    window.addEventListener("focus",checkExpiry);
+    document.addEventListener("visibilitychange",onVisibility);
+    return ()=>{
+      active=false;
+      window.clearInterval(timer);
+      window.removeEventListener("focus",checkExpiry);
+      document.removeEventListener("visibilitychange",onVisibility);
+    };
+  },[result?.sessionToken,result?.expiresUtc]);
 
   return <div className="customer-entry"><div className="customer-entry-glow"/>
     <header className="customer-entry-brand"><div className="brand-mark"><QrCode size={21}/></div><div><div className="brand-name">smart<span>print</span></div><div className="brand-caption">BY QRtoPrint</div></div></header>
