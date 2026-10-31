@@ -1386,25 +1386,23 @@ shop.MapGet("/customers", async (
         .ToListAsync(ct);
 
     var customerIds = customers.Select(item => item.CustomerId).ToArray();
-    var jobStatistics = customerIds.Length == 0
-        ? []
-        : await (
-            from job in db.PrintJobs.AsNoTracking()
-            join session in db.CustomerPrintSessions.AsNoTracking()
-                on new { job.TenantId, SessionId = job.CustomerSessionId }
-                equals new { session.TenantId, SessionId = session.Id }
-            where job.TenantId == tenantId &&
-                  session.CustomerUserId != null &&
-                  customerIds.Contains(session.CustomerUserId.Value)
-            group job by session.CustomerUserId!.Value into customerJobs
-            select new
-            {
-                CustomerId = customerJobs.Key,
-                PrintJobCount = customerJobs.Count(),
-                CompletedJobCount = customerJobs.Count(job =>
-                    job.Status == "COMPLETED" && job.OutputConfirmedUtc != null),
-                LastPrintUtc = customerJobs.Max(job => job.CreatedUtc)
-            }).ToListAsync(ct);
+    var jobStatistics = await (
+        from job in db.PrintJobs.AsNoTracking()
+        join session in db.CustomerPrintSessions.AsNoTracking()
+            on new { job.TenantId, SessionId = job.CustomerSessionId }
+            equals new { session.TenantId, SessionId = session.Id }
+        where job.TenantId == tenantId &&
+              session.CustomerUserId != null &&
+              customerIds.Contains(session.CustomerUserId.Value)
+        group job by session.CustomerUserId!.Value into customerJobs
+        select new
+        {
+            CustomerId = customerJobs.Key,
+            PrintJobCount = customerJobs.Count(),
+            CompletedJobCount = customerJobs.Count(job =>
+                job.Status == "COMPLETED" && job.OutputConfirmedUtc != null),
+            LastPrintUtc = customerJobs.Max(job => job.CreatedUtc)
+        }).ToListAsync(ct);
 
     var statisticsByCustomer = jobStatistics.ToDictionary(item => item.CustomerId);
     return Results.Ok(new
