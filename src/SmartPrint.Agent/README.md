@@ -50,7 +50,7 @@ To remove the Windows Service, run scripts\uninstall-agent-service.ps1 from an e
 
 Direct customer document upload over shop Wi-Fi is implemented. The customer portal obtains a one-use upload grant from the API, sends document bytes to this paired Agent, and the Agent validates the hash and document structure before storing the file in its DPAPI-protected local queue. The API retains only job/document metadata, SHA-256, page analysis and quote/payment/dispatch state. The same PrintJob is later authorised by the shop and claimed by this Agent after manual payment verification; the cloud is not asked to download a LOCAL_AGENT document.
 
-The cloud-assisted upload path remains available as a customer-selected fallback. Local upload requires an HTTPS customer portal origin, browser Local Network Access permission, a Windows Private network profile, and `Agent:LocalApi:AllowedOrigins` configured to the exact portal origin. The installer sets this origin through `-CustomerPortalOrigin`.
+The cloud-assisted upload path remains available as a customer-selected fallback. Production local upload requires an HTTPS customer portal origin, browser Local Network Access permission, a Windows Private network profile, and `Agent:LocalApi:AllowedOrigins` configured to the exact portal origin. Local development can use HTTP only on a trusted private IPv4 LAN with the explicit `-AllowInsecureLocalDevelopment` switch; do not use that mode on public networks.
 
 - Queries Win32_Printer through WMI for installed queue name, driver, port, status and default queue.
 - Sends printer inventory to the paired shop tenant using agent-specific authentication headers.

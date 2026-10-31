@@ -452,7 +452,7 @@ class MainActivity : AppCompatActivity() {
                     !allowedLocalDevelopmentPortal(uri)) {
                     return WebResourceResponse(
                         "text/plain", "UTF-8", 403, "Blocked by QRtoPrint", emptyMap(),
-                        ByteArrayInputStream("Only private paired-Agent upload endpoints are allowed over HTTP.".toByteArray())
+                        ByteArrayInputStream("Only the selected private-LAN development portal and paired-Agent upload endpoints are allowed over HTTP.".toByteArray())
                     )
                 }
                 return super.shouldInterceptRequest(view, request)

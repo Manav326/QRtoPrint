@@ -3,6 +3,7 @@ plugins {
     id("org.jetbrains.kotlin.android")
 }
 android {
+    buildFeatures { buildConfig = true }
     namespace = "com.thinkwithsujeet.qrtoprint"
     compileSdk = 36
     defaultConfig {
