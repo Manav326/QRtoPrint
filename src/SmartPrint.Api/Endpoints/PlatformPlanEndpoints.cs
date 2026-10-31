@@ -1,4 +1,3 @@
-using System.Text.RegularExpressions;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
@@ -10,8 +9,6 @@ namespace SmartPrint.Api.Endpoints;
 
 public static class PlatformPlanEndpoints
 {
-    private static readonly Regex PlanCodePattern = new(@"^[A-Z][A-Z0-9_]{1,39}$", RegexOptions.CultureInvariant);
-
     public static RouteGroupBuilder MapSubscriptionPlanEndpoints(this RouteGroupBuilder platform)
     {
         platform.MapGet("/plans", async (SmartPrintDbContext db, CancellationToken ct) =>
@@ -236,7 +233,7 @@ public static class PlatformPlanEndpoints
         bool allowMissingCode = false)
     {
         var errors = new Dictionary<string, string[]>();
-        if (!allowMissingCode && (code is null || !PlanCodePattern.IsMatch(code)))
+        if (!allowMissingCode && !SubscriptionPlanRules.IsValidCode(code))
         {
             errors["code"] = ["Use 2–40 uppercase letters, digits or underscores; the first character must be a letter."];
         }
@@ -246,7 +243,7 @@ public static class PlatformPlanEndpoints
             errors["name"] = ["Plan name is required and must be 100 characters or fewer."];
         }
 
-        if (description?.Length > 500)
+        if (description is { Length: > 500 })
         {
             errors["description"] = ["Description must be 500 characters or fewer."];
         }
@@ -258,12 +255,12 @@ public static class PlatformPlanEndpoints
     {
         var errors = new Dictionary<string, string[]>();
         var currency = request.Currency?.Trim().ToUpperInvariant() ?? string.Empty;
-        if (currency.Length != 3 || currency.Any(character => character is < 'A' or > 'Z'))
+        if (!SubscriptionPlanRules.IsValidCurrency(currency))
         {
             errors["currency"] = ["Use a three-letter ISO currency code, for example INR."];
         }
 
-        if (request.MonthlyPriceMinor < 0 || request.AnnualPriceMinor < 0)
+        if (!SubscriptionPlanRules.IsValidPriceMinor(request.MonthlyPriceMinor) || !SubscriptionPlanRules.IsValidPriceMinor(request.AnnualPriceMinor))
         {
             errors["price"] = ["Prices cannot be negative. Use zero for a free interval or leave it empty when that interval is unavailable."];
         }
@@ -272,7 +269,7 @@ public static class PlatformPlanEndpoints
         AddPositiveLimitError(errors, nameof(request.MaxAgentDevices), request.MaxAgentDevices);
         AddPositiveLimitError(errors, nameof(request.MaxQrStations), request.MaxQrStations);
         AddPositiveLimitError(errors, nameof(request.MaxMonthlyPrintJobs), request.MaxMonthlyPrintJobs);
-        if (request.MaxDocumentBytes is <= 0)
+        if (!SubscriptionPlanRules.IsValidPositiveByteLimit(request.MaxDocumentBytes))
         {
             errors["maxDocumentBytes"] = ["Maximum document size must be a positive number of bytes or empty for no configured cap."];
         }
@@ -290,7 +287,7 @@ public static class PlatformPlanEndpoints
 
     private static void AddPositiveLimitError(Dictionary<string, string[]> errors, string key, int? value)
     {
-        if (value is <= 0)
+        if (!SubscriptionPlanRules.IsValidPositiveLimit(value))
         {
             errors[key] = ["Use a positive whole number or leave the limit empty for no configured cap."];
         }
