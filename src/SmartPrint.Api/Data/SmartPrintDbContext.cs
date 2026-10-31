@@ -230,7 +230,9 @@ public sealed class SmartPrintDbContext(DbContextOptions<SmartPrintDbContext> op
             entity.HasIndex(x => x.TokenHash).IsUnique();
             entity.HasAlternateKey(x => new { x.TenantId, x.Id });
             entity.HasIndex(x => new { x.TenantId, x.ExpiresUtc });
+            entity.HasIndex(x => new { x.CustomerUserId, x.CreatedUtc });
             entity.HasOne<Tenant>().WithMany().HasForeignKey(x => x.TenantId).OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne<AppUser>().WithMany().HasForeignKey(x => x.CustomerUserId).OnDelete(DeleteBehavior.SetNull);
             entity.HasOne<QrStation>().WithMany()
                 .HasForeignKey(x => new { x.TenantId, x.QrStationId })
                 .HasPrincipalKey(x => new { x.TenantId, x.Id })
