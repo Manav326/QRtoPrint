@@ -63,14 +63,92 @@ class LocalDocumentStore(filesDir: File) {
         val path = directory.canonicalPath
         require(path == base || path.startsWith(base + File.separator)) { "Folder is outside local storage." }
         return (directory.listFiles() ?: emptyArray()).sortedWith(
-            compareBy<File>({ !it.isDirectory }, { it.name.lowercase(Locale.ROOT) })
+            compareBy<File>({ !it.isDirectory }, { it.lastModified() }, { it.name.lowercase(Locale.ROOT) })
         ).toTypedArray()
+    }
+
+    /** Places an item immediately before another sibling in the same folder. */
+    fun moveBefore(item: File, target: File): Boolean {
+        val base = root.canonicalFile
+        val source = item.canonicalFile
+        val destination = target.canonicalFile
+        require(source.path.startsWith(base.path + File.separator) &&
+            destination.path.startsWith(base.path + File.separator)) {
+            "Items must be inside local storage."
+        }
+        require(source.parentFile?.canonicalPath == destination.parentFile?.canonicalPath) {
+            "Items can only be reordered within the same folder."
+        }
+        if (source.path == destination.path) return false
+        val parent = source.parentFile ?: return false
+        val items = list(parent).toMutableList()
+        val from = items.indexOfFirst { it.canonicalPath == source.path }
+        val to = items.indexOfFirst { it.canonicalPath == destination.path }
+        if (from < 0 || to < 0) return false
+        val selected = items.removeAt(from)
+        val targetIndex = if (from < to) to - 1 else to
+        items.add(targetIndex, selected)
+        val firstTimestamp = System.currentTimeMillis() + 60_000L
+        items.forEachIndexed { index, file ->
+            check(file.setLastModified(firstTimestamp + index * 1_000L)) {
+                "The display order could not be saved."
+            }
+        }
+        return true
+    }
+
+    fun move(item: File, destinationPath: String) {
+        val base = root.canonicalFile
+        val source = item.canonicalFile
+        require(source.path.startsWith(base.path + File.separator)) {
+            "Item is outside local storage."
+        }
+        val destination = folder(destinationPath).canonicalFile
+        require(source.path != destination.path) { "Choose a different destination folder." }
+        if (item.isDirectory) {
+            require(!destination.path.startsWith(source.path + File.separator)) {
+                "A folder cannot be moved inside itself."
+            }
+        }
+        val target = File(destination, item.name)
+        require(!target.exists()) { "An item with that name already exists in the destination." }
+        check(item.renameTo(target)) { "Item could not be moved." }
+    }
+
+    /**
+     * Changes the explicit order of sibling files/folders without changing their names or bytes.
+     * Order is stored using filesystem metadata inside app-private storage, so exports preserve
+     * the visible sequence without adding numeric prefixes to customer filenames.
+     */
+    fun reorder(item: File, offset: Int): Boolean {
+        require(offset == -1 || offset == 1) { "Order offset must be -1 or 1." }
+        val base = root.canonicalFile
+        val canonical = item.canonicalFile
+        require(canonical.path.startsWith(base.path + File.separator)) {
+            "Item is outside local storage."
+        }
+        val parent = canonical.parentFile ?: error("Item has no parent folder.")
+        val items = list(parent).toMutableList()
+        val from = items.indexOfFirst { it.canonicalPath == canonical.path }
+        if (from < 0) return false
+        val to = from + offset
+        if (to !in items.indices) return false
+        val selected = items.removeAt(from)
+        items.add(to, selected)
+        val firstTimestamp = System.currentTimeMillis() + 60_000L
+        items.forEachIndexed { index, file ->
+            check(file.setLastModified(firstTimestamp + index * 1_000L)) {
+                "The display order could not be saved."
+            }
+        }
+        return true
     }
 
     fun pathOf(file: File): String {
         val base = root.canonicalPath
         val path = file.canonicalPath
-        require(path.startsWith(base + File.separator)) { "Item is outside local storage." }
+        require(path == base || path.startsWith(base + File.separator)) { "Item is outside local storage." }
+        if (path == base) return ""
         return path.removePrefix(base + File.separator).replace(File.separatorChar, '/')
     }
 

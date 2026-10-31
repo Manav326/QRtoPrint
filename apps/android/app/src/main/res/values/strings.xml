@@ -1,1 +1,3 @@
-<resources><string name="app_name">SmartPrint by QuantaEdge</string></resources>
+<resources>
+    <string name="app_name">SmartPrint by QuantaEdge</string>
+</resources>

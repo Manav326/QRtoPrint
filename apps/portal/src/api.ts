@@ -499,7 +499,39 @@ export function logout(token: string) {
   }, token);
 }
 
-export function createCustomerSession(publicCode: string) {
+async function nativeCustomerAuthorizationHeaders(): Promise<Record<string, string>> {
+  try {
+    const bridge = (window as Window & {
+      SmartPrintNative?: {
+        postMessage: (message: string) => void;
+        addEventListener: (type: string, listener: (event: MessageEvent) => void) => void;
+        removeEventListener: (type: string, listener: (event: MessageEvent) => void) => void;
+      };
+    }).SmartPrintNative;
+    if (!bridge?.postMessage || !bridge.addEventListener || !bridge.removeEventListener) return {};
+    const token = await new Promise<string>((resolve) => {
+      let settled = false;
+      const finish = (value: string) => {
+        if (settled) return;
+        settled = true;
+        window.clearTimeout(timeout);
+        bridge.removeEventListener("message", onMessage);
+        resolve(value);
+      };
+      const onMessage = (event: MessageEvent) => finish(
+        typeof event.data === "string" ? event.data : ""
+      );
+      const timeout = window.setTimeout(() => finish(""), 10000);
+      bridge.addEventListener("message", onMessage);
+      bridge.postMessage("getCustomerAccessToken");
+    });
+    return token ? { Authorization: `Bearer ${token}` } : {};
+  } catch {
+    return {};
+  }
+}
+
+export async function createCustomerSession(publicCode: string) {
   return apiRequest<{
     id: string;
     status: string;
@@ -509,7 +541,10 @@ export function createCustomerSession(publicCode: string) {
     printer: { displayName: string; manufacturer: string; model: string; status: string; capabilitiesJson: string } | null;
     paymentOptions: { upiEnabled: boolean; upiId?: string | null; payeeName?: string | null; cashEnabled: boolean };
     localAgent: { agentDeviceId: string; endpoints: string[] } | null;
-  }>(`/api/v1/public/stations/${encodeURIComponent(publicCode)}/sessions`, { method: "POST" });
+  }>(`/api/v1/public/stations/${encodeURIComponent(publicCode)}/sessions`, {
+    method: "POST",
+    headers: await nativeCustomerAuthorizationHeaders()
+  });
 }
 
 

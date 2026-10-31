@@ -128,8 +128,8 @@ class QrScannerActivity : AppCompatActivity() {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(8), 0, 0, 0)
         }
-        titleColumn.addView(label("SMART SCAN", 11, 0xFFB6C0D5.toInt(), true))
-        titleColumn.addView(label("Scan shop QR code", 19, Color.WHITE, true))
+        titleColumn.addView(label("SMARTPRINT BY QUANTAEDGE", 10, 0xFFB6C0D5.toInt(), true))
+        titleColumn.addView(label("Connect to a print shop", 19, Color.WHITE, true))
         top.addView(titleColumn, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
         root.addView(top, LinearLayout.LayoutParams(
             ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT

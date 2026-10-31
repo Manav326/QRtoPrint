@@ -7,6 +7,7 @@ public sealed record RegisterShopRequest(
     string Password);
 
 public sealed record LoginRequest(string Email, string Password);
+public sealed record RegisterCustomerRequest(string DisplayName, string Email, string Password);
 public sealed record RefreshRequest(string RefreshToken);
 public sealed record ShopProfileRequest(string DisplayName, string? LogoUrl, string AccentColor);
 
