@@ -125,6 +125,65 @@ public sealed class AgentLocalQueueStoreTests
     }
 
     [Fact]
+    public async Task FinalizedLocalUploadsSurviveTicketExpiryCleanup()
+    {
+        var root = CreateTemporaryDirectory();
+        try
+        {
+            var store = new AgentLocalQueueStore(root);
+            await store.InitializeAsync(CancellationToken.None);
+            var bytes = "Finalized local document"u8.ToArray();
+            var job = CreateJob(bytes) with
+            {
+                StorageMode = "LOCAL_AGENT",
+                LeaseExpiresUtc = DateTimeOffset.UtcNow.AddMinutes(-1)
+            };
+            await store.EnqueueLocalUploadAsync(job, bytes, CancellationToken.None);
+
+            await store.MarkLocalUploadFinalizedAsync(job.Id, CancellationToken.None);
+            Assert.Equal("LOCAL_UPLOAD_PENDING_PAYMENT", store.Find(job.Id)!.State);
+            Assert.Empty(store.GetStagedLocalUploads());
+
+            await Assert.ThrowsAsync<InvalidOperationException>(() =>
+                store.DeleteExpiredLocalUploadAsync(job.Id, DateTimeOffset.UtcNow, CancellationToken.None));
+            Assert.True(bytes.AsSpan().SequenceEqual(store.ReadDocument(job.Id)));
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task DeletesOnlyExpiredUnfinalizedLocalUploads()
+    {
+        var root = CreateTemporaryDirectory();
+        try
+        {
+            var store = new AgentLocalQueueStore(root);
+            await store.InitializeAsync(CancellationToken.None);
+            var bytes = "Expired local upload"u8.ToArray();
+            var job = CreateJob(bytes) with
+            {
+                StorageMode = "LOCAL_AGENT",
+                LeaseExpiresUtc = DateTimeOffset.UtcNow.AddMinutes(-1)
+            };
+            var entry = await store.EnqueueLocalUploadAsync(job, bytes, CancellationToken.None);
+
+            await store.DeleteExpiredLocalUploadAsync(job.Id, DateTimeOffset.UtcNow, CancellationToken.None);
+
+            Assert.Null(store.Find(job.Id));
+            Assert.False(File.Exists(entry.DocumentPath));
+            Assert.Empty(Directory.GetFiles(root, "*.json"));
+            Assert.Empty(Directory.GetFiles(root, "*.qdoc"));
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
     public async Task RejectsChangedContentForAnExistingJobId()
     {
         var root = CreateTemporaryDirectory();

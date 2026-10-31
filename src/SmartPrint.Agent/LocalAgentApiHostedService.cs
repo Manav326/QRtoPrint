@@ -143,6 +143,15 @@ public sealed class LocalAgentApiHostedService(
 
                 if (claim.AlreadyCompleted && claim.UploadResult is not null)
                 {
+                    var completedJobId = claim.PrintJobId != Guid.Empty
+                        ? claim.PrintJobId
+                        : claim.UploadResult.Job.Id;
+                    var completedEntry = localQueueStore.Find(completedJobId);
+                    if (completedEntry is null || !File.Exists(completedEntry.DocumentPath))
+                    {
+                        return Results.Conflict(new { code = "local_upload_document_missing", message = "The API has this local upload recorded, but the original document is missing from the protected shop queue. Ask the customer to upload again." });
+                    }
+                    await localQueueStore.MarkLocalUploadFinalizedAsync(completedJobId, ct);
                     return Results.Ok(claim.UploadResult);
                 }
 
@@ -266,6 +275,7 @@ public sealed class LocalAgentApiHostedService(
                         return Results.Problem(statusCode: StatusCodes.Status502BadGateway, title: "The cloud API did not return the completed local upload.");
                     }
 
+                    await localQueueStore.MarkLocalUploadFinalizedAsync(claim.PrintJobId, ct);
                     return Results.Ok(completed.UploadResult);
                 }
                 finally

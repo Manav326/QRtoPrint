@@ -126,6 +126,7 @@ public sealed class Worker(
         AgentCredentials credentials,
         CancellationToken cancellationToken)
     {
+        await ReconcileStagedLocalUploadsAsync(client, credentials, cancellationToken);
         await RetryPendingAcknowledgementsAsync(client, credentials, cancellationToken);
 
         using var claimResponse = await SendAgentRequestAsync(
@@ -227,6 +228,55 @@ public sealed class Worker(
             catch (Exception exception)
             {
                 logger.LogError(exception, "Could not secure paid job {JobNumber} in the local queue.", job.JobNumber);
+            }
+        }
+    }
+
+    private async Task ReconcileStagedLocalUploadsAsync(
+        HttpClient client,
+        AgentCredentials credentials,
+        CancellationToken cancellationToken)
+    {
+        foreach (var entry in localQueueStore.GetStagedLocalUploads())
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            try
+            {
+                using var response = await SendAgentGetRequestAsync(
+                    client,
+                    credentials,
+                    $"api/v1/agent/local-uploads/{entry.JobId}/status",
+                    cancellationToken);
+                if (!response.IsSuccessStatusCode)
+                {
+                    logger.LogWarning("Local upload status for {JobNumber} returned HTTP {StatusCode}; keeping the protected file.", entry.JobNumber, (int)response.StatusCode);
+                    continue;
+                }
+
+                var status = await response.Content.ReadFromJsonAsync<AgentLocalUploadStatusResponse>(cancellationToken);
+                if (status is null)
+                {
+                    logger.LogWarning("Local upload status for {JobNumber} was empty; keeping the protected file.", entry.JobNumber);
+                    continue;
+                }
+
+                if (status.Completed)
+                {
+                    await localQueueStore.MarkLocalUploadFinalizedAsync(entry.JobId, cancellationToken);
+                }
+                else if (status.ExpiresUtc <= DateTimeOffset.UtcNow)
+                {
+                    await localQueueStore.DeleteExpiredLocalUploadAsync(entry.JobId, DateTimeOffset.UtcNow, cancellationToken);
+                    logger.LogInformation("Removed expired unfinalised local upload {JobNumber} from the protected queue.", entry.JobNumber);
+                }
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (Exception exception)
+            {
+                logger.LogWarning(exception, "Could not reconcile staged local upload {JobNumber}; keeping its protected file.", entry.JobNumber);
             }
         }
     }

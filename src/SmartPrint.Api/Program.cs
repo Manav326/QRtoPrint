@@ -2516,6 +2516,36 @@ agentApi.MapPost("/local-uploads/{ticketId:guid}/complete", async (
     });
 });
 
+agentApi.MapGet("/local-uploads/{jobId:guid}/status", async (
+    Guid jobId,
+    HttpContext context,
+    SmartPrintDbContext db,
+    CancellationToken ct) =>
+{
+    var device = await AuthenticateAgentAsync(context, db, ct);
+    if (device is null) return Results.Unauthorized();
+
+    var ticket = await db.LocalPrintUploadTickets.AsNoTracking()
+        .Where(item => item.PrintJobId == jobId &&
+                       item.TenantId == device.TenantId &&
+                       item.AgentDeviceId == device.Id)
+        .Select(item => new { item.CompletedUtc, item.ExpiresUtc })
+        .SingleOrDefaultAsync(ct);
+    if (ticket is null) return Results.NotFound();
+
+    var documentExists = await db.PrintDocuments.AsNoTracking().AnyAsync(item =>
+        item.TenantId == device.TenantId &&
+        item.PrintJobId == jobId &&
+        item.StorageMode == "LOCAL_AGENT" &&
+        item.AgentDeviceId == device.Id, ct);
+
+    return Results.Ok(new
+    {
+        Completed = ticket.CompletedUtc != null && documentExists,
+        ticket.ExpiresUtc
+    });
+});
+
 agentApi.MapPost("/jobs/print-claim", async (AgentPrintClaimRequest request, HttpContext context, SmartPrintDbContext db, CancellationToken ct) =>
 {
     var device = await AuthenticateAgentAsync(context, db, ct);

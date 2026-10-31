@@ -85,6 +85,9 @@ public sealed class AgentLocalQueueStore
     public IReadOnlyList<AgentLocalQueueEntry> GetSpoolerTrackingJobs() =>
         ReadEntries().Where(x => x.State == "SPOOLER_ACCEPTED" && x.SpoolerJobId is > 0).ToArray();
 
+    public IReadOnlyList<AgentLocalQueueEntry> GetStagedLocalUploads() =>
+        ReadEntries().Where(entry => entry.State == "LOCAL_UPLOAD_STAGED").ToArray();
+
     public IReadOnlyList<AgentLocalQueueEntry> GetPendingAcknowledgements()
     {
         var entries = new List<AgentLocalQueueEntry>();
@@ -229,6 +232,43 @@ public sealed class AgentLocalQueueStore
         }
     }
 
+    public async Task MarkLocalUploadFinalizedAsync(Guid jobId, CancellationToken cancellationToken)
+    {
+        var entry = Find(jobId)
+            ?? throw new FileNotFoundException("The staged local upload is missing from the protected queue.");
+        if (!File.Exists(entry.DocumentPath))
+        {
+            throw new FileNotFoundException("The staged local upload document is missing.", entry.DocumentPath);
+        }
+        if (entry.State is "LOCAL_UPLOAD_PENDING_PAYMENT" or "ACK_PENDING" or "ACKNOWLEDGED" or
+            "SUBMITTING" or "SPOOLER_ACCEPTED" or "PRINTING" or "OUTPUT_UNCONFIRMED" or "OUTPUT_CONFIRMED")
+        {
+            return;
+        }
+        if (entry.State != "LOCAL_UPLOAD_STAGED")
+        {
+            throw new InvalidOperationException($"Cannot finalise a local upload in state {entry.State}.");
+        }
+
+        await SaveManifestAsync(entry with { State = "LOCAL_UPLOAD_PENDING_PAYMENT" }, cancellationToken);
+    }
+
+    public async Task DeleteExpiredLocalUploadAsync(Guid jobId, DateTimeOffset now, CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        var entry = Find(jobId);
+        if (entry is null) return;
+        if (entry.State != "LOCAL_UPLOAD_STAGED" || entry.LeaseExpiresUtc > now)
+        {
+            throw new InvalidOperationException("Only an expired, unfinalised local upload can be removed.");
+        }
+
+        var manifestPath = GetManifestPath(jobId);
+        if (File.Exists(manifestPath)) File.Delete(manifestPath);
+        if (File.Exists(entry.DocumentPath)) File.Delete(entry.DocumentPath);
+        await Task.CompletedTask;
+    }
+
     public async Task UpdateFromClaimAsync(AgentClaimedJob job, CancellationToken cancellationToken)
     {
         var entry = Find(job.Id)
@@ -240,7 +280,7 @@ public sealed class AgentLocalQueueStore
         {
             throw new InvalidDataException("The paid job no longer matches the local upload, assigned printer or queue.");
         }
-        if (entry.State is not ("LOCAL_UPLOAD_STAGED" or "ACK_PENDING" or "ACKNOWLEDGED"))
+        if (entry.State is not ("LOCAL_UPLOAD_PENDING_PAYMENT" or "LOCAL_UPLOAD_STAGED" or "ACK_PENDING" or "ACKNOWLEDGED"))
         {
             throw new InvalidOperationException($"Cannot update print options for a local upload in state {entry.State}.");
         }
