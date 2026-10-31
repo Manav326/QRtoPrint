@@ -8,6 +8,7 @@ import android.os.Bundle
 import android.provider.OpenableColumns
 import android.view.Gravity
 import android.view.Menu
+import android.content.res.ColorStateList
 import android.view.View
 import android.view.ViewGroup
 import android.webkit.CookieManager
@@ -27,6 +28,7 @@ import android.widget.ScrollView
 import android.widget.TextView
 import android.widget.Toast
 import androidx.activity.result.ActivityResultLauncher
+import androidx.activity.result.IntentSenderRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.FileProvider
@@ -39,16 +41,23 @@ import com.google.android.material.bottomnavigation.BottomNavigationView
 import com.google.android.material.button.MaterialButton
 import com.google.android.material.card.MaterialCardView
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
+import com.google.mlkit.vision.documentscanner.GmsDocumentScannerOptions
+import com.google.mlkit.vision.documentscanner.GmsDocumentScanning
+import com.google.mlkit.vision.documentscanner.GmsDocumentScanningResult
 import java.io.ByteArrayInputStream
 import java.io.File
 import java.io.FileInputStream
+import java.text.SimpleDateFormat
+import java.util.Date
 import java.util.Locale
 
 class MainActivity : AppCompatActivity() {
     companion object {
-        private const val FILES = 1
-        private const val SCAN = 2
-        private const val PRINT = 3
+        private const val HOME = 1
+        private const val FILES = 2
+        private const val SCAN_PRINT = 3
+        private const val ACTIVITY = 4
+        private const val PROFILE = 90
         private const val MAX_TREE_FILES = 500
         private const val MAX_TREE_DEPTH = 12
     }
@@ -72,6 +81,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var exportOne: ActivityResultLauncher<String>
     private lateinit var exportTree: ActivityResultLauncher<Uri?>
     private lateinit var scannerLauncher: ActivityResultLauncher<Intent>
+    private lateinit var documentScanLauncher: ActivityResultLauncher<IntentSenderRequest>
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -79,7 +89,7 @@ class MainActivity : AppCompatActivity() {
         store = LocalDocumentStore(filesDir)
         registerFileActions()
         buildLayout()
-        showFiles()
+        showHome()
         portalUrl = savedInstanceState?.getString("portalUrl")
         portalHost = savedInstanceState?.getString("portalHost")
         portalUrl?.let { ensureWebView().loadUrl(it); showPrint() }
@@ -102,8 +112,9 @@ class MainActivity : AppCompatActivity() {
     override fun onBackPressed() {
         when {
             pickerMode -> cancelPicker()
-            navigation.selectedItemId == PRINT && webView?.canGoBack() == true -> webView?.goBack()
-            navigation.selectedItemId == PRINT -> showFiles()
+            navigation.selectedItemId == SCAN_PRINT && webView?.canGoBack() == true -> webView?.goBack()
+            navigation.selectedItemId == SCAN_PRINT -> showScanPrint()
+            navigation.selectedItemId != HOME -> showHome()
             folderPath.isNotEmpty() -> { folderPath = parent(folderPath); showFiles() }
             else -> super.onBackPressed()
         }
@@ -116,7 +127,20 @@ class MainActivity : AppCompatActivity() {
                 try {
                     confirmShop(StationQrLink.parse(rawValue, allowLocalDevelopment = BuildConfig.DEBUG))
                 } catch (_: Exception) {
-                    toast("This is not a valid QRtoPrint shop QR code.")
+                    toast("This is not a valid SmartPrint shop QR code.")
+                }
+            }
+        }
+        documentScanLauncher = registerForActivityResult(
+            ActivityResultContracts.StartIntentSenderForResult()
+        ) { result ->
+            if (result.resultCode == RESULT_OK) {
+                try {
+                    val scan = GmsDocumentScanningResult.fromActivityResultIntent(result.data)
+                        ?: error("The scan could not be read.")
+                    saveDocumentScan(scan)
+                } catch (e: Exception) {
+                    toast("Could not save the scan: ${message(e)}")
                 }
             }
         }
@@ -183,31 +207,47 @@ class MainActivity : AppCompatActivity() {
             setBackgroundColor(getColor(R.color.qp_surface))
         }
         toolbar = MaterialToolbar(this).apply {
-            title = "My documents"
+            title = "SmartPrint"
             setTitleTextColor(getColor(R.color.qp_text))
             setBackgroundColor(getColor(R.color.qp_surface))
+            elevation = dp(1).toFloat()
+            menu.add(Menu.NONE, PROFILE, Menu.NONE, "Account").apply {
+                setIcon(android.R.drawable.ic_menu_myplaces)
+                setShowAsAction(android.view.MenuItem.SHOW_AS_ACTION_ALWAYS)
+            }
+            setOnMenuItemClickListener { item ->
+                if (item.itemId == PROFILE) { showProfile(); true } else false
+            }
         }
-        root.addView(toolbar, LinearLayout.LayoutParams(-1, dp(60)))
+        root.addView(toolbar, LinearLayout.LayoutParams(-1, dp(62)))
         content = FrameLayout(this)
         root.addView(content, LinearLayout.LayoutParams(-1, 0, 1f))
         navigation = BottomNavigationView(this).apply {
-            menu.add(Menu.NONE, FILES, 0, "Files").setIcon(android.R.drawable.ic_menu_agenda)
-            menu.add(Menu.NONE, SCAN, 1, "Scan QR").setIcon(android.R.drawable.ic_menu_camera)
-            menu.add(Menu.NONE, PRINT, 2, "Print").setIcon(android.R.drawable.ic_menu_view)
+            menu.add(Menu.NONE, HOME, 0, "Home").setIcon(android.R.drawable.ic_menu_view)
+            menu.add(Menu.NONE, FILES, 1, "My Files").setIcon(android.R.drawable.ic_menu_agenda)
+            menu.add(Menu.NONE, SCAN_PRINT, 2, "Scan & Print").setIcon(android.R.drawable.ic_menu_camera)
+            menu.add(Menu.NONE, ACTIVITY, 3, "Activity").setIcon(android.R.drawable.ic_menu_recent_history)
             labelVisibilityMode = BottomNavigationView.LABEL_VISIBILITY_LABELED
+            itemHorizontalTranslationEnabled = false
+            backgroundTintList = ColorStateList.valueOf(getColor(R.color.qp_card))
+            itemIconTintList = ColorStateList(
+                arrayOf(intArrayOf(android.R.attr.state_checked), intArrayOf()),
+                intArrayOf(getColor(R.color.qp_primary), getColor(R.color.qp_muted))
+            )
+            itemTextColor = itemIconTintList
+            itemRippleColor = ColorStateList.valueOf(getColor(R.color.qp_soft))
+            elevation = dp(12).toFloat()
             setOnItemSelectedListener { item ->
                 when (item.itemId) {
+                    HOME -> { showHome(); true }
                     FILES -> { showFiles(); true }
-                    SCAN -> { scanQr(); false }
-                    PRINT -> {
-                        if (portalUrl == null) { toast("Scan a shop QR code first."); false }
-                        else { showPrint(); true }
-                    }
+                    SCAN_PRINT -> { showScanPrint(); true }
+                    ACTIVITY -> { showActivity(); true }
                     else -> false
                 }
             }
         }
-        root.addView(navigation, LinearLayout.LayoutParams(-1, ViewGroup.LayoutParams.WRAP_CONTENT))
+        root.addView(navigation, LinearLayout.LayoutParams(-1, dp(70)))
         ViewCompat.setOnApplyWindowInsetsListener(root) { view, insets ->
             val bars = insets.getInsets(WindowInsetsCompat.Type.systemBars())
             view.setPadding(bars.left, bars.top, bars.right, bars.bottom)
@@ -217,11 +257,206 @@ class MainActivity : AppCompatActivity() {
         ViewCompat.requestApplyInsets(root)
     }
 
+    private fun resetToolbar(title: String) {
+        toolbar.title = title
+        toolbar.navigationIcon = null
+        toolbar.setNavigationOnClickListener(null)
+        navigation.visibility = View.VISIBLE
+    }
+
+    private fun showProfile() {
+        MaterialAlertDialogBuilder(this)
+            .setTitle("SmartPrint account")
+            .setMessage(
+                "You're using SmartPrint as a guest. No account is required to prepare documents or connect to a print shop. " +
+                    "Your document library is stored privately on this device. Customer sign-in and account sync are not enabled yet."
+            )
+            .setPositiveButton("Continue as guest", null)
+            .setNeutralButton("Sign in / Create account") { _, _ ->
+                MaterialAlertDialogBuilder(this)
+                    .setTitle("Customer accounts")
+                    .setMessage("Customer sign-in and registration will be available when the dedicated customer-account service is enabled. Shop-owner credentials are not used for customer accounts.")
+                    .setPositiveButton("Got it", null)
+                    .show()
+            }
+            .show()
+    }
+
+    private fun showHome() {
+        pickerMode = false
+        resetToolbar("SmartPrint")
+        navigation.menu.findItem(HOME).isChecked = true
+        content.removeAllViews()
+        content.addView(homeView(), frameParams())
+    }
+
+    private fun homeView(): View {
+        val scroll = ScrollView(this).apply { isFillViewport = true }
+        val column = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(20), dp(18), dp(20), dp(28))
+        }
+        scroll.addView(column)
+        val brand = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+        }
+        val brandMark = TextView(this).apply {
+            text = "S"
+            textSize = 25f
+            gravity = Gravity.CENTER
+            setTypeface(typeface, android.graphics.Typeface.BOLD)
+            setTextColor(getColor(android.R.color.white))
+            background = android.graphics.drawable.GradientDrawable().apply {
+                setColor(getColor(R.color.qp_primary))
+                cornerRadius = dp(15).toFloat()
+            }
+        }
+        brand.addView(brandMark, LinearLayout.LayoutParams(dp(48), dp(48)))
+        val wordmark = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(12), 0, 0, 0)
+        }
+        wordmark.addView(text("SmartPrint", 19, R.color.qp_text, true))
+        wordmark.addView(text("by QuantaEdge", 12, R.color.qp_muted, false).apply { setPadding(0, dp(2), 0, 0) })
+        brand.addView(wordmark)
+        column.addView(brand, linearParams().apply { bottomMargin = dp(18) })
+
+        val hero = card().apply {
+            radius = dp(24).toFloat()
+            setCardBackgroundColor(getColor(R.color.qp_hero))
+            strokeWidth = 0
+        }
+        val heroContent = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(21), dp(22), dp(21), dp(22))
+        }
+        heroContent.addView(text("Your documents.\nReady when you are.", 27, R.color.qp_hero_text, true))
+        heroContent.addView(text(
+            "Scan, organise and prepare everything before you reach the print shop.",
+            14, R.color.qp_hero_muted, false
+        ).apply { setPadding(0, dp(10), 0, dp(18)) })
+        val scanButton = button("Scan a document", true).apply { setOnClickListener { startDocumentScan() } }
+        heroContent.addView(scanButton, linearParams())
+        hero.addView(heroContent)
+        column.addView(hero, linearParams())
+
+        val actions = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        actions.addView(button("Import files", false).apply {
+            setOnClickListener { importFiles.launch(arrayOf("*/*")); navigation.menu.findItem(FILES).isChecked = true }
+        }, LinearLayout.LayoutParams(0, dp(50), 1f))
+        actions.addView(button("My files", false).apply { setOnClickListener { showFiles() } },
+            LinearLayout.LayoutParams(0, dp(50), 1f).apply { marginStart = dp(10) })
+        column.addView(actions, linearParams().apply { topMargin = dp(12) })
+
+        val journey = card()
+        val journeyContent = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(18), dp(17), dp(18), dp(17))
+        }
+        journeyContent.addView(text("From phone to print shop", 17, R.color.qp_text, true))
+        journeyContent.addView(text(
+            "Build your collection here. Scan the shop's SmartPrint QR code when you arrive, then review the quote and follow the shop's print progress.",
+            13, R.color.qp_muted, false
+        ).apply { setPadding(0, dp(6), 0, 0) })
+        journey.addView(journeyContent)
+        column.addView(journey, linearParams().apply { topMargin = dp(18) })
+        column.addView(button("Scan & Print  →", true).apply { setOnClickListener { showScanPrint() } },
+            linearParams().apply { topMargin = dp(12) })
+        return scroll
+    }
+
+    private fun showScanPrint() {
+        pickerMode = false
+        if (portalUrl != null) { showPrint(); return }
+        resetToolbar("Scan & Print")
+        navigation.menu.findItem(SCAN_PRINT).isChecked = true
+        content.removeAllViews()
+        content.addView(scanPrintView(), frameParams())
+    }
+
+    private fun scanPrintView(): View {
+        val scroll = ScrollView(this).apply { isFillViewport = true }
+        val column = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(20), dp(18), dp(20), dp(28))
+        }
+        scroll.addView(column)
+        val hero = card().apply {
+            radius = dp(22).toFloat()
+            setCardBackgroundColor(getColor(R.color.qp_hero))
+            strokeWidth = 0
+        }
+        val body = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(20), dp(22), dp(20), dp(20))
+        }
+        body.addView(text("Print nearby.\nWithout the back-and-forth.", 25, R.color.qp_hero_text, true))
+        body.addView(text(
+            "Prepare your files first. At a participating shop, scan the SmartPrint QR code displayed at the counter to connect securely.",
+            14, R.color.qp_hero_muted, false
+        ).apply { setPadding(0, dp(9), 0, dp(18)) })
+        body.addView(button("Scan shop QR code", true).apply { setOnClickListener { scanQr() } }, linearParams())
+        hero.addView(body)
+        column.addView(hero, linearParams())
+        column.addView(text("How it works", 18, R.color.qp_text, true).apply {
+            setPadding(dp(2), dp(22), 0, dp(10))
+        })
+        val steps = listOf(
+            Triple("01", "Prepare", "Scan paper pages or import PDFs and photos. Arrange your collection before you visit."),
+            Triple("02", "Connect", "Scan the QR code shown by the print shop. SmartPrint opens that shop's secure print session."),
+            Triple("03", "Review & collect", "Choose available print settings, review the server-calculated quote, pay and follow job progress.")
+        )
+        steps.forEach { (number, title, description) ->
+            val step = card()
+            val row = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                setPadding(dp(15), dp(15), dp(15), dp(15))
+            }
+            row.addView(text(number, 15, R.color.qp_primary, true), LinearLayout.LayoutParams(dp(42), -2))
+            val copy = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+            copy.addView(text(title, 15, R.color.qp_text, true))
+            copy.addView(text(description, 13, R.color.qp_muted, false).apply { setPadding(0, dp(4), 0, 0) })
+            row.addView(copy, LinearLayout.LayoutParams(0, -2, 1f))
+            step.addView(row)
+            column.addView(step, linearParams().apply { bottomMargin = dp(9) })
+        }
+        column.addView(text(
+            "Your files stay on this phone until you choose to send them. Shop connection and printing require an internet connection.",
+            12, R.color.qp_muted, false
+        ).apply { setPadding(dp(3), dp(8), dp(3), 0) })
+        column.addView(button("Prepare documents first", false).apply { setOnClickListener { showFiles() } },
+            linearParams().apply { topMargin = dp(13) })
+        return scroll
+    }
+
+    private fun showActivity() {
+        pickerMode = false
+        resetToolbar("Activity")
+        navigation.menu.findItem(ACTIVITY).isChecked = true
+        content.removeAllViews()
+        val column = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.CENTER
+            setPadding(dp(28), dp(24), dp(28), dp(24))
+        }
+        column.addView(text("Your print journey starts here", 20, R.color.qp_text, true).apply {
+            gravity = Gravity.CENTER
+        })
+        column.addView(text(
+            if (portalUrl == null) "Connect to a participating print shop to begin a print session. Your live job status will be shown in the secure shop workflow."
+            else "Your shop connection is ready. Open the current print session to review your quote, payment and job progress.",
+            14, R.color.qp_muted, false
+        ).apply { gravity = Gravity.CENTER; setPadding(0, dp(9), 0, dp(18)) })
+        if (portalUrl != null) column.addView(button("Open print session", true).apply { setOnClickListener { showPrint() } })
+        else column.addView(button("Scan & Print", true).apply { setOnClickListener { showScanPrint() } })
+        content.addView(column, frameParams())
+    }
+
     private fun showFiles() {
         pickerMode = false
-        toolbar.title = "My documents"
-        toolbar.navigationIcon = null
-        navigation.visibility = View.VISIBLE
+        resetToolbar("My files")
         navigation.menu.findItem(FILES).isChecked = true
         content.removeAllViews()
         content.addView(libraryView(false), frameParams())
@@ -240,11 +475,11 @@ class MainActivity : AppCompatActivity() {
 
     private fun showPrint() {
         pickerMode = false
-        toolbar.title = portalHost?.let { "Print · $it" } ?: "Print at a shop"
+        toolbar.title = portalHost?.let { "SmartPrint · $it" } ?: "SmartPrint at a shop"
         toolbar.setNavigationIcon(android.R.drawable.ic_media_previous)
         toolbar.setNavigationOnClickListener { showFiles() }
         navigation.visibility = View.VISIBLE
-        navigation.menu.findItem(PRINT).isChecked = true
+        navigation.menu.findItem(SCAN_PRINT).isChecked = true
         content.removeAllViews()
         val view = ensureWebView()
         (view.parent as? ViewGroup)?.removeView(view)
@@ -451,7 +686,7 @@ class MainActivity : AppCompatActivity() {
                     !allowedAgentUpload(uri) &&
                     !allowedLocalDevelopmentEndpoint(uri)) {
                     return WebResourceResponse(
-                        "text/plain", "UTF-8", 403, "Blocked by QRtoPrint", emptyMap(),
+                        "text/plain", "UTF-8", 403, "Blocked by SmartPrint", emptyMap(),
                         ByteArrayInputStream("Only the selected private-LAN development portal and paired-Agent upload endpoints are allowed over HTTP.".toByteArray())
                     )
                 }
@@ -489,7 +724,49 @@ class MainActivity : AppCompatActivity() {
             LocalAgentUploadPolicy.isPrivateIpv4Host(uri.host.orEmpty())
 
     private fun scanQr() {
+        navigation.menu.findItem(SCAN_PRINT).isChecked = true
         scannerLauncher.launch(Intent(this, QrScannerActivity::class.java))
+    }
+
+    private fun startDocumentScan() {
+        val options = GmsDocumentScannerOptions.Builder()
+            .setGalleryImportAllowed(true)
+            .setPageLimit(50)
+            .setResultFormats(
+                GmsDocumentScannerOptions.RESULT_FORMAT_PDF,
+                GmsDocumentScannerOptions.RESULT_FORMAT_JPEG
+            )
+            .setScannerMode(GmsDocumentScannerOptions.SCANNER_MODE_FULL)
+            .build()
+        GmsDocumentScanning.getClient(options)
+            .getStartScanIntent(this)
+            .addOnSuccessListener { sender ->
+                documentScanLauncher.launch(IntentSenderRequest.Builder(sender).build())
+            }
+            .addOnFailureListener { error ->
+                toast("Document scanner is unavailable on this device. You can still import photos or PDFs. ${message(error)}")
+            }
+    }
+
+    private fun saveDocumentScan(scan: GmsDocumentScanningResult) {
+        val label = SimpleDateFormat("yyyy-MM-dd HHmm", Locale.ROOT).format(Date())
+        val folder = store.createFolder("", "Scan $label", allowExisting = false)
+        val targetPath = store.pathOf(folder)
+        var saved = 0
+        scan.getPdf()?.let { pdf ->
+            val input = contentResolver.openInputStream(pdf.getUri()) ?: error("Scanned PDF is unavailable.")
+            input.use { store.importFile(it, "Scanned document.pdf", targetPath) }
+            saved++
+        }
+        scan.getPages().orEmpty().forEachIndexed { index, page ->
+            val input = contentResolver.openInputStream(page.getImageUri()) ?: error("Scanned page ${index + 1} is unavailable.")
+            input.use { store.importFile(it, "Page ${(index + 1).toString().padStart(2, '0')}.jpg", targetPath) }
+            saved++
+        }
+        require(saved > 0) { "The scanner returned no pages." }
+        folderPath = targetPath
+        showFiles()
+        toast("Saved your scan in My files.")
     }
 
     private fun confirmShop(link: StationQrLink) {
