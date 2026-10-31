@@ -2016,8 +2016,14 @@ shop.MapGet("/print-jobs/{jobId:guid}/preview-source", async (
     Guid jobId,
     ClaimsPrincipal principal,
     SmartPrintDbContext db,
+    HttpContext context,
     CancellationToken ct) =>
 {
+    // The short-lived Agent preview grant is a bearer credential. Never allow
+    // browsers or intermediate proxies to cache this response.
+    context.Response.Headers.CacheControl = "private, no-store";
+    context.Response.Headers.Pragma = "no-cache";
+
     if (!TryGetTenantId(principal, out var tenantId))
     {
         return Results.Forbid();
