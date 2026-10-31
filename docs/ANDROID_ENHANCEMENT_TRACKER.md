@@ -1,9 +1,9 @@
-# Android Premium Document Studio — Enhancement Tracker
+| AND-09 | Export and conversion | Export one or many files/folders to user-selected destinations. Support only conversions implemented and validated (initial target: images to PDF and multiple images to one PDF; PDF page operations where supported). Preserve originals and clearly disclose unsupported conversions. | In progress | Single-file export, folder-tree export, multi-file ZIP export and selected-image-to-multipage-PDF are implemented; original photos are retained. Merging existing PDFs, extracting/rearranging saved PDF pages and Office conversions remain unsupported. |
 
 **Scope:** Native Android customer app in `apps/android`  
 **Base:** `main` at `3a0e29c6d97228ebeba7c4da24e3023422920d35`  
 **Working branch:** `feature/android-document-studio-premium-ux`  
-**Status:** Active implementation
+**Status:** Initial implementation complete; product follow-ups and physical-device acceptance remain
 
 This tracker is the source of truth for the Android enhancement work. Update each status and its evidence as code, tests and device validation are completed. Do not mark an item complete merely because a screen or API call exists.
 
@@ -52,6 +52,23 @@ The Android app must continue to reuse the existing tenant/station-bound QR sess
 5. Redesign Scan & Print and connect the collection to the existing secure workflow (AND-10/11/12).
 6. Add truthful guest/profile/activity experiences (AND-04/13).
 7. Complete automated, accessibility, emulator and physical-device evidence (AND-14/15/16); update docs (AND-17).
+
+
+## Latest verified CI evidence
+
+- **Workflow:** [GitHub Actions run 41216111944](https://github.com/Manav326/QRtoPrint/actions/runs/41216111944)
+- **Revision:** `e2e479b43c1a3f0074ca19c4e243e8729c5b8245`
+- **Result:** workflow completed successfully, including Android 15 (API 35) emulator UI tests.
+- **Artifacts uploaded:** `qrtoprint-android-debug`, `qrtoprint-android-test-reports` and `qrtoprint-agent-win-x64`.
+
+## Known product follow-ups
+
+1. One print job currently accepts one uploaded document. A true multi-document print batch needs a coordinated API, portal, quote/shop-review and Windows Agent job-contract change.
+2. Previously imported PDFs/photos do not yet have a persistent in-app page editor. Scan-time edits are available through ML Kit; saved-PDF page extraction/reordering and Office conversions are not implemented.
+3. Exercise real camera capture, QR scanning, Google Play services scanner availability, file-manager providers, Android-version compatibility, light/dark and accessibility behaviour, shop Wi-Fi/tunnel, live account use across multiple shops, payment and actual printer output on physical devices.
+4. Customer sessions are linked to the global account only when a customer starts the QR session while signed in. Guest and earlier sessions are not retroactively linked; email verification and password recovery are not implemented here.
+
+CI/emulator success is development evidence, not production release or Play Store approval.
 
 ## Guardrails
 
