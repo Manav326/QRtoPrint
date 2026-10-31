@@ -21,6 +21,7 @@ import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.widget.EditText
+import android.widget.CheckBox
 import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.PopupMenu
@@ -75,6 +76,7 @@ class MainActivity : AppCompatActivity() {
     private var fileCallback: ValueCallback<Array<Uri>>? = null
     private var exportFile: File? = null
     private var exportFolder: File? = null
+    private val selectedFilePaths = linkedSetOf<String>()
 
     private lateinit var importFiles: ActivityResultLauncher<Array<String>>
     private lateinit var importTree: ActivityResultLauncher<Uri?>
@@ -197,6 +199,7 @@ class MainActivity : AppCompatActivity() {
                     if (complete) "Exported ${count[0]} file(s)."
                     else "Exported ${count[0]} file(s); remaining items skipped at the safe folder-transfer limit."
                 )
+                if (source.parentFile?.canonicalPath == cacheDir.canonicalPath) source.deleteRecursively()
             } catch (e: Exception) { toast("Folder export failed: ${message(e)}") }
         }
     }
@@ -553,13 +556,40 @@ class MainActivity : AppCompatActivity() {
 
         val folder = try { store.folder(path) } catch (_: Exception) { store.root }
         val entries = store.list(folder)
+        val selectedHere = entries.filter { !it.isDirectory && selectedFilePaths.contains(it.canonicalPath) }
+        if (!isPicker && selectedHere.isNotEmpty()) {
+            val selectionCard = card()
+            val selectionContent = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                setPadding(dp(14), dp(12), dp(14), dp(12))
+            }
+            selectionContent.addView(text("${selectedHere.size} selected", 14, R.color.qp_text, true))
+            val selectionActions = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+            selectionActions.addView(button("Export", false).apply {
+                setOnClickListener { exportSelected(selectedHere) }
+            }, LinearLayout.LayoutParams(0, dp(44), 1f))
+            val allPhotos = selectedHere.all { it.extension.lowercase(Locale.ROOT) in setOf("jpg", "jpeg", "png") }
+            selectionActions.addView(button("Make PDF", true).apply {
+                isEnabled = allPhotos
+                alpha = if (allPhotos) 1f else 0.45f
+                setOnClickListener { makePdfFromSelected(selectedHere) }
+            }, LinearLayout.LayoutParams(0, dp(44), 1f).apply { marginStart = dp(8) })
+            selectionContent.addView(selectionActions, linearParams().apply { topMargin = dp(8) })
+            selectionContent.addView(text(
+                if (allPhotos) "Photos are combined in the order shown. Original images remain unchanged."
+                else "PDF creation is available when only JPG, JPEG or PNG photos are selected.",
+                11, R.color.qp_muted, false
+            ).apply { setPadding(0, dp(7), 0, 0) })
+            selectionCard.addView(selectionContent)
+            column.addView(selectionCard, linearParams().apply { bottomMargin = dp(12) })
+        }
         if (entries.isEmpty()) {
             val empty = card()
             empty.addView(text(
                 if (isPicker) "No printable files here. Import a document or open another folder."
-                else "No documents here yet. Import files from your phone or create a folder to get started.",
+                else "No documents here yet. Scan paper pages, import files or create a folder to get started.",
                 14, R.color.qp_muted, false
-            ).apply { setPadding(dp(18), dp(22), dp(18), dp(22)) })
+            ).apply { setPadding(dp(18), dp(22), dp(18), dp(22) })
             column.addView(empty, linearParams())
         } else {
             entries.forEach { entry ->
@@ -595,6 +625,20 @@ class MainActivity : AppCompatActivity() {
                 minWidth = dp(72)
                 setOnClickListener { chooseFile(file) }
             })
+        } else if (!isPicker && !file.isDirectory) {
+            val selected = CheckBox(this).apply {
+                isChecked = selectedFilePaths.contains(file.canonicalPath)
+                contentDescription = "Select ${file.name}"
+                setOnCheckedChangeListener { _, checked ->
+                    if (checked) selectedFilePaths.add(file.canonicalPath)
+                    else selectedFilePaths.remove(file.canonicalPath)
+                    refreshLibrary()
+                }
+            }
+            row.addView(selected, LinearLayout.LayoutParams(dp(42), dp(44)))
+            val more = text("⋮", 24, R.color.qp_muted, false).apply { gravity = Gravity.CENTER }
+            row.addView(more, LinearLayout.LayoutParams(dp(36), dp(44)))
+            more.setOnClickListener { showEntryMenu(more, file) }
         } else if (!isPicker) {
             val more = text("⋮", 24, R.color.qp_muted, false).apply { gravity = Gravity.CENTER }
             row.addView(more, LinearLayout.LayoutParams(dp(42), dp(44)))
@@ -615,17 +659,28 @@ class MainActivity : AppCompatActivity() {
         if (!file.isDirectory) menu.menu.add("Open")
         menu.menu.add("Rename")
         menu.menu.add(if (file.isDirectory) "Export folder" else "Export")
+        menu.menu.add("Move to folder")
+        val siblingItems = file.parentFile?.let { store.list(it) }.orEmpty()
+        val position = siblingItems.indexOfFirst { it.canonicalPath == file.canonicalPath }
+        if (position > 0) menu.menu.add("Move earlier")
+        if (position >= 0 && position < siblingItems.lastIndex) menu.menu.add("Move later")
         if (!file.isDirectory) menu.menu.add("Share")
         menu.menu.add("Delete")
         menu.setOnMenuItemClickListener { item ->
             when (item.title.toString()) {
                 "Open" -> openDocument(file)
                 "Rename" -> nameDialog("Rename", file.name) { name ->
-                    try { store.rename(file, name); showFiles() }
+                    try { store.rename(file, name); selectedFilePaths.remove(file.canonicalPath); showFiles() }
                     catch (e: Exception) { toast("Rename failed: ${message(e)}") }
                 }
                 "Export" -> { exportFile = file; exportOne.launch(file.name) }
                 "Export folder" -> { exportFolder = file; exportTree.launch(null) }
+                "Move to folder" -> nameDialog("Destination folder path", file.parentFile?.let { store.pathOf(it) }.orEmpty()) { path ->
+                    try { store.move(file, path); selectedFilePaths.remove(file.canonicalPath); showFiles() }
+                    catch (e: Exception) { toast("Move failed: ${message(e)}") }
+                }
+                "Move earlier" -> { try { store.reorder(file, -1); showFiles() } catch (e: Exception) { toast("Reorder failed: ${message(e)}") } }
+                "Move later" -> { try { store.reorder(file, 1); showFiles() } catch (e: Exception) { toast("Reorder failed: ${message(e)}") } }
                 "Share" -> shareDocument(file)
                 "Delete" -> MaterialAlertDialogBuilder(this)
                     .setTitle("Delete ${if (file.isDirectory) "folder" else "document"}?")
@@ -639,6 +694,39 @@ class MainActivity : AppCompatActivity() {
             true
         }
         menu.show()
+    }
+
+    private fun exportSelected(files: List<File>) {
+        if (files.isEmpty()) return
+        try {
+            val staging = File(cacheDir, "SmartPrint export ${System.currentTimeMillis()}")
+            check(staging.mkdirs()) { "Temporary export folder could not be created." }
+            files.forEach { source ->
+                val target = File(staging, source.name)
+                check(!target.exists()) { "Duplicate selected filenames cannot be exported together." }
+                FileInputStream(source).use { input -> target.outputStream().use { output -> input.copyTo(output) } }
+            }
+            selectedFilePaths.clear()
+            exportFolder = staging
+            exportTree.launch(null)
+        } catch (e: Exception) {
+            toast("Could not prepare selected files: ${message(e)}")
+        }
+    }
+
+    private fun makePdfFromSelected(files: List<File>) {
+        val pdf = File(cacheDir, "SmartPrint photo collection ${System.currentTimeMillis()}.pdf")
+        try {
+            val pages = ImagePdfComposer.compose(files, pdf)
+            FileInputStream(pdf).use { input -> store.importFile(input, "Photo collection.pdf", folderPath) }
+            selectedFilePaths.clear()
+            showFiles()
+            toast("Created a $pages-page PDF. Original photos are unchanged.")
+        } catch (e: Exception) {
+            toast("PDF creation failed: ${message(e)}")
+        } finally {
+            pdf.delete()
+        }
     }
 
     private fun nameDialog(title: String, initial: String, onSave: (String) -> Unit) {
