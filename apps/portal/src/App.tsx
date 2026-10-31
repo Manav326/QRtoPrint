@@ -18,11 +18,11 @@ import {
   updateShopProfile, updateStationEnabled, uploadCustomerDocument,
   verifyShopPayment, type CustomerPayment, type ShopPayment, type ShopPaymentSettings,
   type AgentDevice, type AuthTokens, type CustomerJobStatus, type PrinterDevice, type PrintQuoteResult, type ShopJobEvent,
-  type QrStation, type ShopPricingProfile, type ShopPrintJob, type ShopProfile, type ShopReportSummary,
+  type QrStation, type ShopPricingProfile, type ShopPrintJob, type ShopProfile, type ShopReportSummary, type ShopSubscriptionSummary,
   type UploadedPrintJob
 } from "./api";
 
-type Section = "Overview" | "Print Queue" | "Printers" | "QR Stations" | "Print Agent" | "Pricing" | "Payments" | "Customers" | "Reports" | "Settings";
+type Section = "Overview" | "Print Queue" | "Printers" | "QR Stations" | "Print Agent" | "Pricing" | "Subscription" | "Payments" | "Customers" | "Reports" | "Settings";
 type Modal = "printer" | "station" | null;
 
 const sections: { label: Section; icon: typeof LayoutDashboard }[] = [
@@ -32,6 +32,7 @@ const sections: { label: Section; icon: typeof LayoutDashboard }[] = [
   { label: "QR Stations", icon: QrCode },
   { label: "Print Agent", icon: Monitor },
   { label: "Pricing", icon: Wallet },
+  { label: "Subscription", icon: ShieldCheck },
   { label: "Payments", icon: CreditCard },
   { label: "Customers", icon: Users },
   { label: "Reports", icon: Activity },
@@ -69,6 +70,7 @@ function ShopConsole({ tokens, onSignOut }: { tokens: AuthTokens; onSignOut: () 
   const [agentDevices, setAgentDevices] = useState<AgentDevice[]>([]);
   const [paymentSettings, setPaymentSettings] = useState<ShopPaymentSettings | null>(null);
   const [payments, setPayments] = useState<ShopPayment[]>([]);
+  const [subscription, setSubscription] = useState<ShopSubscriptionSummary | null>(null);
   const [enrollmentCode, setEnrollmentCode] = useState<{ code: string; expiresUtc: string } | null>(null);
   const [agentBusy, setAgentBusy] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -93,6 +95,7 @@ function ShopConsole({ tokens, onSignOut }: { tokens: AuthTokens; onSignOut: () 
       setAgentDevices(snapshot.agentDevices);
       setPaymentSettings(snapshot.paymentSettings);
       setPayments(snapshot.payments);
+      setSubscription(snapshot.subscription);
     } catch (exception) {
       if (exception instanceof ApiError && exception.status === 401) {
         storeTokens(null);
@@ -428,7 +431,7 @@ function ShopConsole({ tokens, onSignOut }: { tokens: AuthTokens; onSignOut: () 
           ))}
         </nav>
         <div className="sidebar-bottom">
-          <div className="plan-card"><div className="plan-icon"><ShieldCheck size={17}/></div><div><strong>Trial workspace</strong><span>14-day introductory access</span></div></div>
+          <button type="button" className="plan-card" onClick={() => navAction("Subscription")}><div className="plan-icon"><ShieldCheck size={17}/></div><div><strong>{subscription?.plan?.name || (subscription?.subscription.planCode === "TRIAL" ? "Trial plan" : "Subscription")}</strong><span>{subscription ? `${subscription.subscription.status} · ends ${new Date(subscription.subscription.periodEndUtc).toLocaleDateString("en-IN")}` : "View plan and usage"}</span></div><ArrowRight size={14}/></button>
           <button className="nav-item support-link" onClick={() => navAction("Settings")}><LifeBuoy size={18}/><span>Help & support</span></button>
           <div className="profile-row">
             <div className="profile-avatar">{initials(profile?.ownerName || "Shop Owner")}</div>
@@ -467,6 +470,7 @@ function ShopConsole({ tokens, onSignOut }: { tokens: AuthTokens; onSignOut: () 
           {active === "QR Stations" && <StationsPage stations={stations} onAdd={() => setModal("station")} onToggle={toggleStation} onGenerate={createFreshStationCode}/>}
           {active === "Print Agent" && <PrintAgentPage agents={agentDevices} enrollmentCode={enrollmentCode} busy={agentBusy} onGenerate={generateAgentCode} onRevoke={revokeAgent}/>}
           {active === "Pricing" && pricing && <PricingPage pricing={pricing} onSave={savePricing} busy={busy}/>}
+          {active === "Subscription" && subscription && <SubscriptionPage summary={subscription}/>}
           {active === "Payments" && paymentSettings && <PaymentsPage settings={paymentSettings} payments={payments} onSave={savePaymentSettings} onVerify={verifyPayment} onReject={rejectPayment} busy={busy} busyJobId={busyJobId}/>}
           {active === "Settings" && profile && <SettingsPage profile={profile} onSave={saveProfile} busy={busy}/>}
           {active === "Print Queue" && <PrintQueuePage jobs={printJobs} printers={printers} onPreview={previewJob} onApprove={approveJob} onReject={rejectJob} onHistory={viewJobHistory} onAssignPrinter={assignPrinter} onDispatch={dispatchPrintJob} onConfirmOutput={confirmPrintedOutput} onRefresh={reload} busyJobId={busyJobId}/>}
@@ -958,6 +962,98 @@ function Device({name,detail,state,tone}:{name:string;detail:string;state:string
 }
 function Status({label,tone}:{label:string;tone:string}) { return <span className={"status-badge "+tone}><i/>{label}</span>; }
 function initials(value:string) { return value.trim().split(/\s+/).slice(0,2).map(part=>part[0]?.toUpperCase()||"").join("") || "SP"; }
+function SubscriptionPage({ summary }: { summary: ShopSubscriptionSummary }) {
+  const { subscription, plan, entitlements, usage } = summary;
+  const status = subscription.status.toLowerCase();
+  const statusTone = status === "active" ? "tone-success" : status === "trial" ? "tone-warning" : "tone-neutral";
+  const planName = plan?.name ?? (subscription.planCode === "TRIAL" ? "Trial plan" : subscription.planCode);
+  const periodStart = new Date(subscription.periodStartUtc).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" });
+  const periodEnd = new Date(subscription.periodEndUtc).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" });
+  const price = (amount: number | null | undefined, currency: string) =>
+    amount == null ? "Not configured" : `${currency} ${amount.toLocaleString("en-IN")} minor units`;
+
+  return (
+    <section className="subscription-workspace">
+      <div className="subscription-hero-grid">
+        <section className="panel subscription-current-panel">
+          <div className="subscription-panel-top">
+            <span className="subscription-eyebrow">CURRENT SUBSCRIPTION</span>
+            <span className={`subscription-status ${statusTone}`}>{subscription.status}</span>
+          </div>
+          <h2>{planName}</h2>
+          <p className="subscription-plan-meta">
+            {plan ? `Plan ${plan.code} · version ${plan.version} · ${plan.status}` : "A versioned plan has not yet been assigned to this shop."}
+          </p>
+          <div className="subscription-period">
+            <div><span>Billing interval</span><strong>{subscription.billingInterval}</strong></div>
+            <div><span>Current period</span><strong>{periodStart} – {periodEnd}</strong></div>
+          </div>
+          <div className="subscription-prices">
+            <div><span>Monthly plan price</span><strong>{price(plan?.monthlyPriceMinor, plan?.currency ?? "INR")}</strong></div>
+            <div><span>Annual plan price</span><strong>{price(plan?.annualPriceMinor, plan?.currency ?? "INR")}</strong></div>
+          </div>
+          {entitlements.isLegacyUnconfigured && (
+            <div className="subscription-legacy-note"><ShieldCheck size={15}/><span>This subscription predates plan assignment. Existing shop access is being preserved until its terms are explicitly assigned.</span></div>
+          )}
+        </section>
+
+        <section className="panel subscription-feature-panel">
+          <div className="panel-heading"><div><h2>Included capabilities</h2><p>Resolved from the version assigned to your subscription</p></div></div>
+          <div className="subscription-feature-list">
+            <FeatureLine label="Cloud-assisted printing" enabled={entitlements.cloudAssistedPrintingEnabled}/>
+            <FeatureLine label="White-label experience" enabled={entitlements.whiteLabelEnabled}/>
+            <FeatureLine label="Advanced reports" enabled={entitlements.advancedReportsEnabled}/>
+          </div>
+          <div className="subscription-upgrade-note">
+            <CreditCard size={15}/>
+            <span>Plan changes and subscription billing are managed by the QRtoPrint platform team. Customer print payments remain separate and continue to be handled by your shop.</span>
+          </div>
+        </section>
+      </div>
+
+      <section className="panel subscription-usage-panel">
+        <div className="subscription-usage-heading">
+          <div><h2>Usage and limits</h2><p>Live counts for this shop. Monthly print jobs use the UTC calendar month.</p></div>
+          <span className="subscription-updated">Updated {new Date(summary.generatedUtc).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" })}</span>
+        </div>
+        <div className="subscription-usage-grid">
+          <UsageMeter label="Registered printers" used={usage.printerCount} maximum={entitlements.maxPrinters}/>
+          <UsageMeter label="Paired computers" used={usage.agentDeviceCount} maximum={entitlements.maxAgentDevices}/>
+          <UsageMeter label="QR stations" used={usage.qrStationCount} maximum={entitlements.maxQrStations}/>
+          <UsageMeter label="Print jobs this month" used={usage.monthlyPrintJobCount} maximum={entitlements.maxMonthlyPrintJobs}/>
+        </div>
+        <div className="subscription-document-limit">
+          <span>Maximum cloud document size</span>
+          <strong>{entitlements.maxDocumentBytes == null ? "No configured cap" : `${(entitlements.maxDocumentBytes / (1024 * 1024)).toLocaleString("en-IN", { maximumFractionDigits: 2 })} MB`}</strong>
+        </div>
+        <div className="subscription-usage-footnote">Disabled printers, QR stations and offline agents still count as registered resources unless removed or revoked. Revoked agent computers are excluded.</div>
+      </section>
+    </section>
+  );
+}
+
+function UsageMeter({ label, used, maximum }: { label: string; used: number; maximum: number | null }) {
+  const boundedMaximum = maximum == null ? null : Math.max(0, maximum);
+  const percentage = boundedMaximum == null ? 0 : boundedMaximum > 0 ? Math.min(100, used / boundedMaximum * 100) : 100;
+  return (
+    <div className="subscription-usage-item">
+      <div className="subscription-usage-item-top"><span>{label}</span><strong>{used.toLocaleString("en-IN")} <small>{boundedMaximum == null ? "/ unlimited" : `/ ${boundedMaximum.toLocaleString("en-IN")}`}</small></strong></div>
+      <div className="subscription-progress-track"><span style={{ width: boundedMaximum == null ? "0%" : `${percentage}%` }}/></div>
+      <small className="subscription-usage-caption">{boundedMaximum == null ? "No configured plan limit" : boundedMaximum === 0 ? "Not available on this plan" : `${Math.max(0, boundedMaximum - used).toLocaleString("en-IN")} remaining`}</small>
+    </div>
+  );
+}
+
+function FeatureLine({ label, enabled }: { label: string; enabled: boolean }) {
+  return (
+    <div className="subscription-feature-line">
+      <span className={enabled ? "subscription-feature-indicator enabled" : "subscription-feature-indicator"}>{enabled ? <Check size={13}/> : <X size={13}/>}</span>
+      <span>{label}</span>
+      <strong>{enabled ? "Included" : "Not included"}</strong>
+    </div>
+  );
+}
+
 function pageDescription(section:Section) {
   const descriptions:Record<Section,string> = {
     "Overview":"Your shop setup and operations, all in one place.",
@@ -966,6 +1062,7 @@ function pageDescription(section:Section) {
     "QR Stations":"Create secure customer entry points for each counter.",
     "Print Agent":"Pair the Windows computer that hosts your installed printers.",
     "Pricing":"Set your mono, colour and duplex rates.",
+    "Subscription":"Review your assigned plan, entitlement limits and current usage.",
     "Payments":"Configure your shop's payment methods and verify customer print payments.",
     "Customers":"View customer activity and print history.",
     "Reports":"Understand print volume, shop revenue and performance.",
