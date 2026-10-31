@@ -3466,6 +3466,41 @@ publicApi.MapPost("/jobs/{jobId:guid}/accept-quote", async (
     return Results.Ok(new { job.Id, job.JobNumber, job.Status, job.Currency, job.QuotedAmountMinor, job.UpdatedUtc });
 });
 
+publicApi.MapPost("/sessions/current/renew", async (
+    HttpContext context,
+    SmartPrintDbContext db,
+    CancellationToken ct) =>
+{
+    var rawToken = context.Request.Headers["X-Print-Session"].FirstOrDefault();
+    if (string.IsNullOrWhiteSpace(rawToken))
+    {
+        return Results.Unauthorized();
+    }
+
+    var now = DateTimeOffset.UtcNow;
+    var tokenHash = HashOpaqueToken(rawToken);
+    var session = await db.CustomerPrintSessions.SingleOrDefaultAsync(
+        item => item.TokenHash == tokenHash &&
+                item.Status == "Active" &&
+                item.RevokedUtc == null &&
+                item.ExpiresUtc > now,
+        ct);
+    if (session is null)
+    {
+        return Results.Unauthorized();
+    }
+
+    // Renew only when the existing expiry is approaching; repeated foreground
+    // refreshes do not cause a database write on every customer status poll.
+    if (session.ExpiresUtc <= now.AddMinutes(10))
+    {
+        session.ExpiresUtc = now.AddMinutes(15);
+        await db.SaveChangesAsync(ct);
+    }
+
+    return Results.Ok(new { session.ExpiresUtc });
+}).RequireRateLimiting("qr-session");
+
 publicApi.MapGet("/jobs/{jobId:guid}/status", async (
     Guid jobId,
     HttpContext context,
