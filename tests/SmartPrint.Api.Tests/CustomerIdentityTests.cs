@@ -1,4 +1,5 @@
 using System.Security.Claims;
+using System.IdentityModel.Tokens.Jwt;
 using SmartPrint.Api.Domain;
 using SmartPrint.Api.Security;
 
