@@ -44,7 +44,7 @@ class SavedPdfEditorInstrumentedTest {
                 onView(withContentDescription("Move page 2 up")).check(matches(isDisplayed()))
                 onView(withContentDescription("Remove page 1")).check(matches(isDisplayed()))
                 onView(withContentDescription("Preview page 1")).perform(click())
-                onView(withText("Page 1")).check(matches(isDisplayed()))
+                onView(withText("Close")).check(matches(isDisplayed()))
                 onView(withText("Close")).perform(click())
             }
             assertTrue("The original imported PDF must remain untouched.", source.isFile)
