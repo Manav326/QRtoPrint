@@ -3024,6 +3024,15 @@ publicApi.MapPost("/jobs/{jobId:guid}/quote", async (
         return Results.NotFound();
     }
 
+    if (job.Status is not ("AWAITING_CONFIGURATION" or "QUOTE_EXPIRED" or "Uploaded" or "UPLOADED"))
+    {
+        return Results.Conflict(new
+        {
+            code = "job_not_ready_for_quote",
+            message = "A new quote can only be created for a newly uploaded job or an expired quote."
+        });
+    }
+
     if (job.PageCount <= 0 || job.PageCount > 500 ||
         request.Copies is < 1 or > 100 ||
         request.PaperSize != "A4" ||
