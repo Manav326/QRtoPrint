@@ -910,7 +910,7 @@ shop.MapGet("/reports/summary", async (
         payment.TenantId == tenantId &&
         (payment.Status == "AWAITING_CUSTOMER_PAYMENT" ||
          payment.Status == "CUSTOMER_REPORTED" ||
-         payment.Status == "CASH_AWAITING_PAYMENT"), ct)
+         payment.Status == "CASH_AWAITING_PAYMENT"), ct);
 
     return Results.Ok(new
     {
