@@ -1,5 +1,6 @@
 <resources>
-    <color name="qp_icon_background">#182B5D</color>\n    <color name="qp_primary">#315CDB</color>
+    <color name="qp_icon_background">#182B5D</color>
+    <color name="qp_primary">#315CDB</color>
     <color name="qp_surface">#F7F8FC</color>
     <color name="qp_card">#FFFFFF</color>
     <color name="qp_text">#172033</color>
