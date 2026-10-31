@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import {
-  CheckCircle2, CirclePlus, Clock3, Cloud, FileText, Layers3, LoaderCircle,
+  CheckCircle2, CirclePlus, Cloud, FileText, Layers3, LoaderCircle,
   LockKeyhole, RefreshCw, Save, ShieldCheck, Sparkles, ToggleLeft, ToggleRight
 } from "lucide-react";
 import {
@@ -424,7 +424,7 @@ function Field({ label, hint, wide, children }: {
   label: string;
   hint?: string;
   wide?: boolean;
-  children: React.ReactNode;
+  children: ReactNode;
 }) {
   return <label className={wide ? "platform-plan-field wide" : "platform-plan-field"}>
     <span>{label}{hint && <small>{hint}</small>}</span>
@@ -464,7 +464,7 @@ function PlanVersionEditor({ form, onChange }: {
 }
 
 function FeatureToggle({ icon, label, description, checked, onChange }: {
-  icon: React.ReactNode;
+  icon: ReactNode;
   label: string;
   description: string;
   checked: boolean;
