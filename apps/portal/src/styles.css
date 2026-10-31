@@ -149,3 +149,40 @@
 @media(max-width:650px){.queue-header-actions{align-items:flex-end;flex-direction:column}.queue-refresh-button{width:100%;justify-content:center}}
 
 .queue-print-warning{color:var(--warning,#ca8a04)}.queue-header-actions{display:flex;align-items:center;gap:8px;flex:0 0 auto}.queue-refresh-button{height:30px;padding:0 10px;font-size:8px;white-space:nowrap}.queue-refresh-button svg{margin-right:5px}@media(max-width:650px){.queue-header-actions{align-items:flex-end;flex-direction:column}.queue-refresh-button{justify-content:center}}
+
+/* Shop operations reporting */
+.reports-workspace{display:flex;flex-direction:column;gap:15px;min-width:0}
+.reports-toolbar{display:flex;align-items:flex-end;justify-content:space-between;gap:16px;margin-bottom:2px}
+.reports-toolbar h2{font:700 18px Manrope,sans-serif;letter-spacing:-.35px;margin:4px 0 5px;color:var(--text)}
+.reports-toolbar p{font-size:10px;color:var(--muted);margin:0;line-height:1.55}
+.reports-eyebrow{font-size:8px;letter-spacing:1.3px;font-weight:800;color:var(--accent)}
+.reports-controls{display:flex;align-items:flex-end;gap:9px;flex:0 0 auto}
+.reports-period{display:flex;flex-direction:column;gap:5px;font-size:8px;font-weight:700;color:var(--muted)}
+.reports-period select{height:34px;min-width:128px;padding:0 10px;border:1px solid var(--border);border-radius:8px;background:var(--surface-2);color:var(--text);font:9px 'DM Sans',sans-serif}
+.reports-refresh{height:34px;display:inline-flex;align-items:center;gap:6px;padding:0 11px}
+.reports-loading{min-height:120px;display:flex;align-items:center;justify-content:center;gap:10px;color:var(--muted);font-size:10px}
+.reports-stat-grid{margin-bottom:0}
+.reports-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:15px}
+.reports-panel{min-width:0;min-height:250px}
+.reports-panel .panel-heading{margin-bottom:17px}
+.reports-panel .panel-heading h2{font:700 13px Manrope,sans-serif;margin:0 0 5px;color:var(--text)}
+.reports-panel .panel-heading p{font-size:9px;color:var(--muted);margin:0;line-height:1.45}
+.report-status-list,.report-collection-list{display:flex;flex-direction:column;gap:15px}
+.report-status-row{display:flex;flex-direction:column;gap:7px}
+.report-status-label{display:flex;align-items:center;justify-content:space-between;gap:12px;font-size:9px;color:var(--muted)}
+.report-status-label strong{font:700 10px 'DM Sans',sans-serif;color:var(--text);font-variant-numeric:tabular-nums}
+.report-status-track{height:7px;overflow:hidden;border-radius:99px;background:var(--surface-2);border:1px solid var(--border)}
+.report-status-track span{display:block;height:100%;border-radius:99px;background:var(--accent);min-width:3px;transition:width .25s ease}
+.report-collection-row{display:flex;justify-content:space-between;align-items:center;gap:12px;padding-bottom:13px;border-bottom:1px solid var(--border)}
+.report-collection-row:last-child{border-bottom:0;padding-bottom:0}
+.report-collection-row>div{display:flex;flex-direction:column;gap:4px;min-width:0}
+.report-collection-row>div strong{font-size:10px;color:var(--text)}
+.report-collection-row small{font-size:8px;color:var(--muted)}
+.report-collection-amount{font:700 13px Manrope,sans-serif;color:var(--text);white-space:nowrap;font-variant-numeric:tabular-nums}
+.reports-empty{min-height:130px;display:flex;align-items:center;justify-content:center;text-align:center;padding:18px;color:var(--muted);font-size:9px;line-height:1.6}
+.report-caution{display:flex;align-items:flex-start;gap:9px;padding:12px 14px;border:1px solid rgba(218,163,73,.3);border-radius:9px;background:rgba(218,163,73,.08);color:var(--warning,#c18a35);font-size:9px;line-height:1.55}
+.report-caution svg{flex:0 0 auto;margin-top:1px}
+.report-caution strong{font-weight:800}
+.reports-footnote{font-size:8px;color:var(--muted);line-height:1.6;padding:0 2px}
+@media(max-width:850px){.reports-grid{grid-template-columns:1fr}}
+@media(max-width:600px){.reports-toolbar{align-items:stretch;flex-direction:column}.reports-controls{width:100%;align-items:flex-end}.reports-period{flex:1}.reports-period select{width:100%}.reports-stat-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.reports-panel{padding:15px}.reports-toolbar h2{font-size:16px}}
