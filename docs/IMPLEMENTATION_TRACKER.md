@@ -1,11 +1,11 @@
 # SmartPrint by QuantaEdge — implementation tracker
 
-Working branch: `feature/shop-review-refunds-and-portal-polish`. Keep implementation on this branch; do not write to `main`.
+Integration target: `main`. Keep the existing Android document-studio draft PR separate from this shop-review/refund change.
 
 ## Implemented in source
 - [x] Multi-file PDF/JPG/JPEG/PNG customer uploads share one batch identifier.
 - [x] Every file starts accepted; the shopkeeper can reject files individually and undo selections before applying review.
-- [x] Verified paid files support page-level partial refunds calculated from the original paid amount.
+- [x] Verified paid files support page-level partial refunds from immutable per-page allocations saved with the original quote (duplex sheet sharing, copies and minimum charge included).
 - [x] Multiple partial refunds accumulate; the total cannot exceed the original payment.
 - [x] Refund idempotency keys prevent duplicate records and cannot be reused across files.
 - [x] Previously refunded pages cannot be restored.
@@ -16,9 +16,9 @@ Working branch: `feature/shop-review-refunds-and-portal-polish`. Keep implementa
 - [x] SmartPrint by QuantaEdge branding is applied to portal metadata, Android launcher and primary documentation.
 
 ## Acceptance still required
-- [ ] Run portal typecheck/build and .NET Release build/tests.
+- [ ] Re-run portal typecheck/build and .NET Release build/tests after quote-allocation and row-lock changes.
 - [ ] Apply the EF migration against PostgreSQL containing historical refund rows.
-- [ ] Exercise partial/full refunds, cumulative amounts and concurrent idempotency against PostgreSQL.
+- [ ] Exercise partial/full refunds, cumulative amounts and refund-vs-Agent-claim concurrency against PostgreSQL.
 - [ ] Validate filtered physical print and PDF output on Windows.
 - [ ] Validate page-review UX on desktop and physical Android.
 - [ ] Rehearse UPI/cash returns and verify the customer receives the money before recording it.
