@@ -114,6 +114,7 @@ export interface QrStation {
   printerDeviceId?: string | null;
   displayName: string;
   publicCodeHint: string;
+  publicUrl?: string | null;
   isEnabled: boolean;
   createdUtc: string;
   publicUrl?: string;
@@ -356,12 +357,41 @@ export interface ShopSubscriptionSummary {
   };
 }
 
+export interface ShopRefund {
+  id: string;
+  printJobId: string;
+  printPaymentId: string;
+  jobNumber: string;
+  documentName: string;
+  amountMinor: number;
+  currency: string;
+  method: "UPI" | "CASH";
+  status: string;
+  reference?: string | null;
+  reason: string;
+  refundedUtc: string;
+  refundedByUserId: string;
+  refundedByName: string;
+}
+
+export function recordShopPrintRefund(token: string, jobId: string, values: {
+  refundMethod: "UPI" | "CASH";
+  refundReference: string | null;
+  reason: string;
+  confirmedSent: true;
+}) {
+  return apiRequest<ShopRefund>(`/api/v1/shop/print-jobs/${jobId}/refund`, {
+    method: "POST",
+    body: JSON.stringify(values)
+  }, token);
+}
+
 export function getShopSubscription(token: string) {
   return apiRequest<ShopSubscriptionSummary>("/api/v1/shop/subscription", {}, token);
 }
 
 export async function loadShopData(token: string) {
-  const [profile, printers, stations, pricing, printJobs, agentDevices, paymentSettings, payments, subscription] = await Promise.all([
+  const [profile, printers, stations, pricing, printJobs, agentDevices, paymentSettings, payments, refunds, subscription] = await Promise.all([
     apiRequest<ShopProfile>("/api/v1/shop/profile", {}, token),
     apiRequest<PrinterDevice[]>("/api/v1/shop/printers", {}, token),
     apiRequest<QrStation[]>("/api/v1/shop/qr-stations", {}, token),
@@ -370,9 +400,10 @@ export async function loadShopData(token: string) {
     apiRequest<AgentDevice[]>("/api/v1/shop/agent-devices", {}, token),
     apiRequest<ShopPaymentSettings>("/api/v1/shop/payment-settings", {}, token),
     apiRequest<ShopPayment[]>("/api/v1/shop/payments", {}, token),
+    apiRequest<ShopRefund[]>("/api/v1/shop/refunds", {}, token),
     getShopSubscription(token)
   ]);
-  return { profile, printers, stations, pricing, printJobs, agentDevices, paymentSettings, payments, subscription };
+  return { profile, printers, stations, pricing, printJobs, agentDevices, paymentSettings, payments, refunds, subscription };
 }
 
 export function getShopReportSummary(token: string, days: 7 | 30 | 90) {
@@ -490,6 +521,7 @@ export interface ShopPricingProfile {
 
 export interface ShopPrintJob {
   id: string;
+  batchId?: string | null;
   jobNumber: string;
   status: string;
   pageCount: number;
@@ -522,6 +554,7 @@ export interface ShopPrintJob {
   outputSha256?: string | null;
   outputSizeBytes?: number | null;
   outputCompletedUtc?: string | null;
+  payment?: { id: string; status: string; amountMinor: number; currency: string; method: string } | null;
   document: { originalFileName: string; mediaType: string; sizeBytes: number };
 }
 
@@ -533,6 +566,7 @@ export interface UploadedPrintJob {
 
 export interface PrintQuoteResult {
   id: string;
+  batchId?: string | null;
   jobNumber: string;
   status: string;
   pageCount: number;
@@ -577,7 +611,7 @@ function customerUploadAttemptStorageKey(sessionToken: string, file: File): stri
   return `qrtoprint.customer-upload-attempt.${sessionToken.slice(0, 16)}.${fingerprint}`;
 }
 
-export async function uploadCustomerDocument(sessionToken: string, file: File) {
+export async function uploadCustomerDocument(sessionToken: string, file: File, batchId?: string) {
   const storageKey = customerUploadAttemptStorageKey(sessionToken, file);
   const idempotencyKey = sessionStorage.getItem(storageKey) || crypto.randomUUID();
   sessionStorage.setItem(storageKey, idempotencyKey);
@@ -588,7 +622,8 @@ export async function uploadCustomerDocument(sessionToken: string, file: File) {
     method: "POST",
     headers: {
       "X-Print-Session": sessionToken,
-      "Idempotency-Key": idempotencyKey
+      "Idempotency-Key": idempotencyKey,
+      ...(batchId ? { "X-Print-Batch-Id": batchId } : {})
     },
     body: form
   });
@@ -632,7 +667,8 @@ function isPrivateLocalAgentEndpoint(value: string): URL | null {
 export async function uploadCustomerDocumentLocally(
   sessionToken: string,
   file: File,
-  localAgent: CustomerLocalAgentApi
+  localAgent: CustomerLocalAgentApi,
+  batchId?: string
 ): Promise<UploadedPrintJob> {
   const keys = customerLocalUploadAttemptStorageKeys(sessionToken, file);
   const idempotencyKey = sessionStorage.getItem(keys.idempotency) || crypto.randomUUID();
@@ -668,7 +704,8 @@ export async function uploadCustomerDocumentLocally(
         originalFileName: file.name,
         sizeBytes: file.size,
         sha256,
-        grantToken
+        grantToken,
+        batchId: batchId ?? null
       })
     });
   } catch (exception) {
