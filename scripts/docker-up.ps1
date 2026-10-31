@@ -106,6 +106,36 @@ if ($LASTEXITCODE -ne 0) {
     throw "Docker Compose failed to start the QRtoPrint services. Inspect with: docker compose --env-file .env -f compose.yml logs"
 }
 
+
+Write-Host "Waiting for the API database migrations and portal health checks..." -ForegroundColor Cyan
+$apiHealthy = $false
+for ($attempt = 0; $attempt -lt 90; $attempt++) {
+    docker compose --env-file $envPath -f $composeFile exec -T api curl --fail --silent http://127.0.0.1:8080/health/ready | Out-Null
+    if ($LASTEXITCODE -eq 0) {
+        $apiHealthy = $true
+        break
+    }
+    Start-Sleep -Seconds 2
+}
+if (-not $apiHealthy) {
+    docker compose --env-file $envPath -f $composeFile logs --tail 80 api db
+    throw "The API did not become healthy. The database migration may have failed; do not proceed with shop onboarding until the logs are resolved."
+}
+
+$portalHealthy = $false
+for ($attempt = 0; $attempt -lt 30; $attempt++) {
+    docker compose --env-file $envPath -f $composeFile exec -T portal wget -q -O /dev/null http://127.0.0.1/
+    if ($LASTEXITCODE -eq 0) {
+        $portalHealthy = $true
+        break
+    }
+    Start-Sleep -Seconds 2
+}
+if (-not $portalHealthy) {
+    docker compose --env-file $envPath -f $composeFile logs --tail 80 portal
+    throw "The portal did not become healthy. Inspect the portal container logs before use."
+}
+
 docker compose --env-file $envPath -f (Join-Path $repoRoot "compose.yml") ps
 $values = @{}
 foreach ($line in (Get-Content -LiteralPath $envPath)) {

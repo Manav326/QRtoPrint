@@ -2,12 +2,23 @@
     email {$ACME_EMAIL}
 }
 
+(securityHeaders) {
+    header {
+        Strict-Transport-Security "max-age=31536000"
+        X-Content-Type-Options "nosniff"
+        Referrer-Policy "strict-origin-when-cross-origin"
+        X-Frame-Options "DENY"
+    }
+}
+
 {$PORTAL_DOMAIN} {
+    import securityHeaders
     encode zstd gzip
     reverse_proxy portal:80
 }
 
 {$API_DOMAIN} {
+    import securityHeaders
     encode zstd gzip
     reverse_proxy api:8080
 }

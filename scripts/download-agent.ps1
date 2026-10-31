@@ -30,7 +30,7 @@ $fullDestination = [System.IO.Path]::GetFullPath($Destination)
 $destinationParent = Split-Path -Parent $fullDestination
 New-Item -ItemType Directory -Force -Path $destinationParent | Out-Null
 $stageDirectory = Join-Path $destinationParent ('.qrtoprint-agent-stage-' + [Guid]::NewGuid().ToString('N'))
-$previousDirectory = $fullDestination + '.previous-' + (Get-Date -Format 'yyyyMMdd-HHmmss')
+$previousDirectory = $fullDestination + '.previous-' + (Get-Date -Format 'yyyyMMdd-HHmmss') + '-' + [Guid]::NewGuid().ToString('N').Substring(0, 6)
 New-Item -ItemType Directory -Force -Path $stageDirectory | Out-Null
 $oldMoved = $false
 $newInstalled = $false
