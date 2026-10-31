@@ -31,34 +31,38 @@ Acceptance: an operator can configure a shop, station and pricing, inspect jobs 
 
 ## Workstream 3 — customer PWA
 
-- QR session creation/expiry/revocation.
-- Multi-file upload, validation, preview and document analysis.
-- Print configuration constrained by printer capabilities.
-- Server-calculated quote and customer approval.
-- Shop-configured payment/counter-payment flow.
-- Tracking, receipt, collection and issue reporting.
+- [x] QR session creation, expiry, renewal, revocation and customer keepalive.
+- [x] Single PDF/JPG/PNG upload with signature checks, SHA-256, page analysis and 20 MB application limit.
+- [x] Direct shop-LAN upload to the paired Agent using a short-lived one-use grant; document bytes do not traverse cloud storage.
+- [x] Cloud-assisted protected upload remains available as a selectable fallback.
+- [x] Server-calculated quote, customer quote acceptance, shop review and customer job tracking.
+- [x] Shop-configured UPI/cash reporting with manual shop payment verification.
+- Multi-file, Office formats, complete customer receipt/collection and issue-report workflow.
 
-Acceptance: full customer journey works end-to-end with local mode and test payment provider/sandbox; no client-trusted price or payment state.
+Acceptance: both transfer modes use one server-owned job lifecycle; no client-trusted price or payment state. LAN mode must be verified on representative real Android/iOS browsers and shop Wi-Fi networks before it is treated as universally compatible.
 
 ## Workstream 4 — local Windows edge and printer integration
 
-- Windows service, tray companion and authenticated local endpoint.
-- Durable SQLite queue and recovery journal.
-- Windows spooler adapter and IPP adapter where supported.
-- Capability discovery, status freshness and diagnostics.
-- Cloud agent registration, secure polling and sync.
+- [x] Windows Service, paired identity, DPAPI LocalMachine credentials and authenticated cloud heartbeat.
+- [x] LAN endpoint discovery and private-profile firewall rule on TCP 17842.
+- [x] Read-only local health endpoint and direct multipart document upload with exact-origin CORS.
+- [x] Shared PDF/JPG/PNG document analysis, SHA-256 verification and DPAPI-protected local document queue.
+- [x] Staged-upload reconciliation and expiry cleanup; paid-job claim refreshes settings before queue acknowledgement.
+- [x] Windows spooler submission, status reconciliation and explicit shop output confirmation.
+- Tray companion, signed installer/auto-updater, additional IPP adapter and richer device diagnostics.
 
-Acceptance: tests cover restart, disconnect, duplicate submission prevention and uncertain output. Physical hardware matrix is documented and tested before compatibility claims.
+Acceptance: automated tests cover staging, same-printer binding, restart recovery and duplicate submission prevention. Physical hardware matrix and mobile-browser Local Network Access behaviour are documented and tested before compatibility claims.
 
-## Workstream 5 — cloud-assisted printing and payments
+## Workstream 5 — cloud control plane and cloud-assisted transfer
 
-- Protected cloud upload and retention.
-- Tenant/station-bound job routing and agent retrieval.
-- Payment provider adapter boundary and verified webhook flow.
-- Separate shop print and platform subscription financial ledgers.
-- Reconciliation and refund lifecycle.
+- [x] Protected cloud upload and retention as an alternative transfer mode.
+- [x] Tenant/station-bound job routing and paired-Agent retrieval.
+- [x] Server-calculated quote, quote expiry/acceptance and shop approval.
+- [x] UPI/cash print-payment attempt with manual shop payment verification before Agent dispatch.
+- Separate customer-print and SaaS-subscription payment provider adapters.
+- Automated signed gateway webhook verification, subscription invoices, refund and reconciliation lifecycle.
 
-Acceptance: cross-tenant retrieval is impossible; payment replay/idempotency and failed transfer cases are tested.
+Acceptance: cross-tenant retrieval is impossible; payment replay/idempotency and failed-transfer cases are tested. Manual payment verification must not be described as automated gateway verification.
 
 ## Workstream 6 — platform administration and operations
 

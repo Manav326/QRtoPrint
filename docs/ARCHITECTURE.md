@@ -78,11 +78,11 @@ Initial adapters: Windows Print Spooler (installed vendor driver), IPP where sup
 
 ## 6. Local and cloud-assisted data flow
 
-Local mode: customer browser → QR-bound local session → local edge upload → local validation/quote → customer approval/payment policy → local durable queue → printer adapter.
+**Direct LAN document transfer (implemented):** customer browser on an HTTPS origin → QR-bound cloud session → API issues a one-use, 15-minute grant bound to the tenant/session/station/printer/Agent and expected file hash → browser transfers bytes to the paired Agent's private-LAN HTTP endpoint → Agent verifies grant with the API, validates signature/hash/page analysis and stores the file encrypted with DPAPI LocalMachine → API records metadata only as `StorageMode=LOCAL_AGENT`.
 
-Cloud-assisted mode: customer browser → authenticated tenant/station session → protected cloud upload → server-side validation/quote/authorisation → agent lease/pull → verified local staging → local queue → printer adapter.
+**Cloud-assisted document transfer (implemented):** customer browser → authenticated tenant/station session → API validates and stores encrypted cloud document → shop/quote/payment lifecycle → assigned Agent claims a verified, explicitly dispatched job → Agent downloads and verifies the document into the same DPAPI-protected queue.
 
-The agent authenticates with a device credential and short-lived access tokens. It polls/streams only jobs for its tenant and registered station. Cloud files are encrypted in transit and at rest, have short-lived access grants, quotas and retention policies.
+These are two ingress/storage modes for one PrintJob model, not two parallel job systems. Both use the cloud API for authoritative session, tenant, quote, approval, payment, entitlement and dispatch state. Direct LAN transfer keeps document bytes off cloud storage but is not an offline quote/payment/dispatch mode. A `LOCAL_AGENT` document is printer/Agent-bound; cloud document endpoints reject retrieval and the shop cannot reassign it to a different printer. The Agent must prove the local file is present and intact before acknowledging receipt or executing an authorised print.
 
 ## 7. Payment boundaries
 

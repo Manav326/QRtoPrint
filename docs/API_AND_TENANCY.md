@@ -92,13 +92,16 @@ The initial PostgreSQL migration creates Identity tables and tenant-scoped tenan
 
 Set ConnectionStrings:SmartPrint and Authentication:SigningKey using environment variables or a secret store. Apply migrations using the scripts/migrate-database.ps1 PowerShell script.
 
-ASPNETCORE_ENVIRONMENT=Development uses a local PostgreSQL connection fallback for developer convenience. The API does not automatically mutate a production database on startup. /health/live is process health; /health/ready verifies database connectivity.
+ASPNETCORE_ENVIRONMENT=Development uses a local PostgreSQL connection fallback for developer convenience. The API does not automatically mutate a database by default; the Docker Compose deployment explicitly sets `Database:ApplyMigrationsOnStartup=true`, so the API applies pending migrations after PostgreSQL is healthy. /health/live is process health; /health/ready verifies database connectivity.
 
 ## Current boundary
 
-The cloud-assisted print workflow is implemented end to end: a customer uploads one supported document through the public API; the API validates and stores it in protected storage; the shop configures and quotes the request; the customer accepts; the shop approves; the customer starts a UPI or cash payment attempt; the shop manually verifies receipt; and a paired Windows Agent secures the original in its encrypted local queue and performs controlled spooler submission. A shop operator must still confirm the actual paper output.
+The customer print workflow supports two document-transfer modes and one shared job/payment lifecycle:
 
-The current customer upload path is cloud-assisted. The document is sent to the API and stored in protected server storage before the paired agent retrieves it. **Direct shop-Wi-Fi/LAN upload**, where document bytes stay on the shop network and do not pass through cloud document storage, is not implemented yet. Do not describe the current cloud-assisted path as local-only printing.
+- **Direct shop-Wi-Fi upload:** the customer phone sends one supported PDF/JPG/PNG document directly to the paired Windows Agent on the shop LAN. The Agent validates the signature, SHA-256, file size and page analysis, then stores the file in its DPAPI LocalMachine-protected queue. The cloud API stores only metadata and the expected content hash; it does not receive the document bytes or create a cloud document object.
+- **Cloud-assisted upload:** the customer sends the file to the public API, which validates and stores it in protected cloud document storage. The assigned Agent later retrieves the document over its authenticated cloud connection into the same protected local queue.
+
+Both modes use the same tenant-scoped PrintJob, server-calculated quote, customer quote acceptance, shop approval, UPI/cash payment attempt, manual shop payment verification, explicit dispatch, spooler reconciliation and shop-confirmed physical-output state. A local-only document is locked to the paired Agent and printer that received it and cannot be downloaded from cloud storage or reassigned to another Agent. A shop operator must still confirm the actual paper output. Direct LAN transfer does not mean offline quote/payment operation: the API remains the control plane for job creation, quote, payment and dispatch.
 
 ## Quote acceptance and shop review
 
@@ -108,7 +111,7 @@ The current customer upload path is cloud-assisted. The document is sent to the 
 - GET /api/v1/public/jobs/{jobId}/status — returns status and a customer-safe event timeline only to the active customer session that created the job.
 - POST /api/v1/shop/print-jobs/{jobId}/approve — shop owner/manager approval advances the request to AWAITING_PAYMENT, never directly to printing.
 - POST /api/v1/shop/print-jobs/{jobId}/reject — rejects a customer-accepted request awaiting shop review.
-- GET /api/v1/shop/print-jobs/{jobId}/document — tenant-authorised document preview. The file is decrypted only after tenant/job access is verified and is served with no-store and nosniff headers.
+- GET /api/v1/shop/print-jobs/{jobId}/document — tenant-authorised preview for cloud-stored documents. A `LOCAL_AGENT` document returns `409 document_stored_on_local_agent`; its bytes intentionally remain on the assigned shop computer.
 
 Customer print payments use the shop's UPI/cash settings and require a separate manual verification action by the shop. Shop approval alone neither proves payment nor authorises physical print execution.
 
@@ -146,7 +149,7 @@ Direct LAN upload uses these endpoints:
 - The local document remains bound to the original paired Agent and printer. After shop approval and manual payment verification, that same Agent claims the paid job, refreshes stored print settings, acknowledges local receipt and continues through the existing print-dispatch/spooler/output-confirmation flow. A LOCAL_AGENT document cannot be reassigned or fetched from the cloud.
 - Cloud-assisted upload remains available as a customer-selected alternative. Direct LAN upload requires a secure HTTPS portal origin, user-granted Local Network Access permission and exact `Agent:LocalApi:AllowedOrigins` configuration. The installer sets the portal origin through `-CustomerPortalOrigin`.
 
-The Windows Agent is not inventory-only. It claims paid jobs assigned to its own live printer queues, retrieves the original document over its authenticated channel, verifies the original SHA-256 and byte count, persists the document in an encrypted DPAPI-protected local queue, and submits only jobs explicitly authorised by the shop. It reports spooler state and uncertain outcomes to the API. It does not capture payments or infer that a spooler-accepted job has physically completed. The durable queue, print submission and output-reconciliation lifecycle is described below.
+The Windows Agent is not inventory-only. For cloud-stored jobs it retrieves the original document over its authenticated channel; for LAN-only jobs it reuses the already staged local document and never requests a cloud download. In both cases it verifies SHA-256 and size, acknowledges local receipt only after the protected file exists, and submits only jobs explicitly authorised by the shop after verified payment. It reports spooler state and uncertain outcomes to the API. It does not capture payments or infer that a spooler-accepted job has physically completed. The durable queue, print submission and output-reconciliation lifecycle is described below.
 
 
 ## Shop-owned print payments

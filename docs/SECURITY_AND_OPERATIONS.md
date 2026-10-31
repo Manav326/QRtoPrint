@@ -18,7 +18,10 @@ A printed QR identifies a shop station; it does not authorise printing by itself
 - Allowlist file formats and validate signatures, not only extensions.
 - Enforce file size, page count, decompression and processing-time limits.
 - Store files outside public web roots; use opaque identifiers and short-lived authorised access.
-- Encrypt cloud transfer and documents at rest using AES-256-GCM with a deployment-specific 32-byte key; protect the key in a secret store and files with Windows ACLs/shop-scoped directories.
+- Encrypt cloud documents at rest using AES-256-GCM with a deployment-specific 32-byte key; protect the key in the deployment secret store.
+- For direct LAN uploads, issue a random one-use grant bound to the live QR session, tenant, station, assigned Agent/printer, filename, byte count and SHA-256. Persist only a hash of the grant in the API.
+- Accept the document only at the exact private-LAN Agent, verify grant ownership with the cloud API, enforce a 20 MB transfer ceiling and analyse the actual document signature/content before storing.
+- Store received Agent documents and the Windows Agent identity with DPAPI LocalMachine; protect the queue directory with SYSTEM/Administrators-only Windows ACLs. Never return a local-only document through cloud document-preview/download endpoints.
 - The document storage format is versioned (`QSP1`); never reuse the development key in production.
 - Scan uploads where configured and isolate conversion/rendering processes.
 - Apply explicit retention and deletion policies. Never log document contents or public file URLs.
@@ -57,6 +60,9 @@ Platform support access to tenant records must be least-privilege, time-bound, p
 
 ## 8. Release operations
 
+- Deploy PostgreSQL, API, portal and Caddy through the versioned Docker Compose stack; use persistent database, cloud-document and Caddy certificate volumes.
+- Keep the Windows Print Agent on the printer-connected shop computer; it is not run in the Linux API container.
+- Preserve the exact `.env` secrets and back up PostgreSQL and cloud document storage together before upgrades/migrations; test restore procedures.
 - Sign Windows installers and agent updates.
 - Use staged release channels and rollback-capable updates.
 - Verify update signatures before installation.

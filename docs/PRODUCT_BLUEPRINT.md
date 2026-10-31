@@ -26,13 +26,13 @@ QRtoPrint is a commercial QR-based printing platform. Independent print shops su
 
 ### Local Wi-Fi
 
-A customer joins the shop network, scans a station QR, and sends documents to the shop's local edge endpoint. The local edge validates the QR session and receives the upload. Print execution and local file handling do not require cloud document storage. SaaS licensing and optional online payment still need internet periodically or at payment time.
+The intended end-state local mode keeps document transfer and print execution on the shop network. **Currently implemented slice:** the phone obtains a one-use grant from the cloud API using the live QR session, sends the document directly to the paired Agent, and the Agent validates and stores the file locally. The cloud retains job/document metadata and remains authoritative for quote, approval, payment verification and explicit dispatch. Therefore current LAN upload avoids cloud document storage but does not provide offline quote/payment/dispatch.
 
 ### Cloud-assisted
 
 A customer scans a QR or opens the shop portal over mobile data or any internet connection. Files are uploaded to a protected cloud transfer area. The shop's authenticated agent retrieves only jobs authorised for its tenant and station. Cloud transfer/storage must have explicit quotas, retention, encryption, and metering.
 
-Both modes share one job model, price engine, approval policy, state machine, receipt and audit trail. The local mode must not become a separate product.
+Both modes share one job model, server-side price engine, approval policy, payment state machine and audit trail. The local mode must not become a separate product.
 
 ## 5. Document intelligence
 
