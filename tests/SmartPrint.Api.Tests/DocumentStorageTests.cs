@@ -1,6 +1,7 @@
 using System.Security.Cryptography;
 using Microsoft.Extensions.Configuration;
 using SmartPrint.Api.Storage;
+using SmartPrint.Documents;
 
 namespace SmartPrint.Api.Tests;
 
