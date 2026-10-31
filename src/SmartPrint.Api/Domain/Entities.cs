@@ -82,7 +82,7 @@ public sealed class SubscriptionPlanVersion
     public int? MaxQrStations { get; set; }
     public int? MaxMonthlyPrintJobs { get; set; }
     public long? MaxDocumentBytes { get; set; }
-    public bool CloudAssistedPrintingEnabled { get; set; } = true;
+    public bool CloudAssistedPrintingEnabled { get; set; }
     public bool WhiteLabelEnabled { get; set; }
     public bool AdvancedReportsEnabled { get; set; }
     public DateTimeOffset CreatedUtc { get; set; } = DateTimeOffset.UtcNow;
