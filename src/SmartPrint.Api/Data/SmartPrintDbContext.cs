@@ -194,7 +194,7 @@ public sealed class SmartPrintDbContext(DbContextOptions<SmartPrintDbContext> op
             entity.HasAlternateKey(x => new { x.TenantId, x.Id });
             entity.HasIndex(x => new { x.TenantId, x.AgentDeviceId, x.QueueName })
                 .IsUnique()
-                .HasFilter("\"AgentDeviceId\" IS NOT NULL");
+                .HasFilter("\"AgentDeviceId\" IS NOT NULL AND \"QueueName\" IS NOT NULL");
             entity.HasIndex(x => new { x.TenantId, x.IsActive });
             entity.HasOne<AgentDevice>().WithMany()
                 .HasForeignKey(x => new { x.TenantId, x.AgentDeviceId })
@@ -341,7 +341,7 @@ public sealed class SmartPrintDbContext(DbContextOptions<SmartPrintDbContext> op
                 .HasPrincipalKey(x => new { x.TenantId, x.Id })
                 .OnDelete(DeleteBehavior.Restrict);
             entity.HasIndex(x => new { x.TenantId, x.AgentDeviceId })
-                .HasFilter("\\"AgentDeviceId\\" IS NOT NULL");
+                .HasFilter("\"AgentDeviceId\" IS NOT NULL");
             entity.HasIndex(x => new { x.TenantId, x.PrintJobId }).IsUnique();
             entity.HasIndex(x => new { x.TenantId, x.Sha256 });
             entity.HasOne<PrintJob>().WithOne().HasForeignKey<PrintDocument>(x => new { x.TenantId, x.PrintJobId })
