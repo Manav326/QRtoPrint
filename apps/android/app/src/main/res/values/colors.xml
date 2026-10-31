@@ -1,0 +1,8 @@
+<resources>
+    <color name="qp_primary">#315CDB</color>
+    <color name="qp_surface">#F7F8FC</color>
+    <color name="qp_card">#FFFFFF</color>
+    <color name="qp_text">#172033</color>
+    <color name="qp_muted">#667085</color>
+    <color name="qp_outline">#E3E7EF</color>
+</resources>

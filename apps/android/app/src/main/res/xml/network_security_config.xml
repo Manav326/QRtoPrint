@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<network-security-config>
+    <!-- MainActivity blocks cleartext except private-shop Agent upload URLs on TCP 17842. -->
+    <base-config cleartextTrafficPermitted="true" />
+</network-security-config>
