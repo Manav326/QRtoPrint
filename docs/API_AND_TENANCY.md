@@ -46,6 +46,13 @@ Plan versions are immutable after publication. A subscription's nullable PlanVer
 
 The catalogue is a configuration foundation, not a payment implementation. Publishing a plan does not bill a shop or assign a subscription; plan assignment, runtime quota enforcement, subscription invoices, platform payment reconciliation, renewals, dunning and refunds remain separate work. Do not use shop-owned print-payment settings or records for SaaS subscription charges.
 
+### Shop subscription visibility
+
+- GET /api/v1/shop/subscription — returns only the authenticated tenant's latest subscription, linked plan-version terms, effective entitlements and current resource usage. The endpoint never accepts a tenant ID from the caller.
+- Usage counts include all shop printers and QR stations, active paired agent computers and print jobs created in the current UTC calendar month.
+- Prices are returned as configured minor currency units. This is a read-only summary; shops cannot edit their plan, set their own limits, or initiate/confirm a subscription payment from this endpoint.
+- This is the platform subscription flow, not customer print payments. UPI/cash collected by a shop for a customer's print job remains separate.
+
 ### Authenticated shop endpoints
 
 - GET /api/v1/shop/profile
