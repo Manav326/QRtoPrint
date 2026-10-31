@@ -86,7 +86,7 @@ public sealed class PlatformSubscriptionAssignmentRulesTests
     }
 
     [Theory]
-    [InlineData(100)]
+    [InlineData(100L)]
     [InlineData(null)]
     public void PaidOrUnsetPriceCannotBeGrantedManually(long? monthlyPriceMinor)
     {
