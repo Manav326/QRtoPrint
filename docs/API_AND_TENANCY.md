@@ -11,6 +11,12 @@
 
 Passwords are handled by ASP.NET Core Identity's password hasher and validation policy. Access tokens are signed JWTs. Set a unique signing key in each environment; the development fallback must never be used in production.
 
+### Shop operations reports
+
+- GET /api/v1/shop/reports/summary?days=7|30|90 — returns a summary scoped to the authenticated shop. The default period is 30 days; unsupported period values are rejected.
+- Job totals and status breakdown use jobs created inside the selected UTC window. `completedJobs` counts only jobs in `COMPLETED` with an operator-recorded `OutputConfirmedUtc`; `pagesRequested` is page count multiplied by requested copies and is not a claim of physical output.
+- Verified collections are grouped by currency and payment method and use `VerifiedUtc` within the selected window. UPI references that have not been independently verified by the shop are excluded. Pending payment attempts are reported separately.
+
 ### Authenticated shop endpoints
 
 - GET /api/v1/shop/profile
