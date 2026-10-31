@@ -1544,25 +1544,39 @@ function CustomerLocalConnection({localAgent,onReady}:{localAgent:CustomerLocalA
 type StoredCustomerDraft = {
   sessionToken: string;
   uploaded: UploadedPrintJob;
+  uploadedBatch?: UploadedPrintJob[];
+  uploadedFileFingerprints?: string[];
+  batchId?: string;
   quote: PrintQuoteResult | null;
 };
+
+function customerFileFingerprint(file:File):string {
+  return `${file.name}\u0000${file.size}\u0000${file.lastModified}\u0000${file.type}`;
+}
 
 function readStoredCustomerDraft(sessionToken:string):StoredCustomerDraft|null {
   try {
     const raw=sessionStorage.getItem("qrtoprint.customer-active-job");
     if(!raw)return null;
     const draft=JSON.parse(raw) as StoredCustomerDraft;
-    return draft.sessionToken===sessionToken&&draft.uploaded?.job?.id?draft:null;
+    return draft.sessionToken===sessionToken&&(draft.uploaded?.job?.id||draft.uploadedBatch?.length)?draft:null;
   } catch {
     return null;
   }
 }
 
 function CustomerPrintFlow({sessionToken,paymentOptions,localAgent,localReady}:{sessionToken:string;paymentOptions:{upiEnabled:boolean;upiId?:string|null;payeeName?:string|null;cashEnabled:boolean};localAgent:CustomerLocalAgent|null;localReady:boolean}) {
-  const [file,setFile]=useState<File|null>(null);
+  const initialDraft=readStoredCustomerDraft(sessionToken);
+  const [files,setFiles]=useState<File[]>([]);
+  const [selectedFileIndex,setSelectedFileIndex]=useState(0);
+  const file=files[selectedFileIndex]??null;
   const [previewUrl,setPreviewUrl]=useState<string|null>(null);
-  const [uploaded,setUploaded]=useState<UploadedPrintJob|null>(()=>readStoredCustomerDraft(sessionToken)?.uploaded??null);
-  const [quote,setQuote]=useState<PrintQuoteResult|null>(()=>readStoredCustomerDraft(sessionToken)?.quote??null);
+  const [uploaded,setUploaded]=useState<UploadedPrintJob|null>(()=>initialDraft?.uploaded??initialDraft?.uploadedBatch?.[0]??null);
+  const [uploadedBatch,setUploadedBatch]=useState<UploadedPrintJob[]>(()=>initialDraft?.uploadedBatch??(initialDraft?.uploaded?[initialDraft.uploaded]:[]));
+  const [uploadedFileFingerprints,setUploadedFileFingerprints]=useState<string[]>(()=>initialDraft?.uploadedFileFingerprints??[]);
+  const [batchId,setBatchId]=useState(()=>initialDraft?.batchId??"");
+  const [uploadProgress,setUploadProgress]=useState<{completed:number;total:number}|null>(null);
+  const [quote,setQuote]=useState<PrintQuoteResult|null>(()=>initialDraft?.quote??null);
   const [jobStatus,setJobStatus]=useState<CustomerJobStatus|null>(null);
   const [payment,setPayment]=useState<CustomerPayment|null>(null);
   const [paymentReference,setPaymentReference]=useState("");
@@ -1585,16 +1599,19 @@ function CustomerPrintFlow({sessionToken,paymentOptions,localAgent,localReady}:{
   },[paymentOptions.upiEnabled,paymentOptions.cashEnabled]);
 
   useEffect(()=>{
-    if(!uploaded){
+    if(!uploaded&&uploadedBatch.length===0){
       sessionStorage.removeItem("qrtoprint.customer-active-job");
       return;
     }
     sessionStorage.setItem("qrtoprint.customer-active-job",JSON.stringify({
       sessionToken,
-      uploaded,
+      uploaded: uploaded??uploadedBatch[0],
+      uploadedBatch,
+      uploadedFileFingerprints,
+      batchId,
       quote
     } satisfies StoredCustomerDraft));
-  },[sessionToken,uploaded,quote]);
+  },[sessionToken,uploaded,uploadedBatch,uploadedFileFingerprints,batchId,quote]);
 
   useEffect(()=>{
     if(!uploaded)return;
@@ -1625,20 +1642,44 @@ function CustomerPrintFlow({sessionToken,paymentOptions,localAgent,localReady}:{
   },[file]);
 
   async function upload() {
-    if(!file)return;
+    if(files.length===0)return;
     if(uploadMode==="LOCAL"&&!localReady) {
       setError("Check shop Wi-Fi access above before starting a direct local upload.");
       return;
     }
-    setBusy(true);setError("");setQuote(null);setJobStatus(null);
+    const currentBatchId=batchId||crypto.randomUUID();
+    setBatchId(currentBatchId);
+    const completedFingerprints=new Set(uploadedFileFingerprints);
+    const results=[...uploadedBatch];
+    const pending=files.filter(candidate=>!completedFingerprints.has(customerFileFingerprint(candidate)));
+    if(pending.length===0){setError("All selected files are already uploaded. Choose another document or folder.");return;}
+    setBusy(true);setError("");setQuote(null);setJobStatus(null);setUploadProgress({completed:0,total:pending.length});
     try {
-      const created=uploadMode==="LOCAL"&&localAgent
-        ? await uploadCustomerDocumentLocally(sessionToken,file,localAgent)
-        : await uploadCustomerDocument(sessionToken,file);
-      setUploaded(created);
+      for(let index=0;index<pending.length;index++){
+        const candidate=pending[index];
+        const created=uploadMode==="LOCAL"&&localAgent
+          ? await uploadCustomerDocumentLocally(sessionToken,candidate,localAgent,currentBatchId)
+          : await uploadCustomerDocument(sessionToken,candidate,currentBatchId);
+        if(!results.some(item=>item.job.id===created.job.id))results.push(created);
+        completedFingerprints.add(customerFileFingerprint(candidate));
+        setUploadedBatch([...results]);
+        setUploadedFileFingerprints([...completedFingerprints]);
+        setUploadProgress({completed:index+1,total:pending.length});
+      }
+      setUploadedBatch(results);
+      setUploaded(results[0]??null);
+      setQuote(null);setJobStatus(null);setPayment(null);setPaymentReference("");
+      setSelectedFileIndex(0);
     } catch(exception) {
-      setError(exception instanceof ApiError?exception.message:"The document could not be uploaded.");
-    } finally {setBusy(false);}
+      setUploadedBatch(results);
+      setUploadedFileFingerprints([...completedFingerprints]);
+      if(results.length>0)setUploaded(results[0]);
+      setError(exception instanceof ApiError?exception.message:`Upload stopped after ${completedFingerprints.size} file(s). Retry the selected files to continue; completed files will be skipped.`);
+    } finally {setBusy(false);setUploadProgress(null);}
+  }
+
+  function selectUploadedFile(item:UploadedPrintJob) {
+    setUploaded(item);setQuote(null);setJobStatus(null);setPayment(null);setPaymentReference("");setError("");
   }
 
   async function getQuote() {
@@ -1733,8 +1774,21 @@ function CustomerPrintFlow({sessionToken,paymentOptions,localAgent,localReady}:{
     } finally {setBusy(false);}
   }
 
-  function chooseFile(next:File|null) {
-    setFile(next);setUploaded(null);setQuote(null);setJobStatus(null);setPayment(null);setPaymentReference("");setError("");
+  function chooseFiles(next:File[]) {
+    const unique=Array.from(new Map(next.map(candidate=>[customerFileFingerprint(candidate),candidate])).values());
+    if(unique.length>20){setError("Select no more than 20 documents in one upload batch.");return;}
+    const unsupported=unique.find(candidate=>! /\.(pdf|jpe?g|png)$/i.test(candidate.name));
+    if(unsupported){setError(`“${unsupported.name}” is not supported. Choose PDF, JPG or PNG files.`);return;}
+    const oversized=unique.find(candidate=>candidate.size<=0||candidate.size>20*1024*1024);
+    if(oversized){setError(`“${oversized.name}” exceeds the 20 MB per-file limit.`);return;}
+    const alreadyUploaded=new Set(uploadedFileFingerprints);
+    const pending=unique.filter(candidate=>!alreadyUploaded.has(customerFileFingerprint(candidate)));
+    const totalBytes=uploadedBatch.reduce((sum,item)=>sum+item.document.sizeBytes,0)+pending.reduce((sum,candidate)=>sum+candidate.size,0);
+    if(uploadedBatch.length+pending.length>20||totalBytes>50*1024*1024){
+      setError("This batch can contain up to 20 files and 50 MB in total. Remove some files before uploading.");
+      return;
+    }
+    setFiles(unique);setSelectedFileIndex(0);setError("");
   }
 
   return <section className="customer-print-flow">
