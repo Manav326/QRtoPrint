@@ -684,7 +684,7 @@ customerApi.MapGet("/me", async (
         return Results.Forbid();
     }
 
-    var user = await userManager.FindByIdAsync(customerId.ToString());
+    var user = await userManager.FindByIdAsync(customerId.Value.ToString());
     if (user is null || user.TenantId is not null)
     {
         return Results.Unauthorized();
