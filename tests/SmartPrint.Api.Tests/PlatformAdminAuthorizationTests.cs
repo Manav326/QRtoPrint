@@ -36,6 +36,17 @@ public sealed class PlatformAdminAuthorizationTests
     }
 
     [Fact]
+    public void AcceptsAnUnscopedPlatformAdminPrincipal()
+    {
+        var identity = new ClaimsIdentity(
+        [
+            new Claim(PlatformAdminAuthorization.ClaimType, PlatformAdminAuthorization.ClaimValue)
+        ], "test");
+
+        Assert.True(PlatformAdminAuthorization.IsPlatformAdmin(new ClaimsPrincipal(identity)));
+    }
+
+    [Fact]
     public void TokenPrincipalMustNotContainATenantClaim()
     {
         var identity = new ClaimsIdentity(
