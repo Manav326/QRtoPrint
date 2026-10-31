@@ -546,7 +546,7 @@ function ShopConsole({ tokens, onSignOut }: { tokens: AuthTokens; onSignOut: () 
         <div className="nav-label">SHOP WORKSPACE</div>
         <nav className="primary-nav" aria-label="Shop navigation">
           {sections.map(({ label, icon: Icon }) => (
-            <button key={label} className={active === label ? "nav-item active" : "nav-item"} onClick={() => navAction(label)}>
+            <button key={label} title={label} aria-label={label} className={active === label ? "nav-item active" : "nav-item"} onClick={() => navAction(label)}>
               <Icon size={18} strokeWidth={1.8}/><span>{label}</span>{label === "Print Queue" && <span className="nav-soon">SOON</span>}
             </button>
           ))}
@@ -768,7 +768,7 @@ function StationsPage({ stations, profile, onAdd, onToggle, onGenerate }: {
           <span className="qr-scan-label">SCAN TO PRINT</span>
           <span className="qr-scan-hint">Scan to upload documents and send them to this shop</span>
           <div className="qr-shop-station">{station.displayName}</div>
-          <div className="qr-powered"><span className="qr-powered-mark">Q</span><small>Powered by <strong>QuantaEdge</strong></small></div>
+          <div className="qr-powered"><small>POWERED BY</small><img src="/branding/quantaedge-logo.svg" alt="QuantaEdge"/></div>
         </div> : <div className="qr-missing"><QrCode size={34}/><strong>QR code not stored</strong><span>This older station needs a one-time QR replacement. Its existing printed code cannot be recovered from the old hash.</span><button className="secondary-button" onClick={()=>onGenerate(station)}>Reissue permanent QR</button></div>}</div>
         <div className="station-foot"><span>Code ending ···{station.publicCodeHint}</span><button className="subtle-button" onClick={()=>onToggle(station)}>{station.isEnabled?"Disable station":"Enable station"}</button></div>
         {station.publicUrl && <div className="station-actions"><button className="secondary-button" onClick={()=>void copyText(station.publicUrl!)}> <Copy size={14}/> Copy link</button><button className="secondary-button" onClick={()=>setPrintingStationId(station.id)}>Print QR sign</button></div>}
@@ -1101,6 +1101,7 @@ function prettyStatus(status:string) {
     QUOTE_EXPIRED:"Quote expired",
     AWAITING_SHOP_APPROVAL:"Awaiting shop approval",
     REJECTED:"Rejected",
+    REFUNDED:"Refunded",
 
     UPLOADED:"Uploaded",
     VALIDATING:"Validating",
