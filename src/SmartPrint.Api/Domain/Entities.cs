@@ -187,6 +187,7 @@ public sealed class PrintJob
     public Guid CustomerSessionId { get; set; }
     public Guid? BatchId { get; set; }
     public string RejectedPageNumbersJson { get; set; } = "[]";
+    public string PageRefundAllocationsJson { get; set; } = "[]";
     public string JobNumber { get; set; } = string.Empty;
     public string Status { get; set; } = "Uploaded";
     public string IdempotencyKey { get; set; } = string.Empty;
