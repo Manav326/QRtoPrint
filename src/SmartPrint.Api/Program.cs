@@ -945,9 +945,17 @@ shop.MapGet("/printers", async (ClaimsPrincipal principal, SmartPrintDbContext d
             Status = printer.Status == "AgentRevoked"
                 ? "AgentRevoked"
                 : printer.AgentDeviceId != null &&
-                  (printer.LastSeenUtc == null || printer.LastSeenUtc < onlineAfter)
+                  !db.AgentDevices.AsNoTracking().Any(agent =>
+                      agent.Id == printer.AgentDeviceId && agent.TenantId == tenantId &&
+                      agent.RevokedUtc == null && agent.Status != "Revoked" &&
+                      agent.LastSeenUtc != null && agent.LastSeenUtc >= onlineAfter)
                     ? "AgentOffline"
-                    : printer.Status,
+                    : printer.AgentDeviceId != null && printer.OutputMode == "PDF_EXPORT"
+                        ? "Ready"
+                        : printer.AgentDeviceId != null &&
+                          (printer.LastSeenUtc == null || printer.LastSeenUtc < onlineAfter)
+                            ? "InventoryStale"
+                            : printer.Status,
             printer.IsActive,
             printer.LastSeenUtc
         })
@@ -1752,9 +1760,9 @@ shop.MapPatch("/print-jobs/{jobId:guid}/printer", async (
                        item.TenantId == tenantId &&
                        item.IsActive &&
                        item.AgentDeviceId != null &&
-                       item.LastSeenUtc != null &&
-                       item.LastSeenUtc >= onlineAfter &&
-                       (item.Status == "Ready" || item.Status == "Busy") &&
+                       (item.OutputMode == "PDF_EXPORT" ||
+                        (item.LastSeenUtc != null && item.LastSeenUtc >= onlineAfter &&
+                         (item.Status == "Ready" || item.Status == "Busy"))) &&
                        db.AgentDevices.Any(agent =>
                            agent.Id == item.AgentDeviceId &&
                            agent.TenantId == tenantId &&
@@ -1841,8 +1849,9 @@ shop.MapPost("/print-jobs/{jobId:guid}/dispatch", async (Guid jobId, ClaimsPrinc
         where printer.Id == job.PrinterDeviceId && printer.TenantId == tenantId &&
               printer.AgentDeviceId == job.ClaimedByAgentDeviceId && printer.IsActive &&
               printer.QueueName != null && printer.QueueName != "" &&
-              printer.LastSeenUtc != null && printer.LastSeenUtc >= onlineAfter &&
-              (printer.Status == "Ready" || printer.Status == "Busy") &&
+              (printer.OutputMode == "PDF_EXPORT" ||
+               (printer.LastSeenUtc != null && printer.LastSeenUtc >= onlineAfter &&
+                (printer.Status == "Ready" || printer.Status == "Busy"))) &&
               agent.RevokedUtc == null && agent.LastSeenUtc != null && agent.LastSeenUtc >= onlineAfter
         select new { printer.DisplayName, printer.QueueName, printer.OutputMode, AgentId = agent.Id }
     ).SingleOrDefaultAsync(ct);
@@ -1906,7 +1915,7 @@ shop.MapPost("/print-jobs/{jobId:guid}/retry-pdf-export", async (
             equals new { agent.TenantId, AgentId = agent.Id }
         where printer.Id == printerId && printer.TenantId == tenantId &&
               printer.AgentDeviceId == agentId && printer.OutputMode == "PDF_EXPORT" &&
-              printer.IsActive && printer.LastSeenUtc != null && printer.LastSeenUtc >= onlineAfter &&
+              printer.IsActive &&
               agent.RevokedUtc == null && agent.LastSeenUtc != null && agent.LastSeenUtc >= onlineAfter
         select new { printer.DisplayName }
     ).SingleOrDefaultAsync(ct);
@@ -2001,6 +2010,75 @@ shop.MapGet("/print-jobs/{jobId:guid}/events", async (
         })
         .ToListAsync(ct);
     return Results.Ok(events);
+});
+
+shop.MapGet("/print-jobs/{jobId:guid}/preview-source", async (
+    Guid jobId,
+    ClaimsPrincipal principal,
+    SmartPrintDbContext db,
+    CancellationToken ct) =>
+{
+    if (!TryGetTenantId(principal, out var tenantId))
+    {
+        return Results.Forbid();
+    }
+
+    var document = await db.PrintDocuments.AsNoTracking()
+        .Where(item => item.TenantId == tenantId && item.PrintJobId == jobId)
+        .Select(item => new { item.StorageMode, item.AgentDeviceId })
+        .SingleOrDefaultAsync(ct);
+    if (document is null) return Results.NotFound();
+
+    if (!string.Equals(document.StorageMode, "LOCAL_AGENT", StringComparison.Ordinal))
+    {
+        return Results.Ok(new { Mode = "CLOUD" });
+    }
+
+    if (document.AgentDeviceId is not Guid agentId)
+    {
+        return Results.Conflict(new
+        {
+            code = "local_preview_agent_missing",
+            message = "This local-only document is not associated with a paired print computer."
+        });
+    }
+
+    var now = DateTimeOffset.UtcNow;
+    var agent = await db.AgentDevices.AsNoTracking()
+        .Where(item => item.Id == agentId && item.TenantId == tenantId &&
+                       item.RevokedUtc == null && item.Status != "Revoked" &&
+                       item.LastSeenUtc != null && item.LastSeenUtc >= now.AddMinutes(-2))
+        .Select(item => new { item.Id, item.LocalEndpointsJson })
+        .SingleOrDefaultAsync(ct);
+    if (agent is null)
+    {
+        return Results.Conflict(new
+        {
+            code = "local_preview_agent_offline",
+            message = "The paired Windows Print Agent is offline. Reconnect it before previewing this shop-local document."
+        });
+    }
+
+    var endpoints = ReadLocalAgentEndpoints(agent.LocalEndpointsJson);
+    if (endpoints.Length == 0)
+    {
+        return Results.Conflict(new
+        {
+            code = "local_preview_endpoint_missing",
+            message = "The paired computer has not published a reachable local preview endpoint."
+        });
+    }
+
+    var expiresUtc = now.AddMinutes(2);
+    var grantToken = LocalDocumentPreviewGrant.Issue(
+        signingKeyText, issuer, audience, tenantId, jobId, agent.Id, now, expiresUtc);
+    return Results.Ok(new
+    {
+        Mode = "LOCAL_AGENT",
+        GrantToken = grantToken,
+        Endpoints = endpoints,
+        ExpiresUtc = expiresUtc
+    });
 });
 
 shop.MapGet("/print-jobs/{jobId:guid}/document", async (
@@ -2527,9 +2605,13 @@ agentApi.MapPost("/jobs/claim", async (
         .Where(printer => printer.TenantId == device.TenantId &&
                           printer.AgentDeviceId == device.Id &&
                           printer.IsActive &&
-                          printer.LastSeenUtc != null &&
-                          printer.LastSeenUtc >= onlineAfter &&
-                          (printer.Status == "Ready" || printer.Status == "Busy"))
+                          (printer.OutputMode == "PDF_EXPORT" ||
+                           (printer.LastSeenUtc != null && printer.LastSeenUtc >= onlineAfter &&
+                            (printer.Status == "Ready" || printer.Status == "Busy"))) &&
+                          db.AgentDevices.Any(agent =>
+                              agent.Id == device.Id && agent.TenantId == device.TenantId &&
+                              agent.RevokedUtc == null && agent.Status != "Revoked" &&
+                              agent.LastSeenUtc != null && agent.LastSeenUtc >= onlineAfter))
         .Select(printer => printer.Id)
         .ToListAsync(ct);
 
@@ -2595,13 +2677,14 @@ agentApi.MapPost("/jobs/claim", async (
                               printer.TenantId == device.TenantId &&
                               printer.AgentDeviceId == device.Id &&
                               printer.IsActive &&
-                              printer.LastSeenUtc != null &&
-                              printer.LastSeenUtc >= onlineAfter &&
-                              (printer.Status == "Ready" || printer.Status == "Busy")) &&
+                              (printer.OutputMode == "PDF_EXPORT" ||
+                               (printer.LastSeenUtc != null && printer.LastSeenUtc >= onlineAfter &&
+                                (printer.Status == "Ready" || printer.Status == "Busy")))) &&
                           db.AgentDevices.Any(agent =>
                               agent.Id == device.Id &&
                               agent.TenantId == device.TenantId &&
-                              agent.RevokedUtc == null) &&
+                              agent.RevokedUtc == null && agent.Status != "Revoked" &&
+                              agent.LastSeenUtc != null && agent.LastSeenUtc >= onlineAfter) &&
                           db.PrintPayments.Any(payment =>
                               payment.TenantId == job.TenantId &&
                               payment.PrintJobId == job.Id &&
@@ -3253,9 +3336,12 @@ agentApi.MapPost("/jobs/print-claim", async (AgentPrintClaimRequest request, Htt
                   document.Sha256 == proof.Sha256 && document.SizeBytes == proof.SizeBytes &&
                   printer.AgentDeviceId == device.Id && printer.IsActive &&
                   printer.QueueName != null && printer.QueueName != "" &&
-                  printer.LastSeenUtc != null && printer.LastSeenUtc >= onlineAfter &&
-                  (printer.Status == "Ready" || printer.Status == "Busy") &&
-                  db.AgentDevices.Any(a => a.Id == device.Id && a.TenantId == device.TenantId && a.RevokedUtc == null && a.LastSeenUtc != null && a.LastSeenUtc >= onlineAfter) &&
+                  (printer.OutputMode == "PDF_EXPORT" ||
+                   (printer.LastSeenUtc != null && printer.LastSeenUtc >= onlineAfter &&
+                    (printer.Status == "Ready" || printer.Status == "Busy"))) &&
+                  db.AgentDevices.Any(a => a.Id == device.Id && a.TenantId == device.TenantId &&
+                      a.RevokedUtc == null && a.Status != "Revoked" &&
+                      a.LastSeenUtc != null && a.LastSeenUtc >= onlineAfter) &&
                   db.PrintPayments.Any(pay => pay.TenantId == job.TenantId && pay.PrintJobId == job.Id && (pay.Status == "VERIFIED" || pay.Status == "PARTIALLY_REFUNDED"))
             select new { job.Id, job.JobNumber, job.Status, job.SpoolerJobName, job.RejectedPageNumbersJson, QueueName = printer.QueueName, OutputMode = printer.OutputMode }
         ).SingleOrDefaultAsync(ct);
@@ -3270,7 +3356,12 @@ agentApi.MapPost("/jobs/print-claim", async (AgentPrintClaimRequest request, Htt
             job.LocalQueueReceivedUtc != null &&
             db.PrinterDevices.Any(printer => printer.Id == job.PrinterDeviceId && printer.TenantId == device.TenantId &&
                 printer.AgentDeviceId == device.Id && printer.IsActive && printer.QueueName != null && printer.QueueName != "" &&
-                printer.LastSeenUtc != null && printer.LastSeenUtc >= onlineAfter) &&
+                (printer.OutputMode == "PDF_EXPORT" ||
+                 (printer.LastSeenUtc != null && printer.LastSeenUtc >= onlineAfter &&
+                  (printer.Status == "Ready" || printer.Status == "Busy")))) &&
+            db.AgentDevices.Any(agent => agent.Id == device.Id && agent.TenantId == device.TenantId &&
+                agent.RevokedUtc == null && agent.Status != "Revoked" &&
+                agent.LastSeenUtc != null && agent.LastSeenUtc >= onlineAfter) &&
             db.PrintPayments.Any(pay => pay.TenantId == job.TenantId && pay.PrintJobId == job.Id && (pay.Status == "VERIFIED" || pay.Status == "PARTIALLY_REFUNDED")))
             .ExecuteUpdateAsync(u => u
                 .SetProperty(job => job.Status, "PRINT_SUBMITTING")
@@ -3493,6 +3584,42 @@ agentApi.MapPost("/jobs/{jobId:guid}/spooler-status", async (Guid jobId, AgentSp
     return Results.Ok(new { job.Id, job.Status, job.SpoolerStatus, job.SpoolerObservedUtc });
 });
 
+agentApi.MapGet("/local-document-previews/{jobId:guid}/authorize", async (
+    Guid jobId,
+    HttpContext context,
+    SmartPrintDbContext db,
+    CancellationToken ct) =>
+{
+    var device = await AuthenticateAgentAsync(context, db, ct);
+    if (device is null) return Results.Unauthorized();
+
+    var grantToken = context.Request.Headers["X-Print-Preview-Grant"].FirstOrDefault();
+    if (!LocalDocumentPreviewGrant.TryValidate(
+            grantToken, signingKeyText, issuer, audience, DateTimeOffset.UtcNow, out var grant) ||
+        !LocalDocumentPreviewGrant.IsFor(grant, device.TenantId, jobId, device.Id))
+    {
+        return Results.Unauthorized();
+    }
+
+    var document = await (
+        from job in db.PrintJobs.AsNoTracking()
+        join item in db.PrintDocuments.AsNoTracking()
+            on new { job.TenantId, PrintJobId = job.Id } equals new { item.TenantId, item.PrintJobId }
+        where job.Id == jobId && job.TenantId == device.TenantId &&
+              item.StorageMode == "LOCAL_AGENT" && item.AgentDeviceId == device.Id
+        select new { item.MediaType, item.OriginalFileName, item.SizeBytes, item.Sha256 }
+    ).SingleOrDefaultAsync(ct);
+
+    if (document is null) return Results.NotFound();
+    return Results.Ok(new
+    {
+        document.MediaType,
+        document.OriginalFileName,
+        document.SizeBytes,
+        document.Sha256
+    });
+});
+
 agentApi.MapPost("/heartbeat", async (
     HttpContext context,
     SmartPrintDbContext db,
@@ -3520,7 +3647,8 @@ agentApi.MapPost("/heartbeat", async (
         device.LastSeenUtc,
         AgentVersion = request.Version,
         LocalEndpoints = localEndpoints,
-        PublicBaseUrl = publicBaseUrl
+        PublicBaseUrl = publicBaseUrl,
+        AllowedPortalOrigins = corsOrigins
     });
 });
 
