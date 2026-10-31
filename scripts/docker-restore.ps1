@@ -28,7 +28,7 @@ $dbCandidates = @(Get-ChildItem -LiteralPath $resolvedBackup -Filter 'qrtoprint-
 if ($dbCandidates.Count -eq 0) { throw 'The backup directory contains no qrtoprint-database-*.dump file.' }
 $databaseFile = $dbCandidates[0].FullName
 $stamp = [System.IO.Path]::GetFileNameWithoutExtension($dbCandidates[0].Name).Substring('qrtoprint-database-'.Length)
-if ($stamp -notmatch '^\d{8}-\d{6}
+if ($stamp -notmatch '^[0-9]{8}-[0-9]{6}$') { throw 'The selected database backup filename does not contain a valid UTC backup timestamp.' }
 $documentsFile = Join-Path $resolvedBackup ("qrtoprint-documents-$stamp.tar.gz")
 $secretsFile = Join-Path $resolvedBackup ("qrtoprint-secrets-$stamp.env")
 foreach ($requiredFile in @($documentsFile, $secretsFile)) {
