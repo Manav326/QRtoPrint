@@ -672,3 +672,15 @@
   .station-card.print-active .qr-scan-label {font-size:16pt!important}
   .station-card.print-active .qr-powered img {max-height:8mm!important}
 }
+
+
+/* Per-page review and partial-refund controls */
+.page-refund-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(92px,1fr));gap:8px;max-height:280px;overflow:auto;padding:2px}
+.page-refund-chip{display:flex;align-items:center;gap:7px;min-height:38px;padding:7px 9px;border:1px solid var(--border);border-radius:10px;background:var(--surface-2);color:var(--text);font-size:12px;cursor:pointer}
+.page-refund-chip input{accent-color:var(--accent);margin:0}
+.page-refund-chip.selected{border-color:var(--accent);background:var(--accent-soft)}
+.page-refund-chip.already-rejected{opacity:.72;background:var(--surface-3);cursor:not-allowed}
+.page-refund-estimate{display:flex;flex-direction:column;gap:5px;margin:12px 0;padding:12px;border:1px solid var(--border);border-radius:12px;background:var(--surface-2);color:var(--muted);font-size:12px}
+.page-refund-estimate strong{font-size:18px;color:var(--text)}
+.page-refund-estimate small{color:var(--muted)}
+@media(max-width:520px){.page-refund-grid{grid-template-columns:repeat(3,minmax(0,1fr));max-height:240px}.page-refund-chip{font-size:11px;padding:7px}}

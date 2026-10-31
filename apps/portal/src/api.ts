@@ -389,15 +389,30 @@ export interface RecordShopRefundResult {
   refundedByUserId: string;
 }
 
+export interface ShopRefundPreview {
+  id: string; pageCount: number; rejectedPageNumbers: number[];
+  rejectedPageCount: number; acceptedPageCount: number;
+  originalAmountMinor: number; previouslyRefundedAmountMinor: number;
+  additionalRefundAmountMinor: number; cumulativeRefundAmountMinor: number;
+  remainingPaidAmountMinor: number; currency: string;
+}
+
+export function previewShopPrintRefund(token: string, jobId: string, rejectedPageNumbers: number[]) {
+  return apiRequest<ShopRefundPreview>(`/api/v1/shop/print-jobs/${jobId}/refund-preview`, {
+    method: "POST", body: JSON.stringify({ rejectedPageNumbers })
+  }, token);
+}
+
 export function recordShopPrintRefund(token: string, jobId: string, values: {
   refundMethod: "UPI" | "CASH";
   refundReference: string | null;
   reason: string;
   confirmedSent: true;
+  idempotencyKey: string;
+  rejectedPageNumbers: number[];
 }) {
   return apiRequest<RecordShopRefundResult>(`/api/v1/shop/print-jobs/${jobId}/refund`, {
-    method: "POST",
-    body: JSON.stringify(values)
+    method: "POST", body: JSON.stringify(values)
   }, token);
 }
 
@@ -537,6 +552,7 @@ export interface ShopPricingProfile {
 export interface ShopPrintJob {
   id: string;
   batchId?: string | null;
+  rejectedPageNumbersJson?: string;
   jobNumber: string;
   status: string;
   pageCount: number;

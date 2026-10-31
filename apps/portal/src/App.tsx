@@ -16,7 +16,7 @@ import {
   reportCustomerUpiPayment, renewCustomerPrintSession, resumeCustomerSession, rotateStationCode, startCustomerPayment, storeTokens,
   updatePrinterActive, updateShopPaymentSettings, updateShopPricing,
   updateShopProfile, updateStationEnabled, uploadCustomerDocument, uploadCustomerDocumentLocally,
-  verifyShopPayment, retryShopPdfExport, recordShopPrintRefund, type CustomerPayment, type ShopPayment, type ShopPaymentSettings, type ShopRefund,
+  verifyShopPayment, retryShopPdfExport, recordShopPrintRefund, previewShopPrintRefund, type CustomerPayment, type ShopPayment, type ShopPaymentSettings, type ShopRefund,
   type AgentDevice, type AuthTokens, type CustomerJobStatus, type PrinterDevice, type PrintQuoteResult, type ShopJobEvent,
   type QrStation, type ShopPricingProfile, type ShopPrintJob, type ShopProfile, type ShopReportSummary, type ShopSubscriptionSummary,
   type UploadedPrintJob
@@ -505,11 +505,13 @@ function ShopConsole({ tokens, onSignOut }: { tokens: AuthTokens; onSignOut: () 
     setBusyJobId(null);
   }
 
-  async function recordFileRefund(job: ShopPrintJob, values: { refundMethod: "UPI" | "CASH"; refundReference: string | null; reason: string }) {
+  async function recordFileRefund(job: ShopPrintJob, values: { refundMethod: "UPI" | "CASH"; refundReference: string | null; reason: string; rejectedPageNumbers: number[] }) {
     setBusyJobId(job.id);
     setError("");
     try {
-      const result = await recordShopPrintRefund(tokens.accessToken, job.id, { ...values, confirmedSent: true });
+      const result = await recordShopPrintRefund(tokens.accessToken, job.id, {
+        ...values, confirmedSent: true, idempotencyKey: crypto.randomUUID()
+      });
       setToast(`Refund of ${formatMoney(result.amountMinor, result.currency)} recorded for ${job.document.originalFileName}. The return was logged under the signed-in shopkeeper.`);
       setRefundJob(null);
       if (preview?.job.id === job.id) {
@@ -608,7 +610,7 @@ function ShopConsole({ tokens, onSignOut }: { tokens: AuthTokens; onSignOut: () 
             {batchReviewJobs && <BatchReviewModal jobs={batchReviewJobs} busy={busyJobId==="batch-review"} onClose={()=>setBatchReviewJobs(null)} onPreview={previewJob} onApply={acceptedIds=>void applyBatchReview(batchReviewJobs,acceptedIds)}/>}
       {preview && <DocumentPreviewModal name={preview.name} url={preview.url} mediaType={preview.mediaType} job={preview.job} onApprove={()=>void approveJob(preview.job)} onReject={()=>void rejectJob(preview.job)} onRefund={()=>setRefundJob(preview.job)} onClose={() => { URL.revokeObjectURL(preview.url); setPreview(null); }}/>} 
       {eventHistory && <JobHistoryModal job={eventHistory.job} events={eventHistory.events} onClose={() => setEventHistory(null)}/>}
-            {refundJob && <RefundModal job={refundJob} busy={busyJobId===refundJob.id} onClose={()=>setRefundJob(null)} onSubmit={values=>void recordFileRefund(refundJob,values)}/>
+      {refundJob && <RefundModal job={refundJob} token={tokens.accessToken} busy={busyJobId===refundJob.id} onClose={()=>setRefundJob(null)} onSubmit={values=>void recordFileRefund(refundJob,values)}/>} 
       {actionDialog && <Modal title={actionDialog.title} subtitle="This action will be recorded against your shop account." onClose={closeActionDialog}>
         <div className="in-app-dialog-body"><p>{actionDialog.message}</p>{actionDialog.inputLabel&&<label className="dialog-input-label">{actionDialog.inputLabel}<textarea autoFocus rows={3} maxLength={300} value={actionDialogValue} onChange={event=>setActionDialogValue(event.target.value)} placeholder="Enter at least 3 characters"/></label>}</div>
         <div className="modal-actions"><button className="secondary-button" onClick={closeActionDialog}>Cancel</button><button className="primary-button" disabled={!!actionDialog.inputLabel&&actionDialogValue.trim().length<3} onClick={submitActionDialog}>{actionDialog.confirmLabel}</button></div>
@@ -1013,7 +1015,7 @@ function PrintQueuePage({ jobs, printers, onPreview, onApprove, onReject, onRefu
           </div></td>
           <td><Status label={job.outputType==="PDF_EXPORT"&&job.status==="COMPLETED"?"PDF saved":job.outputMode==="PDF_EXPORT"&&job.status==="PRINT_SUBMITTING"?"Creating PDF":prettyStatus(job.status)} tone={job.status==="AWAITING_CUSTOMER_APPROVAL"||job.status==="AWAITING_SHOP_APPROVAL"?"amber":job.status==="COMPLETED"||job.status==="LOCAL_QUEUE_READY"?"green":job.status==="OUTPUT_UNCONFIRMED"?"amber":job.status==="REFUNDED"?"green":"blue"}/></td>
           <td className="time-cell">{new Date(job.createdUtc).toLocaleString()}</td>
-          <td><div className="queue-actions"><button className="subtle-button" disabled={busyJobId===job.id} onClick={()=>onPreview(job)}>Preview</button><button className="subtle-button" disabled={busyJobId===job.id} onClick={()=>onHistory(job)}>History</button>{job.status==="AWAITING_SHOP_APPROVAL"&&<><button className="subtle-button approve-action" disabled={busyJobId===job.id} onClick={()=>onApprove(job)}>Accept file</button><button className="subtle-button reject-action" disabled={busyJobId===job.id} onClick={()=>onReject(job)}>Reject file</button></>}{job.status==="PAID_AUTHORISED"&&job.payment?.status==="VERIFIED"&&!job.localQueueReceivedUtc&&!job.claimedByAgentDeviceId&&<button className="subtle-button reject-action" disabled={busyJobId===job.id} onClick={()=>onRefund(job)}>Reject & refund</button>}{job.status==="LOCAL_QUEUE_READY"&&<button className="subtle-button approve-action" disabled={busyJobId===job.id} onClick={()=>onDispatch(job)}>{job.outputMode==="PDF_EXPORT"?"Save PDF":"Start printing"}</button>}{job.status==="OUTPUT_UNCONFIRMED"&&job.outputMode==="PDF_EXPORT"&&<button className="subtle-button approve-action" disabled={busyJobId===job.id} onClick={()=>onRetryPdfExport(job)}>Save PDF again</button>}{(job.status==="SPOOLER_ACCEPTED"||job.status==="PRINTING"||(job.status==="OUTPUT_UNCONFIRMED"&&job.outputMode!=="PDF_EXPORT"))&&<button className="subtle-button approve-action" disabled={busyJobId===job.id} onClick={()=>onConfirmOutput(job)}>Confirm output</button>}</div></td>
+          <td><div className="queue-actions"><button className="subtle-button" disabled={busyJobId===job.id} onClick={()=>onPreview(job)}>Preview</button><button className="subtle-button" disabled={busyJobId===job.id} onClick={()=>onHistory(job)}>History</button>{job.status==="AWAITING_SHOP_APPROVAL"&&<><button className="subtle-button approve-action" disabled={busyJobId===job.id} onClick={()=>onApprove(job)}>Accept file</button><button className="subtle-button reject-action" disabled={busyJobId===job.id} onClick={()=>onReject(job)}>Reject file</button></>}{job.status==="PAID_AUTHORISED"&&(job.payment?.status==="VERIFIED"||job.payment?.status==="PARTIALLY_REFUNDED")&&!job.localQueueReceivedUtc&&!job.claimedByAgentDeviceId&&<button className="subtle-button reject-action" disabled={busyJobId===job.id} onClick={()=>onRefund(job)}>Review pages</button>}{job.status==="LOCAL_QUEUE_READY"&&<button className="subtle-button approve-action" disabled={busyJobId===job.id} onClick={()=>onDispatch(job)}>{job.outputMode==="PDF_EXPORT"?"Save PDF":"Start printing"}</button>}{job.status==="OUTPUT_UNCONFIRMED"&&job.outputMode==="PDF_EXPORT"&&<button className="subtle-button approve-action" disabled={busyJobId===job.id} onClick={()=>onRetryPdfExport(job)}>Save PDF again</button>}{(job.status==="SPOOLER_ACCEPTED"||job.status==="PRINTING"||(job.status==="OUTPUT_UNCONFIRMED"&&job.outputMode!=="PDF_EXPORT"))&&<button className="subtle-button approve-action" disabled={busyJobId===job.id} onClick={()=>onConfirmOutput(job)}>Confirm output</button>}</div></td>
         </tr>)}
       </tbody></table></div>}
   </section>;
@@ -1061,36 +1063,78 @@ function DocumentPreviewModal({name,url,mediaType,job,onClose,onApprove,onReject
   return <Modal title={name} subtitle={job.batchId? `File review · Batch ${job.batchId.slice(0,8).toUpperCase()}` : "Private shop document preview. The encrypted original remains in protected shop storage."} onClose={onClose}>
     <div className="shop-document-preview">{isPdf?<iframe src={url} title={name}/>:<img src={url} alt={name}/>}</div>
     {job.status==="AWAITING_SHOP_APPROVAL"&&<div className="file-review-note"><Check size={16}/><span>Review this file independently. Accepting or rejecting it will not change any other file in the batch.</span></div>}
-    {job.status==="PAID_AUTHORISED"&&job.payment?.status==="VERIFIED"&&<div className="file-refund-note"><Wallet size={16}/><span>Paid amount: <strong>{formatMoney(job.payment.amountMinor,job.payment.currency)}</strong>. A refund can be recorded while this file has not yet been handed to the shop computer.</span></div>}
+    {job.status==="PAID_AUTHORISED"&&(job.payment?.status==="VERIFIED"||job.payment?.status==="PARTIALLY_REFUNDED")&&<div className="file-refund-note"><Wallet size={16}/><span>Paid amount: <strong>{formatMoney(job.payment.amountMinor,job.payment.currency)}</strong>. A refund can be recorded while this file has not yet been handed to the shop computer.</span></div>}
     <div className="modal-actions">
       {job.status==="AWAITING_SHOP_APPROVAL"&&<><button className="secondary-button reject-action" onClick={onReject}><X size={15}/> Reject this file</button><button className="primary-button" onClick={onApprove}><Check size={15}/> Accept this file</button></>}
-      {job.status==="PAID_AUTHORISED"&&job.payment?.status==="VERIFIED"&&!job.localQueueReceivedUtc&&!job.claimedByAgentDeviceId&&<button className="secondary-button reject-action" onClick={onRefund}><RotateCcw size={15}/> Reject & record refund</button>}
+      {job.status==="PAID_AUTHORISED"&&(job.payment?.status==="VERIFIED"||job.payment?.status==="PARTIALLY_REFUNDED")&&!job.localQueueReceivedUtc&&!job.claimedByAgentDeviceId&&<button className="secondary-button reject-action" onClick={onRefund}><RotateCcw size={15}/> Review pages & refund</button>}
       <button className="secondary-button" onClick={onClose}>Close preview</button>
     </div>
   </Modal>;
 }
 
-function RefundModal({job,busy,onClose,onSubmit}:{
-  job:ShopPrintJob;
-  busy:boolean;
-  onClose:()=>void;
-  onSubmit:(values:{refundMethod:"UPI"|"CASH";refundReference:string|null;reason:string})=>void;
+function RefundModal({job,token,busy,onClose,onSubmit}:{
+  job:ShopPrintJob; token:string; busy:boolean; onClose:()=>void;
+  onSubmit:(values:{refundMethod:"UPI"|"CASH";refundReference:string|null;reason:string;rejectedPageNumbers:number[]})=>void;
 }) {
+  const [rejectedPages,setRejectedPages]=useState<Set<number>>(()=>{
+    try{return new Set<number>(JSON.parse(job.rejectedPageNumbersJson||"[]") as number[]);}catch{return new Set<number>();}
+  });
+  const [estimate,setEstimate]=useState<Awaited<ReturnType<typeof previewShopPrintRefund>>|null>(null);
+  const [estimating,setEstimating]=useState(false);
+  const [estimateError,setEstimateError]=useState("");
   const [method,setMethod]=useState<"UPI"|"CASH">(job.payment?.method==="CASH"?"CASH":"UPI");
   const [reference,setReference]=useState("");
-  const [reason,setReason]=useState("Customer rejected this document after shop preview.");
+  const [reason,setReason]=useState("Customer rejected selected pages after shop preview.");
   const [confirmed,setConfirmed]=useState(false);
-  const amount=job.payment?.amountMinor||0;
-  const canSubmit=amount>0&&reason.trim().length>=3&&confirmed&&(method==="CASH"||reference.trim().length>=4);
-  return <Modal title="Reject file and record refund" subtitle="This refund applies only to this document. Other files in its batch remain unchanged." onClose={onClose}>
-    <div className="refund-summary-card"><div><span>FILE</span><strong>{job.document.originalFileName}</strong></div><div><span>EXACT AMOUNT TO RETURN</span><strong>{formatMoney(amount,job.payment?.currency||job.currency)}</strong></div></div>
-    <form className="refund-form" onSubmit={event=>{event.preventDefault();if(canSubmit)onSubmit({refundMethod:method,refundReference:method==="UPI"?reference.trim():null,reason:reason.trim()});}}>
+  const selectedPages=Array.from(rejectedPages).sort((a,b)=>a-b);
+  const selectionKey=selectedPages.join(",");
+  const alreadyRejected=(()=>{try{return new Set<number>(JSON.parse(job.rejectedPageNumbersJson||"[]") as number[]);}catch{return new Set<number>();}})();
+
+  useEffect(()=>{
+    let active=true;
+    setEstimating(true);setEstimateError("");setEstimate(null);
+    void previewShopPrintRefund(token,job.id,selectedPages).then(value=>{if(active)setEstimate(value);})
+      .catch(error=>{if(active)setEstimateError(error instanceof Error?error.message:"Could not calculate the refund.");})
+      .finally(()=>{if(active)setEstimating(false);});
+    return ()=>{active=false;};
+  },[token,job.id,selectionKey]);
+
+  const additional=estimate?.additionalRefundAmountMinor??0;
+  const hasNewPages=selectedPages.some(page=>!alreadyRejected.has(page));
+  const canSubmit=!!estimate&&hasNewPages&&reason.trim().length>=3&&confirmed&&
+    (method==="CASH"||reference.trim().length>=4);
+  const togglePage=(page:number,checked:boolean)=>{
+    if(alreadyRejected.has(page))return;
+    setRejectedPages(current=>{const next=new Set(current);if(checked)next.add(page);else next.delete(page);return next;});
+  };
+
+  return <Modal title="Review pages and refund" subtitle="Every page starts accepted. Tick only pages to reject; selections can be undone before recording. Already refunded pages stay excluded." onClose={onClose}>
+    <div className="refund-summary-card">
+      <div><span>FILE</span><strong>{job.document.originalFileName}</strong></div>
+      <div><span>VERIFIED PAYMENT</span><strong>{formatMoney(job.payment?.amountMinor||job.quotedAmountMinor,job.payment?.currency||job.currency)}</strong></div>
+    </div>
+    <div className="page-refund-grid" role="group" aria-label="Pages to reject">
+      {Array.from({length:job.pageCount},(_,index)=>index+1).map(page=>{
+        const rejected=rejectedPages.has(page), locked=alreadyRejected.has(page);
+        return <label className={locked?"page-refund-chip already-rejected":rejected?"page-refund-chip selected":"page-refund-chip"} key={page}>
+          <input type="checkbox" checked={rejected} disabled={locked||busy} onChange={event=>togglePage(page,event.target.checked)}/>
+          <span>Page {page}{locked?" · refunded":rejected?" · reject":""}</span>
+        </label>;
+      })}
+    </div>
+    <div className="page-refund-estimate">
+      {estimating?<span>Calculating the exact refund from the original quote…</span>:
+       estimateError?<span className="inline-error">{estimateError}</span>:
+       estimate?<><span>{estimate.acceptedPageCount} pages will remain in the print job.</span><strong>Return {formatMoney(additional,estimate.currency)}</strong><small>Cumulative returned: {formatMoney(estimate.cumulativeRefundAmountMinor,estimate.currency)} · remaining payment: {formatMoney(estimate.remainingPaidAmountMinor,estimate.currency)}</small></>:<span>Select page(s) to see the refund amount.</span>}
+    </div>
+    {estimate&&additional>0&&<form className="refund-form" onSubmit={event=>{event.preventDefault();if(canSubmit)onSubmit({refundMethod:method,refundReference:method==="UPI"?reference.trim():null,reason:reason.trim(),rejectedPageNumbers:selectedPages});}}>
       <label>Refund returned by<select value={method} onChange={event=>setMethod(event.target.value as "UPI"|"CASH")}><option value="UPI">UPI transfer</option><option value="CASH">Cash returned at counter</option></select></label>
       {method==="UPI"&&<label>Refund transaction reference<input value={reference} onChange={event=>setReference(event.target.value)} maxLength={100} placeholder="Enter the refund UPI reference" required/></label>}
-      <label>Reason for rejecting this file<textarea rows={3} maxLength={300} value={reason} onChange={event=>setReason(event.target.value)} required/></label>
-      <label className="refund-confirm-line"><input type="checkbox" checked={confirmed} onChange={event=>setConfirmed(event.target.checked)}/><span>I confirm that I have already returned the exact amount shown above to the customer. I understand that QRtoPrint only records this refund; it does not send money automatically.</span></label>
-      <div className="modal-actions"><button type="button" className="secondary-button" onClick={onClose}>Cancel</button><button className="primary-button" disabled={busy||!canSubmit}>{busy?<span className="button-spinner"/>:"Record refund and reject file"}</button></div>
-    </form>
+      <label>Reason for rejecting these pages<textarea rows={3} maxLength={300} value={reason} onChange={event=>setReason(event.target.value)} required/></label>
+      <label className="refund-confirm-line"><input type="checkbox" checked={confirmed} onChange={event=>setConfirmed(event.target.checked)}/><span>I confirm that I have already returned the exact additional amount shown above. SmartPrint records the refund; it does not send money automatically.</span></label>
+      <div className="modal-actions"><button type="button" className="secondary-button" onClick={onClose}>Cancel</button><button className="primary-button" disabled={busy||estimating||!canSubmit}>{busy?<span className="button-spinner"/>:"Record refund and reject selected pages"}</button></div>
+    </form>}
+    {estimate&&additional===0&&<div className="refund-form"><p>Select at least one additional page that produces a positive refund from the original quote. No page is rejected until a refund can be recorded.</p><div className="modal-actions"><button type="button" className="secondary-button" onClick={onClose}>Close</button></div></div>}
   </Modal>;
 }
 
@@ -1101,7 +1145,8 @@ function prettyStatus(status:string) {
     QUOTE_EXPIRED:"Quote expired",
     AWAITING_SHOP_APPROVAL:"Awaiting shop approval",
     REJECTED:"Rejected",
-    REFUNDED:"Refunded",
+    REFUNDED:"Fully refunded",
+    PARTIALLY_REFUNDED:"Partially refunded",
 
     UPLOADED:"Uploaded",
     VALIDATING:"Validating",
