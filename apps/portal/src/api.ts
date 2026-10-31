@@ -450,6 +450,13 @@ export function createCustomerSession(publicCode: string) {
 }
 
 
+export function renewCustomerPrintSession(sessionToken: string) {
+  return apiRequest<{ expiresUtc: string }>("/api/v1/public/sessions/current/renew", {
+    method: "POST",
+    headers: { "X-Print-Session": sessionToken }
+  });
+}
+
 export function resumeCustomerSession(sessionToken: string, publicCode: string) {
   return apiRequest<{
     id: string;
