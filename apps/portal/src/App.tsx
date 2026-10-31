@@ -85,6 +85,7 @@ function ShopConsole({ tokens, onSignOut }: { tokens: AuthTokens; onSignOut: () 
   const [toast, setToast] = useState("");
   const [preview, setPreview] = useState<{ name: string; url: string; mediaType: string; job: ShopPrintJob } | null>(null);
   const [refundJob, setRefundJob] = useState<ShopPrintJob | null>(null);
+  const [batchReviewJobs, setBatchReviewJobs] = useState<ShopPrintJob[] | null>(null);
   type ActionDialogState = { title: string; message: string; inputLabel?: string; confirmLabel: string; resolve: (value: string | null) => void };
   const [actionDialog, setActionDialog] = useState<ActionDialogState | null>(null);
   const [actionDialogValue, setActionDialogValue] = useState("");
@@ -480,6 +481,30 @@ function ShopConsole({ tokens, onSignOut }: { tokens: AuthTokens; onSignOut: () 
     }
   }
 
+  async function applyBatchReview(batchJobs: ShopPrintJob[], acceptedJobIds: string[]) {
+    const accepted=new Set(acceptedJobIds);
+    const acceptJobs=batchJobs.filter(job=>accepted.has(job.id));
+    const rejectJobs=batchJobs.filter(job=>!accepted.has(job.id));
+    if(acceptJobs.length+rejectJobs.length===0)return;
+    if(!(await confirmInApp(`Accept ${acceptJobs.length} file(s) and reject ${rejectJobs.length} file(s)? Accepted files will move to payment. Rejected files will be excluded from printing.`,"Confirm batch review","Apply review")))return;
+    setBusyJobId("batch-review");
+    setError("");
+    const failures:string[]=[];
+    for(const job of acceptJobs){
+      try{await approveShopPrintJob(tokens.accessToken,job.id);}
+      catch(exception){failures.push(`${job.document.originalFileName}: ${exception instanceof Error?exception.message:"Could not accept"}`);}
+    }
+    for(const job of rejectJobs){
+      try{await rejectShopPrintJob(tokens.accessToken,job.id);}
+      catch(exception){failures.push(`${job.document.originalFileName}: ${exception instanceof Error?exception.message:"Could not reject"}`);}
+    }
+    setBatchReviewJobs(null);
+    await reload();
+    if(failures.length)setError(`Some files could not be updated: ${failures.join("; ")}`);
+    else setToast(`Batch review saved: ${acceptJobs.length} accepted and ${rejectJobs.length} rejected. You can review paid files separately to record refunds.`);
+    setBusyJobId(null);
+  }
+
   async function recordFileRefund(job: ShopPrintJob, values: { refundMethod: "UPI" | "CASH"; refundReference: string | null; reason: string }) {
     setBusyJobId(job.id);
     setError("");
@@ -570,7 +595,7 @@ function ShopConsole({ tokens, onSignOut }: { tokens: AuthTokens; onSignOut: () 
           {active === "Subscription" && subscription && <SubscriptionPage summary={subscription}/>}
           {active === "Payments" && paymentSettings && <PaymentsPage settings={paymentSettings} payments={payments} refunds={refunds} onSave={savePaymentSettings} onVerify={verifyPayment} onReject={rejectPayment} busy={busy} busyJobId={busyJobId}/>}
           {active === "Settings" && profile && <SettingsPage profile={profile} onSave={saveProfile} busy={busy}/>}
-          {active === "Print Queue" && <PrintQueuePage jobs={printJobs} printers={printers} onPreview={previewJob} onApprove={approveJob} onReject={rejectJob} onRefund={job=>setRefundJob(job)} onHistory={viewJobHistory} onAssignPrinter={assignPrinter} onDispatch={dispatchPrintJob} onConfirmOutput={confirmPrintedOutput} onRetryPdfExport={retryPdfExport} onRefresh={reload} busyJobId={busyJobId}/>} 
+          {active === "Print Queue" && <PrintQueuePage jobs={printJobs} printers={printers} onPreview={previewJob} onApprove={approveJob} onReject={rejectJob} onRefund={job=>setRefundJob(job)} onReviewBatch={batchId=>setBatchReviewJobs(printJobs.filter(job=>job.batchId===batchId&&job.status==="AWAITING_SHOP_APPROVAL"))} onHistory={viewJobHistory} onAssignPrinter={assignPrinter} onDispatch={dispatchPrintJob} onConfirmOutput={confirmPrintedOutput} onRetryPdfExport={retryPdfExport} onRefresh={reload} busyJobId={busyJobId}/>} 
           {active === "Customers" && <EmptyModule icon={<Users size={24}/>} title="Customer directory is coming next" text="Customer profiles and print history will be connected to completed print jobs. No sample customer records are shown."/>}
           {active === "Reports" && <ReportsPage token={tokens.accessToken}/>} 
 
@@ -582,7 +607,8 @@ function ShopConsole({ tokens, onSignOut }: { tokens: AuthTokens; onSignOut: () 
       {modal === "station" && <StationModal busy={busy} printers={printers.filter(printer => printer.isActive)} onClose={() => setModal(null)} onSubmit={submitStation}/>}
       {preview && <DocumentPreviewModal name={preview.name} url={preview.url} mediaType={preview.mediaType} job={preview.job} onApprove={()=>void approveJob(preview.job)} onReject={()=>void rejectJob(preview.job)} onRefund={()=>setRefundJob(preview.job)} onClose={() => { URL.revokeObjectURL(preview.url); setPreview(null); }}/>} 
       {eventHistory && <JobHistoryModal job={eventHistory.job} events={eventHistory.events} onClose={() => setEventHistory(null)}/>}
-      {refundJob && <RefundModal job={refundJob} busy={busyJobId===refundJob.id} onClose={()=>setRefundJob(null)} onSubmit={values=>void recordFileRefund(refundJob,values)}/>}
+      {batchReviewJobs && <BatchReviewModal jobs={batchReviewJobs} busy={busyJobId==="batch-review"} onClose={()=>setBatchReviewJobs(null)} onPreview={previewJob} onApply={acceptedIds=>void applyBatchReview(batchReviewJobs,acceptedIds)}/>}
+      {refundJob && <RefundModal job={refundJob} busy={busyJobId===refundJob.id} onClose={()=>setRefundJob(null)} onSubmit={values=>void recordFileRefund(refundJob,values)}/>
       {actionDialog && <Modal title={actionDialog.title} subtitle="This action will be recorded against your shop account." onClose={closeActionDialog}>
         <div className="in-app-dialog-body"><p>{actionDialog.message}</p>{actionDialog.inputLabel&&<label className="dialog-input-label">{actionDialog.inputLabel}<textarea autoFocus rows={3} maxLength={300} value={actionDialogValue} onChange={event=>setActionDialogValue(event.target.value)} placeholder="Enter at least 3 characters"/></label>}</div>
         <div className="modal-actions"><button className="secondary-button" onClick={closeActionDialog}>Cancel</button><button className="primary-button" disabled={!!actionDialog.inputLabel&&actionDialogValue.trim().length<3} onClick={submitActionDialog}>{actionDialog.confirmLabel}</button></div>
@@ -927,6 +953,7 @@ function PrintQueuePage({ jobs, printers, onPreview, onApprove, onReject, onRefu
   onApprove: (job: ShopPrintJob) => void;
   onReject: (job: ShopPrintJob) => void;
   onRefund: (job: ShopPrintJob) => void;
+  onReviewBatch: (batchId: string) => void;
   onHistory: (job: ShopPrintJob) => void;
   onAssignPrinter: (job: ShopPrintJob, printerDeviceId: string) => void;
   onDispatch: (job: ShopPrintJob) => void;
@@ -954,6 +981,7 @@ function PrintQueuePage({ jobs, printers, onPreview, onApprove, onReject, onRefu
     return ()=>window.clearInterval(timer);
   },[autoRefresh,refreshSeconds]);
 
+  const reviewBatches=Array.from(new Map(jobs.filter(job=>job.batchId&&job.status==="AWAITING_SHOP_APPROVAL").map(job=>[job.batchId!,job])).keys());
   const dispatchablePrinters = printers.filter(printer =>
     printer.isActive &&
     !!printer.agentDeviceId &&
@@ -967,6 +995,7 @@ function PrintQueuePage({ jobs, printers, onPreview, onApprove, onReject, onRefu
       <label className="queue-refresh-interval">Refresh every <input type="number" min={5} max={3600} step={1} value={refreshSeconds} onChange={event=>setRefreshSeconds(Math.max(5,Math.min(3600,Number(event.target.value)||5)))}/> seconds</label>
       <span className="queue-refresh-note">{autoRefresh?"Queue refreshes automatically while this page is open.":"Automatic refresh is off. Use Refresh queue whenever needed."}</span>
     </div>
+    {reviewBatches.length>0&&<div className="batch-review-strip"><div><strong>{reviewBatches.length} batch(es) waiting for review</strong><span>All files start accepted. Uncheck only documents the shop should reject.</span></div>{reviewBatches.map(batchId=><button key={batchId} className="secondary-button" onClick={()=>onReviewBatch(batchId)}>Review batch · {jobs.filter(job=>job.batchId===batchId&&job.status==="AWAITING_SHOP_APPROVAL").length} files</button>)}</div>}
     {jobs.length===0 ? <EmptyModule icon={<FileText size={24}/>} title="Your queue is clear" text="When a customer uploads a document through one of your QR stations, the job and its current state will appear here."/> :
       <div className="table-scroll"><table><thead><tr><th>JOB</th><th>DOCUMENT</th><th>PRINT SETTINGS</th><th>QUOTE</th><th>PRINTER / LOCAL QUEUE</th><th>STATUS</th><th>CREATED</th><th>ACTIONS</th></tr></thead><tbody>
         {jobs.map(job=><tr key={job.id}>
@@ -991,6 +1020,32 @@ function PrintQueuePage({ jobs, printers, onPreview, onApprove, onReject, onRefu
 }
 
 
+
+function BatchReviewModal({jobs,busy,onClose,onPreview,onApply}:{
+  jobs:ShopPrintJob[];
+  busy:boolean;
+  onClose:()=>void;
+  onPreview:(job:ShopPrintJob)=>void;
+  onApply:(acceptedJobIds:string[])=>void;
+}) {
+  const [acceptedIds,setAcceptedIds]=useState<Set<string>>(()=>new Set(jobs.map(job=>job.id)));
+  useEffect(()=>setAcceptedIds(new Set(jobs.map(job=>job.id))),[jobs]);
+  const acceptedCount=jobs.filter(job=>acceptedIds.has(job.id)).length;
+  const rejectedCount=jobs.length-acceptedCount;
+  return <Modal title="Review upload batch" subtitle="Every file is accepted by default. Uncheck an individual file to reject it. Changes can be undone until you apply the review." onClose={onClose}>
+    <div className="batch-review-list">{jobs.map((job,index)=>{
+      const accepted=acceptedIds.has(job.id);
+      return <div className={accepted?"batch-review-row accepted":"batch-review-row rejected"} key={job.id}>
+        <label className="batch-review-checkbox"><input type="checkbox" checked={accepted} onChange={event=>setAcceptedIds(current=>{const next=new Set(current);if(event.target.checked)next.add(job.id);else next.delete(job.id);return next;})}/></label>
+        <span className="batch-review-index">{index+1}</span>
+        <div className="batch-review-file"><strong>{job.document.originalFileName}</strong><small>{formatBytes(job.document.sizeBytes)} · {job.pageCount} pages · {formatMoney(job.quotedAmountMinor,job.currency)}</small><Status label={accepted?"Accepted by default":"Marked for rejection"} tone={accepted?"green":"red"}/></div>
+        <button className="subtle-button" type="button" onClick={()=>onPreview(job)}>Preview</button>
+      </div>;
+    })}</div>
+    <div className="batch-review-summary"><span><strong>{acceptedCount}</strong> accepted</span><span><strong>{rejectedCount}</strong> rejected</span><small>Rejected files are excluded individually. Unpaid rejected files do not need a refund.</small></div>
+    <div className="modal-actions"><button className="secondary-button" onClick={onClose} disabled={busy}>Keep reviewing</button><button className="primary-button" disabled={busy||jobs.length===0} onClick={()=>onApply(Array.from(acceptedIds))}>{busy?<span className="button-spinner"/>:"Apply review"}</button></div>
+  </Modal>;
+}
 
 function JobHistoryModal({job,events,onClose}:{job:ShopPrintJob;events:ShopJobEvent[];onClose:()=>void}) {
   return <Modal title={job.jobNumber} subtitle={`Audit history · ${job.document.originalFileName}`} onClose={onClose}>
