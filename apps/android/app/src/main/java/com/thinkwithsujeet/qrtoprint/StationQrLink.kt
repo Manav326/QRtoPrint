@@ -4,7 +4,7 @@ import java.net.URI
 
 data class StationQrLink(val url: String, val host: String, val publicCode: String) {
     companion object {
-        private val codePattern = Regex("^[A-Za-z0-9_-]{20,160}$")
+        private val codePattern = Regex("^[A-Za-z0-9_-]{32}$")
 
         fun parse(raw: String?): StationQrLink {
             require(!raw.isNullOrBlank()) { "QR code is empty." }

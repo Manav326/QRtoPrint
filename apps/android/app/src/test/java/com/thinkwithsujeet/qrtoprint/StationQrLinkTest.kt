@@ -5,7 +5,7 @@ import org.junit.Assert.assertThrows
 import org.junit.Test
 
 class StationQrLinkTest {
-    private val code = "AbCdEf0123456789_-AbCdEf0123456789"
+    private val code = "abcdefghijklmnopqrstuvwx12345678"
 
     @Test fun acceptsTheCurrentPortalStationRoute() {
         val parsed = StationQrLink.parse("https://print.example.test/s/$code")
@@ -17,5 +17,7 @@ class StationQrLinkTest {
         assertThrows(IllegalArgumentException::class.java) { StationQrLink.parse("http://print.example.test/s/$code") }
         assertThrows(IllegalArgumentException::class.java) { StationQrLink.parse("https://print.example.test/admin") }
         assertThrows(IllegalArgumentException::class.java) { StationQrLink.parse("https://print.example.test/s/short") }
+        assertThrows(IllegalArgumentException::class.java) { StationQrLink.parse("https://print.example.test/s/${code}extra") }
+        assertThrows(IllegalArgumentException::class.java) { StationQrLink.parse("https://print.example.test/s/${code}?next=1") }
     }
 }
