@@ -719,17 +719,33 @@ function PrintersPage({ printers, onAdd, onToggle }: { printers: PrinterDevice[]
   );
 }
 
-function StationsPage({ stations, onAdd, onToggle, onGenerate }: {
-  stations:QrStation[]; onAdd:()=>void; onToggle:(station:QrStation)=>void; onGenerate:(station:QrStation)=>void;
+function StationsPage({ stations, profile, onAdd, onToggle, onGenerate }: {
+  stations:QrStation[]; profile:ShopProfile|null; onAdd:()=>void; onToggle:(station:QrStation)=>void; onGenerate:(station:QrStation)=>void;
 }) {
+  const [printingStationId,setPrintingStationId]=useState<string|null>(null);
+  useEffect(()=>{
+    if(!printingStationId)return;
+    const onAfterPrint=()=>setPrintingStationId(null);
+    window.addEventListener("afterprint",onAfterPrint);
+    const timer=window.setTimeout(()=>window.print(),120);
+    return ()=>{window.clearTimeout(timer);window.removeEventListener("afterprint",onAfterPrint);};
+  },[printingStationId]);
+
   return (
     <section className="panel collection-panel">
-      <div className="collection-header"><div><h2>Customer QR stations</h2><p>Each station has its own identifier. Scanning it creates a short-lived customer session.</p></div><button className="primary-button" onClick={onAdd}><Plus size={16}/> Create station</button></div>
+      <div className="collection-header"><div><h2>Customer QR stations</h2><p>Each station has a permanent public link. Every scan creates a separate short-lived customer session.</p></div><button className="primary-button" onClick={onAdd}><Plus size={16}/> Create station</button></div>
       {stations.length===0 ? <EmptyModule icon={<QrCode size={24}/>} title="Your first QR station starts here" text="Create a station for a counter or printer. The QR code identifies the station; every scan gets a separate expiring customer session." actionLabel="Create QR station" onAction={onAdd}/> :
-      <div className="station-grid">{stations.map(station=><article className="station-card" key={station.id}><div className="station-card-head"><div className="station-icon"><QrCode size={18}/></div><div className="station-head-copy"><strong>{station.displayName}</strong><span>{station.isEnabled?"Accepting new sessions":"Disabled"}</span></div><Status label={station.isEnabled?"Enabled":"Disabled"} tone={station.isEnabled?"green":"slate"}/></div>
-        <div className="station-qr-area">{station.publicUrl ? <div className="qr-paper"><QRCode value={station.publicUrl} size={148} level="M" fgColor="#121722" bgColor="#ffffff"/><span>SCAN TO PRINT</span></div> : <div className="qr-missing"><QrCode size={34}/><strong>QR code not stored</strong><span>Generate a fresh code to replace the old one.</span><button className="secondary-button" onClick={()=>onGenerate(station)}>Generate fresh QR</button></div>}</div>
+      <div className="station-grid">{stations.map(station=><article className={printingStationId===station.id?"station-card print-active":"station-card"} key={station.id}><div className="station-card-head"><div className="station-icon"><QrCode size={18}/></div><div className="station-head-copy"><strong>{station.displayName}</strong><span>{station.isEnabled?"Accepting new sessions":"Disabled"}</span></div><Status label={station.isEnabled?"Enabled":"Disabled"} tone={station.isEnabled?"green":"slate"}/></div>
+        <div className="station-qr-area">{station.publicUrl ? <div className="qr-paper">
+          <div className="qr-shop-brand">{profile?.logoUrl?<img src={profile.logoUrl} alt={profile.displayName+" logo"}/>:<span className="qr-shop-initial">{(profile?.displayName||"S").slice(0,1).toUpperCase()}</span>}<div><strong>{profile?.displayName||station.displayName}</strong><small>DOCUMENT PRINTING STATION</small></div></div>
+          <div className="qr-code-frame"><QRCode value={station.publicUrl} size={172} level="H" fgColor="#101c35" bgColor="#ffffff"/></div>
+          <span className="qr-scan-label">SCAN TO PRINT</span>
+          <span className="qr-scan-hint">Scan to upload documents and send them to this shop</span>
+          <div className="qr-shop-station">{station.displayName}</div>
+          <div className="qr-powered"><span className="qr-powered-mark">Q</span><small>Powered by <strong>QuantaEdge</strong></small></div>
+        </div> : <div className="qr-missing"><QrCode size={34}/><strong>QR code not stored</strong><span>This older station needs a one-time QR replacement. Its existing printed code cannot be recovered from the old hash.</span><button className="secondary-button" onClick={()=>onGenerate(station)}>Reissue permanent QR</button></div>}</div>
         <div className="station-foot"><span>Code ending ···{station.publicCodeHint}</span><button className="subtle-button" onClick={()=>onToggle(station)}>{station.isEnabled?"Disable station":"Enable station"}</button></div>
-        {station.publicUrl && <div className="station-actions"><button className="secondary-button" onClick={()=>void copyText(station.publicUrl!)}> <Copy size={14}/> Copy link</button><button className="secondary-button" onClick={()=>window.print()}>Print QR</button></div>}
+        {station.publicUrl && <div className="station-actions"><button className="secondary-button" onClick={()=>void copyText(station.publicUrl!)}> <Copy size={14}/> Copy link</button><button className="secondary-button" onClick={()=>setPrintingStationId(station.id)}>Print QR sign</button></div>}
       </article>)}</div>}
     </section>
   );
