@@ -19,9 +19,9 @@ public sealed class SubscriptionPlanModelTests
         Assert.Equal("SubscriptionPlans", plan.GetTableName());
         Assert.Equal("SubscriptionPlanVersions", version.GetTableName());
         Assert.Contains(plan.GetIndexes(), index =>
-            index.IsUnique && index.Properties.Select(property => property.Name).SequenceEqual(["Code"]));
+            index.IsUnique && index.Properties.Select(property => property.Name).SequenceEqual(new[] { "Code" }));
         Assert.Contains(version.GetIndexes(), index =>
-            index.IsUnique && index.Properties.Select(property => property.Name).SequenceEqual(["PlanId", "Version"]));
+            index.IsUnique && index.Properties.Select(property => property.Name).SequenceEqual(new[] { "PlanId", "Version" }));
     }
 
     [Fact]
@@ -31,8 +31,9 @@ public sealed class SubscriptionPlanModelTests
         var subscription = db.Model.FindEntityType(typeof(TenantSubscription));
         Assert.NotNull(subscription);
 
-        var planVersionRelationship = Assert.Single(subscription.GetForeignKeys(), relationship =>
-            relationship.Properties.Any(property => property.Name == nameof(TenantSubscription.PlanVersionId)));
+        var planVersionRelationship = Assert.Single(subscription.GetForeignKeys()
+            .Where(relationship =>
+                relationship.Properties.Any(property => property.Name == nameof(TenantSubscription.PlanVersionId))));
 
         Assert.Equal(DeleteBehavior.Restrict, planVersionRelationship.DeleteBehavior);
         Assert.True(planVersionRelationship.Properties.Single().IsNullable);
