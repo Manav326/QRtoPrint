@@ -551,6 +551,7 @@ class MainActivity : AppCompatActivity() {
             try {
                 val name = child.name ?: "Imported item"
                 if (child.isDirectory) {
+                    if (depth >= MAX_TREE_DEPTH) return false
                     val folder = store.createFolder(destinationPath, name, allowExisting = true)
                     if (!importDirectory(child, store.pathOf(folder), depth + 1, counts, budget)) return false
                 } else if (child.isFile) {
