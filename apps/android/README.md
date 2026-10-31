@@ -27,3 +27,12 @@ gradle --no-daemon -p apps/android :app:testDebugUnitTest :app:assembleDebug
 ```
 
 The CI workflow uploads the debug APK as `qrtoprint-android-debug`. Download it with `scripts\\download-android-apk.ps1`; add `-Install` to install it on one connected, ADB-authorised Android device. Debug builds are for development only. Release signing, physical Android/Wi-Fi validation, Play Store listing and distribution are not yet complete.
+
+## Automated Android UI tests
+
+The CI Android job also launches an Android 15 (API 35) emulator and runs
+`connectedDebugAndroidTest`. Current instrumented coverage includes the
+document-library landing screen, nested-folder navigation and the explicit
+camera-permission explanation screen. This is emulator UI coverage; it does
+not replace physical-device QR camera, file-manager provider, Wi-Fi Agent or
+printer validation.
