@@ -76,7 +76,7 @@ Before upgrades or migrations, run an on-demand backup:
 .\scripts\docker-backup.ps1
 ```
 
-The script pauses API/portal writes, exports PostgreSQL, archives the encrypted cloud-document volume and copies the exact `.env` secrets required to restore the documents. It restarts the services afterwards. Store all three files together in encrypted off-host storage. The Windows Agent's DPAPI-protected local queue remains on the shop computer and needs its own machine-level backup/recovery policy.
+The script pauses API/portal writes, exports PostgreSQL, archives the encrypted cloud-document volume and copies the exact `.env` secrets required to restore the documents. It restricts local backup-file ACLs and restarts the services afterwards. Store all three files together in encrypted off-host storage. To restore the newest complete backup set in a folder, run `.\\scripts\\docker-restore.ps1 -BackupDirectory ".\\backups" -ConfirmRestore`; the script asks you to type the selected backup timestamp before replacing the live database and document volume. Restore requires the original PostgreSQL credentials and preserves a copy of the current `.env` before switching to the backup secrets. The Windows Agent's DPAPI-protected local queue remains on each shop computer and needs its own machine-level backup/recovery policy.
 
 ### Operations
 

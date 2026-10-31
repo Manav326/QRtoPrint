@@ -33,6 +33,11 @@ foreach ($required in @("POSTGRES_DB", "POSTGRES_USER", "POSTGRES_PASSWORD", "DO
 
 New-Item -ItemType Directory -Force -Path $BackupDirectory | Out-Null
 $resolvedBackup = (Resolve-Path -LiteralPath $BackupDirectory).Path
+$identity = [Security.Principal.WindowsIdentity]::GetCurrent().Name
+& icacls.exe $resolvedBackup /inheritance:r /grant:r "$($identity):(OI)(CI)(F)" "*S-1-5-32-544:(OI)(CI)(F)" "*S-1-5-18:(OI)(CI)(F)" | Out-Null
+if ($LASTEXITCODE -ne 0) {
+    throw "Could not restrict backup-directory permissions. Choose a protected backup directory and retry."
+}
 $stamp = (Get-Date).ToUniversalTime().ToString("yyyyMMdd-HHmmss")
 $dbFile = Join-Path $resolvedBackup "qrtoprint-database-$stamp.dump"
 $docsFile = Join-Path $resolvedBackup "qrtoprint-documents-$stamp.tar.gz"
@@ -85,8 +90,12 @@ try {
     $backupContainer = $null
 
     Copy-Item -LiteralPath $envPath -Destination $envFile -Force
-    $identity = [Security.Principal.WindowsIdentity]::GetCurrent().Name
-    & icacls.exe $envFile /inheritance:r /grant:r "$($identity):(F)" "*S-1-5-32-544:(F)" | Out-Null
+    foreach ($backupItem in @($dbFile, $docsFile, $envFile)) {
+        & icacls.exe $backupItem /inheritance:r /grant:r "$($identity):(F)" "*S-1-5-32-544:(F)" "*S-1-5-18:(F)" | Out-Null
+        if ($LASTEXITCODE -ne 0) {
+            throw "Could not restrict backup-file permissions for $backupItem."
+        }
+    }
     if ($LASTEXITCODE -ne 0) {
         Write-Warning "Could not restrict the backup secret file ACLs automatically. Secure the backup directory manually."
     }
