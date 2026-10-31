@@ -45,7 +45,8 @@ Acceptance: an owner/manager can configure and operate the core shop print workf
 - [x] Direct phone-to-Agent ticket, integrity check and DPAPI-protected local staging; document bytes do not traverse cloud storage in LAN mode.
 - [x] Server-calculated quote, customer quote acceptance, shop review and customer job tracking.
 - [x] Shop-configured UPI/cash payment attempt and customer UPI reference submission; a reference or screenshot is not proof of payment.
-- [ ] Multi-file and Office-document uploads, server-side malware scanning, richer customer receipts and issue/collection workflow.
+- [x] Multi-file PDF/JPG/JPEG/PNG uploads as separate print jobs under one shared batch ID (up to 20 files / 50 MB total), with shop-side per-file review/rejection and refunds.
+- [ ] Office-document uploads, server-side malware scanning, richer customer receipts and issue/collection workflow.
 - [ ] Automated payment-provider verification and cross-device customer account/history.
 - [ ] Physical Android/iOS browser and shop Wi-Fi client-isolation test matrix for Local Network Access.
 
@@ -57,7 +58,7 @@ Acceptance: both transfer modes use one server-owned job lifecycle. LAN mode req
 - [x] Branded CameraX/ML Kit on-device QR scanner with permission handling and flashlight; decoded URLs are validated against the existing HTTPS `/s/{publicCode}` route.
 - [x] App-private document library with folders/subfolders, rename, delete, open and share actions.
 - [x] Multi-file and recursive folder import through Android's Storage Access Framework; file and folder export to a user-selected provider.
-- [x] Native saved-document picker integrated with the customer portal's existing single-file upload control.
+- [x] Native saved-document picker integrated with the customer portal; multi-file selection hands original files into the existing separate-file batch upload contract (fresh-branch CI and physical-device acceptance tracked in `docs/ANDROID_ENHANCEMENT_TRACKER.md`).
 - [x] WebView HTTP request filter limiting cleartext traffic to private IPv4 Agent upload endpoints on TCP 17842.
 - [x] JVM tests for QR route validation, print-format/size policy, local storage, duplicate preservation, path traversal and bounded folder-transfer budgets; CI Android debug build and APK artifact.
 - [x] Windows PowerShell helper to download the latest successful Android debug artifact and optionally install it via ADB.
