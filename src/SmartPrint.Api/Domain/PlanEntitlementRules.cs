@@ -1,0 +1,17 @@
+namespace SmartPrint.Api.Domain;
+
+public static class PlanEntitlementRules
+{
+    public static bool CanAdd(long? maximum, long currentCount, long requestedCount = 1) =>
+        currentCount >= 0 &&
+        requestedCount >= 0 &&
+        (maximum is null ||
+         (maximum.Value >= 0 &&
+          currentCount <= maximum.Value &&
+          requestedCount <= maximum.Value - currentCount));
+
+    public static bool AllowsDocument(long? maximumBytes, long requestedBytes) =>
+        requestedBytes > 0 &&
+        (maximumBytes is null ||
+         (maximumBytes.Value > 0 && requestedBytes <= maximumBytes.Value));
+}

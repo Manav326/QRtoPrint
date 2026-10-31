@@ -17,6 +17,7 @@ using SmartPrint.Api.Endpoints;
 using SmartPrint.Api.Pricing;
 using SmartPrint.Api.Security;
 using SmartPrint.Api.Storage;
+using SmartPrint.Api.Services;
 
 const string bootstrapPlatformAdminArgument = "--bootstrap-platform-admin";
 var bootstrapPlatformAdmin = args.Any(argument =>
@@ -85,6 +86,7 @@ builder.Services.AddAuthorization(options =>
         policy.RequireAssertion(context => PlatformAdminAuthorization.IsPlatformAdmin(context.User)));
 });
 builder.Services.AddScoped<TokenIssuer>();
+builder.Services.AddScoped<TenantEntitlementService>();
 builder.Services.AddSingleton<DocumentStorage>();
 builder.Services.AddRateLimiter(options =>
 {
@@ -643,6 +645,7 @@ shop.MapPost("/printers", async (
     CreatePrinterRequest request,
     ClaimsPrincipal principal,
     SmartPrintDbContext db,
+    TenantEntitlementService entitlements,
     CancellationToken ct) =>
 {
     if (!IsShopOwner(principal) || !TryGetTenantId(principal, out var tenantId))
@@ -679,6 +682,15 @@ shop.MapPost("/printers", async (
         });
     }
 
+    await using var transaction = await db.Database.BeginTransactionAsync(ct);
+    await entitlements.AcquireQuotaLockAsync(tenantId, TenantQuotaResource.Printer, ct);
+    var quota = await entitlements.CheckCapacityAsync(tenantId, TenantQuotaResource.Printer, ct);
+    if (!quota.Allowed)
+    {
+        await transaction.RollbackAsync(ct);
+        return Results.Conflict(new { code = quota.Code, message = quota.Message, current = quota.Current, maximum = quota.Maximum });
+    }
+
     var printer = new PrinterDevice
     {
         TenantId = tenantId,
@@ -694,6 +706,7 @@ shop.MapPost("/printers", async (
     };
     db.PrinterDevices.Add(printer);
     await db.SaveChangesAsync(ct);
+    await transaction.CommitAsync(ct);
     return Results.Created($"/api/v1/shop/printers/{printer.Id}", new
     {
         printer.Id,
@@ -761,6 +774,7 @@ shop.MapPost("/qr-stations", async (
     ClaimsPrincipal principal,
     SmartPrintDbContext db,
     IConfiguration configuration,
+    TenantEntitlementService entitlements,
     CancellationToken ct) =>
 {
     if (!IsShopOwner(principal) || !TryGetTenantId(principal, out var tenantId))
@@ -785,6 +799,15 @@ shop.MapPost("/qr-stations", async (
         });
     }
 
+    await using var transaction = await db.Database.BeginTransactionAsync(ct);
+    await entitlements.AcquireQuotaLockAsync(tenantId, TenantQuotaResource.QrStation, ct);
+    var quota = await entitlements.CheckCapacityAsync(tenantId, TenantQuotaResource.QrStation, ct);
+    if (!quota.Allowed)
+    {
+        await transaction.RollbackAsync(ct);
+        return Results.Conflict(new { code = quota.Code, message = quota.Message, current = quota.Current, maximum = quota.Maximum });
+    }
+
     var publicCode = Microsoft.AspNetCore.WebUtilities.WebEncoders.Base64UrlEncode(RandomNumberGenerator.GetBytes(24));
     var station = new QrStation
     {
@@ -796,6 +819,7 @@ shop.MapPost("/qr-stations", async (
     };
     db.QrStations.Add(station);
     await db.SaveChangesAsync(ct);
+    await transaction.CommitAsync(ct);
 
     var portalBase = (configuration["PublicPortal:BaseUrl"] ?? "http://localhost:3000").TrimEnd('/');
     return Results.Created($"/api/v1/shop/qr-stations/{station.Id}", new
@@ -1576,6 +1600,7 @@ var agentApi = app.MapGroup("/api/v1/agent").AllowAnonymous();
 agentApi.MapPost("/enroll", async (
     AgentEnrollmentRequest request,
     SmartPrintDbContext db,
+    TenantEntitlementService entitlements,
     CancellationToken ct) =>
 {
     if (string.IsNullOrWhiteSpace(request.Code) || request.Code.Length > 100 ||
@@ -1612,6 +1637,14 @@ agentApi.MapPost("/enroll", async (
             code = "agent_already_enrolled",
             message = "This Windows computer is already paired with this shop. Revoke the previous pairing before enrolling it again."
         });
+    }
+
+    await entitlements.AcquireQuotaLockAsync(enrollment.TenantId, TenantQuotaResource.AgentDevice, ct);
+    var quota = await entitlements.CheckCapacityAsync(enrollment.TenantId, TenantQuotaResource.AgentDevice, ct);
+    if (!quota.Allowed)
+    {
+        await transaction.RollbackAsync(ct);
+        return Results.Conflict(new { code = quota.Code, message = quota.Message, current = quota.Current, maximum = quota.Maximum });
     }
 
     var claimed = await db.AgentEnrollmentCodes
@@ -2158,6 +2191,7 @@ agentApi.MapPost("/printers/sync", async (
     HttpContext context,
     SmartPrintDbContext db,
     AgentPrinterSyncRequest request,
+    TenantEntitlementService entitlements,
     CancellationToken ct) =>
 {
     var device = await AuthenticateAgentAsync(context, db, ct);
@@ -2196,6 +2230,34 @@ agentApi.MapPost("/printers/sync", async (
     }
 
     var now = DateTimeOffset.UtcNow;
+    await using var transaction = await db.Database.BeginTransactionAsync(ct);
+    await entitlements.AcquireQuotaLockAsync(device.TenantId, TenantQuotaResource.Printer, ct);
+
+    var tenantPrinters = await db.PrinterDevices.AsNoTracking()
+        .Where(printer => printer.TenantId == device.TenantId)
+        .Select(printer => new { printer.QueueName, printer.AgentDeviceId })
+        .ToListAsync(ct);
+    var revokedAgentIds = await db.AgentDevices.AsNoTracking()
+        .Where(agent => agent.TenantId == device.TenantId && agent.RevokedUtc != null)
+        .Select(agent => agent.Id)
+        .ToListAsync(ct);
+    var additionalPrinters = normalized.LongCount(discovered =>
+        !tenantPrinters.Any(printer =>
+            string.Equals(printer.QueueName, discovered.QueueName, StringComparison.OrdinalIgnoreCase) &&
+            (printer.AgentDeviceId == device.Id ||
+             printer.AgentDeviceId == null ||
+             (printer.AgentDeviceId is Guid previousAgentId && revokedAgentIds.Contains(previousAgentId)))));
+    if (additionalPrinters > 0)
+    {
+        var quota = await entitlements.CheckCapacityAsync(
+            device.TenantId, TenantQuotaResource.Printer, ct, additionalPrinters);
+        if (!quota.Allowed)
+        {
+            await transaction.RollbackAsync(ct);
+            return Results.Conflict(new { code = quota.Code, message = quota.Message, current = quota.Current, maximum = quota.Maximum });
+        }
+    }
+
     var existing = await db.PrinterDevices
         .Where(printer => printer.TenantId == device.TenantId &&
                           printer.AgentDeviceId == device.Id)
@@ -2265,6 +2327,7 @@ agentApi.MapPost("/printers/sync", async (
     device.Status = "Online";
     device.LastSeenUtc = now;
     await db.SaveChangesAsync(ct);
+    await transaction.CommitAsync(ct);
     return Results.Ok(new { device.Id, Discovered = normalized.Count, Created = created, Updated = updated, Unavailable = existing.Count(printer => !seenQueues.Contains(printer.QueueName ?? string.Empty)), SyncedUtc = now });
 });
 
@@ -2605,6 +2668,7 @@ publicApi.MapPost("/sessions/current/jobs", async (
     HttpContext context,
     SmartPrintDbContext db,
     DocumentStorage storage,
+    TenantEntitlementService entitlements,
     CancellationToken ct) =>
 {
     var rawToken = context.Request.Headers["X-Print-Session"].FirstOrDefault();
@@ -2667,6 +2731,28 @@ publicApi.MapPost("/sessions/current/jobs", async (
         return Results.Problem(statusCode: StatusCodes.Status413PayloadTooLarge, title: "File size must be between 1 byte and 20 MB.");
     }
 
+    var subscription = await entitlements.GetForTenantAsync(session.TenantId, ct);
+    if (!subscription.CloudAssistedPrintingEnabled)
+    {
+        return Results.Problem(
+            statusCode: StatusCodes.Status403Forbidden,
+            title: "Cloud-assisted printing is not included in this shop's current plan.");
+    }
+
+    if (!PlanEntitlementRules.AllowsDocument(subscription.MaxDocumentBytes, file.Length))
+    {
+        return Results.Problem(
+            statusCode: StatusCodes.Status413PayloadTooLarge,
+            title: "This document exceeds the maximum size configured for this shop's plan.");
+    }
+
+    var preflightQuota = await entitlements.CheckCapacityAsync(
+        session.TenantId, TenantQuotaResource.MonthlyPrintJob, ct);
+    if (!preflightQuota.Allowed)
+    {
+        return Results.Conflict(new { code = preflightQuota.Code, message = preflightQuota.Message, current = preflightQuota.Current, maximum = preflightQuota.Maximum });
+    }
+
     var originalName = file.FileName.Split('/', '\\').LastOrDefault() ?? string.Empty;
     originalName = new string(originalName.Where(character => !char.IsControl(character)).ToArray()).Trim();
     if (string.IsNullOrWhiteSpace(originalName))
@@ -2721,6 +2807,15 @@ publicApi.MapPost("/sessions/current/jobs", async (
     try
     {
         await using var transaction = await db.Database.BeginTransactionAsync(ct);
+        await entitlements.AcquireQuotaLockAsync(session.TenantId, TenantQuotaResource.MonthlyPrintJob, ct);
+        var quota = await entitlements.CheckCapacityAsync(session.TenantId, TenantQuotaResource.MonthlyPrintJob, ct);
+        if (!quota.Allowed)
+        {
+            await transaction.RollbackAsync(ct);
+            await storage.DeleteAsync(stored.StorageKey);
+            return Results.Conflict(new { code = quota.Code, message = quota.Message, current = quota.Current, maximum = quota.Maximum });
+        }
+
         db.PrintJobs.Add(job);
         db.PrintDocuments.Add(document);
         db.PrintJobEvents.Add(new PrintJobEvent

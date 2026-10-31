@@ -1,0 +1,153 @@
+using Microsoft.EntityFrameworkCore;
+using SmartPrint.Api.Data;
+using SmartPrint.Api.Domain;
+
+namespace SmartPrint.Api.Services;
+
+public enum TenantQuotaResource
+{
+    Printer,
+    AgentDevice,
+    QrStation,
+    MonthlyPrintJob
+}
+
+public sealed record TenantEntitlementSnapshot(
+    Guid TenantId,
+    string PlanCode,
+    string SubscriptionStatus,
+    Guid? PlanVersionId,
+    int? MaxPrinters,
+    int? MaxAgentDevices,
+    int? MaxQrStations,
+    int? MaxMonthlyPrintJobs,
+    long? MaxDocumentBytes,
+    bool CloudAssistedPrintingEnabled,
+    bool WhiteLabelEnabled,
+    bool AdvancedReportsEnabled,
+    bool IsLegacyUnconfigured);
+
+public sealed record TenantQuotaDecision(
+    bool Allowed,
+    string Code,
+    string Message,
+    long Current,
+    long? Maximum);
+
+public sealed class TenantEntitlementService(SmartPrintDbContext db)
+{
+    public async Task<TenantEntitlementSnapshot> GetForTenantAsync(Guid tenantId, CancellationToken cancellationToken)
+    {
+        var subscription = await db.TenantSubscriptions.AsNoTracking()
+            .Where(item => item.TenantId == tenantId)
+            .OrderByDescending(item => item.CreatedUtc)
+            .ThenByDescending(item => item.Id)
+            .Select(item => new { item.PlanCode, item.Status, item.PlanVersionId })
+            .FirstOrDefaultAsync(cancellationToken);
+
+        // Legacy subscriptions have no immutable version reference. Preserve their existing access.
+        if (subscription?.PlanVersionId is not Guid planVersionId)
+        {
+            return new TenantEntitlementSnapshot(
+                tenantId, subscription?.PlanCode ?? "UNCONFIGURED",
+                subscription?.Status ?? "Unconfigured", null,
+                null, null, null, null, null,
+                true, false, true, true);
+        }
+
+        var version = await db.SubscriptionPlanVersions.AsNoTracking()
+            .SingleOrDefaultAsync(item => item.Id == planVersionId, cancellationToken);
+        if (version is null)
+        {
+            throw new InvalidOperationException(
+                $"Subscription {subscription.PlanCode} for tenant {tenantId} references a missing plan version.");
+        }
+
+        return new TenantEntitlementSnapshot(
+            tenantId, subscription.PlanCode, subscription.Status, version.Id,
+            version.MaxPrinters, version.MaxAgentDevices, version.MaxQrStations,
+            version.MaxMonthlyPrintJobs, version.MaxDocumentBytes,
+            version.CloudAssistedPrintingEnabled, version.WhiteLabelEnabled,
+            version.AdvancedReportsEnabled, false);
+    }
+
+    public async Task AcquireQuotaLockAsync(Guid tenantId, TenantQuotaResource resource, CancellationToken cancellationToken)
+    {
+        if (db.Database.CurrentTransaction is null)
+        {
+            throw new InvalidOperationException("A database transaction is required before acquiring a quota lock.");
+        }
+
+        var lockKey = $"{tenantId:N}:{resource}";
+        await db.Database.ExecuteSqlInterpolatedAsync(
+            $"SELECT pg_advisory_xact_lock(0, hashtext({lockKey}))", cancellationToken);
+    }
+
+    public async Task<TenantQuotaDecision> CheckCapacityAsync(
+        Guid tenantId,
+        TenantQuotaResource resource,
+        CancellationToken cancellationToken,
+        long requestedCount = 1)
+    {
+        var entitlement = await GetForTenantAsync(tenantId, cancellationToken);
+        long? maximum = resource switch
+        {
+            TenantQuotaResource.Printer => entitlement.MaxPrinters,
+            TenantQuotaResource.AgentDevice => entitlement.MaxAgentDevices,
+            TenantQuotaResource.QrStation => entitlement.MaxQrStations,
+            TenantQuotaResource.MonthlyPrintJob => entitlement.MaxMonthlyPrintJobs,
+            _ => throw new ArgumentOutOfRangeException(nameof(resource), resource, "Unknown tenant quota resource.")
+        };
+
+        if (maximum is null || requestedCount == 0)
+        {
+            return new TenantQuotaDecision(true, string.Empty, string.Empty, 0, maximum);
+        }
+
+        if (requestedCount < 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(requestedCount));
+        }
+
+        var current = resource switch
+        {
+            TenantQuotaResource.Printer => await db.PrinterDevices.AsNoTracking()
+                .LongCountAsync(item => item.TenantId == tenantId, cancellationToken),
+            TenantQuotaResource.AgentDevice => await db.AgentDevices.AsNoTracking()
+                .LongCountAsync(item => item.TenantId == tenantId && item.RevokedUtc == null && item.Status != "Revoked", cancellationToken),
+            TenantQuotaResource.QrStation => await db.QrStations.AsNoTracking()
+                .LongCountAsync(item => item.TenantId == tenantId, cancellationToken),
+            TenantQuotaResource.MonthlyPrintJob => await CountMonthlyJobsAsync(tenantId, cancellationToken),
+            _ => throw new ArgumentOutOfRangeException(nameof(resource), resource, "Unknown tenant quota resource.")
+        };
+
+        var allowed = PlanEntitlementRules.CanAdd(maximum, current, requestedCount);
+        var (code, plural) = resource switch
+        {
+            TenantQuotaResource.Printer => ("printer_limit_reached", "printers"),
+            TenantQuotaResource.AgentDevice => ("agent_device_limit_reached", "paired computers"),
+            TenantQuotaResource.QrStation => ("qr_station_limit_reached", "QR stations"),
+            TenantQuotaResource.MonthlyPrintJob => ("monthly_print_job_limit_reached", "monthly print jobs"),
+            _ => ("resource_limit_reached", "resources")
+        };
+
+        return new TenantQuotaDecision(
+            allowed,
+            allowed ? string.Empty : code,
+            allowed ? string.Empty : $"This shop has reached its plan limit of {maximum} {plural}.",
+            current,
+            maximum);
+    }
+
+    private async Task<long> CountMonthlyJobsAsync(Guid tenantId, CancellationToken cancellationToken)
+    {
+        var now = DateTimeOffset.UtcNow;
+        var periodStart = new DateTimeOffset(now.Year, now.Month, 1, 0, 0, 0, TimeSpan.Zero);
+        var periodEnd = periodStart.AddMonths(1);
+        return await db.PrintJobs.AsNoTracking().LongCountAsync(
+            item => item.TenantId == tenantId &&
+                    item.CreatedUtc >= periodStart &&
+                    item.CreatedUtc < periodEnd,
+            cancellationToken);
+    }
+}
