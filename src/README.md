@@ -1,7 +1,7 @@
 # .NET services
 
-- SmartPrint.Api: cloud control-plane API, tenant onboarding, shop authentication, QR sessions, protected document upload/quotes, job review/audit history, agent enrollment and printer inventory sync.
-- SmartPrint.Agent: Windows background service. It pairs to one shop, stores its device secret with DPAPI LocalMachine, sends heartbeats and reports Windows-installed printer queues.
+- SmartPrint.Api: cloud control-plane API for tenant onboarding, shop authentication, QR sessions, protected document upload and quotes, shop review, audit history, shop-owned UPI/cash payment verification, tenant-scoped reporting, agent enrollment, secure job handoff, print dispatch and output reconciliation.
+- SmartPrint.Agent: Windows background service paired to one shop. It stores its device secret and received documents with DPAPI LocalMachine, reports printer inventory and heartbeat, claims authorised jobs, executes supported PDF/JPEG/PNG jobs through the installed Windows print driver, monitors spooler state, and marks uncertain output for operator reconciliation.
 
 ## Windows agent setup
 
@@ -11,4 +11,4 @@ See src/SmartPrint.Agent/README.md and the scripts below:
 - scripts/install-agent-service.ps1
 - scripts/uninstall-agent-service.ps1
 
-The current agent release discovers printer inventory and health only. It does not submit physical print jobs. Payment verification, durable local queueing, spooler submission and uncertain-output reconciliation are separate workstreams.
+The current agent supports a protected local queue and explicitly authorised Windows spooler submission. It never treats spooler acceptance as proof of physical paper output and never automatically resubmits a job after an uncertain submission. The shop operator must inspect the paper and confirm output in the shop portal. Actual device/driver compatibility still requires physical validation.
