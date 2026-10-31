@@ -8,7 +8,7 @@ The customer-facing app is **SmartPrint by QuantaEdge**. QRtoPrint remains the r
 - Create nested folders, move files/folders between directories, and reorder sibling items without renaming customer files.
 - Select several local photos and combine them into a PDF; original images remain unchanged.
 - Create nested folders, import multiple files, or import a directory tree using Android's Storage Access Framework.
-- Export one file, multiple selected files, or an entire folder tree into a user-selected Android File Manager destination.
+- Export one file or an entire folder tree into a user-selected Android File Manager destination. Multiple selected files export together as a ZIP archive that preserves their original filenames.
 - Open/share files with other Android apps.
 - The customer portal's file picker can select a saved PDF/JPG/JPEG/PNG from this library.
 
