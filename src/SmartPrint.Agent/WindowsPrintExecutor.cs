@@ -58,6 +58,7 @@ public sealed class WindowsPrintExecutor
         using var raster = OpenDocument(bytes, entry.MediaType, entry.ColourMode == "Mono");
         if (raster.PageCount is <= 0 or > 500)
             throw new PrintExecutionBlockedException("INVALID_PAGE_COUNT", "The document contains an unsupported number of pages.");
+        var printablePageIndices = GetPrintablePageIndices(raster.PageCount, entry.RejectedPageNumbers);
 
         IntPtr printer = IntPtr.Zero;
         IntPtr devMode = IntPtr.Zero;
@@ -92,7 +93,7 @@ public sealed class WindowsPrintExecutor
             // Copies are expanded here (collated) exactly once; driver-level copies stay at one.
             for (var copy = 0; copy < entry.Copies; copy++)
             {
-                for (var pageIndex = 0; pageIndex < raster.PageCount; pageIndex++)
+                foreach (var pageIndex in printablePageIndices)
                 {
                     cancellationToken.ThrowIfCancellationRequested();
                     if (StartPage(dc) <= 0)
@@ -167,6 +168,7 @@ public sealed class WindowsPrintExecutor
         using var raster = OpenDocument(bytes, entry.MediaType, entry.ColourMode == "Mono");
         if (raster.PageCount is <= 0 or > 500)
             throw new PrintExecutionBlockedException("INVALID_PAGE_COUNT", "The document contains an unsupported number of pages.");
+        var printablePageIndices = GetPrintablePageIndices(raster.PageCount, entry.RejectedPageNumbers);
 
         Directory.CreateDirectory(exportDirectory);
         var outputPath = GetPdfExportPath(entry, exportDirectory);
@@ -185,7 +187,7 @@ public sealed class WindowsPrintExecutor
                 const int dpi = 300;
                 for (var copy = 0; copy < entry.Copies; copy++)
                 {
-                    for (var pageIndex = 0; pageIndex < raster.PageCount; pageIndex++)
+                    foreach (var pageIndex in printablePageIndices)
                     {
                         cancellationToken.ThrowIfCancellationRequested();
                         using var page = raster.RenderPage(pageIndex, dpi);
@@ -425,6 +427,19 @@ public sealed class WindowsPrintExecutor
         "A4" => 9, "A5" => 11, "LETTER" => 1, "LEGAL" => 5,
         _ => throw new PrintExecutionBlockedException("PAPER_SIZE_UNSUPPORTED", $"Paper '{paper}' is not supported in this release.")
     };
+
+    private static int[] GetPrintablePageIndices(int pageCount, IReadOnlyList<int>? rejectedPageNumbers)
+    {
+        var rejectedPages = rejectedPageNumbers ?? Array.Empty<int>();
+        if (rejectedPages.Distinct().Count() != rejectedPages.Count ||
+            rejectedPages.Any(page => page < 1 || page > pageCount))
+            throw new PrintExecutionBlockedException("REJECTED_PAGE_SELECTION_INVALID", "The server supplied an invalid rejected-page selection.");
+
+        var printable = Enumerable.Range(0, pageCount).Where(index => !rejectedPages.Contains(index + 1)).ToArray();
+        if (printable.Length == 0)
+            throw new PrintExecutionBlockedException("NO_ACCEPTED_PAGES", "Every page was rejected. The file must be fully refunded instead of printed.");
+        return printable;
+    }
 
     private static IRasterDocument OpenDocument(byte[] bytes, string mediaType, bool mono)
     {

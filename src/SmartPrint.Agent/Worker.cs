@@ -415,9 +415,14 @@ public sealed class Worker(
             }
             try
             {
+                var rejectedPages = job.RejectedPageNumbers ?? Array.Empty<int>();
+                await localQueueStore.UpdateRejectedPagesAsync(job.Id, rejectedPages, ct);
+                entry = localQueueStore.Find(job.Id)
+                    ?? throw new FileNotFoundException("The local print job disappeared before output.");
+
                 if (isPdfExport)
                 {
-                    var exportEntry = entry with { OutputMode = PrinterOutputModeRules.PdfExport };
+                    var exportEntry = entry with { OutputMode = PrinterOutputModeRules.PdfExport, RejectedPageNumbers = rejectedPages };
                     var destination = printExecutor.GetPdfExportPath(exportEntry, pdfExportDirectory);
                     await localQueueStore.MarkPdfExportStartedAsync(job.Id, destination, ct);
                     var documentBytes = localQueueStore.ReadDocument(job.Id);
@@ -434,7 +439,7 @@ public sealed class Worker(
                 await localQueueStore.MarkSubmissionStartedAsync(job.Id, job.SpoolerJobName, ct);
                 var bytes = localQueueStore.ReadDocument(job.Id);
                 SpoolerPrintReceipt spoolerReceipt;
-                try { spoolerReceipt = printExecutor.Print(entry with { SpoolerJobName = job.SpoolerJobName }, bytes, ct); }
+                try { spoolerReceipt = printExecutor.Print(entry with { SpoolerJobName = job.SpoolerJobName, RejectedPageNumbers = rejectedPages }, bytes, ct); }
                 finally { CryptographicOperations.ZeroMemory(bytes); }
 
                 await localQueueStore.MarkSpoolerAcceptedAsync(job.Id, spoolerReceipt.JobId, spoolerReceipt.DocumentName, ct);

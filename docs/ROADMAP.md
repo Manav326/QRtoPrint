@@ -31,7 +31,8 @@ Acceptance: core tenant and subscription administration exists; automated SaaS b
 - [x] Printer registry, paired Agent/printer discovery, QR stations and enable/disable controls.
 - [x] Print-job list, quote review, shop approve/reject, printer assignment, dispatch and output confirmation.
 - [x] Payment attempt review and manual payment verification/rejection.
-- [ ] Full operator role matrix, rich customer directory/history, comprehensive reporting, refunds, collection workflow and configurable notification studio.
+- [x] Per-file and per-page rejection with full or proportional partial refunds before computer handoff; rejected pages are omitted from physical print and PDF output.
+- [ ] Full operator role matrix, rich customer directory/history, comprehensive reporting, collection workflow and configurable notification studio.
 - [ ] Full mobile/tablet and light/dark accessibility/visual-regression audit.
 
 Acceptance: an owner/manager can configure and operate the core shop print workflow; broader shop operations remain in progress.
@@ -88,7 +89,8 @@ Acceptance: Windows build and queue-state tests pass; physical model/driver supp
 - [x] UPI/cash payment attempt with manual shop verification before Agent dispatch.
 - [x] Separate shop print-payment records from platform subscription assignments.
 - [ ] Payment gateway adapters and verified webhook lifecycle.
-- [ ] Refund, reconciliation and customer-to-shop settlement reporting.
+- [x] Shop-recorded full and partial refunds for verified page selections, with cumulative amount and idempotency guards.
+- [ ] Automated refund execution, reconciliation and customer-to-shop settlement reporting.
 
 Acceptance: manual payment verification is implemented; do not describe it as automated gateway verification or reconciliation.
 

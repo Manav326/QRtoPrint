@@ -66,12 +66,13 @@ public sealed record AgentLocalQueueEntry(
     string? OutputFilePath = null,
     string? OutputFileName = null,
     string? OutputFileSha256 = null,
-    long? OutputFileSizeBytes = null);
+    long? OutputFileSizeBytes = null,
+    IReadOnlyList<int>? RejectedPageNumbers = null);
 
 public sealed record AgentLocalQueueProof(Guid JobId, string Sha256, long SizeBytes);
 public sealed record AgentPrintClaimRequest(IReadOnlyList<AgentLocalQueueProof> LocalJobs);
 public sealed record AgentPrintClaimResponse(IReadOnlyList<AgentPrintClaimedJob> Jobs, DateTimeOffset ClaimedUtc);
-public sealed record AgentPrintClaimedJob(Guid Id, string JobNumber, string Status, string QueueName, string SpoolerJobName, DateTimeOffset LeaseExpiresUtc, string OutputMode = PrinterOutputModeRules.Physical);
+public sealed record AgentPrintClaimedJob(Guid Id, string JobNumber, string Status, string QueueName, string SpoolerJobName, DateTimeOffset LeaseExpiresUtc, string OutputMode = PrinterOutputModeRules.Physical, IReadOnlyList<int>? RejectedPageNumbers = null);
 public sealed record AgentPdfExportedRequest(string FileName, string OutputPath, long SizeBytes, string Sha256);
 public sealed record PdfExportReceipt(string FileName, string OutputPath, long SizeBytes, string Sha256);
 public sealed record AgentSpoolerAcceptedRequest(int SpoolerJobId, string SpoolerJobName, string SpoolerStatus);

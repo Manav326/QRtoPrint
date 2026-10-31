@@ -33,6 +33,34 @@ public static class PricingCalculator
         if (pricing.MinimumChargeMinor < 0) throw new InvalidOperationException("The configured minimum charge is invalid.");
         return Math.Max(amount, pricing.MinimumChargeMinor);
     }
+
+    public static long[] CalculatePageRefundAllocations(int pageCount, int copies, string colourMode, bool isDuplex, ShopPricingProfile pricing)
+    {
+        var total = Calculate(pageCount, copies, colourMode, isDuplex, pricing);
+        var weights = Enumerable.Repeat(1L, pageCount).ToArray();
+        if (isDuplex && pageCount % 2 == 1) weights[^1] = 2;
+
+        var totalWeight = weights.Aggregate(0L, (sum, weight) => checked(sum + weight));
+        var allocations = new long[pageCount];
+        var remainders = new List<(int Index, decimal Remainder)>();
+        long allocated = 0;
+        for (var index = 0; index < weights.Length; index++)
+        {
+            var exact = (decimal)total * weights[index] / totalWeight;
+            var whole = decimal.ToInt64(decimal.Floor(exact));
+            allocations[index] = whole;
+            allocated = checked(allocated + whole);
+            remainders.Add((index, exact - whole));
+        }
+
+        var remainingMinorUnits = checked(total - allocated);
+        foreach (var remainder in remainders.OrderByDescending(item => item.Remainder).ThenBy(item => item.Index).Take(checked((int)remainingMinorUnits)))
+            allocations[remainder.Index] = checked(allocations[remainder.Index] + 1);
+
+        if (allocations.Aggregate(0L, (sum, value) => checked(sum + value)) != total)
+            throw new InvalidOperationException("The page refund allocation does not equal the original quote.");
+        return allocations;
+    }
 }
 
 public sealed class DuplexPricingNotConfiguredException()
