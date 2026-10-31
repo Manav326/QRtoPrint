@@ -439,6 +439,18 @@ export function logout(token: string) {
   }, token);
 }
 
+function nativeCustomerAuthorizationHeaders(): Record<string, string> {
+  try {
+    const bridge = (window as Window & {
+      SmartPrintNative?: { getCustomerAccessToken?: () => string };
+    }).SmartPrintNative;
+    const token = bridge?.getCustomerAccessToken?.();
+    return token ? { Authorization: `Bearer ${token}` } : {};
+  } catch {
+    return {};
+  }
+}
+
 export function createCustomerSession(publicCode: string) {
   return apiRequest<{
     id: string;
@@ -449,7 +461,10 @@ export function createCustomerSession(publicCode: string) {
     printer: { displayName: string; manufacturer: string; model: string; status: string; capabilitiesJson: string } | null;
     paymentOptions: { upiEnabled: boolean; upiId?: string | null; payeeName?: string | null; cashEnabled: boolean };
     localAgent: { agentDeviceId: string; endpoints: string[] } | null;
-  }>(`/api/v1/public/stations/${encodeURIComponent(publicCode)}/sessions`, { method: "POST" });
+  }>(`/api/v1/public/stations/${encodeURIComponent(publicCode)}/sessions`, {
+    method: "POST",
+    headers: nativeCustomerAuthorizationHeaders()
+  });
 }
 
 
