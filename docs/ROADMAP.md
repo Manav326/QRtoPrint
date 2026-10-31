@@ -53,12 +53,13 @@ Acceptance: both transfer modes use one server-owned job lifecycle. LAN mode req
 ## Workstream 3A — native Android companion
 
 - [x] Native Android project scaffold with pinned Android Gradle Plugin/Kotlin toolchain and Android 8+ baseline (minSdk 26).
-- [x] QR scanning for the existing HTTPS `/s/{publicCode}` station route; session creation and validation remain in the existing API.
+- [x] Branded CameraX/ML Kit on-device QR scanner with permission handling and flashlight; decoded URLs are validated against the existing HTTPS `/s/{publicCode}` route.
 - [x] App-private document library with folders/subfolders, rename, delete, open and share actions.
 - [x] Multi-file and recursive folder import through Android's Storage Access Framework; file and folder export to a user-selected provider.
 - [x] Native saved-document picker integrated with the customer portal's existing single-file upload control.
 - [x] WebView HTTP request filter limiting cleartext traffic to private IPv4 Agent upload endpoints on TCP 17842.
-- [x] JVM tests for QR route validation and print-format/size policy; CI Android debug build and APK artifact.
+- [x] JVM tests for QR route validation, print-format/size policy, local storage, duplicate preservation, path traversal and bounded folder-transfer budgets; CI Android debug build and APK artifact.
+- [x] Windows PowerShell helper to download the latest successful Android debug artifact and optionally install it via ADB.
 - [ ] Instrumented/UI tests on physical Android versions and different file-manager/document providers.
 - [ ] Real shop-Wi-Fi test matrix for Android WebView Local Network Access, private endpoint discovery, client isolation and paired Agent upload.
 - [ ] Signed release bundle, Play Store listing, update channel and production release signing.

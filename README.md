@@ -39,6 +39,18 @@ A native Android client is located in `apps/android`. It complements the custome
 
 CI builds the Android debug APK and runs JVM unit tests. A real-device matrix (QR scanning, file-provider interoperability, Android version coverage and shop-Wi-Fi Agent upload) is still required before production or Play Store release. The debug APK is published as the `qrtoprint-android-debug` workflow artifact.
 
+## Download and install the Android debug APK
+
+On Windows with GitHub CLI authenticated and Android Debug Bridge (ADB) installed:
+
+```powershell
+.\\scripts\\download-android-apk.ps1
+.\\scripts\\download-android-apk.ps1 -Install
+.\\scripts\\download-android-apk.ps1 -Install -DeviceSerial "YOUR_DEVICE_SERIAL"
+```
+
+The script selects the latest successful main-branch CI run, downloads the `qrtoprint-android-debug` artifact, validates the APK and reports its SHA-256. Use `-Install` only after enabling USB debugging and authorising the device. This is a development debug build, not a Play Store release.
+
 ## Docker deployment
 
 The production Docker stack runs PostgreSQL, the ASP.NET Core API, the React portal and Caddy (automatic HTTPS). Database migrations are applied at API startup only when the compose setting `Database__ApplyMigrationsOnStartup=true` is enabled. PostgreSQL and cloud document storage use persistent Docker volumes.

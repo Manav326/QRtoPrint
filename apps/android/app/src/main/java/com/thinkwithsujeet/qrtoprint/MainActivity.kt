@@ -82,7 +82,7 @@ class MainActivity : AppCompatActivity() {
         showFiles()
         portalUrl = savedInstanceState?.getString("portalUrl")
         portalHost = savedInstanceState?.getString("portalHost")
-        portalUrl?.let { ensureWebView().loadUrl(it) }
+        portalUrl?.let { ensureWebView().loadUrl(it); showPrint() }
         handleShareIntent(intent)
     }
 
@@ -139,7 +139,11 @@ class MainActivity : AppCompatActivity() {
                 val tree = DocumentFile.fromTreeUri(this, uri) ?: error("Folder is unavailable.")
                 require(tree.isDirectory) { "Select a folder." }
                 val counts = intArrayOf(0, 0)
-                importDirectory(tree, if (pickerMode) pickerPath else folderPath, 0, counts)
+                val completed = importDirectory(
+                    tree, if (pickerMode) pickerPath else folderPath, 0, counts,
+                    FolderTransferBudget(MAX_TREE_FILES, MAX_TREE_DEPTH)
+                )
+                if (!completed) counts[1]++
                 reportImport(counts[0], counts[1])
             } catch (e: Exception) { toast("Folder import failed: ${message(e)}") }
             refreshLibrary()
@@ -162,8 +166,13 @@ class MainActivity : AppCompatActivity() {
                 val destination = DocumentFile.fromTreeUri(this, uri) ?: error("Destination unavailable.")
                 require(destination.isDirectory) { "Select a destination folder." }
                 val count = intArrayOf(0)
-                copyFolder(source, destination, 0, count)
-                toast("Exported ${count[0]} file(s).")
+                val complete = copyFolder(
+                    source, destination, 0, count, FolderTransferBudget(MAX_TREE_FILES, MAX_TREE_DEPTH)
+                )
+                toast(
+                    if (complete) "Exported ${count[0]} file(s)."
+                    else "Exported ${count[0]} file(s); remaining items skipped at the safe folder-transfer limit."
+                )
             } catch (e: Exception) { toast("Folder export failed: ${message(e)}") }
         }
     }
@@ -536,32 +545,49 @@ class MainActivity : AppCompatActivity() {
         return uri.lastPathSegment?.substringAfterLast('/')?.ifBlank { null } ?: "Imported document"
     }
 
-    private fun importDirectory(source: DocumentFile, destinationPath: String, depth: Int, counts: IntArray) {
-        if (depth > MAX_TREE_DEPTH || counts.sum() >= MAX_TREE_FILES) { counts[1]++; return }
-        source.listFiles().forEach { child ->
-            if (counts.sum() >= MAX_TREE_FILES) { counts[1]++; return@forEach }
+    private fun importDirectory(
+        source: DocumentFile,
+        destinationPath: String,
+        depth: Int,
+        counts: IntArray,
+        budget: FolderTransferBudget
+    ): Boolean {
+        for (child in source.listFiles()) {
+            // Count folders as well as files so empty-directory trees cannot bypass the cap.
+            if (!budget.tryTake(depth)) return false
             try {
                 val name = child.name ?: "Imported item"
                 if (child.isDirectory) {
                     val folder = store.createFolder(destinationPath, name, allowExisting = true)
-                    importDirectory(child, store.pathOf(folder), depth + 1, counts)
+                    if (!importDirectory(child, store.pathOf(folder), depth + 1, counts, budget)) return false
                 } else if (child.isFile) {
                     val input = contentResolver.openInputStream(child.uri) ?: error("File cannot be opened.")
                     input.use { store.importFile(it, name, destinationPath) }
                     counts[0]++
                 }
-            } catch (_: Exception) { counts[1]++ }
+            } catch (_: Exception) {
+                counts[1]++
+            }
         }
+        return true
     }
 
-    private fun copyFolder(source: File, targetParent: DocumentFile, depth: Int, count: IntArray) {
-        require(depth <= MAX_TREE_DEPTH) { "Folder nesting exceeds the safe export limit." }
+    private fun copyFolder(
+        source: File,
+        targetParent: DocumentFile,
+        depth: Int,
+        count: IntArray,
+        budget: FolderTransferBudget
+    ): Boolean {
+        if (depth > MAX_TREE_DEPTH) return false
         val target = targetParent.findFile(source.name)?.takeIf { it.isDirectory }
             ?: targetParent.createDirectory(source.name) ?: error("Could not create ${source.name}.")
-        store.list(source).forEach { child ->
-            if (count[0] >= MAX_TREE_FILES) return@forEach
-            if (child.isDirectory) copyFolder(child, target, depth + 1, count)
-            else {
+        for (child in store.list(source)) {
+            // Count folders as well as files so empty-folder trees stay bounded too.
+            if (!budget.tryTake(depth)) return false
+            if (child.isDirectory) {
+                if (!copyFolder(child, target, depth + 1, count, budget)) return false
+            } else {
                 val outputFile = target.createFile(DocumentNamePolicy.mimeType(child.name), uniqueName(target, child.name))
                     ?: error("Could not create ${child.name}.")
                 val output = contentResolver.openOutputStream(outputFile.uri, "w") ?: error("Cannot write ${child.name}.")
@@ -569,6 +595,7 @@ class MainActivity : AppCompatActivity() {
                 count[0]++
             }
         }
+        return true
     }
 
     private fun uniqueName(folder: DocumentFile, name: String): String {

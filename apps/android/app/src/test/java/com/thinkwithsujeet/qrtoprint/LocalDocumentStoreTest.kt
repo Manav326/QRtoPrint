@@ -50,4 +50,16 @@ class LocalDocumentStoreTest {
         assertEquals("Documents", entries.first().name)
         assertEquals("Documents/School", store.pathOf(store.folder("Documents/School")))
     }
+
+    @Test
+    fun folderTransferBudgetCountsDirectoriesAndEnforcesDepth() {
+        val budget = FolderTransferBudget(maxItems = 3, maxDepth = 2)
+        assertTrue(budget.tryTake(depth = 0))
+        assertTrue(budget.tryTake(depth = 1))
+        assertFalse(budget.tryTake(depth = 3))
+        assertEquals(2, budget.itemsVisited)
+        assertTrue(budget.tryTake(depth = 2))
+        assertFalse(budget.tryTake(depth = 0))
+        assertEquals(3, budget.itemsVisited)
+    }
 }
