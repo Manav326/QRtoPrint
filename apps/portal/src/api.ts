@@ -5,6 +5,79 @@ export interface AuthTokens {
   accessTokenExpiresUtc: string;
 }
 
+export function isPlatformAdminSession(tokens: AuthTokens | null): boolean {
+  if (!tokens?.accessToken) return false;
+  try {
+    const segments = tokens.accessToken.split(".");
+    if (segments.length !== 3) return false;
+    const encoded = segments[1].replace(/-/g, "+").replace(/_/g, "/");
+    const payload = JSON.parse(atob(encoded.padEnd(Math.ceil(encoded.length / 4) * 4, "="))) as {
+      tenant_id?: string;
+      platform_role?: string | string[];
+    };
+    const roles = Array.isArray(payload.platform_role)
+      ? payload.platform_role
+      : [payload.platform_role];
+    return !payload.tenant_id && roles.includes("PlatformAdmin");
+  } catch {
+    return false;
+  }
+}
+
+export interface PlatformOverview {
+  generatedUtc: string;
+  tenantCount: number;
+  activeTenantCount: number;
+  trialSubscriptionCount: number;
+  activeSubscriptionCount: number;
+  printerCount: number;
+  activePrinterCount: number;
+  agentCount: number;
+  onlineAgentCount: number;
+  jobsLast30Days: number;
+  subscriptionsByStatus: { status: string; count: number }[];
+}
+
+export interface PlatformTenant {
+  id: string;
+  slug: string;
+  businessName: string;
+  status: string;
+  createdUtc: string;
+  planCode?: string | null;
+  subscriptionStatus?: string | null;
+  subscriptionPeriodEndUtc?: string | null;
+  printerCount: number;
+  activePrinterCount: number;
+  agentCount: number;
+  jobsLast30Days: number;
+}
+
+export interface PlatformTenantsPage {
+  page: number;
+  pageSize: number;
+  totalCount: number;
+  items: PlatformTenant[];
+}
+
+export function getPlatformOverview(token: string) {
+  return apiRequest<PlatformOverview>("/api/v1/platform/overview", {}, token);
+}
+
+export function getPlatformTenants(token: string, values: {
+  search?: string;
+  status?: string;
+  page?: number;
+  pageSize?: number;
+}) {
+  const params = new URLSearchParams();
+  if (values.search?.trim()) params.set("search", values.search.trim());
+  if (values.status) params.set("status", values.status);
+  params.set("page", String(values.page ?? 1));
+  params.set("pageSize", String(values.pageSize ?? 25));
+  return apiRequest<PlatformTenantsPage>(`/api/v1/platform/tenants?${params.toString()}`, {}, token);
+}
+
 export interface ShopProfile {
   id: string;
   slug: string;
