@@ -543,18 +543,24 @@ export function updateShopPricing(token: string, values: {
   }, token);
 }
 
-function customerUploadAttemptStorageKey(sessionToken: string): string {
-  // Keep one pending upload key per QR session. The key is removed only after
-  // the API confirms success, so a lost response can safely be retried.
-  return `qrtoprint.customer-upload-attempt.${sessionToken.slice(0, 16)}`;
-}
-
-export function resetCustomerUploadAttempt(sessionToken: string): void {
-  sessionStorage.removeItem(customerUploadAttemptStorageKey(sessionToken));
+function customerUploadAttemptStorageKey(sessionToken: string, file: File): string {
+  // Hash file metadata rather than storing the original filename in the key.
+  // This lets a re-selected file reuse its in-flight key after a page reload,
+  // while a different file gets its own key.
+  const identity = `${file.name}\u0000${file.size}\u0000${file.lastModified}\u0000${file.type}`;
+  let first = 2166136261;
+  let second = 5381;
+  for (let index = 0; index < identity.length; index++) {
+    const code = identity.charCodeAt(index);
+    first = Math.imul(first ^ code, 16777619);
+    second = Math.imul(second ^ code, 33);
+  }
+  const fingerprint = `${(first >>> 0).toString(36)}${(second >>> 0).toString(36)}`;
+  return `qrtoprint.customer-upload-attempt.${sessionToken.slice(0, 16)}.${fingerprint}`;
 }
 
 export async function uploadCustomerDocument(sessionToken: string, file: File) {
-  const storageKey = customerUploadAttemptStorageKey(sessionToken);
+  const storageKey = customerUploadAttemptStorageKey(sessionToken, file);
   const idempotencyKey = sessionStorage.getItem(storageKey) || crypto.randomUUID();
   sessionStorage.setItem(storageKey, idempotencyKey);
 
