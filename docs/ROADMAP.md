@@ -67,11 +67,12 @@ Acceptance: cross-tenant retrieval is impossible; payment replay/idempotency and
 - [x] Versioned plan catalogue with configurable prices and entitlement fields; published versions remain immutable.
 - [x] Enforce assigned-plan printer, agent, QR station, monthly-job, document-size and cloud-assisted-printing entitlements at API boundaries.
 - [x] Platform-admin subscription directory and audited assignment of trial/explicitly free published plan versions.
-- Subscription invoices, verified paid-plan checkout/activation, platform payment reconciliation and revenue analytics.
+- [x] Manual paid-plan activation after the platform operator confirms funds received and records the bank/UPI transaction reference in the immutable assignment audit.
+- Subscription invoices, automated paid-plan checkout/webhook verification, platform payment reconciliation and revenue analytics.
 - Device/licence management, white-label upgrades and coupons.
 - Support workflow, audit logs and release management.
 
-Acceptance: platform owner can manage SaaS lifecycle without direct database edits. The platform console supports plan metadata, editable drafts, immutable publication history and centrally managed entitlement fields. The API enforces assigned-plan quotas at resource creation and upload boundaries. Assigning commercial versions to shops, subscription invoices and payment reconciliation remain future work.
+Acceptance: platform owner can manage SaaS lifecycle without direct database edits. The platform console supports plan metadata, editable drafts, immutable publication history and centrally managed entitlement fields. The API enforces assigned-plan quotas at resource creation and upload boundaries. Trial/free and operator-confirmed paid assignments are audited; automated gateway checkout, subscription invoices and payment reconciliation remain future work.
 
 ## Workstream 7 — production readiness
 
