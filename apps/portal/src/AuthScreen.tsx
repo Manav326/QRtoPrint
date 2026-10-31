@@ -39,7 +39,7 @@ export default function AuthScreen({ onAuthenticated }: { onAuthenticated: (toke
       <div className="auth-glow auth-glow-one"/><div className="auth-glow auth-glow-two"/>
       <header className="auth-topbar">
         <div className="brand-lockup auth-brand"><div className="brand-mark"><Printer size={21}/></div><div><div className="brand-name">smart<span>print</span></div><div className="brand-caption">BY QRtoPrint</div></div></div>
-        <span className="auth-top-note"><ShieldCheck size={15}/> Secure shop workspace</span>
+        <span className="auth-top-note"><ShieldCheck size={15}/> Secure Smart Print workspace</span>
       </header>
       <main className="auth-layout">
         <section className="auth-story">
