@@ -858,9 +858,10 @@ function PricingPage({ pricing, onSave, busy }: {
 }
 
 
-function PaymentsPage({settings,payments,onSave,onVerify,onReject,busy,busyJobId}:{
+function PaymentsPage({settings,payments,refunds,onSave,onVerify,onReject,busy,busyJobId}:{
   settings:ShopPaymentSettings;
   payments:ShopPayment[];
+  refunds:ShopRefund[];
   onSave:(values:{upiEnabled:boolean;upiId:string|null;payeeName:string|null;cashEnabled:boolean})=>void;
   onVerify:(payment:ShopPayment)=>void;
   onReject:(payment:ShopPayment)=>void;
@@ -907,23 +908,52 @@ function PaymentsPage({settings,payments,onSave,onVerify,onReject,busy,busyJobId
         {payment.status==="VERIFIED"&&<div className="payment-verified-note"><Check size={14}/> Verified {payment.verifiedUtc?new Date(payment.verifiedUtc).toLocaleString():"by shop"}</div>}
       </article>)}</div>}
     </section>
+    <section className="panel refund-audit-panel">
+      <div className="collection-header"><div><h2>Refund audit log</h2><p>Every shopkeeper-recorded file refund, with its exact amount, return method, reason and operator.</p></div><span className="setup-count">{refunds.length} recorded</span></div>
+      {refunds.length===0?<EmptyModule icon={<RotateCcw size={24}/>} title="No refunds recorded" text="When a shopkeeper rejects a paid file and records its return, the audit entry will appear here."/>:
+      <div className="payment-record-list">{refunds.map(refund=><article className="payment-record refund-record" key={refund.id}>
+        <div className="payment-record-head"><div><strong>{refund.jobNumber}</strong><small>{refund.documentName}</small></div><div className="payment-record-amount">{formatMoney(refund.amountMinor,refund.currency)}</div></div>
+        <div className="payment-record-meta"><span>{refund.method} refund</span><span>{new Date(refund.refundedUtc).toLocaleString()}</span><Status label="Recorded as sent" tone="green"/></div>
+        <div className="refund-record-details"><span>Shopkeeper</span><strong>{refund.refundedByName}</strong><span>Reason</span><strong>{refund.reason}</strong>{refund.reference&&<><span>Refund reference</span><strong>{refund.reference}</strong></>}</div>
+      </article>)}</div>}
+    </section>
   </div>;
 }
 
-function PrintQueuePage({ jobs, printers, onPreview, onApprove, onReject, onHistory, onAssignPrinter, onDispatch, onConfirmOutput, onRetryPdfExport, onRefresh, busyJobId }: {
+function PrintQueuePage({ jobs, printers, onPreview, onApprove, onReject, onRefund, onHistory, onAssignPrinter, onDispatch, onConfirmOutput, onRetryPdfExport, onRefresh, busyJobId }: {
   jobs: ShopPrintJob[];
   printers: PrinterDevice[];
   onPreview: (job: ShopPrintJob) => void;
   onApprove: (job: ShopPrintJob) => void;
   onReject: (job: ShopPrintJob) => void;
+  onRefund: (job: ShopPrintJob) => void;
   onHistory: (job: ShopPrintJob) => void;
   onAssignPrinter: (job: ShopPrintJob, printerDeviceId: string) => void;
   onDispatch: (job: ShopPrintJob) => void;
   onConfirmOutput: (job: ShopPrintJob) => void;
   onRetryPdfExport: (job: ShopPrintJob) => void;
-  onRefresh: () => void;
+  onRefresh: () => Promise<void> | void;
   busyJobId: string | null;
 }) {
+  const [autoRefresh,setAutoRefresh]=useState(false);
+  const [refreshSeconds,setRefreshSeconds]=useState(10);
+  const refreshRunning=useRef(false);
+  const refreshCallback=useRef(onRefresh);
+  refreshCallback.current=onRefresh;
+
+  async function refreshQueue() {
+    if(refreshRunning.current)return;
+    refreshRunning.current=true;
+    try { await refreshCallback.current(); }
+    finally { refreshRunning.current=false; }
+  }
+
+  useEffect(()=>{
+    if(!autoRefresh)return;
+    const timer=window.setInterval(()=>void refreshQueue(),Math.max(5,refreshSeconds)*1000);
+    return ()=>window.clearInterval(timer);
+  },[autoRefresh,refreshSeconds]);
+
   const dispatchablePrinters = printers.filter(printer =>
     printer.isActive &&
     !!printer.agentDeviceId &&
@@ -931,12 +961,17 @@ function PrintQueuePage({ jobs, printers, onPreview, onApprove, onReject, onHist
   );
 
   return <section className="panel queue-panel live-queue-panel">
-    <div className="collection-header"><div><h2>Customer print jobs</h2><p>Assign paid jobs to a live output destination. Physical printers require paper-output confirmation; PDF destinations save a file directly to the shop computer.</p></div><div className="queue-header-actions"><span className="setup-count">{jobs.length} recent jobs</span><button className="secondary-button queue-refresh-button" onClick={onRefresh}><Activity size={13}/> Refresh queue</button></div></div>
+    <div className="collection-header"><div><h2>Customer print jobs</h2><p>Preview every file separately. Each file can be accepted or rejected without changing the rest of its upload batch. Refunds are available before handoff to the print computer.</p></div><div className="queue-header-actions"><span className="setup-count">{jobs.length} recent jobs</span><button className="secondary-button queue-refresh-button" onClick={()=>void refreshQueue()} disabled={refreshRunning.current}><Activity size={13}/> Refresh queue</button></div></div>
+    <div className="queue-refresh-controls">
+      <label className="queue-auto-toggle"><input type="checkbox" checked={autoRefresh} onChange={event=>setAutoRefresh(event.target.checked)}/><span className="queue-toggle-track"/><strong>Auto refresh</strong><small>{autoRefresh?"On":"Off"}</small></label>
+      <label className="queue-refresh-interval">Refresh every <input type="number" min={5} max={3600} step={1} value={refreshSeconds} onChange={event=>setRefreshSeconds(Math.max(5,Math.min(3600,Number(event.target.value)||5)))}/> seconds</label>
+      <span className="queue-refresh-note">{autoRefresh?"Queue refreshes automatically while this page is open.":"Automatic refresh is off. Use Refresh queue whenever needed."}</span>
+    </div>
     {jobs.length===0 ? <EmptyModule icon={<FileText size={24}/>} title="Your queue is clear" text="When a customer uploads a document through one of your QR stations, the job and its current state will appear here."/> :
       <div className="table-scroll"><table><thead><tr><th>JOB</th><th>DOCUMENT</th><th>PRINT SETTINGS</th><th>QUOTE</th><th>PRINTER / LOCAL QUEUE</th><th>STATUS</th><th>CREATED</th><th>ACTIONS</th></tr></thead><tbody>
         {jobs.map(job=><tr key={job.id}>
           <td><strong className="job-id">{job.jobNumber}</strong></td>
-          <td><div className="customer-cell"><strong>{job.document.originalFileName}</strong><span>{formatBytes(job.document.sizeBytes)} · {job.document.mediaType}</span></div></td>
+          <td><div className="customer-cell"><strong>{job.document.originalFileName}</strong><span>{formatBytes(job.document.sizeBytes)} · {job.document.mediaType}</span>{job.batchId&&<small className="batch-ref">Batch · {job.batchId.slice(0,8).toUpperCase()}</small>}</div></td>
           <td><div className="detail-cell"><strong>{job.pageCount} pages × {job.copies}</strong><span>{job.colourMode} · {job.paperSize} · {job.isDuplex?"Duplex":"Single-sided"}</span></div></td>
           <td className="amount-cell">{job.quotedAmountMinor>0?formatMoney(job.quotedAmountMinor,job.currency):"Not quoted"}</td>
           <td><div className="queue-printer-cell">
@@ -947,13 +982,14 @@ function PrintQueuePage({ jobs, printers, onPreview, onApprove, onReject, onHist
             {job.status!=="PAID_AUTHORISED"&&job.status!=="LOCAL_QUEUE_CLAIMED"&&<><strong>{job.outputType==="PDF_EXPORT"&&job.status==="COMPLETED"?"PDF saved":job.printerName||"Not assigned"}</strong><small>{job.outputType==="PDF_EXPORT"&&job.outputFilePath?job.outputFilePath:job.localQueueReceivedUtc?"Local copy secured "+new Date(job.localQueueReceivedUtc).toLocaleTimeString():(job.queueName||"Waiting for local queue handoff")}</small></>}
             {job.status==="LOCAL_QUEUE_CLAIMED"&&<><strong>{job.printerName||"Agent claimed job"}</strong><small>{job.agentLeaseExpiresUtc?"Claim lease expires "+new Date(job.agentLeaseExpiresUtc).toLocaleTimeString():"Waiting for local agent acknowledgement"}</small></>}
           </div></td>
-          <td><Status label={job.outputType==="PDF_EXPORT"&&job.status==="COMPLETED"?"PDF saved":job.outputMode==="PDF_EXPORT"&&job.status==="PRINT_SUBMITTING"?"Creating PDF":prettyStatus(job.status)} tone={job.status==="AWAITING_CUSTOMER_APPROVAL"||job.status==="AWAITING_SHOP_APPROVAL"?"amber":job.status==="COMPLETED"||job.status==="LOCAL_QUEUE_READY"?"green":job.status==="OUTPUT_UNCONFIRMED"?"amber":"blue"}/></td>
+          <td><Status label={job.outputType==="PDF_EXPORT"&&job.status==="COMPLETED"?"PDF saved":job.outputMode==="PDF_EXPORT"&&job.status==="PRINT_SUBMITTING"?"Creating PDF":prettyStatus(job.status)} tone={job.status==="AWAITING_CUSTOMER_APPROVAL"||job.status==="AWAITING_SHOP_APPROVAL"?"amber":job.status==="COMPLETED"||job.status==="LOCAL_QUEUE_READY"?"green":job.status==="OUTPUT_UNCONFIRMED"?"amber":job.status==="REFUNDED"?"green":"blue"}/></td>
           <td className="time-cell">{new Date(job.createdUtc).toLocaleString()}</td>
-          <td><div className="queue-actions"><button className="subtle-button" disabled={busyJobId===job.id} onClick={()=>onPreview(job)}>Preview</button><button className="subtle-button" disabled={busyJobId===job.id} onClick={()=>onHistory(job)}>History</button>{job.status==="AWAITING_SHOP_APPROVAL"&&<><button className="subtle-button approve-action" disabled={busyJobId===job.id} onClick={()=>onApprove(job)}>Approve</button><button className="subtle-button reject-action" disabled={busyJobId===job.id} onClick={()=>onReject(job)}>Reject</button></>}{job.status==="LOCAL_QUEUE_READY"&&<button className="subtle-button approve-action" disabled={busyJobId===job.id} onClick={()=>onDispatch(job)}>{job.outputMode==="PDF_EXPORT"?"Save PDF":"Start printing"}</button>}{job.status==="OUTPUT_UNCONFIRMED"&&job.outputMode==="PDF_EXPORT"&&<button className="subtle-button approve-action" disabled={busyJobId===job.id} onClick={()=>onRetryPdfExport(job)}>Save PDF again</button>}{(job.status==="SPOOLER_ACCEPTED"||job.status==="PRINTING"||(job.status==="OUTPUT_UNCONFIRMED"&&job.outputMode!=="PDF_EXPORT"))&&<button className="subtle-button approve-action" disabled={busyJobId===job.id} onClick={()=>onConfirmOutput(job)}>Confirm output</button>}</div></td>
+          <td><div className="queue-actions"><button className="subtle-button" disabled={busyJobId===job.id} onClick={()=>onPreview(job)}>Preview</button><button className="subtle-button" disabled={busyJobId===job.id} onClick={()=>onHistory(job)}>History</button>{job.status==="AWAITING_SHOP_APPROVAL"&&<><button className="subtle-button approve-action" disabled={busyJobId===job.id} onClick={()=>onApprove(job)}>Accept file</button><button className="subtle-button reject-action" disabled={busyJobId===job.id} onClick={()=>onReject(job)}>Reject file</button></>}{job.status==="PAID_AUTHORISED"&&job.payment?.status==="VERIFIED"&&!job.localQueueReceivedUtc&&!job.claimedByAgentDeviceId&&<button className="subtle-button reject-action" disabled={busyJobId===job.id} onClick={()=>onRefund(job)}>Reject & refund</button>}{job.status==="LOCAL_QUEUE_READY"&&<button className="subtle-button approve-action" disabled={busyJobId===job.id} onClick={()=>onDispatch(job)}>{job.outputMode==="PDF_EXPORT"?"Save PDF":"Start printing"}</button>}{job.status==="OUTPUT_UNCONFIRMED"&&job.outputMode==="PDF_EXPORT"&&<button className="subtle-button approve-action" disabled={busyJobId===job.id} onClick={()=>onRetryPdfExport(job)}>Save PDF again</button>}{(job.status==="SPOOLER_ACCEPTED"||job.status==="PRINTING"||(job.status==="OUTPUT_UNCONFIRMED"&&job.outputMode!=="PDF_EXPORT"))&&<button className="subtle-button approve-action" disabled={busyJobId===job.id} onClick={()=>onConfirmOutput(job)}>Confirm output</button>}</div></td>
         </tr>)}
       </tbody></table></div>}
   </section>;
 }
+
 
 
 function JobHistoryModal({job,events,onClose}:{job:ShopPrintJob;events:ShopJobEvent[];onClose:()=>void}) {
