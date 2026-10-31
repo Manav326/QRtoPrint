@@ -62,12 +62,14 @@ Acceptance: cross-tenant retrieval is impossible; payment replay/idempotency and
 
 ## Workstream 6 — platform administration and operations
 
+- [x] Dedicated platform-admin identity, offline bootstrap, and separate authorization policy.
+- [x] Read-only platform overview and paginated tenant directory with subscription, printer, agent and recent usage summaries.
 - Plan/price/entitlement editor.
 - Subscription invoices, platform payment reconciliation and revenue analytics.
 - Device/licence management, white-label upgrades and coupons.
 - Support workflow, audit logs and release management.
 
-Acceptance: platform owner can manage SaaS lifecycle without direct database edits.
+Acceptance: platform owner can manage SaaS lifecycle without direct database edits. The initial overview/directory are read-only; commercial changes remain blocked until their underlying plan, entitlement and billing models are implemented.
 
 ## Workstream 7 — production readiness
 

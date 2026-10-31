@@ -17,6 +17,15 @@ Passwords are handled by ASP.NET Core Identity's password hasher and validation 
 - Job totals and status breakdown use jobs created inside the selected UTC window. `completedJobs` counts only jobs in `COMPLETED` with an operator-recorded `OutputConfirmedUtc`; `pagesRequested` is page count multiplied by requested copies and is not a claim of physical output.
 - Verified collections are grouped by currency and payment method and use `VerifiedUtc` within the selected window. UPI references that have not been independently verified by the shop are excluded. The pending-payment count includes all currently open UPI/cash attempts for the tenant, regardless of creation date, so an old unresolved payment never disappears from the operator's review count.
 
+### Platform administration
+
+Platform administrator accounts are provisioned offline using `scripts/bootstrap-platform-admin.ps1`. A bootstrap operation refuses to elevate an account that already belongs to a shop. Platform accounts have no `TenantId` and receive a dedicated `platform_role=PlatformAdmin` user claim. Shop routes remain separately tenant-scoped.
+
+- GET /api/v1/platform/overview — returns aggregate tenant, subscription, printer, agent and recent job counts. It does not expose customer documents or payment credentials.
+- GET /api/v1/platform/tenants?search=&status=&page=1&pageSize=25 — returns a paginated tenant directory with shop status, latest subscription metadata, printer/agent counts and recent job volume. Search is limited to shop business name and slug.
+
+These routes require the platform-admin authorization policy. A shop user cannot access them, even if a platform claim is mistakenly added to a tenant-scoped token.
+
 ### Authenticated shop endpoints
 
 - GET /api/v1/shop/profile

@@ -17,7 +17,13 @@ using SmartPrint.Api.Pricing;
 using SmartPrint.Api.Security;
 using SmartPrint.Api.Storage;
 
-var builder = WebApplication.CreateBuilder(args);
+const string bootstrapPlatformAdminArgument = "--bootstrap-platform-admin";
+var bootstrapPlatformAdmin = args.Any(argument =>
+    string.Equals(argument, bootstrapPlatformAdminArgument, StringComparison.OrdinalIgnoreCase));
+var builderArguments = args
+    .Where(argument => !string.Equals(argument, bootstrapPlatformAdminArgument, StringComparison.OrdinalIgnoreCase))
+    .ToArray();
+var builder = WebApplication.CreateBuilder(builderArguments);
 var connectionString = builder.Configuration.GetConnectionString("SmartPrint")
     ?? (builder.Environment.IsDevelopment()
         ? "Host=localhost;Port=5432;Database=qrtoprint;Username=postgres;Password=postgres"
@@ -72,7 +78,11 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
             RoleClaimType = "shop_role"
         };
     });
-builder.Services.AddAuthorization();
+builder.Services.AddAuthorization(options =>
+{
+    options.AddPolicy(PlatformAdminAuthorization.PolicyName, policy =>
+        policy.RequireAssertion(context => PlatformAdminAuthorization.IsPlatformAdmin(context.User)));
+});
 builder.Services.AddScoped<TokenIssuer>();
 builder.Services.AddSingleton<DocumentStorage>();
 builder.Services.AddRateLimiter(options =>
@@ -101,6 +111,12 @@ builder.Services.AddCors(options => options.AddPolicy("web", policy => policy
     .AllowAnyMethod()));
 
 var app = builder.Build();
+if (bootstrapPlatformAdmin)
+{
+    await PlatformAdminBootstrap.RunAsync(app.Services);
+    return;
+}
+
 app.UseExceptionHandler();
 app.UseCors("web");
 app.UseRateLimiter();
@@ -135,6 +151,146 @@ app.MapGet("/", () => Results.Ok(new
     apiVersion = "v1",
     health = "/health/live"
 }));
+
+var platform = app.MapGroup("/api/v1/platform")
+    .RequireAuthorization(PlatformAdminAuthorization.PolicyName);
+
+platform.MapGet("/overview", async (SmartPrintDbContext db, CancellationToken ct) =>
+{
+    var now = DateTimeOffset.UtcNow;
+    var recentStart = now.AddDays(-30);
+    var onlineAfter = now.AddMinutes(-2);
+
+    var tenantCount = await db.Tenants.AsNoTracking().CountAsync(ct);
+    var activeTenantCount = await db.Tenants.AsNoTracking()
+        .CountAsync(tenant => tenant.Status == "Active", ct);
+    var trialSubscriptionCount = await db.TenantSubscriptions.AsNoTracking()
+        .CountAsync(subscription => subscription.Status == "Trial" && subscription.PeriodEndUtc > now, ct);
+    var activeSubscriptionCount = await db.TenantSubscriptions.AsNoTracking()
+        .CountAsync(subscription => subscription.Status == "Active" && subscription.PeriodEndUtc > now, ct);
+    var printerCount = await db.PrinterDevices.AsNoTracking().CountAsync(ct);
+    var activePrinterCount = await db.PrinterDevices.AsNoTracking()
+        .CountAsync(printer => printer.IsActive, ct);
+    var agentCount = await db.AgentDevices.AsNoTracking()
+        .CountAsync(agent => agent.RevokedUtc == null && agent.Status != "Revoked", ct);
+    var onlineAgentCount = await db.AgentDevices.AsNoTracking()
+        .CountAsync(agent => agent.RevokedUtc == null && agent.Status != "Revoked" &&
+                             agent.LastSeenUtc != null && agent.LastSeenUtc >= onlineAfter, ct);
+    var jobsLast30Days = await db.PrintJobs.AsNoTracking()
+        .CountAsync(job => job.CreatedUtc >= recentStart && job.CreatedUtc < now, ct);
+
+    var subscriptionsByStatus = await db.TenantSubscriptions.AsNoTracking()
+        .GroupBy(subscription => subscription.Status)
+        .Select(group => new { status = group.Key, count = group.Count() })
+        .OrderByDescending(group => group.count)
+        .ThenBy(group => group.status)
+        .ToListAsync(ct);
+
+    return Results.Ok(new
+    {
+        generatedUtc = now,
+        tenantCount,
+        activeTenantCount,
+        trialSubscriptionCount,
+        activeSubscriptionCount,
+        printerCount,
+        activePrinterCount,
+        agentCount,
+        onlineAgentCount,
+        jobsLast30Days,
+        subscriptionsByStatus
+    });
+});
+
+platform.MapGet("/tenants", async (
+    string? search,
+    string? status,
+    int? page,
+    int? pageSize,
+    SmartPrintDbContext db,
+    CancellationToken ct) =>
+{
+    if (search?.Trim().Length > 100)
+    {
+        return Results.ValidationProblem(new Dictionary<string, string[]>
+        {
+            ["search"] = ["Search must be 100 characters or fewer."]
+        });
+    }
+
+    if (status?.Trim().Length > 24)
+    {
+        return Results.ValidationProblem(new Dictionary<string, string[]>
+        {
+            ["status"] = ["Status must be 24 characters or fewer."]
+        });
+    }
+
+    var pageNumber = Math.Clamp(page ?? 1, 1, 10_000);
+    var boundedPageSize = Math.Clamp(pageSize ?? 25, 1, 50);
+    var query = db.Tenants.AsNoTracking().AsQueryable();
+
+    if (!string.IsNullOrWhiteSpace(search))
+    {
+        var pattern = $"%{search.Trim()}%";
+        query = query.Where(tenant =>
+            EF.Functions.ILike(tenant.BusinessName, pattern) ||
+            EF.Functions.ILike(tenant.Slug, pattern));
+    }
+
+    if (!string.IsNullOrWhiteSpace(status))
+    {
+        var statusFilter = status.Trim();
+        query = query.Where(tenant => tenant.Status == statusFilter);
+    }
+
+    var totalCount = await query.CountAsync(ct);
+    var recentStart = DateTimeOffset.UtcNow.AddDays(-30);
+    var items = await query
+        .OrderByDescending(tenant => tenant.CreatedUtc)
+        .Select(tenant => new
+        {
+            tenant.Id,
+            tenant.Slug,
+            tenant.BusinessName,
+            tenant.Status,
+            tenant.CreatedUtc,
+            PlanCode = db.TenantSubscriptions.AsNoTracking()
+                .Where(subscription => subscription.TenantId == tenant.Id)
+                .OrderByDescending(subscription => subscription.CreatedUtc)
+                .Select(subscription => subscription.PlanCode)
+                .FirstOrDefault(),
+            SubscriptionStatus = db.TenantSubscriptions.AsNoTracking()
+                .Where(subscription => subscription.TenantId == tenant.Id)
+                .OrderByDescending(subscription => subscription.CreatedUtc)
+                .Select(subscription => subscription.Status)
+                .FirstOrDefault(),
+            SubscriptionPeriodEndUtc = db.TenantSubscriptions.AsNoTracking()
+                .Where(subscription => subscription.TenantId == tenant.Id)
+                .OrderByDescending(subscription => subscription.CreatedUtc)
+                .Select(subscription => (DateTimeOffset?)subscription.PeriodEndUtc)
+                .FirstOrDefault(),
+            PrinterCount = db.PrinterDevices.AsNoTracking()
+                .Count(printer => printer.TenantId == tenant.Id),
+            ActivePrinterCount = db.PrinterDevices.AsNoTracking()
+                .Count(printer => printer.TenantId == tenant.Id && printer.IsActive),
+            AgentCount = db.AgentDevices.AsNoTracking()
+                .Count(agent => agent.TenantId == tenant.Id && agent.RevokedUtc == null),
+            JobsLast30Days = db.PrintJobs.AsNoTracking()
+                .Count(job => job.TenantId == tenant.Id && job.CreatedUtc >= recentStart)
+        })
+        .Skip((pageNumber - 1) * boundedPageSize)
+        .Take(boundedPageSize)
+        .ToListAsync(ct);
+
+    return Results.Ok(new
+    {
+        page = pageNumber,
+        pageSize = boundedPageSize,
+        totalCount,
+        items
+    });
+});
 
 var auth = app.MapGroup("/api/v1/auth");
 auth.MapPost("/register-shop", async (
@@ -272,7 +428,15 @@ auth.MapPost("/login", async (
     }
 
     var user = await userManager.FindByEmailAsync(request.Email.Trim());
-    if (user is null || user.TenantId is null)
+    if (user is null)
+    {
+        return Results.Unauthorized();
+    }
+
+    var userClaims = user.TenantId is null
+        ? await userManager.GetClaimsAsync(user)
+        : [];
+    if (user.TenantId is null && !PlatformAdminAuthorization.IsPlatformAdmin(user.TenantId, userClaims))
     {
         return Results.Unauthorized();
     }
@@ -330,7 +494,16 @@ auth.MapPost("/refresh", async (
     }
 
     var user = await userManager.FindByIdAsync(existing.UserId.ToString());
-    if (user is null || user.TenantId is null)
+    if (user is null)
+    {
+        await transaction.RollbackAsync(ct);
+        return Results.Unauthorized();
+    }
+
+    var userClaims = user.TenantId is null
+        ? await userManager.GetClaimsAsync(user)
+        : [];
+    if (user.TenantId is null && !PlatformAdminAuthorization.IsPlatformAdmin(user.TenantId, userClaims))
     {
         await transaction.RollbackAsync(ct);
         return Results.Unauthorized();
