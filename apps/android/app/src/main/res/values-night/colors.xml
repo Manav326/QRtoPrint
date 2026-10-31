@@ -1,0 +1,14 @@
+<resources>
+    <color name="qp_icon_background">#11182D</color>
+    <color name="qp_primary">#A6A4FF</color>
+    <color name="qp_primary_dark">#8784F3</color>
+    <color name="qp_soft">#34345C</color>
+    <color name="qp_surface">#111827</color>
+    <color name="qp_card">#1C2639</color>
+    <color name="qp_hero">#252F5B</color>
+    <color name="qp_hero_text">#FFFFFF</color>
+    <color name="qp_hero_muted">#D8DEF4</color>
+    <color name="qp_text">#F1F4FC</color>
+    <color name="qp_muted">#AAB4C8</color>
+    <color name="qp_outline">#344158</color>
+</resources>
