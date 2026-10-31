@@ -13,6 +13,7 @@ using Microsoft.IdentityModel.Tokens;
 using SmartPrint.Api.Contracts;
 using SmartPrint.Api.Data;
 using SmartPrint.Api.Domain;
+using SmartPrint.Api.Endpoints;
 using SmartPrint.Api.Pricing;
 using SmartPrint.Api.Security;
 using SmartPrint.Api.Storage;
@@ -154,6 +155,8 @@ app.MapGet("/", () => Results.Ok(new
 
 var platform = app.MapGroup("/api/v1/platform")
     .RequireAuthorization(PlatformAdminAuthorization.PolicyName);
+
+platform.MapSubscriptionPlanEndpoints();
 
 platform.MapGet("/overview", async (SmartPrintDbContext db, CancellationToken ct) =>
 {
@@ -361,6 +364,7 @@ auth.MapPost("/register-shop", async (
     db.TenantSubscriptions.Add(new TenantSubscription
     {
         TenantId = tenant.Id,
+        PlanVersionId = SubscriptionPlanDefaults.TrialVersionId,
         PlanCode = "TRIAL",
         Status = "Trial",
         BillingInterval = "Trial",
