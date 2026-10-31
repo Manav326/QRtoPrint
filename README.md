@@ -51,6 +51,8 @@ On Windows with GitHub CLI authenticated and Android Debug Bridge (ADB) installe
 
 The script selects the latest successful main-branch CI run, downloads the `qrtoprint-android-debug` artifact, validates the APK and reports its SHA-256. Use `-Install` only after enabling USB debugging and authorising the device. This is a development debug build, not a Play Store release.
 
+The same CI run publishes `qrtoprint-android-test-reports` with JVM and emulator test evidence.
+
 ## Docker deployment
 
 The production Docker stack runs PostgreSQL, the ASP.NET Core API, the React portal and Caddy (automatic HTTPS). Database migrations are applied at API startup only when the compose setting `Database__ApplyMigrationsOnStartup=true` is enabled. PostgreSQL and cloud document storage use persistent Docker volumes.

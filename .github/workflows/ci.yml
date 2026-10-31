@@ -107,6 +107,18 @@ jobs:
           emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
           disable-animations: true
           script: gradle --no-daemon -p apps/android :app:connectedDebugAndroidTest
+      - name: Upload Android test reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: qrtoprint-android-test-reports
+          path: |
+            apps/android/app/build/test-results/testDebugUnitTest/
+            apps/android/app/build/reports/tests/testDebugUnitTest/
+            apps/android/app/build/outputs/androidTest-results/connected/
+            apps/android/app/build/reports/androidTests/connected/
+          if-no-files-found: warn
+          retention-days: 30
       - name: Upload debug APK
         uses: actions/upload-artifact@v4
         with:
