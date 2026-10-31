@@ -24,7 +24,7 @@ thinkwithsujeet.in is the preferred domain. Proposed subdomains (subject to DNS 
 
 ## Repository status
 
-This repository is being initialized from an empty baseline. The architecture and delivery plan are documented under docs/. Implementation must proceed as one integrated product, not disconnected demos.
+The repository now contains an integrated first implementation: a React customer/shop portal, a tenant-scoped ASP.NET Core API, PostgreSQL data model and migrations, a paired Windows Print Agent with protected local document queue and spooler execution, automated unit/model tests, and CI. Shop onboarding, QR sessions, document upload and quoting, shop approval, UPI/cash reporting with manual shop verification, agent handoff, explicit print dispatch, and physical-output reconciliation are implemented. The platform-owner administration surface, automated payment-provider verification, LAN-only edge upload path, and validated physical-printer compatibility matrix remain future work. See docs/ROADMAP.md for the delivery plan and acceptance boundaries.
 
 ## Documentation
 
