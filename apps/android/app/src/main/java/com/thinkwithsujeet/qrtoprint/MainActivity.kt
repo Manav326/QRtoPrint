@@ -55,6 +55,8 @@ import java.io.FileInputStream
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import java.util.zip.ZipEntry
+import java.util.zip.ZipOutputStream
 
 class MainActivity : AppCompatActivity() {
     companion object {
@@ -81,6 +83,7 @@ class MainActivity : AppCompatActivity() {
     private var fileCallback: ValueCallback<Array<Uri>>? = null
     private var exportFile: File? = null
     private var exportFolder: File? = null
+    private var archiveFiles: List<File> = emptyList()
     private var accountCreateMode = false
     private val selectedFilePaths = linkedSetOf<String>()
 
@@ -88,6 +91,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var importTree: ActivityResultLauncher<Uri?>
     private lateinit var exportOne: ActivityResultLauncher<String>
     private lateinit var exportTree: ActivityResultLauncher<Uri?>
+    private lateinit var exportArchive: ActivityResultLauncher<String>
     private lateinit var scannerLauncher: ActivityResultLauncher<Intent>
     private lateinit var documentScanLauncher: ActivityResultLauncher<IntentSenderRequest>
 
@@ -194,7 +198,10 @@ class MainActivity : AppCompatActivity() {
         exportTree = registerForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
             val source = exportFolder
             exportFolder = null
-            if (uri == null || source == null) return@registerForActivityResult
+            if (uri == null || source == null) {
+                if (source?.parentFile?.canonicalPath == cacheDir.canonicalPath) source.deleteRecursively()
+                return@registerForActivityResult
+            }
             try {
                 val destination = DocumentFile.fromTreeUri(this, uri) ?: error("Destination unavailable.")
                 require(destination.isDirectory) { "Select a destination folder." }
@@ -206,8 +213,27 @@ class MainActivity : AppCompatActivity() {
                     if (complete) "Exported ${count[0]} file(s)."
                     else "Exported ${count[0]} file(s); remaining items skipped at the safe folder-transfer limit."
                 )
-                if (source.parentFile?.canonicalPath == cacheDir.canonicalPath) source.deleteRecursively()
             } catch (e: Exception) { toast("Folder export failed: ${message(e)}") }
+            finally {
+                if (source.parentFile?.canonicalPath == cacheDir.canonicalPath) source.deleteRecursively()
+            }
+        }
+        exportArchive = registerForActivityResult(ActivityResultContracts.CreateDocument("application/zip")) { uri ->
+            val files = archiveFiles
+            archiveFiles = emptyList()
+            if (uri == null || files.isEmpty()) return@registerForActivityResult
+            try {
+                val output = contentResolver.openOutputStream(uri, "w") ?: error("Destination unavailable.")
+                ZipOutputStream(output.buffered()).use { zip ->
+                    files.forEach { source ->
+                        require(source.isFile && source.exists()) { "${source.name} is no longer available." }
+                        zip.putNextEntry(ZipEntry(source.name))
+                        FileInputStream(source).use { it.copyTo(zip) }
+                        zip.closeEntry()
+                    }
+                }
+                toast("Exported ${files.size} file(s) as a ZIP archive.")
+            } catch (e: Exception) { toast("ZIP export failed: ${message(e)}") }
         }
     }
 
@@ -792,7 +818,7 @@ class MainActivity : AppCompatActivity() {
             }
             selectionContent.addView(text("${selectedHere.size} selected", 14, R.color.qp_text, true))
             val selectionActions = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
-            selectionActions.addView(button("Export", false).apply {
+            selectionActions.addView(button("Export ZIP", false).apply {
                 setOnClickListener { exportSelected(selectedHere) }
             }, LinearLayout.LayoutParams(0, dp(44), 1f))
             val allPhotos = selectedHere.all { it.extension.lowercase(Locale.ROOT) in setOf("jpg", "jpeg", "png") }
@@ -956,20 +982,9 @@ class MainActivity : AppCompatActivity() {
 
     private fun exportSelected(files: List<File>) {
         if (files.isEmpty()) return
-        try {
-            val staging = File(cacheDir, "SmartPrint export ${System.currentTimeMillis()}")
-            check(staging.mkdirs()) { "Temporary export folder could not be created." }
-            files.forEach { source ->
-                val target = File(staging, source.name)
-                check(!target.exists()) { "Duplicate selected filenames cannot be exported together." }
-                FileInputStream(source).use { input -> target.outputStream().use { output -> input.copyTo(output) } }
-            }
-            selectedFilePaths.clear()
-            exportFolder = staging
-            exportTree.launch(null)
-        } catch (e: Exception) {
-            toast("Could not prepare selected files: ${message(e)}")
-        }
+        archiveFiles = files.toList()
+        selectedFilePaths.clear()
+        exportArchive.launch("SmartPrint files ${SimpleDateFormat("yyyyMMdd-HHmmss", Locale.ROOT).format(Date())}.zip")
     }
 
     private fun makePdfFromSelected(files: List<File>) {
@@ -1134,21 +1149,26 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun saveDocumentScan(scan: GmsDocumentScanningResult) {
-        val label = SimpleDateFormat("yyyy-MM-dd HHmm", Locale.ROOT).format(Date())
+        val label = SimpleDateFormat("yyyy-MM-dd HHmmss", Locale.ROOT).format(Date())
         val folder = store.createFolder("", "Scan $label", allowExisting = false)
         val targetPath = store.pathOf(folder)
-        var saved = 0
-        scan.getPdf()?.let { pdf ->
-            val input = contentResolver.openInputStream(pdf.getUri()) ?: error("Scanned PDF is unavailable.")
-            input.use { store.importFile(it, "Scanned document.pdf", targetPath) }
-            saved++
+        try {
+            var saved = 0
+            scan.getPdf()?.let { pdf ->
+                val input = contentResolver.openInputStream(pdf.getUri()) ?: error("Scanned PDF is unavailable.")
+                input.use { store.importFile(it, "Scanned document.pdf", targetPath) }
+                saved++
+            }
+            scan.getPages().orEmpty().forEachIndexed { index, page ->
+                val input = contentResolver.openInputStream(page.getImageUri()) ?: error("Scanned page ${index + 1} is unavailable.")
+                input.use { store.importFile(it, "Page ${(index + 1).toString().padStart(2, '0')}.jpg", targetPath) }
+                saved++
+            }
+            require(saved > 0) { "The scanner returned no pages." }
+        } catch (error: Exception) {
+            runCatching { store.delete(folder) }
+            throw error
         }
-        scan.getPages().orEmpty().forEachIndexed { index, page ->
-            val input = contentResolver.openInputStream(page.getImageUri()) ?: error("Scanned page ${index + 1} is unavailable.")
-            input.use { store.importFile(it, "Page ${(index + 1).toString().padStart(2, '0')}.jpg", targetPath) }
-            saved++
-        }
-        require(saved > 0) { "The scanner returned no pages." }
         folderPath = targetPath
         showFiles()
         toast("Saved your scan in My files.")
