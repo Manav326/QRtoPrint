@@ -15,7 +15,7 @@ public sealed class LocalAgentApiState
 {
     private readonly object sync = new();
     private HashSet<string> configuredOrigins = new(StringComparer.OrdinalIgnoreCase);
-    private string? publicPortalOrigin;
+    private HashSet<string> trustedPortalOrigins = new(StringComparer.OrdinalIgnoreCase);
 
     public bool IsRunning { get; internal set; }
 
@@ -31,9 +31,19 @@ public sealed class LocalAgentApiState
         }
     }
 
-    public void SetPublicPortalOrigin(string? origin)
+    public void SetPublicPortalOrigin(string? origin) =>
+        SetTrustedPortalOrigins(origin is null ? Array.Empty<string>() : [origin]);
+
+    public void SetTrustedPortalOrigins(IEnumerable<string> origins)
     {
-        lock (sync) { publicPortalOrigin = NormalizeOrigin(origin); }
+        lock (sync)
+        {
+            trustedPortalOrigins = origins
+                .Select(NormalizeOrigin)
+                .Where(origin => origin is not null)
+                .Select(origin => origin!)
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        }
     }
 
     public bool IsOriginAllowed(string origin)
@@ -42,8 +52,7 @@ public sealed class LocalAgentApiState
         if (normalized is null) return false;
         lock (sync)
         {
-            return configuredOrigins.Contains(normalized) ||
-                   string.Equals(publicPortalOrigin, normalized, StringComparison.OrdinalIgnoreCase);
+            return configuredOrigins.Contains(normalized) || trustedPortalOrigins.Contains(normalized);
         }
     }
 
@@ -118,11 +127,23 @@ public sealed class LocalAgentApiHostedService(
             {
                 policy.SetIsOriginAllowed(state.IsOriginAllowed)
                     .WithMethods("GET", "POST")
-                    .WithHeaders("Content-Type", "X-Print-Upload-Grant")
+                    .WithHeaders("Content-Type", "X-Print-Upload-Grant", "X-Print-Preview-Grant")
                     .SetPreflightMaxAge(TimeSpan.FromMinutes(10));
             }));
 
             var app = builder.Build();
+            app.Use(async (context, next) =>
+            {
+                if (context.Request.Headers.TryGetValue("Origin", out var origin) &&
+                    state.IsOriginAllowed(origin.ToString()) &&
+                    string.Equals(context.Request.Headers["Access-Control-Request-Private-Network"],
+                        "true", StringComparison.OrdinalIgnoreCase))
+                {
+                    context.Response.Headers["Access-Control-Allow-Private-Network"] = "true";
+                }
+
+                await next();
+            });
             app.UseCors("CustomerPortal");
             app.MapGet("/api/v1/local/status", () =>
             {
@@ -149,6 +170,80 @@ public sealed class LocalAgentApiHostedService(
                         statusCode: StatusCodes.Status503ServiceUnavailable,
                         title: "The local agent identity is unavailable.");
                 }
+            }).RequireCors("CustomerPortal");
+
+            app.MapGet("/api/v1/local/documents/{jobId:guid}/preview", async (
+                Guid jobId,
+                HttpContext context,
+                CancellationToken ct) =>
+            {
+                var credentials = credentialStore.Load();
+                var grantToken = context.Request.Headers["X-Print-Preview-Grant"].FirstOrDefault();
+                if (credentials is null || string.IsNullOrWhiteSpace(grantToken) || grantToken.Length > 4096)
+                    return Results.Unauthorized();
+
+                var client = httpClientFactory.CreateClient("cloud");
+                client.Timeout = TimeSpan.FromSeconds(15);
+                client.BaseAddress = new Uri(credentials.ApiBaseUrl.TrimEnd('/') + "/");
+                using var authorizeRequest = new HttpRequestMessage(
+                    HttpMethod.Get,
+                    $"api/v1/agent/local-document-previews/{jobId}/authorize");
+                authorizeRequest.Headers.Add("X-Print-Agent-Id", credentials.AgentDeviceId.ToString());
+                authorizeRequest.Headers.Add("X-Print-Agent-Secret", credentials.AgentSecret);
+                authorizeRequest.Headers.Add("X-Print-Preview-Grant", grantToken);
+
+                using var authorizeResponse = await client.SendAsync(authorizeRequest, ct);
+                if (!authorizeResponse.IsSuccessStatusCode)
+                {
+                    logger.LogWarning("Local document preview authorization for job {JobId} returned HTTP {StatusCode}.",
+                        jobId, (int)authorizeResponse.StatusCode);
+                    return Results.Problem(
+                        statusCode: (int)authorizeResponse.StatusCode,
+                        title: "The cloud service could not authorize this local document preview.");
+                }
+
+                var authorizedDocument = await authorizeResponse.Content.ReadFromJsonAsync<LocalDocumentPreviewAuthorizationResponse>(cancellationToken: ct);
+                if (authorizedDocument is null)
+                    return Results.Problem(statusCode: StatusCodes.Status502BadGateway, title: "The cloud service returned invalid local preview metadata.");
+
+                var entry = localQueueStore.Find(jobId);
+                if (entry is null || !File.Exists(entry.DocumentPath))
+                    return Results.NotFound(new { code = "local_preview_document_missing", message = "The original file is no longer present on this shop computer." });
+
+                if (entry.MediaType is not ("application/pdf" or "image/jpeg" or "image/png"))
+                    return Results.StatusCode(StatusCodes.Status415UnsupportedMediaType);
+
+                if (entry.SizeBytes != authorizedDocument.SizeBytes ||
+                    !string.Equals(entry.Sha256, authorizedDocument.Sha256, StringComparison.OrdinalIgnoreCase) ||
+                    !string.Equals(entry.MediaType, authorizedDocument.MediaType, StringComparison.OrdinalIgnoreCase) ||
+                    !string.Equals(entry.DocumentName, authorizedDocument.OriginalFileName, StringComparison.Ordinal))
+                {
+                    return Results.Conflict(new { code = "local_preview_document_mismatch", message = "The protected local file does not match the document registered by the shop API." });
+                }
+
+                byte[] bytes;
+                try
+                {
+                    bytes = localQueueStore.ReadDocument(jobId);
+                }
+                catch (Exception exception) when (exception is IOException or CryptographicException or InvalidDataException)
+                {
+                    logger.LogError(exception, "Local document preview integrity check failed for job {JobId}.", jobId);
+                    return Results.Problem(
+                        statusCode: StatusCodes.Status500InternalServerError,
+                        title: "The protected local document could not be read safely.");
+                }
+
+                context.Response.Headers["Cache-Control"] = "private, no-store";
+                context.Response.Headers["X-Content-Type-Options"] = "nosniff";
+                context.Response.Headers["Content-Security-Policy"] = "sandbox";
+                context.Response.Headers["Content-Disposition"] = "inline";
+                context.Response.OnCompleted(() =>
+                {
+                    CryptographicOperations.ZeroMemory(bytes);
+                    return Task.CompletedTask;
+                });
+                return Results.File(bytes, entry.MediaType, enableRangeProcessing: false);
             }).RequireCors("CustomerPortal");
 
             app.MapPost("/api/v1/local/uploads/{ticketId:guid}", async (
@@ -402,6 +497,9 @@ public sealed class LocalAgentApiHostedService(
     private sealed record LocalUploadedDocument(
         Guid Id, string OriginalFileName, string MediaType, long SizeBytes,
         string Sha256, string PageSizesJson);
+
+    private sealed record LocalDocumentPreviewAuthorizationResponse(
+        string MediaType, string OriginalFileName, long SizeBytes, string Sha256);
 
     public async ValueTask DisposeAsync()
     {
