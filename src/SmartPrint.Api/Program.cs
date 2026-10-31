@@ -1615,6 +1615,14 @@ shop.MapPost("/print-jobs/{jobId:guid}/approve", async (
         CreatedUtc = now
     });
     await db.SaveChangesAsync(ct);
+
+    var paymentSettings = await db.ShopPaymentProfiles.AsNoTracking()
+        .SingleOrDefaultAsync(item => item.TenantId == tenantId, ct);
+    var hasConfiguredPaymentMethod = paymentSettings?.CashEnabled == true ||
+        (paymentSettings?.UpiEnabled == true &&
+         !string.IsNullOrWhiteSpace(paymentSettings.UpiId) &&
+         !string.IsNullOrWhiteSpace(paymentSettings.PayeeName));
+
     return Results.Ok(new
     {
         job.Id,
@@ -1623,7 +1631,9 @@ shop.MapPost("/print-jobs/{jobId:guid}/approve", async (
         job.Currency,
         job.QuotedAmountMinor,
         job.UpdatedUtc,
-        NextStep = "Payment collection is not configured yet. This job cannot be sent to a printer."
+        NextStep = hasConfiguredPaymentMethod
+            ? "Quote approved. The customer can now choose an enabled shop payment method. Verify payment before assigning a printer."
+            : "Quote approved, but no shop payment method is enabled. Configure UPI or cash at counter in Payments before the customer can proceed."
     });
 });
 
@@ -3164,7 +3174,7 @@ shop.MapPost("/payments/{paymentId:guid}/verify", async (
         JobId = job.Id,
         JobNumber = job.JobNumber,
         JobStatus = job.Status,
-        NextStep = "Payment is verified. Printer dispatch is not enabled until the durable local print queue is installed."
+        NextStep = "Payment is verified. Assign this job to a live printer on its paired computer. The agent will secure the document locally before you explicitly start printing."
     });
 });
 
