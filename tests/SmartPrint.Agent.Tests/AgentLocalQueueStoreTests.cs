@@ -263,6 +263,38 @@ public sealed class AgentLocalQueueStoreTests
     }
 
     [Fact]
+    public async Task UnconfirmedPdfExportCanBeExplicitlyRequeuedFromTheProtectedLocalCopy()
+    {
+        var root = CreateTemporaryDirectory();
+        try
+        {
+            var store = new AgentLocalQueueStore(root);
+            await store.InitializeAsync(CancellationToken.None);
+            var bytes = "PDF export retry document"u8.ToArray();
+            var job = CreateJob(bytes) with
+            {
+                QueueName = "Microsoft Print to PDF",
+                OutputMode = PrinterOutputModeRules.PdfExport
+            };
+            await store.EnqueueAsync(job, bytes, CancellationToken.None);
+            await store.MarkAcknowledgedAsync(job.Id, CancellationToken.None);
+
+            var outputPath = Path.Combine(root, "SP-TEST-receipt.pdf");
+            await store.MarkPdfExportStartedAsync(job.Id, outputPath, CancellationToken.None);
+            await store.MarkOutputUnconfirmedAsync(
+                job.Id, "LEGACY_MICROSOFT_PDF_DIALOG_INTERRUPTED",
+                CancellationToken.None, PrinterOutputModeRules.PdfExport);
+
+            Assert.Equal("OUTPUT_UNCONFIRMED", store.Find(job.Id)!.State);
+            Assert.Equal(PrinterOutputModeRules.PdfExport, store.Find(job.Id)!.OutputMode);
+            Assert.Single(store.GetAcknowledgedJobs());
+            Assert.Single(store.GetPdfExportRecoveryJobs());
+            Assert.True(bytes.AsSpan().SequenceEqual(store.ReadDocument(job.Id)));
+        }
+        finally { Directory.Delete(root, recursive: true); }
+    }
+
+    [Fact]
     public async Task PreSubmissionBlockReturnsJobToAcknowledgedStateForExplicitRetry()
     {
         var root = CreateTemporaryDirectory();
@@ -322,7 +354,7 @@ public sealed class AgentLocalQueueStoreTests
             200,
             Guid.NewGuid(),
             "Shop Printer",
-            "Microsoft Print to PDF",
+            "Brother HL-L2350DW",
             "receipt.pdf",
             "application/pdf",
             content.LongLength,
