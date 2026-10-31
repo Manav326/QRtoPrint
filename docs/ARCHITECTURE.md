@@ -10,7 +10,7 @@ Use a modular monolith for the cloud control plane and a local edge runtime for 
 - Cloud API: ASP.NET Core on .NET 10, modular application layers and versioned REST endpoints.
 - Cloud database: PostgreSQL with tenant-scoped data access and migrations.
 - Local Windows Agent/edge runtime: .NET 10 Worker Service with a local authenticated HTTP endpoint and tray companion.
-- Local durable state: SQLite for job leases, event journal, printer snapshots and recovery metadata; files stored outside the database in tenant/shop-scoped protected directories.
+- Local durable state (current implementation): DPAPI LocalMachine-encrypted document files and JSON manifests under an ACL-protected ProgramData directory. SQLite remains a future option for richer queue/event history; it is not used by the current Agent queue.
 - Contracts: versioned OpenAPI plus shared, generated TypeScript client types where practical.
 - CI: build, lint, typecheck, unit tests, API integration tests, dependency/security checks and packaging validation.
 

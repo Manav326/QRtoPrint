@@ -1,94 +1,107 @@
 # Delivery Roadmap and Acceptance Criteria
 
-## Workstream 0 — repository and engineering foundation
+This roadmap distinguishes implemented capabilities from remaining work. A checked item means it exists in the repository and is covered by build/tests where applicable; it does not mean that production network access or physical hardware has been validated.
 
-- Establish monorepo layout, formatting, linting, type checking and CI.
-- Add shared UI tokens/components and responsive app shell.
-- Establish API contracts, configuration and secret-handling conventions.
-- Add architecture decision records and local developer setup.
-- Keep main buildable after each integrated increment.
+## Workstream 0 — engineering and delivery foundation
 
-Acceptance: clean checkout can install, build and run the initial web shell; CI executes reproducibly.
+- [x] Monorepo with React/TypeScript portal, .NET 10 API/Agent and PostgreSQL migrations.
+- [x] Portal type-check/build and API/Agent build in CI.
+- [x] API model/unit tests and Agent local-queue tests in CI.
+- [x] Docker images for API and portal, compose stack, Caddy HTTPS proxy and GHCR publication from main.
+- [x] CI-produced self-contained Windows x64 Agent artifact with pairing/install scripts.
+- [ ] Full lint/format gates, dependency/security scanning and integration tests against a real PostgreSQL service.
+
+Acceptance: the repository builds in CI. Deployment still needs DNS, registry access and restore rehearsal before production sign-off.
 
 ## Workstream 1 — SaaS and tenant foundation
 
-- Tenant/shop registration and lifecycle.
-- User identity, membership, roles and sessions.
-- Plans, subscription state, entitlements and configurable limits.
-- Device/agent registration, revocation and signed licence.
-- Platform admin tenant and subscription views.
+- [x] Shop/tenant registration, shop-owner identity and authentication.
+- [x] Tenant-scoped shop profile, printers, QR stations, pricing and payment settings.
+- [x] Platform-admin identity and separate authorization policy.
+- [x] Versioned plan catalogue and enforced printer/Agent/station/monthly-job/document-size entitlements.
+- [x] Audited trial/free assignment and operator-confirmed paid-plan activation with transaction reference.
+- [ ] Automated subscription gateway checkout, invoices, webhooks, reconciliation, renewals, dunning, refunds and signed offline licence/grace policy.
+- [ ] Complete shop membership/role matrix and user administration.
 
-Acceptance: automated tests prove strict tenant isolation and platform/shop permission boundaries.
+Acceptance: core tenant and subscription administration exists; automated SaaS billing and complete shop-role management remain outstanding.
 
 ## Workstream 2 — shop operations
 
-- Shop profile, branding, pricing and payment settings.
-- Printer registry, QR stations and operator roles.
-- Job queue, status history, reports and audit.
-- Responsive shop portal with complete light/dark UI.
+- [x] Shop profile, branding, pricing and UPI/cash payment settings.
+- [x] Printer registry, paired Agent/printer discovery, QR stations and enable/disable controls.
+- [x] Print-job list, quote review, shop approve/reject, printer assignment, dispatch and output confirmation.
+- [x] Payment attempt review and manual payment verification/rejection.
+- [ ] Full operator role matrix, rich customer directory/history, comprehensive reporting, refunds, collection workflow and configurable notification studio.
+- [ ] Full mobile/tablet and light/dark accessibility/visual-regression audit.
 
-Acceptance: an operator can configure a shop, station and pricing, inspect jobs and perform permitted actions.
+Acceptance: an owner/manager can configure and operate the core shop print workflow; broader shop operations remain in progress.
 
 ## Workstream 3 — customer PWA
 
-- [x] QR session creation, expiry, renewal, revocation and customer keepalive.
-- [x] Single PDF/JPG/PNG upload with signature checks, SHA-256, page analysis and 20 MB application limit.
-- [x] Direct shop-LAN upload to the paired Agent using a short-lived one-use grant; document bytes do not traverse cloud storage.
-- [x] Cloud-assisted protected upload remains available as a selectable fallback.
+- [x] QR session creation, expiry, resume, renewal and customer keepalive.
+- [x] Single-document PDF/JPG/JPEG/PNG upload, signature checks, SHA-256 and page/image analysis (20 MB hard limit; PDF maximum 500 pages).
+- [x] Customer choice of direct Shop Wi-Fi upload or Cloud-assisted upload.
+- [x] Direct phone-to-Agent ticket, integrity check and DPAPI-protected local staging; document bytes do not traverse cloud storage in LAN mode.
 - [x] Server-calculated quote, customer quote acceptance, shop review and customer job tracking.
-- [x] Shop-configured UPI/cash reporting with manual shop payment verification.
-- Multi-file, Office formats, complete customer receipt/collection and issue-report workflow.
+- [x] Shop-configured UPI/cash payment attempt and customer UPI reference submission; a reference or screenshot is not proof of payment.
+- [ ] Multi-file and Office-document uploads, server-side malware scanning, richer customer receipts and issue/collection workflow.
+- [ ] Automated payment-provider verification and cross-device customer account/history.
+- [ ] Physical Android/iOS browser and shop Wi-Fi client-isolation test matrix for Local Network Access.
 
-Acceptance: both transfer modes use one server-owned job lifecycle; no client-trusted price or payment state. LAN mode must be verified on representative real Android/iOS browsers and shop Wi-Fi networks before it is treated as universally compatible.
+Acceptance: both transfer modes use one server-owned job lifecycle. LAN mode requires an online API/Agent and user-granted browser permission; it is not offline printing.
 
 ## Workstream 4 — local Windows edge and printer integration
 
 - [x] Windows Service, paired identity, DPAPI LocalMachine credentials and authenticated cloud heartbeat.
-- [x] LAN endpoint discovery and private-profile firewall rule on TCP 17842.
+- [x] LAN endpoint discovery and Private-profile firewall rule on TCP 17842.
 - [x] Read-only local health endpoint and direct multipart document upload with exact-origin CORS.
 - [x] Shared PDF/JPG/PNG document analysis, SHA-256 verification and DPAPI-protected local document queue.
-- [x] Staged-upload reconciliation and expiry cleanup; paid-job claim refreshes settings before queue acknowledgement.
+- [x] Staged-upload recovery and expiry cleanup; paid-job claim refreshes print settings before queue acknowledgement.
 - [x] Windows spooler submission, status reconciliation and explicit shop output confirmation.
-- Tray companion, signed installer/auto-updater, additional IPP adapter and richer device diagnostics.
+- [ ] Tray companion, signed installer/auto-updater and richer device diagnostics.
+- [ ] SQLite queue/event journal (the current durable queue is encrypted document files plus JSON manifests).
+- [ ] IPP/network printer adapters, vendor capability adapters and representative physical-printer matrix.
 
-Acceptance: automated tests cover staging, same-printer binding, restart recovery and duplicate submission prevention. Physical hardware matrix and mobile-browser Local Network Access behaviour are documented and tested before compatibility claims.
+Acceptance: Windows build and queue-state tests pass; physical model/driver support and real-device LAN transfer still require shop-floor testing.
 
 ## Workstream 5 — cloud control plane and cloud-assisted transfer
 
 - [x] Protected cloud upload and retention as an alternative transfer mode.
-- [x] Tenant/station-bound job routing and paired-Agent retrieval.
+- [x] Tenant/station-bound routing and paired-Agent retrieval.
 - [x] Server-calculated quote, quote expiry/acceptance and shop approval.
-- [x] UPI/cash print-payment attempt with manual shop payment verification before Agent dispatch.
-- Separate customer-print and SaaS-subscription payment provider adapters.
-- Automated signed gateway webhook verification, subscription invoices, refund and reconciliation lifecycle.
+- [x] UPI/cash payment attempt with manual shop verification before Agent dispatch.
+- [x] Separate shop print-payment records from platform subscription assignments.
+- [ ] Payment gateway adapters and verified webhook lifecycle.
+- [ ] Refund, reconciliation and customer-to-shop settlement reporting.
 
-Acceptance: cross-tenant retrieval is impossible; payment replay/idempotency and failed-transfer cases are tested. Manual payment verification must not be described as automated gateway verification.
+Acceptance: manual payment verification is implemented; do not describe it as automated gateway verification or reconciliation.
 
 ## Workstream 6 — platform administration and operations
 
-- [x] Dedicated platform-admin identity, offline bootstrap, and separate authorization policy.
-- [x] Read-only platform overview and paginated tenant directory with subscription, printer, agent and recent usage summaries.
-- [x] Versioned plan catalogue with configurable prices and entitlement fields; published versions remain immutable.
-- [x] Enforce assigned-plan printer, agent, QR station, monthly-job, document-size and cloud-assisted-printing entitlements at API boundaries.
-- [x] Platform-admin subscription directory and audited assignment of trial/explicitly free published plan versions.
-- [x] Manual paid-plan activation after the platform operator confirms funds received and records the bank/UPI transaction reference in the immutable assignment audit.
-- Subscription invoices, automated paid-plan checkout/webhook verification, platform payment reconciliation and revenue analytics.
-- Device/licence management, white-label upgrades and coupons.
-- Support workflow, audit logs and release management.
+- [x] Dedicated platform-admin identity, offline bootstrap and separate authorization policy.
+- [x] Read-only platform overview and paginated tenant directory.
+- [x] Versioned plan catalogue with immutable published versions.
+- [x] API enforcement of assigned-plan resource and document-size quotas.
+- [x] Audited trial/free and operator-confirmed paid subscription assignment.
+- [ ] Subscription invoices, automated paid-plan checkout/webhook verification, platform payment reconciliation, revenue analytics, coupons, support workflow and full audit search.
 
-Acceptance: platform owner can manage SaaS lifecycle without direct database edits. The platform console supports plan metadata, editable drafts, immutable publication history and centrally managed entitlement fields. The API enforces assigned-plan quotas at resource creation and upload boundaries. Trial/free and operator-confirmed paid assignments are audited; automated gateway checkout, subscription invoices and payment reconciliation remain future work.
+Acceptance: platform plan/subscription administration works without direct database edits; full SaaS billing and support operations remain future work.
 
 ## Workstream 7 — production readiness
 
-- Security review, dependency scanning and threat-model review.
-- Backup/restore drills, retention/deletion and incident procedures.
-- Signed Windows installer, update and rollback.
-- Performance, accessibility, visual regression and responsive testing.
-- End-to-end test matrix and representative physical printer validation.
-- Domain/DNS/TLS deployment and monitoring.
+- [x] Docker compose stack for PostgreSQL, API, portal and Caddy-managed HTTPS.
+- [x] Optional migration-on-startup, persistent database/document/TLS volumes and one-time secrets generated by the PowerShell starter.
+- [x] Docker backup/export script for PostgreSQL, encrypted document storage and env recovery material.
+- [x] Docker restore script with explicit operator confirmation and preservation of the current deployment environment.
+- [x] CI build/publish of GHCR API/portal images and self-contained Windows Agent artifact.
+- [ ] Anonymous GHCR pull availability (requires one-time package visibility configuration) or an operational authenticated registry policy.
+- [ ] Backup restore rehearsal, retention/deletion policy, incident process and monitoring/alerting.
+- [ ] Production DNS/TLS cutover and deployment/rollback rehearsal.
+- [ ] Security/dependency review, load/accessibility/visual-regression tests and representative physical-printer validation.
+- [ ] Real Android browser, shop Wi-Fi and printer end-to-end acceptance run.
 
-Acceptance: all critical workflows pass automated tests; deployment and rollback are rehearsed; hardware/payment claims match actual validation.
+Acceptance: CI and packaging are green. Production rollout is not signed off until network, domain, backups, physical printer and real-device LAN tests pass.
 
-## Explicit non-goals for initial release
+## Explicit non-goals for this release
 
-Play Store apps, universal support for every printer feature, advanced OCR/AI document editing, complex finishing without confirmed devices, franchise management and loyalty programmes.
+Play Store apps, universal support for every printer, multi-file/Office conversion, advanced OCR/AI document editing, unsupported finishing options, franchise management, loyalty programmes and fully offline quote/payment/printing.

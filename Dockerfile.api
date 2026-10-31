@@ -1,4 +1,6 @@
 FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
+LABEL org.opencontainers.image.source="https://github.com/Manav326/QRtoPrint"
+LABEL org.opencontainers.image.description="QRtoPrint tenant-scoped ASP.NET Core API"
 WORKDIR /source
 COPY . .
 RUN dotnet restore src/SmartPrint.Api/SmartPrint.Api.csproj

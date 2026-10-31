@@ -24,7 +24,7 @@ thinkwithsujeet.in is the preferred domain. Proposed subdomains (subject to DNS 
 
 ## Repository status
 
-The repository contains an integrated customer/shop portal, tenant-scoped ASP.NET Core API, PostgreSQL schema and migrations, paired Windows Print Agent, encrypted local print queue, spooler execution, automated tests and CI. Supported single-file PDF/JPG/PNG jobs can be uploaded either through protected cloud storage or directly from the customer phone to the paired shop Agent over the shop LAN. Both modes create the same cloud-coordinated PrintJob and use the existing server quote, shop approval, manual shop payment verification, explicit dispatch and output-confirmation lifecycle. In direct LAN mode, document bytes remain on the shop computer; the API retains only document metadata, SHA-256 and page analysis. Platform-admin identity, read-only operations overview, tenant directory, versioned plans, entitlement enforcement and audited trial/free/operator-confirmed paid subscription assignment are implemented. Automated payment gateways, SaaS subscription invoices, refunds/reconciliation, multi-file/Office upload, signed Agent installer/auto-update and the physical-printer compatibility matrix remain future work. See docs/ROADMAP.md for scope and validation boundaries.
+The repository contains an integrated customer/shop portal, tenant-scoped ASP.NET Core API, PostgreSQL schema and migrations, paired Windows Print Agent, encrypted local print queue, spooler execution, automated tests and CI. Supported single-file PDF/JPG/JPEG/PNG jobs (20 MB hard limit, PDFs up to 500 pages) can be uploaded either through protected cloud storage or directly from the customer phone to the paired shop Agent over the shop LAN. Both modes create the same cloud-coordinated PrintJob and use the existing server quote, shop approval, manual shop payment verification, explicit dispatch and output-confirmation lifecycle. In direct LAN mode, document bytes remain on the shop network; the API retains only document metadata, SHA-256 and page analysis. The cloud remains required for QR-session validation, upload grants, metadata, quotes, payment and dispatch authorisation, so this is not offline printing. Platform-admin identity, read-only operations overview, tenant directory, versioned plans, entitlement enforcement and audited trial/free/operator-confirmed paid subscription assignment are implemented. Automated payment gateways, SaaS subscription invoices, refunds/reconciliation, multi-file/Office upload, Agent tray/auto-update and the physical-printer compatibility matrix remain future work. See docs/ROADMAP.md for scope and validation boundaries.
 
 ## Docker deployment
 
@@ -42,10 +42,10 @@ The production Docker stack runs PostgreSQL, the ASP.NET Core API, the React por
    .\scripts\docker-up.ps1 -AcmeEmail "your-operations-email@example.com"
    ```
 
-   The script creates a local `.env` with fresh database, JWT-signing and document-encryption secrets, then pulls the published GHCR images and starts the stack. Keep `.env` private and backed up; losing the document-encryption key makes existing cloud documents unreadable.
+   The script creates a local `.env` with fresh database, JWT-signing and document-encryption secrets. It first tries to pull the published GHCR images (using an authenticated GitHub CLI session when available); if the packages are not accessible, it builds the same API and portal images from this checkout. It then starts the stack. Keep `.env` private and backed up; losing the document-encryption key makes existing cloud documents unreadable.
 4. Open the printed portal URL. The API health endpoint is `https://api.thinkwithsujeet.in/health/ready`.
 
-The container images are published to GHCR by the main-branch workflow. If the first image pull reports an authorization error, sign in with a GitHub account that has `read:packages` access (`docker login ghcr.io`); repository owners can make both GHCR packages public once from Package settings to allow anonymous pulls.
+The container images are built and published to GHCR by the main-branch workflow. GHCR packages are private by default until their owner changes visibility. The deployment script can use an authenticated GitHub CLI session or fall back to a local source build. To use anonymous image pulls, make both packages public once in GitHub → Packages → package settings.
 
 ### First administrator
 
@@ -66,7 +66,7 @@ Docker does not run the Windows Print Spooler Agent on a Linux server. Install t
 .\scripts\install-agent-service.ps1 -AgentExePath ".\SmartPrint.Agent.exe" -CustomerPortalOrigin "https://print.thinkwithsujeet.in"
 ```
 
-The customer phone must open the HTTPS portal while connected to the same shop Wi-Fi/LAN as the Agent and allow the browser's Local Network Access permission. The shop computer must use a Windows Private network profile. Cloud-assisted upload remains available if the local route cannot be reached.
+The customer phone must open the HTTPS portal while connected to the same shop Wi-Fi/LAN as the Agent and allow the browser's Local Network Access permission. The shop computer must use a Windows Private network profile and the Agent installer must use the exact customer portal origin. Direct LAN upload keeps the document bytes on the shop network but still needs the online API for QR session, upload grant, quote, payment and dispatch coordination. Cloud-assisted upload remains available if the local route cannot be reached.
 
 ### Backups
 

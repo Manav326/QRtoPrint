@@ -1,4 +1,6 @@
 FROM node:22-alpine AS build
+LABEL org.opencontainers.image.source="https://github.com/Manav326/QRtoPrint"
+LABEL org.opencontainers.image.description="QRtoPrint customer and shop web portal"
 WORKDIR /workspace
 RUN corepack enable && corepack prepare pnpm@10.18.0 --activate
 COPY . .

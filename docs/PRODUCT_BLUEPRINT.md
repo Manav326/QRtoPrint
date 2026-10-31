@@ -101,3 +101,14 @@ The standard brand combines Smart Print identity and tenant identity. White-labe
 V1 includes multi-tenancy, SaaS billing foundation, customer flow, shop operations, Windows agent, multi-vendor printer abstraction, local and cloud-assisted access, shop payment integration boundary, platform admin, security, backups, installer/update flow and automated tests.
 
 Defer Play Store apps, advanced AI/OCR, universal manufacturer-specific features, advanced finishing without confirmed hardware, franchise workflows and loyalty features for print customers.
+
+
+## Implemented V1 boundary
+
+The blueprint above records the intended product, not every feature currently shipped. The present implementation is narrower:
+
+- Customer uploads are single-file PDF/JPG/JPEG/PNG, with a 20 MB hard limit and a 500-page PDF limit. The customer chooses Shop Wi-Fi (direct phone-to-Agent) or Cloud-assisted (encrypted API storage).
+- Direct Shop Wi-Fi keeps document bytes on the shop network, but still uses the cloud API for QR-session validation, one-use grant, metadata finalisation, quote, payment and dispatch authorisation. It is not an offline quote/payment/printing mode.
+- Both modes share one PrintJob, quote, approval, payment and spooler lifecycle. Shop UPI/cash payment is manually verified; gateway webhooks, automated refunds and payment reconciliation are not implemented.
+- The Windows Agent runs as a Windows Service on the printer-connected shop PC. Its current durable queue uses DPAPI-encrypted files and JSON manifests, not SQLite. A tray UI, signed installer and automatic updater remain outstanding.
+- Printer compatibility must be verified per model and installed driver. Windows spooler acceptance is not proof of paper completion; shop-side output confirmation remains required.

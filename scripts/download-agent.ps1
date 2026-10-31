@@ -16,14 +16,17 @@ if ($LASTEXITCODE -ne 0) { throw 'Sign in to GitHub CLI first by running: gh aut
 
 $runListArgs = @(
     'run', 'list', '--repo', $repository, '--workflow', 'ci.yml',
-    '--branch', 'main', '--status', 'success', '--limit', '1',
-    '--json', 'databaseId,headSha', '--jq', '.[0]'
+    '--branch', 'main', '--limit', '1',
+    '--json', 'databaseId,headSha,status,conclusion', '--jq', '.[0]'
 )
 $runJson = & gh @runListArgs
 if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($runJson)) { throw 'No successful main-branch CI run was found.' }
 $run = $runJson | ConvertFrom-Json
 if ([string]::IsNullOrWhiteSpace($run.databaseId) -or [string]::IsNullOrWhiteSpace($run.headSha)) {
-    throw 'The latest successful workflow did not return a run ID and commit SHA.'
+    throw 'The latest main-branch workflow did not return a run ID and commit SHA.'
+}
+if ($run.status -ne 'completed' -or $run.conclusion -ne 'success') {
+    throw "The latest main-branch CI run is not green ($($run.status)/$($run.conclusion)). Fix or rerun CI before downloading an Agent."
 }
 
 $fullDestination = [System.IO.Path]::GetFullPath($Destination)
