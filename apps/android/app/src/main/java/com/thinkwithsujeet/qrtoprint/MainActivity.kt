@@ -918,15 +918,15 @@ class MainActivity : AppCompatActivity() {
                         it.length() in 1..(20L * 1024L * 1024L)
                 } &&
                 selectedHere.sumOf { it.length() } <= DocumentBatchComposer.MAX_SOURCE_BYTES
-            selectionActions.addView(button("Prepare batch PDF", true).apply {
+            selectionActions.addView(button("Combine into one PDF", true).apply {
                 isEnabled = supportedBatch
                 alpha = if (supportedBatch) 1f else 0.45f
                 setOnClickListener { preparePrintBatch(selectedHere) }
             }, LinearLayout.LayoutParams(0, dp(44), 1f).apply { marginStart = dp(8) })
             selectionContent.addView(selectionActions, linearParams().apply { topMargin = dp(8) })
             selectionContent.addView(text(
-                if (supportedBatch) "Selected PDFs and photos become one ordered print-ready PDF. Original files stay unchanged."
-                else "Select 2–20 PDF/JPG/PNG files, each up to 20 MB and 100 MB total, to prepare one print batch.",
+                if (supportedBatch) "Creates one combined PDF. For separately reviewable print files, use Select multiple files after scanning a shop QR code."
+                else "Select 2–20 PDF/JPG/PNG files, each up to 20 MB and 100 MB total, to combine them into one PDF.",
                 11, R.color.qp_muted, false
             ).apply { setPadding(0, dp(7), 0, 0) })
             selectionCard.addView(selectionContent)
