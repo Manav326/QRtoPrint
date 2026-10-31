@@ -1,4 +1,4 @@
-package in.thinkwithsujeet.qrtoprint
+package com.thinkwithsujeet.qrtoprint
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertThrows

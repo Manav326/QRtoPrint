@@ -1,4 +1,4 @@
-package in.thinkwithsujeet.qrtoprint
+package com.thinkwithsujeet.qrtoprint
 
 import android.content.ClipData
 import android.content.Intent
@@ -39,9 +39,6 @@ import com.google.android.material.bottomnavigation.BottomNavigationView
 import com.google.android.material.button.MaterialButton
 import com.google.android.material.card.MaterialCardView
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
-import com.google.mlkit.vision.barcode.common.Barcode
-import com.google.mlkit.vision.codescanner.GmsBarcodeScannerOptions
-import com.google.mlkit.vision.codescanner.GmsBarcodeScanning
 import java.io.ByteArrayInputStream
 import java.io.File
 import java.io.FileInputStream
@@ -74,6 +71,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var importTree: ActivityResultLauncher<Uri?>
     private lateinit var exportOne: ActivityResultLauncher<String>
     private lateinit var exportTree: ActivityResultLauncher<Uri?>
+    private lateinit var scannerLauncher: ActivityResultLauncher<Intent>
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -112,6 +110,16 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun registerFileActions() {
+        scannerLauncher = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+            if (result.resultCode == RESULT_OK) {
+                val rawValue = result.data?.getStringExtra(QrScannerActivity.EXTRA_RAW_VALUE)
+                try {
+                    confirmShop(StationQrLink.parse(rawValue))
+                } catch (_: Exception) {
+                    toast("This is not a valid QRtoPrint shop QR code.")
+                }
+            }
+        }
         importFiles = registerForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
             if (uris.isNullOrEmpty()) return@registerForActivityResult
             var ok = 0
@@ -470,16 +478,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun scanQr() {
-        val options = GmsBarcodeScannerOptions.Builder()
-            .setBarcodeFormats(Barcode.FORMAT_QR_CODE)
-            .enableAutoZoom()
-            .build()
-        GmsBarcodeScanning.getClient(this, options).startScan()
-            .addOnSuccessListener { barcode ->
-                try { confirmShop(StationQrLink.parse(barcode.rawValue)) }
-                catch (_: Exception) { toast("This is not a valid QRtoPrint shop QR code.") }
-            }
-            .addOnFailureListener { toast("QR scanner unavailable. Check Google Play services.") }
+        scannerLauncher.launch(Intent(this, QrScannerActivity::class.java))
     }
 
     private fun confirmShop(link: StationQrLink) {
@@ -493,19 +492,6 @@ class MainActivity : AppCompatActivity() {
                 ensureWebView().loadUrl(link.url)
                 showPrint()
             }.show()
-    }
-
-    private fun showPrint() {
-        pickerMode = false
-        toolbar.title = portalHost?.let { "Print · $it" } ?: "Print at a shop"
-        toolbar.setNavigationIcon(android.R.drawable.ic_media_previous)
-        toolbar.setNavigationOnClickListener { showFiles() }
-        navigation.visibility = View.VISIBLE
-        navigation.menu.findItem(PRINT).isChecked = true
-        content.removeAllViews()
-        val view = ensureWebView()
-        (view.parent as? ViewGroup)?.removeView(view)
-        content.addView(view, frameParams())
     }
 
     private fun chooseFile(file: File) {

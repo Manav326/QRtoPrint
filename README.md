@@ -30,7 +30,7 @@ The repository contains an integrated customer/shop portal, tenant-scoped ASP.NE
 
 A native Android client is located in `apps/android`. It complements the customer PWA rather than replacing the shared print workflow.
 
-- Scan the existing shop QR code (`/s/{publicCode}`) using Google Play services Code Scanner. Only HTTPS QRtoPrint station URLs are accepted.
+- Scan the existing shop QR code (`/s/{publicCode}`) in a branded CameraX preview using bundled on-device ML Kit. Only HTTPS QRtoPrint station URLs are accepted; camera frames stay on the device.
 - Keep documents in app-private local storage with folders and subfolders. Import multiple files or an entire folder through Android's Storage Access Framework; export a file or folder back to a user-selected file-manager destination.
 - Select a saved PDF/JPG/JPEG/PNG from the native library when the customer portal requests a file. The existing API limits printable documents to 20 MB and remains responsible for document analysis, quotes, shop approval, payment and job status.
 - The embedded customer portal uses the same station-bound session and upload APIs as the web PWA. It does not introduce a second print-job lifecycle or claim offline printing.

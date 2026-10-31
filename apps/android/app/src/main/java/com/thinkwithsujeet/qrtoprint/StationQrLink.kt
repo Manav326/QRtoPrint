@@ -1,4 +1,4 @@
-package in.thinkwithsujeet.qrtoprint
+package com.thinkwithsujeet.qrtoprint
 
 import java.net.URI
 

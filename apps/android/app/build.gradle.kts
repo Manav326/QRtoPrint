@@ -3,10 +3,10 @@ plugins {
     id("org.jetbrains.kotlin.android")
 }
 android {
-    namespace = "in.thinkwithsujeet.qrtoprint"
+    namespace = "com.thinkwithsujeet.qrtoprint"
     compileSdk = 35
     defaultConfig {
-        applicationId = "in.thinkwithsujeet.qrtoprint"
+        applicationId = "com.thinkwithsujeet.qrtoprint"
         minSdk = 26
         targetSdk = 35
         versionCode = 1
@@ -29,6 +29,10 @@ dependencies {
     implementation("androidx.appcompat:appcompat:1.7.0")
     implementation("androidx.documentfile:documentfile:1.0.1")
     implementation("com.google.android.material:material:1.12.0")
-    implementation("com.google.android.gms:play-services-code-scanner:16.1.0")
+    implementation("androidx.camera:camera-camera2:1.6.2")
+    implementation("androidx.camera:camera-core:1.6.2")
+    implementation("androidx.camera:camera-lifecycle:1.6.2")
+    implementation("androidx.camera:camera-view:1.6.2")
+    implementation("com.google.mlkit:barcode-scanning:17.3.0")
     testImplementation("junit:junit:4.13.2")
 }
