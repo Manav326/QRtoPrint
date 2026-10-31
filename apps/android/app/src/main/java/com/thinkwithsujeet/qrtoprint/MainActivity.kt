@@ -847,7 +847,7 @@ class MainActivity : AppCompatActivity() {
                 if (isPicker) "No printable files here. Import a document or open another folder."
                 else "No documents here yet. Scan paper pages, import files or create a folder to get started.",
                 14, R.color.qp_muted, false
-            ).apply { setPadding(dp(18), dp(22), dp(18), dp(22) })
+            ).apply { setPadding(dp(18), dp(22), dp(18), dp(22)) })
             column.addView(empty, linearParams())
         } else {
             entries.forEach { entry ->
