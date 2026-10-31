@@ -1173,7 +1173,10 @@ function CustomerPrintFlow({sessionToken,paymentOptions}:{sessionToken:string;pa
     let active=true;
     void getCustomerJobStatus(sessionToken,uploaded.job.id).then(refreshed=>{
       if(!active)return;
-      if(refreshed.status==="Uploaded"){
+      // A newly uploaded job starts in AWAITING_CONFIGURATION on the API.
+      // Treat that state like the legacy Uploaded value so the customer can
+      // choose print settings and request the first quote after a reload.
+      if(refreshed.status==="Uploaded"||refreshed.status==="UPLOADED"||refreshed.status==="AWAITING_CONFIGURATION"){
         setJobStatus(null);
         setPayment(null);
         return;
