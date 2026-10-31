@@ -1,7 +1,7 @@
 import { useEffect, useState, type ReactNode } from "react";
 import {
   Activity, Building2, CheckCircle2, ChevronLeft, ChevronRight,
-  Clock3, LogOut, Moon, Monitor, Printer, RefreshCw, Search, ShieldCheck,
+  Clock3, LogOut, Menu, Moon, Monitor, Printer, RefreshCw, Search, ShieldCheck,
   Sun
 } from "lucide-react";
 import {
@@ -20,6 +20,7 @@ export default function PlatformAdminConsole({
 }) {
   const [section, setSection] = useState<Section>("Overview");
   const [dark, setDark] = useState(true);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
   const [overview, setOverview] = useState<PlatformOverview | null>(null);
   const [overviewLoading, setOverviewLoading] = useState(true);
   const [overviewError, setOverviewError] = useState("");
@@ -66,6 +67,7 @@ export default function PlatformAdminConsole({
 
   function navigate(next: Section) {
     setSection(next);
+    setSidebarOpen(false);
   }
 
   const title = section === "Overview" ? "Platform overview" : "Shop tenants";
@@ -75,7 +77,8 @@ export default function PlatformAdminConsole({
 
   return (
     <div className={`app-shell platform-admin-shell${dark ? "" : " light"}`}>
-      <aside className="sidebar platform-sidebar">
+      {sidebarOpen && <button className="mobile-scrim" aria-label="Close navigation" onClick={() => setSidebarOpen(false)}/>}
+      <aside className={`sidebar platform-sidebar${sidebarOpen ? " sidebar-open" : ""}`}>
         <div className="brand-lockup">
           <div className="brand-mark"><Printer size={21}/></div>
           <div><div className="brand-name">smart<span>print</span></div><div className="brand-caption">BY QRtoPrint</div></div>
@@ -109,7 +112,7 @@ export default function PlatformAdminConsole({
 
       <main className="main-panel">
         <header className="topbar">
-          <div className="breadcrumb"><span>Smart Print</span><span className="crumb-slash">/</span><strong>{title}</strong></div>
+          <div className="topbar-left"><button className="icon-button mobile-menu" onClick={() => setSidebarOpen(true)} aria-label="Open navigation"><Menu size={19}/></button><div className="breadcrumb"><span>Smart Print</span><span className="crumb-slash">/</span><strong>{title}</strong></div></div>
           <div className="topbar-actions">
             <span className="platform-session-pill"><i/> Platform session secured</span>
             <span className="topbar-divider"/>
