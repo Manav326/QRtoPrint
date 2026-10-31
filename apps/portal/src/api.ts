@@ -245,8 +245,67 @@ export interface ShopPayment {
   verifiedUtc?: string | null;
 }
 
+export interface ShopSubscriptionPlan {
+  id: string;
+  code: string;
+  name: string;
+  description: string | null;
+  isActive: boolean;
+  version: number;
+  status: string;
+  currency: string;
+  monthlyPriceMinor: number | null;
+  annualPriceMinor: number | null;
+  maxPrinters: number | null;
+  maxAgentDevices: number | null;
+  maxQrStations: number | null;
+  maxMonthlyPrintJobs: number | null;
+  maxDocumentBytes: number | null;
+  cloudAssistedPrintingEnabled: boolean;
+  whiteLabelEnabled: boolean;
+  advancedReportsEnabled: boolean;
+  publishedUtc: string | null;
+}
+
+export interface ShopSubscriptionSummary {
+  generatedUtc: string;
+  subscription: {
+    id: string;
+    planCode: string;
+    status: string;
+    billingInterval: string;
+    periodStartUtc: string;
+    periodEndUtc: string;
+    createdUtc: string;
+  };
+  plan: ShopSubscriptionPlan | null;
+  entitlements: {
+    maxPrinters: number | null;
+    maxAgentDevices: number | null;
+    maxQrStations: number | null;
+    maxMonthlyPrintJobs: number | null;
+    maxDocumentBytes: number | null;
+    cloudAssistedPrintingEnabled: boolean;
+    whiteLabelEnabled: boolean;
+    advancedReportsEnabled: boolean;
+    isLegacyUnconfigured: boolean;
+  };
+  usage: {
+    printerCount: number;
+    agentDeviceCount: number;
+    qrStationCount: number;
+    monthlyPrintJobCount: number;
+    monthlyPeriodStartUtc: string;
+    monthlyPeriodEndUtc: string;
+  };
+}
+
+export function getShopSubscription(token: string) {
+  return apiRequest<ShopSubscriptionSummary>("/api/v1/shop/subscription", {}, token);
+}
+
 export async function loadShopData(token: string) {
-  const [profile, printers, stations, pricing, printJobs, agentDevices, paymentSettings, payments] = await Promise.all([
+  const [profile, printers, stations, pricing, printJobs, agentDevices, paymentSettings, payments, subscription] = await Promise.all([
     apiRequest<ShopProfile>("/api/v1/shop/profile", {}, token),
     apiRequest<PrinterDevice[]>("/api/v1/shop/printers", {}, token),
     apiRequest<QrStation[]>("/api/v1/shop/qr-stations", {}, token),
@@ -254,9 +313,10 @@ export async function loadShopData(token: string) {
     apiRequest<ShopPrintJob[]>("/api/v1/shop/print-jobs", {}, token),
     apiRequest<AgentDevice[]>("/api/v1/shop/agent-devices", {}, token),
     apiRequest<ShopPaymentSettings>("/api/v1/shop/payment-settings", {}, token),
-    apiRequest<ShopPayment[]>("/api/v1/shop/payments", {}, token)
+    apiRequest<ShopPayment[]>("/api/v1/shop/payments", {}, token),
+    getShopSubscription(token)
   ]);
-  return { profile, printers, stations, pricing, printJobs, agentDevices, paymentSettings, payments };
+  return { profile, printers, stations, pricing, printJobs, agentDevices, paymentSettings, payments, subscription };
 }
 
 export function getShopReportSummary(token: string, days: 7 | 30 | 90) {
