@@ -22,3 +22,5 @@ public sealed record DiscoveredPrinter(
     string PortName,
     string Status,
     bool IsDefault);
+
+public sealed record AgentHeartbeatResponse(string? PublicBaseUrl);

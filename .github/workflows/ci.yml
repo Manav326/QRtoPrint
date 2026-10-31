@@ -136,6 +136,10 @@ jobs:
       packages: write
     steps:
       - uses: actions/checkout@v4
+      - name: Prepare a CI-only Cloudflare Tunnel secret
+        run: |
+          mkdir -p .secrets/cloudflare
+          printf 'ci-placeholder-token' > .secrets/cloudflare/tunnel-token
       - name: Validate Docker Compose configuration
         run: docker compose --env-file .env.example -f compose.yml config --quiet
       - name: Validate local-only Docker Compose configuration
@@ -145,18 +149,8 @@ jobs:
           POSTGRES_PASSWORD: local-ci-validation-only
           AUTH_SIGNING_KEY: YWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFh
           DOCUMENTS_ENCRYPTION_KEY: YWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWE=
-          LOCAL_LAN_IP: 192.168.31.47
+          PUBLIC_BASE_URL: https://print.example.test
         run: docker compose -f compose.local.yml config --quiet
-      - name: Validate local HTTPS Caddy configuration
-        run: docker run --rm -e LOCAL_LAN_IP=192.168.31.47 -v "$PWD/Caddyfile.local:/etc/caddy/Caddyfile:ro" caddy:2-alpine caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile
-      - name: Validate production Caddy HTTPS reverse proxy configuration
-        run: |
-          docker run --rm \
-            -e PORTAL_DOMAIN=print.thinkwithsujeet.in \
-            -e API_DOMAIN=api.thinkwithsujeet.in \
-            -e ACME_EMAIL=ci@example.com \
-            -v "$PWD/Caddyfile:/etc/caddy/Caddyfile:ro" \
-            caddy:2-alpine caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile
       - uses: docker/setup-buildx-action@v3
       - name: Log in to GitHub Container Registry
         uses: docker/login-action@v3
@@ -199,9 +193,7 @@ jobs:
 
           cat > "$env_file" <<EOF
           IMAGE_TAG=sha-${GITHUB_SHA}
-          PORTAL_DOMAIN=print.test
-          API_DOMAIN=api.test
-          ACME_EMAIL=ci@example.com
+          PUBLIC_BASE_URL=https://print.test
           POSTGRES_DB=qrtoprint
           POSTGRES_USER=qrtoprint
           POSTGRES_PASSWORD=$(openssl rand -hex 32)

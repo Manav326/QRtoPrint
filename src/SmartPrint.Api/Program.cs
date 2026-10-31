@@ -920,6 +920,15 @@ shop.MapPost("/qr-stations", async (
         return Results.Forbid();
     }
 
+    var portalBase = (configuration["PublicPortal:BaseUrl"] ?? string.Empty).TrimEnd('/');
+    if (!Uri.TryCreate(portalBase, UriKind.Absolute, out var portalUri) ||
+        portalUri.Scheme != Uri.UriSchemeHttps || portalUri.AbsolutePath != "/" ||
+        !string.IsNullOrEmpty(portalUri.Query) || !string.IsNullOrEmpty(portalUri.Fragment) ||
+        !string.IsNullOrEmpty(portalUri.UserInfo))
+    {
+        return Results.Problem(statusCode: StatusCodes.Status503ServiceUnavailable, title: "The canonical public HTTPS URL is not configured.");
+    }
+
     if (string.IsNullOrWhiteSpace(request.DisplayName) || request.DisplayName.Trim().Length > 120)
     {
         return Results.ValidationProblem(new Dictionary<string, string[]>
@@ -959,7 +968,6 @@ shop.MapPost("/qr-stations", async (
     await db.SaveChangesAsync(ct);
     await transaction.CommitAsync(ct);
 
-    var portalBase = (configuration["PublicPortal:BaseUrl"] ?? "http://localhost:3000").TrimEnd('/');
     return Results.Created($"/api/v1/shop/qr-stations/{station.Id}", new
     {
         station.Id,
@@ -983,6 +991,15 @@ shop.MapPost("/qr-stations/{stationId:guid}/rotate-code", async (
         return Results.Forbid();
     }
 
+    var portalBase = (configuration["PublicPortal:BaseUrl"] ?? string.Empty).TrimEnd('/');
+    if (!Uri.TryCreate(portalBase, UriKind.Absolute, out var portalUri) ||
+        portalUri.Scheme != Uri.UriSchemeHttps || portalUri.AbsolutePath != "/" ||
+        !string.IsNullOrEmpty(portalUri.Query) || !string.IsNullOrEmpty(portalUri.Fragment) ||
+        !string.IsNullOrEmpty(portalUri.UserInfo))
+    {
+        return Results.Problem(statusCode: StatusCodes.Status503ServiceUnavailable, title: "The canonical public HTTPS URL is not configured.");
+    }
+
     var station = await db.QrStations.SingleOrDefaultAsync(
         item => item.Id == stationId && item.TenantId == tenantId, ct);
     if (station is null)
@@ -995,7 +1012,6 @@ shop.MapPost("/qr-stations/{stationId:guid}/rotate-code", async (
     station.PublicCodeHint = publicCode[^4..];
     await db.SaveChangesAsync(ct);
 
-    var portalBase = (configuration["PublicPortal:BaseUrl"] ?? "http://localhost:3000").TrimEnd('/');
     return Results.Ok(new
     {
         station.Id,
@@ -2748,6 +2764,7 @@ agentApi.MapPost("/jobs/{jobId:guid}/spooler-status", async (Guid jobId, AgentSp
 agentApi.MapPost("/heartbeat", async (
     HttpContext context,
     SmartPrintDbContext db,
+    IConfiguration configuration,
     AgentHeartbeatRequest request,
     CancellationToken ct) =>
 {
@@ -2763,7 +2780,16 @@ agentApi.MapPost("/heartbeat", async (
     device.Status = "Online";
     device.LastSeenUtc = now;
     await db.SaveChangesAsync(ct);
-    return Results.Ok(new { device.Id, device.Status, device.LastSeenUtc, AgentVersion = request.Version, LocalEndpoints = localEndpoints });
+    var publicBaseUrl = (configuration["PublicPortal:BaseUrl"] ?? string.Empty).TrimEnd('/');
+    return Results.Ok(new
+    {
+        device.Id,
+        device.Status,
+        device.LastSeenUtc,
+        AgentVersion = request.Version,
+        LocalEndpoints = localEndpoints,
+        PublicBaseUrl = publicBaseUrl
+    });
 });
 
 agentApi.MapPost("/printers/sync", async (

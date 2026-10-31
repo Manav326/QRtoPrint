@@ -1,12 +1,39 @@
 [CmdletBinding()]
 param(
     [string]$Destination = (Join-Path $env:USERPROFILE 'Downloads\QRtoPrintAgent'),
-    [string]$ApiBaseUrl = 'http://localhost:8080',
-    [string]$CustomerPortalOrigin = 'http://localhost:3000'
+    [string]$ApiBaseUrl = '',
+    [string]$CustomerPortalOrigin = ''
 )
 
 $ErrorActionPreference = 'Stop'
 $repository = 'Manav326/QRtoPrint'
+$repoRoot = Split-Path -Parent $PSScriptRoot
+$configPath = @((Join-Path $repoRoot '.env.local'), (Join-Path $repoRoot '.env')) | Where-Object { Test-Path -LiteralPath $_ -PathType Leaf } | Select-Object -First 1
+if ([string]::IsNullOrWhiteSpace($ApiBaseUrl) -or [string]::IsNullOrWhiteSpace($CustomerPortalOrigin)) {
+    $configuredUrl = ''
+    if ($configPath) {
+        $urlLine = Get-Content -LiteralPath $configPath | Where-Object { $_ -match '^PUBLIC_BASE_URL=' } | Select-Object -First 1
+        if ($urlLine) { $configuredUrl = $urlLine.Substring('PUBLIC_BASE_URL='.Length).Trim() }
+    }
+    if ($configuredUrl) {
+        if ([string]::IsNullOrWhiteSpace($ApiBaseUrl)) { $ApiBaseUrl = $configuredUrl }
+        if ([string]::IsNullOrWhiteSpace($CustomerPortalOrigin)) { $CustomerPortalOrigin = $configuredUrl }
+    }
+}
+if ([string]::IsNullOrWhiteSpace($ApiBaseUrl) -or [string]::IsNullOrWhiteSpace($CustomerPortalOrigin)) {
+    $examplePath = Join-Path $repoRoot '.env.example'
+    if (Test-Path -LiteralPath $examplePath) {
+        $exampleUrlLine = Get-Content -LiteralPath $examplePath | Where-Object { $_ -match '^PUBLIC_BASE_URL=' } | Select-Object -First 1
+        if ($exampleUrlLine) {
+            $exampleUrl = $exampleUrlLine.Substring('PUBLIC_BASE_URL='.Length).Trim()
+            if ([string]::IsNullOrWhiteSpace($ApiBaseUrl)) { $ApiBaseUrl = $exampleUrl }
+            if ([string]::IsNullOrWhiteSpace($CustomerPortalOrigin)) { $CustomerPortalOrigin = $exampleUrl }
+        }
+    }
+}
+if ([string]::IsNullOrWhiteSpace($ApiBaseUrl) -or [string]::IsNullOrWhiteSpace($CustomerPortalOrigin)) {
+    throw 'Set PUBLIC_BASE_URL in .env/.env.local or pass both URL parameters.'
+}
 
 if (-not (Get-Command gh -ErrorAction SilentlyContinue)) {
     throw 'GitHub CLI (gh) was not found. Install it from https://cli.github.com/ and retry.'

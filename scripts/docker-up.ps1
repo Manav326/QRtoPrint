@@ -1,80 +1,128 @@
 [CmdletBinding()]
-param(
-    [string]$PortalDomain = "",
-    [string]$ApiDomain = "",
-    [string]$AcmeEmail = ""
-)
+param([string]$PublicBaseUrl = "")
 
 $ErrorActionPreference = "Stop"
 $repoRoot = Split-Path -Parent $PSScriptRoot
 $envPath = Join-Path $repoRoot ".env"
-$templatePath = Join-Path $repoRoot ".env.example"
+$composeFile = Join-Path $repoRoot "compose.yml"
+$secretDirectory = Join-Path $repoRoot ".secrets\cloudflare"
+$tokenPath = Join-Path $secretDirectory "tunnel-token"
+$exampleEnvPath = Join-Path $repoRoot ".env.example"
 
-if (-not (Get-Command docker -ErrorAction SilentlyContinue)) {
-    throw "Docker was not found. Install Docker Desktop or Docker Engine with the Compose plugin, then run this script again."
+function New-RandomHex([int]$Length) {
+    $bytes = New-Object byte[] $Length
+    $rng = [Security.Cryptography.RandomNumberGenerator]::Create()
+    try { $rng.GetBytes($bytes) } finally { $rng.Dispose() }
+    return [BitConverter]::ToString($bytes).Replace("-", "")
 }
+function New-RandomBase64([int]$Length) {
+    $bytes = New-Object byte[] $Length
+    $rng = [Security.Cryptography.RandomNumberGenerator]::Create()
+    try { $rng.GetBytes($bytes) } finally { $rng.Dispose() }
+    return [Convert]::ToBase64String($bytes)
+}
+function Get-EnvValue([string[]]$Lines, [string]$Name) {
+    $prefix = "$Name="
+    $match = $Lines | Where-Object { $_.StartsWith($prefix, [StringComparison]::Ordinal) } | Select-Object -First 1
+    if ($null -eq $match) { return "" }
+    return $match.Substring($prefix.Length).Trim()
+}
+function Set-EnvValue([string[]]$Lines, [string]$Name, [string]$Value) {
+    $prefix = "$Name="
+    $found = $false
+    $result = @()
+    foreach ($line in $Lines) {
+        if ($line.StartsWith($prefix, [StringComparison]::Ordinal)) {
+            if (-not $found) { $result += "$prefix$Value"; $found = $true }
+        } else { $result += $line }
+    }
+    if (-not $found) { $result += "$prefix$Value" }
+    return ,([string[]]$result)
+}
+function Get-CloudflareToken {
+    $secure = Read-Host "Paste the Cloudflare Tunnel token (hidden input)" -AsSecureString
+    $pointer = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($secure)
+    try { return [Runtime.InteropServices.Marshal]::PtrToStringBSTR($pointer) }
+    finally { [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($pointer) }
+}
+function Save-Utf8NoBom([string]$Path, [string[]]$Lines) {
+    [IO.File]::WriteAllLines($Path, $Lines, [Text.UTF8Encoding]::new($false))
+}
+
+$exampleLines = @(Get-Content -LiteralPath $exampleEnvPath)
+$defaultBaseUrl = Get-EnvValue $exampleLines "PUBLIC_BASE_URL"
+if ([string]::IsNullOrWhiteSpace($defaultBaseUrl)) { throw ".env.example must define PUBLIC_BASE_URL." }
+
+if (-not (Get-Command docker -ErrorAction SilentlyContinue)) { throw "Install and start Docker Desktop first." }
 docker compose version | Out-Null
-if ($LASTEXITCODE -ne 0) {
-    throw "Docker Compose v2 is required. Update Docker Desktop or install the Compose plugin."
-}
+if ($LASTEXITCODE -ne 0) { throw "Docker Compose v2 is required." }
+docker info | Out-Null
+if ($LASTEXITCODE -ne 0) { throw "Docker Desktop engine is not running." }
 
 if (-not (Test-Path -LiteralPath $envPath)) {
-    $template = Get-Content -LiteralPath $templatePath -Raw
-    if ([string]::IsNullOrWhiteSpace($PortalDomain)) {
-        $PortalDomain = "print.thinkwithsujeet.in"
+    $lines = @(
+        "POSTGRES_DB=qrtoprint",
+        "POSTGRES_USER=qrtoprint",
+        "POSTGRES_PASSWORD=$(New-RandomHex 32)",
+        "AUTH_SIGNING_KEY=$(New-RandomBase64 48)",
+        "DOCUMENTS_ENCRYPTION_KEY=$(New-RandomBase64 32)",
+        "PUBLIC_BASE_URL=$defaultBaseUrl"
+    )
+    Write-Host "Created .env with fresh production secrets." -ForegroundColor Green
+} else {
+    $lines = @(Get-Content -LiteralPath $envPath)
+    if (($lines -join "`n") -match "CHANGE_ME") { throw "The existing .env contains example secrets. Replace them before deployment." }
+    foreach ($required in @("POSTGRES_PASSWORD=", "AUTH_SIGNING_KEY=", "DOCUMENTS_ENCRYPTION_KEY=")) {
+        if (-not ($lines | Where-Object { $_.StartsWith($required, [StringComparison]::Ordinal) })) {
+            throw ".env is missing $($required.TrimEnd('=')); existing secrets were not changed."
+        }
     }
-    if ([string]::IsNullOrWhiteSpace($ApiDomain)) {
-        $ApiDomain = "api.thinkwithsujeet.in"
-    }
-    if ([string]::IsNullOrWhiteSpace($AcmeEmail)) {
-        $AcmeEmail = Read-Host "Email for HTTPS certificate expiry notices"
-    }
-    if ([string]::IsNullOrWhiteSpace($AcmeEmail) -or $AcmeEmail -notmatch "^[^\s@]+@[^\s@]+\.[^\s@]+$") {
-        throw "Provide a valid ACME email using -AcmeEmail."
-    }
-
-    $random = [Security.Cryptography.RandomNumberGenerator]::Create()
-    $postgresBytes = New-Object byte[] 32
-    $signingBytes = New-Object byte[] 48
-    $documentBytes = New-Object byte[] 32
-    try {
-        $random.GetBytes($postgresBytes)
-        $random.GetBytes($signingBytes)
-        $random.GetBytes($documentBytes)
-        $postgresPassword = [BitConverter]::ToString($postgresBytes).Replace("-", "")
-        $signingKey = [Convert]::ToBase64String($signingBytes)
-        $documentKey = [Convert]::ToBase64String($documentBytes)
-    }
-    finally {
-        $random.Dispose()
-    }
-
-    $template = $template.Replace("PORTAL_DOMAIN=print.thinkwithsujeet.in", "PORTAL_DOMAIN=$PortalDomain")
-    $template = $template.Replace("API_DOMAIN=api.thinkwithsujeet.in", "API_DOMAIN=$ApiDomain")
-    $template = $template.Replace("ACME_EMAIL=replace-with-your-operations-email@example.com", "ACME_EMAIL=$AcmeEmail")
-    $template = $template.Replace("POSTGRES_PASSWORD=CHANGE_ME", "POSTGRES_PASSWORD=$postgresPassword")
-    $template = $template.Replace("AUTH_SIGNING_KEY=CHANGE_ME", "AUTH_SIGNING_KEY=$signingKey")
-    $template = $template.Replace("DOCUMENTS_ENCRYPTION_KEY=CHANGE_ME", "DOCUMENTS_ENCRYPTION_KEY=$documentKey")
-    [System.IO.File]::WriteAllText($envPath, $template, [System.Text.UTF8Encoding]::new($false))
-    Write-Host "Created .env with fresh database, signing and document-encryption secrets." -ForegroundColor Green
-}
-else {
-    $existingEnv = Get-Content -LiteralPath $envPath -Raw
-    if ($existingEnv -match "CHANGE_ME|replace-with-your-operations-email") {
-        throw "The existing .env still contains example values. Replace them before deployment."
-    }
-    Write-Host "Using the existing .env; persisted secrets will not be overwritten." -ForegroundColor Yellow
+    Write-Host "Reusing the existing production database and document-encryption secrets." -ForegroundColor Yellow
 }
 
-$composeFile = Join-Path $repoRoot "compose.yml"
-Write-Host ""
-Write-Host "Pulling the published QRtoPrint images from GHCR..." -ForegroundColor Cyan
-$imagesPulled = $false
+$currentBaseUrl = Get-EnvValue $lines "PUBLIC_BASE_URL"
+if ([string]::IsNullOrWhiteSpace($currentBaseUrl)) { $currentBaseUrl = $defaultBaseUrl }
+if (-not [string]::IsNullOrWhiteSpace($PublicBaseUrl)) { $currentBaseUrl = $PublicBaseUrl.Trim() }
+$uri = $null
+if (-not [Uri]::TryCreate($currentBaseUrl, [UriKind]::Absolute, [ref]$uri) -or
+    $uri.Scheme -ne "https" -or $uri.AbsolutePath -ne "/" -or
+    $uri.Query -or $uri.Fragment -or $uri.UserInfo) {
+    throw "PUBLIC_BASE_URL must be an HTTPS origin only, e.g. https://print.thinkwithsujeet.in."
+}
+$currentBaseUrl = $uri.GetLeftPart([UriPartial]::Authority).TrimEnd("/")
+$lines = Set-EnvValue $lines "PUBLIC_BASE_URL" $currentBaseUrl
+$lines = @($lines | Where-Object {
+    -not $_.StartsWith("LOCAL_PORTAL_ORIGIN=", [StringComparison]::Ordinal) -and
+    -not $_.StartsWith("LOCAL_API_BASE_URL=", [StringComparison]::Ordinal) -and
+    -not $_.StartsWith("LOCAL_LAN_IP=", [StringComparison]::Ordinal) -and
+    -not $_.StartsWith("PORTAL_DOMAIN=", [StringComparison]::Ordinal) -and
+    -not $_.StartsWith("API_DOMAIN=", [StringComparison]::Ordinal) -and
+    -not $_.StartsWith("ACME_EMAIL=", [StringComparison]::Ordinal)
+})
+
+New-Item -ItemType Directory -Force -Path $secretDirectory | Out-Null
+if (-not (Test-Path -LiteralPath $tokenPath -PathType Leaf) -or
+    [string]::IsNullOrWhiteSpace((Get-Content -LiteralPath $tokenPath -Raw))) {
+    Write-Host ""
+    Write-Host "Create a named Cloudflare Tunnel and add a Published application route:" -ForegroundColor Cyan
+    Write-Host "Hostname: $currentBaseUrl"
+    Write-Host "Service:  http://portal:80"
+    Write-Host "Then paste the Docker connector token below."
+    $token = Get-CloudflareToken
+    if ([string]::IsNullOrWhiteSpace($token)) { throw "A Cloudflare Tunnel token is required." }
+    [IO.File]::WriteAllText($tokenPath, $token.Trim(), [Text.UTF8Encoding]::new($false))
+    $token = $null
+}
+Save-Utf8NoBom $envPath $lines
+
+docker compose --env-file $envPath -f $composeFile config --quiet
+if ($LASTEXITCODE -ne 0) { throw "Production Cloudflare Compose configuration is invalid." }
+
+Write-Host "Pulling published images and starting production services with Cloudflare Tunnel..." -ForegroundColor Cyan
 docker compose --env-file $envPath -f $composeFile pull
 $imagesPulled = ($LASTEXITCODE -eq 0)
-
 if (-not $imagesPulled -and (Get-Command gh -ErrorAction SilentlyContinue)) {
-    Write-Warning "GHCR requires authentication. Trying the existing GitHub CLI login..."
+    Write-Warning "GHCR may require authentication. Trying the existing GitHub CLI login..."
     gh auth status --hostname github.com 2>$null | Out-Null
     if ($LASTEXITCODE -eq 0) {
         $ghUser = gh api user --jq .login 2>$null
@@ -91,60 +139,50 @@ if (-not $imagesPulled -and (Get-Command gh -ErrorAction SilentlyContinue)) {
         $ghToken = $null
     }
 }
-
-if (-not $imagesPulled) {
-    Write-Warning "Published GHCR images are not accessible. Building the API and portal images locally from this checkout."
-    docker compose --env-file $envPath -f $composeFile build
-    if ($LASTEXITCODE -ne 0) {
-        throw "GHCR pull and local image build both failed. Inspect the Docker build output."
-    }
-}
-
-Write-Host "Starting PostgreSQL, API, portal and HTTPS reverse proxy..." -ForegroundColor Cyan
+if (-not $imagesPulled) { throw "GHCR images could not be pulled. Sign in with GitHub CLI or verify package access, then retry." }
 docker compose --env-file $envPath -f $composeFile up -d --no-build
-if ($LASTEXITCODE -ne 0) {
-    throw "Docker Compose failed to start the QRtoPrint services. Inspect with: docker compose --env-file .env -f compose.yml logs"
-}
+if ($LASTEXITCODE -ne 0) { throw "Production stack failed to start." }
 
-
-Write-Host "Waiting for the API database migrations and portal health checks..." -ForegroundColor Cyan
 $apiHealthy = $false
-for ($attempt = 0; $attempt -lt 90; $attempt++) {
+for ($attempt = 0; $attempt -lt 120; $attempt++) {
     docker compose --env-file $envPath -f $composeFile exec -T api curl --fail --silent http://127.0.0.1:8080/health/ready | Out-Null
-    if ($LASTEXITCODE -eq 0) {
-        $apiHealthy = $true
-        break
-    }
+    if ($LASTEXITCODE -eq 0) { $apiHealthy = $true; break }
     Start-Sleep -Seconds 2
 }
 if (-not $apiHealthy) {
-    docker compose --env-file $envPath -f $composeFile logs --tail 80 api db
-    throw "The API did not become healthy. The database migration may have failed; do not proceed with shop onboarding until the logs are resolved."
+    docker compose --env-file $envPath -f $composeFile logs --tail 100 api db
+    throw "API did not become ready. Resolve startup or migration errors."
 }
 
 $portalHealthy = $false
 for ($attempt = 0; $attempt -lt 30; $attempt++) {
     docker compose --env-file $envPath -f $composeFile exec -T portal wget -q -O /dev/null http://127.0.0.1/
-    if ($LASTEXITCODE -eq 0) {
-        $portalHealthy = $true
-        break
-    }
+    if ($LASTEXITCODE -eq 0) { $portalHealthy = $true; break }
     Start-Sleep -Seconds 2
 }
 if (-not $portalHealthy) {
     docker compose --env-file $envPath -f $composeFile logs --tail 80 portal
-    throw "The portal did not become healthy. Inspect the portal container logs before use."
+    throw "Portal did not become ready."
 }
 
-docker compose --env-file $envPath -f (Join-Path $repoRoot "compose.yml") ps
-$values = @{}
-foreach ($line in (Get-Content -LiteralPath $envPath)) {
-    if ($line -match '^([A-Z0-9_]+)=(.*)$') { $values[$Matches[1]] = $Matches[2] }
+$publicHealthy = $false
+for ($attempt = 0; $attempt -lt 60; $attempt++) {
+    try {
+        $response = Invoke-WebRequest -Uri "$currentBaseUrl/health/ready" -UseBasicParsing -TimeoutSec 12
+        if ($response.StatusCode -eq 200) { $publicHealthy = $true; break }
+    } catch { }
+    Start-Sleep -Seconds 3
 }
+if (-not $publicHealthy) {
+    docker compose --env-file $envPath -f $composeFile logs --tail 100 cloudflared portal api
+    throw "Containers are healthy, but $currentBaseUrl is not reachable. Confirm the Cloudflare route targets http://portal:80."
+}
+
+docker compose --env-file $envPath -f $composeFile ps
 Write-Host ""
-Write-Host "QRtoPrint containers have been started." -ForegroundColor Green
-Write-Host "Portal: https://$($values["PORTAL_DOMAIN"])"
-Write-Host "API:    https://$($values["API_DOMAIN"])/health/ready"
-Write-Host "Agent pairing API URL: https://$($values["API_DOMAIN"])"
-Write-Host "Ensure both DNS records point to this host and inbound TCP 80/443 are allowed."
-Write-Host "The Windows Print Agent must still be installed as a Windows Service on the computer connected to the printer."
+Write-Host "QRtoPrint production deployment is reachable through Cloudflare Tunnel." -ForegroundColor Green
+Write-Host "Single public application URL: $currentBaseUrl"
+Write-Host "Portal, QR links and API:      $currentBaseUrl"
+Write-Host "Agent local listener:         TCP 17842 (Private firewall profile)"
+Write-Host "No customer certificate installation is required."
+Write-Host "Do not run docker compose down -v; the database and documents are persistent."

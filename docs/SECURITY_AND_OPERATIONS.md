@@ -60,7 +60,7 @@ Platform support access to tenant records must be least-privilege, time-bound, p
 
 ## 8. Release operations
 
-- Deploy PostgreSQL, API, portal and Caddy through the versioned Docker Compose stack; use persistent database, cloud-document and Caddy certificate volumes.
+- Deploy PostgreSQL, API, portal and the Cloudflare Tunnel connector through the versioned Docker Compose stack. Keep database and encrypted document volumes persistent; store the remotely-managed tunnel token in the Git-ignored .secrets/cloudflare/tunnel-token Docker secret file. The public portal and API share PUBLIC_BASE_URL and do not require inbound host ports or a local TLS certificate.
 - Keep the Windows Print Agent on the printer-connected shop computer; it is not run in the Linux API container.
 - Preserve the exact `.env` secrets and back up PostgreSQL and cloud document storage together before upgrades/migrations; test restore procedures.
 - Sign Windows installers and agent updates.

@@ -2,36 +2,13 @@
 
 This is a Windows Service. It pairs with one shop using a single-use enrollment code, stores the returned credential with Windows DPAPI (LocalMachine), heartbeats to the Smart Print API, and synchronizes Windows-installed printer queue inventory every 30 seconds.
 
-## Local-only development (no public deployment)
+## Local and production portal URL
 
-The local portal must be opened through HTTPS for browser-to-Agent access. Chrome blocks Local Network Access from insecure HTTP pages and does not show a permission prompt in that case.
+The portal, QR links and API use one canonical HTTPS origin: PUBLIC_BASE_URL in .env or .env.local. Portal API requests use the same origin under /api, reverse-proxied to the API by Nginx.
 
-From the repository root on the Windows laptop:
+Run .\scripts\docker-up-local.ps1 for local end-to-end testing. Create a named Cloudflare Tunnel and publish the chosen hostname to http://portal:80. The helper stores the tunnel token in .secrets/cloudflare/tunnel-token, which is ignored by Git. Do not put the token in source control or share it with customers.
 
-```powershell
-.\scripts\docker-up-local.ps1 -PortalHost "192.168.31.47"
-```
-
-This starts PostgreSQL, API, portal and a local Caddy HTTPS proxy. It preserves the existing database/document volumes and exports the Caddy public root certificate to `certs/qrtoprint-local-root.crt`. Trust that root certificate on the phone as a CA certificate before opening the portal. Do not delete the persistent `qrtoprint_local_caddy_data` volume unless you intend to replace the local CA and trust the new certificate on every client.
-
-Secure portal: `https://192.168.31.47:3443`. The API is available through that same origin at `/api`; pairing on the laptop still uses `http://localhost:8080`.
-
-Download the Windows Agent package:
-
-```powershell
-.\scripts\download-agent.ps1
-$agentDir = Join-Path $env:USERPROFILE "Downloads\QRtoPrintAgent"
-$agentExe = Join-Path $agentDir "SmartPrint.Agent.exe"
-```
-
-Pair once if the computer is not already enrolled. To preserve an existing pairing and only update the local portal CORS origin, run Administrator PowerShell:
-
-```powershell
-& "$agentDir\install-agent-service.ps1" -AgentExePath $agentExe -CustomerPortalOrigin "https://192.168.31.47:3443"
-Get-Service QRtoPrintSmartPrintAgent
-```
-
-The Agent is a background Windows Service, not a desktop GUI. It must run on the Windows host to access installed printer queues and the Windows Print Spooler. Its LAN listener uses TCP 17842. The portal is served by HTTPS on TCP 3443. Keep the laptop on a Windows Private network profile and allow those ports through the Private firewall. The portal's API calls use the same HTTPS origin, so the phone does not call the API directly on port 8080.
+Pair the Agent with the same PUBLIC_BASE_URL. After an authenticated heartbeat, the Agent synchronises the canonical URL and its Local API CORS origin from the API without changing its DPAPI-protected identity. Keep any previous Cloudflare hostname route active during a migration so existing Agents can receive the new address and previously printed QR codes remain usable.
 
 ## Pair and install
 
@@ -39,13 +16,13 @@ The Agent is a background Windows Service, not a desktop GUI. It must run on the
 2. Build or extract the SmartPrint.Agent Windows release on the shop computer.
 3. Open PowerShell as Administrator and pair the computer:
 
-   .\scripts\pair-agent.ps1 -ApiBaseUrl "https://YOUR-SMART-PRINT-API-HOST" -AgentExePath ".\SmartPrint.Agent.exe"
+   .\scripts\pair-agent.ps1 -ApiBaseUrl "https://YOUR_PUBLIC_BASE_URL" -AgentExePath ".\SmartPrint.Agent.exe"
 
-4. Install and start the Windows Service, setting the exact customer portal HTTPS origin for Local Network Access CORS:
+4. Install and start the Windows Service using the same canonical customer portal HTTPS origin:
 
-   .\scripts\install-agent-service.ps1 -AgentExePath ".\SmartPrint.Agent.exe" -CustomerPortalOrigin "https://print.thinkwithsujeet.in"
+   .\scripts\install-agent-service.ps1 -AgentExePath ".\SmartPrint.Agent.exe" -CustomerPortalOrigin "https://YOUR_PUBLIC_BASE_URL"
 
-The installer writes this origin to the Agent's adjacent `appsettings.json`, enables the local status and direct-upload endpoint, and opens TCP 17842 through Windows Firewall on Private network profiles only. Re-run the install command after changing the customer portal origin.
+The installer enables the local status and direct-upload endpoint and opens TCP 17842 through Windows Firewall on Private network profiles only. The authenticated heartbeat keeps the runtime browser CORS origin aligned with PUBLIC_BASE_URL.
 
 5. Return to the Print Agent screen in the shop workspace. The computer should report its next heartbeat and installed printer queues.
 
@@ -55,13 +32,13 @@ To remove the Windows Service, run scripts\uninstall-agent-service.ps1 from an e
 
 Direct customer document upload over shop Wi-Fi is implemented. The customer portal obtains a one-use upload grant from the API, sends document bytes to this paired Agent, and the Agent validates the hash and document structure before storing the file in its DPAPI-protected local queue. The API retains only job/document metadata, SHA-256, page analysis and quote/payment/dispatch state. The same PrintJob is later authorised by the shop and claimed by this Agent after manual payment verification; the cloud is not asked to download a LOCAL_AGENT document.
 
-The cloud-assisted upload path remains available as a customer-selected fallback. Local and production browser uploads require a secure HTTPS customer portal origin, any Local Network Access permission required by the browser, a Windows Private network profile, and `Agent:LocalApi:AllowedOrigins` configured to the exact portal origin. Do not use an insecure HTTP portal for direct local uploads.
+The cloud-assisted upload path remains available as a customer-selected fallback. Browser uploads require a secure HTTPS customer portal origin, any Local Network Access permission required by the browser, and a Windows Private network profile. The current HTTPS origin is learned from the Agent's authenticated heartbeat. Do not use an insecure HTTP portal for direct local uploads.
 
 - Queries Win32_Printer through WMI for installed queue name, driver, port, status and default queue.
 - Sends printer inventory to the paired shop tenant using agent-specific authentication headers.
 - Exposes a read-only local status endpoint at `http://<shop-computer-LAN-IP>:17842/api/v1/local/status`. It returns only the paired agent ID, protocol version and readiness state; it does not expose the agent secret, queue or documents.
 - Reports up to eight RFC1918 IPv4 endpoint addresses in the authenticated cloud heartbeat. The customer session receives endpoints only for its assigned printer's recently online, non-revoked agent.
-- The installer adds a Windows Firewall inbound rule for TCP 17842 on the Private network profile only. Keep shop computers on a trusted Private network profile and configure `Agent:LocalApi:AllowedOrigins` to the exact customer portal origin(s).
+- The installer adds a Windows Firewall inbound rule for TCP 17842 on the Private network profile only. Keep shop computers on a trusted Private network profile. The Agent synchronises its current public origin through its authenticated heartbeat.
 - Refreshes agent heartbeat and printer status every 30 seconds (configurable from 10 to 300 seconds).
 - Marks previously discovered queues unavailable when they disappear from that computer's WMI inventory.
 - Stores the agent secret and locally received print documents encrypted using DPAPI LocalMachine. The protected queue directory is restricted to SYSTEM and local Administrators.

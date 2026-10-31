@@ -76,6 +76,23 @@ public sealed class Worker(
                 }
                 else if (heartbeat.IsSuccessStatusCode)
                 {
+                    var serverConfiguration = await heartbeat.Content.ReadFromJsonAsync<AgentHeartbeatResponse>(cancellationToken: stoppingToken);
+                    if (Uri.TryCreate(serverConfiguration?.PublicBaseUrl, UriKind.Absolute, out var configuredBaseUri) &&
+                        configuredBaseUri.Scheme == Uri.UriSchemeHttps && configuredBaseUri.AbsolutePath == "/" &&
+                        string.IsNullOrEmpty(configuredBaseUri.Query) && string.IsNullOrEmpty(configuredBaseUri.Fragment) && string.IsNullOrEmpty(configuredBaseUri.UserInfo))
+                    {
+                        var currentBaseUrl = configuredBaseUri.GetLeftPart(UriPartial.Authority);
+                        localAgentApiState.SetPublicPortalOrigin(currentBaseUrl);
+                        if (!string.Equals(credentials.ApiBaseUrl.TrimEnd('/'), currentBaseUrl, StringComparison.OrdinalIgnoreCase))
+                        {
+                            credentials = credentials with { ApiBaseUrl = currentBaseUrl };
+                            credentialStore.Save(credentials);
+                            client.Dispose();
+                            client = httpClientFactory.CreateClient("cloud");
+                            client.BaseAddress = new Uri(currentBaseUrl.TrimEnd('/') + "/");
+                            logger.LogInformation("Updated Agent API destination and CORS origin from the canonical public URL.");
+                        }
+                    }
                     var printers = printerDiscovery.Discover();
                     using var sync = await SendAgentRequestAsync(
                         client,

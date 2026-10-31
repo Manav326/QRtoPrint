@@ -13,7 +13,54 @@ namespace SmartPrint.Agent;
 
 public sealed class LocalAgentApiState
 {
+    private readonly object sync = new();
+    private HashSet<string> configuredOrigins = new(StringComparer.OrdinalIgnoreCase);
+    private string? publicPortalOrigin;
+
     public bool IsRunning { get; internal set; }
+
+    public void SetConfiguredOrigins(IEnumerable<string> origins)
+    {
+        lock (sync)
+        {
+            configuredOrigins = origins
+                .Select(NormalizeOrigin)
+                .Where(origin => origin is not null)
+                .Select(origin => origin!)
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        }
+    }
+
+    public void SetPublicPortalOrigin(string? origin)
+    {
+        lock (sync) { publicPortalOrigin = NormalizeOrigin(origin); }
+    }
+
+    public bool IsOriginAllowed(string origin)
+    {
+        var normalized = NormalizeOrigin(origin);
+        if (normalized is null) return false;
+        lock (sync)
+        {
+            return configuredOrigins.Contains(normalized) ||
+                   string.Equals(publicPortalOrigin, normalized, StringComparison.OrdinalIgnoreCase);
+        }
+    }
+
+    private static string? NormalizeOrigin(string? value)
+    {
+        if (!Uri.TryCreate(value, UriKind.Absolute, out var uri) ||
+            (uri.Scheme is not ("http" or "https")) ||
+            uri.AbsolutePath != "/" ||
+            !string.IsNullOrEmpty(uri.Query) ||
+            !string.IsNullOrEmpty(uri.Fragment) ||
+            !string.IsNullOrEmpty(uri.UserInfo))
+        {
+            return null;
+        }
+
+        return uri.GetLeftPart(UriPartial.Authority).TrimEnd('/');
+    }
 }
 
 public sealed class LocalAgentApiHostedService(
@@ -63,15 +110,16 @@ public sealed class LocalAgentApiHostedService(
                 options.MemoryBufferThreshold = 21 * 1024 * 1024;
             });
 
+            // Retain loopback-only static origins for local development. The production
+            // HTTPS origin is supplied dynamically by the authenticated API heartbeat.
+            state.SetConfiguredOrigins(allowedOrigins.Where(origin =>
+                Uri.TryCreate(origin, UriKind.Absolute, out var configuredUri) && configuredUri.IsLoopback));
             builder.Services.AddCors(options => options.AddPolicy("CustomerPortal", policy =>
             {
-                if (allowedOrigins.Length > 0)
-                {
-                    policy.WithOrigins(allowedOrigins)
-                        .WithMethods("GET", "POST")
-                        .WithHeaders("Content-Type", "X-Print-Upload-Grant")
-                        .SetPreflightMaxAge(TimeSpan.FromMinutes(10));
-                }
+                policy.SetIsOriginAllowed(state.IsOriginAllowed)
+                    .WithMethods("GET", "POST")
+                    .WithHeaders("Content-Type", "X-Print-Upload-Grant")
+                    .SetPreflightMaxAge(TimeSpan.FromMinutes(10));
             }));
 
             var app = builder.Build();

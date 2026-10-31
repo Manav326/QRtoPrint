@@ -33,7 +33,8 @@ services:
       Documents__EncryptionKey: ${DOCUMENTS_ENCRYPTION_KEY:?Set DOCUMENTS_ENCRYPTION_KEY in .env}
       Documents__StorageRoot: /var/lib/qrtoprint/documents
       Database__ApplyMigrationsOnStartup: "true"
-      Cors__AllowedOrigins__0: "https://${PORTAL_DOMAIN:?Set PORTAL_DOMAIN in .env}"
+      PublicPortal__BaseUrl: ${PUBLIC_BASE_URL:?Set PUBLIC_BASE_URL in .env}
+      Cors__AllowedOrigins__0: ${PUBLIC_BASE_URL:?Set PUBLIC_BASE_URL in .env}
     volumes:
       - qrtoprint_documents:/var/lib/qrtoprint/documents
     depends_on:
@@ -62,29 +63,20 @@ services:
       retries: 5
       start_period: 10s
 
-  caddy:
-    image: caddy:2-alpine
+  cloudflared:
+    image: cloudflare/cloudflared:latest
     restart: unless-stopped
-    environment:
-      PORTAL_DOMAIN: ${PORTAL_DOMAIN:?Set PORTAL_DOMAIN in .env}
-      API_DOMAIN: ${API_DOMAIN:?Set API_DOMAIN in .env}
-      ACME_EMAIL: ${ACME_EMAIL:?Set ACME_EMAIL in .env}
-    ports:
-      - "80:80"
-      - "443:443"
-      - "443:443/udp"
-    volumes:
-      - ./Caddyfile:/etc/caddy/Caddyfile:ro
-      - qrtoprint_caddy_data:/data
-      - qrtoprint_caddy_config:/config
+    command: ["tunnel", "--no-autoupdate", "run", "--token-file", "/run/secrets/cloudflare_tunnel_token"]
+    secrets:
+      - cloudflare_tunnel_token
     depends_on:
       portal:
-        condition: service_healthy
-      api:
         condition: service_healthy
 
 volumes:
   qrtoprint_database:
   qrtoprint_documents:
-  qrtoprint_caddy_data:
-  qrtoprint_caddy_config:
+
+secrets:
+  cloudflare_tunnel_token:
+    file: ./.secrets/cloudflare/tunnel-token
