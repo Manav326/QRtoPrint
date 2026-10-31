@@ -1792,21 +1792,34 @@ function CustomerPrintFlow({sessionToken,paymentOptions,localAgent,localReady}:{
   }
 
   return <section className="customer-print-flow">
-    <div className="customer-flow-heading"><div><span>STEP 1</span><h2>Add your document</h2></div><span className="upload-limit">PDF, JPG or PNG · Up to 20 MB</span></div>
+    <div className="customer-flow-heading"><div><span>STEP 1</span><h2>Add your documents</h2></div><span className="upload-limit">PDF, JPG or PNG · Up to 20 files / 50 MB per batch</span></div>
     {localAgent?.endpoints.length? <div className="customer-upload-modes">
       <button type="button" className={uploadMode==="LOCAL"?"customer-upload-mode selected":"customer-upload-mode"} onClick={()=>setUploadMode("LOCAL")}><strong>Shop Wi-Fi</strong><small>Document stays on the shop computer</small></button>
       <button type="button" className={uploadMode==="CLOUD"?"customer-upload-mode selected":"customer-upload-mode"} onClick={()=>setUploadMode("CLOUD")}><strong>Cloud-assisted</strong><small>Encrypted upload through the API</small></button>
     </div>:null}
-    <label className="customer-upload-zone">
-      <input type="file" accept=".pdf,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png" onChange={event=>chooseFile(event.target.files?.[0]||null)}/>
-      <span className="customer-upload-icon"><FileUp size={21}/></span>
-      <strong>{file?file.name:uploaded?"Your uploaded document is ready to continue":"Choose a document to print"}</strong>
-      <small>{file?formatBytes(file.size)+" · Select another file to replace":uploaded?"Your upload and current request are saved in this browser session":"Tap to browse files on your phone"}</small>
-    </label>
-    {previewUrl&&file&&<div className="customer-file-preview"><div className="customer-file-label"><FileText size={15}/><span>Document preview</span></div>{file.type==="application/pdf"?<iframe src={previewUrl} title="PDF document preview"/>:<img src={previewUrl} alt="Selected document preview"/>}</div>}
-    {file&&!uploaded&&<button className="customer-flow-button" disabled={busy||(uploadMode==="LOCAL"&&!localReady)} onClick={()=>void upload()}>{busy?<span className="button-spinner"/>:<><UploadIcon/>{uploadMode==="LOCAL"&&localAgent?"Upload directly to shop":"Upload document"}</>}</button>}
-    {file&&!uploaded&&uploadMode==="LOCAL"&&localAgent&&<small className="customer-upload-local-note">{localReady?"Your file travels over shop Wi-Fi. The cloud receives only the job, quote and payment metadata.":"Tap Check shop Wi-Fi above first to grant the browser permission."}</small>}
-    {file&&!uploaded&&uploadMode==="CLOUD"&&localAgent&&<small className="customer-upload-local-note">Cloud-assisted fallback: the encrypted file is uploaded to the API before being transferred to the shop computer.</small>}
+    <div className="customer-upload-picker-grid">
+      <label className="customer-upload-zone">
+        <input type="file" multiple accept=".pdf,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png" onChange={event=>{chooseFiles(Array.from(event.currentTarget.files||[]));event.currentTarget.value="";}}/>
+        <span className="customer-upload-icon"><FileUp size={21}/></span>
+        <strong>Select multiple files</strong>
+        <small>Choose up to 20 PDF, JPG or PNG documents at once</small>
+      </label>
+      <label className="customer-upload-zone folder-upload-zone">
+        <input type="file" multiple accept=".pdf,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png" {...({webkitdirectory:"true",directory:"true"} as any)} onChange={event=>{chooseFiles(Array.from(event.currentTarget.files||[]));event.currentTarget.value="";}}/>
+        <span className="customer-upload-icon"><FolderOpen size={21}/></span>
+        <strong>Choose a folder</strong>
+        <small>Upload supported documents from a folder</small>
+      </label>
+    </div>
+    {files.length>0&&<div className="customer-selected-files">
+      <div className="customer-selected-files-head"><strong>{files.length} selected</strong><span>{formatBytes(files.reduce((total,item)=>total+item.size,0))} in this selection</span></div>
+      <div className="customer-selected-file-list">{files.map((selected,index)=><button type="button" key={customerFileFingerprint(selected)} className={selectedFileIndex===index?"selected":" "} onClick={()=>setSelectedFileIndex(index)}><FileText size={15}/><span><strong>{selected.name}</strong><small>{formatBytes(selected.size)}</small></span>{selectedFileIndex===index&&<Check size={15}/>}</button>)}</div>
+    </div>}
+    {previewUrl&&file&&<div className="customer-file-preview"><div className="customer-file-label"><FileText size={15}/><span>Preview · {file.name}</span></div>{file.type==="application/pdf"||/\.pdf$/i.test(file.name)?<iframe src={previewUrl} title={file.name+" preview"}/>:<img src={previewUrl} alt={file.name+" preview"}/>}</div>}
+    {files.length>0&&<button className="customer-flow-button" disabled={busy||pendingFilesCount===0||(uploadMode==="LOCAL"&&!localReady)} onClick={()=>void upload()}>{busy?<span className="button-spinner"/>:<><UploadIcon/>{uploadMode==="LOCAL"&&localAgent?"Upload "+pendingFilesCount+" file(s) to shop":"Upload "+pendingFilesCount+" file(s)"}</>}</button>}
+    {uploadProgress&&<div className="customer-upload-progress"><span>{uploadProgress.completed} of {uploadProgress.total} files uploaded</span><div><i style={{width:`${uploadProgress.total?uploadProgress.completed/uploadProgress.total*100:0}%`}}/></div></div>}
+    {files.length>0&&uploadMode==="LOCAL"&&localAgent&&<small className="customer-upload-local-note">{localReady?"Your files travel over shop Wi-Fi. The cloud receives only job, quote and payment metadata.":"Tap Check shop Wi-Fi above first to grant the browser permission."}</small>}
+    {files.length>0&&uploadMode==="CLOUD"&&localAgent&&<small className="customer-upload-local-note">Cloud-assisted fallback: files are uploaded encrypted to the API before being transferred to the shop computer.</small>}
     {uploaded&&<>
       <div className="uploaded-document-card"><div className="uploaded-document-icon"><FileText size={18}/></div><div><strong>{uploaded.document.originalFileName}</strong><span>{uploaded.job.pageCount} {uploaded.job.pageCount===1?"page":"pages"} · {formatBytes(uploaded.document.sizeBytes)} · Validated</span></div><Status label="Uploaded" tone="green"/></div>
       {!quote&&!jobStatus&&<>
