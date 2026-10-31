@@ -784,9 +784,9 @@ function CustomersPage({ token }: { token: string }) {
                             {job.payment.status.replaceAll("_", " ")} · {job.payment.method} · Net recorded: {formatMoney(netPaid, job.payment.currency)}
                             {job.payment.refundedAmountMinor > 0 ? " · Refund recorded" : ""}
                           </div>}
-                          <div className="customer-history-output">{job.outputConfirmedUtc
-                            ? "Shop confirmed physical output"
-                            : "Physical output not yet confirmed"}</div>
+                          <div className="customer-history-output">{job.outputType === "PDF_EXPORT"
+                            ? (job.outputCompletedUtc ? "PDF export created and verified" : "PDF export not yet completed")
+                            : (job.outputConfirmedUtc ? "Shop confirmed physical output" : "Physical output not yet confirmed")}</div>
                         </article>
                       );
                     })}
