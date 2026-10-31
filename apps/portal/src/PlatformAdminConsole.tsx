@@ -139,7 +139,7 @@ export default function PlatformAdminConsole({
               <p>{subtitle}</p>
             </div>
             <div className="platform-heading-actions">
-              <span className="platform-readonly-label"><ShieldCheck size={13}/> Read-only monitoring</span>
+              <span className="platform-readonly-label"><ShieldCheck size={13}/> {section === "Plans" ? "Plan configuration" : "Read-only monitoring"}</span>
               <button className="secondary-button platform-refresh" onClick={() => setRefreshKey(value => value + 1)} disabled={overviewLoading || tenantLoading}>
                 <RefreshCw size={14}/> Refresh data
               </button>
