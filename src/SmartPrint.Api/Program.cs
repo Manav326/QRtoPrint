@@ -245,7 +245,8 @@ platform.MapGet("/tenants", async (
     }
 
     var totalCount = await query.CountAsync(ct);
-    var recentStart = DateTimeOffset.UtcNow.AddDays(-30);
+    var recentEnd = DateTimeOffset.UtcNow;
+    var recentStart = recentEnd.AddDays(-30);
     var items = await query
         .OrderByDescending(tenant => tenant.CreatedUtc)
         .Select(tenant => new
@@ -275,9 +276,9 @@ platform.MapGet("/tenants", async (
             ActivePrinterCount = db.PrinterDevices.AsNoTracking()
                 .Count(printer => printer.TenantId == tenant.Id && printer.IsActive),
             AgentCount = db.AgentDevices.AsNoTracking()
-                .Count(agent => agent.TenantId == tenant.Id && agent.RevokedUtc == null),
+                .Count(agent => agent.TenantId == tenant.Id && agent.RevokedUtc == null && agent.Status != "Revoked"),
             JobsLast30Days = db.PrintJobs.AsNoTracking()
-                .Count(job => job.TenantId == tenant.Id && job.CreatedUtc >= recentStart)
+                .Count(job => job.TenantId == tenant.Id && job.CreatedUtc >= recentStart && job.CreatedUtc < recentEnd)
         })
         .Skip((pageNumber - 1) * boundedPageSize)
         .Take(boundedPageSize)
