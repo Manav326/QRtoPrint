@@ -26,7 +26,8 @@ A printed QR identifies a shop station; it does not authorise printing by itself
 
 ## 4. Payments and financial integrity
 
-- Verify payment status server-side using signed webhooks and/or provider APIs.
+- Verify automated gateway payment status server-side using signed webhooks and/or provider APIs.
+- For a manually confirmed SaaS subscription payment, require a platform administrator to check the actual platform account receipt, enter the bank/UPI transaction reference, and grant the plan through the audited platform endpoint. The API snapshots the published amount/currency, operator and reference; never accept a shop customer's success screen or client-supplied payment flag as proof.
 - Enforce idempotency for order creation, capture, refund and webhook processing.
 - Store immutable quote, tax, currency and payment snapshots.
 - Separate customer print payment flows from SaaS subscription billing.

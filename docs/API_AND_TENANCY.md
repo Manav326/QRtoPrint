@@ -49,11 +49,11 @@ The catalogue is a configuration foundation, not a payment implementation. Publi
 ### Platform subscription administration
 
 - GET /api/v1/platform/subscriptions — paginated, searchable tenant/subscription directory with the latest assigned published plan version and current billing period.
-- POST /api/v1/platform/tenants/{tenantId}/subscriptions — platform-admin-only assignment of the protected 14-day trial or an explicitly zero-priced published monthly/annual plan.
-- GET /api/v1/platform/tenants/{tenantId}/subscription-history — immutable assignment history including reason, actor, plan version, period and idempotency key.
+- POST /api/v1/platform/tenants/{tenantId}/subscriptions — platform-admin-only assignment of the protected 14-day trial, an explicitly free published plan, or a paid published plan after the operator confirms receipt and supplies the bank/UPI transaction reference.
+- GET /api/v1/platform/tenants/{tenantId}/subscription-history — immutable assignment history including reason, actor, plan version, period, payment reference and idempotency key.
 - Every assignment appends a subscription row and a separate append-only audit event. The previous row is marked Superseded, while its previous status is preserved in the audit event; no prior subscription row is deleted.
-- A paid monthly/annual version is rejected with code paid_plan_requires_verified_payment. Paid access must be granted by a future payment-verification path, not by manual selection in this console.
-- Free-plan assignment requires an explicit reason and an idempotency key. Retries return the original result rather than creating a second subscription.
+- Paid monthly/annual grants require an authenticated platform-admin confirmation and a 4–100 character transaction reference. The API snapshots the published plan amount/currency and records the granting actor; the operator must check the actual platform payment account before confirming receipt.
+- Every grant requires an explicit reason and an idempotency key. Retries return the original result rather than creating a second subscription.
 
 ### Shop subscription visibility
 
