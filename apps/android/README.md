@@ -11,6 +11,7 @@ The customer-facing app is **SmartPrint by QuantaEdge**. QRtoPrint remains the r
 - Export one file or an entire folder tree into a user-selected Android File Manager destination. Multiple selected files export together as a ZIP archive that preserves their original filenames.
 - Open/share files with other Android apps.
 - The customer portal's file picker can select a saved PDF/JPG/JPEG/PNG from this library.
+- The native navigation uses SmartPrint vector icons for Home, My Files, Scan & Print and Activity; the Scan & Print explainer uses matching document-scan, QR and printer icons.
 
 General library imports allow up to 100 MB per file. The print workflow uses the existing server-supported single-document types and 20 MB hard limit. Files remain on the device until the customer chooses to upload one.
 
@@ -53,8 +54,4 @@ The CI Android job also uploads JVM and emulator test reports as `qrtoprint-andr
 ## Automated Android UI tests
 
 The CI Android job also launches an Android 15 (API 35) emulator and runs
-`connectedDebugAndroidTest`. Current instrumented coverage includes the
-document-library landing screen, nested-folder navigation and the explicit
-camera-permission explanation screen. This is emulator UI coverage; it does
-not replace physical-device QR camera, file-manager provider, Wi-Fi Agent or
-printer validation.
+`connectedDebugAndroidTest`. Current instrumented coverage includes SmartPrint home/navigation, global guest-account entry, the Scan & Print explanation, nested-folder operations, scanner permission explanation, encrypted account-token storage and document/photo PDF operations. The latest passing CI run is [41216111944](https://github.com/Manav326/QRtoPrint/actions/runs/41216111944). This remains emulator/API/unit coverage; it does not replace physical-device camera, Google Play services scanner, file-manager provider, shop Wi-Fi, payment or printer validation.
