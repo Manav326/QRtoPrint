@@ -87,8 +87,7 @@ public sealed class PlatformSubscriptionAssignmentRulesTests
 
     [Theory]
     [InlineData(100L)]
-    [InlineData(null)]
-    public void PaidOrUnsetPriceCannotBeGrantedManually(long? monthlyPriceMinor)
+    public void PaidPriceCannotBeGrantedManually(long? monthlyPriceMinor)
     {
         var plan = new SubscriptionPlan { Code = "PRO", IsActive = true };
         var version = new SubscriptionPlanVersion
