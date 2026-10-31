@@ -147,6 +147,8 @@ public sealed class QrStation
     public Guid? PrinterDeviceId { get; set; }
     public string DisplayName { get; set; } = string.Empty;
     public string PublicCodeHash { get; set; } = string.Empty;
+    // Public station URLs are printed and shared; retain their code so the same QR renders after reload.
+    public string? PublicCode { get; set; }
     public string PublicCodeHint { get; set; } = string.Empty;
     public bool IsEnabled { get; set; } = true;
     public DateTimeOffset CreatedUtc { get; set; } = DateTimeOffset.UtcNow;
@@ -183,6 +185,7 @@ public sealed class PrintJob
     public Guid? PrinterDeviceId { get; set; }
     public Guid? ClaimedByAgentDeviceId { get; set; }
     public Guid CustomerSessionId { get; set; }
+    public Guid? BatchId { get; set; }
     public string JobNumber { get; set; } = string.Empty;
     public string Status { get; set; } = "Uploaded";
     public string IdempotencyKey { get; set; } = string.Empty;
@@ -240,6 +243,7 @@ public sealed class LocalPrintUploadTicket
     public Guid Id { get; set; } = Guid.NewGuid();
     public Guid TenantId { get; set; }
     public Guid CustomerSessionId { get; set; }
+    public Guid? BatchId { get; set; }
     public Guid QrStationId { get; set; }
     public Guid PrinterDeviceId { get; set; }
     public Guid AgentDeviceId { get; set; }
@@ -308,6 +312,23 @@ public sealed class ShopPaymentProfile
     public string? PayeeName { get; set; }
     public bool CashEnabled { get; set; }
     public DateTimeOffset UpdatedUtc { get; set; } = DateTimeOffset.UtcNow;
+}
+
+public sealed class PrintRefund
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+    public Guid TenantId { get; set; }
+    public Guid PrintJobId { get; set; }
+    public Guid PrintPaymentId { get; set; }
+    public long AmountMinor { get; set; }
+    public string Currency { get; set; } = "INR";
+    public string Method { get; set; } = string.Empty;
+    public string Status { get; set; } = "RECORDED_AS_SENT";
+    public string? Reference { get; set; }
+    public string Reason { get; set; } = string.Empty;
+    public Guid RefundedByUserId { get; set; }
+    public DateTimeOffset RefundedUtc { get; set; } = DateTimeOffset.UtcNow;
+    public DateTimeOffset CreatedUtc { get; set; } = DateTimeOffset.UtcNow;
 }
 
 public sealed class PrintPayment
