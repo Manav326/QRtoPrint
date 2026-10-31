@@ -249,6 +249,8 @@ class MainActivity : AppCompatActivity() {
             elevation = dp(1).toFloat()
             menu.add(Menu.NONE, PROFILE, Menu.NONE, "Account").apply {
                 setIcon(android.R.drawable.ic_menu_myplaces)
+                setContentDescription("Account")
+                setTooltipText("SmartPrint account")
                 setShowAsAction(android.view.MenuItem.SHOW_AS_ACTION_ALWAYS)
             }
             setOnMenuItemClickListener { item ->
