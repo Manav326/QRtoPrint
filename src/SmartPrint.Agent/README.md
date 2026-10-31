@@ -4,29 +4,37 @@ This is a Windows Service. It pairs with one shop using a single-use enrollment 
 
 ## Local-only development (no public deployment)
 
-From the repository root, start the local API, portal and database with Docker Desktop:
+From the repository root, start the local database, API and portal with one command:
 
 ```powershell
-.\scripts\docker-up-local.ps1
-.\scripts\download-agent.ps1
+docker compose -f compose.local.yml up --build -d
 ```
 
-Open http://localhost:3000, register a test shop, add the connected Windows printer, and generate a one-time code from Print Agent. Then open PowerShell as Administrator:
+The Compose file defaults to portal `http://192.168.31.47:3000` and API `http://192.168.31.47:8080`. No public deployment or `.env.local` file is required. Local-only credentials are built into the development Compose configuration and must never be reused in production.
+
+Download the Windows Agent package:
 
 ```powershell
+.\scripts\download-agent.ps1
 $agentDir = Join-Path $env:USERPROFILE "Downloads\QRtoPrintAgent"
 $agentExe = Join-Path $agentDir "SmartPrint.Agent.exe"
-& "$agentDir\pair-agent.ps1" -ApiBaseUrl "http://localhost:8080" -AgentExePath $agentExe
-& "$agentDir\install-agent-service.ps1" -AgentExePath $agentExe -CustomerPortalOrigin "http://localhost:3000"
 ```
 
-For Android over the same Wi-Fi, the local test IP is `192.168.31.47`. Start with `.\scripts\docker-up-local.ps1 -PortalHost 192.168.31.47`. The portal is `http://192.168.31.47:3000` and the Android API base is `http://192.168.31.47:8080`. Pair the Windows Agent with `http://localhost:8080`, but set the LAN portal origin explicitly:
+Register a test shop in the local portal, add the Windows printer, and generate a one-time pairing code. Run the following from Administrator PowerShell:
 
 ```powershell
+& "$agentDir\pair-agent.ps1" -ApiBaseUrl "http://localhost:8080" -AgentExePath $agentExe
 & "$agentDir\install-agent-service.ps1" -AgentExePath $agentExe -CustomerPortalOrigin "http://192.168.31.47:3000" -AllowInsecureLocalDevelopment
+Get-Service QRtoPrintSmartPrintAgent
 ```
 
-Use the Android debug APK for this private-LAN HTTP test. Debug builds accept HTTP station URLs only for private IPv4 hosts on port 3000; release builds continue to require HTTPS. Keep this on trusted Wi-Fi. Stop the stack using `.\scripts\docker-down-local.ps1`; Docker data volumes are preserved.
+The Agent is a background Windows Service, not a desktop GUI. It must run on the Windows host to access installed printer queues and the Windows Print Spooler. Its local listener uses TCP 17842. Allow TCP 3000, 8080 and 17842 on the Windows Private firewall profile. Android debug builds connect to the laptop API at `http://192.168.31.47:8080`; release builds remain HTTPS-only.
+
+Stop containers without deleting data using:
+
+```powershell
+docker compose -f compose.local.yml down
+```
 
 ## Pair and install
 

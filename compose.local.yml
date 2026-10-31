@@ -7,7 +7,7 @@ services:
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-qrtoprint}
       POSTGRES_USER: ${POSTGRES_USER:-qrtoprint}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Run scripts/docker-up-local.ps1 to create .env.local}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-qrtoprint-local-only-db-password}
     volumes:
       - qrtoprint_local_database:/var/lib/postgresql/data
     healthcheck:
@@ -27,9 +27,9 @@ services:
     environment:
       ASPNETCORE_ENVIRONMENT: Development
       ASPNETCORE_URLS: http://+:8080
-      ConnectionStrings__SmartPrint: "Host=db;Port=5432;Database=${POSTGRES_DB:-qrtoprint};Username=${POSTGRES_USER:-qrtoprint};Password=${POSTGRES_PASSWORD:?Required}"
-      Authentication__SigningKey: ${AUTH_SIGNING_KEY:?Required}
-      Documents__EncryptionKey: ${DOCUMENTS_ENCRYPTION_KEY:?Required}
+      ConnectionStrings__SmartPrint: "Host=db;Port=5432;Database=${POSTGRES_DB:-qrtoprint};Username=${POSTGRES_USER:-qrtoprint};Password=${POSTGRES_PASSWORD:-qrtoprint-local-only-db-password}"
+      Authentication__SigningKey: ${AUTH_SIGNING_KEY:-MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=}
+      Documents__EncryptionKey: ${DOCUMENTS_ENCRYPTION_KEY:-MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=}
       Documents__StorageRoot: /var/lib/qrtoprint/documents
       Database__ApplyMigrationsOnStartup: "true"
       PublicPortal__BaseUrl: ${LOCAL_PORTAL_ORIGIN:-http://localhost:3000}
