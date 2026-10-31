@@ -141,6 +141,19 @@ export interface ShopPaymentSettings {
   updatedUtc: string;
 }
 
+export interface ShopReportSummary {
+  periodDays: number;
+  fromUtc: string;
+  toUtc: string;
+  generatedUtc: string;
+  totalJobs: number;
+  completedJobs: number;
+  outputUnconfirmedJobs: number;
+  pagesRequested: number;
+  pendingPaymentCount: number;
+  jobsByStatus: { status: string; count: number }[];
+  verifiedCollectionsByMethod: { method: string; currency: string; paymentCount: number; amountMinor: number }[];
+}
 export interface ShopPayment {
   id: string;
   printJobId: string;
@@ -173,6 +186,9 @@ export async function loadShopData(token: string) {
   return { profile, printers, stations, pricing, printJobs, agentDevices, paymentSettings, payments };
 }
 
+export function getShopReportSummary(token: string, days: 7 | 30 | 90) {
+  return apiRequest<ShopReportSummary>(`/api/v1/shop/reports/summary?days=${days}`, {}, token);
+}
 export function createPrinter(token: string, values: {
   displayName: string;
   manufacturer: string;
