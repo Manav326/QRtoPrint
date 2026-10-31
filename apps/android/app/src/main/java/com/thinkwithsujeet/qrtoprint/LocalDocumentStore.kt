@@ -147,7 +147,8 @@ class LocalDocumentStore(filesDir: File) {
     fun pathOf(file: File): String {
         val base = root.canonicalPath
         val path = file.canonicalPath
-        require(path.startsWith(base + File.separator)) { "Item is outside local storage." }
+        require(path == base || path.startsWith(base + File.separator)) { "Item is outside local storage." }
+        if (path == base) return ""
         return path.removePrefix(base + File.separator).replace(File.separatorChar, '/')
     }
 
