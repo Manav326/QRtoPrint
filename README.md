@@ -44,4 +44,4 @@ The repository now contains an integrated first implementation: a React customer
 - Do not claim hardware compatibility until representative physical devices have been tested.
 
 
-Platform administrators can manage versioned SaaS plans and assign trial or explicitly free published versions to shops with an append-only assignment audit. Paid subscription activation, invoices and payment reconciliation remain gated on server-verified payment integration.
+Platform administrators can manage versioned SaaS plans and grant published trial, free or paid versions to shops. Paid access can be granted after an operator confirms the funds were received and records the bank/UPI transaction reference; the granting actor and amount are kept in the append-only assignment audit. Automated gateway checkout, subscription invoices and payment reconciliation remain future work.

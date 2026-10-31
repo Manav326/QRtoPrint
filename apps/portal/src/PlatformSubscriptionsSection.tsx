@@ -15,7 +15,12 @@ import {
 type AssignmentOption = {
   value: string;
   label: string;
+  requiresPayment: boolean;
 };
+
+function formatPlanPrice(amountMinor: number, currency: string): string {
+  return `${currency} ${(amountMinor / 100).toFixed(2)}`;
+}
 
 function buildAssignmentOptions(plans: PlatformPlan[]): AssignmentOption[] {
   const options: AssignmentOption[] = [];
@@ -27,20 +32,23 @@ function buildAssignmentOptions(plans: PlatformPlan[]): AssignmentOption[] {
         options.push({
           value: `${version.id}|Trial`,
           label: `${plan.name} · version ${version.version} · 14-day trial`,
+          requiresPayment: false
         });
         continue;
       }
       if (plan.isSystemPlan) continue;
-      if (version.monthlyPriceMinor === 0) {
+      if (version.monthlyPriceMinor !== null) {
         options.push({
           value: `${version.id}|Monthly`,
-          label: `${plan.name} · version ${version.version} · free monthly`,
+          label: `${plan.name} · version ${version.version} · ${version.monthlyPriceMinor === 0 ? "free monthly" : `${formatPlanPrice(version.monthlyPriceMinor, version.currency)} / month`}`,
+          requiresPayment: version.monthlyPriceMinor > 0
         });
       }
-      if (version.annualPriceMinor === 0) {
+      if (version.annualPriceMinor !== null) {
         options.push({
           value: `${version.id}|Annual`,
-          label: `${plan.name} · version ${version.version} · free annual`,
+          label: `${plan.name} · version ${version.version} · ${version.annualPriceMinor === 0 ? "free annual" : `${formatPlanPrice(version.annualPriceMinor, version.currency)} / year`}`,
+          requiresPayment: version.annualPriceMinor > 0
         });
       }
     }
@@ -67,12 +75,15 @@ export default function PlatformSubscriptionsSection({ tokens }: { tokens: AuthT
   const [assignTenant, setAssignTenant] = useState<PlatformSubscriptionItem | null>(null);
   const [selectedOption, setSelectedOption] = useState("");
   const [reason, setReason] = useState("");
+  const [paymentReference, setPaymentReference] = useState("");
+  const [paymentConfirmed, setPaymentConfirmed] = useState(false);
   const [requestKey, setRequestKey] = useState("");
   const [historyTenant, setHistoryTenant] = useState<string | null>(null);
   const [history, setHistory] = useState<PlatformSubscriptionAudit[]>([]);
   const [historyLoading, setHistoryLoading] = useState(false);
 
   const options = useMemo(() => buildAssignmentOptions(plans), [plans]);
+  const selectedAssignment = options.find(option => option.value === selectedOption);
 
   useEffect(() => {
     let current = true;
@@ -97,6 +108,8 @@ export default function PlatformSubscriptionsSection({ tokens }: { tokens: AuthT
     setAssignTenant(tenant);
     setSelectedOption(options[0]?.value ?? "");
     setReason("");
+    setPaymentReference("");
+    setPaymentConfirmed(false);
     setRequestKey(crypto.randomUUID());
     setError("");
     setSuccess("");
@@ -106,7 +119,13 @@ export default function PlatformSubscriptionsSection({ tokens }: { tokens: AuthT
     if (!assignTenant) return;
     const [planVersionId, billingInterval] = selectedOption.split("|");
     if (!planVersionId || !billingInterval || reason.trim().length < 10) {
-      setError("Choose an assignable plan and provide a reason of at least 10 characters.");
+      setError("Choose a plan and provide a reason of at least 10 characters.");
+      return;
+    }
+    const normalizedPaymentReference = paymentReference.trim();
+    if (selectedAssignment?.requiresPayment &&
+        (!paymentConfirmed || !/^[A-Za-z0-9_-]{4,100}$/.test(normalizedPaymentReference))) {
+      setError("Confirm that the payment was received and enter its transaction reference.");
       return;
     }
     setBusy(true);
@@ -117,7 +136,9 @@ export default function PlatformSubscriptionsSection({ tokens }: { tokens: AuthT
         planVersionId,
         billingInterval,
         reason: reason.trim(),
-        idempotencyKey: requestKey
+        idempotencyKey: requestKey,
+        paymentConfirmed: Boolean(selectedAssignment?.requiresPayment && paymentConfirmed),
+        paymentReference: selectedAssignment?.requiresPayment ? normalizedPaymentReference : undefined
       });
       setSuccess(`${result.planCode} assigned to ${assignTenant.businessName}. ${result.status} until ${date(result.periodEndUtc)}.`);
       setAssignTenant(null);
@@ -157,7 +178,7 @@ export default function PlatformSubscriptionsSection({ tokens }: { tokens: AuthT
         <div>
           <div className="platform-plan-kicker"><CreditCard size={14}/> SUBSCRIPTION OPERATIONS</div>
           <h2>Shop subscriptions</h2>
-          <p>Inspect each shop’s assigned plan and billing period. Trial and explicitly free plans can be assigned with an immutable audit record. Paid plans require verified payment before activation.</p>
+          <p>Choose a published plan. Once the payment is received and confirmed, grant the shop access from this screen.</p>
         </div>
         <div className="platform-plans-actions">
           <button className="secondary-button" onClick={() => setRefreshKey(value => value + 1)} disabled={loading}><RefreshCw size={14}/> Refresh</button>
@@ -197,7 +218,7 @@ export default function PlatformSubscriptionsSection({ tokens }: { tokens: AuthT
                     <td><div className="platform-subs-copy"><strong>{date(tenant.subscription?.periodEndUtc)}</strong><small>{tenant.subscription ? `Started ${date(tenant.subscription.periodStartUtc)}` : "—"}</small></div></td>
                     <td><div className="platform-subscription-actions">
                       <button className="secondary-button small" type="button" onClick={() => void toggleHistory(tenant)}><History size={13}/> History</button>
-                      <button className="primary-button small" type="button" disabled={!canAssign} onClick={() => openAssignment(tenant)}>Assign trial/free plan</button>
+                      <button className="primary-button small" type="button" disabled={!canAssign} onClick={() => openAssignment(tenant)}>Grant plan access</button>
                     </div></td>
                   </tr>
                 ))}
@@ -223,7 +244,7 @@ export default function PlatformSubscriptionsSection({ tokens }: { tokens: AuthT
               <thead><tr><th>EVENT</th><th>PLAN</th><th>STATUS</th><th>PREVIOUS STATUS</th><th>PERIOD</th><th>REASON</th><th>RECORDED</th></tr></thead>
               <tbody>{history.map(event => <tr key={event.id}>
                 <td><strong>{event.eventType.replace(/_/g, " ")}</strong></td>
-                <td>{event.planCode} · {event.billingInterval}</td>
+                <td>{event.planCode} · {event.billingInterval}{event.paymentReference ? <small>Payment ref: {event.paymentReference}</small> : null}</td>
                 <td>{event.status}</td>
                 <td>{event.previousStatus ?? "First assignment"}</td>
                 <td>{date(event.periodStartUtc)} – {date(event.periodEndUtc)}</td>
@@ -239,22 +260,35 @@ export default function PlatformSubscriptionsSection({ tokens }: { tokens: AuthT
         <div className="platform-assignment-backdrop" role="presentation" onMouseDown={event => { if (event.target === event.currentTarget && !busy) setAssignTenant(null); }}>
           <section className="panel platform-assignment-modal" role="dialog" aria-modal="true" aria-labelledby="subscription-assignment-title">
             <div className="platform-assignment-heading">
-              <div><div className="platform-plan-kicker"><CalendarClock size={14}/> MANUAL ASSIGNMENT</div><h2 id="subscription-assignment-title">Assign trial or free plan</h2><p>{assignTenant.businessName} · {assignTenant.slug}</p></div>
+              <div><div className="platform-plan-kicker"><CalendarClock size={14}/> SUBSCRIPTION ACCESS</div><h2 id="subscription-assignment-title">Grant plan access</h2><p>{assignTenant.businessName} · {assignTenant.slug}</p></div>
               <button className="icon-button" onClick={() => setAssignTenant(null)} disabled={busy} aria-label="Close assignment"><X size={16}/></button>
             </div>
-            <label className="platform-assignment-field">Published trial or free plan
-              <select value={selectedOption} onChange={event => setSelectedOption(event.target.value)} disabled={busy}>
+            <label className="platform-assignment-field">Published plan
+              <select value={selectedOption} onChange={event => {
+                setSelectedOption(event.target.value);
+                setPaymentReference("");
+                setPaymentConfirmed(false);
+              }} disabled={busy}>
                 {options.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}
               </select>
             </label>
-            <label className="platform-assignment-field">Reason for assignment
-              <textarea rows={3} maxLength={500} value={reason} onChange={event => setReason(event.target.value)} placeholder="Record the approval, trial extension or complimentary access reason." disabled={busy}/>
+            {selectedAssignment?.requiresPayment && <>
+              <label className="platform-assignment-field">Payment transaction reference / UTR
+                <input value={paymentReference} onChange={event => setPaymentReference(event.target.value)} maxLength={100} placeholder="Enter the bank / UPI transaction reference" disabled={busy}/>
+              </label>
+              <label className="platform-assignment-payment-check">
+                <input type="checkbox" checked={paymentConfirmed} onChange={event => setPaymentConfirmed(event.target.checked)} disabled={busy}/>
+                <span>I checked the payment account and confirmed that this amount was received.</span>
+              </label>
+            </>}
+            <label className="platform-assignment-field">Reason for access grant
+              <textarea rows={3} maxLength={500} value={reason} onChange={event => setReason(event.target.value)} placeholder="Record why this plan is being granted." disabled={busy}/>
               <small>{reason.trim().length}/500 characters · minimum 10</small>
             </label>
-            <div className="platform-assignment-guard"><ShieldCheck size={15}/><span>Paid versions cannot be manually assigned. This action does not initiate a charge, create an invoice or handle customer print payments.</span></div>
+            <div className="platform-assignment-guard"><ShieldCheck size={15}/><span>{selectedAssignment?.requiresPayment ? "Access is granted as soon as you confirm the payment was received and enter its transaction reference. The amount and granting operator are retained in the audit history." : "Trial and explicitly free plans can be granted without payment. Every assignment is recorded in the audit history."}</span></div>
             <div className="platform-assignment-actions">
               <button className="secondary-button" onClick={() => setAssignTenant(null)} disabled={busy}>Cancel</button>
-              <button className="primary-button" onClick={() => void submitAssignment()} disabled={busy || !selectedOption || reason.trim().length < 10}>{busy ? "Assigning…" : "Assign subscription"}</button>
+              <button className="primary-button" onClick={() => void submitAssignment()} disabled={busy || !selectedOption || reason.trim().length < 10 || Boolean(selectedAssignment?.requiresPayment && (!paymentConfirmed || !/^[A-Za-z0-9_-]{4,100}$/.test(paymentReference.trim())))}>{busy ? "Granting…" : "Grant access"}</button>
             </div>
           </section>
         </div>

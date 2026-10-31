@@ -793,6 +793,7 @@ export interface PlatformSubscriptionAudit {
   periodStartUtc: string;
   periodEndUtc: string;
   reason: string;
+  paymentReference: string | null;
   idempotencyKey: string;
   createdUtc: string;
 }
@@ -819,6 +820,8 @@ export function assignPlatformSubscription(token: string, tenantId: string, valu
   billingInterval: string;
   reason: string;
   idempotencyKey: string;
+  paymentConfirmed?: boolean;
+  paymentReference?: string;
 }) {
   return apiRequest<{
     subscriptionId: string;
