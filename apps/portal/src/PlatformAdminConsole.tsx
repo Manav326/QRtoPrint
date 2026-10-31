@@ -1,15 +1,16 @@
 import { useEffect, useState, type ReactNode } from "react";
 import {
   Activity, Building2, CheckCircle2, ChevronLeft, ChevronRight,
-  Clock3, LogOut, Menu, Moon, Monitor, Printer, RefreshCw, Search, ShieldCheck,
+  Clock3, Layers3, LogOut, Menu, Moon, Monitor, Printer, RefreshCw, Search, ShieldCheck,
   Sun
 } from "lucide-react";
+import PlatformPlansSection from "./PlatformPlansSection";
 import {
   getPlatformOverview, getPlatformTenants, logout,
   type AuthTokens, type PlatformOverview, type PlatformTenantsPage
 } from "./api";
 
-type Section = "Overview" | "Tenants";
+type Section = "Overview" | "Tenants" | "Plans";
 
 export default function PlatformAdminConsole({
   tokens,
@@ -70,10 +71,12 @@ export default function PlatformAdminConsole({
     setSidebarOpen(false);
   }
 
-  const title = section === "Overview" ? "Platform overview" : "Shop tenants";
+  const title = section === "Overview" ? "Platform overview" : section === "Tenants" ? "Shop tenants" : "Plans and entitlements";
   const subtitle = section === "Overview"
     ? "A cross-platform view of tenant health, subscriptions, devices and recent activity."
-    : "Find shops and inspect their current subscription and connected-device footprint.";
+    : section === "Tenants"
+      ? "Find shops and inspect their current subscription and connected-device footprint."
+      : "Configure versioned SaaS plans, prices and centrally managed capabilities.";
 
   return (
     <div className={`app-shell platform-admin-shell${dark ? "" : " light"}`}>
@@ -96,6 +99,9 @@ export default function PlatformAdminConsole({
           <button className={section === "Tenants" ? "nav-item active" : "nav-item"} onClick={() => navigate("Tenants")}>
             <Building2 size={17}/> Shop tenants
             {overview && <span className="nav-count">{overview.tenantCount}</span>}
+          </button>
+          <button className={section === "Plans" ? "nav-item active" : "nav-item"} onClick={() => navigate("Plans")}>
+            <Layers3 size={17}/> Plans & entitlements
           </button>
         </nav>
         <div className="sidebar-bottom">
@@ -250,6 +256,7 @@ export default function PlatformAdminConsole({
               )}
             </section>
           )}
+          {section === "Plans" && <PlatformPlansSection tokens={tokens}/>}
         </div>
       </main>
     </div>
