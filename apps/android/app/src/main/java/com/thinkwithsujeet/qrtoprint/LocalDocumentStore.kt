@@ -72,8 +72,8 @@ class LocalDocumentStore(filesDir: File) {
         val base = root.canonicalFile
         val source = item.canonicalFile
         val destination = target.canonicalFile
-        require(source.parentFile?.canonicalPath?.startsWith(base.path) == true &&
-            destination.parentFile?.canonicalPath?.startsWith(base.path) == true) {
+        require(source.path.startsWith(base.path + File.separator) &&
+            destination.path.startsWith(base.path + File.separator)) {
             "Items must be inside local storage."
         }
         require(source.parentFile?.canonicalPath == destination.parentFile?.canonicalPath) {
@@ -100,7 +100,7 @@ class LocalDocumentStore(filesDir: File) {
     fun move(item: File, destinationPath: String) {
         val base = root.canonicalFile
         val source = item.canonicalFile
-        require(source.parentFile?.canonicalPath?.startsWith(base.path + File.separator) == true) {
+        require(source.path.startsWith(base.path + File.separator)) {
             "Item is outside local storage."
         }
         val destination = folder(destinationPath).canonicalFile
@@ -124,7 +124,7 @@ class LocalDocumentStore(filesDir: File) {
         require(offset == -1 || offset == 1) { "Order offset must be -1 or 1." }
         val base = root.canonicalFile
         val canonical = item.canonicalFile
-        require(canonical.parentFile?.canonicalPath?.startsWith(base.path) == true) {
+        require(canonical.path.startsWith(base.path + File.separator)) {
             "Item is outside local storage."
         }
         val parent = canonical.parentFile ?: error("Item has no parent folder.")
