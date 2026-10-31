@@ -1,0 +1,256 @@
+package com.thinkwithsujeet.qrtoprint
+
+import android.content.Context
+import android.security.keystore.KeyGenParameterSpec
+import android.security.keystore.KeyProperties
+import android.util.Base64
+import org.json.JSONArray
+import org.json.JSONObject
+import java.io.BufferedReader
+import java.io.InputStreamReader
+import java.net.HttpURLConnection
+import java.net.URL
+import java.nio.charset.StandardCharsets
+import java.security.KeyStore
+import java.time.Instant
+import javax.crypto.Cipher
+import javax.crypto.KeyGenerator
+import javax.crypto.SecretKey
+import javax.crypto.spec.GCMParameterSpec
+
+class CustomerApiException(val statusCode: Int, message: String) : IllegalStateException(message)
+
+data class CustomerAuth(
+    val accessToken: String,
+    val refreshToken: String,
+    val accessTokenExpiresUtc: String,
+    val displayName: String,
+    val email: String
+)
+
+data class CustomerPrintHistoryItem(
+    val id: String,
+    val jobNumber: String,
+    val status: String,
+    val pageCount: Int,
+    val copies: Int,
+    val currency: String,
+    val quotedAmountMinor: Long,
+    val createdUtc: String,
+    val shopName: String
+)
+
+/**
+ * Stores the customer session encrypted with an Android Keystore AES-GCM key.
+ * Guest document files remain available independently of this account state.
+ */
+class CustomerAccountStore(context: Context) {
+    private val preferences = context.getSharedPreferences("smartprint.customer.account", Context.MODE_PRIVATE)
+
+    fun read(): CustomerAuth? {
+        val value = preferences.getString("payload", null) ?: return null
+        return try {
+            val plain = decrypt(Base64.decode(value, Base64.NO_WRAP))
+            val json = JSONObject(String(plain, StandardCharsets.UTF_8))
+            CustomerAuth(
+                accessToken = json.getString("accessToken"),
+                refreshToken = json.getString("refreshToken"),
+                accessTokenExpiresUtc = json.getString("accessTokenExpiresUtc"),
+                displayName = json.optString("displayName"),
+                email = json.optString("email")
+            )
+        } catch (_: Exception) {
+            clear()
+            null
+        }
+    }
+
+    fun save(auth: CustomerAuth) {
+        val json = JSONObject()
+            .put("accessToken", auth.accessToken)
+            .put("refreshToken", auth.refreshToken)
+            .put("accessTokenExpiresUtc", auth.accessTokenExpiresUtc)
+            .put("displayName", auth.displayName)
+            .put("email", auth.email)
+        val encrypted = encrypt(json.toString().toByteArray(StandardCharsets.UTF_8))
+        preferences.edit().putString("payload", Base64.encodeToString(encrypted, Base64.NO_WRAP)).apply()
+    }
+
+    fun clear() {
+        preferences.edit().remove("payload").apply()
+    }
+
+    private fun encrypt(plain: ByteArray): ByteArray {
+        val cipher = Cipher.getInstance("AES/GCM/NoPadding")
+        cipher.init(Cipher.ENCRYPT_MODE, getOrCreateKey())
+        val encrypted = cipher.doFinal(plain)
+        return cipher.iv + encrypted
+    }
+
+    private fun decrypt(payload: ByteArray): ByteArray {
+        require(payload.size > 12) { "Stored account data is invalid." }
+        val iv = payload.copyOfRange(0, 12)
+        val encrypted = payload.copyOfRange(12, payload.size)
+        val cipher = Cipher.getInstance("AES/GCM/NoPadding")
+        cipher.init(Cipher.DECRYPT_MODE, getOrCreateKey(), GCMParameterSpec(128, iv))
+        return cipher.doFinal(encrypted)
+    }
+
+    private fun getOrCreateKey(): SecretKey {
+        val keyStore = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
+        val existing = keyStore.getKey(KEY_ALIAS, null) as? SecretKey
+        if (existing != null) return existing
+
+        val generator = KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES, "AndroidKeyStore")
+        generator.init(
+            KeyGenParameterSpec.Builder(
+                KEY_ALIAS,
+                KeyProperties.PURPOSE_ENCRYPT or KeyProperties.PURPOSE_DECRYPT
+            )
+                .setBlockModes(KeyProperties.BLOCK_MODE_GCM)
+                .setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE)
+                .setRandomizedEncryptionRequired(true)
+                .build()
+        )
+        return generator.generateKey()
+    }
+
+    private companion object {
+        const val KEY_ALIAS = "smartprint.customer.account.v1"
+    }
+}
+
+/** Small HTTPS client for the separate customer identity API. */
+object CustomerAccountClient {
+    fun signIn(baseUrl: String, email: String, password: String): CustomerAuth {
+        val response = request(
+            baseUrl,
+            "/api/v1/auth/customer-login",
+            JSONObject().put("email", email).put("password", password)
+        )
+        val tokens = response.toAuth(email, "")
+        val profile = profile(baseUrl, tokens.accessToken)
+        return tokens.copy(displayName = profile.optString("displayName", email.substringBefore('@')))
+    }
+
+    fun register(baseUrl: String, displayName: String, email: String, password: String): CustomerAuth {
+        val response = request(
+            baseUrl,
+            "/api/v1/auth/register-customer",
+            JSONObject().put("displayName", displayName).put("email", email).put("password", password)
+        )
+        return response.toAuth(email, displayName)
+    }
+
+    fun accessTokenIsExpired(auth: CustomerAuth, leewaySeconds: Long = 90): Boolean {
+        val expires = runCatching { Instant.parse(auth.accessTokenExpiresUtc) }.getOrNull()
+            ?: return true
+        return !expires.isAfter(Instant.now().plusSeconds(leewaySeconds))
+    }
+
+    fun refresh(baseUrl: String, auth: CustomerAuth): CustomerAuth {
+        val response = request(
+            baseUrl,
+            "/api/v1/auth/refresh",
+            JSONObject().put("refreshToken", auth.refreshToken)
+        )
+        return response.toAuth(auth.email, auth.displayName)
+    }
+
+    fun logout(baseUrl: String, auth: CustomerAuth) {
+        request(
+            baseUrl,
+            "/api/v1/auth/logout",
+            JSONObject().put("refreshToken", auth.refreshToken)
+        )
+    }
+
+    fun profile(baseUrl: String, accessToken: String): JSONObject =
+        request(baseUrl, "/api/v1/customer/me", null, accessToken)
+
+    fun history(baseUrl: String, accessToken: String): List<CustomerPrintHistoryItem> {
+        val response = request(baseUrl, "/api/v1/customer/jobs", null, accessToken)
+        val jobs = response.optJSONArray("jobs") ?: JSONArray()
+        return (0 until jobs.length()).mapNotNull { index ->
+            val job = jobs.optJSONObject(index) ?: return@mapNotNull null
+            CustomerPrintHistoryItem(
+                id = job.optString("id"),
+                jobNumber = job.optString("jobNumber"),
+                status = job.optString("status"),
+                pageCount = job.optInt("pageCount"),
+                copies = job.optInt("copies"),
+                currency = job.optString("currency", "INR"),
+                quotedAmountMinor = job.optLong("quotedAmountMinor"),
+                createdUtc = job.optString("createdUtc"),
+                shopName = job.optString("shopName")
+            )
+        }
+    }
+
+    private fun JSONObject.toAuth(email: String, displayName: String) = CustomerAuth(
+        accessToken = getString("accessToken"),
+        refreshToken = getString("refreshToken"),
+        accessTokenExpiresUtc = getString("accessTokenExpiresUtc"),
+        displayName = displayName,
+        email = email
+    )
+
+    private fun request(
+        baseUrl: String,
+        path: String,
+        body: JSONObject?,
+        accessToken: String? = null
+    ): JSONObject {
+        val origin = baseUrl.trim().trimEnd('/')
+        val parsed = URL(origin)
+        require(parsed.protocol.equals("https", true) ||
+            (BuildConfig.DEBUG && parsed.protocol.equals("http", true) &&
+                parsed.host.matches(Regex("^(10\\.|192\\.168\\.|172\\.(1[6-9]|2[0-9]|3[01])\\.).*")))) {
+            "SmartPrint account connections require HTTPS."
+        }
+        val connection = (URL(origin + path).openConnection() as HttpURLConnection).apply {
+            requestMethod = if (body == null) "GET" else "POST"
+            connectTimeout = 12_000
+            readTimeout = 20_000
+            instanceFollowRedirects = false
+            setRequestProperty("Accept", "application/json")
+            if (body != null) {
+                doOutput = true
+                setRequestProperty("Content-Type", "application/json; charset=utf-8")
+            }
+            if (!accessToken.isNullOrBlank()) setRequestProperty("Authorization", "Bearer $accessToken")
+        }
+        try {
+            if (body != null) {
+                connection.outputStream.use { output ->
+                    output.write(body.toString().toByteArray(StandardCharsets.UTF_8))
+                }
+            }
+            val status = connection.responseCode
+            val stream = if (status in 200..299) connection.inputStream else connection.errorStream
+            val payload = stream?.use { input ->
+                BufferedReader(InputStreamReader(input, StandardCharsets.UTF_8)).readText()
+            }.orEmpty()
+            val json = if (payload.isBlank()) JSONObject() else JSONObject(payload)
+            if (status !in 200..299) {
+                val fieldErrors = json.optJSONObject("errors")
+                val firstFieldError = fieldErrors?.keys()?.asSequence()
+                    ?.mapNotNull { fieldErrors.optJSONArray(it)?.optString(0) }
+                    ?.firstOrNull()
+                val message = firstFieldError
+                    ?: json.optString("message").takeIf { it.isNotBlank() }
+                    ?: json.optString("detail").takeIf { it.isNotBlank() }
+                    ?: json.optString("title").takeIf { it.isNotBlank() }
+                    ?: when (status) {
+                        401 -> "Email or password is incorrect."
+                        409 -> "An account already exists for this email address."
+                        else -> "SmartPrint account request failed (HTTP $status)."
+                    }
+                throw CustomerApiException(status, message)
+            }
+            return json
+        } finally {
+            connection.disconnect()
+        }
+    }
+}
