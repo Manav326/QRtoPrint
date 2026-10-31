@@ -118,7 +118,39 @@ public sealed class SmartPrintDbContext(DbContextOptions<SmartPrintDbContext> op
             {
                 table.HasCheckConstraint("CK_SubscriptionPlanVersions_Version", "\"Version\" > 0");
                 table.HasCheckConstraint("CK_SubscriptionPlanVersions_Status", "\"Status\" IN ('Draft', 'Published', 'Retired')");
-                table.HasCheckConstraint("CK_SubscriptionPlanVersions_Currency", "\"Currency\" ~ '^[A-Z]{3}
+                table.HasCheckConstraint("CK_SubscriptionPlanVersions_Currency", "char_length(\"Currency\") = 3 AND \"Currency\" = upper(\"Currency\") AND \"Currency\" ~ '^[A-Z]{3}'");
+                table.HasCheckConstraint("CK_SubscriptionPlanVersions_MonthlyPriceMinor", "\"MonthlyPriceMinor\" IS NULL OR \"MonthlyPriceMinor\" >= 0");
+                table.HasCheckConstraint("CK_SubscriptionPlanVersions_AnnualPriceMinor", "\"AnnualPriceMinor\" IS NULL OR \"AnnualPriceMinor\" >= 0");
+                table.HasCheckConstraint("CK_SubscriptionPlanVersions_MaxPrinters", "\"MaxPrinters\" IS NULL OR \"MaxPrinters\" > 0");
+                table.HasCheckConstraint("CK_SubscriptionPlanVersions_MaxAgentDevices", "\"MaxAgentDevices\" IS NULL OR \"MaxAgentDevices\" > 0");
+                table.HasCheckConstraint("CK_SubscriptionPlanVersions_MaxQrStations", "\"MaxQrStations\" IS NULL OR \"MaxQrStations\" > 0");
+                table.HasCheckConstraint("CK_SubscriptionPlanVersions_MaxMonthlyPrintJobs", "\"MaxMonthlyPrintJobs\" IS NULL OR \"MaxMonthlyPrintJobs\" > 0");
+                table.HasCheckConstraint("CK_SubscriptionPlanVersions_MaxDocumentBytes", "\"MaxDocumentBytes\" IS NULL OR \"MaxDocumentBytes\" > 0");
+            });
+            entity.HasKey(x => x.Id);
+            entity.Property(x => x.Status).HasMaxLength(16).IsRequired();
+            entity.Property(x => x.Currency).HasMaxLength(3).IsRequired();
+            entity.HasIndex(x => new { x.PlanId, x.Version }).IsUnique();
+            entity.HasIndex(x => new { x.PlanId, x.Status });
+            entity.HasOne<SubscriptionPlan>().WithMany()
+                .HasForeignKey(x => x.PlanId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<TenantSubscription>(entity =>
+        {
+            entity.ToTable("TenantSubscriptions");
+            entity.HasKey(x => x.Id);
+            entity.Property(x => x.PlanCode).HasMaxLength(40).IsRequired();
+            entity.Property(x => x.Status).HasMaxLength(24).IsRequired();
+            entity.Property(x => x.BillingInterval).HasMaxLength(16).IsRequired();
+            entity.HasIndex(x => new { x.TenantId, x.Status });
+            entity.HasIndex(x => x.PlanVersionId);
+            entity.HasOne<Tenant>().WithMany().HasForeignKey(x => x.TenantId).OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne<SubscriptionPlanVersion>().WithMany()
+                .HasForeignKey(x => x.PlanVersionId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
 
         modelBuilder.Entity<PrinterDevice>(entity =>
         {
