@@ -76,7 +76,7 @@ CI/emulator success is development evidence, not production release or Play Stor
 - When the customer portal requests multiple files, Android now presents a multi-select view of the private document library. Customers can browse nested folders without losing prior selections, then attach the selected original PDF/JPG/JPEG/PNG files as distinct URIs in selection order.
 - The existing portal then uploads each original file separately with one shared batch ID. Each file remains an independently reviewable print job; Android does not flatten the selection into one combined document for this route.
 - The native picker validates the API's current 20-file, 20 MB per-file and 50 MB aggregate limits, rejects duplicate paths and skips missing/unsupported files. Unit tests cover these boundaries; branch CI is still pending.
-- The separate **Prepare batch PDF** helper remains a compatibility conversion action that combines selected PDFs/photos into one PDF. It is not the true multi-file batch route.
+- The separate **Combine into one PDF** helper remains a compatibility conversion action that combines selected PDFs/photos into one PDF. It is not the true multi-file batch route.
 - The final combined PDF is capped at 20 MB and 500 pages because those are the current print-job limits. Source selection can total 100 MB, but output must meet the upload limit.
 - PDF pages are rasterized up to a 2,000-pixel long edge when combined or edited. This is not a lossless/vector-preserving merge.
 - Saved PDFs can be previewed, rotated, reordered, have pages removed, and saved as a new copy; the original is never overwritten.
