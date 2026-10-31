@@ -257,7 +257,7 @@ public static class PlatformPlanEndpoints
         var currency = request.Currency?.Trim().ToUpperInvariant() ?? string.Empty;
         if (!SubscriptionPlanRules.IsValidCurrency(currency))
         {
-            errors["currency"] = ["Use a three-letter ISO currency code, for example INR."];
+            errors["currency"] = ["Use a three-letter uppercase currency code, for example INR."];
         }
 
         if (!SubscriptionPlanRules.IsValidPriceMinor(request.MonthlyPriceMinor) || !SubscriptionPlanRules.IsValidPriceMinor(request.AnnualPriceMinor))
