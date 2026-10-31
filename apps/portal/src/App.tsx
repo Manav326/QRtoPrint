@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import {
   Activity, ArrowRight, Check, Clock3, Copy, CreditCard, FileText, FileUp, FolderOpen, LayoutDashboard,
   LifeBuoy, LogOut, Menu, Moon, Monitor, Plus, Printer, QrCode, Settings,
-  ShieldCheck, Sun, Users, Wallet, X, PanelLeftClose, PanelLeftOpen, RotateCcw, Trash2
+  ShieldCheck, Sun, Users, Wallet, X, PanelLeftClose, PanelLeftOpen, RotateCcw
 } from "lucide-react";
 import QRCode from "react-qr-code";
 import AuthScreen from "./AuthScreen";
@@ -948,7 +948,7 @@ function PaymentsPage({settings,payments,refunds,onSave,onVerify,onReject,busy,b
   </div>;
 }
 
-function PrintQueuePage({ jobs, printers, onPreview, onApprove, onReject, onRefund, onHistory, onAssignPrinter, onDispatch, onConfirmOutput, onRetryPdfExport, onRefresh, busyJobId }: {
+function PrintQueuePage({ jobs, printers, onPreview, onApprove, onReject, onRefund, onReviewBatch, onHistory, onAssignPrinter, onDispatch, onConfirmOutput, onRetryPdfExport, onRefresh, busyJobId }: {
   jobs: ShopPrintJob[];
   printers: PrinterDevice[];
   onPreview: (job: ShopPrintJob) => void;

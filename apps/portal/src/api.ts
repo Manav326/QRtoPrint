@@ -117,7 +117,6 @@ export interface QrStation {
   publicUrl?: string | null;
   isEnabled: boolean;
   createdUtc: string;
-  publicUrl?: string;
 }
 
 export interface AgentDevice {
