@@ -374,13 +374,28 @@ export interface ShopRefund {
   refundedByName: string;
 }
 
+export interface RecordShopRefundResult {
+  id: string;
+  printJobId: string;
+  printPaymentId: string;
+  jobNumber: string;
+  amountMinor: number;
+  currency: string;
+  method: "UPI" | "CASH";
+  status: string;
+  reference?: string | null;
+  reason: string;
+  refundedUtc: string;
+  refundedByUserId: string;
+}
+
 export function recordShopPrintRefund(token: string, jobId: string, values: {
   refundMethod: "UPI" | "CASH";
   refundReference: string | null;
   reason: string;
   confirmedSent: true;
 }) {
-  return apiRequest<ShopRefund>(`/api/v1/shop/print-jobs/${jobId}/refund`, {
+  return apiRequest<RecordShopRefundResult>(`/api/v1/shop/print-jobs/${jobId}/refund`, {
     method: "POST",
     body: JSON.stringify(values)
   }, token);
