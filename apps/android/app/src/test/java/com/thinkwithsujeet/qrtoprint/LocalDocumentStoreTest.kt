@@ -78,4 +78,21 @@ class LocalDocumentStoreTest {
         assertFalse(store.reorder(second, -1))
     }
 
+    @Test
+    fun supportsMovingItemsBetweenNestedFoldersAndUsesRootAsEmptyPath() {
+        val store = LocalDocumentStore(temporaryFolder.newFolder("private"))
+        val source = store.createFolder("", "Incoming")
+        val target = store.createFolder("", "School")
+        val file = store.importFile(ByteArrayInputStream("certificate".toByteArray()), "certificate.pdf", "Incoming")
+
+        assertEquals("", store.pathOf(store.root))
+        store.move(file, "School")
+        assertFalse(file.exists())
+        val moved = store.folder("School").resolve("certificate.pdf")
+        assertTrue(moved.isFile)
+        assertEquals("certificate", moved.readText())
+        assertEquals("School", store.pathOf(target))
+        assertEquals("Incoming", store.pathOf(source))
+    }
+
 }
