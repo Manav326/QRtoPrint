@@ -157,6 +157,7 @@ public sealed class CustomerPrintSession
     public Guid Id { get; set; } = Guid.NewGuid();
     public Guid TenantId { get; set; }
     public Guid QrStationId { get; set; }
+    public Guid? CustomerUserId { get; set; }
     public string TokenHash { get; set; } = string.Empty;
     public string Status { get; set; } = "Active";
     public DateTimeOffset CreatedUtc { get; set; } = DateTimeOffset.UtcNow;
