@@ -970,7 +970,7 @@ function SubscriptionPage({ summary }: { summary: ShopSubscriptionSummary }) {
   const periodStart = new Date(subscription.periodStartUtc).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" });
   const periodEnd = new Date(subscription.periodEndUtc).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" });
   const price = (amount: number | null | undefined, currency: string) =>
-    amount == null ? "Not configured" : `${currency} ${amount.toLocaleString("en-IN")} minor units`;
+    amount == null ? "Not configured" : `${currency} ${(amount / 100).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
   return (
     <section className="subscription-workspace">
