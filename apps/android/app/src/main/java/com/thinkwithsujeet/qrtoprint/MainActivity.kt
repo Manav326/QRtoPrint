@@ -1137,6 +1137,7 @@ class MainActivity : AppCompatActivity() {
                 gravity = Gravity.CENTER_VERTICAL
             }
             actions.addView(button("Preview", false).apply {
+                contentDescription = "Preview page ${position + 1}"
                 setOnClickListener {
                     try {
                         val bitmap = DocumentBatchComposer.renderPagePreview(file, page)
@@ -1158,12 +1159,14 @@ class MainActivity : AppCompatActivity() {
                 }
             }, LinearLayout.LayoutParams(0, dp(42), 1f))
             actions.addView(button("Rotate", false).apply {
+                contentDescription = "Rotate page ${position + 1}"
                 setOnClickListener {
                     pages[position] = page.copy(rotationDegrees = (page.rotationDegrees + 90) % 360)
                     renderPdfEditor(file, pages)
                 }
             }, LinearLayout.LayoutParams(0, dp(42), 1f).apply { marginStart = dp(6) })
             actions.addView(button("Up", false).apply {
+                contentDescription = "Move page ${position + 1} up"
                 isEnabled = position > 0
                 alpha = if (position > 0) 1f else 0.4f
                 setOnClickListener {
@@ -1175,6 +1178,7 @@ class MainActivity : AppCompatActivity() {
                 }
             }, LinearLayout.LayoutParams(0, dp(42), 0.7f).apply { marginStart = dp(6) })
             actions.addView(button("Down", false).apply {
+                contentDescription = "Move page ${position + 1} down"
                 isEnabled = position < pages.lastIndex
                 alpha = if (position < pages.lastIndex) 1f else 0.4f
                 setOnClickListener {
@@ -1187,6 +1191,7 @@ class MainActivity : AppCompatActivity() {
             }, LinearLayout.LayoutParams(0, dp(42), 0.9f).apply { marginStart = dp(6) })
             body.addView(actions, linearParams().apply { topMargin = dp(9) })
             body.addView(button("Remove page", false).apply {
+                contentDescription = "Remove page ${position + 1}"
                 setOnClickListener {
                     if (pages.size <= 1) {
                         toast("A PDF must keep at least one page.")
