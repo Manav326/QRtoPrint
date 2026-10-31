@@ -63,7 +63,7 @@ public sealed class PdfExportExecutorTests
             var receipt = executor.ExportPdf(entry, bytes, directory, CancellationToken.None);
 
             Assert.True(File.Exists(receipt.OutputPath));
-            Assert.True(receipt.FileName.EndsWith(".pdf", StringComparison.OrdinalIgnoreCase));
+            Assert.EndsWith(".pdf", receipt.FileName, StringComparison.OrdinalIgnoreCase);
             Assert.True(receipt.SizeBytes > 0);
             Assert.Equal(64, receipt.Sha256.Length);
             var header = new byte[5];
