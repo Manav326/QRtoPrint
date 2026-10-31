@@ -695,8 +695,7 @@ customerApi.MapGet("/me", async (
     {
         user.Id,
         user.DisplayName,
-        user.Email,
-        user.CreatedUtc
+        user.Email
     });
 });
 
