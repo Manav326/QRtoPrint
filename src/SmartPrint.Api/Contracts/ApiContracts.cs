@@ -88,7 +88,14 @@ public sealed record CreateLocalPrintUploadTicketRequest(
     string OriginalFileName,
     long SizeBytes,
     string Sha256,
-    string GrantToken);
+    string GrantToken,
+    Guid? BatchId = null);
+
+public sealed record RecordPrintRefundRequest(
+    string RefundMethod,
+    string? RefundReference,
+    string Reason,
+    bool ConfirmedSent);
 
 public sealed record LocalPrintUploadCompletionRequest(
     int PageCount,
