@@ -955,11 +955,17 @@ class MainActivity : AppCompatActivity() {
                 }
             }
             row.addView(selected, LinearLayout.LayoutParams(dp(42), dp(44)))
-            val more = text("⋮", 24, R.color.qp_muted, false).apply { gravity = Gravity.CENTER }
+            val more = text("⋮", 24, R.color.qp_muted, false).apply {
+                gravity = Gravity.CENTER
+                contentDescription = "More options for ${file.name}"
+            }
             row.addView(more, LinearLayout.LayoutParams(dp(36), dp(44)))
             more.setOnClickListener { showEntryMenu(more, file) }
         } else if (!isPicker) {
-            val more = text("⋮", 24, R.color.qp_muted, false).apply { gravity = Gravity.CENTER }
+            val more = text("⋮", 24, R.color.qp_muted, false).apply {
+                gravity = Gravity.CENTER
+                contentDescription = "More options for ${file.name}"
+            }
             row.addView(more, LinearLayout.LayoutParams(dp(42), dp(44)))
             more.setOnClickListener { showEntryMenu(more, file) }
         }
