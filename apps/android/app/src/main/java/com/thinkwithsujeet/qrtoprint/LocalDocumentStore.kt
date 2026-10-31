@@ -67,6 +67,36 @@ class LocalDocumentStore(filesDir: File) {
         ).toTypedArray()
     }
 
+    /** Places an item immediately before another sibling in the same folder. */
+    fun moveBefore(item: File, target: File): Boolean {
+        val base = root.canonicalFile
+        val source = item.canonicalFile
+        val destination = target.canonicalFile
+        require(source.parentFile?.canonicalPath?.startsWith(base.path) == true &&
+            destination.parentFile?.canonicalPath?.startsWith(base.path) == true) {
+            "Items must be inside local storage."
+        }
+        require(source.parentFile?.canonicalPath == destination.parentFile?.canonicalPath) {
+            "Items can only be reordered within the same folder."
+        }
+        if (source.path == destination.path) return false
+        val parent = source.parentFile ?: return false
+        val items = list(parent).toMutableList()
+        val from = items.indexOfFirst { it.canonicalPath == source.path }
+        val to = items.indexOfFirst { it.canonicalPath == destination.path }
+        if (from < 0 || to < 0) return false
+        val selected = items.removeAt(from)
+        val targetIndex = if (from < to) to - 1 else to
+        items.add(targetIndex, selected)
+        val firstTimestamp = System.currentTimeMillis() + 60_000L
+        items.forEachIndexed { index, file ->
+            check(file.setLastModified(firstTimestamp + index * 1_000L)) {
+                "The display order could not be saved."
+            }
+        }
+        return true
+    }
+
     fun move(item: File, destinationPath: String) {
         val base = root.canonicalFile
         val source = item.canonicalFile
