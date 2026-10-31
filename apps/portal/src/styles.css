@@ -684,3 +684,8 @@
 .page-refund-estimate strong{font-size:18px;color:var(--text)}
 .page-refund-estimate small{color:var(--muted)}
 @media(max-width:520px){.page-refund-grid{grid-template-columns:repeat(3,minmax(0,1fr));max-height:240px}.page-refund-chip{font-size:11px;padding:7px}}
+
+
+.customer-refund-note{display:flex;align-items:flex-start;gap:9px;margin:10px 0;padding:12px 13px;border:1px solid var(--border);border-radius:12px;background:var(--surface-2);color:var(--muted);font-size:12px;line-height:1.55}
+.customer-refund-note svg{flex:none;color:var(--accent);margin-top:1px}
+.customer-refund-note strong{color:var(--text)}

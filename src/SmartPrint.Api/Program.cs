@@ -4632,6 +4632,7 @@ publicApi.MapGet("/jobs/{jobId:guid}/status", async (
             item.Currency,
             item.QuotedAmountMinor,
             item.QuoteExpiresUtc,
+            item.RejectedPageNumbersJson,
             item.UpdatedUtc
         })
         .SingleOrDefaultAsync(ct);
@@ -4654,6 +4655,7 @@ publicApi.MapGet("/jobs/{jobId:guid}/status", async (
             item.Method,
             item.Status,
             item.AmountMinor,
+            item.RefundedAmountMinor,
             item.Currency,
             item.UpiIdSnapshot,
             item.PayeeNameSnapshot,
@@ -4669,6 +4671,7 @@ publicApi.MapGet("/jobs/{jobId:guid}/status", async (
         payment.Method,
         payment.Status,
         payment.AmountMinor,
+        payment.RefundedAmountMinor,
         payment.Currency,
         payment.UpiIdSnapshot,
         payment.PayeeNameSnapshot,
@@ -4957,6 +4960,7 @@ static object BuildPaymentResponse(PrintPayment payment, PrintJob job) =>
         payment.Method,
         payment.Status,
         payment.AmountMinor,
+        payment.RefundedAmountMinor,
         payment.Currency,
         payment.UpiIdSnapshot,
         payment.PayeeNameSnapshot,

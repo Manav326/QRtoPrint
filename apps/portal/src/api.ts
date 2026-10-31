@@ -828,6 +828,7 @@ export interface CustomerJobStatus {
   currency: string;
   quotedAmountMinor: number;
   quoteExpiresUtc?: string | null;
+  rejectedPageNumbersJson?: string;
   updatedUtc: string;
   timeline?: Array<{ newStatus: string; actorType: string; createdUtc: string }>;
   payment?: CustomerPayment | null;
@@ -974,6 +975,7 @@ export interface CustomerPayment {
   method: "UPI" | "CASH";
   status: string;
   amountMinor: number;
+  refundedAmountMinor?: number;
   currency: string;
   upiIdSnapshot?: string | null;
   payeeNameSnapshot?: string | null;
