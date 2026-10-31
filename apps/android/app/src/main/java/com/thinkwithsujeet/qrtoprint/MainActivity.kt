@@ -1,6 +1,7 @@
 package com.thinkwithsujeet.qrtoprint
 
 import android.content.ClipData
+import android.content.ClipDescription
 import android.content.Intent
 import android.database.Cursor
 import android.net.Uri
@@ -552,7 +553,13 @@ class MainActivity : AppCompatActivity() {
                 refreshLibrary()
             }
         }
-        column.addView(crumb, linearParams().apply { topMargin = dp(20); bottomMargin = dp(9) })
+        column.addView(crumb, linearParams().apply { topMargin = dp(20); bottomMargin = dp(5) })
+        if (!isPicker) {
+            column.addView(text(
+                "Long-press and drag files or folders to arrange their order. Use ⋮ to rename or move items.",
+                11, R.color.qp_muted, false
+            ).apply { setPadding(dp(2), 0, 0, dp(9)) })
+        }
 
         val folder = try { store.folder(path) } catch (_: Exception) { store.root }
         val entries = store.list(folder)
@@ -650,6 +657,37 @@ class MainActivity : AppCompatActivity() {
                 if (isPicker) pickerPath = store.pathOf(file) else folderPath = store.pathOf(file)
                 refreshLibrary()
             } else if (isPicker) chooseFile(file) else openDocument(file)
+        }
+        if (!isPicker) {
+            outer.setOnLongClickListener {
+                val clip = ClipData.newPlainText("SmartPrint item order", file.name)
+                outer.startDragAndDrop(clip, View.DragShadowBuilder(outer), file.canonicalPath, 0)
+            }
+            outer.setOnDragListener { _, event ->
+                when (event.action) {
+                    android.view.DragEvent.ACTION_DRAG_STARTED ->
+                        event.clipDescription?.hasMimeType(ClipDescription.MIMETYPE_TEXT_PLAIN) == true
+                    android.view.DragEvent.ACTION_DRAG_ENTERED -> { outer.alpha = 0.65f; true }
+                    android.view.DragEvent.ACTION_DRAG_EXITED -> { outer.alpha = 1f; true }
+                    android.view.DragEvent.ACTION_DROP -> {
+                        val sourcePath = event.localState as? String
+                        val source = sourcePath?.let(::File)
+                        if (source != null) {
+                            try {
+                                if (store.moveBefore(source, file)) {
+                                    selectedFilePaths.remove(source.canonicalPath)
+                                    showFiles()
+                                }
+                            } catch (e: Exception) {
+                                toast("Could not reorder items: ${message(e)}")
+                            }
+                        }
+                        true
+                    }
+                    android.view.DragEvent.ACTION_DRAG_ENDED -> { outer.alpha = 1f; true }
+                    else -> true
+                }
+            }
         }
         return outer
     }
