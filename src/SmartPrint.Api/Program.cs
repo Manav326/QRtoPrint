@@ -703,8 +703,8 @@ customerApi.MapGet("/jobs", async (
     SmartPrintDbContext db,
     CancellationToken ct) =>
 {
-    if (principal.FindFirstValue("customer_role") != "Customer" ||
-        !Guid.TryParse(principal.FindFirstValue(JwtRegisteredClaimNames.Sub), out var customerId))
+    var customerId = CustomerIdentity.GetCustomerId(principal);
+    if (customerId is null)
     {
         return Results.Forbid();
     }
