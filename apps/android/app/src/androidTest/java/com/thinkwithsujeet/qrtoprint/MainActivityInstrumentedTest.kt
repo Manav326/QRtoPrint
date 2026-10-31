@@ -8,9 +8,11 @@ import androidx.test.espresso.action.ViewActions.replaceText
 import androidx.test.espresso.assertion.ViewAssertions.doesNotExist
 import androidx.test.espresso.assertion.ViewAssertions.matches
 import androidx.test.espresso.matcher.ViewMatchers.isDisplayed
+import androidx.test.espresso.matcher.ViewMatchers.withId
 import androidx.test.espresso.matcher.ViewMatchers.withHint
 import androidx.test.espresso.matcher.ViewMatchers.withText
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import org.hamcrest.Matchers.allOf
 import org.hamcrest.Matchers.containsString
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -23,8 +25,9 @@ class MainActivityInstrumentedTest {
             onView(withText("Keep everything ready")).check(matches(isDisplayed()))
             onView(withText("Import files")).check(matches(isDisplayed()))
             onView(withText("Import folder")).check(matches(isDisplayed()))
-            onView(withText("Scan QR")).check(matches(isDisplayed()))
-            onView(withText("Print")).check(matches(isDisplayed()))
+            val navigationLabel = com.google.android.material.R.id.navigation_bar_item_small_label_view
+            onView(allOf(withId(navigationLabel), withText("Scan QR"))).check(matches(isDisplayed()))
+            onView(allOf(withId(navigationLabel), withText("Print"))).check(matches(isDisplayed()))
         }
     }
 
