@@ -886,7 +886,7 @@ shop.MapPatch("/printers/{printerId:guid}/active", async (
     return Results.Ok(new { printer.Id, printer.IsActive, printer.UpdatedUtc });
 });
 
-shop.MapGet("/qr-stations", async (ClaimsPrincipal principal, SmartPrintDbContext db, CancellationToken ct) =>
+shop.MapGet("/qr-stations", async (ClaimsPrincipal principal, SmartPrintDbContext db, IConfiguration configuration, CancellationToken ct) =>
 {
     if (!TryGetTenantId(principal, out var tenantId))
     {
@@ -902,11 +902,22 @@ shop.MapGet("/qr-stations", async (ClaimsPrincipal principal, SmartPrintDbContex
             station.PrinterDeviceId,
             station.DisplayName,
             station.PublicCodeHint,
+            station.PublicCode,
             station.IsEnabled,
             station.CreatedUtc
         })
         .ToListAsync(ct);
-    return Results.Ok(stations);
+    var portalBase = (configuration["PublicPortal:BaseUrl"] ?? string.Empty).TrimEnd('/');
+    return Results.Ok(stations.Select(station => new
+    {
+        station.Id,
+        station.PrinterDeviceId,
+        station.DisplayName,
+        station.PublicCodeHint,
+        station.IsEnabled,
+        station.CreatedUtc,
+        PublicUrl = station.PublicCode is not null ? $"{portalBase}/s/{station.PublicCode}" : null
+    }));
 });
 
 shop.MapPost("/qr-stations", async (
@@ -964,6 +975,7 @@ shop.MapPost("/qr-stations", async (
         PrinterDeviceId = request.PrinterDeviceId,
         DisplayName = request.DisplayName.Trim(),
         PublicCodeHash = HashOpaqueToken(publicCode),
+        PublicCode = publicCode,
         PublicCodeHint = publicCode[^4..]
     };
     db.QrStations.Add(station);
@@ -1011,6 +1023,7 @@ shop.MapPost("/qr-stations/{stationId:guid}/rotate-code", async (
 
     var publicCode = Microsoft.AspNetCore.WebUtilities.WebEncoders.Base64UrlEncode(RandomNumberGenerator.GetBytes(24));
     station.PublicCodeHash = HashOpaqueToken(publicCode);
+    station.PublicCode = publicCode;
     station.PublicCodeHint = publicCode[^4..];
     await db.SaveChangesAsync(ct);
 
@@ -1152,6 +1165,7 @@ shop.MapGet("/print-jobs", async (
         select new
         {
             job.Id,
+            job.BatchId,
             job.JobNumber,
             job.Status,
             job.PageCount,
@@ -2558,6 +2572,7 @@ agentApi.MapPost("/local-uploads/{ticketId:guid}/complete", async (
     {
         Id = ticket.PrintJobId,
         TenantId = ticket.TenantId,
+        BatchId = ticket.BatchId,
         QrStationId = ticket.QrStationId,
         PrinterDeviceId = ticket.PrinterDeviceId,
         CustomerSessionId = ticket.CustomerSessionId,
@@ -3463,6 +3478,12 @@ publicApi.MapPost("/sessions/current/jobs", async (
         });
     }
 
+    var rawBatchId = context.Request.Headers["X-Print-Batch-Id"].FirstOrDefault();
+    if (!string.IsNullOrWhiteSpace(rawBatchId) && !Guid.TryParse(rawBatchId, out _))
+    {
+        return Results.BadRequest(new { code = "invalid_batch_id", message = "The upload batch identifier is invalid." });
+    }
+    var batchId = string.IsNullOrWhiteSpace(rawBatchId) ? Guid.NewGuid() : Guid.Parse(rawBatchId);
     var tokenHash = HashOpaqueToken(rawToken);
     var now = DateTimeOffset.UtcNow;
     var session = await db.CustomerPrintSessions.AsNoTracking()
@@ -3477,7 +3498,7 @@ publicApi.MapPost("/sessions/current/jobs", async (
 
     var existing = await db.PrintJobs.AsNoTracking()
         .Where(job => job.TenantId == session.TenantId && job.IdempotencyKey == idempotencyKey)
-        .Select(job => new { job.Id, job.CustomerSessionId, job.JobNumber, job.Status, job.PageCount, job.CreatedUtc })
+        .Select(job => new { job.Id, job.BatchId, job.CustomerSessionId, job.JobNumber, job.Status, job.PageCount, job.CreatedUtc })
         .SingleOrDefaultAsync(ct);
     if (existing is not null)
     {
@@ -3565,6 +3586,7 @@ publicApi.MapPost("/sessions/current/jobs", async (
         TenantId = session.TenantId,
         QrStationId = session.QrStationId,
         CustomerSessionId = session.Id,
+        BatchId = batchId,
         JobNumber = $"SP-{now:yyMMdd}-{Guid.NewGuid().ToString("N")[..8].ToUpperInvariant()}",
         Status = "AWAITING_CONFIGURATION",
         IdempotencyKey = idempotencyKey,
@@ -3594,6 +3616,28 @@ publicApi.MapPost("/sessions/current/jobs", async (
     {
         await using var transaction = await db.Database.BeginTransactionAsync(ct);
         await entitlements.AcquireQuotaLockAsync(session.TenantId, TenantQuotaResource.MonthlyPrintJob, ct);
+        var batchJobSizes = await (
+            from batchJob in db.PrintJobs.AsNoTracking()
+            join batchDocument in db.PrintDocuments.AsNoTracking()
+                on new { batchJob.TenantId, PrintJobId = batchJob.Id } equals new { batchDocument.TenantId, batchDocument.PrintJobId }
+            where batchJob.TenantId == session.TenantId &&
+                  batchJob.CustomerSessionId == session.Id &&
+                  batchJob.BatchId == batchId
+            select batchDocument.SizeBytes).ToListAsync(ct);
+        var pendingBatchTicketSizes = await db.LocalPrintUploadTickets.AsNoTracking()
+            .Where(ticket => ticket.TenantId == session.TenantId &&
+                             ticket.CustomerSessionId == session.Id &&
+                             ticket.BatchId == batchId &&
+                             ticket.CompletedUtc == null)
+            .Select(ticket => ticket.SizeBytes).ToListAsync(ct);
+        if (batchJobSizes.Count + pendingBatchTicketSizes.Count >= 20 ||
+            batchJobSizes.Sum() + pendingBatchTicketSizes.Sum() + file.Length > 50L * 1024 * 1024)
+        {
+            await transaction.RollbackAsync(ct);
+            await storage.DeleteAsync(stored.StorageKey);
+            return Results.Problem(statusCode: StatusCodes.Status413PayloadTooLarge,
+                title: "A print batch can contain up to 20 files and 50 MB in total.");
+        }
         var quota = await entitlements.CheckCapacityAsync(session.TenantId, TenantQuotaResource.MonthlyPrintJob, ct);
         if (!quota.Allowed)
         {
@@ -3689,6 +3733,7 @@ publicApi.MapPost("/sessions/current/local-upload-tickets", async (
         return Results.UnprocessableEntity(new { code = "document_not_supported", message = "Local upload supports PDF, JPG/JPEG and PNG files up to 20 MB with a valid SHA-256 digest." });
     }
 
+    var batchId = request.BatchId ?? Guid.NewGuid();
     var now = DateTimeOffset.UtcNow;
     var customerSessionTokenHash = HashOpaqueToken(rawToken);
     var session = await db.CustomerPrintSessions.AsNoTracking()
@@ -3725,6 +3770,7 @@ publicApi.MapPost("/sessions/current/local-upload-tickets", async (
         {
             existing.Id,
             existing.PrintJobId,
+            existing.BatchId,
             existing.JobNumber,
             existing.AgentDeviceId,
             existing.ExpiresUtc,
@@ -3792,6 +3838,7 @@ publicApi.MapPost("/sessions/current/local-upload-tickets", async (
         QrStationId = session.QrStationId,
         PrinterDeviceId = stationPrinter.PrinterDeviceId,
         AgentDeviceId = stationPrinter.AgentDeviceId,
+        BatchId = batchId,
         JobNumber = $"SP-{now:yyMMdd}-{Guid.NewGuid().ToString("N")[..8].ToUpperInvariant()}",
         IdempotencyKey = idempotencyKey,
         GrantHash = grantHash,
@@ -3803,6 +3850,27 @@ publicApi.MapPost("/sessions/current/local-upload-tickets", async (
         CreatedUtc = now,
         ExpiresUtc = now.AddMinutes(15)
     };
+    var batchJobSizes = await (
+        from batchJob in db.PrintJobs.AsNoTracking()
+        join batchDocument in db.PrintDocuments.AsNoTracking()
+            on new { batchJob.TenantId, PrintJobId = batchJob.Id } equals new { batchDocument.TenantId, batchDocument.PrintJobId }
+        where batchJob.TenantId == session.TenantId &&
+              batchJob.CustomerSessionId == session.Id &&
+              batchJob.BatchId == batchId
+        select batchDocument.SizeBytes).ToListAsync(ct);
+    var pendingBatchTicketSizes = await db.LocalPrintUploadTickets.AsNoTracking()
+        .Where(item => item.TenantId == session.TenantId &&
+                       item.CustomerSessionId == session.Id &&
+                       item.BatchId == batchId &&
+                       item.CompletedUtc == null)
+        .Select(item => item.SizeBytes).ToListAsync(ct);
+    if (batchJobSizes.Count + pendingBatchTicketSizes.Count >= 20 ||
+        batchJobSizes.Sum() + pendingBatchTicketSizes.Sum() + request.SizeBytes > 50L * 1024 * 1024)
+    {
+        return Results.Problem(statusCode: StatusCodes.Status413PayloadTooLarge,
+            title: "A print batch can contain up to 20 files and 50 MB in total.");
+    }
+
     db.LocalPrintUploadTickets.Add(ticket);
     await db.SaveChangesAsync(ct);
 
