@@ -274,6 +274,7 @@ public sealed class SmartPrintDbContext(DbContextOptions<SmartPrintDbContext> op
             entity.Property(x => x.OutputFileName).HasMaxLength(255);
             entity.Property(x => x.OutputSha256).HasMaxLength(64);
             entity.Property(x => x.RejectedPageNumbersJson).HasColumnType("jsonb").HasDefaultValue("[]").IsRequired();
+            entity.Property(x => x.PageRefundAllocationsJson).HasColumnType("jsonb").HasDefaultValue("[]").IsRequired();
             entity.HasIndex(x => new { x.TenantId, x.CreatedUtc });
             entity.HasIndex(x => new { x.TenantId, x.BatchId });
             entity.HasIndex(x => new { x.TenantId, x.IdempotencyKey }).IsUnique();
