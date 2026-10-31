@@ -12,6 +12,7 @@ import java.net.HttpURLConnection
 import java.net.URL
 import java.nio.charset.StandardCharsets
 import java.security.KeyStore
+import java.time.Instant
 import javax.crypto.Cipher
 import javax.crypto.KeyGenerator
 import javax.crypto.SecretKey
@@ -135,6 +136,12 @@ object CustomerAccountClient {
             JSONObject().put("displayName", displayName).put("email", email).put("password", password)
         )
         return response.toAuth(email, displayName)
+    }
+
+    fun accessTokenIsExpired(auth: CustomerAuth, leewaySeconds: Long = 90): Boolean {
+        val expires = runCatching { Instant.parse(auth.accessTokenExpiresUtc) }.getOrNull()
+            ?: return true
+        return !expires.isAfter(Instant.now().plusSeconds(leewaySeconds))
     }
 
     fun refresh(baseUrl: String, auth: CustomerAuth): CustomerAuth {
