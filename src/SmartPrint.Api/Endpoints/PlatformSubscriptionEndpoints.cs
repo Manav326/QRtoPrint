@@ -202,7 +202,7 @@ public static class PlatformSubscriptionEndpoints
                 var message = errorCode == "paid_plan_requires_verified_payment"
                     ? "Confirm that payment was received and provide its transaction reference before granting this paid plan."
                     : errorCode == "billing_interval_not_available"
-                        ? "That billing interval is not available at an explicitly zero price."
+                        ? "That billing interval is not configured for this published plan version."
                         : "This published plan version is not available for manual assignment.";
                 return Results.Conflict(new { code = errorCode, message });
             }
