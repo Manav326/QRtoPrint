@@ -34,6 +34,18 @@ class MainActivityInstrumentedTest {
     }
 
     @Test
+    fun guestCanOpenGlobalSmartPrintAccountAndSeeCustomerSignInOptions() {
+        ActivityScenario.launch(MainActivity::class.java).use {
+            onView(withContentDescription("Account")).perform(click())
+            onView(withText(containsString("Every print shop."))).check(matches(isDisplayed()))
+            onView(withText(containsString("Continue as a guest"))).check(matches(isDisplayed()))
+            onView(withHint("Email address")).check(matches(isDisplayed()))
+            onView(withHint("Password")).check(matches(isDisplayed()))
+            onView(withText("Create account")).check(matches(isDisplayed()))
+        }
+    }
+
+    @Test
     fun explainsTheShopQrConnectionBeforeStartingTheScanner() {
         ActivityScenario.launch(MainActivity::class.java).use {
             val navigationLabel = com.google.android.material.R.id.navigation_bar_item_small_label_view
