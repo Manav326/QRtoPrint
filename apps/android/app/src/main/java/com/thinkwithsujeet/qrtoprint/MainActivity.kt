@@ -647,8 +647,13 @@ class MainActivity : AppCompatActivity() {
             try {
                 var auth = customerAccountStore.read() ?: error("Sign in to view print history.")
                 val jobs = try {
+                    if (CustomerAccountClient.accessTokenIsExpired(auth)) {
+                        auth = CustomerAccountClient.refresh(accountServiceUrl(), auth)
+                        customerAccountStore.save(auth)
+                    }
                     CustomerAccountClient.history(accountServiceUrl(), auth.accessToken)
-                } catch (first: Exception) {
+                } catch (error: CustomerApiException) {
+                    if (error.statusCode != 401) throw error
                     auth = CustomerAccountClient.refresh(accountServiceUrl(), auth)
                     customerAccountStore.save(auth)
                     CustomerAccountClient.history(accountServiceUrl(), auth.accessToken)
@@ -1038,10 +1043,7 @@ class MainActivity : AppCompatActivity() {
                         val token = try {
                             var auth = customerAccountStore.read()
                             if (auth != null) {
-                                val expiry = runCatching {
-                                    java.time.Instant.parse(auth.accessTokenExpiresUtc)
-                                }.getOrNull()
-                                if (expiry == null || expiry.isBefore(java.time.Instant.now().plusSeconds(90))) {
+                                if (CustomerAccountClient.accessTokenIsExpired(auth)) {
                                     auth = CustomerAccountClient.refresh(BuildConfig.SERVICE_BASE_URL, auth)
                                     customerAccountStore.save(auth)
                                 }
