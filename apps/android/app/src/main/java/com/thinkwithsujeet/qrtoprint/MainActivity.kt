@@ -301,11 +301,11 @@ class MainActivity : AppCompatActivity() {
             setPadding(dp(20), dp(20), dp(20), dp(20))
         }
         heroContent.addView(text(
-            if (auth == null) "Your print journey,\nyour choice." else "Welcome back,\n${auth.displayName.ifBlank { "SmartPrint customer" }}.",
+            if (auth == null) "One SmartPrint account.\nEvery print shop." else "Welcome back,\n${auth.displayName.ifBlank { "SmartPrint customer" }}.",
             24, R.color.qp_hero_text, true
         ))
         heroContent.addView(text(
-            if (auth == null) "Prepare and print as a guest, or create a free account to keep your print history together across shops."
+            if (auth == null) "Prepare and print as a guest, or create one free SmartPrint account to use at any participating shop and keep your print history together."
             else "New shop sessions started while you're signed in will be linked to your customer account.",
             13, R.color.qp_hero_muted, false
         ).apply { setPadding(0, dp(8), 0, 0) })
@@ -372,7 +372,7 @@ class MainActivity : AppCompatActivity() {
         form.addView(displayName, linearParams())
         form.addView(email, linearParams().apply { topMargin = dp(8) })
         form.addView(password, linearParams().apply { topMargin = dp(8) })
-        form.addView(button(if (accountCreateMode) "Create my account" else "Sign in", true).apply {
+        form.addView(button(if (accountCreateMode) "Create SmartPrint account" else "Sign in to SmartPrint", true).apply {
             setOnClickListener {
                 val name = displayName.text.toString().trim()
                 val emailValue = email.text.toString().trim()
@@ -388,7 +388,7 @@ class MainActivity : AppCompatActivity() {
         fields.addView(form)
         column.addView(fields, linearParams().apply { topMargin = dp(12) })
         column.addView(text(
-            if (accountCreateMode) "Use at least 12 characters with uppercase, lowercase, a number and a symbol. Your account is separate from any print shop's staff login."
+            if (accountCreateMode) "Use at least 12 characters with uppercase, lowercase, a number and a symbol. This is your global SmartPrint customer account, not a shop account."
             else "Customer accounts are separate from print-shop staff accounts. Your local documents remain available if you sign out.",
             11, R.color.qp_muted, false
         ).apply { setPadding(dp(3), dp(10), dp(3), 0) })
