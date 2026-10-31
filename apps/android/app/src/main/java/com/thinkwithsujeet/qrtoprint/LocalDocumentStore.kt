@@ -63,8 +63,37 @@ class LocalDocumentStore(filesDir: File) {
         val path = directory.canonicalPath
         require(path == base || path.startsWith(base + File.separator)) { "Folder is outside local storage." }
         return (directory.listFiles() ?: emptyArray()).sortedWith(
-            compareBy<File>({ !it.isDirectory }, { it.name.lowercase(Locale.ROOT) })
+            compareBy<File>({ !it.isDirectory }, { it.lastModified() }, { it.name.lowercase(Locale.ROOT) })
         ).toTypedArray()
+    }
+
+    /**
+     * Changes the explicit order of sibling files/folders without changing their names or bytes.
+     * Order is stored using filesystem metadata inside app-private storage, so exports preserve
+     * the visible sequence without adding numeric prefixes to customer filenames.
+     */
+    fun reorder(item: File, offset: Int): Boolean {
+        require(offset == -1 || offset == 1) { "Order offset must be -1 or 1." }
+        val base = root.canonicalFile
+        val canonical = item.canonicalFile
+        require(canonical.parentFile?.canonicalPath?.startsWith(base.path) == true) {
+            "Item is outside local storage."
+        }
+        val parent = canonical.parentFile ?: error("Item has no parent folder.")
+        val items = list(parent).toMutableList()
+        val from = items.indexOfFirst { it.canonicalPath == canonical.path }
+        if (from < 0) return false
+        val to = from + offset
+        if (to !in items.indices) return false
+        val selected = items.removeAt(from)
+        items.add(to, selected)
+        val firstTimestamp = System.currentTimeMillis() + 60_000L
+        items.forEachIndexed { index, file ->
+            check(file.setLastModified(firstTimestamp + index * 1_000L)) {
+                "The display order could not be saved."
+            }
+        }
+        return true
     }
 
     fun pathOf(file: File): String {
