@@ -31,9 +31,10 @@ public sealed class SubscriptionPlanModelTests
         var subscription = db.Model.FindEntityType(typeof(TenantSubscription));
         Assert.NotNull(subscription);
 
-        var planVersionRelationship = Assert.Single(subscription.GetForeignKeys()
-            .Where(relationship =>
-                relationship.Properties.Any(property => property.Name == nameof(TenantSubscription.PlanVersionId))));
+        var planVersionRelationship = Assert.Single(
+            subscription.GetForeignKeys(),
+            relationship => relationship.Properties.Any(property =>
+                property.Name == nameof(TenantSubscription.PlanVersionId)));
 
         Assert.Equal(DeleteBehavior.Restrict, planVersionRelationship.DeleteBehavior);
         Assert.True(planVersionRelationship.Properties.Single().IsNullable);
