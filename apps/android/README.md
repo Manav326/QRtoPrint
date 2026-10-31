@@ -40,7 +40,13 @@ From repository root:
 gradle --no-daemon -p apps/android :app:testDebugUnitTest :app:assembleDebug
 ```
 
-The CI workflow uploads the debug APK as `qrtoprint-android-debug`. Download it with `scripts\\download-android-apk.ps1`; add `-Install` to install it on one connected, ADB-authorised Android device. Debug builds are for development only. Release signing, physical Android/Wi-Fi validation, Play Store listing and distribution are not yet complete.
+Build the Android app with the service origin configured in one place:
+
+```bash
+gradle --no-daemon -p apps/android -PsmartPrintServiceUrl=https://print.thinkwithsujeet.in :app:testDebugUnitTest :app:assembleDebug
+```
+
+The Gradle property defaults to the canonical SmartPrint service origin and can be changed for other deployment environments. The CI workflow uploads the debug APK as `qrtoprint-android-debug`. Download it with `scripts\\download-android-apk.ps1`; add `-Install` to install it on one connected, ADB-authorised Android device. Debug builds are for development only. Release signing, physical Android/Wi-Fi validation, Play Store listing and distribution are not yet complete.
 
 The CI Android job also uploads JVM and emulator test reports as `qrtoprint-android-test-reports`, including JUnit XML and the connected-test HTML report when generated. Use the report artifact to inspect individual test cases and failures from a CI run.
 
