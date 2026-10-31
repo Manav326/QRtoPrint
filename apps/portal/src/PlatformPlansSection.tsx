@@ -33,7 +33,7 @@ const emptyForm: PlanForm = {
   maxQrStations: "",
   maxMonthlyPrintJobs: "",
   maxDocumentBytes: "",
-  cloudAssistedPrintingEnabled: true,
+  cloudAssistedPrintingEnabled: false,
   whiteLabelEnabled: false,
   advancedReportsEnabled: false
 };
