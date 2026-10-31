@@ -15,7 +15,7 @@ Passwords are handled by ASP.NET Core Identity's password hasher and validation 
 
 - GET /api/v1/shop/reports/summary?days=7|30|90 — returns a summary scoped to the authenticated shop. The default period is 30 days; unsupported period values are rejected.
 - Job totals and status breakdown use jobs created inside the selected UTC window. `completedJobs` counts only jobs in `COMPLETED` with an operator-recorded `OutputConfirmedUtc`; `pagesRequested` is page count multiplied by requested copies and is not a claim of physical output.
-- Verified collections are grouped by currency and payment method and use `VerifiedUtc` within the selected window. UPI references that have not been independently verified by the shop are excluded. Pending payment attempts are reported separately.
+- Verified collections are grouped by currency and payment method and use `VerifiedUtc` within the selected window. UPI references that have not been independently verified by the shop are excluded. The pending-payment count includes all currently open UPI/cash attempts for the tenant, regardless of creation date, so an old unresolved payment never disappears from the operator's review count.
 
 ### Authenticated shop endpoints
 
