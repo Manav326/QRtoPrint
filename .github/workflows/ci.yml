@@ -106,7 +106,24 @@ jobs:
           profile: pixel_2
           emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
           disable-animations: true
-          script: gradle --no-daemon -p apps/android :app:connectedDebugAndroidTest
+          script: |
+            set -euo pipefail
+            echo "Waking and unlocking the Android emulator before Espresso tests..."
+            adb wait-for-device
+            adb shell input keyevent KEYCODE_WAKEUP
+            adb shell wm dismiss-keyguard || true
+            adb shell locksettings set-disabled true || true
+            adb shell settings put global stay_on_while_plugged_in 7
+            adb shell settings put system screen_off_timeout 2147483647
+            adb shell input keyevent KEYCODE_HOME
+            sleep 2
+
+            echo "Checking emulator power state..."
+            adb shell dumpsys power | grep -E 'mWakefulness=Awake|Display Power: state=ON'
+            echo "Current Android window focus:"
+            adb shell dumpsys window | grep -E 'mCurrentFocus|mFocusedApp' || true
+
+            gradle --no-daemon -p apps/android :app:connectedDebugAndroidTest
       - name: Upload Android test reports
         if: always()
         uses: actions/upload-artifact@v4
