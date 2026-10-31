@@ -17,6 +17,7 @@ data class PdfPageEdit(val sourceIndex: Int, val rotationDegrees: Int = 0)
 
 object DocumentBatchComposer {
     const val MAX_SOURCE_BYTES = 100L * 1024L * 1024L
+    const val MAX_PRINT_PDF_BYTES = 20L * 1024L * 1024L
     const val MAX_PAGES = 500
     private const val MAX_RENDER_EDGE = 2000
     private const val PAGE_WIDTH = 595
@@ -48,7 +49,9 @@ object DocumentBatchComposer {
                     val width = (page.width * scale).toInt().coerceAtLeast(1)
                     val height = (page.height * scale).toInt().coerceAtLeast(1)
                     val bitmap = renderPdfPage(page, width, height)
-                    return rotate(bitmap, edit.rotationDegrees)
+                    val rotated = rotate(bitmap, edit.rotationDegrees)
+                    if (rotated !== bitmap) bitmap.recycle()
+                    return rotated
                 }
             }
         }
@@ -252,8 +255,8 @@ object DocumentBatchComposer {
             document.writeTo(stream)
             stream.fd.sync()
         }
-        require(output.length() in 1..MAX_SOURCE_BYTES) {
-            "The prepared PDF exceeds the 100 MB print limit."
+        require(output.length() in 1..MAX_PRINT_PDF_BYTES) {
+            "The prepared PDF exceeds the current 20 MB per-document print limit. Remove pages or prepare a smaller batch."
         }
     }
 }
