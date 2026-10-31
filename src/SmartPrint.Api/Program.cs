@@ -210,7 +210,7 @@ platform.MapGet("/tenants", async (
     SmartPrintDbContext db,
     CancellationToken ct) =>
 {
-    if (search?.Trim().Length > 100)
+    if (search is not null && search.Trim().Length > 100)
     {
         return Results.ValidationProblem(new Dictionary<string, string[]>
         {
@@ -218,7 +218,7 @@ platform.MapGet("/tenants", async (
         });
     }
 
-    if (status?.Trim().Length > 24)
+    if (status is not null && status.Trim().Length > 24)
     {
         return Results.ValidationProblem(new Dictionary<string, string[]>
         {
@@ -433,9 +433,7 @@ auth.MapPost("/login", async (
         return Results.Unauthorized();
     }
 
-    var userClaims = user.TenantId is null
-        ? await userManager.GetClaimsAsync(user)
-        : [];
+    var userClaims = await userManager.GetClaimsAsync(user);
     if (user.TenantId is null && !PlatformAdminAuthorization.IsPlatformAdmin(user.TenantId, userClaims))
     {
         return Results.Unauthorized();
@@ -500,9 +498,7 @@ auth.MapPost("/refresh", async (
         return Results.Unauthorized();
     }
 
-    var userClaims = user.TenantId is null
-        ? await userManager.GetClaimsAsync(user)
-        : [];
+    var userClaims = await userManager.GetClaimsAsync(user);
     if (user.TenantId is null && !PlatformAdminAuthorization.IsPlatformAdmin(user.TenantId, userClaims))
     {
         await transaction.RollbackAsync(ct);
