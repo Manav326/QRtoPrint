@@ -844,6 +844,92 @@ shop.MapGet("/print-jobs", async (
 
 
 
+shop.MapGet("/reports/summary", async (
+    ClaimsPrincipal principal,
+    SmartPrintDbContext db,
+    int? days,
+    CancellationToken ct) =>
+{
+    if (!TryGetTenantId(principal, out var tenantId))
+    {
+        return Results.Forbid();
+    }
+
+    var periodDays = days ?? 30;
+    if (periodDays != 7 && periodDays != 30 && periodDays != 90)
+    {
+        return Results.ValidationProblem(new Dictionary<string, string[]>
+        {
+            ["days"] = ["Choose a reporting period of 7, 30 or 90 days."]
+        });
+    }
+
+    var toUtc = DateTimeOffset.UtcNow;
+    var fromUtc = toUtc.AddDays(-periodDays);
+    var jobs = db.PrintJobs.AsNoTracking().Where(job =>
+        job.TenantId == tenantId &&
+        job.CreatedUtc >= fromUtc &&
+        job.CreatedUtc < toUtc);
+
+    var totalJobs = await jobs.CountAsync(ct);
+    var completedJobs = await jobs.CountAsync(job =>
+        job.Status == "COMPLETED" && job.OutputConfirmedUtc != null, ct);
+    var outputUnconfirmedJobs = await jobs.CountAsync(job =>
+        job.Status == "OUTPUT_UNCONFIRMED", ct);
+    var pagesRequested = await jobs.SumAsync(job =>
+        (long?)(job.PageCount * (long)job.Copies), ct) ?? 0;
+
+    var jobsByStatus = await jobs
+        .GroupBy(job => job.Status)
+        .Select(group => new { status = group.Key, count = group.Count() })
+        .OrderByDescending(group => group.count)
+        .ThenBy(group => group.status)
+        .ToListAsync(ct);
+
+    var verifiedPayments = db.PrintPayments.AsNoTracking().Where(payment =>
+        payment.TenantId == tenantId &&
+        payment.Status == "VERIFIED" &&
+        payment.VerifiedUtc != null &&
+        payment.VerifiedUtc >= fromUtc &&
+        payment.VerifiedUtc < toUtc);
+
+    var verifiedCollectionsByMethod = await verifiedPayments
+        .GroupBy(payment => new { payment.Method, payment.Currency })
+        .Select(group => new
+        {
+            method = group.Key.Method,
+            currency = group.Key.Currency,
+            paymentCount = group.Count(),
+            amountMinor = group.Sum(payment => payment.AmountMinor)
+        })
+        .OrderBy(group => group.currency)
+        .ThenBy(group => group.method)
+        .ToListAsync(ct);
+
+    var pendingPaymentCount = await db.PrintPayments.AsNoTracking().CountAsync(payment =>
+        payment.TenantId == tenantId &&
+        payment.CreatedUtc >= fromUtc &&
+        payment.CreatedUtc < toUtc &&
+        (payment.Status == "AWAITING_CUSTOMER_PAYMENT" ||
+         payment.Status == "CUSTOMER_REPORTED" ||
+         payment.Status == "CASH_AWAITING_PAYMENT"), ct);
+
+    return Results.Ok(new
+    {
+        periodDays,
+        fromUtc,
+        toUtc,
+        generatedUtc = DateTimeOffset.UtcNow,
+        totalJobs,
+        completedJobs,
+        outputUnconfirmedJobs,
+        pagesRequested,
+        pendingPaymentCount,
+        jobsByStatus,
+        verifiedCollectionsByMethod
+    });
+});
+
 shop.MapPatch("/print-jobs/{jobId:guid}/printer", async (
     Guid jobId,
     AssignPrintJobPrinterRequest request,
