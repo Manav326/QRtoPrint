@@ -67,6 +67,24 @@ class LocalDocumentStore(filesDir: File) {
         ).toTypedArray()
     }
 
+    fun move(item: File, destinationPath: String) {
+        val base = root.canonicalFile
+        val source = item.canonicalFile
+        require(source.parentFile?.canonicalPath?.startsWith(base.path + File.separator) == true) {
+            "Item is outside local storage."
+        }
+        val destination = folder(destinationPath).canonicalFile
+        require(source.path != destination.path) { "Choose a different destination folder." }
+        if (item.isDirectory) {
+            require(!destination.path.startsWith(source.path + File.separator)) {
+                "A folder cannot be moved inside itself."
+            }
+        }
+        val target = File(destination, item.name)
+        require(!target.exists()) { "An item with that name already exists in the destination." }
+        check(item.renameTo(target)) { "Item could not be moved." }
+    }
+
     /**
      * Changes the explicit order of sibling files/folders without changing their names or bytes.
      * Order is stored using filesystem metadata inside app-private storage, so exports preserve
