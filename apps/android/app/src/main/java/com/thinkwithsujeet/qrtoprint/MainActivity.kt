@@ -861,7 +861,7 @@ class MainActivity : AppCompatActivity() {
         MaterialAlertDialogBuilder(this)
             .setTitle("Connect to this print shop?")
             .setMessage(
-                "Open the QRtoPrint customer portal at:\n\n${link.host}\n\n" +
+                "Open the SmartPrint customer portal at:\n\n${link.host}\n\n" +
                     (if (link.url.startsWith("http://")) "LOCAL DEVELOPMENT ONLY — use a trusted private Wi-Fi network.\n\n" else "") +
                     "The shop's existing quote, payment and print-status workflow will be used."
             )
