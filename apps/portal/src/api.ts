@@ -137,23 +137,76 @@ export class ApiError extends Error {
 
 const apiBase = (import.meta.env.VITE_API_BASE_URL || "http://localhost:8080").replace(/\/$/, "");
 
+let refreshInFlight: Promise<AuthTokens | null> | null = null;
+
+async function refreshStoredSession(expectedAccessToken: string): Promise<AuthTokens | null> {
+  const stored = readStoredTokens();
+  if (!stored?.refreshToken) return null;
+
+  // Another request may already have rotated the token while this request was
+  // in flight. Reuse the newer access token instead of consuming its refresh
+  // token again.
+  if (stored.accessToken !== expectedAccessToken) {
+    const expiresAt = Date.parse(stored.accessTokenExpiresUtc);
+    if (Number.isFinite(expiresAt) && expiresAt > Date.now() + 15_000) {
+      return stored;
+    }
+  }
+
+  if (!refreshInFlight) {
+    const source = stored;
+    refreshInFlight = apiRequest<AuthTokens>("/api/v1/auth/refresh", {
+      method: "POST",
+      body: JSON.stringify({ refreshToken: source.refreshToken })
+    }).then(tokens => {
+      const latest = readStoredTokens();
+      if (!latest) return null;
+      if (latest.refreshToken === source.refreshToken) {
+        storeTokens(tokens);
+        return tokens;
+      }
+      return latest;
+    }).catch(error => {
+      if (error instanceof ApiError && error.status === 401) {
+        const latest = readStoredTokens();
+        if (latest?.refreshToken === source.refreshToken) storeTokens(null);
+        return null;
+      }
+      throw error;
+    }).finally(() => {
+      refreshInFlight = null;
+    });
+  }
+
+  return refreshInFlight;
+}
+
 export async function apiRequest<T>(
   path: string,
   options: RequestInit = {},
   accessToken?: string
 ): Promise<T> {
-  const headers = new Headers(options.headers);
-  headers.set("Accept", "application/json");
-  if (accessToken) headers.set("Authorization", `Bearer ${accessToken}`);
-  if (options.body && !(options.body instanceof FormData) && !headers.has("Content-Type")) {
-    headers.set("Content-Type", "application/json");
-  }
+  const send = async (bearerToken?: string): Promise<Response> => {
+    const headers = new Headers(options.headers);
+    headers.set("Accept", "application/json");
+    if (bearerToken) headers.set("Authorization", `Bearer ${bearerToken}`);
+    if (options.body && !(options.body instanceof FormData) && !headers.has("Content-Type")) {
+      headers.set("Content-Type", "application/json");
+    }
 
-  let response: Response;
-  try {
-    response = await fetch(`${apiBase}${path}`, { ...options, headers });
-  } catch {
-    throw new ApiError(`Unable to reach Smart Print API at ${apiBase}. Check that the API is running and the network is available.`, 0);
+    try {
+      return await fetch(`${apiBase}${path}`, { ...options, headers });
+    } catch {
+      throw new ApiError(`Unable to reach Smart Print API at ${apiBase}. Check that the API is running and the network is available.`, 0);
+    }
+  };
+
+  let response = await send(accessToken);
+  if (response.status === 401 && accessToken) {
+    const refreshed = await refreshStoredSession(accessToken);
+    if (refreshed) {
+      response = await send(refreshed.accessToken);
+    }
   }
 
   const raw = await response.text();
