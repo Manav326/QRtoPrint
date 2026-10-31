@@ -1821,7 +1821,9 @@ shop.MapPost("/print-jobs/{jobId:guid}/refund-preview", async (
     {
         var previous = JsonSerializer.Deserialize<int[]>(job.RejectedPageNumbersJson) ?? [];
         var selected = PrintRefundRules.NormalizeRejectedPages(job.PageCount, request.RejectedPageNumbers, previous);
-        var additional = PrintRefundRules.CalculateAdditionalRefundAmount(payment!.AmountMinor, payment.RefundedAmountMinor, job.PageCount, job.Copies, selected);
+        var allocations = PrintRefundRules.NormalizePageAllocations(payment!.AmountMinor, job.PageCount,
+            JsonSerializer.Deserialize<long[]>(job.PageRefundAllocationsJson));
+        var additional = PrintRefundRules.CalculateAdditionalRefundAmount(payment.AmountMinor, payment.RefundedAmountMinor, selected, allocations);
         var cumulative = checked(payment.RefundedAmountMinor + additional);
         return Results.Ok(new { job.Id, job.PageCount, RejectedPageNumbers = selected, RejectedPageCount = selected.Length,
             AcceptedPageCount = job.PageCount - selected.Length, OriginalAmountMinor = payment.AmountMinor,
@@ -1857,7 +1859,12 @@ shop.MapPost("/print-jobs/{jobId:guid}/refund", async (
             return Results.Conflict(new { code = "refund_idempotency_key_reused", message = "This refund request key is already associated with another print file." });
         return Results.Ok(new { duplicate.Id, duplicate.PrintJobId, duplicate.PrintPaymentId, duplicate.AmountMinor, duplicate.Currency, duplicate.Method, duplicate.Status, duplicate.Reference, duplicate.Reason, duplicate.RefundedUtc, DuplicateRequest = true });
     }
-    var job = await db.PrintJobs.SingleOrDefaultAsync(x => x.Id == jobId && x.TenantId == tenantId, ct);
+    // Serialize refund recording with the Agent's atomic claim UPDATE.
+    // The first transaction to lock the row wins; the second reads the committed state.
+    var lockedJobs = await db.PrintJobs.FromSqlInterpolated(
+        $"""SELECT * FROM "PrintJobs" WHERE "Id" = {jobId} AND "TenantId" = {tenantId} FOR UPDATE""")
+        .ToListAsync(ct);
+    var job = lockedJobs.SingleOrDefault();
     if (job is null) { await tx.RollbackAsync(ct); return Results.NotFound(); }
     if (!PrintRefundRules.CanRefundBeforePrintHandoff(job))
     {
@@ -1885,7 +1892,9 @@ shop.MapPost("/print-jobs/{jobId:guid}/refund", async (
             await tx.RollbackAsync(ct);
             return Results.Conflict(new { code = "no_new_pages_rejected", message = "Select at least one additional page to reject." });
         }
-        additional = PrintRefundRules.CalculateAdditionalRefundAmount(payment!.AmountMinor, payment.RefundedAmountMinor, job.PageCount, job.Copies, rejected);
+        var allocations = PrintRefundRules.NormalizePageAllocations(payment!.AmountMinor, job.PageCount,
+            JsonSerializer.Deserialize<long[]>(job.PageRefundAllocationsJson));
+        additional = PrintRefundRules.CalculateAdditionalRefundAmount(payment.AmountMinor, payment.RefundedAmountMinor, rejected, allocations);
         cumulative = checked(payment.RefundedAmountMinor + additional);
     }
     catch (Exception ex) when (ex is ArgumentException or InvalidOperationException or OverflowException or JsonException)
@@ -4154,6 +4163,8 @@ publicApi.MapPost("/jobs/{jobId:guid}/quote", async (
             request.ColourMode,
             request.IsDuplex,
             pricing);
+        var pageRefundAllocations = PricingCalculator.CalculatePageRefundAllocations(
+            job.PageCount, request.Copies, request.ColourMode, request.IsDuplex, pricing);
 
         job.ColourMode = request.ColourMode;
         job.PaperSize = request.PaperSize;
@@ -4161,6 +4172,7 @@ publicApi.MapPost("/jobs/{jobId:guid}/quote", async (
         job.Copies = request.Copies;
         job.Currency = "INR";
         job.QuotedAmountMinor = amount;
+        job.PageRefundAllocationsJson = JsonSerializer.Serialize(pageRefundAllocations);
         job.PricingVersion = pricing.Version;
         job.QuoteExpiresUtc = now.AddMinutes(10);
         var previousStatus = job.Status;
