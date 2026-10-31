@@ -1,5 +1,4 @@
-| AND-09 | Export and conversion | Export one or many files/folders to user-selected destinations. Support only conversions implemented and validated (initial target: images to PDF and multiple images to one PDF; PDF page operations where supported). Preserve originals and clearly disclose unsupported conversions. | In progress | Single-file export, folder-tree export, multi-file ZIP export and selected-image-to-multipage-PDF are implemented; original photos are retained. Merging existing PDFs, extracting/rearranging saved PDF pages and Office conversions remain unsupported. |
-
+# Android Premium Document Studio — Enhancement Tracker
 **Scope:** Native Android customer app in `apps/android`  
 **Base:** `main` at `3a0e29c6d97228ebeba7c4da24e3023422920d35`  
 **Working branch:** `feature/android-document-studio-premium-ux`  
