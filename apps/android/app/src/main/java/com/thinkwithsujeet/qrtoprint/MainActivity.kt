@@ -476,15 +476,8 @@ class MainActivity : AppCompatActivity() {
         return view
     }
 
-    private fun allowedAgentUpload(uri: Uri): Boolean {
-        if (!uri.scheme.equals("http", true) || uri.port != 17842 ||
-            !uri.path.orEmpty().startsWith("/api/v1/local/uploads/")) return false
-        val octets = uri.host.orEmpty().split('.').mapNotNull { it.toIntOrNull() }
-        if (octets.size != 4 || octets.any { it !in 0..255 }) return false
-        return octets[0] == 10 ||
-            (octets[0] == 172 && octets[1] in 16..31) ||
-            (octets[0] == 192 && octets[1] == 168)
-    }
+    private fun allowedAgentUpload(uri: Uri): Boolean =
+        LocalAgentUploadPolicy.allows(uri.scheme.orEmpty(), uri.host.orEmpty(), uri.port, uri.path.orEmpty())
 
     private fun scanQr() {
         scannerLauncher.launch(Intent(this, QrScannerActivity::class.java))
