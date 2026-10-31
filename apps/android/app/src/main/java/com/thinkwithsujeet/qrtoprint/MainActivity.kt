@@ -13,6 +13,7 @@ import android.content.res.ColorStateList
 import android.view.View
 import android.view.ViewGroup
 import android.webkit.CookieManager
+import android.webkit.JavascriptInterface
 import android.webkit.SslErrorHandler
 import android.webkit.ValueCallback
 import android.webkit.WebChromeClient
@@ -22,6 +23,7 @@ import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.widget.EditText
+import android.text.InputType
 import android.widget.CheckBox
 import android.widget.FrameLayout
 import android.widget.LinearLayout
@@ -65,6 +67,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private lateinit var store: LocalDocumentStore
+    private lateinit var customerAccountStore: CustomerAccountStore
     private lateinit var toolbar: MaterialToolbar
     private lateinit var content: FrameLayout
     private lateinit var navigation: BottomNavigationView
@@ -77,6 +80,7 @@ class MainActivity : AppCompatActivity() {
     private var fileCallback: ValueCallback<Array<Uri>>? = null
     private var exportFile: File? = null
     private var exportFolder: File? = null
+    private var accountCreateMode = false
     private val selectedFilePaths = linkedSetOf<String>()
 
     private lateinit var importFiles: ActivityResultLauncher<Array<String>>
@@ -90,6 +94,7 @@ class MainActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         WindowCompat.setDecorFitsSystemWindows(window, false)
         store = LocalDocumentStore(filesDir)
+        customerAccountStore = CustomerAccountStore(this)
         registerFileActions()
         buildLayout()
         showHome()
@@ -269,21 +274,164 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun showProfile() {
-        MaterialAlertDialogBuilder(this)
-            .setTitle("SmartPrint account")
-            .setMessage(
-                "You're using SmartPrint as a guest. No account is required to prepare documents or connect to a print shop. " +
-                    "Your document library is stored privately on this device. Customer sign-in and account sync are not enabled yet."
-            )
-            .setPositiveButton("Continue as guest", null)
-            .setNeutralButton("Sign in / Create account") { _, _ ->
-                MaterialAlertDialogBuilder(this)
-                    .setTitle("Customer accounts")
-                    .setMessage("Customer sign-in and registration will be available when the dedicated customer-account service is enabled. Shop-owner credentials are not used for customer accounts.")
-                    .setPositiveButton("Got it", null)
-                    .show()
+        pickerMode = false
+        toolbar.title = "Your account"
+        toolbar.setNavigationIcon(android.R.drawable.ic_media_previous)
+        toolbar.setNavigationOnClickListener { showHome() }
+        navigation.visibility = View.GONE
+        content.removeAllViews()
+        content.addView(accountView(), frameParams())
+    }
+
+    private fun accountView(): View {
+        val scroll = ScrollView(this).apply { isFillViewport = true }
+        val column = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(20), dp(20), dp(20), dp(30))
+        }
+        scroll.addView(column)
+        val auth = customerAccountStore.read()
+        val hero = card().apply {
+            radius = dp(22).toFloat()
+            setCardBackgroundColor(getColor(R.color.qp_hero))
+            strokeWidth = 0
+        }
+        val heroContent = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(20), dp(20), dp(20), dp(20))
+        }
+        heroContent.addView(text(
+            if (auth == null) "Your print journey,\nyour choice." else "Welcome back,\n${auth.displayName.ifBlank { "SmartPrint customer" }}.",
+            24, R.color.qp_hero_text, true
+        ))
+        heroContent.addView(text(
+            if (auth == null) "Prepare and print as a guest, or create a free account to keep your print history together across shops."
+            else "New shop sessions started while you're signed in will be linked to your customer account.",
+            13, R.color.qp_hero_muted, false
+        ).apply { setPadding(0, dp(8), 0, 0) })
+        hero.addView(heroContent)
+        column.addView(hero, linearParams())
+
+        if (auth != null) {
+            val accountCard = card()
+            val accountContent = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                setPadding(dp(17), dp(18), dp(17), dp(18))
             }
-            .show()
+            accountContent.addView(text(auth.displayName, 18, R.color.qp_text, true))
+            accountContent.addView(text(auth.email, 13, R.color.qp_muted, false).apply { setPadding(0, dp(4), 0, dp(14)) })
+            accountContent.addView(text("Your document library stays on this device. Print history is associated with sessions you start while signed in.",
+                12, R.color.qp_muted, false))
+            accountCard.addView(accountContent)
+            column.addView(accountCard, linearParams().apply { topMargin = dp(14) })
+            column.addView(button("View print activity", true).apply {
+                setOnClickListener { showActivity() }
+            }, linearParams().apply { topMargin = dp(12) })
+            column.addView(button("Sign out", false).apply {
+                setOnClickListener { signOutCustomer() }
+            }, linearParams().apply { topMargin = dp(8) })
+            return scroll
+        }
+
+        column.addView(text("Continue as a guest", 17, R.color.qp_text, true)
+            .apply { setPadding(dp(2), dp(20), 0, dp(3)) })
+        column.addView(text(
+            "Guest mode includes document scanning, local folders and shop printing. No account is needed.",
+            12, R.color.qp_muted, false
+        ).apply { setPadding(dp(2), 0, 0, dp(12)) })
+        val modes = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        modes.addView(button("Sign in", !accountCreateMode).apply {
+            setOnClickListener { accountCreateMode = false; showProfile() }
+        }, LinearLayout.LayoutParams(0, dp(46), 1f))
+        modes.addView(button("Create account", accountCreateMode).apply {
+            setOnClickListener { accountCreateMode = true; showProfile() }
+        }, LinearLayout.LayoutParams(0, dp(46), 1f).apply { marginStart = dp(8) })
+        column.addView(modes, linearParams())
+
+        val fields = card()
+        val form = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(16), dp(16), dp(16), dp(16))
+        }
+        val displayName = EditText(this).apply {
+            hint = "Your name"
+            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_CAP_WORDS
+            visibility = if (accountCreateMode) View.VISIBLE else View.GONE
+            maxLines = 1
+        }
+        val email = EditText(this).apply {
+            hint = "Email address"
+            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_EMAIL_ADDRESS
+            maxLines = 1
+        }
+        val password = EditText(this).apply {
+            hint = if (accountCreateMode) "Password (12+ characters)" else "Password"
+            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD
+            maxLines = 1
+        }
+        form.addView(displayName, linearParams())
+        form.addView(email, linearParams().apply { topMargin = dp(8) })
+        form.addView(password, linearParams().apply { topMargin = dp(8) })
+        form.addView(button(if (accountCreateMode) "Create my account" else "Sign in", true).apply {
+            setOnClickListener {
+                val name = displayName.text.toString().trim()
+                val emailValue = email.text.toString().trim()
+                val passwordValue = password.text.toString()
+                if (emailValue.isBlank() || passwordValue.isBlank() ||
+                    (accountCreateMode && name.isBlank())) {
+                    toast("Enter the required account details.")
+                    return@setOnClickListener
+                }
+                authenticateCustomer(name, emailValue, passwordValue, accountCreateMode)
+            }
+        }, linearParams().apply { topMargin = dp(14) })
+        fields.addView(form)
+        column.addView(fields, linearParams().apply { topMargin = dp(12) })
+        column.addView(text(
+            if (accountCreateMode) "Use at least 12 characters with uppercase, lowercase, a number and a symbol. Your account is separate from any print shop's staff login."
+            else "Customer accounts are separate from print-shop staff accounts. Your local documents remain available if you sign out.",
+            11, R.color.qp_muted, false
+        ).apply { setPadding(dp(3), dp(10), dp(3), 0) })
+        return scroll
+    }
+
+    private fun accountServiceUrl(): String {
+        val current = portalUrl?.let { Uri.parse(it) }
+        return if (current != null && !current.host.isNullOrBlank()) {
+            "${current.scheme}://${current.authority}"
+        } else BuildConfig.SERVICE_BASE_URL
+    }
+
+    private fun authenticateCustomer(name: String, email: String, password: String, create: Boolean) {
+        toast(if (create) "Creating your SmartPrint account…" else "Signing in…")
+        Thread {
+            try {
+                val auth = if (create) {
+                    CustomerAccountClient.register(accountServiceUrl(), name, email, password)
+                } else {
+                    CustomerAccountClient.signIn(accountServiceUrl(), email, password)
+                }
+                val saved = auth.copy(displayName = if (create) name else auth.displayName.ifBlank { email.substringBefore('@') })
+                customerAccountStore.save(saved)
+                runOnUiThread {
+                    accountCreateMode = false
+                    showProfile()
+                    toast(if (create) "Your SmartPrint account is ready." else "You're signed in.")
+                }
+            } catch (e: Exception) {
+                runOnUiThread { toast("Account request failed: ${message(e)}") }
+            }
+        }.start()
+    }
+
+    private fun signOutCustomer() {
+        val auth = customerAccountStore.read()
+        customerAccountStore.clear()
+        showProfile()
+        if (auth != null) Thread {
+            try { CustomerAccountClient.logout(accountServiceUrl(), auth) } catch (_: Exception) { }
+        }.start()
+        toast("Signed out. Your local documents are unchanged.")
     }
 
     private fun showHome() {
@@ -440,22 +588,99 @@ class MainActivity : AppCompatActivity() {
         resetToolbar("Activity")
         navigation.menu.findItem(ACTIVITY).isChecked = true
         content.removeAllViews()
+        val scroll = ScrollView(this).apply { isFillViewport = true }
         val column = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            gravity = Gravity.CENTER
-            setPadding(dp(28), dp(24), dp(28), dp(24))
+            setPadding(dp(20), dp(18), dp(20), dp(26))
         }
-        column.addView(text("Your print journey starts here", 20, R.color.qp_text, true).apply {
-            gravity = Gravity.CENTER
-        })
-        column.addView(text(
-            if (portalUrl == null) "Connect to a participating print shop to begin a print session. Your live job status will be shown in the secure shop workflow."
-            else "Your shop connection is ready. Open the current print session to review your quote, payment and job progress.",
-            14, R.color.qp_muted, false
-        ).apply { gravity = Gravity.CENTER; setPadding(0, dp(9), 0, dp(18)) })
-        if (portalUrl != null) column.addView(button("Open print session", true).apply { setOnClickListener { showPrint() } })
-        else column.addView(button("Scan & Print", true).apply { setOnClickListener { showScanPrint() } })
-        content.addView(column, frameParams())
+        scroll.addView(column)
+        column.addView(text("Your print history", 21, R.color.qp_text, true))
+        val auth = customerAccountStore.read()
+        if (auth == null) {
+            column.addView(text(
+                "You're browsing as a guest. Sign in before connecting to a shop to keep new print jobs together across shops.",
+                13, R.color.qp_muted, false
+            ).apply { setPadding(0, dp(7), 0, dp(14)) })
+            column.addView(button("Sign in or create account", true).apply {
+                setOnClickListener { showProfile() }
+            }, linearParams())
+        } else {
+            column.addView(text("Signed in as ${auth.email}", 12, R.color.qp_muted, false)
+                .apply { setPadding(0, dp(5), 0, dp(14)) })
+            val history = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+            history.addView(text("Loading your print history…", 13, R.color.qp_muted, false))
+            column.addView(history, linearParams())
+            loadCustomerHistory(history)
+        }
+        if (portalUrl != null) column.addView(button("Open current shop session", false).apply {
+            setOnClickListener { showPrint() }
+        }, linearParams().apply { topMargin = dp(14) })
+        else column.addView(button("Scan & Print", false).apply {
+            setOnClickListener { showScanPrint() }
+        }, linearParams().apply { topMargin = dp(14) })
+        content.addView(scroll, frameParams())
+    }
+
+    private fun loadCustomerHistory(container: LinearLayout) {
+        Thread {
+            try {
+                var auth = customerAccountStore.read() ?: error("Sign in to view print history.")
+                val jobs = try {
+                    CustomerAccountClient.history(accountServiceUrl(), auth.accessToken)
+                } catch (first: Exception) {
+                    auth = CustomerAccountClient.refresh(accountServiceUrl(), auth)
+                    customerAccountStore.save(auth)
+                    CustomerAccountClient.history(accountServiceUrl(), auth.accessToken)
+                }
+                runOnUiThread {
+                    if (navigation.selectedItemId != ACTIVITY || isFinishing) return@runOnUiThread
+                    container.removeAllViews()
+                    if (jobs.isEmpty()) {
+                        container.addView(text(
+                            "No account-linked print jobs yet. Your new shop sessions will appear here when you start them while signed in.",
+                            13, R.color.qp_muted, false
+                        ).apply { setPadding(0, dp(12), 0, dp(12)) })
+                    } else {
+                        jobs.forEach { job ->
+                            val item = card()
+                            val body = LinearLayout(this).apply {
+                                orientation = LinearLayout.VERTICAL
+                                setPadding(dp(15), dp(14), dp(15), dp(14))
+                            }
+                            val top = LinearLayout(this).apply {
+                                orientation = LinearLayout.HORIZONTAL
+                                gravity = Gravity.CENTER_VERTICAL
+                            }
+                            top.addView(text(job.jobNumber, 15, R.color.qp_text, true),
+                                LinearLayout.LayoutParams(0, -2, 1f))
+                            top.addView(text(job.status.replace('_', ' '), 11, R.color.qp_primary, true))
+                            body.addView(top)
+                            body.addView(text(job.shopName, 12, R.color.qp_muted, false).apply {
+                                setPadding(0, dp(5), 0, 0)
+                            })
+                            body.addView(text(
+                                "${job.pageCount} page(s) · ${job.copies} copy/copies · ${job.currency} ${"%.2f".format(Locale.ROOT, job.quotedAmountMinor / 100.0)}",
+                                12, R.color.qp_muted, false
+                            ).apply { setPadding(0, dp(4), 0, 0) })
+                            item.addView(body)
+                            container.addView(item, linearParams().apply { bottomMargin = dp(9) })
+                        }
+                    }
+                }
+            } catch (e: Exception) {
+                runOnUiThread {
+                    if (navigation.selectedItemId != ACTIVITY || isFinishing) return@runOnUiThread
+                    container.removeAllViews()
+                    container.addView(text(
+                        "Couldn't load your print history. Check your connection and try again. ${message(e)}",
+                        13, R.color.qp_muted, false
+                    ))
+                    container.addView(button("Retry", false).apply {
+                        setOnClickListener { showActivity() }
+                    }, linearParams().apply { topMargin = dp(8) })
+                }
+            }
+        }.start()
     }
 
     private fun showFiles() {
@@ -783,6 +1008,11 @@ class MainActivity : AppCompatActivity() {
     private fun ensureWebView(): WebView {
         webView?.let { return it }
         val view = WebView(this)
+        view.addJavascriptInterface(object {
+            @JavascriptInterface
+            fun getCustomerAccessToken(): String =
+                customerAccountStore.read()?.accessToken.orEmpty()
+        }, "SmartPrintNative")
         view.settings.apply {
             javaScriptEnabled = true
             domStorageEnabled = true
