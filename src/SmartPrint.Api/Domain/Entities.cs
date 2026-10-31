@@ -47,12 +47,53 @@ public sealed class TenantSubscription
 {
     public Guid Id { get; set; } = Guid.NewGuid();
     public Guid TenantId { get; set; }
+    public Guid? PlanVersionId { get; set; }
     public string PlanCode { get; set; } = "TRIAL";
     public string Status { get; set; } = "Trial";
     public string BillingInterval { get; set; } = "Trial";
     public DateTimeOffset PeriodStartUtc { get; set; } = DateTimeOffset.UtcNow;
     public DateTimeOffset PeriodEndUtc { get; set; } = DateTimeOffset.UtcNow.AddDays(14);
     public DateTimeOffset CreatedUtc { get; set; } = DateTimeOffset.UtcNow;
+}
+
+public sealed class SubscriptionPlan
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+    public string Code { get; set; } = string.Empty;
+    public string Name { get; set; } = string.Empty;
+    public string? Description { get; set; }
+    public bool IsActive { get; set; } = true;
+    public bool IsSystemPlan { get; set; }
+    public DateTimeOffset CreatedUtc { get; set; } = DateTimeOffset.UtcNow;
+    public DateTimeOffset UpdatedUtc { get; set; } = DateTimeOffset.UtcNow;
+}
+
+public sealed class SubscriptionPlanVersion
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+    public Guid PlanId { get; set; }
+    public int Version { get; set; }
+    public string Status { get; set; } = "Draft";
+    public string Currency { get; set; } = "INR";
+    public long? MonthlyPriceMinor { get; set; }
+    public long? AnnualPriceMinor { get; set; }
+    public int? MaxPrinters { get; set; }
+    public int? MaxAgentDevices { get; set; }
+    public int? MaxQrStations { get; set; }
+    public int? MaxMonthlyPrintJobs { get; set; }
+    public long? MaxDocumentBytes { get; set; }
+    public bool CloudAssistedPrintingEnabled { get; set; } = true;
+    public bool WhiteLabelEnabled { get; set; }
+    public bool AdvancedReportsEnabled { get; set; }
+    public DateTimeOffset CreatedUtc { get; set; } = DateTimeOffset.UtcNow;
+    public DateTimeOffset UpdatedUtc { get; set; } = DateTimeOffset.UtcNow;
+    public DateTimeOffset? PublishedUtc { get; set; }
+}
+
+public static class SubscriptionPlanDefaults
+{
+    public static readonly Guid TrialPlanId = Guid.Parse("e0af4c2a-82b8-4bd1-9bc4-cb3bffb51001");
+    public static readonly Guid TrialVersionId = Guid.Parse("f2b849a1-1be8-4a88-a6c5-7e8e80d0c002");
 }
 
 public sealed class PrinterDevice
