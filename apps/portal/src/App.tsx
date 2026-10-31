@@ -1,8 +1,8 @@
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import {
-  Activity, ArrowRight, Check, Clock3, Copy, CreditCard, FileText, FileUp, LayoutDashboard,
+  Activity, ArrowRight, Check, Clock3, Copy, CreditCard, FileText, FileUp, FolderOpen, LayoutDashboard,
   LifeBuoy, LogOut, Menu, Moon, Monitor, Plus, Printer, QrCode, Settings,
-  ShieldCheck, Sun, Users, Wallet, X
+  ShieldCheck, Sun, Users, Wallet, X, PanelLeftClose, PanelLeftOpen, RotateCcw, Trash2
 } from "lucide-react";
 import QRCode from "react-qr-code";
 import AuthScreen from "./AuthScreen";
@@ -16,7 +16,7 @@ import {
   reportCustomerUpiPayment, renewCustomerPrintSession, resumeCustomerSession, rotateStationCode, startCustomerPayment, storeTokens,
   updatePrinterActive, updateShopPaymentSettings, updateShopPricing,
   updateShopProfile, updateStationEnabled, uploadCustomerDocument, uploadCustomerDocumentLocally,
-  verifyShopPayment, retryShopPdfExport, type CustomerPayment, type ShopPayment, type ShopPaymentSettings,
+  verifyShopPayment, retryShopPdfExport, recordShopPrintRefund, type CustomerPayment, type ShopPayment, type ShopPaymentSettings, type ShopRefund,
   type AgentDevice, type AuthTokens, type CustomerJobStatus, type PrinterDevice, type PrintQuoteResult, type ShopJobEvent,
   type QrStation, type ShopPricingProfile, type ShopPrintJob, type ShopProfile, type ShopReportSummary, type ShopSubscriptionSummary,
   type UploadedPrintJob
@@ -62,6 +62,10 @@ function ShopConsole({ tokens, onSignOut }: { tokens: AuthTokens; onSignOut: () 
   const [active, setActive] = useState<Section>("Overview");
   const [dark, setDark] = useState(true);
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
+    try { return window.localStorage.getItem("qrtoprint.sidebar-collapsed") === "true"; } catch { return false; }
+  });
+  const reloadInFlight = useRef(false);
   const [profile, setProfile] = useState<ShopProfile | null>(null);
   const [printers, setPrinters] = useState<PrinterDevice[]>([]);
   const [stations, setStations] = useState<QrStation[]>([]);
@@ -70,6 +74,7 @@ function ShopConsole({ tokens, onSignOut }: { tokens: AuthTokens; onSignOut: () 
   const [agentDevices, setAgentDevices] = useState<AgentDevice[]>([]);
   const [paymentSettings, setPaymentSettings] = useState<ShopPaymentSettings | null>(null);
   const [payments, setPayments] = useState<ShopPayment[]>([]);
+  const [refunds, setRefunds] = useState<ShopRefund[]>([]);
   const [subscription, setSubscription] = useState<ShopSubscriptionSummary | null>(null);
   const [enrollmentCode, setEnrollmentCode] = useState<{ code: string; expiresUtc: string } | null>(null);
   const [agentBusy, setAgentBusy] = useState(false);
@@ -78,11 +83,17 @@ function ShopConsole({ tokens, onSignOut }: { tokens: AuthTokens; onSignOut: () 
   const [modal, setModal] = useState<Modal>(null);
   const [busy, setBusy] = useState(false);
   const [toast, setToast] = useState("");
-  const [preview, setPreview] = useState<{ name: string; url: string; mediaType: string } | null>(null);
+  const [preview, setPreview] = useState<{ name: string; url: string; mediaType: string; job: ShopPrintJob } | null>(null);
+  const [refundJob, setRefundJob] = useState<ShopPrintJob | null>(null);
+  type ActionDialogState = { title: string; message: string; inputLabel?: string; confirmLabel: string; resolve: (value: string | null) => void };
+  const [actionDialog, setActionDialog] = useState<ActionDialogState | null>(null);
+  const [actionDialogValue, setActionDialogValue] = useState("");
   const [busyJobId, setBusyJobId] = useState<string | null>(null);
   const [eventHistory, setEventHistory] = useState<{ job: ShopPrintJob; events: ShopJobEvent[] } | null>(null);
 
   async function reload() {
+    if (reloadInFlight.current) return;
+    reloadInFlight.current = true;
     setLoading(true);
     setError("");
     try {
@@ -95,6 +106,7 @@ function ShopConsole({ tokens, onSignOut }: { tokens: AuthTokens; onSignOut: () 
       setAgentDevices(snapshot.agentDevices);
       setPaymentSettings(snapshot.paymentSettings);
       setPayments(snapshot.payments);
+      setRefunds(snapshot.refunds);
       setSubscription(snapshot.subscription);
     } catch (exception) {
       if (exception instanceof ApiError && exception.status === 401) {
@@ -105,7 +117,43 @@ function ShopConsole({ tokens, onSignOut }: { tokens: AuthTokens; onSignOut: () 
       }
     } finally {
       setLoading(false);
+      reloadInFlight.current = false;
     }
+  }
+
+  function requestActionDialog(options: { title: string; message: string; inputLabel?: string; confirmLabel?: string }): Promise<string | null> {
+    return new Promise(resolve => {
+      setActionDialogValue("");
+      setActionDialog({ ...options, confirmLabel: options.confirmLabel || "Confirm", resolve });
+    });
+  }
+
+  async function confirmInApp(message: string, title = "Please confirm", confirmLabel = "Confirm"): Promise<boolean> {
+    return (await requestActionDialog({ title, message, confirmLabel })) !== null;
+  }
+
+  async function promptInApp(message: string, title = "Enter details", inputLabel = "Reason"): Promise<string | null> {
+    return requestActionDialog({ title, message, inputLabel, confirmLabel: "Continue" });
+  }
+
+  function closeActionDialog() {
+    const current = actionDialog;
+    setActionDialog(null);
+    current?.resolve(null);
+  }
+
+  function submitActionDialog() {
+    const current = actionDialog;
+    setActionDialog(null);
+    current?.resolve(actionDialogValue);
+  }
+
+  function toggleSidebarCollapsed() {
+    setSidebarCollapsed(current => {
+      const next = !current;
+      try { window.localStorage.setItem("qrtoprint.sidebar-collapsed", String(next)); } catch { /* Storage is optional. */ }
+      return next;
+    });
   }
 
   useEffect(() => {
@@ -171,7 +219,7 @@ function ShopConsole({ tokens, onSignOut }: { tokens: AuthTokens; onSignOut: () 
   }
 
   async function createFreshStationCode(station: QrStation) {
-    const confirmed = window.confirm("Generate a fresh QR code? Any previously printed QR code for this station will stop working.");
+    const confirmed = await confirmInApp("Generating a replacement QR will invalidate every previously printed sign for this station. Continue only when you intend to replace them.", "Replace this station's QR?", "Replace QR");
     if (!confirmed) return;
     try {
       const result = await rotateStationCode(tokens.accessToken, station.id);
@@ -200,7 +248,7 @@ function ShopConsole({ tokens, onSignOut }: { tokens: AuthTokens; onSignOut: () 
   }
 
   async function revokeAgent(agent: AgentDevice) {
-    if (!window.confirm(`Revoke the Print Agent on ${agent.deviceName}? It will no longer be able to report printers or connect to this shop.`)) return;
+    if (!(await confirmInApp(`Revoke the Print Agent on ${agent.deviceName}? It will no longer be able to report printers or connect to this shop.`, "Revoke Print Agent", "Revoke agent"))) return;
     setAgentBusy(true);
     setError("");
     try {
@@ -234,9 +282,9 @@ function ShopConsole({ tokens, onSignOut }: { tokens: AuthTokens; onSignOut: () 
 
   async function dispatchPrintJob(job: ShopPrintJob) {
     const pdfExport = job.outputMode === "PDF_EXPORT";
-    const ok = window.confirm(pdfExport
+    const ok = await confirmInApp(pdfExport
       ? `Save a PDF for ${job.jobNumber} in the shop's QRtoPrint Exports folder? No Windows printer dialog will be opened.`
-      : `Start printing ${job.jobNumber} on ${job.printerName || "the assigned printer"}? The document will be submitted once to Windows. Spooler acceptance is not proof of paper output.`);
+      : `Start printing ${job.jobNumber} on ${job.printerName || "the assigned printer"}? The document will be submitted once to Windows. Spooler acceptance is not proof of paper output.`, pdfExport ? "Save PDF export?" : "Start printing?", pdfExport ? "Save PDF" : "Start printing");
     if (!ok) return;
     setBusyJobId(job.id); setError("");
     try {
@@ -251,8 +299,9 @@ function ShopConsole({ tokens, onSignOut }: { tokens: AuthTokens; onSignOut: () 
   }
 
   async function retryPdfExport(job: ShopPrintJob) {
-    const ok = window.confirm(
-      `Confirm that no PDF file was saved for ${job.jobNumber}? The Agent will create the PDF in the shop's QRtoPrint Exports folder. Do not continue if a file from this job already exists.`
+    const ok = await confirmInApp(
+      `Confirm that no PDF file was saved for ${job.jobNumber}? The Agent will create the PDF in the shop's QRtoPrint Exports folder. Do not continue if a file from this job already exists.`,
+      "Retry PDF export?", "Retry export"
     );
     if (!ok) return;
     setBusyJobId(job.id);
@@ -270,7 +319,7 @@ function ShopConsole({ tokens, onSignOut }: { tokens: AuthTokens; onSignOut: () 
   }
 
   async function confirmPrintedOutput(job: ShopPrintJob) {
-    const ok = window.confirm(`Have you physically checked all requested pages for ${job.jobNumber}? Only confirm after checking the actual paper output.`);
+    const ok = await confirmInApp(`Have you physically checked all requested pages for ${job.jobNumber}? Only confirm after checking the actual paper output.`, "Confirm paper output", "Confirm output");
     if (!ok) return;
     setBusyJobId(job.id); setError("");
     try {
@@ -302,7 +351,7 @@ function ShopConsole({ tokens, onSignOut }: { tokens: AuthTokens; onSignOut: () 
     const confirmation = payment.method === "UPI"
       ? `Have you independently confirmed this UPI transaction in your shop's bank/UPI app? Reference: ${payment.paymentReference || "not supplied"}`
       : "Have you physically received the cash for this print job?";
-    if (!window.confirm(confirmation)) return;
+    if (!(await confirmInApp(confirmation, "Verify payment received", "Verify payment"))) return;
 
     setBusyJobId(payment.printJobId);
     setError("");
@@ -318,7 +367,7 @@ function ShopConsole({ tokens, onSignOut }: { tokens: AuthTokens; onSignOut: () 
   }
 
   async function rejectPayment(payment: ShopPayment) {
-    const reason = window.prompt("Enter why this payment report is being rejected (for example, amount not received or reference not found):");
+    const reason = await promptInApp("Explain why this payment report is being rejected.", "Reject payment report", "Rejection reason");
     if (reason === null) return;
     if (reason.trim().length < 3) {
       setError("A rejection reason of at least 3 characters is required.");
@@ -376,7 +425,7 @@ function ShopConsole({ tokens, onSignOut }: { tokens: AuthTokens; onSignOut: () 
     try {
       const blob = await downloadShopDocument(tokens.accessToken, job.id);
       const url = URL.createObjectURL(blob);
-      setPreview({ name: job.document.originalFileName, url, mediaType: blob.type || job.document.mediaType });
+      setPreview({ name: job.document.originalFileName, url, mediaType: blob.type || job.document.mediaType, job });
     } catch (exception) {
       setError(exception instanceof Error ? exception.message : "Could not open the document.");
     } finally {
@@ -398,7 +447,7 @@ function ShopConsole({ tokens, onSignOut }: { tokens: AuthTokens; onSignOut: () 
   }
 
   async function approveJob(job: ShopPrintJob) {
-    if (!window.confirm(`Approve ${job.jobNumber} for payment? It will not be sent to a printer yet.`)) return;
+    if (!(await confirmInApp(`Approve ${job.jobNumber} for payment? It will not be sent to a printer yet.`, "Accept this file", "Accept file"))) return;
     setBusyJobId(job.id);
     setError("");
     try {
@@ -413,7 +462,7 @@ function ShopConsole({ tokens, onSignOut }: { tokens: AuthTokens; onSignOut: () 
   }
 
   async function rejectJob(job: ShopPrintJob) {
-    if (!window.confirm(`Reject ${job.jobNumber}? The customer will see that the shop declined the request.`)) return;
+    if (!(await confirmInApp(`Reject ${job.jobNumber}? The customer will see that the shop declined the request.`, "Reject this file?", "Reject file"))) return;
     setBusyJobId(job.id);
     setError("");
     try {
