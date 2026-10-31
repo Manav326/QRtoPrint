@@ -951,16 +951,92 @@ export function rejectShopPrintJob(token: string, jobId: string) {
   );
 }
 
-export async function downloadShopDocument(token: string, jobId: string): Promise<Blob> {
-  const response = await fetch(`${apiBase}/api/v1/shop/print-jobs/${jobId}/document`, {
-    headers: { Accept: "application/pdf,image/jpeg,image/png", Authorization: `Bearer ${token}` },
-    cache: "no-store"
-  });
-  if (!response.ok) {
-    const message = response.status === 404 ? "This job document is no longer available." : `Document preview failed (${response.status}).`;
-    throw new ApiError(message, response.status);
+function isPrivateLocalPreviewEndpoint(value: string): URL | null {
+  try {
+    const endpoint = new URL(value);
+    const octets = endpoint.hostname.split(".").map(Number);
+    const privateIpv4 = octets.length === 4 &&
+      octets.every(part => Number.isInteger(part) && part >= 0 && part <= 255) &&
+      (octets[0] === 10 ||
+        (octets[0] === 172 && octets[1] >= 16 && octets[1] <= 31) ||
+        (octets[0] === 192 && octets[1] === 168));
+    if (endpoint.protocol !== "http:" || endpoint.port !== "17842" ||
+        endpoint.username || endpoint.password || endpoint.pathname !== "/" ||
+        endpoint.search || endpoint.hash || !privateIpv4) return null;
+    return endpoint;
+  } catch {
+    return null;
   }
-  return response.blob();
+}
+
+export async function downloadShopDocument(token: string, jobId: string): Promise<Blob> {
+  const source = await apiRequest<
+    | { mode: "CLOUD" }
+    | { mode: "LOCAL_AGENT"; grantToken: string; endpoints: string[]; expiresUtc: string }
+  >(`/api/v1/shop/print-jobs/${jobId}/preview-source`, {}, token);
+
+  if (source.mode === "CLOUD") {
+    const response = await fetch(`${apiBase}/api/v1/shop/print-jobs/${jobId}/document`, {
+      headers: { Accept: "application/pdf,image/jpeg,image/png", Authorization: `Bearer ${token}` },
+      cache: "no-store"
+    });
+    if (!response.ok) {
+      const message = response.status === 404
+        ? "This job document is no longer available."
+        : `Document preview failed (${response.status}).`;
+      throw new ApiError(message, response.status);
+    }
+    return response.blob();
+  }
+
+  if (Date.parse(source.expiresUtc) <= Date.now()) {
+    throw new ApiError("The local preview grant expired. Close the preview and try again.", 409);
+  }
+
+  let lastError: Error | null = null;
+  for (const value of source.endpoints.slice(0, 8)) {
+    const endpoint = isPrivateLocalPreviewEndpoint(value);
+    if (!endpoint) continue;
+    const controller = new AbortController();
+    const timeout = window.setTimeout(() => controller.abort(), 15_000);
+    try {
+      const response = await fetch(
+        `${endpoint.origin}/api/v1/local/documents/${encodeURIComponent(jobId)}/preview`,
+        {
+          method: "GET",
+          mode: "cors",
+          cache: "no-store",
+          credentials: "omit",
+          headers: { "X-Print-Preview-Grant": source.grantToken },
+          signal: controller.signal,
+          targetAddressSpace: "local"
+        } as RequestInit & { targetAddressSpace: "local" }
+      );
+      if (response.ok) return await response.blob();
+
+      const raw = await response.text();
+      let detail = "";
+      if (raw) {
+        try {
+          const payload = JSON.parse(raw) as { title?: string; detail?: string; message?: string };
+          detail = payload.detail || payload.message || payload.title || "";
+        } catch {
+          detail = raw;
+        }
+      }
+      lastError = new ApiError(detail || `Local document preview failed (${response.status}).`, response.status);
+      if ([401, 403, 404, 409, 415].includes(response.status)) break;
+    } catch (exception) {
+      lastError = exception instanceof Error ? exception : new Error("Could not reach the paired shop computer.");
+    } finally {
+      window.clearTimeout(timeout);
+    }
+  }
+
+  throw lastError ?? new ApiError(
+    "The original file is stored on the shop computer. Open the shop console from the shop network and try preview again.",
+    0
+  );
 }
 
 export function createAgentEnrollmentCode(token: string) {

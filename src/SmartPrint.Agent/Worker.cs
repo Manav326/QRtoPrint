@@ -83,7 +83,6 @@ public sealed class Worker(
                         string.IsNullOrEmpty(configuredBaseUri.Query) && string.IsNullOrEmpty(configuredBaseUri.Fragment) && string.IsNullOrEmpty(configuredBaseUri.UserInfo))
                     {
                         var currentBaseUrl = configuredBaseUri.GetLeftPart(UriPartial.Authority);
-                        localAgentApiState.SetPublicPortalOrigin(currentBaseUrl);
                         if (!string.Equals(credentials.ApiBaseUrl.TrimEnd('/'), currentBaseUrl, StringComparison.OrdinalIgnoreCase))
                         {
                             credentials = credentials with { ApiBaseUrl = currentBaseUrl };
@@ -94,30 +93,49 @@ public sealed class Worker(
                             logger.LogInformation("Updated Agent API destination and CORS origin from the canonical public URL.");
                         }
                     }
-                    var printers = printerDiscovery.Discover();
-                    using var sync = await SendAgentRequestAsync(
-                        client,
-                        credentials,
-                        "api/v1/agent/printers/sync",
-                        new { printers },
-                        stoppingToken);
-
-                    if (sync.IsSuccessStatusCode)
+                    var trustedOrigins = serverConfiguration?.AllowedPortalOrigins;
+                    if (trustedOrigins is { Count: > 0 })
                     {
-                        logger.LogInformation("Synchronized {PrinterCount} Windows printer queues with the shop.", printers.Count);
-                        await ProcessLocalQueueHandoffAsync(client, credentials, stoppingToken);
-                        await ReconcileLegacyPdfQueueJobsAsync(client, credentials, stoppingToken);
-                        await ReconcileInterruptedPdfExportsAsync(client, credentials, stoppingToken);
-                        await RetryPendingPdfExportReceiptsAsync(client, credentials, stoppingToken);
-                        await ReconcileInterruptedSubmissionsAsync(client, credentials, stoppingToken);
-                        await RetrySpoolerReceiptsAsync(client, credentials, stoppingToken);
-                        await ProcessAuthorizedPrintJobsAsync(client, credentials, stoppingToken);
-                        await MonitorSpoolerJobsAsync(client, credentials, stoppingToken);
+                        localAgentApiState.SetTrustedPortalOrigins(trustedOrigins);
+                    }
+                    else if (!string.IsNullOrWhiteSpace(serverConfiguration?.PublicBaseUrl))
+                    {
+                        localAgentApiState.SetTrustedPortalOrigins([serverConfiguration.PublicBaseUrl]);
+                    }
+
+                    if (printerDiscovery.TryDiscover(out var printers))
+                    {
+                        using var sync = await SendAgentRequestAsync(
+                            client,
+                            credentials,
+                            "api/v1/agent/printers/sync",
+                            new { printers },
+                            stoppingToken);
+
+                        if (sync.IsSuccessStatusCode)
+                        {
+                            logger.LogInformation("Synchronized {PrinterCount} Windows printer queues with the shop.", printers.Count);
+                        }
+                        else
+                        {
+                            logger.LogWarning("Printer inventory synchronization failed with HTTP {StatusCode}; the last successful inventory is retained.", (int)sync.StatusCode);
+                        }
                     }
                     else
                     {
-                        logger.LogWarning("Printer inventory synchronization failed with HTTP {StatusCode}.", (int)sync.StatusCode);
+                        logger.LogWarning("Skipping this printer inventory sync because Windows discovery failed; the server's last known printers are retained.");
                     }
+
+                    // A transient printer enumeration/sync failure must not stop payment-
+                    // authorised jobs already secured by this Agent from being reconciled.
+                    await ProcessLocalQueueHandoffAsync(client, credentials, stoppingToken);
+                    await ReconcileLegacyPdfQueueJobsAsync(client, credentials, stoppingToken);
+                    await ReconcileInterruptedPdfExportsAsync(client, credentials, stoppingToken);
+                    await RetryPendingPdfExportReceiptsAsync(client, credentials, stoppingToken);
+                    await ReconcileInterruptedSubmissionsAsync(client, credentials, stoppingToken);
+                    await RetrySpoolerReceiptsAsync(client, credentials, stoppingToken);
+                    await ProcessAuthorizedPrintJobsAsync(client, credentials, stoppingToken);
+                    await MonitorSpoolerJobsAsync(client, credentials, stoppingToken);
                 }
                 else
                 {

@@ -30,6 +30,24 @@ public sealed class LocalAgentApiStateTests
         Assert.True(state.IsOriginAllowed("https://new.example.test"));
     }
 
+    [Fact]
+    public void AllowsBothTrustedShopAndCustomerPortalOrigins()
+    {
+        var state = new LocalAgentApiState();
+        state.SetTrustedPortalOrigins([
+            "https://print.example.test",
+            "https://shops.example.test"
+        ]);
+
+        Assert.True(state.IsOriginAllowed("https://print.example.test"));
+        Assert.True(state.IsOriginAllowed("https://shops.example.test"));
+
+        state.SetTrustedPortalOrigins(["https://new-shops.example.test"]);
+
+        Assert.False(state.IsOriginAllowed("https://shops.example.test"));
+        Assert.True(state.IsOriginAllowed("https://new-shops.example.test"));
+    }
+
     [Theory]
     [InlineData("http://localhost:3000/path")]
     [InlineData("https://example.test/path")]

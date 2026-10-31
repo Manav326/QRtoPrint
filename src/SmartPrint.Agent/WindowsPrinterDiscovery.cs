@@ -4,19 +4,21 @@ namespace SmartPrint.Agent;
 
 public sealed class WindowsPrinterDiscovery(ILogger<WindowsPrinterDiscovery> logger)
 {
-    public IReadOnlyList<DiscoveredPrinter> Discover()
+    public bool TryDiscover(out IReadOnlyList<DiscoveredPrinter> discovered)
     {
+        discovered = [];
         if (!OperatingSystem.IsWindows())
         {
-            return [];
+            logger.LogWarning("Windows printer discovery was requested on a non-Windows host.");
+            return false;
         }
 
-        var printers = new List<DiscoveredPrinter>();
         try
         {
             using var searcher = new ManagementObjectSearcher(
                 "SELECT Name, DriverName, PortName, WorkOffline, PrinterStatus, Default FROM Win32_Printer");
             using var results = searcher.Get();
+            var printers = new List<DiscoveredPrinter>();
 
             foreach (ManagementObject printer in results)
             {
@@ -33,31 +35,37 @@ public sealed class WindowsPrinterDiscovery(ILogger<WindowsPrinterDiscovery> log
                     var offline = ReadBoolean(printer, "WorkOffline");
                     var printerStatus = ReadInteger(printer, "PrinterStatus");
                     var isDefault = ReadBoolean(printer, "Default");
+                    var outputMode = PrinterOutputModeRules.Detect(name, driver);
+
+                    var status = ResolvePublishedStatus(outputMode, printerStatus, offline);
 
                     printers.Add(new DiscoveredPrinter(
                         name.Trim(),
                         string.IsNullOrWhiteSpace(driver) ? "Unknown driver" : driver.Trim(),
                         port?.Trim() ?? string.Empty,
-                        MapStatus(printerStatus, offline),
+                        status,
                         isDefault,
-                        PrinterOutputModeRules.Detect(name, driver)));
+                        outputMode));
                 }
             }
+
+            discovered = printers
+                .GroupBy(printer => printer.QueueName, StringComparer.OrdinalIgnoreCase)
+                .Select(group => group.First())
+                .OrderBy(printer => printer.QueueName, StringComparer.OrdinalIgnoreCase)
+                .ToArray();
+            return true;
         }
         catch (ManagementException exception)
         {
-            logger.LogWarning(exception, "Windows printer discovery through WMI failed.");
+            logger.LogWarning(exception, "Windows printer discovery through WMI failed; retaining the last successful printer inventory.");
+            return false;
         }
         catch (UnauthorizedAccessException exception)
         {
-            logger.LogWarning(exception, "The agent could not read the Windows printer inventory.");
+            logger.LogWarning(exception, "The Agent could not read the Windows printer inventory; retaining the last successful inventory.");
+            return false;
         }
-
-        return printers
-            .GroupBy(printer => printer.QueueName, StringComparer.OrdinalIgnoreCase)
-            .Select(group => group.First())
-            .OrderBy(printer => printer.QueueName, StringComparer.OrdinalIgnoreCase)
-            .ToArray();
     }
 
     private static string ReadString(ManagementBaseObject source, string property) =>
@@ -76,6 +84,11 @@ public sealed class WindowsPrinterDiscovery(ILogger<WindowsPrinterDiscovery> log
         catch (FormatException) { return 0; }
         catch (InvalidCastException) { return 0; }
     }
+
+    public static string ResolvePublishedStatus(string? outputMode, int printerStatus, bool offline) =>
+        string.Equals(outputMode, PrinterOutputModeRules.PdfExport, StringComparison.OrdinalIgnoreCase)
+            ? "Ready"
+            : MapStatus(printerStatus, offline);
 
     private static string MapStatus(int printerStatus, bool offline)
     {
