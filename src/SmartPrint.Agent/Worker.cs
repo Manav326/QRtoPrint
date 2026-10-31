@@ -65,7 +65,7 @@ public sealed class Worker(
                         version = typeof(Worker).Assembly.GetName().Version?.ToString() ?? "1.0.0",
                         operatingSystem = Environment.OSVersion.VersionString,
                         localEndpoints = localAgentApiState.IsRunning
-                            ? LocalNetworkEndpointDiscovery.Discover(configuration.GetValue<int?>("Agent:LocalApi:Port") ?? LocalNetworkEndpointDiscovery.DefaultPort)
+                            ? LocalNetworkEndpointDiscovery.Discover()
                             : Array.Empty<string>()
                     },
                     stoppingToken);

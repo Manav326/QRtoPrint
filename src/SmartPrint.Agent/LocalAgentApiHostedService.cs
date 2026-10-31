@@ -28,7 +28,7 @@ public sealed class LocalAgentApiHostedService(
             return;
         }
 
-        var port = configuration.GetValue<int?>("Agent:LocalApi:Port") ?? LocalNetworkEndpointDiscovery.DefaultPort;
+        const int port = LocalNetworkEndpointDiscovery.DefaultPort;
         if (port is < 1 or > 65535)
         {
             logger.LogError("Local Agent API port {Port} is invalid. LAN discovery is disabled.", port);
