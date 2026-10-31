@@ -79,7 +79,7 @@ public sealed class LocalAgentApiHostedService(
                     {
                         agentDeviceId = credentials.AgentDeviceId,
                         protocolVersion = 1,
-                        status = "READY"
+                        status = "LOCAL_ENDPOINT_READY"
                     });
                 }
                 catch (CryptographicException)

@@ -1145,12 +1145,148 @@ function CustomerEntry({publicCode}:{publicCode:string}) {
       result?<><div className="entry-success-icon"><Check size={23}/></div><div className="entry-eyebrow">SECURE SESSION CREATED</div><h1>Welcome to {result.shop.displayName}</h1><p>Your phone is connected to this shop's print station.</p>
         <div className="entry-printer-card"><div className="entry-printer-icon"><Printer size={20}/></div><div><strong>{result.printer?.displayName||"Shop print counter"}</strong><span>{result.printer?result.printer.manufacturer+" · "+result.printer.model:"The shop will select a printer for your job."}</span></div><Status label={result.printer?.status||"Session ready"} tone="blue"/></div>
         <div className="entry-session-note"><ShieldCheck size={16}/><span>This session expires at {new Date(result.expiresUtc).toLocaleTimeString([], {hour:"2-digit",minute:"2-digit"})}. Your document access stays limited to this shop session.</span></div>
+        <CustomerLocalConnection localAgent={result.localAgent}/>
         <CustomerPrintFlow sessionToken={result.sessionToken} paymentOptions={result.paymentOptions}/>
       </>:null}
     </main>
     <footer className="customer-entry-footer">© 2026 Smart Print · Secure customer printing</footer>
   </div>;
 }
+
+
+type CustomerLocalAgent = NonNullable<Awaited<ReturnType<typeof createCustomerSession>>["localAgent"]>;
+type LocalAgentCheckStatus = "idle" | "checking" | "connected" | "unavailable" | "denied";
+
+function CustomerLocalConnection({localAgent}:{localAgent:CustomerLocalAgent|null}) {
+  const [permissionState,setPermissionState]=useState<PermissionState|"unknown">("unknown");
+  const [checkStatus,setCheckStatus]=useState<LocalAgentCheckStatus>("idle");
+  const [message,setMessage]=useState("");
+
+  async function checkConnection() {
+    if(!localAgent)return;
+    setCheckStatus("checking");
+    setMessage("Checking the shop computer. No document is sent by this check.");
+
+    let validEndpointCount=0;
+    for(const value of localAgent.endpoints.slice(0,8)) {
+      let endpoint:URL;
+      try {
+        endpoint=new URL(value);
+        const octets=endpoint.hostname.split(".").map(Number);
+        const privateIpv4=octets.length===4 &&
+          octets.every(part=>Number.isInteger(part)&&part>=0&&part<=255) &&
+          (octets[0]===10 ||
+           (octets[0]===172&&octets[1]>=16&&octets[1]<=31) ||
+           (octets[0]===192&&octets[1]===168));
+        if(endpoint.protocol!=="http:" ||
+           endpoint.port!=="17842" ||
+           endpoint.username!=="" ||
+           endpoint.password!=="" ||
+           endpoint.pathname!=="/" ||
+           endpoint.search!=="" ||
+           endpoint.hash!=="" ||
+           !privateIpv4)continue;
+      } catch {
+        continue;
+      }
+
+      validEndpointCount++;
+      const controller=new AbortController();
+      const timeout=window.setTimeout(()=>controller.abort(),2500);
+      try {
+        // The first request is made synchronously from the customer's button
+        // click so browsers can present their Local Network Access prompt.
+        const response=await fetch(`${endpoint.origin}/api/v1/local/status`,{
+          method:"GET",
+          mode:"cors",
+          cache:"no-store",
+          credentials:"omit",
+          signal:controller.signal,
+          targetAddressSpace:"local"
+        } as RequestInit & {targetAddressSpace:"local"});
+        if(!response.ok)continue;
+
+        const status=await response.json() as {
+          agentDeviceId?:string;
+          protocolVersion?:number;
+          status?:string;
+        };
+        if(status.agentDeviceId===localAgent.agentDeviceId &&
+           status.protocolVersion===1 &&
+           status.status==="LOCAL_ENDPOINT_READY") {
+          setCheckStatus("connected");
+          setMessage("This phone can reach the shop computer. Your document will still use the current cloud-assisted upload.");
+          return;
+        }
+      } catch {
+        // Try the next private address. This read-only check sends no document data.
+      } finally {
+        window.clearTimeout(timeout);
+      }
+    }
+
+    setCheckStatus("unavailable");
+    setMessage(validEndpointCount===0
+      ? "The shop has not announced a usable local address. The regular upload remains available."
+      : "Could not reach the shop computer. Connect this phone to the shop Wi-Fi and allow Local network access if your browser asks. The regular upload remains available.");
+  }
+
+  useEffect(()=>{
+    if(!localAgent?.endpoints.length||!navigator.permissions?.query)return;
+    let active=true;
+    let permissionStatus:PermissionStatus|null=null;
+    const updatePermission=()=>{
+      if(!active||!permissionStatus)return;
+      setPermissionState(permissionStatus.state);
+      if(permissionStatus.state==="denied") {
+        setCheckStatus("denied");
+        setMessage("Local network access is blocked for this site. Enable it in browser site settings, or continue with the regular upload.");
+      } else if(permissionStatus.state==="prompt") {
+        setCheckStatus("idle");
+      }
+    };
+
+    void navigator.permissions.query({name:"local-network" as PermissionName})
+      .then(status=>{
+        if(!active)return;
+        permissionStatus=status;
+        status.addEventListener("change",updatePermission);
+        setPermissionState(status.state);
+        if(status.state==="granted")void checkConnection();
+        else if(status.state==="denied")updatePermission();
+      })
+      .catch(()=>{if(active)setPermissionState("unknown");});
+
+    return ()=>{
+      active=false;
+      permissionStatus?.removeEventListener("change",updatePermission);
+    };
+  },[localAgent?.agentDeviceId]);
+
+  if(!localAgent?.endpoints.length)return null;
+
+  const label=checkStatus==="checking"?"Checking…":
+    checkStatus==="connected"?"Shop computer reachable":
+    checkStatus==="denied"?"Browser permission blocked":
+    checkStatus==="unavailable"?"Not reachable":"Not checked";
+  const tone=checkStatus==="connected"?"green":
+    checkStatus==="unavailable"||checkStatus==="denied"?"red":"blue";
+
+  return <section className="entry-local-agent">
+    <div className="entry-local-agent-head">
+      <div><strong>Shop Wi-Fi connection</strong><span>Optional local connection check</span></div>
+      <Status label={label} tone={tone}/>
+    </div>
+    <p>Check whether this phone can reach the shop's local print computer. This check does not upload your document.</p>
+    {permissionState==="denied"
+      ? <small className="entry-local-agent-message">{message}</small>
+      : <button type="button" className="customer-flow-button" disabled={checkStatus==="checking"} onClick={()=>void checkConnection()}>
+          {checkStatus==="checking"?"Checking shop connection…":checkStatus==="connected"?"Check again":"Check shop Wi-Fi"}
+        </button>}
+    {message&&permissionState!=="denied"&&<small className="entry-local-agent-message">{message}</small>}
+  </section>;
+}
+
 
 
 type StoredCustomerDraft = {

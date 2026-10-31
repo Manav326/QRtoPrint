@@ -89,6 +89,14 @@
 .entry-printer-card{display:flex;align-items:center;gap:10px;padding:12px;background:#f8f9fc;border:1px solid #e8ebf2;border-radius:10px;text-align:left}
 .entry-printer-icon{height:35px;width:35px;border-radius:9px;background:#eeebff;color:#7862df;display:grid;place-items:center;flex:0 0 35px}.entry-printer-card>div:nth-child(2){display:flex;flex-direction:column;gap:4px;flex:1;min-width:0}.entry-printer-card strong{font-size:9px}.entry-printer-card span{font-size:8px;color:#7e8899}
 .entry-session-note{display:flex;gap:8px;text-align:left;font-size:8px;color:#737f92;line-height:1.55;margin:15px 0;padding:10px;border-radius:8px;background:#f7f8fb}.entry-session-note svg{color:#7460dc;flex:0 0 auto}
+.entry-local-agent{margin:13px 0;padding:12px;border:1px solid #e2e7f0;border-radius:9px;background:#fafbfe;text-align:left}
+.entry-local-agent-head{display:flex;align-items:center;justify-content:space-between;gap:10px}
+.entry-local-agent-head>div{display:flex;flex-direction:column;gap:4px;min-width:0}
+.entry-local-agent-head strong{font-size:9px;color:#313b50}
+.entry-local-agent-head>div>span{font-size:7px;color:#8993a5}
+.entry-local-agent>p{font-size:8px;line-height:1.55;color:#768196;margin:9px 0}
+.entry-local-agent .customer-flow-button{height:34px;margin-top:3px}
+.entry-local-agent-message{display:block;margin-top:8px;font-size:7px;line-height:1.55;color:#788497}
 .entry-next-step{display:flex;flex-direction:column;gap:5px;padding-top:12px;border-top:1px solid #edf0f5;text-align:left}.entry-next-step strong{font-size:9px;color:#313b50}.entry-next-step span{font-size:8px;color:#929bac;line-height:1.55}.customer-entry-footer{position:relative;z-index:1;font-size:8px;color:#929bad;text-align:center}
 @media(max-width:1100px){.printer-grid,.station-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.auth-layout{gap:45px}}
 @media(max-width:850px){.setup-checks{grid-template-columns:1fr}.setup-check{padding:13px}.auth-layout{grid-template-columns:1fr minmax(340px,410px);gap:25px}.auth-story h1{font-size:40px}}
