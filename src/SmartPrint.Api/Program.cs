@@ -441,6 +441,115 @@ auth.MapPost("/register-shop", async (
     return Results.Created("/api/v1/shop/profile", response);
 }).AllowAnonymous();
 
+auth.MapPost("/register-customer", async (
+    RegisterCustomerRequest request,
+    UserManager<AppUser> userManager,
+    SmartPrintDbContext db,
+    TokenIssuer tokenIssuer,
+    CancellationToken ct) =>
+{
+    var displayName = request.DisplayName?.Trim();
+    var email = request.Email?.Trim();
+
+    if (string.IsNullOrWhiteSpace(displayName) || displayName.Length > 160 ||
+        string.IsNullOrWhiteSpace(email) || email.Length > 256 ||
+        !System.Net.Mail.MailAddress.TryCreate(email, out _) ||
+        string.IsNullOrWhiteSpace(request.Password))
+    {
+        return Results.ValidationProblem(new Dictionary<string, string[]>
+        {
+            ["customer"] = ["A display name, valid email address and password are required."]
+        });
+    }
+
+    if (await userManager.FindByEmailAsync(email) is not null)
+    {
+        return Results.Conflict(new { code = "email_already_registered", message = "An account already exists for this email address." });
+    }
+
+    var now = DateTimeOffset.UtcNow;
+    var user = new AppUser
+    {
+        Id = Guid.NewGuid(),
+        TenantId = null,
+        UserName = email,
+        Email = email,
+        DisplayName = displayName,
+        EmailConfirmed = false
+    };
+    var createResult = await userManager.CreateAsync(user, request.Password);
+    if (!createResult.Succeeded)
+    {
+        return Results.ValidationProblem(createResult.Errors
+            .GroupBy(error => error.Code)
+            .ToDictionary(group => group.Key, group => group.Select(error => error.Description).ToArray()));
+    }
+
+    var claimResult = await userManager.AddClaimAsync(user, new Claim("customer_role", "Customer"));
+    if (!claimResult.Succeeded)
+    {
+        await userManager.DeleteAsync(user);
+        return Results.Problem("Could not create the customer account permissions.", statusCode: 500);
+    }
+
+    var tokens = await tokenIssuer.CreateAsync(user);
+    db.RefreshTokens.Add(new RefreshToken
+    {
+        UserId = user.Id,
+        TokenHash = TokenIssuer.HashRefreshToken(tokens.RefreshToken),
+        CreatedUtc = now,
+        ExpiresUtc = now.AddDays(30)
+    });
+    await db.SaveChangesAsync(ct);
+    return Results.Created("/api/v1/customer/me",
+        new TokenResponse("Bearer", tokens.AccessToken, tokens.RefreshToken, tokens.AccessTokenExpiresUtc));
+}).AllowAnonymous();
+
+auth.MapPost("/customer-login", async (
+    LoginRequest request,
+    UserManager<AppUser> userManager,
+    SignInManager<AppUser> signInManager,
+    SmartPrintDbContext db,
+    TokenIssuer tokenIssuer,
+    CancellationToken ct) =>
+{
+    if (string.IsNullOrWhiteSpace(request.Email) || string.IsNullOrWhiteSpace(request.Password))
+    {
+        return Results.Unauthorized();
+    }
+
+    var user = await userManager.FindByEmailAsync(request.Email.Trim());
+    if (user is null)
+    {
+        return Results.Unauthorized();
+    }
+
+    var claims = await userManager.GetClaimsAsync(user);
+    if (user.TenantId is not null ||
+        !claims.Any(claim => claim.Type == "customer_role" && claim.Value == "Customer"))
+    {
+        return Results.Unauthorized();
+    }
+
+    var signIn = await signInManager.CheckPasswordSignInAsync(user, request.Password, lockoutOnFailure: true);
+    if (!signIn.Succeeded)
+    {
+        return Results.Unauthorized();
+    }
+
+    var tokens = await tokenIssuer.CreateAsync(user);
+    var now = DateTimeOffset.UtcNow;
+    db.RefreshTokens.Add(new RefreshToken
+    {
+        UserId = user.Id,
+        TokenHash = TokenIssuer.HashRefreshToken(tokens.RefreshToken),
+        CreatedUtc = now,
+        ExpiresUtc = now.AddDays(30)
+    });
+    await db.SaveChangesAsync(ct);
+    return Results.Ok(new TokenResponse("Bearer", tokens.AccessToken, tokens.RefreshToken, tokens.AccessTokenExpiresUtc));
+}).AllowAnonymous();
+
 auth.MapPost("/login", async (
     LoginRequest request,
     UserManager<AppUser> userManager,
@@ -526,7 +635,10 @@ auth.MapPost("/refresh", async (
     }
 
     var userClaims = await userManager.GetClaimsAsync(user);
-    if (user.TenantId is null && !PlatformAdminAuthorization.IsPlatformAdmin(user.TenantId, userClaims))
+    var isCustomer = userClaims.Any(claim => claim.Type == "customer_role" && claim.Value == "Customer");
+    if (user.TenantId is null &&
+        !PlatformAdminAuthorization.IsPlatformAdmin(user.TenantId, userClaims) &&
+        !isCustomer)
     {
         await transaction.RollbackAsync(ct);
         return Results.Unauthorized();
@@ -560,6 +672,71 @@ auth.MapPost("/logout", async (RefreshRequest request, SmartPrintDbContext db, C
         .ExecuteUpdateAsync(update => update.SetProperty(token => token.RevokedUtc, now), ct);
     return Results.NoContent();
 }).AllowAnonymous();
+
+var customerApi = app.MapGroup("/api/v1/customer").RequireAuthorization();
+
+customerApi.MapGet("/me", async (
+    ClaimsPrincipal principal,
+    UserManager<AppUser> userManager) =>
+{
+    if (principal.FindFirstValue("customer_role") != "Customer" ||
+        !Guid.TryParse(principal.FindFirstValue(JwtRegisteredClaimNames.Sub), out var customerId))
+    {
+        return Results.Forbid();
+    }
+
+    var user = await userManager.FindByIdAsync(customerId.ToString());
+    if (user is null || user.TenantId is not null)
+    {
+        return Results.Unauthorized();
+    }
+
+    return Results.Ok(new
+    {
+        user.Id,
+        user.DisplayName,
+        user.Email,
+        user.CreatedUtc
+    });
+});
+
+customerApi.MapGet("/jobs", async (
+    ClaimsPrincipal principal,
+    SmartPrintDbContext db,
+    CancellationToken ct) =>
+{
+    if (principal.FindFirstValue("customer_role") != "Customer" ||
+        !Guid.TryParse(principal.FindFirstValue(JwtRegisteredClaimNames.Sub), out var customerId))
+    {
+        return Results.Forbid();
+    }
+
+    var jobs = await (
+        from job in db.PrintJobs.AsNoTracking()
+        join session in db.CustomerPrintSessions.AsNoTracking()
+            on new { job.TenantId, SessionId = job.CustomerSessionId }
+            equals new { session.TenantId, SessionId = session.Id }
+        join profile in db.ShopProfiles.AsNoTracking()
+            on job.TenantId equals profile.TenantId
+        where session.CustomerUserId == customerId
+        orderby job.CreatedUtc descending
+        select new
+        {
+            job.Id,
+            job.JobNumber,
+            job.Status,
+            job.PageCount,
+            job.Copies,
+            job.Currency,
+            job.QuotedAmountMinor,
+            job.CreatedUtc,
+            ShopName = profile.DisplayName
+        })
+        .Take(100)
+        .ToListAsync(ct);
+
+    return Results.Ok(new { Jobs = jobs });
+});
 
 var shop = app.MapGroup("/api/v1/shop").RequireAuthorization();
 
@@ -4493,6 +4670,7 @@ publicApi.MapPost("/sessions/current/resume", async (
 
 publicApi.MapPost("/stations/{publicCode}/sessions", async (
     string publicCode,
+    HttpContext context,
     SmartPrintDbContext db,
     CancellationToken ct) =>
 {
@@ -4510,6 +4688,10 @@ publicApi.MapPost("/stations/{publicCode}/sessions", async (
     {
         TenantId = station.TenantId,
         QrStationId = station.Id,
+        CustomerUserId = context.User.FindFirstValue("customer_role") == "Customer" &&
+            Guid.TryParse(context.User.FindFirstValue(JwtRegisteredClaimNames.Sub), out var customerUserId)
+                ? customerUserId
+                : null,
         TokenHash = HashOpaqueToken(rawToken),
         CreatedUtc = now,
         ExpiresUtc = now.AddMinutes(15)
