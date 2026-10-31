@@ -3024,7 +3024,7 @@ publicApi.MapPost("/jobs/{jobId:guid}/quote", async (
         return Results.NotFound();
     }
 
-    if (job.Status is not ("AWAITING_CONFIGURATION" or "QUOTE_EXPIRED" or "Uploaded" or "UPLOADED"))
+    if (!PrintJobQuoteRules.CanCreateQuote(job.Status))
     {
         return Results.Conflict(new
         {
