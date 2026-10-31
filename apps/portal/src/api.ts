@@ -690,7 +690,7 @@ export function createPlatformPlan(token: string, values: {
   description?: string;
   version: PlatformPlanVersionInput;
 }) {
-  return apiRequest<PlatformPlan>("/api/v1/platform/plans", {
+  return apiRequest<{ id: string; code: string; name: string; description: string | null; isActive: boolean; isSystemPlan: boolean; version: PlatformPlanVersion }>("/api/v1/platform/plans", {
     method: "POST",
     body: JSON.stringify(values)
   }, token);
@@ -701,7 +701,7 @@ export function updatePlatformPlan(token: string, planId: string, values: {
   description?: string;
   isActive: boolean;
 }) {
-  return apiRequest<PlatformPlan>(`/api/v1/platform/plans/${planId}`, {
+  return apiRequest<{ id: string; code: string; name: string; description: string | null; isActive: boolean; updatedUtc: string }>(`/api/v1/platform/plans/${planId}`, {
     method: "PUT",
     body: JSON.stringify(values)
   }, token);
