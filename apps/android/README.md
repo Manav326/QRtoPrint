@@ -18,7 +18,11 @@ General library imports allow up to 100 MB per file. The print workflow uses the
 
 The native document-capture action uses Google ML Kit Document Scanner in full mode and requests both PDF and JPEG outputs. The scanner supports multi-page capture and its on-device UI provides document-edge detection, crop/perspective correction, rotation, page ordering and image filters. Google Play services downloads the scanner UI/models when needed; the first launch can require a download, and devices below the scanner's 1.7 GB RAM requirement are not supported. If unavailable, customers can still import photos/PDFs through Android's file picker. Scanned PDF and JPEG pages are saved in a timestamped folder in My files.
 
-Customer sign-in/sign-up is not currently enabled: the API exposes shop-owner authentication but no separate customer identity/account service. The profile therefore keeps guest use available and clearly explains this limitation rather than incorrectly using shop credentials.
+## Global SmartPrint customer account
+
+SmartPrint customer accounts are global and independent of any print shop. A customer registers once with SmartPrint, then uses the same account at any participating shop by scanning that shop's QR code. Shops are session destinations, not customer-account owners. New authenticated QR sessions carry the global customer ID; account print history is aggregated across shops by that ID. Guest customers can still scan, organise and print without registration. Existing guest sessions and print jobs are not silently attached to an account later.
+
+Customer identity is separate from shop staff identity and uses dedicated `/api/v1/auth/register-customer` and `/api/v1/auth/customer-login` endpoints. Android access/refresh tokens are encrypted with Android Keystore AES-GCM. The WebView does not expose the long-lived token to page JavaScript through a generic JavaScript interface: AndroidX WebKit messaging is restricted to the trusted top-level shop origin and main frame.
 
 ## QR and print flow
 
