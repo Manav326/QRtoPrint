@@ -47,8 +47,7 @@ if (-not (Test-Path -LiteralPath $envPath)) {
         "POSTGRES_PASSWORD=$(New-RandomHex 32)"
         "AUTH_SIGNING_KEY=$(New-RandomBase64 48)"
         "DOCUMENTS_ENCRYPTION_KEY=$(New-RandomBase64 32)"
-        "LOCAL_PORTAL_ORIGIN=$portalOrigin"
-        "LOCAL_API_BASE_URL=http://$($PortalHost):8080"
+        "LOCAL_LAN_IP=$PortalHost"
     )
     [IO.File]::WriteAllLines($envPath, [string[]]$lines, [Text.UTF8Encoding]::new($false))
     Write-Host "Created .env.local with fresh local secrets." -ForegroundColor Green
@@ -61,10 +60,10 @@ if (-not (Test-Path -LiteralPath $envPath)) {
     }
     $lines = @($lines | Where-Object {
         -not $_.StartsWith("LOCAL_PORTAL_ORIGIN=", [StringComparison]::Ordinal) -and
-        -not $_.StartsWith("LOCAL_API_BASE_URL=", [StringComparison]::Ordinal)
+        -not $_.StartsWith("LOCAL_API_BASE_URL=", [StringComparison]::Ordinal) -and
+        -not $_.StartsWith("LOCAL_LAN_IP=", [StringComparison]::Ordinal)
     })
-    $lines += "LOCAL_PORTAL_ORIGIN=$portalOrigin"
-    $lines += "LOCAL_API_BASE_URL=http://$($PortalHost):8080"
+    $lines += "LOCAL_LAN_IP=$PortalHost"
     [IO.File]::WriteAllLines($envPath, [string[]]$lines, [Text.UTF8Encoding]::new($false))
     Write-Host "Reusing .env.local secrets; updated only the portal origin." -ForegroundColor Yellow
 }
