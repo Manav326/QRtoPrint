@@ -107,6 +107,78 @@ public sealed class PlatformSubscriptionAssignmentRulesTests
         Assert.Equal("paid_plan_requires_verified_payment", error);
     }
 
+
+    [Fact]
+    public void PaidMonthlyPlanRequiresPaymentConfirmationAndUsesPublishedPrice()
+    {
+        var plan = new SubscriptionPlan { Code = "PRO", IsActive = true };
+        var version = new SubscriptionPlanVersion
+        {
+            PlanId = plan.Id,
+            Status = "Published",
+            Currency = "INR",
+            MonthlyPriceMinor = 49900
+        };
+
+        var denied = PlatformSubscriptionAssignmentRules.TryResolve(
+            plan, version, "Monthly", Now, out var deniedTerms, out var deniedError);
+        Assert.False(denied);
+        Assert.Null(deniedTerms);
+        Assert.Equal("paid_plan_requires_verified_payment", deniedError);
+
+        var allowed = PlatformSubscriptionAssignmentRules.TryResolve(
+            plan, version, "Monthly", Now, out var terms, out var error, paymentConfirmed: true);
+
+        Assert.True(allowed);
+        Assert.Empty(error);
+        Assert.NotNull(terms);
+        Assert.Equal("PAID_PLAN_ASSIGNED", terms.EventType);
+        Assert.Equal("Active", terms.Status);
+        Assert.Equal(49900, terms.AmountMinor);
+        Assert.Equal("INR", terms.Currency);
+        Assert.Equal(Now.AddMonths(1), terms.PeriodEndUtc);
+    }
+
+    [Fact]
+    public void PaidAnnualPlanUsesAnnualPriceAndOneYearPeriodAfterConfirmation()
+    {
+        var plan = new SubscriptionPlan { Code = "PRO", IsActive = true };
+        var version = new SubscriptionPlanVersion
+        {
+            PlanId = plan.Id,
+            Status = "Published",
+            Currency = "INR",
+            AnnualPriceMinor = 499900
+        };
+
+        var allowed = PlatformSubscriptionAssignmentRules.TryResolve(
+            plan, version, "Annual", Now, out var terms, out var error, paymentConfirmed: true);
+
+        Assert.True(allowed);
+        Assert.Empty(error);
+        Assert.NotNull(terms);
+        Assert.Equal("PAID_PLAN_ASSIGNED", terms.EventType);
+        Assert.Equal(499900, terms.AmountMinor);
+        Assert.Equal(Now.AddYears(1), terms.PeriodEndUtc);
+    }
+
+    [Fact]
+    public void UnconfiguredBillingIntervalCannotBeAssignedEvenWithPaymentConfirmation()
+    {
+        var plan = new SubscriptionPlan { Code = "PRO", IsActive = true };
+        var version = new SubscriptionPlanVersion
+        {
+            PlanId = plan.Id,
+            Status = "Published",
+            MonthlyPriceMinor = null,
+            AnnualPriceMinor = null
+        };
+
+        Assert.False(PlatformSubscriptionAssignmentRules.TryResolve(
+            plan, version, "Monthly", Now, out _, out var error, paymentConfirmed: true));
+        Assert.Equal("billing_interval_not_available", error);
+    }
+
     [Fact]
     public void InactiveOrUnpublishedPlansCannotBeAssigned()
     {

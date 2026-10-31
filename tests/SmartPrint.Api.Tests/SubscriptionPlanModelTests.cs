@@ -82,6 +82,7 @@ public sealed class SubscriptionPlanModelTests
             index.IsUnique && index.Properties.Select(property => property.Name).SequenceEqual(new[] { "IdempotencyKey" }));
         Assert.Contains(audit.GetIndexes(), index =>
             index.IsUnique && index.Properties.Select(property => property.Name).SequenceEqual(new[] { "AssignedSubscriptionId" }));
+        Assert.Equal(100, audit.FindProperty(nameof(PlatformSubscriptionAudit.PaymentReference))?.GetMaxLength());
         Assert.Contains(audit.GetForeignKeys(), relationship =>
             relationship.Properties.Any(property => property.Name == nameof(PlatformSubscriptionAudit.TenantId)) &&
             relationship.DeleteBehavior == DeleteBehavior.Restrict);

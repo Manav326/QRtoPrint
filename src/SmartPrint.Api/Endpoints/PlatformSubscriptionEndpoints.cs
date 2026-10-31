@@ -133,10 +133,16 @@ public static class PlatformSubscriptionEndpoints
         {
             var reason = request.Reason?.Trim() ?? string.Empty;
             var idempotencyKey = request.IdempotencyKey?.Trim() ?? string.Empty;
+            var paymentReference = request.PaymentReference?.Trim() ?? string.Empty;
+            var validPaymentReference = paymentReference.Length is >= 4 and <= 100 &&
+                paymentReference.All(character =>
+                    character is >= 'a' and <= 'z' or >= 'A' and <= 'Z' or >= '0' and <= '9' or '-' or '_');
             if (tenantId == Guid.Empty ||
                 request.PlanVersionId == Guid.Empty ||
                 reason.Length is < 10 or > 500 ||
-                idempotencyKey.Length is < 8 or > 100)
+                idempotencyKey.Length is < 8 or > 100 ||
+                (request.PaymentConfirmed && !validPaymentReference) ||
+                (!request.PaymentConfirmed && paymentReference.Length != 0))
             {
                 return Results.ValidationProblem(new Dictionary<string, string[]>
                 {
@@ -190,14 +196,23 @@ public static class PlatformSubscriptionEndpoints
                 request.BillingInterval,
                 now,
                 out var terms,
-                out var errorCode) || terms is null)
+                out var errorCode,
+                request.PaymentConfirmed) || terms is null)
             {
                 var message = errorCode == "paid_plan_requires_verified_payment"
-                    ? "A paid plan can only be assigned after a server-verified subscription payment."
+                    ? "Confirm that payment was received and provide its transaction reference before granting this paid plan."
                     : errorCode == "billing_interval_not_available"
                         ? "That billing interval is not available at an explicitly zero price."
                         : "This published plan version is not available for manual assignment.";
                 return Results.Conflict(new { code = errorCode, message });
+            }
+
+            if (terms.AmountMinor == 0 && request.PaymentConfirmed)
+            {
+                return Results.ValidationProblem(new Dictionary<string, string[]>
+                {
+                    ["paymentReference"] = ["Payment confirmation is only required for a paid plan."]
+                });
             }
 
             var tenant = await db.Tenants.AsNoTracking()
@@ -282,6 +297,7 @@ public static class PlatformSubscriptionEndpoints
                 PeriodStartUtc = terms.PeriodStartUtc,
                 PeriodEndUtc = terms.PeriodEndUtc,
                 Reason = reason,
+                PaymentReference = request.PaymentConfirmed ? paymentReference : null,
                 IdempotencyKey = idempotencyKey,
                 CreatedUtc = now
             });
@@ -335,6 +351,7 @@ public static class PlatformSubscriptionEndpoints
                     item.PeriodStartUtc,
                     item.PeriodEndUtc,
                     item.Reason,
+                    item.PaymentReference,
                     item.IdempotencyKey,
                     item.CreatedUtc
                 })
@@ -350,4 +367,6 @@ public sealed record AssignPlatformSubscriptionRequest(
     Guid PlanVersionId,
     string BillingInterval,
     string Reason,
-    string IdempotencyKey);
+    string IdempotencyKey,
+    bool PaymentConfirmed = false,
+    string? PaymentReference = null);
