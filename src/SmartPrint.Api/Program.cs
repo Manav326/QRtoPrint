@@ -1207,6 +1207,18 @@ shop.MapGet("/print-jobs", async (
             job.OutputSha256,
             job.OutputSizeBytes,
             job.OutputCompletedUtc,
+            Payment = db.PrintPayments.AsNoTracking()
+                .Where(payment => payment.TenantId == job.TenantId && payment.PrintJobId == job.Id)
+                .OrderByDescending(payment => payment.CreatedUtc)
+                .Select(payment => new
+                {
+                    payment.Id,
+                    payment.Status,
+                    payment.AmountMinor,
+                    payment.Currency,
+                    payment.Method
+                })
+                .FirstOrDefault(),
             Document = new
             {
                 document.OriginalFileName,
@@ -1790,6 +1802,155 @@ shop.MapPost("/print-jobs/{jobId:guid}/reject", async (
     return Results.Ok(new { job.Id, job.JobNumber, job.Status, job.UpdatedUtc });
 });
 
+shop.MapPost("/print-jobs/{jobId:guid}/refund", async (
+    Guid jobId,
+    RecordPrintRefundRequest request,
+    ClaimsPrincipal principal,
+    SmartPrintDbContext db,
+    CancellationToken ct) =>
+{
+    if (!IsShopOwner(principal) || !TryGetTenantId(principal, out var tenantId))
+    {
+        return Results.Forbid();
+    }
+
+    var reason = request.Reason?.Trim();
+    var method = request.RefundMethod?.Trim().ToUpperInvariant();
+    var reference = request.RefundReference?.Trim();
+    if (string.IsNullOrWhiteSpace(reason) || reason.Length is < 3 or > 300 ||
+        method is not ("UPI" or "CASH") ||
+        (method == "UPI" && (string.IsNullOrWhiteSpace(reference) || reference.Length is < 4 or > 100)) ||
+        (reference?.Length > 100) ||
+        !request.ConfirmedSent)
+    {
+        return Results.ValidationProblem(new Dictionary<string, string[]>
+        {
+            ["refund"] = ["Confirm the refund was sent, choose UPI or cash, provide a reason, and enter a UPI refund reference when applicable."]
+        });
+    }
+
+    await using var transaction = await db.Database.BeginTransactionAsync(ct);
+    var job = await db.PrintJobs.SingleOrDefaultAsync(
+        item => item.Id == jobId && item.TenantId == tenantId, ct);
+    if (job is null)
+    {
+        await transaction.RollbackAsync(ct);
+        return Results.NotFound();
+    }
+
+    var existingRefund = await db.PrintRefunds.AsNoTracking()
+        .SingleOrDefaultAsync(item => item.TenantId == tenantId && item.PrintJobId == job.Id, ct);
+    if (existingRefund is not null)
+    {
+        await transaction.RollbackAsync(ct);
+        return Results.Ok(new
+        {
+            existingRefund.Id,
+            existingRefund.PrintJobId,
+            existingRefund.AmountMinor,
+            existingRefund.Currency,
+            existingRefund.Method,
+            existingRefund.Status,
+            DuplicateRequest = true
+        });
+    }
+
+    if (job.Status != "PAID_AUTHORISED" ||
+        job.LocalQueueReceivedUtc is not null ||
+        job.ClaimedByAgentDeviceId is not null ||
+        job.AgentClaimedUtc is not null ||
+        job.PrintDispatchAttempts > 0 ||
+        job.SpoolerSubmittedUtc is not null ||
+        job.OutputConfirmedUtc is not null)
+    {
+        await transaction.RollbackAsync(ct);
+        return Results.Conflict(new
+        {
+            code = "file_not_refundable_after_print_handoff",
+            message = "A paid file can be rejected and refunded only before it is handed to the shop computer or printing begins."
+        });
+    }
+
+    var payment = await db.PrintPayments.SingleOrDefaultAsync(
+        item => item.TenantId == tenantId &&
+                item.PrintJobId == job.Id &&
+                item.Status == "VERIFIED", ct);
+    if (payment is null || payment.AmountMinor <= 0)
+    {
+        await transaction.RollbackAsync(ct);
+        return Results.Conflict(new
+        {
+            code = "verified_payment_not_found",
+            message = "This file has no verified payment to refund. An unpaid file can be rejected without a refund."
+        });
+    }
+
+    var now = DateTimeOffset.UtcNow;
+    var refund = new PrintRefund
+    {
+        TenantId = tenantId,
+        PrintJobId = job.Id,
+        PrintPaymentId = payment.Id,
+        AmountMinor = payment.AmountMinor,
+        Currency = payment.Currency,
+        Method = method!,
+        Status = "RECORDED_AS_SENT",
+        Reference = string.IsNullOrWhiteSpace(reference) ? null : reference,
+        Reason = reason,
+        RefundedByUserId = GetActorId(principal),
+        RefundedUtc = now,
+        CreatedUtc = now
+    };
+
+    payment.Status = "REFUNDED";
+    payment.UpdatedUtc = now;
+    job.Status = "REFUNDED";
+    job.FailureCode = "SHOP_REJECTED_FILE_REFUNDED";
+    job.UpdatedUtc = now;
+    db.PrintRefunds.Add(refund);
+    db.PrintJobEvents.Add(new PrintJobEvent
+    {
+        TenantId = tenantId,
+        PrintJobId = job.Id,
+        PreviousStatus = "PAID_AUTHORISED",
+        NewStatus = "REFUNDED",
+        ActorType = "ShopUser",
+        ActorId = GetActorId(principal),
+        ReasonCode = "SHOP_REJECTED_FILE_REFUND_LOGGED",
+        CreatedUtc = now
+    });
+
+    try
+    {
+        await db.SaveChangesAsync(ct);
+    }
+    catch (DbUpdateConcurrencyException)
+    {
+        await transaction.RollbackAsync(ct);
+        return Results.Conflict(new
+        {
+            code = "refund_recorded_concurrently",
+            message = "The payment changed while the refund was being recorded. Refresh the job before retrying."
+        });
+    }
+
+    await transaction.CommitAsync(ct);
+    return Results.Created($"/api/v1/shop/refunds/{refund.Id}", new
+    {
+        refund.Id,
+        refund.PrintJobId,
+        refund.PrintPaymentId,
+        job.JobNumber,
+        refund.AmountMinor,
+        refund.Currency,
+        refund.Method,
+        refund.Status,
+        refund.Reference,
+        refund.Reason,
+        refund.RefundedUtc,
+        refund.RefundedByUserId
+    });
+});
 
 var shopAgents = app.MapGroup("/api/v1/shop").RequireAuthorization();
 
@@ -3257,6 +3418,49 @@ shop.MapGet("/payments", async (
         .ToListAsync(ct);
 
     return Results.Ok(payments);
+});
+
+shop.MapGet("/refunds", async (
+    ClaimsPrincipal principal,
+    SmartPrintDbContext db,
+    CancellationToken ct) =>
+{
+    if (!TryGetTenantId(principal, out var tenantId))
+    {
+        return Results.Forbid();
+    }
+
+    var refunds = await (
+        from refund in db.PrintRefunds.AsNoTracking()
+        join job in db.PrintJobs.AsNoTracking()
+            on new { refund.TenantId, PrintJobId = refund.PrintJobId } equals new { job.TenantId, PrintJobId = job.Id }
+        join document in db.PrintDocuments.AsNoTracking()
+            on new { refund.TenantId, refund.PrintJobId } equals new { document.TenantId, document.PrintJobId }
+        join user in db.Users.AsNoTracking()
+            on refund.RefundedByUserId equals user.Id
+        where refund.TenantId == tenantId
+        orderby refund.RefundedUtc descending
+        select new
+        {
+            refund.Id,
+            refund.PrintJobId,
+            refund.PrintPaymentId,
+            job.JobNumber,
+            DocumentName = document.OriginalFileName,
+            refund.AmountMinor,
+            refund.Currency,
+            refund.Method,
+            refund.Status,
+            refund.Reference,
+            refund.Reason,
+            refund.RefundedUtc,
+            refund.RefundedByUserId,
+            RefundedByName = user.DisplayName
+        })
+        .Take(100)
+        .ToListAsync(ct);
+
+    return Results.Ok(refunds);
 });
 
 shop.MapPost("/payments/{paymentId:guid}/verify", async (
