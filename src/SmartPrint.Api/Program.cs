@@ -1400,7 +1400,10 @@ shop.MapGet("/customers", async (
             CustomerId = customerJobs.Key,
             PrintJobCount = customerJobs.Count(),
             CompletedJobCount = customerJobs.Count(job =>
-                job.Status == "COMPLETED" && job.OutputConfirmedUtc != null),
+                job.Status == "COMPLETED" &&
+                    (job.OutputType == "PDF_EXPORT"
+                        ? job.OutputCompletedUtc != null
+                        : job.OutputConfirmedUtc != null)),
             LastPrintUtc = customerJobs.Max(job => job.CreatedUtc)
         }).ToListAsync(ct);
 
@@ -1483,7 +1486,9 @@ shop.MapGet("/customers/{customerId:guid}/jobs", async (
             job.Currency,
             job.QuotedAmountMinor,
             job.RejectedPageNumbersJson,
+            job.OutputType,
             job.OutputConfirmedUtc,
+            job.OutputCompletedUtc,
             Document = new
             {
                 document.OriginalFileName,
