@@ -23,13 +23,9 @@ public static class PrintRefundRules
     public static bool HasRefundableVerifiedPayment(PrintJob job, PrintPayment? payment)
     {
         ArgumentNullException.ThrowIfNull(job);
-        return payment is not null &&
-               payment.TenantId == job.TenantId &&
-               payment.PrintJobId == job.Id &&
+        return payment is not null && payment.TenantId == job.TenantId && payment.PrintJobId == job.Id &&
                (payment.Status == "VERIFIED" || payment.Status == "PARTIALLY_REFUNDED") &&
-               payment.AmountMinor > 0 &&
-               payment.RefundedAmountMinor >= 0 &&
-               payment.RefundedAmountMinor <= payment.AmountMinor;
+               payment.AmountMinor > 0 && payment.RefundedAmountMinor >= 0 && payment.RefundedAmountMinor <= payment.AmountMinor;
     }
 
     public static int[] NormalizeRejectedPages(int pageCount, IEnumerable<int> requestedPages, IEnumerable<int> alreadyRejectedPages)
@@ -46,24 +42,44 @@ public static class PrintRefundRules
         return requested.Order().ToArray();
     }
 
-    public static long CalculateCumulativeRefundAmount(long originalAmountMinor, int originalPageCount, int copies, IReadOnlyCollection<int> rejectedPages)
+    public static long[] NormalizePageAllocations(long originalAmountMinor, int pageCount, IEnumerable<long>? savedAllocations)
     {
-        ArgumentNullException.ThrowIfNull(rejectedPages);
         if (originalAmountMinor <= 0) throw new ArgumentOutOfRangeException(nameof(originalAmountMinor));
-        if (originalPageCount is < 1 or > 500) throw new ArgumentOutOfRangeException(nameof(originalPageCount));
-        if (copies is < 1 or > 100) throw new ArgumentOutOfRangeException(nameof(copies));
-        if (rejectedPages.Any(page => page < 1 || page > originalPageCount) || rejectedPages.Distinct().Count() != rejectedPages.Count)
-            throw new ArgumentException("Rejected page numbers must be unique and in range.");
-        var acceptedPages = originalPageCount - rejectedPages.Count;
-        var remaining = (long)decimal.Round((decimal)originalAmountMinor * acceptedPages / originalPageCount, 0, MidpointRounding.AwayFromZero);
-        return Math.Clamp(originalAmountMinor - remaining, 0L, originalAmountMinor);
+        if (pageCount is < 1 or > 500) throw new ArgumentOutOfRangeException(nameof(pageCount));
+        var allocations = savedAllocations?.ToArray() ?? [];
+        // Pre-allocation quotes use a stable exact equal split; new quotes always persist their weighted allocation.
+        if (allocations.Length == 0)
+        {
+            allocations = new long[pageCount];
+            var each = originalAmountMinor / pageCount;
+            var remainder = originalAmountMinor % pageCount;
+            for (var index = 0; index < pageCount; index++) allocations[index] = each + (index < remainder ? 1 : 0);
+        }
+        if (allocations.Length != pageCount || allocations.Any(amount => amount < 0) ||
+            allocations.Aggregate(0L, (sum, amount) => checked(sum + amount)) != originalAmountMinor)
+            throw new InvalidOperationException("The saved per-page refund allocation does not match the original paid amount.");
+        return allocations;
     }
 
-    public static long CalculateAdditionalRefundAmount(long originalAmountMinor, long alreadyRefundedAmountMinor, int originalPageCount, int copies, IReadOnlyCollection<int> rejectedPages)
+    public static long CalculateCumulativeRefundAmount(IReadOnlyList<long> pageAllocations, IReadOnlyCollection<int> rejectedPages)
+    {
+        ArgumentNullException.ThrowIfNull(pageAllocations);
+        ArgumentNullException.ThrowIfNull(rejectedPages);
+        if (pageAllocations.Count is < 1 or > 500 || pageAllocations.Any(amount => amount < 0))
+            throw new ArgumentException("The per-page refund allocation is invalid.");
+        if (rejectedPages.Any(page => page < 1 || page > pageAllocations.Count) || rejectedPages.Distinct().Count() != rejectedPages.Count)
+            throw new ArgumentException("Rejected page numbers must be unique and in range.");
+        return rejectedPages.Aggregate(0L, (sum, page) => checked(sum + pageAllocations[page - 1]));
+    }
+
+    public static long CalculateAdditionalRefundAmount(long originalAmountMinor, long alreadyRefundedAmountMinor,
+        IReadOnlyCollection<int> rejectedPages, IReadOnlyList<long> pageAllocations)
     {
         if (alreadyRefundedAmountMinor < 0 || alreadyRefundedAmountMinor > originalAmountMinor)
             throw new ArgumentOutOfRangeException(nameof(alreadyRefundedAmountMinor));
-        var cumulative = CalculateCumulativeRefundAmount(originalAmountMinor, originalPageCount, copies, rejectedPages);
+        if (pageAllocations.Aggregate(0L, (sum, amount) => checked(sum + amount)) != originalAmountMinor)
+            throw new ArgumentException("The per-page refund allocation must sum to the original paid amount.");
+        var cumulative = CalculateCumulativeRefundAmount(pageAllocations, rejectedPages);
         if (cumulative < alreadyRefundedAmountMinor) throw new InvalidOperationException("Selected pages do not produce a new refund amount.");
         return cumulative - alreadyRefundedAmountMinor;
     }
