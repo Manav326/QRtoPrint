@@ -11,6 +11,7 @@ The customer-facing app is **SmartPrint by QuantaEdge**. QRtoPrint remains the r
 - Export one file or an entire folder tree into a user-selected Android File Manager destination. Multiple selected files export together as a ZIP archive that preserves their original filenames.
 - Open/share files with other Android apps.
 - The customer portal's file picker can select a saved PDF/JPG/JPEG/PNG from this library.
+- The native navigation uses custom SmartPrint vector icons for Home, My Files, Scan & Print and Activity; the Scan & Print explainer uses matching scan, QR and printer icons.
 - The native navigation uses SmartPrint vector icons for Home, My Files, Scan & Print and Activity; the Scan & Print explainer uses matching document-scan, QR and printer icons.
 
 General library imports allow up to 100 MB per file. The print workflow uses the existing server-supported single-document types and 20 MB hard limit. Files remain on the device until the customer chooses to upload one.
