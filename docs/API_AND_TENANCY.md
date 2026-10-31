@@ -46,6 +46,15 @@ Plan versions are immutable after publication. A subscription's nullable PlanVer
 
 The catalogue is a configuration foundation, not a payment implementation. Publishing a plan does not bill a shop or assign a subscription; plan assignment, runtime quota enforcement, subscription invoices, platform payment reconciliation, renewals, dunning and refunds remain separate work. Do not use shop-owned print-payment settings or records for SaaS subscription charges.
 
+### Platform subscription administration
+
+- GET /api/v1/platform/subscriptions — paginated, searchable tenant/subscription directory with the latest assigned published plan version and current billing period.
+- POST /api/v1/platform/tenants/{tenantId}/subscriptions — platform-admin-only assignment of the protected 14-day trial or an explicitly zero-priced published monthly/annual plan.
+- GET /api/v1/platform/tenants/{tenantId}/subscription-history — immutable assignment history including reason, actor, plan version, period and idempotency key.
+- Every assignment appends a subscription row and a separate append-only audit event. The previous row is marked Superseded, while its previous status is preserved in the audit event; no prior subscription row is deleted.
+- A paid monthly/annual version is rejected with code paid_plan_requires_verified_payment. Paid access must be granted by a future payment-verification path, not by manual selection in this console.
+- Free-plan assignment requires an explicit reason and an idempotency key. Retries return the original result rather than creating a second subscription.
+
 ### Shop subscription visibility
 
 - GET /api/v1/shop/subscription — returns only the authenticated tenant's latest subscription, linked plan-version terms, effective entitlements and current resource usage. The endpoint never accepts a tenant ID from the caller.

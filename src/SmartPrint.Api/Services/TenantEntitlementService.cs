@@ -25,7 +25,8 @@ public sealed record TenantEntitlementSnapshot(
     bool CloudAssistedPrintingEnabled,
     bool WhiteLabelEnabled,
     bool AdvancedReportsEnabled,
-    bool IsLegacyUnconfigured);
+    bool IsLegacyUnconfigured,
+    bool IsAccessActive);
 
 public sealed record TenantQuotaDecision(
     bool Allowed,
@@ -42,17 +43,22 @@ public sealed class TenantEntitlementService(SmartPrintDbContext db)
             .Where(item => item.TenantId == tenantId)
             .OrderByDescending(item => item.CreatedUtc)
             .ThenByDescending(item => item.Id)
-            .Select(item => new { item.PlanCode, item.Status, item.PlanVersionId })
+            .Select(item => new { item.PlanCode, item.Status, item.PlanVersionId, item.PeriodEndUtc })
             .FirstOrDefaultAsync(cancellationToken);
 
-        // Legacy subscriptions have no immutable version reference. Preserve their existing access.
+        var accessActive = subscription is not null &&
+            PlanEntitlementRules.IsSubscriptionAccessActive(
+                subscription.Status, subscription.PeriodEndUtc, DateTimeOffset.UtcNow);
+
+        // Legacy subscriptions have no immutable version reference. Preserve their existing access
+        // only while their recorded Trial/Active period is still valid.
         if (subscription?.PlanVersionId is not Guid planVersionId)
         {
             return new TenantEntitlementSnapshot(
                 tenantId, subscription?.PlanCode ?? "UNCONFIGURED",
                 subscription?.Status ?? "Unconfigured", null,
                 null, null, null, null, null,
-                true, false, true, true);
+                accessActive, false, accessActive, true, accessActive);
         }
 
         var version = await db.SubscriptionPlanVersions.AsNoTracking()
@@ -67,8 +73,11 @@ public sealed class TenantEntitlementService(SmartPrintDbContext db)
             tenantId, subscription.PlanCode, subscription.Status, version.Id,
             version.MaxPrinters, version.MaxAgentDevices, version.MaxQrStations,
             version.MaxMonthlyPrintJobs, version.MaxDocumentBytes,
-            version.CloudAssistedPrintingEnabled, version.WhiteLabelEnabled,
-            version.AdvancedReportsEnabled, false);
+            version.CloudAssistedPrintingEnabled && accessActive,
+            version.WhiteLabelEnabled && accessActive,
+            version.AdvancedReportsEnabled && accessActive,
+            false,
+            accessActive);
     }
 
     public async Task AcquireQuotaLockAsync(Guid tenantId, TenantQuotaResource resource, CancellationToken cancellationToken)
@@ -90,6 +99,16 @@ public sealed class TenantEntitlementService(SmartPrintDbContext db)
         long requestedCount = 1)
     {
         var entitlement = await GetForTenantAsync(tenantId, cancellationToken);
+        if (!entitlement.IsAccessActive)
+        {
+            return new TenantQuotaDecision(
+                false,
+                "subscription_inactive",
+                "This shop's trial or subscription period has ended or is inactive. Contact the platform team to restore access.",
+                0,
+                0);
+        }
+
         long? maximum = resource switch
         {
             TenantQuotaResource.Printer => entitlement.MaxPrinters,

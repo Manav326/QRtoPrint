@@ -10,6 +10,11 @@ public static class PlanEntitlementRules
           currentCount <= maximum.Value &&
           requestedCount <= maximum.Value - currentCount));
 
+    public static bool IsSubscriptionAccessActive(string? status, DateTimeOffset periodEndUtc, DateTimeOffset now) =>
+        (string.Equals(status, "Active", StringComparison.OrdinalIgnoreCase) ||
+         string.Equals(status, "Trial", StringComparison.OrdinalIgnoreCase)) &&
+        periodEndUtc > now;
+
     public static bool AllowsDocument(long? maximumBytes, long requestedBytes) =>
         requestedBytes > 0 &&
         (maximumBytes is null ||

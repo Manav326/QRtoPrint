@@ -70,6 +70,26 @@ public sealed class SubscriptionPlanModelTests
         Assert.True(plan.IsSystemPlan);
     }
 
+    [Fact]
+    public void PlatformSubscriptionAuditHasUniqueIdempotencyAndAssignmentKeys()
+    {
+        using var db = CreateContext();
+        var audit = db.Model.FindEntityType(typeof(PlatformSubscriptionAudit));
+
+        Assert.NotNull(audit);
+        Assert.Equal("PlatformSubscriptionAudits", audit.GetTableName());
+        Assert.Contains(audit.GetIndexes(), index =>
+            index.IsUnique && index.Properties.Select(property => property.Name).SequenceEqual(new[] { "IdempotencyKey" }));
+        Assert.Contains(audit.GetIndexes(), index =>
+            index.IsUnique && index.Properties.Select(property => property.Name).SequenceEqual(new[] { "AssignedSubscriptionId" }));
+        Assert.Contains(audit.GetForeignKeys(), relationship =>
+            relationship.Properties.Any(property => property.Name == nameof(PlatformSubscriptionAudit.TenantId)) &&
+            relationship.DeleteBehavior == DeleteBehavior.Restrict);
+        Assert.Contains(audit.GetForeignKeys(), relationship =>
+            relationship.Properties.Any(property => property.Name == nameof(PlatformSubscriptionAudit.PlanVersionId)) &&
+            relationship.DeleteBehavior == DeleteBehavior.Restrict);
+    }
+
     private static SmartPrintDbContext CreateContext()
     {
         var options = new DbContextOptionsBuilder<SmartPrintDbContext>()

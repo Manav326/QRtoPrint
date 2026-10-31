@@ -159,6 +159,7 @@ var platform = app.MapGroup("/api/v1/platform")
     .RequireAuthorization(PlatformAdminAuthorization.PolicyName);
 
 platform.MapSubscriptionPlanEndpoints();
+platform.MapPlatformSubscriptionEndpoints();
 
 platform.MapGet("/overview", async (SmartPrintDbContext db, CancellationToken ct) =>
 {
@@ -646,7 +647,8 @@ shop.MapGet("/subscription", async (
             entitlement.CloudAssistedPrintingEnabled,
             entitlement.WhiteLabelEnabled,
             entitlement.AdvancedReportsEnabled,
-            entitlement.IsLegacyUnconfigured
+            entitlement.IsLegacyUnconfigured,
+            entitlement.IsAccessActive
         },
         usage = new
         {
@@ -2849,6 +2851,13 @@ publicApi.MapPost("/sessions/current/jobs", async (
     }
 
     var subscription = await entitlements.GetForTenantAsync(session.TenantId, ct);
+    if (!subscription.IsAccessActive)
+    {
+        return Results.Problem(
+            statusCode: StatusCodes.Status403Forbidden,
+            title: "This shop's trial or subscription period is no longer active.");
+    }
+
     if (!subscription.CloudAssistedPrintingEnabled)
     {
         return Results.Problem(

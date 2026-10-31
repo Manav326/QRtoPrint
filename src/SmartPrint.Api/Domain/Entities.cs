@@ -56,6 +56,28 @@ public sealed class TenantSubscription
     public DateTimeOffset CreatedUtc { get; set; } = DateTimeOffset.UtcNow;
 }
 
+public sealed class PlatformSubscriptionAudit
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+    public Guid TenantId { get; set; }
+    public Guid? PreviousSubscriptionId { get; set; }
+    public string? PreviousStatus { get; set; }
+    public Guid AssignedSubscriptionId { get; set; }
+    public Guid PlanVersionId { get; set; }
+    public Guid? ActorUserId { get; set; }
+    public string EventType { get; set; } = string.Empty;
+    public string PlanCode { get; set; } = string.Empty;
+    public string BillingInterval { get; set; } = string.Empty;
+    public string Status { get; set; } = string.Empty;
+    public long AmountMinor { get; set; }
+    public string Currency { get; set; } = "INR";
+    public DateTimeOffset PeriodStartUtc { get; set; }
+    public DateTimeOffset PeriodEndUtc { get; set; }
+    public string Reason { get; set; } = string.Empty;
+    public string IdempotencyKey { get; set; } = string.Empty;
+    public DateTimeOffset CreatedUtc { get; set; } = DateTimeOffset.UtcNow;
+}
+
 public sealed class SubscriptionPlan
 {
     public Guid Id { get; set; } = Guid.NewGuid();

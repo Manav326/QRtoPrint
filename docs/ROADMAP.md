@@ -66,7 +66,8 @@ Acceptance: cross-tenant retrieval is impossible; payment replay/idempotency and
 - [x] Read-only platform overview and paginated tenant directory with subscription, printer, agent and recent usage summaries.
 - [x] Versioned plan catalogue with configurable prices and entitlement fields; published versions remain immutable.
 - [x] Enforce assigned-plan printer, agent, QR station, monthly-job, document-size and cloud-assisted-printing entitlements at API boundaries.
-- Subscription invoices, platform payment reconciliation and revenue analytics.
+- [x] Platform-admin subscription directory and audited assignment of trial/explicitly free published plan versions.
+- Subscription invoices, verified paid-plan checkout/activation, platform payment reconciliation and revenue analytics.
 - Device/licence management, white-label upgrades and coupons.
 - Support workflow, audit logs and release management.
 

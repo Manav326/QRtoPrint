@@ -289,6 +289,7 @@ export interface ShopSubscriptionSummary {
     whiteLabelEnabled: boolean;
     advancedReportsEnabled: boolean;
     isLegacyUnconfigured: boolean;
+    isAccessActive: boolean;
   };
   usage: {
     printerCount: number;
@@ -738,6 +739,109 @@ export interface PlatformPlanVersionInput {
   cloudAssistedPrintingEnabled: boolean;
   whiteLabelEnabled: boolean;
   advancedReportsEnabled: boolean;
+}
+
+export interface PlatformSubscriptionItem {
+  id: string;
+  slug: string;
+  businessName: string;
+  status: string;
+  createdUtc: string;
+  subscription: {
+    id: string;
+    planCode: string;
+    status: string;
+    billingInterval: string;
+    periodStartUtc: string;
+    periodEndUtc: string;
+    createdUtc: string;
+    planVersionId: string | null;
+  } | null;
+  plan: {
+    id: string;
+    code: string;
+    name: string;
+    version: number;
+    status: string;
+    currency: string;
+    monthlyPriceMinor: number | null;
+    annualPriceMinor: number | null;
+    isActive: boolean;
+  } | null;
+}
+
+export interface PlatformSubscriptionsPage {
+  page: number;
+  pageSize: number;
+  totalCount: number;
+  items: PlatformSubscriptionItem[];
+}
+
+export interface PlatformSubscriptionAudit {
+  id: string;
+  previousSubscriptionId: string | null;
+  previousStatus: string | null;
+  assignedSubscriptionId: string;
+  planVersionId: string;
+  actorUserId: string | null;
+  eventType: string;
+  planCode: string;
+  billingInterval: string;
+  status: string;
+  amountMinor: number;
+  currency: string;
+  periodStartUtc: string;
+  periodEndUtc: string;
+  reason: string;
+  idempotencyKey: string;
+  createdUtc: string;
+}
+
+export function getPlatformSubscriptions(token: string, values: {
+  search?: string;
+  page?: number;
+  pageSize?: number;
+}) {
+  const query = new URLSearchParams();
+  if (values.search) query.set("search", values.search);
+  if (values.page) query.set("page", String(values.page));
+  if (values.pageSize) query.set("pageSize", String(values.pageSize));
+  const suffix = query.toString();
+  return apiRequest<PlatformSubscriptionsPage>(
+    `/api/v1/platform/subscriptions${suffix ? `?${suffix}` : ""}`,
+    {},
+    token
+  );
+}
+
+export function assignPlatformSubscription(token: string, tenantId: string, values: {
+  planVersionId: string;
+  billingInterval: string;
+  reason: string;
+  idempotencyKey: string;
+}) {
+  return apiRequest<{
+    subscriptionId: string;
+    previousSubscriptionId: string | null;
+    planCode: string;
+    status: string;
+    billingInterval: string;
+    periodStartUtc: string;
+    periodEndUtc: string;
+    eventType: string;
+    duplicateRequest: boolean;
+  }>(`/api/v1/platform/tenants/${tenantId}/subscriptions`, {
+    method: "POST",
+    body: JSON.stringify(values)
+  }, token);
+}
+
+export function getPlatformSubscriptionHistory(token: string, tenantId: string) {
+  return apiRequest<PlatformSubscriptionAudit[]>(
+    `/api/v1/platform/tenants/${tenantId}/subscription-history`,
+    {},
+    token
+  );
 }
 
 export function getPlatformPlans(token: string) {

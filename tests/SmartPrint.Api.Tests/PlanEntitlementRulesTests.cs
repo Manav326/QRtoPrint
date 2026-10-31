@@ -30,6 +30,19 @@ public sealed class PlanEntitlementRulesTests
     }
 
     [Fact]
+    public void SubscriptionAccessRequiresAnActiveStatusAndAnUnexpiredPeriod()
+    {
+        var now = new DateTimeOffset(2026, 10, 31, 12, 0, 0, TimeSpan.Zero);
+
+        Assert.True(PlanEntitlementRules.IsSubscriptionAccessActive("Trial", now.AddMinutes(1), now));
+        Assert.True(PlanEntitlementRules.IsSubscriptionAccessActive("Active", now.AddDays(1), now));
+        Assert.False(PlanEntitlementRules.IsSubscriptionAccessActive("Expired", now.AddDays(1), now));
+        Assert.False(PlanEntitlementRules.IsSubscriptionAccessActive("Cancelled", now.AddDays(1), now));
+        Assert.False(PlanEntitlementRules.IsSubscriptionAccessActive("Trial", now, now));
+        Assert.False(PlanEntitlementRules.IsSubscriptionAccessActive("Active", now.AddTicks(-1), now));
+    }
+
+    [Fact]
     public void DocumentSizeMustBePositiveAndNoGreaterThanPlanMaximum()
     {
         Assert.True(PlanEntitlementRules.AllowsDocument(null, 1));

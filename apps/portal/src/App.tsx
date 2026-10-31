@@ -992,7 +992,10 @@ function SubscriptionPage({ summary }: { summary: ShopSubscriptionSummary }) {
             <div><span>Monthly plan price</span><strong>{price(plan?.monthlyPriceMinor, plan?.currency ?? "INR")}</strong></div>
             <div><span>Annual plan price</span><strong>{price(plan?.annualPriceMinor, plan?.currency ?? "INR")}</strong></div>
           </div>
-          {entitlements.isLegacyUnconfigured && (
+          {!entitlements.isAccessActive && (
+            <div className="subscription-legacy-note subscription-expired-note"><ShieldCheck size={15}/><span>This trial or subscription is no longer active. New print requests are paused. Contact the QRtoPrint platform team to restore access.</span></div>
+          )}
+          {entitlements.isLegacyUnconfigured && entitlements.isAccessActive && (
             <div className="subscription-legacy-note"><ShieldCheck size={15}/><span>This subscription predates plan assignment. Existing shop access is being preserved until its terms are explicitly assigned.</span></div>
           )}
         </section>

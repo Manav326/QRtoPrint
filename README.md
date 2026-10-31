@@ -42,3 +42,6 @@ The repository now contains an integrated first implementation: a React customer
 - Never automatically resubmit an uncertain physical print after restart.
 - Never trust client-supplied prices or payment-success screenshots.
 - Do not claim hardware compatibility until representative physical devices have been tested.
+
+
+Platform administrators can manage versioned SaaS plans and assign trial or explicitly free published versions to shops with an append-only assignment audit. Paid subscription activation, invoices and payment reconciliation remain gated on server-verified payment integration.

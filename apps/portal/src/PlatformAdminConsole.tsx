@@ -1,16 +1,17 @@
 import { useEffect, useState, type ReactNode } from "react";
 import {
   Activity, Building2, CheckCircle2, ChevronLeft, ChevronRight,
-  Clock3, Layers3, LogOut, Menu, Moon, Monitor, Printer, RefreshCw, Search, ShieldCheck,
+  Clock3, CreditCard, Layers3, LogOut, Menu, Moon, Monitor, Printer, RefreshCw, Search, ShieldCheck,
   Sun
 } from "lucide-react";
 import PlatformPlansSection from "./PlatformPlansSection";
+import PlatformSubscriptionsSection from "./PlatformSubscriptionsSection";
 import {
   getPlatformOverview, getPlatformTenants, logout,
   type AuthTokens, type PlatformOverview, type PlatformTenantsPage
 } from "./api";
 
-type Section = "Overview" | "Tenants" | "Plans";
+type Section = "Overview" | "Tenants" | "Plans" | "Subscriptions";
 
 export default function PlatformAdminConsole({
   tokens,
@@ -71,12 +72,12 @@ export default function PlatformAdminConsole({
     setSidebarOpen(false);
   }
 
-  const title = section === "Overview" ? "Platform overview" : section === "Tenants" ? "Shop tenants" : "Plans and entitlements";
+  const title = section === "Overview" ? "Platform overview" : section === "Tenants" ? "Shop tenants" : section === "Plans" ? "Plans and entitlements" : "Shop subscriptions";
   const subtitle = section === "Overview"
     ? "A cross-platform view of tenant health, subscriptions, devices and recent activity."
     : section === "Tenants"
       ? "Find shops and inspect their current subscription and connected-device footprint."
-      : "Configure versioned SaaS plans, prices and centrally managed capabilities.";
+      : section === "Plans" ? "Configure versioned SaaS plans, prices and centrally managed capabilities." : "Manage trial and free-plan assignments with a permanent audit trail.";
 
   return (
     <div className={`app-shell platform-admin-shell${dark ? "" : " light"}`}>
@@ -102,6 +103,9 @@ export default function PlatformAdminConsole({
           </button>
           <button className={section === "Plans" ? "nav-item active" : "nav-item"} onClick={() => navigate("Plans")}>
             <Layers3 size={17}/> Plans & entitlements
+          </button>
+          <button className={section === "Subscriptions" ? "nav-item active" : "nav-item"} onClick={() => navigate("Subscriptions")}>
+            <CreditCard size={17}/> Shop subscriptions
           </button>
         </nav>
         <div className="sidebar-bottom">
@@ -257,6 +261,7 @@ export default function PlatformAdminConsole({
             </section>
           )}
           {section === "Plans" && <PlatformPlansSection tokens={tokens}/>}
+          {section === "Subscriptions" && <PlatformSubscriptionsSection tokens={tokens}/>}
         </div>
       </main>
     </div>

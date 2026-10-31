@@ -17,6 +17,7 @@ public sealed class SmartPrintDbContext(DbContextOptions<SmartPrintDbContext> op
     public DbSet<TenantSubscription> TenantSubscriptions => Set<TenantSubscription>();
     public DbSet<SubscriptionPlan> SubscriptionPlans => Set<SubscriptionPlan>();
     public DbSet<SubscriptionPlanVersion> SubscriptionPlanVersions => Set<SubscriptionPlanVersion>();
+    public DbSet<PlatformSubscriptionAudit> PlatformSubscriptionAudits => Set<PlatformSubscriptionAudit>();
     public DbSet<PrinterDevice> PrinterDevices => Set<PrinterDevice>();
     public DbSet<QrStation> QrStations => Set<QrStation>();
     public DbSet<CustomerPrintSession> CustomerPrintSessions => Set<CustomerPrintSession>();
@@ -150,6 +151,28 @@ public sealed class SmartPrintDbContext(DbContextOptions<SmartPrintDbContext> op
             entity.HasOne<SubscriptionPlanVersion>().WithMany()
                 .HasForeignKey(x => x.PlanVersionId)
                 .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        modelBuilder.Entity<PlatformSubscriptionAudit>(entity =>
+        {
+            entity.ToTable("PlatformSubscriptionAudits");
+            entity.HasKey(x => x.Id);
+            entity.Property(x => x.EventType).HasMaxLength(32).IsRequired();
+            entity.Property(x => x.PreviousStatus).HasMaxLength(24);
+            entity.Property(x => x.PlanCode).HasMaxLength(40).IsRequired();
+            entity.Property(x => x.BillingInterval).HasMaxLength(16).IsRequired();
+            entity.Property(x => x.Status).HasMaxLength(24).IsRequired();
+            entity.Property(x => x.Currency).HasMaxLength(3).IsRequired();
+            entity.Property(x => x.Reason).HasMaxLength(500).IsRequired();
+            entity.Property(x => x.IdempotencyKey).HasMaxLength(100).IsRequired();
+            entity.HasIndex(x => x.IdempotencyKey).IsUnique();
+            entity.HasIndex(x => new { x.TenantId, x.CreatedUtc });
+            entity.HasIndex(x => x.AssignedSubscriptionId).IsUnique();
+            entity.HasOne<Tenant>().WithMany().HasForeignKey(x => x.TenantId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<TenantSubscription>().WithMany().HasForeignKey(x => x.AssignedSubscriptionId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<TenantSubscription>().WithMany().HasForeignKey(x => x.PreviousSubscriptionId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<SubscriptionPlanVersion>().WithMany().HasForeignKey(x => x.PlanVersionId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<AppUser>().WithMany().HasForeignKey(x => x.ActorUserId).OnDelete(DeleteBehavior.Restrict);
         });
 
         modelBuilder.Entity<PrinterDevice>(entity =>

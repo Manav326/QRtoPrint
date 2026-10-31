@@ -408,3 +408,36 @@
 .subscription-usage-footnote{margin-top:12px;color:var(--faint);font-size:7px;line-height:1.5}
 @media(max-width:950px){.subscription-hero-grid{grid-template-columns:1fr}}
 @media(max-width:600px){.subscription-current-panel,.subscription-feature-panel,.subscription-usage-panel{padding:14px}.subscription-period,.subscription-prices,.subscription-usage-grid{grid-template-columns:1fr}.subscription-period{gap:10px}.subscription-usage-heading{align-items:flex-start;flex-direction:column}.subscription-updated{white-space:normal}}
+
+
+/* Platform shop-subscription administration */
+.platform-subscription-table{min-width:980px}
+.platform-subscription-actions{display:flex;align-items:center;gap:6px;white-space:nowrap}
+.platform-subscription-actions button{display:inline-flex;align-items:center;justify-content:center;gap:5px;padding:6px 8px;font-size:8px;min-height:29px}
+.platform-subs-copy{display:flex;flex-direction:column;gap:4px;min-width:0}
+.platform-subs-copy strong{font-size:9px;color:var(--text);font-weight:700}
+.platform-subs-copy small{font-size:8px;color:var(--muted);white-space:nowrap}
+.platform-subscription-state{display:inline-flex;align-items:center;padding:5px 8px;border-radius:20px;background:var(--surface-2);color:var(--muted);font-size:8px;font-weight:700;white-space:nowrap}
+.platform-subscription-state.trial{background:rgba(245,183,84,.12);color:var(--amber)}
+.platform-subscription-state.active{background:rgba(88,214,160,.11);color:var(--green)}
+.platform-subscription-state.expired,.platform-subscription-state.cancelled,.platform-subscription-state.suspended{background:rgba(240,110,110,.1);color:var(--red)}
+.platform-subscription-history{margin-top:14px}
+.platform-history-table{min-width:920px}
+.platform-history-table td strong{font-size:8px;color:var(--text)}
+.platform-history-reason{max-width:270px;white-space:normal;line-height:1.5}
+.platform-assignment-backdrop{position:fixed;inset:0;z-index:100;display:grid;place-items:center;padding:18px;background:rgba(3,6,12,.72);backdrop-filter:blur(7px)}
+.platform-assignment-modal{width:min(100%,520px);max-height:min(90vh,760px);overflow:auto;padding:20px;box-shadow:0 25px 100px rgba(0,0,0,.35)}
+.platform-assignment-heading{display:flex;align-items:flex-start;justify-content:space-between;gap:14px;margin-bottom:18px}
+.platform-assignment-heading h2{font:700 16px Manrope,sans-serif;color:var(--text);margin:7px 0 4px}
+.platform-assignment-heading p{font-size:9px;color:var(--muted);margin:0}
+.platform-assignment-field{display:flex;flex-direction:column;gap:7px;margin:14px 0;font-size:9px;font-weight:700;color:var(--text)}
+.platform-assignment-field select,.platform-assignment-field textarea{width:100%;min-width:0;padding:10px;border:1px solid var(--border);border-radius:8px;background:var(--surface-2);color:var(--text);font:9px 'DM Sans',sans-serif;outline:0}
+.platform-assignment-field select:focus,.platform-assignment-field textarea:focus{border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft)}
+.platform-assignment-field textarea{resize:vertical;line-height:1.5}
+.platform-assignment-field small{font-size:7px;font-weight:400;color:var(--muted)}
+.platform-assignment-guard{display:flex;align-items:flex-start;gap:8px;padding:11px;border:1px solid var(--border);border-radius:8px;background:var(--surface-2);color:var(--muted);font-size:8px;line-height:1.55}
+.platform-assignment-guard svg{flex:0 0 auto;color:var(--accent);margin-top:1px}
+.platform-assignment-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:17px;padding-top:13px;border-top:1px solid var(--border)}
+.platform-assignment-actions button{min-width:105px}
+.platform-subscriptions .platform-tenants-heading{margin-bottom:12px}
+@media(max-width:700px){.platform-assignment-modal{padding:14px}.platform-assignment-actions{flex-direction:column-reverse}.platform-assignment-actions button{width:100%}.platform-subscription-actions{align-items:flex-start;flex-direction:column}}
