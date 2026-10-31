@@ -86,6 +86,7 @@ class MainActivity : AppCompatActivity() {
     private var exportFolder: File? = null
     private var archiveFiles: List<File> = emptyList()
     private var accountCreateMode = false
+    private var editingPdf: File? = null
     private val selectedFilePaths = linkedSetOf<String>()
 
     private lateinit var importFiles: ActivityResultLauncher<Array<String>>
@@ -126,6 +127,7 @@ class MainActivity : AppCompatActivity() {
     override fun onBackPressed() {
         when {
             pickerMode -> cancelPicker()
+            editingPdf != null -> showFiles()
             navigation.selectedItemId == SCAN_PRINT && webView?.canGoBack() == true -> webView?.goBack()
             navigation.selectedItemId == SCAN_PRINT -> showScanPrint()
             navigation.selectedItemId != HOME -> showHome()
@@ -764,6 +766,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun showFiles() {
         pickerMode = false
+        editingPdf = null
         resetToolbar("My files")
         navigation.menu.findItem(FILES).isChecked = true
         content.removeAllViews()
@@ -879,16 +882,21 @@ class MainActivity : AppCompatActivity() {
             selectionActions.addView(button("Export ZIP", false).apply {
                 setOnClickListener { exportSelected(selectedHere) }
             }, LinearLayout.LayoutParams(0, dp(44), 1f))
-            val allPhotos = selectedHere.all { it.extension.lowercase(Locale.ROOT) in setOf("jpg", "jpeg", "png") }
-            selectionActions.addView(button("Make PDF", true).apply {
-                isEnabled = allPhotos
-                alpha = if (allPhotos) 1f else 0.45f
-                setOnClickListener { makePdfFromSelected(selectedHere) }
+            val supportedBatch = selectedHere.size in 2..20 &&
+                selectedHere.all {
+                    it.extension.lowercase(Locale.ROOT) in setOf("pdf", "jpg", "jpeg", "png") &&
+                        it.length() in 1..(20L * 1024L * 1024L)
+                } &&
+                selectedHere.sumOf { it.length() } <= DocumentBatchComposer.MAX_SOURCE_BYTES
+            selectionActions.addView(button("Prepare batch PDF", true).apply {
+                isEnabled = supportedBatch
+                alpha = if (supportedBatch) 1f else 0.45f
+                setOnClickListener { preparePrintBatch(selectedHere) }
             }, LinearLayout.LayoutParams(0, dp(44), 1f).apply { marginStart = dp(8) })
             selectionContent.addView(selectionActions, linearParams().apply { topMargin = dp(8) })
             selectionContent.addView(text(
-                if (allPhotos) "Photos are combined in the order shown. Original images remain unchanged."
-                else "PDF creation is available when only JPG, JPEG or PNG photos are selected.",
+                if (supportedBatch) "Selected PDFs and photos become one ordered print-ready PDF. Original files stay unchanged."
+                else "Select 2–20 PDF/JPG/PNG files, each up to 20 MB and 100 MB total, to prepare one print batch.",
                 11, R.color.qp_muted, false
             ).apply { setPadding(0, dp(7), 0, 0) })
             selectionCard.addView(selectionContent)
@@ -1001,6 +1009,7 @@ class MainActivity : AppCompatActivity() {
         if (!file.isDirectory) menu.menu.add("Open")
         menu.menu.add("Rename")
         menu.menu.add(if (file.isDirectory) "Export folder" else "Export")
+        if (!file.isDirectory && file.extension.equals("pdf", true)) menu.menu.add("Edit PDF pages")
         menu.menu.add("Move to folder")
         val siblingItems = file.parentFile?.let { store.list(it) }.orEmpty()
         val position = siblingItems.indexOfFirst { it.canonicalPath == file.canonicalPath }
@@ -1011,6 +1020,7 @@ class MainActivity : AppCompatActivity() {
         menu.setOnMenuItemClickListener { item ->
             when (item.title.toString()) {
                 "Open" -> openDocument(file)
+                "Edit PDF pages" -> showPdfEditor(file)
                 "Rename" -> nameDialog("Rename", file.name) { name ->
                     try { store.rename(file, name); selectedFilePaths.remove(file.canonicalPath); showFiles() }
                     catch (e: Exception) { toast("Rename failed: ${message(e)}") }
@@ -1045,19 +1055,174 @@ class MainActivity : AppCompatActivity() {
         exportArchive.launch("SmartPrint files ${SimpleDateFormat("yyyyMMdd-HHmmss", Locale.ROOT).format(Date())}.zip")
     }
 
-    private fun makePdfFromSelected(files: List<File>) {
-        val pdf = File(cacheDir, "SmartPrint photo collection ${System.currentTimeMillis()}.pdf")
+    private fun preparePrintBatch(files: List<File>) {
+        val orderedFiles = files.toList()
+        val output = File(cacheDir, "SmartPrint-batch-${System.currentTimeMillis()}.pdf")
+        val destinationPath = orderedFiles.firstOrNull()?.parentFile?.let { store.pathOf(it) }.orEmpty()
+        toast("Preparing your ordered print batch…")
+        Thread {
+            try {
+                val pages = DocumentBatchComposer.compose(orderedFiles, output)
+                val name = "SmartPrint print batch ${SimpleDateFormat("yyyyMMdd-HHmmss", Locale.ROOT).format(Date())}.pdf"
+                val saved = FileInputStream(output).use { store.importFile(it, name, destinationPath) }
+                runOnUiThread {
+                    folderPath = destinationPath
+                    selectedFilePaths.clear()
+                    if (portalUrl != null) showPrint() else showFiles()
+                    toast("Prepared ${orderedFiles.size} documents as one $pages-page PDF: ${saved.name}. Attach this PDF to one SmartPrint print order.")
+                }
+            } catch (e: Exception) {
+                runOnUiThread { toast("Batch preparation failed: ${message(e)}") }
+            } finally {
+                output.delete()
+            }
+        }.start()
+    }
+
+    private fun showPdfEditor(file: File) {
         try {
-            val pages = ImagePdfComposer.compose(files, pdf)
-            FileInputStream(pdf).use { input -> store.importFile(input, "Photo collection.pdf", folderPath) }
-            selectedFilePaths.clear()
-            showFiles()
-            toast("Created a $pages-page PDF. Original photos are unchanged.")
+            require(file.isFile && file.extension.equals("pdf", true)) {
+                "Only saved PDFs can be edited here."
+            }
+            val pages = DocumentBatchComposer.pageEdits(file).toMutableList()
+            editingPdf = file
+            renderPdfEditor(file, pages)
         } catch (e: Exception) {
-            toast("PDF creation failed: ${message(e)}")
-        } finally {
-            pdf.delete()
+            toast("Could not open the PDF editor: ${message(e)}")
         }
+    }
+
+    private fun renderPdfEditor(file: File, pages: MutableList<PdfPageEdit>) {
+        pickerMode = false
+        toolbar.title = "Edit PDF pages"
+        toolbar.setNavigationIcon(android.R.drawable.ic_media_previous)
+        toolbar.setNavigationOnClickListener { showFiles() }
+        navigation.visibility = View.GONE
+        content.removeAllViews()
+
+        val scroll = ScrollView(this).apply { isFillViewport = true }
+        val column = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(18), dp(16), dp(18), dp(28))
+        }
+        scroll.addView(column)
+        column.addView(text(file.name, 17, R.color.qp_text, true))
+        column.addView(text(
+            "Preview pages, rotate them, change their order or remove unwanted pages. Save creates a new PDF; your original stays unchanged.",
+            13, R.color.qp_muted, false
+        ).apply { setPadding(0, dp(5), 0, dp(14)) })
+        column.addView(button("Save edited copy", true).apply {
+            setOnClickListener { savePdfEdits(file, pages.toList()) }
+        }, linearParams().apply { bottomMargin = dp(14) })
+
+        pages.forEachIndexed { position, page ->
+            val item = card()
+            val body = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                setPadding(dp(13), dp(12), dp(13), dp(12))
+            }
+            val heading = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+            }
+            heading.addView(text("Page ${position + 1}", 15, R.color.qp_text, true),
+                LinearLayout.LayoutParams(0, -2, 1f))
+            heading.addView(text(
+                if (page.rotationDegrees == 0) "Original orientation" else "Rotated ${page.rotationDegrees}°",
+                11, R.color.qp_muted, false
+            ))
+            body.addView(heading)
+            val actions = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+            }
+            actions.addView(button("Preview", false).apply {
+                setOnClickListener {
+                    try {
+                        val bitmap = DocumentBatchComposer.renderPagePreview(file, page)
+                        val preview = ImageView(this@MainActivity).apply {
+                            setImageBitmap(bitmap)
+                            adjustViewBounds = true
+                            scaleType = ImageView.ScaleType.FIT_CENTER
+                            setPadding(dp(12), dp(12), dp(12), dp(12))
+                        }
+                        MaterialAlertDialogBuilder(this@MainActivity)
+                            .setTitle("Page ${position + 1}")
+                            .setView(preview)
+                            .setPositiveButton("Close") { _, _ -> bitmap.recycle() }
+                            .setOnDismissListener { if (!bitmap.isRecycled) bitmap.recycle() }
+                            .show()
+                    } catch (e: Exception) {
+                        toast("Page preview failed: ${message(e)}")
+                    }
+                }
+            }, LinearLayout.LayoutParams(0, dp(42), 1f))
+            actions.addView(button("Rotate", false).apply {
+                setOnClickListener {
+                    pages[position] = page.copy(rotationDegrees = (page.rotationDegrees + 90) % 360)
+                    renderPdfEditor(file, pages)
+                }
+            }, LinearLayout.LayoutParams(0, dp(42), 1f).apply { marginStart = dp(6) })
+            actions.addView(button("Up", false).apply {
+                isEnabled = position > 0
+                alpha = if (position > 0) 1f else 0.4f
+                setOnClickListener {
+                    if (position > 0) {
+                        val value = pages.removeAt(position)
+                        pages.add(position - 1, value)
+                        renderPdfEditor(file, pages)
+                    }
+                }
+            }, LinearLayout.LayoutParams(0, dp(42), 0.7f).apply { marginStart = dp(6) })
+            actions.addView(button("Down", false).apply {
+                isEnabled = position < pages.lastIndex
+                alpha = if (position < pages.lastIndex) 1f else 0.4f
+                setOnClickListener {
+                    if (position < pages.lastIndex) {
+                        val value = pages.removeAt(position)
+                        pages.add(position + 1, value)
+                        renderPdfEditor(file, pages)
+                    }
+                }
+            }, LinearLayout.LayoutParams(0, dp(42), 0.9f).apply { marginStart = dp(6) })
+            body.addView(actions, linearParams().apply { topMargin = dp(9) })
+            body.addView(button("Remove page", false).apply {
+                setOnClickListener {
+                    if (pages.size <= 1) {
+                        toast("A PDF must keep at least one page.")
+                    } else {
+                        pages.removeAt(position)
+                        renderPdfEditor(file, pages)
+                    }
+                }
+            }, linearParams().apply { topMargin = dp(7) })
+            item.addView(body)
+            column.addView(item, linearParams().apply { bottomMargin = dp(8) })
+        }
+        content.addView(scroll, frameParams())
+    }
+
+    private fun savePdfEdits(source: File, edits: List<PdfPageEdit>) {
+        val output = File(cacheDir, "SmartPrint-edited-${System.currentTimeMillis()}.pdf")
+        val destinationPath = source.parentFile?.let { store.pathOf(it) }.orEmpty()
+        toast("Saving a new edited PDF…")
+        Thread {
+            try {
+                val pageCount = DocumentBatchComposer.editPdf(source, edits, output)
+                val editedName = "${source.nameWithoutExtension}_edited.pdf"
+                val saved = FileInputStream(output).use { store.importFile(it, editedName, destinationPath) }
+                runOnUiThread {
+                    folderPath = destinationPath
+                    editingPdf = null
+                    showFiles()
+                    toast("Saved ${saved.name} with $pageCount pages. The original PDF is unchanged.")
+                }
+            } catch (e: Exception) {
+                runOnUiThread { toast("Could not save edited PDF: ${message(e)}") }
+            } finally {
+                output.delete()
+            }
+        }.start()
     }
 
     private fun nameDialog(title: String, initial: String, onSave: (String) -> Unit) {
