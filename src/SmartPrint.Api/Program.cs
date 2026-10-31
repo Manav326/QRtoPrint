@@ -908,11 +908,9 @@ shop.MapGet("/reports/summary", async (
 
     var pendingPaymentCount = await db.PrintPayments.AsNoTracking().CountAsync(payment =>
         payment.TenantId == tenantId &&
-        payment.CreatedUtc >= fromUtc &&
-        payment.CreatedUtc < toUtc &&
         (payment.Status == "AWAITING_CUSTOMER_PAYMENT" ||
          payment.Status == "CUSTOMER_REPORTED" ||
-         payment.Status == "CASH_AWAITING_PAYMENT"), ct);
+         payment.Status == "CASH_AWAITING_PAYMENT"), ct)
 
     return Results.Ok(new
     {
