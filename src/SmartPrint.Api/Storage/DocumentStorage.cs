@@ -175,5 +175,6 @@ public sealed class DocumentStorage : IDisposable
         }
         return full;
     }
+}
 
 public sealed record StoredDocument(string StorageKey, string Sha256, long SizeBytes, DocumentAnalysis Analysis);
