@@ -1,7 +1,7 @@
 [CmdletBinding()]
 param(
     # Use localhost for same-PC testing; use the PC private IPv4 to test on Android over Wi-Fi.
-    [string]$PortalHost = "localhost"
+    [string]$PortalHost = "192.168.31.47"
 )
 $ErrorActionPreference = "Stop"
 $repoRoot = Split-Path -Parent $PSScriptRoot
@@ -48,6 +48,7 @@ if (-not (Test-Path -LiteralPath $envPath)) {
         "AUTH_SIGNING_KEY=$(New-RandomBase64 48)"
         "DOCUMENTS_ENCRYPTION_KEY=$(New-RandomBase64 32)"
         "LOCAL_PORTAL_ORIGIN=$portalOrigin"
+        "LOCAL_API_BASE_URL=http://$($PortalHost):8080"
     )
     [IO.File]::WriteAllLines($envPath, [string[]]$lines, [Text.UTF8Encoding]::new($false))
     Write-Host "Created .env.local with fresh local secrets." -ForegroundColor Green
@@ -58,8 +59,12 @@ if (-not (Test-Path -LiteralPath $envPath)) {
             throw ".env.local is missing $($required.TrimEnd('=')); add it without rotating existing secrets."
         }
     }
-    $lines = @($lines | Where-Object { -not $_.StartsWith("LOCAL_PORTAL_ORIGIN=", [StringComparison]::Ordinal) })
+    $lines = @($lines | Where-Object {
+        -not $_.StartsWith("LOCAL_PORTAL_ORIGIN=", [StringComparison]::Ordinal) -and
+        -not $_.StartsWith("LOCAL_API_BASE_URL=", [StringComparison]::Ordinal)
+    })
     $lines += "LOCAL_PORTAL_ORIGIN=$portalOrigin"
+    $lines += "LOCAL_API_BASE_URL=http://$($PortalHost):8080"
     [IO.File]::WriteAllLines($envPath, [string[]]$lines, [Text.UTF8Encoding]::new($false))
     Write-Host "Reusing .env.local secrets; updated only the portal origin." -ForegroundColor Yellow
 }
@@ -97,6 +102,7 @@ docker compose --env-file $envPath -f $composeFile ps
 Write-Host ""
 Write-Host "QRtoPrint is running locally." -ForegroundColor Green
 Write-Host "Portal: http://$($PortalHost):3000"
-Write-Host "API:    http://localhost:8080/health/ready"
+Write-Host "API:    http://$($PortalHost):8080/health/ready"
+Write-Host "Android API base: http://$($PortalHost):8080"
 Write-Host "No public DNS, GHCR login, external URL or Caddy HTTPS deployment was used."
 Write-Host "Data persists in qrtoprint_local_database and qrtoprint_local_documents Docker volumes."

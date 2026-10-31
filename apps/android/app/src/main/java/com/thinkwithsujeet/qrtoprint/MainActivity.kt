@@ -440,7 +440,7 @@ class MainActivity : AppCompatActivity() {
                     "https" -> if (uri.host.equals(portalHost, true)) false else { launchExternal(uri); true }
                     "upi", "tel", "mailto" -> { launchExternal(uri); true }
                     "intent" -> { launchIntent(uri.toString()); true }
-                    "http" -> !(allowedAgentUpload(uri) || allowedLocalDevelopmentPortal(uri))
+                    "http" -> !(allowedAgentUpload(uri) || allowedLocalDevelopmentEndpoint(uri))
                     "about" -> false
                     else -> true
                 }
@@ -449,7 +449,7 @@ class MainActivity : AppCompatActivity() {
                 val uri = request.url
                 if (uri.scheme.equals("http", true) &&
                     !allowedAgentUpload(uri) &&
-                    !allowedLocalDevelopmentPortal(uri)) {
+                    !allowedLocalDevelopmentEndpoint(uri)) {
                     return WebResourceResponse(
                         "text/plain", "UTF-8", 403, "Blocked by QRtoPrint", emptyMap(),
                         ByteArrayInputStream("Only the selected private-LAN development portal and paired-Agent upload endpoints are allowed over HTTP.".toByteArray())
@@ -481,10 +481,10 @@ class MainActivity : AppCompatActivity() {
     private fun allowedAgentUpload(uri: Uri): Boolean =
         LocalAgentUploadPolicy.allows(uri.scheme.orEmpty(), uri.host.orEmpty(), uri.port, uri.path.orEmpty())
 
-    private fun allowedLocalDevelopmentPortal(uri: Uri): Boolean =
+    private fun allowedLocalDevelopmentEndpoint(uri: Uri): Boolean =
         BuildConfig.DEBUG &&
             uri.scheme.equals("http", true) &&
-            uri.port == 3000 &&
+            uri.port in setOf(3000, 8080) &&
             uri.host.equals(portalHost, true) &&
             LocalAgentUploadPolicy.isPrivateIpv4Host(uri.host.orEmpty())
 

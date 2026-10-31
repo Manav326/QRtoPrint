@@ -20,10 +20,10 @@ $agentExe = Join-Path $agentDir "SmartPrint.Agent.exe"
 & "$agentDir\install-agent-service.ps1" -AgentExePath $agentExe -CustomerPortalOrigin "http://localhost:3000"
 ```
 
-For Android over the same Wi-Fi, start with the PC's private IPv4 address, for example `.\scripts\docker-up-local.ps1 -PortalHost 192.168.1.20`. Pair the Agent with `http://localhost:8080`, but set the LAN portal origin explicitly:
+For Android over the same Wi-Fi, the local test IP is `192.168.31.47`. Start with `.\scripts\docker-up-local.ps1 -PortalHost 192.168.31.47`. The portal is `http://192.168.31.47:3000` and the Android API base is `http://192.168.31.47:8080`. Pair the Windows Agent with `http://localhost:8080`, but set the LAN portal origin explicitly:
 
 ```powershell
-& "$agentDir\install-agent-service.ps1" -AgentExePath $agentExe -CustomerPortalOrigin "http://192.168.1.20:3000" -AllowInsecureLocalDevelopment
+& "$agentDir\install-agent-service.ps1" -AgentExePath $agentExe -CustomerPortalOrigin "http://192.168.31.47:3000" -AllowInsecureLocalDevelopment
 ```
 
 Use the Android debug APK for this private-LAN HTTP test. Debug builds accept HTTP station URLs only for private IPv4 hosts on port 3000; release builds continue to require HTTPS. Keep this on trusted Wi-Fi. Stop the stack using `.\scripts\docker-down-local.ps1`; Docker data volumes are preserved.

@@ -55,16 +55,17 @@ The same CI run publishes `qrtoprint-android-test-reports` with JVM and emulator
 
 ## Run everything locally first (no public URL or deployment)
 
-Install Docker Desktop and start it. From the repository root run:
+Install Docker Desktop, connect the laptop to the same Wi-Fi as the Android phone, and confirm the laptop's LAN IPv4 address is `192.168.31.47`. From the repository root run:
 
 ```powershell
-.\scripts\docker-up-local.ps1
+.\scripts\docker-up-local.ps1 -PortalHost 192.168.31.47
 ```
 
 This builds the API and portal from this checkout and starts PostgreSQL, API and portal. It does not pull GHCR images, request DNS, use Caddy or issue certificates. A private `.env.local` is generated, while database and document data persist in Docker volumes.
 
-- Portal: http://localhost:3000
-- API health: http://localhost:8080/health/ready
+- Portal: http://192.168.31.47:3000
+- API health: http://192.168.31.47:8080/health/ready
+- The portal build sets `VITE_API_BASE_URL=http://192.168.31.47:8080`, so Android calls the laptop API directly rather than its own `localhost`.
 
 Register a shop in the local portal, add the Windows computer's installed printer, and generate a one-time pairing code. Download and pair the Windows Agent:
 
@@ -77,19 +78,19 @@ $agentExe = Join-Path $agentDir "SmartPrint.Agent.exe"
 Get-Service QRtoPrintSmartPrintAgent
 ```
 
-Run PowerShell as Administrator for service installation. For Android testing over the same Wi-Fi, use the PC's private IPv4 address (for example `192.168.1.20`):
+Run PowerShell as Administrator for service installation. For Android testing, the local launcher defaults to `192.168.31.47`. Change `-PortalHost` only if the laptop's LAN address changes:
 
 ```powershell
-.\scripts\docker-up-local.ps1 -PortalHost 192.168.1.20
+.\scripts\docker-up-local.ps1 -PortalHost 192.168.31.47
 ```
 
-The station QR URLs will use `http://192.168.1.20:3000`. Use the Android **debug** APK and reinstall the Agent origin for LAN access:
+The station QR URLs use `http://192.168.31.47:3000`; Android API calls use `http://192.168.31.47:8080`. The Windows Agent pairs locally with `http://localhost:8080` and exposes its private upload endpoint on port 17842. Use the Android **debug** APK:
 
 ```powershell
-& "$agentDir\install-agent-service.ps1" -AgentExePath $agentExe -CustomerPortalOrigin "http://192.168.1.20:3000" -AllowInsecureLocalDevelopment
+& "$agentDir\install-agent-service.ps1" -AgentExePath $agentExe -CustomerPortalOrigin "http://192.168.31.47:3000" -AllowInsecureLocalDevelopment
 ```
 
-Debug builds accept HTTP station QR URLs only on private RFC1918 IPv4 addresses and port 3000; release builds remain HTTPS-only. Keep all devices on a trusted private Wi-Fi network and do not expose local HTTP ports to the internet.
+Debug builds accept HTTP station QR URLs only on private RFC1918 IPv4 addresses and port 3000; release builds remain HTTPS-only. Keep all devices on a trusted private Wi-Fi network and do not expose local HTTP ports to the internet. Allow inbound TCP 3000, 8080 and 17842 in Windows Defender Firewall for the Private profile.
 
 Stop containers without deleting local data:
 
