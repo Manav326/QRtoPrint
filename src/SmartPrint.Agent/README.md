@@ -2,6 +2,32 @@
 
 This is a Windows Service. It pairs with one shop using a single-use enrollment code, stores the returned credential with Windows DPAPI (LocalMachine), heartbeats to the Smart Print API, and synchronizes Windows-installed printer queue inventory every 30 seconds.
 
+## Local-only development (no public deployment)
+
+From the repository root, start the local API, portal and database with Docker Desktop:
+
+```powershell
+.\scripts\docker-up-local.ps1
+.\scripts\download-agent.ps1
+```
+
+Open http://localhost:3000, register a test shop, add the connected Windows printer, and generate a one-time code from Print Agent. Then open PowerShell as Administrator:
+
+```powershell
+$agentDir = Join-Path $env:USERPROFILE "Downloads\QRtoPrintAgent"
+$agentExe = Join-Path $agentDir "SmartPrint.Agent.exe"
+& "$agentDir\pair-agent.ps1" -ApiBaseUrl "http://localhost:8080" -AgentExePath $agentExe
+& "$agentDir\install-agent-service.ps1" -AgentExePath $agentExe -CustomerPortalOrigin "http://localhost:3000"
+```
+
+For Android over the same Wi-Fi, start with the PC's private IPv4 address, for example `.\scripts\docker-up-local.ps1 -PortalHost 192.168.1.20`. Pair the Agent with `http://localhost:8080`, but set the LAN portal origin explicitly:
+
+```powershell
+& "$agentDir\install-agent-service.ps1" -AgentExePath $agentExe -CustomerPortalOrigin "http://192.168.1.20:3000" -AllowInsecureLocalDevelopment
+```
+
+Use the Android debug APK for this private-LAN HTTP test. Debug builds accept HTTP station URLs only for private IPv4 hosts on port 3000; release builds continue to require HTTPS. Keep this on trusted Wi-Fi. Stop the stack using `.\scripts\docker-down-local.ps1`; Docker data volumes are preserved.
+
 ## Pair and install
 
 1. In the shop workspace, open Print Agent and generate a one-time pairing code. It expires after 10 minutes.

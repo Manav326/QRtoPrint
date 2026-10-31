@@ -4,7 +4,10 @@ param(
     [string]$AgentExePath,
 
     [Parameter()]
-    [string]$CustomerPortalOrigin = "https://print.thinkwithsujeet.in"
+    [string]$CustomerPortalOrigin = "http://localhost:3000",
+
+    [Parameter()]
+    [switch]$AllowInsecureLocalDevelopment
 )
 
 $ErrorActionPreference = "Stop"
@@ -19,9 +22,21 @@ $portalUri = $null
 if (-not [Uri]::TryCreate($CustomerPortalOrigin.TrimEnd('/'), [UriKind]::Absolute, [ref]$portalUri)) {
     throw "Provide the HTTPS customer portal origin, e.g. https://print.thinkwithsujeet.in."
 }
-if (($portalUri.Scheme -ne "https" -and $portalUri.Host -notin @("localhost", "127.0.0.1")) -or
-    $portalUri.AbsolutePath -ne "/" -or $portalUri.Query -or $portalUri.Fragment -or $portalUri.UserInfo) {
-    throw "The customer portal origin must be HTTPS (HTTP is allowed only for localhost development)."
+$isLocalhostHttp = $portalUri.Scheme -eq "http" -and $portalUri.Host -in @("localhost", "127.0.0.1")
+$isPrivateLanHttp = $false
+if ($portalUri.Scheme -eq "http" -and $AllowInsecureLocalDevelopment -and $portalUri.Port -eq 3000) {
+    $portalAddress = [System.Net.IPAddress]::None
+    if ([System.Net.IPAddress]::TryParse($portalUri.Host, [ref]$portalAddress) -and
+        $portalAddress.AddressFamily -eq [System.Net.Sockets.AddressFamily]::InterNetwork) {
+        $octets = $portalAddress.GetAddressBytes()
+        $isPrivateLanHttp = $octets[0] -eq 10 -or
+            ($octets[0] -eq 172 -and $octets[1] -ge 16 -and $octets[1] -le 31) -or
+            ($octets[0] -eq 192 -and $octets[1] -eq 168)
+    }
+}
+$isAllowedScheme = $portalUri.Scheme -eq "https" -or $isLocalhostHttp -or $isPrivateLanHttp
+if (-not $isAllowedScheme -or $portalUri.AbsolutePath -ne "/" -or $portalUri.Query -or $portalUri.Fragment -or $portalUri.UserInfo) {
+    throw "Use HTTPS normally. HTTP is allowed for localhost, or a private IPv4 portal on port 3000 only with -AllowInsecureLocalDevelopment."
 }
 $allowedOrigin = $portalUri.GetLeftPart([UriPartial]::Authority)
 $settingsPath = Join-Path (Split-Path -Parent $resolvedExe) "appsettings.json"

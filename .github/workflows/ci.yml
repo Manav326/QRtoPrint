@@ -138,6 +138,15 @@ jobs:
       - uses: actions/checkout@v4
       - name: Validate Docker Compose configuration
         run: docker compose --env-file .env.example -f compose.yml config --quiet
+      - name: Validate local-only Docker Compose configuration
+        env:
+          POSTGRES_DB: qrtoprint
+          POSTGRES_USER: qrtoprint
+          POSTGRES_PASSWORD: local-ci-validation-only
+          AUTH_SIGNING_KEY: YWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFh
+          DOCUMENTS_ENCRYPTION_KEY: YWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWE=
+          LOCAL_PORTAL_ORIGIN: http://localhost:3000
+        run: docker compose -f compose.local.yml config --quiet
       - name: Validate Caddy HTTPS reverse proxy configuration
         run: |
           docker run --rm \

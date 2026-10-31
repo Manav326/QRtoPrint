@@ -114,7 +114,7 @@ class MainActivity : AppCompatActivity() {
             if (result.resultCode == RESULT_OK) {
                 val rawValue = result.data?.getStringExtra(QrScannerActivity.EXTRA_RAW_VALUE)
                 try {
-                    confirmShop(StationQrLink.parse(rawValue))
+                    confirmShop(StationQrLink.parse(rawValue, allowLocalDevelopment = BuildConfig.DEBUG))
                 } catch (_: Exception) {
                     toast("This is not a valid QRtoPrint shop QR code.")
                 }
@@ -440,14 +440,16 @@ class MainActivity : AppCompatActivity() {
                     "https" -> if (uri.host.equals(portalHost, true)) false else { launchExternal(uri); true }
                     "upi", "tel", "mailto" -> { launchExternal(uri); true }
                     "intent" -> { launchIntent(uri.toString()); true }
-                    "http" -> !allowedAgentUpload(uri)
+                    "http" -> !(allowedAgentUpload(uri) || allowedLocalDevelopmentPortal(uri))
                     "about" -> false
                     else -> true
                 }
             }
             override fun shouldInterceptRequest(view: WebView, request: WebResourceRequest): WebResourceResponse? {
                 val uri = request.url
-                if (uri.scheme.equals("http", true) && !allowedAgentUpload(uri)) {
+                if (uri.scheme.equals("http", true) &&
+                    !allowedAgentUpload(uri) &&
+                    !allowedLocalDevelopmentPortal(uri)) {
                     return WebResourceResponse(
                         "text/plain", "UTF-8", 403, "Blocked by QRtoPrint", emptyMap(),
                         ByteArrayInputStream("Only private paired-Agent upload endpoints are allowed over HTTP.".toByteArray())
@@ -479,6 +481,13 @@ class MainActivity : AppCompatActivity() {
     private fun allowedAgentUpload(uri: Uri): Boolean =
         LocalAgentUploadPolicy.allows(uri.scheme.orEmpty(), uri.host.orEmpty(), uri.port, uri.path.orEmpty())
 
+    private fun allowedLocalDevelopmentPortal(uri: Uri): Boolean =
+        BuildConfig.DEBUG &&
+            uri.scheme.equals("http", true) &&
+            uri.port == 3000 &&
+            uri.host.equals(portalHost, true) &&
+            LocalAgentUploadPolicy.isPrivateIpv4Host(uri.host.orEmpty())
+
     private fun scanQr() {
         scannerLauncher.launch(Intent(this, QrScannerActivity::class.java))
     }
@@ -486,7 +495,11 @@ class MainActivity : AppCompatActivity() {
     private fun confirmShop(link: StationQrLink) {
         MaterialAlertDialogBuilder(this)
             .setTitle("Connect to this print shop?")
-            .setMessage("Open the secure QRtoPrint customer portal at:\n\n${link.host}\n\nThe shop's existing quote, payment and print-status workflow will be used.")
+            .setMessage(
+                "Open the QRtoPrint customer portal at:\n\n${link.host}\n\n" +
+                    (if (link.url.startsWith("http://")) "LOCAL DEVELOPMENT ONLY — use a trusted private Wi-Fi network.\n\n" else "") +
+                    "The shop's existing quote, payment and print-status workflow will be used."
+            )
             .setNegativeButton("Cancel", null)
             .setPositiveButton("Continue") { _, _ ->
                 portalHost = link.host

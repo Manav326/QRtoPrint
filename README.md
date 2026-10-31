@@ -30,7 +30,7 @@ The repository contains an integrated customer/shop portal, tenant-scoped ASP.NE
 
 A native Android client is located in `apps/android`. It complements the customer PWA rather than replacing the shared print workflow.
 
-- Scan the existing shop QR code (`/s/{publicCode}`) in a branded CameraX preview using bundled on-device ML Kit. Only HTTPS QRtoPrint station URLs are accepted; camera frames stay on the device.
+- Scan the existing shop QR code (`/s/{publicCode}`) in a branded CameraX preview using bundled on-device ML Kit. Release builds accept only HTTPS station URLs; debug builds additionally allow HTTP only for RFC1918 private IPv4 hosts on port 3000 for local LAN development. Camera frames stay on the device.
 - Keep documents in app-private local storage with folders and subfolders. Import multiple files or an entire folder through Android's Storage Access Framework; export a file or folder back to a user-selected file-manager destination.
 - Select a saved PDF/JPG/JPEG/PNG from the native library when the customer portal requests a file. The existing API limits printable documents to 20 MB and remains responsible for document analysis, quotes, shop approval, payment and job status.
 - The embedded customer portal uses the same station-bound session and upload APIs as the web PWA. It does not introduce a second print-job lifecycle or claim offline printing.
@@ -53,6 +53,51 @@ The script selects the latest successful main-branch CI run, downloads the `qrto
 
 The same CI run publishes `qrtoprint-android-test-reports` with JVM and emulator test evidence.
 
+## Run everything locally first (no public URL or deployment)
+
+Install Docker Desktop and start it. From the repository root run:
+
+```powershell
+.\scripts\docker-up-local.ps1
+```
+
+This builds the API and portal from this checkout and starts PostgreSQL, API and portal. It does not pull GHCR images, request DNS, use Caddy or issue certificates. A private `.env.local` is generated, while database and document data persist in Docker volumes.
+
+- Portal: http://localhost:3000
+- API health: http://localhost:8080/health/ready
+
+Register a shop in the local portal, add the Windows computer's installed printer, and generate a one-time pairing code. Download and pair the Windows Agent:
+
+```powershell
+.\scripts\download-agent.ps1
+$agentDir = Join-Path $env:USERPROFILE "Downloads\QRtoPrintAgent"
+$agentExe = Join-Path $agentDir "SmartPrint.Agent.exe"
+& "$agentDir\pair-agent.ps1" -ApiBaseUrl "http://localhost:8080" -AgentExePath $agentExe
+& "$agentDir\install-agent-service.ps1" -AgentExePath $agentExe -CustomerPortalOrigin "http://localhost:3000"
+Get-Service QRtoPrintSmartPrintAgent
+```
+
+Run PowerShell as Administrator for service installation. For Android testing over the same Wi-Fi, use the PC's private IPv4 address (for example `192.168.1.20`):
+
+```powershell
+.\scripts\docker-up-local.ps1 -PortalHost 192.168.1.20
+```
+
+The station QR URLs will use `http://192.168.1.20:3000`. Use the Android **debug** APK and reinstall the Agent origin for LAN access:
+
+```powershell
+& "$agentDir\install-agent-service.ps1" -AgentExePath $agentExe -CustomerPortalOrigin "http://192.168.1.20:3000" -AllowInsecureLocalDevelopment
+```
+
+Debug builds accept HTTP station QR URLs only on private RFC1918 IPv4 addresses and port 3000; release builds remain HTTPS-only. Keep all devices on a trusted private Wi-Fi network and do not expose local HTTP ports to the internet.
+
+Stop containers without deleting local data:
+
+```powershell
+.\scripts\docker-down-local.ps1
+```
+
+Rerun `docker-up-local.ps1` to start again. Do not use `docker compose down -v` unless you intend to delete the local database and documents.
 ## Docker deployment
 
 The production Docker stack runs PostgreSQL, the ASP.NET Core API, the React portal and Caddy (automatic HTTPS). Database migrations are applied at API startup only when the compose setting `Database__ApplyMigrationsOnStartup=true` is enabled. PostgreSQL and cloud document storage use persistent Docker volumes.

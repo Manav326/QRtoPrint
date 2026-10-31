@@ -1,0 +1,72 @@
+name: qrtoprint-local
+
+services:
+  db:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-qrtoprint}
+      POSTGRES_USER: ${POSTGRES_USER:-qrtoprint}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Run scripts/docker-up-local.ps1 to create .env.local}
+    volumes:
+      - qrtoprint_local_database:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-qrtoprint} -d ${POSTGRES_DB:-qrtoprint}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
+  api:
+    image: qrtoprint-api:local
+    build:
+      context: .
+      dockerfile: Dockerfile.api
+    restart: unless-stopped
+    init: true
+    environment:
+      ASPNETCORE_ENVIRONMENT: Development
+      ASPNETCORE_URLS: http://+:8080
+      ConnectionStrings__SmartPrint: "Host=db;Port=5432;Database=${POSTGRES_DB:-qrtoprint};Username=${POSTGRES_USER:-qrtoprint};Password=${POSTGRES_PASSWORD:?Required}"
+      Authentication__SigningKey: ${AUTH_SIGNING_KEY:?Required}
+      Documents__EncryptionKey: ${DOCUMENTS_ENCRYPTION_KEY:?Required}
+      Documents__StorageRoot: /var/lib/qrtoprint/documents
+      Database__ApplyMigrationsOnStartup: "true"
+      PublicPortal__BaseUrl: ${LOCAL_PORTAL_ORIGIN:-http://localhost:3000}
+      Cors__AllowedOrigins__0: "http://localhost:3000"
+      Cors__AllowedOrigins__1: ${LOCAL_PORTAL_ORIGIN:-http://localhost:3000}
+    ports:
+      - "8080:8080"
+    volumes:
+      - qrtoprint_local_documents:/var/lib/qrtoprint/documents
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl --fail --silent http://127.0.0.1:8080/health/ready || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+      start_period: 45s
+
+  portal:
+    image: qrtoprint-portal:local
+    build:
+      context: .
+      dockerfile: apps/portal/Dockerfile
+    restart: unless-stopped
+    ports:
+      - "3000:80"
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1/ || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
+volumes:
+  qrtoprint_local_database:
+  qrtoprint_local_documents:

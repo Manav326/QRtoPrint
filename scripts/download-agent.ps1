@@ -1,8 +1,8 @@
 [CmdletBinding()]
 param(
     [string]$Destination = (Join-Path $env:USERPROFILE 'Downloads\QRtoPrintAgent'),
-    [string]$ApiBaseUrl = 'https://api.thinkwithsujeet.in',
-    [string]$CustomerPortalOrigin = 'https://print.thinkwithsujeet.in'
+    [string]$ApiBaseUrl = 'http://localhost:8080',
+    [string]$CustomerPortalOrigin = 'http://localhost:3000'
 )
 
 $ErrorActionPreference = 'Stop'
@@ -16,7 +16,7 @@ if ($LASTEXITCODE -ne 0) { throw 'Sign in to GitHub CLI first by running: gh aut
 
 $runListArgs = @(
     'run', 'list', '--repo', $repository, '--workflow', 'ci.yml',
-    '--branch', 'main', '--limit', '1',
+    '--branch', 'main', '--status', 'success', '--limit', '1',
     '--json', 'databaseId,headSha,status,conclusion', '--jq', '.[0]'
 )
 $runJson = & gh @runListArgs
