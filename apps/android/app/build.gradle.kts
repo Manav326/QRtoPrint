@@ -2,6 +2,11 @@ plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
 }
+val smartPrintServiceUrl = providers.gradleProperty("smartPrintServiceUrl")
+    .orElse("https://print.thinkwithsujeet.in")
+    .get()
+    .trimEnd('/')
+
 android {
     buildFeatures { buildConfig = true }
     namespace = "com.thinkwithsujeet.qrtoprint"
@@ -12,6 +17,7 @@ android {
         targetSdk = 35
         versionCode = 1
         versionName = "0.1.0"
+        buildConfigField("String", "SERVICE_BASE_URL", "\"$smartPrintServiceUrl\"")
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
     buildTypes {
