@@ -18,6 +18,8 @@ import javax.crypto.KeyGenerator
 import javax.crypto.SecretKey
 import javax.crypto.spec.GCMParameterSpec
 
+class CustomerApiException(val statusCode: Int, message: String) : IllegalStateException(message)
+
 data class CustomerAuth(
     val accessToken: String,
     val refreshToken: String,
@@ -126,7 +128,9 @@ object CustomerAccountClient {
             "/api/v1/auth/customer-login",
             JSONObject().put("email", email).put("password", password)
         )
-        return response.toAuth(email, "")
+        val tokens = response.toAuth(email, "")
+        val profile = profile(baseUrl, tokens.accessToken)
+        return tokens.copy(displayName = profile.optString("displayName", email.substringBefore('@')))
     }
 
     fun register(baseUrl: String, displayName: String, email: String, password: String): CustomerAuth {
@@ -242,7 +246,7 @@ object CustomerAccountClient {
                         409 -> "An account already exists for this email address."
                         else -> "SmartPrint account request failed (HTTP $status)."
                     }
-                throw IllegalStateException(message)
+                throw CustomerApiException(status, message)
             }
             return json
         } finally {
