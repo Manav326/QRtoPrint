@@ -18,6 +18,7 @@ using SmartPrint.Api.Pricing;
 using SmartPrint.Api.Security;
 using SmartPrint.Api.Storage;
 using SmartPrint.Api.Services;
+using SmartPrint.Documents;
 
 const string bootstrapPlatformAdminArgument = "--bootstrap-platform-admin";
 var bootstrapPlatformAdmin = args.Any(argument =>
@@ -3459,8 +3460,9 @@ publicApi.MapPost("/sessions/current/local-upload-tickets", async (
     }
 
     var now = DateTimeOffset.UtcNow;
+    var customerSessionTokenHash = HashOpaqueToken(rawToken);
     var session = await db.CustomerPrintSessions.AsNoTracking()
-        .Where(item => item.TokenHash == HashOpaqueToken(rawToken) && item.Status == "Active" &&
+        .Where(item => item.TokenHash == customerSessionTokenHash && item.Status == "Active" &&
                        item.RevokedUtc == null && item.ExpiresUtc > now)
         .Select(item => new { item.Id, item.TenantId, item.QrStationId })
         .SingleOrDefaultAsync(ct);
