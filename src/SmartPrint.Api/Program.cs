@@ -9,6 +9,7 @@ using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.IdentityModel.Tokens;
 using SmartPrint.Api.Contracts;
 using SmartPrint.Api.Data;
@@ -45,7 +46,8 @@ var issuer = builder.Configuration["Authentication:Issuer"] ?? "QRtoPrint";
 var audience = builder.Configuration["Authentication:Audience"] ?? "QRtoPrint.Clients";
 
 builder.Services.AddProblemDetails();
-builder.Services.AddDbContext<SmartPrintDbContext>(options => options.UseNpgsql(connectionString));
+builder.Services.AddDbContext<SmartPrintDbContext>(options => options.UseNpgsql(connectionString)
+    .ReplaceService<IMigrationsIdGenerator, LegacyCompatibleMigrationsIdGenerator>());
 builder.Services
     .AddIdentityCore<AppUser>(options =>
     {
