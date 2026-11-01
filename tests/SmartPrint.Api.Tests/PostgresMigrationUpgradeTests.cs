@@ -17,7 +17,8 @@ public sealed class PostgresMigrationUpgradeTests
             return;
 
         var options = new DbContextOptionsBuilder<SmartPrintDbContext>()
-            .UseNpgsql(connectionString)
+            .UseNpgsql(connectionString, npgsql => npgsql.MigrationsAssembly(
+                typeof(SmartPrintDbContext).Assembly.GetName().Name))
             .Options;
 
         await using var db = new SmartPrintDbContext(options);
