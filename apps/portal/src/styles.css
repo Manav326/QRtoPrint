@@ -1162,3 +1162,102 @@
     color:#ff9da5;
   }
 }
+
+
+/* Native shell copy density and compact states. */
+.customer-entry.smartprint-native .entry-eyebrow,
+.customer-entry.smartprint-native .entry-success-icon,
+.customer-entry.smartprint-native .entry-error-icon {
+  display:none;
+}
+.customer-entry.smartprint-native .entry-local-agent>p,
+.customer-entry.smartprint-native .entry-local-agent-head>div>span,
+.customer-entry.smartprint-native .customer-upload-zone small,
+.customer-entry.smartprint-native .customer-upload-mode small,
+.customer-entry.smartprint-native .customer-upload-limit,
+.customer-entry.smartprint-native .upload-limit,
+.customer-entry.smartprint-native .customer-flow-heading>div>span {
+  display:none;
+}
+.customer-entry.smartprint-native .entry-local-agent {
+  margin:8px 0;
+  padding:10px;
+}
+.customer-entry.smartprint-native .entry-local-agent-head {
+  align-items:center;
+  margin:0 0 8px;
+}
+.customer-entry.smartprint-native .entry-local-agent-message {
+  display:block;
+  margin-top:8px;
+}
+.customer-entry.smartprint-native .customer-upload-local-note {
+  display:block;
+  margin-top:7px;
+  font-size:10px;
+  line-height:1.4;
+}
+.customer-entry.smartprint-native .customer-flow-heading {
+  margin:0 0 9px;
+}
+.customer-entry.smartprint-native .customer-config-heading {
+  margin:14px 0 8px;
+}
+.customer-entry.smartprint-native .customer-option-group {
+  margin:9px 0;
+}
+.customer-entry.smartprint-native .customer-option-group>span {
+  margin-bottom:5px;
+}
+.customer-entry.smartprint-native .customer-option-grid {
+  gap:8px;
+  margin:8px 0;
+}
+.customer-entry.smartprint-native .customer-paper-note {
+  margin:8px 0;
+  padding:8px 0;
+}
+.customer-entry.smartprint-native .customer-selected-files-head span,
+.customer-entry.smartprint-native .customer-uploaded-batch-head span {
+  display:none;
+}
+.customer-entry.smartprint-native .customer-job-state,
+.customer-entry.smartprint-native .customer-pay-panel {
+  margin-top:10px;
+  padding:12px;
+}
+.customer-entry.smartprint-native .customer-job-state>strong {
+  display:block;
+  margin-top:7px;
+  font-size:13px;
+}
+.customer-entry.smartprint-native .customer-job-state>p {
+  margin:5px 0 0;
+}
+.customer-entry.smartprint-native .customer-payment-boundary {
+  margin-top:10px;
+  padding:9px 0;
+  font-size:10px;
+  line-height:1.45;
+}
+.customer-entry.smartprint-native .customer-pay-heading {
+  margin-bottom:9px;
+}
+.customer-entry.smartprint-native .customer-pay-heading>span {
+  color:var(--native-muted);
+  font-size:10px;
+  letter-spacing:.06em;
+}
+.customer-entry.smartprint-native .customer-upi-qr {
+  margin:10px auto;
+}
+.customer-entry.smartprint-native .customer-reference-field {
+  margin-top:9px;
+}
+.customer-entry.smartprint-native .customer-payment-warning {
+  display:block;
+  margin-top:8px;
+  padding:8px;
+  border-radius:9px;
+  background:var(--native-surface-2);
+}
