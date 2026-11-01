@@ -66,12 +66,14 @@ class MainActivity : AppCompatActivity() {
         private const val SCAN_PRINT = 3
         private const val ACTIVITY = 4
         private const val PROFILE = 90
+        private const val SWITCH_SHOP = 91
         private const val MAX_TREE_FILES = 500
         private const val MAX_TREE_DEPTH = 12
     }
 
     private lateinit var store: LocalDocumentStore
     private lateinit var customerAccountStore: CustomerAccountStore
+    private lateinit var customerPrintSessionStore: CustomerPrintSessionStore
     private lateinit var toolbar: MaterialToolbar
     private lateinit var content: FrameLayout
     private lateinit var navigation: BottomNavigationView
@@ -90,6 +92,9 @@ class MainActivity : AppCompatActivity() {
     private val selectedFilePaths = linkedSetOf<String>()
     private val chooserSelectedFilePaths = linkedSetOf<String>()
     private var fileChooserAllowsMultiple = false
+    private var profileVisible = false
+    private var profileReturnDestination = HOME
+    private var librarySearchQuery = ""
 
     private lateinit var importFiles: ActivityResultLauncher<Array<String>>
     private lateinit var importTree: ActivityResultLauncher<Uri?>
@@ -104,18 +109,30 @@ class MainActivity : AppCompatActivity() {
         WindowCompat.setDecorFitsSystemWindows(window, false)
         store = LocalDocumentStore(filesDir)
         customerAccountStore = CustomerAccountStore(this)
+        customerPrintSessionStore = CustomerPrintSessionStore(this)
         registerFileActions()
         buildLayout()
         showHome()
         portalUrl = savedInstanceState?.getString("portalUrl")
         portalHost = savedInstanceState?.getString("portalHost")
-        portalUrl?.let { ensureWebView().loadUrl(it); showPrint() }
+        portalUrl?.let { url ->
+            val view = ensureWebView()
+            val webState = savedInstanceState?.getBundle("webViewState")
+            val restored = webState?.let { view.restoreState(it) != null } ?: false
+            if (!restored) view.loadUrl(url)
+            showPrint()
+        }
         handleShareIntent(intent)
     }
 
     override fun onSaveInstanceState(outState: Bundle) {
         outState.putString("portalUrl", portalUrl)
         outState.putString("portalHost", portalHost)
+        webView?.let { view ->
+            val webState = Bundle()
+            view.saveState(webState)
+            outState.putBundle("webViewState", webState)
+        }
         super.onSaveInstanceState(outState)
     }
 
@@ -128,6 +145,7 @@ class MainActivity : AppCompatActivity() {
     @Deprecated("Deprecated in Java")
     override fun onBackPressed() {
         when {
+            profileVisible -> returnFromProfile()
             pickerMode -> cancelPicker()
             editingPdf != null -> showFiles()
             navigation.selectedItemId == SCAN_PRINT && webView?.canGoBack() == true -> webView?.goBack()
@@ -143,7 +161,11 @@ class MainActivity : AppCompatActivity() {
             if (result.resultCode == RESULT_OK) {
                 val rawValue = result.data?.getStringExtra(QrScannerActivity.EXTRA_RAW_VALUE)
                 try {
-                    confirmShop(StationQrLink.parse(rawValue, allowLocalDevelopment = BuildConfig.DEBUG))
+                    confirmShop(StationQrLink.parse(
+                        rawValue,
+                        expectedServiceUrl = BuildConfig.SERVICE_BASE_URL,
+                        allowLocalDevelopment = BuildConfig.DEBUG
+                    ))
                 } catch (_: Exception) {
                     toast("This is not a valid SmartPrint shop QR code.")
                 }
@@ -252,6 +274,14 @@ class MainActivity : AppCompatActivity() {
             setTitleTextColor(getColor(R.color.qp_text))
             setBackgroundColor(getColor(R.color.qp_surface))
             elevation = dp(1).toFloat()
+            menu.add(Menu.NONE, SWITCH_SHOP, Menu.NONE, "Switch shop").apply {
+                setIcon(android.R.drawable.ic_menu_camera)
+                setContentDescription("Switch print shop")
+                setTooltipText("Scan another shop QR code")
+                setShowAsAction(android.view.MenuItem.SHOW_AS_ACTION_NEVER)
+                isVisible = false
+                setOnMenuItemClickListener { switchShop(); true }
+            }
             menu.add(Menu.NONE, PROFILE, Menu.NONE, "Account").apply {
                 setIcon(R.drawable.ic_account)
                 setContentDescription("Account")
@@ -313,20 +343,35 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun resetToolbar(title: String) {
+        profileVisible = false
         toolbar.title = title
         toolbar.navigationIcon = null
         toolbar.setNavigationOnClickListener(null)
+        toolbar.menu.findItem(SWITCH_SHOP)?.isVisible = portalUrl != null
         navigation.visibility = View.VISIBLE
     }
 
     private fun showProfile() {
         pickerMode = false
+        if (!profileVisible) profileReturnDestination = navigation.selectedItemId
+        profileVisible = true
         toolbar.title = "Your account"
         toolbar.setNavigationIcon(android.R.drawable.ic_media_previous)
-        toolbar.setNavigationOnClickListener { showHome() }
+        toolbar.setNavigationOnClickListener { returnFromProfile() }
         navigation.visibility = View.GONE
         content.removeAllViews()
         content.addView(accountView(), frameParams())
+    }
+
+    private fun returnFromProfile() {
+        if (!profileVisible) return
+        profileVisible = false
+        when (profileReturnDestination) {
+            FILES -> showFiles()
+            SCAN_PRINT -> if (portalUrl != null) showPrint() else showScanPrint()
+            ACTIVITY -> showActivity()
+            else -> showHome()
+        }
     }
 
     private fun accountView(): View {
@@ -561,11 +606,41 @@ class MainActivity : AppCompatActivity() {
 
     private fun showScanPrint() {
         pickerMode = false
-        if (portalUrl != null) { showPrint(); return }
+        if (portalUrl != null) { showConnectedShop(); return }
         resetToolbar("Scan & Print")
         navigation.menu.findItem(SCAN_PRINT).isChecked = true
         content.removeAllViews()
         content.addView(scanPrintView(), frameParams())
+    }
+
+    private fun showConnectedShop() {
+        resetToolbar("Your print shop")
+        navigation.menu.findItem(SCAN_PRINT).isChecked = true
+        content.removeAllViews()
+        val column = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(20), dp(22), dp(20), dp(28))
+        }
+        val connected = card()
+        val body = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(18), dp(18), dp(18), dp(18))
+        }
+        body.addView(text("Shop session saved", 20, R.color.qp_text, true))
+        body.addView(text(
+            "You are connected to ${portalHost ?: "your selected SmartPrint shop"}. Your existing uploaded jobs remain associated with that shop session.",
+            13, R.color.qp_muted, false
+        ).apply { setPadding(0, dp(7), 0, dp(14)) })
+        body.addView(button("Open current shop session", true).apply { setOnClickListener { showPrint() } }, linearParams())
+        connected.addView(body)
+        column.addView(connected, linearParams())
+        column.addView(button("Scan another shop", false).apply { setOnClickListener { switchShop() } },
+            linearParams().apply { topMargin = dp(12) })
+        column.addView(text(
+            "Switching shops does not cancel or delete an existing order. Re-scan the previous shop QR code to return to its session.",
+            12, R.color.qp_muted, false
+        ).apply { setPadding(dp(3), dp(12), dp(3), 0) })
+        content.addView(column, frameParams())
     }
 
     private fun scanPrintView(): View {
@@ -789,6 +864,8 @@ class MainActivity : AppCompatActivity() {
 
     private fun showPrint() {
         pickerMode = false
+        profileVisible = false
+        toolbar.menu.findItem(SWITCH_SHOP)?.isVisible = portalUrl != null
         toolbar.title = portalHost?.let { "SmartPrint · $it" } ?: "SmartPrint at a shop"
         toolbar.setNavigationIcon(android.R.drawable.ic_media_previous)
         toolbar.setNavigationOnClickListener { showFiles() }
@@ -926,7 +1003,7 @@ class MainActivity : AppCompatActivity() {
             }, LinearLayout.LayoutParams(0, dp(44), 1f).apply { marginStart = dp(8) })
             selectionContent.addView(selectionActions, linearParams().apply { topMargin = dp(8) })
             selectionContent.addView(text(
-                if (supportedBatch) "Creates one combined PDF. For separately reviewable print files, use Select multiple files after scanning a shop QR code."
+                if (supportedBatch) "Creates one image-based PDF. Searchable text and vector quality may be lost. For separately reviewable print files, use Select multiple files after scanning a shop QR code."
                 else "Select 2–20 PDF/JPG/PNG files, each up to 20 MB and 100 MB total, to combine them into one PDF.",
                 11, R.color.qp_muted, false
             ).apply { setPadding(0, dp(7), 0, 0) })
@@ -1153,7 +1230,7 @@ class MainActivity : AppCompatActivity() {
         scroll.addView(column)
         column.addView(text(file.name, 17, R.color.qp_text, true))
         column.addView(text(
-            "Preview pages, rotate them, change their order or remove unwanted pages. Save creates a new PDF; your original stays unchanged.",
+            "Preview pages, rotate them, change their order or remove unwanted pages. Save creates a new image-based PDF; searchable text, vector artwork and some fine detail may be lost. Your original stays unchanged.",
             13, R.color.qp_muted, false
         ).apply { setPadding(0, dp(5), 0, dp(14)) })
         column.addView(button("Save edited copy", true).apply {
@@ -1291,37 +1368,47 @@ class MainActivity : AppCompatActivity() {
     private fun ensureWebView(): WebView {
         webView?.let { return it }
         val view = WebView(this)
-        val trustedPage = Uri.parse(portalUrl ?: BuildConfig.SERVICE_BASE_URL)
+        // Never trust the QR-selected route as a credential-sharing origin.
+        // The bridge is pinned to the configured service origin for this build.
+        val trustedPage = Uri.parse(BuildConfig.SERVICE_BASE_URL)
         val trustedOrigin = "${trustedPage.scheme}://${trustedPage.authority}"
-        if (trustedPage.scheme in setOf("https", "http") &&
+        if (trustedPage.scheme in setOf("https", "http") && trustedPage.host != null &&
             WebViewFeature.isFeatureSupported(WebViewFeature.WEB_MESSAGE_LISTENER)) {
             WebViewCompat.addWebMessageListener(
                 view,
                 "SmartPrintNative",
                 setOf(trustedOrigin)
             ) { _, message, sourceOrigin, isMainFrame, replyProxy ->
-                // Only the trusted top-level shop page may request a customer token.
-                // Third-party frames and all other messages receive no credentials.
+                // Only the fixed configured origin and the top-level document may use this bridge.
                 if (isMainFrame &&
                     sourceOrigin.scheme == trustedPage.scheme &&
                     sourceOrigin.host.equals(trustedPage.host, true) &&
-                    sourceOrigin.port == trustedPage.port &&
-                    message.data == "getCustomerAccessToken") {
+                    sourceOrigin.port == trustedPage.port) {
                     Thread {
-                        val token = try {
-                            var auth = customerAccountStore.read()
-                            if (auth != null) {
-                                if (CustomerAccountClient.accessTokenIsExpired(auth)) {
-                                    auth = CustomerAccountClient.refresh(BuildConfig.SERVICE_BASE_URL, auth)
-                                    customerAccountStore.save(auth)
+                        val response = try {
+                            val parts = message.data.split("|", limit = 3)
+                            when {
+                                message.data == "getCustomerAccessToken" -> {
+                                    var auth = customerAccountStore.read()
+                                    if (auth != null && CustomerAccountClient.accessTokenIsExpired(auth)) {
+                                        auth = CustomerAccountClient.refresh(BuildConfig.SERVICE_BASE_URL, auth)
+                                        customerAccountStore.save(auth)
+                                    }
+                                    auth?.accessToken.orEmpty()
                                 }
-                                auth.accessToken
-                            } else ""
-                        } catch (_: Exception) {
-                            ""
-                        }
+                                parts.size == 2 && parts[0] == "getCustomerPrintSession" ->
+                                    customerPrintSessionStore.read(parts[1]).orEmpty()
+                                parts.size == 3 && parts[0] == "saveCustomerPrintSession" -> {
+                                    customerPrintSessionStore.save(parts[1], parts[2]); "OK"
+                                }
+                                parts.size == 2 && parts[0] == "clearCustomerPrintSession" -> {
+                                    customerPrintSessionStore.clear(parts[1]); "OK"
+                                }
+                                else -> ""
+                            }
+                        } catch (_: Exception) { "" }
                         runOnUiThread {
-                            if (!isFinishing && !isDestroyed) replyProxy.postMessage(token)
+                            if (!isFinishing && !isDestroyed) replyProxy.postMessage(response)
                         }
                     }.start()
                 }
@@ -1395,6 +1482,16 @@ class MainActivity : AppCompatActivity() {
             uri.host.equals(portalHost, true) &&
             LocalAgentUploadPolicy.isPrivateIpv4Host(uri.host.orEmpty())
 
+    private fun switchShop() {
+        if (portalUrl == null) { scanQr(); return }
+        MaterialAlertDialogBuilder(this)
+            .setTitle("Switch print shop?")
+            .setMessage("Your current shop session and uploaded jobs will be kept. Scan the next shop's official QR code to connect to it.")
+            .setNegativeButton("Stay here", null)
+            .setPositiveButton("Scan another shop") { _, _ -> scanQr() }
+            .show()
+    }
+
     private fun scanQr() {
         navigation.menu.findItem(SCAN_PRINT).isChecked = true
         scannerLauncher.launch(Intent(this, QrScannerActivity::class.java))
@@ -1404,10 +1501,7 @@ class MainActivity : AppCompatActivity() {
         val options = GmsDocumentScannerOptions.Builder()
             .setGalleryImportAllowed(true)
             .setPageLimit(50)
-            .setResultFormats(
-                GmsDocumentScannerOptions.RESULT_FORMAT_PDF,
-                GmsDocumentScannerOptions.RESULT_FORMAT_JPEG
-            )
+            .setResultFormats(GmsDocumentScannerOptions.RESULT_FORMAT_PDF)
             .setScannerMode(GmsDocumentScannerOptions.SCANNER_MODE_FULL)
             .build()
         GmsDocumentScanning.getClient(options)
@@ -1431,12 +1525,7 @@ class MainActivity : AppCompatActivity() {
                 input.use { store.importFile(it, "Scanned document.pdf", targetPath) }
                 saved++
             }
-            scan.getPages().orEmpty().forEachIndexed { index, page ->
-                val input = contentResolver.openInputStream(page.getImageUri()) ?: error("Scanned page ${index + 1} is unavailable.")
-                input.use { store.importFile(it, "Page ${(index + 1).toString().padStart(2, '0')}.jpg", targetPath) }
-                saved++
-            }
-            require(saved > 0) { "The scanner returned no pages." }
+            require(saved > 0) { "The scanner did not return a PDF." }
         } catch (error: Exception) {
             runCatching { store.delete(folder) }
             throw error
@@ -1458,6 +1547,7 @@ class MainActivity : AppCompatActivity() {
             .setPositiveButton("Continue") { _, _ ->
                 portalHost = link.host
                 portalUrl = link.url
+                toolbar.menu.findItem(SWITCH_SHOP)?.isVisible = true
                 ensureWebView().loadUrl(link.url)
                 showPrint()
             }.show()
