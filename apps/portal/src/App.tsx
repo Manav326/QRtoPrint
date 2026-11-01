@@ -921,14 +921,14 @@ function ShopConsole({ tokens, onSignOut }: { tokens: AuthTokens; onSignOut: () 
   }
 
   async function savePaymentSettings(values: {
-    upiEnabled: boolean; upiId: string | null; payeeName: string | null; cashEnabled: boolean;
+    upiEnabled: boolean; upiId: string | null; payeeName: string | null; cashEnabled: boolean; instantPaymentEnabled: boolean;
   }) {
     setBusy(true);
     setError("");
     try {
       const updated = await updateShopPaymentSettings(tokens.accessToken, values);
       setPaymentSettings(updated);
-      setToast("Shop payment methods saved. Customer print revenue continues to go directly to your shop.");
+      setToast("Shop payment settings saved. Customer print revenue continues to go directly to your shop.");
     } catch (exception) {
       setError(exception instanceof Error ? exception.message : "Could not save shop payment settings.");
     } finally {
@@ -1861,7 +1861,7 @@ function PaymentsPage({settings,payments,refunds,onSave,onVerify,onReject,busy,b
   settings:ShopPaymentSettings;
   payments:ShopPayment[];
   refunds:ShopRefund[];
-  onSave:(values:{upiEnabled:boolean;upiId:string|null;payeeName:string|null;cashEnabled:boolean})=>void;
+  onSave:(values:{upiEnabled:boolean;upiId:string|null;payeeName:string|null;cashEnabled:boolean;instantPaymentEnabled:boolean})=>void;
   onVerify:(payment:ShopPayment)=>void;
   onReject:(payment:ShopPayment)=>void;
   busy:boolean;
@@ -1871,12 +1871,14 @@ function PaymentsPage({settings,payments,refunds,onSave,onVerify,onReject,busy,b
   const [upiId,setUpiId]=useState(settings.upiId||"");
   const [payeeName,setPayeeName]=useState(settings.payeeName||"");
   const [cashEnabled,setCashEnabled]=useState(settings.cashEnabled);
+  const [instantPaymentEnabled,setInstantPaymentEnabled]=useState(settings.instantPaymentEnabled);
   useEffect(()=>{
     setUpiEnabled(settings.upiEnabled);
     setUpiId(settings.upiId||"");
     setPayeeName(settings.payeeName||"");
     setCashEnabled(settings.cashEnabled);
-  },[settings.upiEnabled,settings.upiId,settings.payeeName,settings.cashEnabled]);
+    setInstantPaymentEnabled(settings.instantPaymentEnabled);
+  },[settings.upiEnabled,settings.upiId,settings.payeeName,settings.cashEnabled,settings.instantPaymentEnabled]);
 
   const pending=payments.filter(payment=>payment.status==="AWAITING_CUSTOMER_PAYMENT"||payment.status==="CUSTOMER_REPORTED"||payment.status==="CASH_AWAITING_PAYMENT");
   return <div className="payments-workspace">
@@ -1892,8 +1894,12 @@ function PaymentsPage({settings,payments,refunds,onSave,onVerify,onReject,busy,b
       <div className="payment-method-card">
         <div className="payment-method-heading"><div className="payment-method-icon"><Printer size={19}/></div><div><strong>Cash at counter</strong><small>Allow customers to select cash and pay in person.</small></div><label className="switch"><input type="checkbox" checked={cashEnabled} onChange={event=>setCashEnabled(event.target.checked)}/><span/></label></div>
       </div>
+      <div className="payment-method-card instant-payment-setting">
+        <div className="payment-method-heading"><div className="payment-method-icon"><Zap size={19}/></div><div><strong>Instant payment after upload</strong><small>Calculate the price automatically and let customers pay the whole batch without quote acceptance or shop pre-approval. You can still review files individually and refund rejected files.</small></div><label className="switch"><input type="checkbox" checked={instantPaymentEnabled} onChange={event=>setInstantPaymentEnabled(event.target.checked)}/><span/></label></div>
+        <p className="instant-payment-setting-note">Requires your print rate card and at least one payment method to be enabled. UPI references and cash are still verified by the shop before printing.</p>
+      </div>
       <div className="payment-security-note"><ShieldCheck size={16}/><span>SmartPrint by QuantaEdge does not receive, hold or route your customer print revenue. Verify every UPI reference against your own bank/UPI app; cash must be physically received. SmartPrint platform subscription charges are billed separately.</span></div>
-      <div className="payment-settings-footer"><span>Last updated {new Date(settings.updatedUtc).toLocaleString()}</span><button className="primary-button" disabled={busy||(!upiEnabled&&!cashEnabled)||(upiEnabled&&(!upiId.trim()||!payeeName.trim()))} onClick={()=>onSave({upiEnabled,upiId:upiEnabled?upiId.trim():null,payeeName:upiEnabled?payeeName.trim():null,cashEnabled})}>{busy?<span className="button-spinner"/>:"Save payment methods"}</button></div>
+      <div className="payment-settings-footer"><span>Last updated {new Date(settings.updatedUtc).toLocaleString()}</span><button className="primary-button" disabled={busy||(!upiEnabled&&!cashEnabled)||(upiEnabled&&(!upiId.trim()||!payeeName.trim()))} onClick={()=>onSave({upiEnabled,upiId:upiEnabled?upiId.trim():null,payeeName:upiEnabled?payeeName.trim():null,cashEnabled,instantPaymentEnabled})}>{busy?<span className="button-spinner"/>:"Save payment methods"}</button></div>
     </section>
     <section className="panel payment-review-panel">
       <div className="collection-header"><div><h2>Payment verification</h2><p>Review UPI references and confirm cash collected before a job becomes payment-authorised.</p></div><span className="setup-count">{pending.length} need review</span></div>
