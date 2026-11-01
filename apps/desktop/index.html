@@ -3,6 +3,14 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <script>
+      (() => {
+        let theme = "light";
+        try { theme = localStorage.getItem("qrtoprint.theme") === "dark" ? "dark" : "light"; } catch {}
+        document.documentElement.dataset.theme = theme;
+        document.documentElement.style.colorScheme = theme;
+      })();
+    </script>
     <meta name="theme-color" content="#0c0f16" />
     <meta name="description" content="SmartPrint desktop workspace for print-shop operations." />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
