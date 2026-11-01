@@ -40,11 +40,11 @@ class SavedPdfEditorInstrumentedTest {
 
                 onView(withText("Edit PDF")).check(matches(isDisplayed()))
                 onView(withText("Page 1")).check(matches(isDisplayed()))
-                onView(withContentDescription("Rotate page 1")).perform(click())
-                onView(withText("90°")).check(matches(isDisplayed()))
-                onView(withContentDescription("Move page 2 up")).check(matches(isDisplayed()))
-                onView(withContentDescription("Remove page 1")).check(matches(isDisplayed()))
-                onView(withContentDescription("Preview page 1")).perform(click())
+                onView(withContentDescription("Rotate page 1")).perform(scrollTo(), click())
+                onView(withText("90°")).perform(scrollTo()).check(matches(isDisplayed()))
+                onView(withContentDescription("Move page 2 up")).perform(scrollTo()).check(matches(isDisplayed()))
+                onView(withContentDescription("Remove page 1")).perform(scrollTo()).check(matches(isDisplayed()))
+                onView(withContentDescription("Preview page 1")).perform(scrollTo(), click())
                 onView(withText("Close")).check(matches(isDisplayed()))
                 onView(withText("Close")).perform(click())
             }

@@ -49,6 +49,7 @@ import com.google.android.material.bottomsheet.BottomSheetDialog
 import com.google.mlkit.vision.documentscanner.GmsDocumentScannerOptions
 import com.google.mlkit.vision.documentscanner.GmsDocumentScanning
 import com.google.mlkit.vision.documentscanner.GmsDocumentScanningResult
+import org.json.JSONArray
 import java.io.ByteArrayInputStream
 import java.io.File
 import java.io.FileInputStream
@@ -70,6 +71,7 @@ class MainActivity : AppCompatActivity() {
         private const val SWITCH_SHOP = 91
         private const val MAX_TREE_FILES = 500
         private const val MAX_TREE_DEPTH = 12
+        private const val FOLDER_PICKER_ACCEPT = "application/x-smartprint-folder-selection"
     }
 
     private lateinit var store: LocalDocumentStore
@@ -92,8 +94,12 @@ class MainActivity : AppCompatActivity() {
     private var editingPdf: File? = null
     private val selectedFilePaths = linkedSetOf<String>()
     private val chooserSelectedFilePaths = linkedSetOf<String>()
+    private val chooserSelectedFolderPaths = linkedSetOf<String>()
     private val expandedFolderPaths = linkedSetOf<String>()
     private var fileChooserAllowsMultiple = false
+    private var fileChooserSelectFolders = false
+    private var pendingScanNeedsDestination = false
+    private var pendingScanDestinationPath = ""
     private var profileVisible = false
     private var profileReturnDestination = HOME
     private var librarySearchQuery = ""
@@ -112,6 +118,8 @@ class MainActivity : AppCompatActivity() {
         store = LocalDocumentStore(filesDir)
         customerAccountStore = CustomerAccountStore(this)
         customerPrintSessionStore = CustomerPrintSessionStore(this)
+        pendingScanNeedsDestination = savedInstanceState?.getBoolean("pendingScanNeedsDestination") ?: false
+        pendingScanDestinationPath = savedInstanceState?.getString("pendingScanDestinationPath").orEmpty()
         registerFileActions()
         buildLayout()
         showHome()
@@ -132,6 +140,8 @@ class MainActivity : AppCompatActivity() {
     }
 
     override fun onSaveInstanceState(outState: Bundle) {
+        outState.putBoolean("pendingScanNeedsDestination", pendingScanNeedsDestination)
+        outState.putString("pendingScanDestinationPath", pendingScanDestinationPath)
         outState.putString("portalUrl", portalUrl)
         outState.putString("portalHost", portalHost)
         webView?.let { view ->
@@ -152,6 +162,7 @@ class MainActivity : AppCompatActivity() {
     override fun onBackPressed() {
         when {
             profileVisible -> returnFromProfile()
+            pickerMode && pickerPath.isNotBlank() -> { pickerPath = parent(pickerPath); refreshLibrary() }
             pickerMode -> cancelPicker()
             editingPdf != null -> showFiles()
             navigation.selectedItemId == SCAN_PRINT && webView?.canGoBack() == true -> webView?.goBack()
@@ -184,10 +195,16 @@ class MainActivity : AppCompatActivity() {
                 try {
                     val scan = GmsDocumentScanningResult.fromActivityResultIntent(result.data)
                         ?: error("The scan could not be read.")
-                    saveDocumentScan(scan)
+                    if (pendingScanNeedsDestination) showScanDestinationPicker(scan)
+                    else saveDocumentScan(scan, pendingScanDestinationPath)
                 } catch (e: Exception) {
+                    pendingScanNeedsDestination = false
+                    pendingScanDestinationPath = ""
                     toast("Could not save the scan: ${message(e)}")
                 }
+            } else {
+                pendingScanNeedsDestination = false
+                pendingScanDestinationPath = ""
             }
         }
         importFiles = registerForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
@@ -861,10 +878,14 @@ class MainActivity : AppCompatActivity() {
         content.addView(libraryView(false), frameParams())
     }
 
-    private fun showPicker() {
+    private fun showPicker(resetPath: Boolean = true) {
         pickerMode = true
-        pickerPath = ""
-        toolbar.title = if (fileChooserAllowsMultiple) "Select files" else "Select file"
+        if (resetPath) pickerPath = ""
+        toolbar.title = when {
+            fileChooserSelectFolders -> "Select folders"
+            fileChooserAllowsMultiple -> "Select files"
+            else -> "Select file"
+        }
         toolbar.setNavigationIcon(android.R.drawable.ic_media_previous)
         toolbar.setNavigationOnClickListener { cancelPicker() }
         navigation.visibility = View.GONE
@@ -887,7 +908,7 @@ class MainActivity : AppCompatActivity() {
         content.addView(view, frameParams())
     }
 
-    private fun refreshLibrary() { if (pickerMode) showPicker() else showFiles() }
+    private fun refreshLibrary() { if (pickerMode) showPicker(resetPath = false) else showFiles() }
 
     private fun libraryView(isPicker: Boolean): View {
         val scroll = ScrollView(this).apply { isFillViewport = true; clipToPadding = false }
@@ -900,27 +921,49 @@ class MainActivity : AppCompatActivity() {
         val rootFolder = try { store.folder(path) } catch (_: Exception) { store.root }
         val allEntries = store.list(rootFolder)
         val visibleEntries = allEntries.filter {
-            isPicker || librarySearchQuery.isBlank() || it.name.contains(librarySearchQuery, ignoreCase = true)
+            when {
+                isPicker && fileChooserSelectFolders -> it.isDirectory
+                isPicker -> it.isDirectory || DocumentNamePolicy.isPrintable(it.name, it.length())
+                librarySearchQuery.isBlank() -> true
+                else -> it.name.contains(librarySearchQuery, ignoreCase = true)
+            }
         }
         val heading = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
         val copy = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-        copy.addView(text(if (isPicker) "Select files" else "My Files", 21, R.color.qp_text, true))
         copy.addView(text(
-            if (isPicker) "${visibleEntries.count { !it.isDirectory }} available"
-            else "${allEntries.count { it.isDirectory }} folders · ${allEntries.count { !it.isDirectory }} files",
+            if (!isPicker) "My Files" else if (fileChooserSelectFolders) "Choose folders" else "Choose files",
+            21, R.color.qp_text, true
+        ))
+        copy.addView(text(
+            when {
+                !isPicker -> "${allEntries.count { it.isDirectory }} folders · ${allEntries.count { !it.isDirectory }} files"
+                fileChooserSelectFolders -> "Select one or more folders. Only files directly inside each folder are added."
+                else -> "${visibleEntries.count { !it.isDirectory }} printable files available"
+            },
             11, R.color.qp_muted, false
         ).apply { setPadding(0, dp(2), 0, 0) })
         heading.addView(copy, LinearLayout.LayoutParams(0, -2, 1f))
-        if (!isPicker) heading.addView(button("New folder", false).apply {
-            minHeight = dp(36)
-            setOnClickListener {
-                nameDialog("New folder", "") { name ->
-                    try { store.createFolder(folderPath, name); showFiles() }
-                    catch (e: Exception) { toast("Folder not created: ${message(e)}") }
-                }
+        column.addView(heading, linearParams().apply { bottomMargin = dp(9) })
+        if (!isPicker) {
+            val folderActions = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
             }
-        })
-        column.addView(heading, linearParams().apply { bottomMargin = dp(12) })
+            folderActions.addView(button("Scan here", false).apply {
+                minHeight = dp(40)
+                setOnClickListener { startDocumentScan(path) }
+            }, LinearLayout.LayoutParams(0, dp(40), 1f))
+            folderActions.addView(button("New folder", false).apply {
+                minHeight = dp(40)
+                setOnClickListener {
+                    nameDialog("New folder", "") { name ->
+                        try { store.createFolder(folderPath, name); showFiles() }
+                        catch (e: Exception) { toast("Folder not created: ${message(e)}") }
+                    }
+                }
+            }, LinearLayout.LayoutParams(0, dp(40), 1f).apply { marginStart = dp(8) })
+            column.addView(folderActions, linearParams().apply { bottomMargin = dp(12) })
+        }
 
         if (!isPicker) {
             val searchRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
@@ -952,7 +995,7 @@ class MainActivity : AppCompatActivity() {
         crumb.addView(text(breadcrumbText, 12, R.color.qp_muted, true),
             LinearLayout.LayoutParams(0, -2, 1f))
         if (path.isNotEmpty()) {
-            val up = button("Up", false).apply { minHeight = dp(34) }
+            val up = button("Back", false).apply { minHeight = dp(34) }
             crumb.addView(up)
             up.setOnClickListener {
                 if (isPicker) pickerPath = parent(pickerPath) else folderPath = parent(folderPath)
@@ -961,23 +1004,46 @@ class MainActivity : AppCompatActivity() {
         }
         column.addView(crumb, linearParams())
 
-        val actions = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
+        if (!isPicker) {
+            val actions = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+            }
+            actions.addView(button("Import files", false).apply {
+                minHeight = dp(38)
+                setOnClickListener { importFiles.launch(arrayOf("application/pdf", "image/jpeg", "image/png")) }
+            }, LinearLayout.LayoutParams(0, dp(38), 1f))
+            actions.addView(button("Import folder", false).apply {
+                minHeight = dp(38)
+                setOnClickListener { importTree.launch(null) }
+            }, LinearLayout.LayoutParams(0, dp(38), 1f).apply { marginStart = dp(7) })
+            column.addView(actions, linearParams().apply { bottomMargin = dp(12) })
         }
-        actions.addView(button("Import", false).apply {
-            minHeight = dp(38)
-            setOnClickListener { importFiles.launch(arrayOf("*/*")) }
-        }, LinearLayout.LayoutParams(0, dp(38), 1f))
-        actions.addView(button("Folder import", false).apply {
-            minHeight = dp(38)
-            setOnClickListener { importTree.launch(null) }
-        }, LinearLayout.LayoutParams(0, dp(38), 1f).apply { marginStart = dp(7) })
-        column.addView(actions, linearParams().apply { bottomMargin = dp(12) })
 
         val selectedHere = selectedFilePaths.mapNotNull { runCatching { File(it).canonicalFile }.getOrNull() }.filter { it.isFile && it.exists() }
-        val chooserSelection = if (isPicker && fileChooserAllowsMultiple) selectedChooserFiles() else emptyList()
-        if (isPicker && fileChooserAllowsMultiple) {
+        val chooserSelection = if (isPicker && fileChooserAllowsMultiple && !fileChooserSelectFolders) selectedChooserFiles() else emptyList()
+        val chooserFolderSelection = if (isPicker && fileChooserSelectFolders) selectedChooserFolders() else emptyList()
+        if (isPicker && fileChooserSelectFolders) {
+            val selectionRow = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                setPadding(dp(12), dp(8), dp(12), dp(8))
+                background = roundedDrawable(getColor(R.color.qp_soft), dp(12))
+            }
+            selectionRow.addView(text("${chooserFolderSelection.size} folders selected", 12, R.color.qp_text, true),
+                LinearLayout.LayoutParams(0, -2, 1f))
+            selectionRow.addView(button("Clear", false).apply {
+                minHeight = dp(34)
+                isEnabled = chooserFolderSelection.isNotEmpty()
+                setOnClickListener { chooserSelectedFolderPaths.clear(); refreshLibrary() }
+            })
+            selectionRow.addView(button("Add folders", true).apply {
+                minHeight = dp(34)
+                isEnabled = chooserFolderSelection.isNotEmpty()
+                setOnClickListener { attachSelectedFolders() }
+            }, LinearLayout.LayoutParams(-2, dp(34)).apply { marginStart = dp(6) })
+            column.addView(selectionRow, linearParams().apply { bottomMargin = dp(10) })
+        } else if (isPicker && fileChooserAllowsMultiple) {
             val selectionRow = LinearLayout(this).apply {
                 orientation = LinearLayout.HORIZONTAL
                 gravity = Gravity.CENTER_VERTICAL
@@ -1112,6 +1178,14 @@ class MainActivity : AppCompatActivity() {
                 }
             }
             row.addView(chevron, LinearLayout.LayoutParams(dp(38), dp(40)))
+        } else if (isPicker && fileChooserSelectFolders) {
+            val selected = CheckBox(this).apply {
+                isChecked = chooserSelectedFolderPaths.contains(file.canonicalPath)
+                contentDescription = "Select folder " + file.name
+                buttonTintList = ColorStateList.valueOf(getColor(R.color.qp_primary))
+                setOnCheckedChangeListener { _, checked -> setChooserFolderSelected(file, checked) }
+            }
+            row.addView(selected, LinearLayout.LayoutParams(dp(40), dp(40)))
         } else if (isPicker && fileChooserAllowsMultiple) {
             val selected = CheckBox(this).apply {
                 isChecked = chooserSelectedFilePaths.contains(file.canonicalPath)
@@ -1146,6 +1220,8 @@ class MainActivity : AppCompatActivity() {
         }
         row.setOnClickListener {
             when {
+                file.isDirectory && isPicker && fileChooserSelectFolders ->
+                    setChooserFolderSelected(file, !chooserSelectedFolderPaths.contains(file.canonicalPath))
                 file.isDirectory -> {
                     if (isPicker) pickerPath = store.pathOf(file) else folderPath = store.pathOf(file)
                     refreshLibrary()
@@ -1714,8 +1790,13 @@ class MainActivity : AppCompatActivity() {
             ): Boolean {
                 fileCallback?.onReceiveValue(null)
                 fileCallback = callback
-                fileChooserAllowsMultiple = params.mode == FileChooserParams.MODE_OPEN_MULTIPLE
+                fileChooserSelectFolders = params.acceptTypes.any { accepted ->
+                    accepted.split(',').any { it.trim().equals(FOLDER_PICKER_ACCEPT, ignoreCase = true) }
+                }
+                fileChooserAllowsMultiple = fileChooserSelectFolders ||
+                    params.mode == FileChooserParams.MODE_OPEN_MULTIPLE
                 chooserSelectedFilePaths.clear()
+                chooserSelectedFolderPaths.clear()
                 showPicker()
                 return true
             }
@@ -1753,7 +1834,9 @@ class MainActivity : AppCompatActivity() {
         scannerLauncher.launch(Intent(this, QrScannerActivity::class.java))
     }
 
-    private fun startDocumentScan() {
+    private fun startDocumentScan(destinationPath: String? = null) {
+        pendingScanNeedsDestination = destinationPath == null
+        pendingScanDestinationPath = destinationPath.orEmpty()
         val options = GmsDocumentScannerOptions.Builder()
             .setGalleryImportAllowed(true)
             .setPageLimit(50)
@@ -1766,29 +1849,85 @@ class MainActivity : AppCompatActivity() {
                 documentScanLauncher.launch(IntentSenderRequest.Builder(sender).build())
             }
             .addOnFailureListener { error ->
+                pendingScanNeedsDestination = false
+                pendingScanDestinationPath = ""
                 toast("Document scanner is unavailable on this device. You can still import photos or PDFs. ${message(error)}")
             }
     }
 
-    private fun saveDocumentScan(scan: GmsDocumentScanningResult) {
-        val label = SimpleDateFormat("yyyy-MM-dd HHmmss", Locale.ROOT).format(Date())
-        val folder = store.createFolder("", "Scan $label", allowExisting = false)
-        val targetPath = store.pathOf(folder)
-        try {
-            var saved = 0
-            scan.getPdf()?.let { pdf ->
-                val input = contentResolver.openInputStream(pdf.getUri()) ?: error("Scanned PDF is unavailable.")
-                input.use { store.importFile(it, "Scanned document.pdf", targetPath) }
-                saved++
+    private fun showScanDestinationPicker(scan: GmsDocumentScanningResult) {
+        val (dialog, root) = sheetRoot("Save scanned document", "Choose where this scan should stay in My Files.")
+        root.addView(button("My Files", true).apply {
+            minHeight = dp(46)
+            setOnClickListener { dialog.dismiss(); saveDocumentScan(scan, "") }
+        }, linearParams().apply { bottomMargin = dp(7) })
+        root.addView(button("Create a new folder", false).apply {
+            minHeight = dp(42)
+            setOnClickListener {
+                nameDialog("New folder for this scan", "") { name ->
+                    try {
+                        val folder = store.createFolder("", name)
+                        dialog.dismiss()
+                        saveDocumentScan(scan, store.pathOf(folder))
+                    } catch (error: Exception) {
+                        toast("Folder not created: ${message(error)}")
+                    }
+                }
             }
-            require(saved > 0) { "The scanner did not return a PDF." }
-        } catch (error: Exception) {
-            runCatching { store.delete(folder) }
-            throw error
+        }, linearParams().apply { bottomMargin = dp(8) })
+        val folders = store.root.walkTopDown()
+            .filter { it.isDirectory && it.canonicalPath != store.root.canonicalPath }
+            .sortedBy { runCatching { store.pathOf(it).lowercase(Locale.ROOT) }.getOrDefault(it.name.lowercase(Locale.ROOT)) }
+            .take(80).toList()
+        if (folders.isEmpty()) {
+            root.addView(text("No saved folders yet. You can create one above.", 12, R.color.qp_muted, false)
+                .apply { setPadding(dp(2), dp(8), 0, dp(8)) })
+        } else {
+            root.addView(text("Existing folders", 12, R.color.qp_muted, true)
+                .apply { setPadding(dp(2), dp(4), 0, dp(7)) })
+            val scroll = ScrollView(this).apply { isFillViewport = false }
+            val list = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+            folders.forEach { folder ->
+                val path = store.pathOf(folder)
+                val label = "My Files  ›  " + path.replace("/", "  ›  ")
+                list.addView(button(label, false).apply {
+                    minHeight = dp(44)
+                    gravity = Gravity.START or Gravity.CENTER_VERTICAL
+                    setOnClickListener { dialog.dismiss(); saveDocumentScan(scan, path) }
+                }, linearParams().apply { bottomMargin = dp(5) })
+            }
+            scroll.addView(list)
+            root.addView(scroll, LinearLayout.LayoutParams(-1, dp(260)))
         }
-        folderPath = targetPath
-        showFiles()
-        toast("Saved your scan in My files.")
+        root.addView(button("Cancel scan", false).apply {
+            minHeight = dp(40)
+            setOnClickListener {
+                dialog.dismiss()
+                pendingScanNeedsDestination = false
+                pendingScanDestinationPath = ""
+                toast("Scan not saved.")
+            }
+        }, linearParams().apply { topMargin = dp(8) })
+        dialog.show()
+    }
+
+    private fun saveDocumentScan(scan: GmsDocumentScanningResult, destinationPath: String) {
+        try {
+            val destination = store.folder(destinationPath)
+            val pdf = scan.getPdf() ?: error("The scanner did not return a PDF.")
+            val input = contentResolver.openInputStream(pdf.getUri())
+                ?: error("Scanned PDF is unavailable.")
+            val saved = input.use { store.importFile(it, "Scanned document.pdf", destinationPath) }
+            pendingScanNeedsDestination = false
+            pendingScanDestinationPath = ""
+            folderPath = store.pathOf(destination)
+            showFiles()
+            val location = if (destinationPath.isBlank()) "My Files" else "My Files / " + destinationPath.replace("/", " / ")
+            toast("Saved ${saved.name} in $location.")
+        } catch (error: Exception) {
+            toast("Could not save the scan: ${message(error)}")
+            showScanDestinationPicker(scan)
+        }
     }
 
     private fun confirmShop(link: StationQrLink) {
@@ -1814,6 +1953,37 @@ class MainActivity : AppCompatActivity() {
         runCatching { File(path).canonicalFile }.getOrNull()
     }.filter { it.isFile }
 
+    private fun selectedChooserFolders(): List<File> = chooserSelectedFolderPaths.mapNotNull { path ->
+        runCatching { File(path).canonicalFile }.getOrNull()
+    }.filter { it.isDirectory }
+
+    private fun setChooserFolderSelected(folder: File, checked: Boolean) {
+        val path = folder.canonicalPath
+        if (checked) chooserSelectedFolderPaths.add(path) else chooserSelectedFolderPaths.remove(path)
+        refreshLibrary()
+    }
+
+    private fun attachSelectedFolders() {
+        val selectedFolders = selectedChooserFolders()
+        if (selectedFolders.isEmpty()) { toast("Select at least one folder."); return }
+        val documents = selectedFolders.flatMap { folder ->
+            val groupName = store.pathOf(folder).replace("/", " - ").take(80).ifBlank { "Loose files" }
+            store.list(folder).filter { file ->
+                file.isFile && DocumentNamePolicy.isPrintable(file.name, file.length())
+            }.map { file -> file to groupName }
+        }.distinctBy { it.first.canonicalPath }
+        if (documents.isEmpty()) {
+            toast("No printable PDF, JPG or PNG files were found directly inside these folders. Nested folders are not included.")
+            return
+        }
+        val error = PrintBatchSelectionPolicy.validationError(documents.map { it.first })
+        if (error != null) { toast(error); return }
+        if (selectedFolders.any { folder -> store.list(folder).any { it.isDirectory } }) {
+            toast("Only files directly inside each selected folder are included. Nested folders are skipped.")
+        }
+        chooseFiles(documents.map { it.first }, documents.map { it.second })
+    }
+
     private fun setChooserFileSelected(file: File, checked: Boolean) {
         val path = file.canonicalPath
         if (!checked) {
@@ -1831,9 +2001,9 @@ class MainActivity : AppCompatActivity() {
         refreshLibrary()
     }
 
-    private fun chooseFile(file: File) = chooseFiles(listOf(file))
+    private fun chooseFile(file: File) = chooseFiles(listOf(file), listOf("Loose files"))
 
-    private fun chooseFiles(files: List<File>) {
+    private fun chooseFiles(files: List<File>, groupNames: List<String>? = null) {
         val callback = fileCallback
         if (callback == null) { toast("Open a document field in the print page first."); return }
         val error = PrintBatchSelectionPolicy.validationError(files)
@@ -1846,11 +2016,22 @@ class MainActivity : AppCompatActivity() {
             val uris = files.map { file ->
                 FileProvider.getUriForFile(this, "$packageName.documents", file)
             }.toTypedArray()
-            fileCallback = null
-            chooserSelectedFilePaths.clear()
-            fileChooserAllowsMultiple = false
-            showPrint()
-            callback.onReceiveValue(uris)
+            val safeGroupNames = groupNames?.takeIf { it.size == files.size }
+                ?: List(files.size) { "Loose files" }
+            val metadataScript = "window.__smartPrintNativePickerGroups = " +
+                JSONArray().apply { safeGroupNames.forEach { put(it) } }.toString() + ";"
+            val deliverSelection = {
+                fileCallback = null
+                chooserSelectedFilePaths.clear()
+                chooserSelectedFolderPaths.clear()
+                fileChooserAllowsMultiple = false
+                fileChooserSelectFolders = false
+                showPrint()
+                callback.onReceiveValue(uris)
+            }
+            val activeWebView = webView
+            if (activeWebView != null) activeWebView.evaluateJavascript(metadataScript) { deliverSelection() }
+            else deliverSelection()
         } catch (e: Exception) {
             cancelPicker()
             toast("Could not attach the selected documents: " + message(e))
@@ -1861,7 +2042,9 @@ class MainActivity : AppCompatActivity() {
         fileCallback?.onReceiveValue(null)
         fileCallback = null
         chooserSelectedFilePaths.clear()
+        chooserSelectedFolderPaths.clear()
         fileChooserAllowsMultiple = false
+        fileChooserSelectFolders = false
         showPrint()
     }
 

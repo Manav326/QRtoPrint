@@ -2609,6 +2609,13 @@ function CustomerLocalConnection({localAgent,onReady}:{localAgent:CustomerLocalA
 
 type CustomerGroupSettings = { colourMode: "Mono" | "Colour"; isDuplex: boolean };
 type CustomerFileSettings = { copies: string; custom: boolean; colourMode: "Mono" | "Colour"; isDuplex: boolean };
+
+function consumeSmartPrintNativePickerGroups():string[]|undefined {
+  const target=window as Window & {__smartPrintNativePickerGroups?:string[]};
+  const groups=target.__smartPrintNativePickerGroups;
+  delete target.__smartPrintNativePickerGroups;
+  return Array.isArray(groups)?groups:undefined;
+}
 type CustomerSavedPrintSettings = { copies: number; colourMode: "Mono" | "Colour"; isDuplex: boolean };
 
 type StoredCustomerDraft = {
@@ -3047,7 +3054,7 @@ function CustomerPrintFlow({publicCode,sessionToken,paymentOptions,localAgent,lo
     } finally {setBusy(false);}
   }
 
-  function chooseFiles(next:File[]) {
+  function chooseFiles(next:File[], nativeGroupNames?:string[]) {
     let nestedSkipped=0;
     const rootFiles=next.filter(candidate=>{
       const relativePath=(candidate as File & {webkitRelativePath?:string}).webkitRelativePath??"";
@@ -3072,13 +3079,17 @@ function CustomerPrintFlow({publicCode,sessionToken,paymentOptions,localAgent,lo
     }
     setFileGroupNames(current=>{
       const updated={...current};
-      for(const candidate of supported)updated[customerFileFingerprint(candidate)]=customerBatchGroupName(candidate);
+      for(const candidate of supported){
+        const nativeGroup=nativeGroupNames?.[next.indexOf(candidate)]?.trim();
+        updated[customerFileFingerprint(candidate)]=nativeGroup||customerBatchGroupName(candidate);
+      }
       return updated;
     });
     setGroupSettings(current=>{
       const updated={...current};
       for(const candidate of supported) {
-        const group=customerBatchGroupName(candidate);
+        const nativeGroup=nativeGroupNames?.[next.indexOf(candidate)]?.trim();
+        const group=nativeGroup||customerBatchGroupName(candidate);
         if(!updated[group])updated[group]={colourMode:"Mono",isDuplex:false};
       }
       return updated;
@@ -3121,13 +3132,13 @@ function CustomerPrintFlow({publicCode,sessionToken,paymentOptions,localAgent,lo
     </div>:null}
     <div className="customer-upload-picker-grid">
       <label className="customer-upload-zone">
-        <input type="file" multiple accept=".pdf,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png" onChange={event=>{chooseFiles(Array.from(event.currentTarget.files||[]));event.currentTarget.value="";}}/>
+        <input type="file" multiple accept=".pdf,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png" onChange={event=>{chooseFiles(Array.from(event.currentTarget.files||[]),consumeSmartPrintNativePickerGroups());event.currentTarget.value="";}}/>
         <span className="customer-upload-icon"><FileUp size={21}/></span>
         <strong>Select multiple files</strong>
         <small>Choose up to 20 PDF, JPG or PNG documents at once</small>
       </label>
       <label className="customer-upload-zone folder-upload-zone">
-        <input type="file" multiple accept=".pdf,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png" {...({webkitdirectory:"true",directory:"true"} as any)} onChange={event=>{chooseFiles(Array.from(event.currentTarget.files||[]));event.currentTarget.value="";}}/>
+        <input type="file" multiple accept={nativeAppMode?"application/x-smartprint-folder-selection":".pdf,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png"} {...({webkitdirectory:"true",directory:"true"} as any)} onChange={event=>{chooseFiles(Array.from(event.currentTarget.files||[]),consumeSmartPrintNativePickerGroups());event.currentTarget.value="";}}/>
         <span className="customer-upload-icon"><FolderOpen size={21}/></span>
         <strong>Choose folders</strong>
         <small>Add multiple folders to this batch</small>
