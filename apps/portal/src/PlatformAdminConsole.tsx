@@ -1,8 +1,7 @@
 import { useEffect, useState, type ReactNode } from "react";
 import {
   Activity, Building2, CheckCircle2, ChevronLeft, ChevronRight,
-  Clock3, CreditCard, Layers3, LogOut, Menu, Moon, Monitor, PauseCircle, PanelLeftClose, PanelLeftOpen, PlayCircle, Printer, RefreshCw, Search, Settings2, ShieldCheck,
-  Sun
+  Clock3, CreditCard, Layers3, LogOut, Menu, Monitor, PauseCircle, PanelLeftClose, PanelLeftOpen, PlayCircle, Printer, RefreshCw, Search, Settings2, ShieldCheck
 } from "lucide-react";
 import PlatformPlansSection from "./PlatformPlansSection";
 import PlatformSubscriptionsSection from "./PlatformSubscriptionsSection";
@@ -12,16 +11,21 @@ import {
   getPlatformOverview, getPlatformTenants, getPlatformTenantStatusHistory, updatePlatformTenantStatus, logout,
   type AuthTokens, type PlatformOverview, type PlatformTenantsPage, type PlatformTenant
 } from "./api";
-import { readDarkModePreference, readSidebarCollapsedPreference, saveDarkModePreference, saveSidebarCollapsedPreference } from "./ui-preferences";
+import { readSidebarCollapsedPreference, saveSidebarCollapsedPreference } from "./ui-preferences";
+import ThemeToggleButton from "./ThemeToggleButton";
 
 type Section = "Overview" | "Tenants" | "Plans" | "Subscriptions" | "Operations";
 
 export default function PlatformAdminConsole({
   tokens,
-  onSignOut
+  onSignOut,
+  dark,
+  onToggleTheme
 }: {
   tokens: AuthTokens;
   onSignOut: () => Promise<void>;
+  dark: boolean;
+  onToggleTheme: () => void;
 }) {
   const [section, setSection] = useState<Section>(() => adminSectionFromPath(window.location.pathname));
 
@@ -30,10 +34,8 @@ export default function PlatformAdminConsole({
     window.addEventListener("popstate", syncSectionFromPath);
     return () => window.removeEventListener("popstate", syncSectionFromPath);
   }, []);
-  const [dark, setDark] = useState(readDarkModePreference);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(readSidebarCollapsedPreference);
-  useEffect(() => { saveDarkModePreference(dark); }, [dark]);
   useEffect(() => { saveSidebarCollapsedPreference(sidebarCollapsed); }, [sidebarCollapsed]);
   const [overview, setOverview] = useState<PlatformOverview | null>(null);
   const [overviewLoading, setOverviewLoading] = useState(true);
@@ -183,9 +185,7 @@ export default function PlatformAdminConsole({
           <div className="topbar-actions">
             <span className="platform-session-pill"><i/> Platform session secured</span>
             <span className="topbar-divider"/>
-            <button className="icon-button" onClick={() => setDark(value => !value)} title={dark ? "Switch to light theme" : "Switch to dark theme"} aria-label={dark ? "Switch to light theme" : "Switch to dark theme"}>
-              {dark ? <Sun size={17}/> : <Moon size={17}/>}
-            </button>
+            <ThemeToggleButton dark={dark} onToggle={onToggleTheme} className="theme-toggle-compact"/>
             <button className="icon-button" onClick={() => void signOut()} disabled={signingOut} title="Sign out" aria-label="Sign out">
               <LogOut size={17}/>
             </button>
