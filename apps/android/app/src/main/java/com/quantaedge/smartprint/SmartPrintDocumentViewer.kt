@@ -135,7 +135,7 @@ class SmartPrintDocumentViewer(
         stage.addView(feedback, FrameLayout.LayoutParams(-2, -2, Gravity.CENTER))
         addView(stage, LinearLayout.LayoutParams(-1, 0, 1f))
 
-        filmstrip.addView(thumbnailRow, HorizontalScrollView.LayoutParams(-2, -1))
+        filmstrip.addView(thumbnailRow, FrameLayout.LayoutParams(-2, -1))
         addView(filmstrip, LinearLayout.LayoutParams(-1, dp(if (isPdf) 88 else 82)))
 
         if (isPdf) {
@@ -309,7 +309,7 @@ class SmartPrintDocumentViewer(
         val file = imageSiblings[index]
         val mainBitmap = decodeImage(file, MAX_IMAGE_EDGE)
         val thumbnails = mutableListOf<Thumbnail>()
-        try {
+        return try {
             val first = max(0, index - THUMBNAIL_WINDOW)
             val last = min(imageSiblings.lastIndex, index + THUMBNAIL_WINDOW)
             for (imageIndex in first..last) {
