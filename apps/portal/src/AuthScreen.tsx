@@ -1,6 +1,6 @@
 import { useState, type FormEvent } from "react";
 import { ArrowLeft, ArrowRight, Eye, EyeOff, LockKeyhole, Mail, Printer, ShieldCheck, Sparkles, Store, UserRound } from "lucide-react";
-import { ApiError, registerShop, signIn, storeTokens, type AuthTokens } from "./api";
+import { registerShop, signIn, storeTokens, type AuthTokens } from "./api";
 import { isDesktopApp, writeDesktopSession } from "./desktop-bridge";
 
 export default function AuthScreen({ onAuthenticated }: { onAuthenticated: (tokens: AuthTokens) => void }) {
