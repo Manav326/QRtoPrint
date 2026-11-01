@@ -255,7 +255,13 @@ async function exerciseWorkspaceSections(page, route, viewport, themeLabel) {
     if (viewport.width <= 850) await page.getByRole("button", { name: "Open navigation" }).click();
     const destination = page.locator(".sidebar").getByRole("button", { name: section, exact: true });
     await destination.click();
-    await page.locator(".breadcrumb strong").waitFor({ state: "visible" });
+    // The native desktop shell intentionally hides the web breadcrumb; verify
+    // the selected navigation item instead of waiting for hidden header text.
+    await page.waitForFunction(
+      label => [...document.querySelectorAll(".sidebar .nav-item")]
+        .some(item => item.textContent.trim() === label && item.classList.contains("active")),
+      section
+    );
     await assertNoHorizontalOverflow(page, route, viewport);
     await assertRouteContrast(page, route);
     results.push({ check: `${route.label} / ${section} / ${themeLabel} / ${viewport.width}px`, passed: true });
