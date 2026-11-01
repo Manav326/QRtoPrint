@@ -364,6 +364,10 @@ public sealed class SmartPrintDbContext(DbContextOptions<SmartPrintDbContext> op
             entity.HasOne<Tenant>().WithMany()
                 .HasForeignKey(x => x.TenantId)
                 .OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne<CustomerPrintSession>().WithMany()
+                .HasForeignKey(x => new { x.TenantId, x.CustomerSessionId })
+                .HasPrincipalKey(x => new { x.TenantId, x.Id })
+                .OnDelete(DeleteBehavior.Restrict);
             entity.HasOne<AppUser>().WithMany()
                 .HasForeignKey(x => x.VerifiedByUserId)
                 .OnDelete(DeleteBehavior.Restrict);
