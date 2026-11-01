@@ -18,6 +18,17 @@ public sealed class Tenant
     public DateTimeOffset UpdatedUtc { get; set; } = DateTimeOffset.UtcNow;
 }
 
+public sealed class TenantStatusAudit
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+    public Guid TenantId { get; set; }
+    public string PreviousStatus { get; set; } = string.Empty;
+    public string NewStatus { get; set; } = string.Empty;
+    public string Reason { get; set; } = string.Empty;
+    public Guid? ActorUserId { get; set; }
+    public DateTimeOffset CreatedUtc { get; set; } = DateTimeOffset.UtcNow;
+}
+
 public sealed class ShopProfile
 {
     public Guid TenantId { get; set; }
