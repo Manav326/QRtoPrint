@@ -72,7 +72,7 @@ public sealed class AgentControlPipeHostedService(
             PipeOptions.Asynchronous,
             inBufferSize: 4096,
             outBufferSize: 4096,
-            security);
+            pipeSecurity: security);
     }
 
     private async Task HandleConnectionAsync(NamedPipeServerStream pipe, CancellationToken ct)
@@ -84,8 +84,28 @@ public sealed class AgentControlPipeHostedService(
             NewLine = "\n"
         };
 
-        var requestLine = await reader.ReadLineAsync(ct);
-        if (string.IsNullOrWhiteSpace(requestLine) || Encoding.UTF8.GetByteCount(requestLine) > MaximumRequestBytes)
+        // Read a bounded line instead of StreamReader.ReadLineAsync(), which can
+        // allocate without limit for a malicious local pipe client.
+        var requestBuffer = new char[MaximumRequestBytes + 1];
+        var requestLength = 0;
+        var requestComplete = false;
+        while (requestLength < requestBuffer.Length)
+        {
+            var count = await reader.ReadAsync(requestBuffer.AsMemory(requestLength, 1), ct);
+            if (count == 0)
+                break;
+            if (requestBuffer[requestLength] == '\\n')
+            {
+                requestComplete = true;
+                break;
+            }
+            requestLength += count;
+        }
+
+        var requestLine = new string(requestBuffer, 0, requestLength).TrimEnd('\\r');
+        if (!requestComplete ||
+            string.IsNullOrWhiteSpace(requestLine) ||
+            Encoding.UTF8.GetByteCount(requestLine) > MaximumRequestBytes)
         {
             await writer.WriteLineAsync(JsonSerializer.Serialize(new PipeResponse(false, null, "Invalid desktop enrollment request."), PipeJsonOptions));
             return;

@@ -1,6 +1,6 @@
 # SmartPrint by QuantaEdge
 
-SmartPrint by QuantaEdge (QRtoPrint) is a multi-tenant SaaS platform for QR-initiated document printing, combining customer web experiences, shop operations, a local Windows Print Agent, and platform-owner administration.
+SmartPrint by QuantaEdge (QRtoPrint) is a multi-tenant SaaS platform for QR-initiated document printing, combining customer web experiences, a native Windows shop-management desktop application, a separate local Windows Print Agent service, and platform-owner administration.
 
 ## Product principles
 

@@ -297,6 +297,19 @@ function ShopConsole({ tokens, onSignOut }: { tokens: AuthTokens; onSignOut: () 
         status: "CONNECTED"
       });
       setLocalAgentConflict(false);
+
+      // Enrollment creates the AgentDevice in the cloud immediately. Refresh its
+      // shop-scoped record so the UI recognizes this computer as connected on the
+      // first run instead of waiting for the next manual reload.
+      try {
+        const refreshedSnapshot = await loadShopData(tokens.accessToken);
+        setAgentDevices(refreshedSnapshot.agentDevices);
+        setPrinters(refreshedSnapshot.printers);
+      } catch {
+        // Keep the successful local enrollment state; the next normal refresh
+        // will synchronize the cloud inventory without enrolling a second time.
+      }
+
       setToast("This computer is securely connected. SmartPrint is discovering its printers.");
       if (!silent) await reload();
     } catch (exception) {
