@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param(
-    [string]$Destination = (Join-Path $env:USERPROFILE 'Downloads\QRtoPrintAndroid'),
+    [string]$Destination = (Join-Path $env:USERPROFILE 'Downloads\SmartPrintAndroid'),
     [switch]$Install,
     [string]$DeviceSerial,
     [string]$Branch = 'main'
@@ -12,7 +12,7 @@ if (Get-Variable -Name PSNativeCommandUseErrorActionPreference -ErrorAction Sile
 }
 
 $workflow = 'ci.yml'
-$artifactName = 'qrtoprint-android-debug'
+$artifactName = 'smartprint-android-debug'
 
 if (-not (Get-Command gh -ErrorAction SilentlyContinue)) {
     throw 'GitHub CLI (gh) was not found. Install it from https://cli.github.com/ and retry.'
@@ -181,7 +181,7 @@ try {
 
     $apkHash = (Get-FileHash -LiteralPath $stagedApk -Algorithm SHA256).Hash
     New-Item -ItemType Directory -Force -Path $fullDestination | Out-Null
-    $finalApk = Join-Path $fullDestination 'app-debug.apk'
+    $finalApk = Join-Path $fullDestination 'SmartPrint-Android-debug.apk'
     if (Test-Path -LiteralPath $finalApk -PathType Container) {
         throw ("The expected APK file path is a directory: {0}" -f $finalApk)
     }
@@ -200,7 +200,7 @@ try {
     }
 
     Write-Host ''
-    Write-Host ("QRtoPrint Android debug APK downloaded from CI run {0}." -f $sourceRun.databaseId) -ForegroundColor Green
+    Write-Host ("SmartPrint Android debug APK downloaded from CI run {0}." -f $sourceRun.databaseId) -ForegroundColor Green
     Write-Host ("Branch: {0}; commit: {1}" -f $sourceRun.headBranch, $sourceRun.headSha)
     Write-Host ("APK: {0}" -f $finalApk)
     Write-Host ("SHA-256: {0}" -f $apkHash)
@@ -247,10 +247,10 @@ try {
     }
 } catch {
     if ($oldMoved -and -not $newInstalled -and $oldApkPath -and (Test-Path -LiteralPath $oldApkPath -PathType Leaf)) {
-        if (Test-Path -LiteralPath (Join-Path $fullDestination 'app-debug.apk') -PathType Leaf) {
-            Remove-Item -LiteralPath (Join-Path $fullDestination 'app-debug.apk') -Force
+        if (Test-Path -LiteralPath (Join-Path $fullDestination 'SmartPrint-Android-debug.apk') -PathType Leaf) {
+            Remove-Item -LiteralPath (Join-Path $fullDestination 'SmartPrint-Android-debug.apk') -Force
         }
-        Move-Item -LiteralPath $oldApkPath -Destination (Join-Path $fullDestination 'app-debug.apk')
+        Move-Item -LiteralPath $oldApkPath -Destination (Join-Path $fullDestination 'SmartPrint-Android-debug.apk')
     }
     throw
 } finally {
