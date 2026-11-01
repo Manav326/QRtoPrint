@@ -14,7 +14,7 @@ import {
   createAgentEnrollmentCode, createCustomerSession, createPrinter, createStation,
   downloadShopDocument, getCustomerJobStatus, getShopAgentDevices, getShopJobEvents, getShopPrinters, getShopPrintJobsPage, loadShopData,
   logout, readStoredTokens, rejectShopPrintJob, rejectShopPayment, revokeAgentDevice,
-  reportCustomerUpiPayment, renewCustomerPrintSession, resumeCustomerPrintSession, saveNativeCustomerPrintSession, clearNativeCustomerPrintSession, resumeCustomerSession, rotateStationCode, startCustomerPayment, storeTokens,
+  reportCustomerUpiPayment, renewCustomerPrintSession, getNativeCustomerPrintSession, saveNativeCustomerPrintSession, clearNativeCustomerPrintSession, resumeCustomerSession, rotateStationCode, startCustomerPayment, storeTokens,
   updatePrinterActive, updateShopPaymentSettings, updateShopPricing,
   updateShopProfile, updateStationEnabled, uploadCustomerDocument, uploadCustomerDocumentLocally,
   verifyShopPayment, retryShopPdfExport, recordShopPrintRefund, previewShopPrintRefund, type CustomerPayment, type ShopPayment, type ShopPaymentSettings, type ShopRefund,
