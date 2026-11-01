@@ -35,27 +35,29 @@ CI builds the Android debug APK and runs JVM unit tests. A real-device matrix (Q
 
 ## Public SmartPrint downloads
 
-The public landing page reserves the latest-release URLs for signed customer packages:
+The public landing page links to the latest SmartPrint release:
 
 - Windows shop installer: `https://github.com/Manav326/QRtoPrint/releases/latest/download/SmartPrint-Windows-Setup.exe`
-- Android customer APK: `https://github.com/Manav326/QRtoPrint/releases/latest/download/SmartPrint-Android.apk`
+- Android customer APK (once production signing is configured): `https://github.com/Manav326/QRtoPrint/releases/latest/download/SmartPrint-Android.apk`
 
-The download cards stay disabled until the first signed release is published. Every stable release is retained indefinitely as its own versioned GitHub Release; publishing a newer version updates the `latest` pointer but does not delete or replace older versions. The release workflow uploads to a draft, verifies the assets and SHA-256 manifest, and refuses to overwrite a published tag.
+The Windows installer is intentionally unsigned for the interim beta channel. The website marks it **Available** with a compact status tag and a short note that Windows may show a first-run security prompt. Some managed Windows 11 devices may block unsigned installers. Do not advise customers to disable Windows security protections. The Android card stays **Coming soon** until the production signing keystore is configured.
 
-Create a version tag (for example, `v0.1.0`) after configuring the release credentials below. The `.github/workflows/release.yml` workflow builds the guided Windows installer, signs it, builds and signs the Android release APK, verifies both outputs and publishes them with a SHA-256 checksum file.
+Every stable release is retained indefinitely as its own versioned GitHub Release; publishing a newer version updates the `latest` pointer but does not delete or replace older versions. The release workflow uploads to a draft, verifies the enabled assets and SHA-256 manifest, and refuses to overwrite a published tag. Windows can publish independently. Android is included only after all four Android signing secrets are configured.
 
-Required GitHub Actions repository secrets:
+Create a version tag (for example, `v0.1.0`) after the current main-branch CI passes and the public origin is confirmed. The `.github/workflows/release.yml` workflow builds the guided Windows installer and publishes it unsigned with a SHA-256 checksum. When Android credentials are present, it also builds, verifies and publishes the signed Android APK.
+
+Required GitHub Actions repository secrets for Android (not required for the Windows beta):
 
 | Secret | Purpose |
 | --- | --- |
-| `WINDOWS_SIGNING_CERT_BASE64` | Base64-encoded PFX code-signing certificate |
-| `WINDOWS_SIGNING_CERT_PASSWORD` | Password for the PFX certificate |
 | `ANDROID_SIGNING_KEYSTORE_BASE64` | Base64-encoded Android release keystore |
 | `ANDROID_SIGNING_KEYSTORE_PASSWORD` | Android keystore password |
 | `ANDROID_SIGNING_KEY_ALIAS` | Android release key alias |
 | `ANDROID_SIGNING_KEY_PASSWORD` | Android release key password |
 
-Keep the Android keystore and its passwords backed up securely. Every Android update must use the same signing identity or existing installations will not accept it as an in-place update. Obtain a trusted Windows code-signing certificate for the publisher identity shown to shop owners; the release workflow intentionally refuses to publish an unsigned Windows installer.
+Keep the Android keystore and its passwords backed up securely. Every Android update must use the same signing identity or existing installations will not accept it as an in-place update.
+
+The future Microsoft Store channel will be a separate MSIX package, not the current EXE installer. Microsoft Store submissions of accepted MSIX packages are re-signed by Microsoft. Before Store submission, the current Windows Service and firewall installation architecture must be validated against MSIX packaging and restricted capabilities.
 
 The release workflow builds the Android app against the repository variable `SMARTPRINT_PUBLIC_BASE_URL`. It defaults to `https://qr-test.paintpulp.com`; set that GitHub Actions variable to the current canonical public HTTPS origin before building a release for a different deployment.
 
