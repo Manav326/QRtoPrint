@@ -22,7 +22,7 @@ public static class DocumentRetentionRules
             return completionUtc is not null && completionUtc <= completedCutoffUtc;
         }
 
-        var terminalUnpaid = jobStatus is "REJECTED" or "PAYMENT_REJECTED" or "QUOTE_EXPIRED";
+        var terminalUnpaid = jobStatus is "REJECTED" or "PAYMENT_REJECTED" or "QUOTE_EXPIRED" or "REFUNDED";
         return terminalUnpaid && outputConfirmedUtc is null &&
             !hasFinancialHold && updatedUtc <= abandonedCutoffUtc;
     }
