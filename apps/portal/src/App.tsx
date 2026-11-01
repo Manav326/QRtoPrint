@@ -12,7 +12,7 @@ import PlatformAdminConsole from "./PlatformAdminConsole";
 import PlatformAdminAuthScreen from "./PlatformAdminAuthScreen";
 import { resolvePortalRoute, shopPathForSection, shopSectionFromPath } from "./portal-routing";
 import {
-  ApiError, isPlatformAdminSession, acceptCustomerQuote, approveShopPrintJob, assignShopPrintJobPrinter, calculateCustomerQuote, getShopCustomerHistory, getShopCustomers, getShopReportSummary,
+  ApiError, isPlatformAdminSession, acceptCustomerQuote, applyShopPrintBatchReview, approveShopPrintJob, assignShopPrintJobPrinter, calculateCustomerQuote, getShopCustomerHistory, getShopCustomers, getShopReportSummary,
   confirmShopPrintOutput, dispatchShopPrintJob,
   createAgentEnrollmentCode, createCustomerSession, createPrinter, createStation,
   downloadShopDocument, getCustomerJobStatus, getShopAgentDevices, getShopJobEvents, getShopPrinters, getShopPrintJobsPage, getShopPrintBatchJobs, loadShopData,
@@ -1083,78 +1083,42 @@ function ShopConsole({ tokens, onSignOut }: { tokens: AuthTokens; onSignOut: () 
   }
 
   async function applyBatchReview(batchJobs: ShopPrintJob[], acceptedJobIds: string[]) {
-    const accepted = new Set(acceptedJobIds);
-    const acceptJobs = batchJobs.filter(job => accepted.has(job.id));
-    const rejectJobs = batchJobs.filter(job => !accepted.has(job.id));
-    if (acceptJobs.length + rejectJobs.length === 0) return;
-    if (!(await confirmInApp(`Accept ${acceptJobs.length} file(s) and reject ${rejectJobs.length} file(s)? Accepted files will move to payment. Rejected files will be excluded from printing.`, "Confirm batch review", "Apply review"))) return;
+    const batchId=batchJobs.find(job=>job.batchId)?.batchId;
+    if(!batchId||batchJobs.length===0)return;
+    const accepted=new Set(acceptedJobIds);
+    const acceptCount=batchJobs.filter(job=>accepted.has(job.id)).length;
+    const rejectCount=batchJobs.length-acceptCount;
+    if (!(await confirmInApp(
+      `Accept ${acceptCount} file(s) and reject ${rejectCount} file(s)? The decisions will be applied together. Rejected paid files must be refunded before printing.`,
+      "Confirm batch review",
+      "Apply review"
+    ))) return;
 
     setBusyJobId("batch-review");
     setError("");
-    const failedIds = new Set<string>();
-    const failures: string[] = [];
-    for (const job of acceptJobs) {
-      try { await approveShopPrintJob(tokens.accessToken, job.id); }
-      catch (exception) {
-        failedIds.add(job.id);
-        failures.push(`${job.document.originalFileName}: ${exception instanceof Error ? exception.message : "Could not accept"}`);
-      }
-    }
-    for (const job of rejectJobs) {
-      try { await rejectShopPrintJob(tokens.accessToken, job.id); }
-      catch (exception) {
-        failedIds.add(job.id);
-        failures.push(`${job.document.originalFileName}: ${exception instanceof Error ? exception.message : "Could not reject"}`);
-      }
-    }
-
-    await reload();
-    if (failedIds.size > 0) {
-      let retryJobs: ShopPrintJob[];
-      try {
-        const batchId = batchJobs.find(job => job.batchId)?.batchId;
-        if (!batchId) throw new Error("The batch identifier is unavailable. Refresh the queue and reopen the batch.");
-        const latestBatch = await getShopPrintBatchJobs(tokens.accessToken, batchId);
-        retryJobs = latestBatch.filter(job => failedIds.has(job.id) && job.status === "AWAITING_SHOP_APPROVAL");
-      } catch {
-        // A failed status refresh leaves the outcome unknown. Do not offer a
-        // blind retry that could repeat a decision whose first request landed.
-        setBatchReviewRetryIds(current => Array.from(new Set([...current, ...failedIds])));
-        setBatchReviewJobs(null);
-        setBatchReviewRetry(false);
-        setError(`Some review actions could not be confirmed. Refresh the queue and reopen this batch before making further changes; no uncertain action was retried. Details: ${failures.join("; ")}`);
-        setBusyJobId(null);
-        return;
-      }
-      const retryIds = new Set(retryJobs.map(job => job.id));
-      setBatchReviewDecisions(current => {
-        const next = { ...current };
-        for (const job of batchJobs) {
-          if (!retryIds.has(job.id)) delete next[job.id];
-          else next[job.id] = accepted.has(job.id);
-        }
-        return next;
-      });
-      setBatchReviewJobs(retryJobs.length > 0 ? retryJobs : null);
-      setBatchReviewRetry(retryJobs.length > 0);
-      setBatchReviewRetryIds(retryJobs.map(job => job.id));
-      if (retryJobs.length > 0) {
-        setError(`Some files could not be updated: ${failures.join("; ")}. Only files still awaiting review remain open. Their previous accept/reject choices have been kept; retry these files without changing the other decisions.`);
-      } else {
-        setError(`The review requests returned errors, but the refreshed queue shows no failed files still awaiting review. Check the updated statuses before trying another action. Details: ${failures.join("; ")}`);
-      }
-    } else {
+    try {
+      await applyShopPrintBatchReview(
+        tokens.accessToken,
+        batchId,
+        batchJobs.map(job=>job.id),
+        acceptedJobIds
+      );
+      await reload();
       setBatchReviewJobs(null);
       setBatchReviewRetry(false);
-      setBatchReviewRetryIds(current => current.filter(id => !batchJobs.some(job => job.id === id)));
-      setBatchReviewDecisions(current => {
-        const next = { ...current };
-        for (const job of batchJobs) delete next[job.id];
+      setBatchReviewRetryIds(current=>current.filter(id=>!batchJobs.some(job=>job.id===id)));
+      setBatchReviewDecisions(current=>{
+        const next={...current};
+        for(const job of batchJobs)delete next[job.id];
         return next;
       });
-      setToast(`Batch review saved: ${acceptJobs.length} accepted and ${rejectJobs.length} rejected. You can review paid files separately to record refunds.`);
+      setToast(`Batch review saved: ${acceptCount} accepted and ${rejectCount} rejected. All accepted files remain part of one checkout.`);
+    } catch(exception) {
+      await reload().catch(()=>undefined);
+      setError(exception instanceof Error?exception.message:"Could not apply this batch review. The decisions were not changed; refresh and retry the same review.");
+    } finally {
+      setBusyJobId(null);
     }
-    setBusyJobId(null);
   }
 
   async function recordFileRefund(job: ShopPrintJob, values: { refundMethod: "UPI" | "CASH"; refundReference: string | null; reason: string; rejectedPageNumbers: number[]; idempotencyKey: string }) {
