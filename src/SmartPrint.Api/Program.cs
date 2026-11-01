@@ -91,18 +91,21 @@ builder.Services.AddScoped<TenantEntitlementService>();
 builder.Services.AddSingleton<DocumentStorage>();
 builder.Services.AddRateLimiter(options =>
 {
-    options.AddFixedWindowLimiter("qr-session", limiter =>
-    {
-        limiter.PermitLimit = 30;
-        limiter.Window = TimeSpan.FromMinutes(1);
-        limiter.QueueLimit = 0;
-    });
-    options.AddFixedWindowLimiter("document-upload", limiter =>
-    {
-        limiter.PermitLimit = 8;
-        limiter.Window = TimeSpan.FromMinutes(1);
-        limiter.QueueLimit = 0;
-    });
+    options.AddPolicy("authentication", context =>
+        RateLimitPartition.GetFixedWindowLimiter(GetRateLimitPartitionKey(context.HttpContext),
+            _ => new FixedWindowRateLimiterOptions { PermitLimit = 20, Window = TimeSpan.FromMinutes(1), QueueLimit = 0 }));
+    options.AddPolicy("public-api", context =>
+        RateLimitPartition.GetFixedWindowLimiter(GetRateLimitPartitionKey(context.HttpContext),
+            _ => new FixedWindowRateLimiterOptions { PermitLimit = 120, Window = TimeSpan.FromMinutes(1), QueueLimit = 0 }));
+    options.AddPolicy("agent-api", context =>
+        RateLimitPartition.GetFixedWindowLimiter(GetRateLimitPartitionKey(context.HttpContext),
+            _ => new FixedWindowRateLimiterOptions { PermitLimit = 30, Window = TimeSpan.FromMinutes(1), QueueLimit = 0 }));
+    options.AddPolicy("qr-session", context =>
+        RateLimitPartition.GetFixedWindowLimiter(GetRateLimitPartitionKey(context.HttpContext),
+            _ => new FixedWindowRateLimiterOptions { PermitLimit = 30, Window = TimeSpan.FromMinutes(1), QueueLimit = 0 }));
+    options.AddPolicy("document-upload", context =>
+        RateLimitPartition.GetFixedWindowLimiter(GetRateLimitPartitionKey(context.HttpContext),
+            _ => new FixedWindowRateLimiterOptions { PermitLimit = 8, Window = TimeSpan.FromMinutes(1), QueueLimit = 0 }));
 });
 var configuredCorsOrigins = builder.Configuration.GetSection("Cors:AllowedOrigins")
     .Get<string[]>()?
@@ -318,7 +321,7 @@ platform.MapGet("/tenants", async (
     });
 });
 
-var auth = app.MapGroup("/api/v1/auth");
+var auth = app.MapGroup("/api/v1/auth").RequireRateLimiting("authentication");
 auth.MapPost("/register-shop", async (
     RegisterShopRequest request,
     UserManager<AppUser> userManager,
@@ -736,7 +739,8 @@ customerApi.MapGet("/jobs", async (
     return Results.Ok(new { Jobs = jobs });
 });
 
-var shop = app.MapGroup("/api/v1/shop").RequireAuthorization();
+var shop = app.MapGroup("/api/v1/shop").RequireAuthorization()
+    .AddEndpointFilter((context, next) => EnforceTenantActiveAsync(context, next, allowSubscriptionRead: true));
 
 shop.MapGet("/subscription", async (
     ClaimsPrincipal principal,
@@ -887,6 +891,7 @@ shop.MapPut("/profile", async (
     ShopProfileRequest request,
     ClaimsPrincipal principal,
     SmartPrintDbContext db,
+    TenantEntitlementService entitlements,
     CancellationToken ct) =>
 {
     if (!IsShopOwner(principal) || !TryGetTenantId(principal, out var tenantId))
@@ -902,6 +907,15 @@ shop.MapPut("/profile", async (
         {
             ["profile"] = ["Provide a display name, a six-digit hex accent colour, and an optional HTTPS logo URL."]
         });
+    }
+
+    var plan = await entitlements.GetForTenantAsync(tenantId, ct);
+    var requestsCustomBranding = request.LogoUrl is not null ||
+        !string.Equals(request.AccentColor, "#7662E8", StringComparison.OrdinalIgnoreCase);
+    if (requestsCustomBranding && !plan.WhiteLabelEnabled)
+    {
+        return Results.Problem(statusCode: StatusCodes.Status403Forbidden,
+            title: "Custom shop branding is not included in this shop's current plan.");
     }
 
     var profile = await db.ShopProfiles.SingleOrDefaultAsync(x => x.TenantId == tenantId, ct);
@@ -1629,6 +1643,7 @@ shop.MapGet("/print-jobs", async (
 shop.MapGet("/reports/summary", async (
     ClaimsPrincipal principal,
     SmartPrintDbContext db,
+    TenantEntitlementService entitlements,
     int? days,
     CancellationToken ct) =>
 {
@@ -1636,6 +1651,14 @@ shop.MapGet("/reports/summary", async (
     {
         return Results.Forbid();
     }
+
+    var plan = await entitlements.GetForTenantAsync(tenantId, ct);
+    if (!plan.IsAccessActive)
+        return Results.Problem(statusCode: StatusCodes.Status403Forbidden,
+            title: "This shop's trial or subscription period is no longer active.");
+    if (!plan.AdvancedReportsEnabled)
+        return Results.Problem(statusCode: StatusCodes.Status403Forbidden,
+            title: "Advanced reporting is not included in this shop's current plan.");
 
     var periodDays = days ?? 30;
     if (periodDays != 7 && periodDays != 30 && periodDays != 90)
@@ -2419,7 +2442,8 @@ shop.MapPost("/print-jobs/{jobId:guid}/refund", async (
         RemainingPaidAmountMinor = payment.AmountMinor - cumulative });
 });
 
-var shopAgents = app.MapGroup("/api/v1/shop").RequireAuthorization();
+var shopAgents = app.MapGroup("/api/v1/shop").RequireAuthorization()
+    .AddEndpointFilter((context, next) => EnforceTenantActiveAsync(context, next, allowSubscriptionRead: false));
 
 shopAgents.MapPost("/agent-enrollment-codes", async (
     ClaimsPrincipal principal,
@@ -2514,7 +2538,9 @@ shopAgents.MapPatch("/agent-devices/{agentId:guid}/revoke", async (
     return Results.Ok(new { device.Id, device.Status, device.RevokedUtc });
 });
 
-var agentApi = app.MapGroup("/api/v1/agent").AllowAnonymous();
+var agentApi = app.MapGroup("/api/v1/agent").AllowAnonymous()
+    .RequireRateLimiting("agent-api")
+    .AddEndpointFilter((context, next) => EnforceTenantActiveAsync(context, next, allowSubscriptionRead: false));
 
 agentApi.MapPost("/enroll", async (
     AgentEnrollmentRequest request,
@@ -4179,7 +4205,9 @@ shop.MapPost("/payments/{paymentId:guid}/reject", async (
     });
 });
 
-var publicApi = app.MapGroup("/api/v1/public").AllowAnonymous();
+var publicApi = app.MapGroup("/api/v1/public").AllowAnonymous()
+    .RequireRateLimiting("public-api")
+    .AddEndpointFilter((context, next) => EnforceTenantActiveAsync(context, next, allowSubscriptionRead: false));
 
 publicApi.MapPost("/sessions/current/jobs", async (
     HttpContext context,
@@ -4613,6 +4641,7 @@ publicApi.MapPost("/jobs/{jobId:guid}/quote", async (
     PrintQuoteRequest request,
     HttpContext context,
     SmartPrintDbContext db,
+    TenantEntitlementService entitlements,
     CancellationToken ct) =>
 {
     var rawToken = context.Request.Headers["X-Print-Session"].FirstOrDefault();
@@ -4632,6 +4661,11 @@ publicApi.MapPost("/jobs/{jobId:guid}/quote", async (
     {
         return Results.Unauthorized();
     }
+
+    var subscription = await entitlements.GetForTenantAsync(session.TenantId, ct);
+    if (!subscription.IsAccessActive)
+        return Results.Problem(statusCode: StatusCodes.Status403Forbidden,
+            title: "This shop's trial or subscription period is no longer active.");
 
     var job = await db.PrintJobs.SingleOrDefaultAsync(
         item => item.Id == jobId && item.TenantId == session.TenantId &&
@@ -5380,6 +5414,62 @@ publicApi.MapGet("/sessions/current", async (
     return Results.Ok(new { session.Id, session.ExpiresUtc, Shop = shopProfile, LocalAgent = localAgent });
 });
 
+
+static string GetRateLimitPartitionKey(HttpContext context) =>
+    context.Connection.RemoteIpAddress?.ToString() ?? "unknown";
+
+static async ValueTask<object?> EnforceTenantActiveAsync(
+    EndpointFilterInvocationContext context,
+    EndpointFilterDelegate next,
+    bool allowSubscriptionRead)
+{
+    var http = context.HttpContext;
+    var db = http.RequestServices.GetRequiredService<SmartPrintDbContext>();
+    Guid? tenantId = null;
+
+    if (TryGetTenantId(http.User, out var userTenantId))
+        tenantId = userTenantId;
+    else if (Guid.TryParse(http.Request.Headers["X-Print-Agent-Id"].FirstOrDefault(), out var agentId))
+        tenantId = await db.AgentDevices.AsNoTracking()
+            .Where(item => item.Id == agentId)
+            .Select(item => (Guid?)item.TenantId)
+            .SingleOrDefaultAsync(http.RequestAborted);
+    else if (http.Request.RouteValues.TryGetValue("publicCode", out var routeCode) && routeCode is not null)
+    {
+        var codeHash = HashOpaqueToken(routeCode.ToString()!);
+        tenantId = await db.QrStations.AsNoTracking()
+            .Where(item => item.PublicCodeHash == codeHash)
+            .Select(item => (Guid?)item.TenantId)
+            .SingleOrDefaultAsync(http.RequestAborted);
+    }
+    else
+    {
+        var sessionToken = http.Request.Headers["X-Print-Session"].FirstOrDefault();
+        if (!string.IsNullOrWhiteSpace(sessionToken))
+        {
+            var tokenHash = HashOpaqueToken(sessionToken);
+            tenantId = await db.CustomerPrintSessions.AsNoTracking()
+                .Where(item => item.TokenHash == tokenHash)
+                .Select(item => (Guid?)item.TenantId)
+                .SingleOrDefaultAsync(http.RequestAborted);
+        }
+    }
+
+    if (tenantId is not Guid resolvedTenantId) return await next(context);
+    if (allowSubscriptionRead &&
+        http.Request.Path.Value?.EndsWith("/subscription", StringComparison.OrdinalIgnoreCase) == true)
+        return await next(context);
+
+    var status = await db.Tenants.AsNoTracking()
+        .Where(item => item.Id == resolvedTenantId)
+        .Select(item => item.Status)
+        .SingleOrDefaultAsync(http.RequestAborted);
+    if (!TenantAccessRules.IsActive(status))
+        return Results.Problem(statusCode: StatusCodes.Status403Forbidden,
+            title: "This shop is suspended or inactive. Contact the platform team for assistance.");
+
+    return await next(context);
+}
 
 static string[] ReadLocalAgentEndpoints(string? json)
 {

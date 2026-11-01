@@ -46,7 +46,12 @@ public sealed class TenantEntitlementService(SmartPrintDbContext db)
             .Select(item => new { item.PlanCode, item.Status, item.PlanVersionId, item.PeriodEndUtc })
             .FirstOrDefaultAsync(cancellationToken);
 
-        var accessActive = subscription is not null &&
+        var tenantStatus = await db.Tenants.AsNoTracking()
+            .Where(item => item.Id == tenantId)
+            .Select(item => item.Status)
+            .SingleOrDefaultAsync(cancellationToken);
+        var accessActive = TenantAccessRules.IsActive(tenantStatus) &&
+            subscription is not null &&
             PlanEntitlementRules.IsSubscriptionAccessActive(
                 subscription.Status, subscription.PeriodEndUtc, DateTimeOffset.UtcNow);
 
