@@ -11,6 +11,7 @@ import androidx.test.espresso.action.ViewActions.closeSoftKeyboard
 import androidx.test.espresso.action.ViewActions.replaceText
 import androidx.test.espresso.assertion.ViewAssertions.matches
 import androidx.test.espresso.matcher.ViewMatchers.isDisplayed
+import androidx.test.espresso.matcher.ViewMatchers.isSelected
 import androidx.test.espresso.matcher.ViewMatchers.withId
 import androidx.test.espresso.matcher.ViewMatchers.withContentDescription
 import androidx.test.espresso.matcher.ViewMatchers.withHint
@@ -259,8 +260,9 @@ class MainActivityInstrumentedTest {
     @Test
     fun scanDestinationUsesFocusedQrEntry() {
         ActivityScenario.launch(MainActivity::class.java).use {
-            val label = com.google.android.material.R.id.navigation_bar_item_small_label_view
-            onView(allOf(withId(label), withText("Print"))).perform(click())
+            // Tap the accessible navigation item itself, not its non-clickable label child.
+            onView(withContentDescription("Print at a shop")).perform(click())
+            onView(withContentDescription("Print at a shop")).check(matches(isSelected()))
             onView(withText("Connect to a shop")).check(matches(isDisplayed()))
             onView(withText("Scan QR code")).check(matches(isDisplayed()))
             onView(withText("Open My Files")).check(matches(isDisplayed()))
