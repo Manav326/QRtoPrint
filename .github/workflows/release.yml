@@ -219,10 +219,13 @@ jobs:
           test -n "$apksigner_path"
           verification_output="$("$apksigner_path" verify --verbose --print-certs artifacts/android/SmartPrint-Android.apk 2>&1)"
           printf '%s\n' "$verification_output"
-          if ! grep -Eiq 'Signer #1 certificate SHA-256 digest: [[:xdigit:]]{64}' <<< "$verification_output"; then
-            echo "::error::Android APK signature verification did not report a signing certificate fingerprint."
+          signer_count="$(awk -F': ' '/^Number of signers:/ { print $2; exit }' <<< "$verification_output")"
+          certificate_fingerprint="$(sed -nE 's/.*certificate SHA-256 digest: ([[:xdigit:]]{64}).*/\1/p' <<< "$verification_output" | head -n 1)"
+          if [[ "$signer_count" != "1" || ! "$certificate_fingerprint" =~ ^[[:xdigit:]]{64}$ ]]; then
+            echo "::error::Android APK signature verification did not report exactly one signing certificate fingerprint."
             exit 1
           fi
+          echo "Verified Android release certificate SHA-256: $certificate_fingerprint"
       - name: Upload Android release APK
         if: steps.check-signing.outputs.available == 'true'
         uses: actions/upload-artifact@v7
