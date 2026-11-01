@@ -631,6 +631,7 @@ class MainActivity : AppCompatActivity() {
             iconPadding = dp(8)
             iconGravity = MaterialButton.ICON_GRAVITY_TEXT_START
             setOnClickListener {
+                folderPath = ""
                 pendingImportDestinationPath = ""
                 importFiles.launch(arrayOf("*/*"))
                 navigation.selectedItemId = FILES
