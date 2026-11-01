@@ -1168,7 +1168,8 @@ function PrintQueuePage({ jobs, printers, onPreview, onApprove, onReject, onRefu
   const dispatchablePrinters = printers.filter(printer =>
     printer.isActive &&
     !!printer.agentDeviceId &&
-    (printer.status === "Ready" || printer.status === "Busy")
+    (printer.status === "Ready" || printer.status === "Busy" ||
+      (printer.outputMode === "PDF_EXPORT" && printer.status === "Unknown"))
   );
 
   return <section className="panel queue-panel live-queue-panel">
@@ -1241,7 +1242,8 @@ function DocumentPreviewModal({name,url,mediaType,job,onClose,onApprove,onReject
   name:string;url:string;mediaType:string;job:ShopPrintJob;onClose:()=>void;onApprove:()=>void;onReject:()=>void;onRefund:()=>void;
 }) {
   const isPdf=mediaType==="application/pdf";
-  return <Modal title={name} subtitle={job.batchId? `File review · Batch ${job.batchId.slice(0,8).toUpperCase()}` : "Private shop document preview. The encrypted original remains in protected shop storage."} onClose={onClose}>
+  const previewSummary = `${job.pageCount} page(s) · ${job.copies} copy/copies requested. Preview displays the uploaded original once.`;
+  return <Modal title={name} subtitle={job.batchId? `File review · Batch ${job.batchId.slice(0,8).toUpperCase()} · ${previewSummary}` : previewSummary} onClose={onClose}>
     <div className="shop-document-preview">{isPdf?<iframe src={url} title={name}/>:<img src={url} alt={name}/>}</div>
     {job.status==="AWAITING_SHOP_APPROVAL"&&<div className="file-review-note"><Check size={16}/><span>Review this file independently. Accepting or rejecting it will not change any other file in the batch.</span></div>}
     {job.status==="PAID_AUTHORISED"&&(job.payment?.status==="VERIFIED"||job.payment?.status==="PARTIALLY_REFUNDED")&&<div className="file-refund-note"><Wallet size={16}/><span>Paid amount: <strong>{formatMoney(job.payment.amountMinor,job.payment.currency)}</strong>. A refund can be recorded while this file has not yet been handed to the shop computer.</span></div>}

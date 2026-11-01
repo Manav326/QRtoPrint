@@ -37,4 +37,6 @@ public static class PrinterOutputModeRules
         IsPdfExport(queueName, driverName) ? PdfExport : Physical;
 }
 
-public sealed record AgentHeartbeatResponse(string? PublicBaseUrl);
+public sealed record AgentHeartbeatResponse(
+    string? PublicBaseUrl,
+    IReadOnlyList<string>? AllowedPortalOrigins = null);
