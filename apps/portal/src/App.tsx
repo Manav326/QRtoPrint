@@ -3371,7 +3371,7 @@ function CustomerPrintFlow({publicCode,sessionToken,paymentOptions,localAgent,lo
   const quoteExpiredForBatchItem=(item:UploadedPrintJob)=>{
     const status=statusForBatchItem(item);
     if(status==="QUOTE_EXPIRED")return true;
-    const expiry=batchStatuses[item.job.id]?.quoteExpiresUtc??quotesByJobId[item.job.id]?.quoteExpiresUtc;
+    const expiry=quotesByJobId[item.job.id]?.quoteExpiresUtc??batchStatuses[item.job.id]?.quoteExpiresUtc;
     if(!expiry)return ["AWAITING_CUSTOMER_APPROVAL","AWAITING_SHOP_APPROVAL","AWAITING_PAYMENT","PAYMENT_REJECTED"].includes(status);
     const expiresAt=Date.parse(expiry);
     return !Number.isFinite(expiresAt)||expiresAt<=Date.now();
