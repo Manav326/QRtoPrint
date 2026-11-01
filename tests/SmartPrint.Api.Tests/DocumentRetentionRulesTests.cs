@@ -35,6 +35,7 @@ public sealed class DocumentRetentionRulesTests
     [InlineData("REJECTED", false, true)]
     [InlineData("PAYMENT_REJECTED", false, true)]
     [InlineData("QUOTE_EXPIRED", false, true)]
+    [InlineData("REFUNDED", false, true)]
     [InlineData("REJECTED", true, false)]
     [InlineData("OUTPUT_UNCONFIRMED", false, false)]
     [InlineData("AWAITING_PAYMENT", false, false)]
