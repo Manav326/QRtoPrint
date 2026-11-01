@@ -10,13 +10,13 @@
         <item name="android:windowActionModeOverlay">true</item>
         <item name="android:colorAccent">@color/qp_primary</item>
     </style>
-    <style name="TextAppearance.SmartPrint.Navigation">
+    <style name="TextAppearance.SmartPrint.Navigation" parent="@android:style/TextAppearance.Material">
         <item name="android:fontFamily">sans</item>
         <item name="android:textSize">10sp</item>
         <item name="android:letterSpacing">0.01</item>
         <item name="android:textStyle">normal</item>
     </style>
-    <style name="TextAppearance.SmartPrint.Toolbar">
+    <style name="TextAppearance.SmartPrint.Toolbar" parent="@android:style/TextAppearance.Material">
         <item name="android:fontFamily">sans</item>
         <item name="android:textSize">18sp</item>
         <item name="android:textStyle">bold</item>
