@@ -129,18 +129,22 @@ function ShopConsole({ tokens, onSignOut }: { tokens: AuthTokens; onSignOut: () 
       setSubscription(snapshot.subscription);
       setApiConnectionState("connected");
     } catch (exception) {
-      const status = exception instanceof ApiError ? exception.status : 0;
-      setApiConnectionState(status === 0 ? "offline" : status >= 500 ? "degraded" : "connected");
-      if (exception instanceof ApiError && exception.status === 401) {
-        storeTokens(null);
-        onSignOut();
-      } else {
-        setError(exception instanceof Error ? exception.message : "Could not load your shop.");
-      }
+      handleShopApiError(exception, "Could not load your shop.");
     } finally {
       setLoading(false);
       reloadInFlight.current = false;
     }
+  }
+
+  function handleShopApiError(exception: unknown, fallback: string) {
+    if (exception instanceof ApiError && exception.status === 401) {
+      storeTokens(null);
+      onSignOut();
+      return;
+    }
+    const status = exception instanceof ApiError ? exception.status : 0;
+    setApiConnectionState(status === 0 ? "offline" : status >= 500 ? "degraded" : "connected");
+    setError(exception instanceof Error ? exception.message : fallback);
   }
 
   async function refreshPrintQueue() {
@@ -177,9 +181,7 @@ function ShopConsole({ tokens, onSignOut }: { tokens: AuthTokens; onSignOut: () 
       });
       setHasMoreQueueJobs(latest.length === 100 || printJobs.length > latest.length);
     } catch (exception) {
-      const status = exception instanceof ApiError ? exception.status : 0;
-      setApiConnectionState(status === 0 ? "offline" : status >= 500 ? "degraded" : "connected");
-      setError(exception instanceof Error ? exception.message : "Could not refresh the print queue.");
+      handleShopApiError(exception, "Could not refresh the print queue.");
     }
   }
 
@@ -201,7 +203,7 @@ function ShopConsole({ tokens, onSignOut }: { tokens: AuthTokens; onSignOut: () 
       setQueueApiOffset(offset => offset + older.length);
       setHasMoreQueueJobs(older.length === 100);
     } catch (exception) {
-      setError(exception instanceof Error ? exception.message : "Could not load older print jobs.");
+      handleShopApiError(exception, "Could not load older print jobs.");
     } finally {
       setLoadingOlderQueueJobs(false);
     }
@@ -221,7 +223,7 @@ function ShopConsole({ tokens, onSignOut }: { tokens: AuthTokens; onSignOut: () 
       setHasMoreQueueJobs(matches.length === 100);
     } catch (exception) {
       if (generation !== queueSearchGeneration.current) return;
-      setError(exception instanceof Error ? exception.message : "Could not search the print queue.");
+      handleShopApiError(exception, "Could not search the print queue.");
     }
   }
 
@@ -285,8 +287,13 @@ function ShopConsole({ tokens, onSignOut }: { tokens: AuthTokens; onSignOut: () 
         }
       } catch (exception) {
         if (mounted) {
-          const status = exception instanceof ApiError ? exception.status : 0;
-          setApiConnectionState(status === 0 ? "offline" : status >= 500 ? "degraded" : "connected");
+          if (exception instanceof ApiError && exception.status === 401) {
+            storeTokens(null);
+            onSignOut();
+          } else {
+            const status = exception instanceof ApiError ? exception.status : 0;
+            setApiConnectionState(status === 0 ? "offline" : status >= 500 ? "degraded" : "connected");
+          }
         }
       } finally {
         inFlight = false;
