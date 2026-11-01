@@ -3,6 +3,7 @@ package com.quantaedge.smartprint
 import android.content.Context
 import android.graphics.Bitmap
 import android.Manifest
+import android.content.pm.PackageManager
 import androidx.test.platform.app.InstrumentationRegistry
 import java.io.File
 import androidx.test.core.app.ActivityScenario
@@ -123,31 +124,48 @@ class MainActivityInstrumentedTest {
     fun qrScannerUsesTheSavedLightAndDarkThemeForItsNativeChrome() {
         val context = ApplicationProvider.getApplicationContext<Context>()
         val instrumentation = InstrumentationRegistry.getInstrumentation()
+        val cameraWasGranted = context.checkSelfPermission(Manifest.permission.CAMERA) ==
+            PackageManager.PERMISSION_GRANTED
         instrumentation.uiAutomation.grantRuntimePermission(context.packageName, Manifest.permission.CAMERA)
-        try {
-            SmartPrintThemePreference.save(context, SmartPrintTheme.LIGHT)
-            ActivityScenario.launch(QrScannerActivity::class.java).use { scenario ->
-                scenario.onActivity { activity ->
-                    val nightMode = activity.resources.configuration.uiMode and
-                        android.content.res.Configuration.UI_MODE_NIGHT_MASK
-                    assertEquals(android.content.res.Configuration.UI_MODE_NIGHT_NO, nightMode)
-                    assertEquals(activity.getColor(R.color.qp_surface), activity.window.statusBarColor)
-                    assertEquals(activity.getColor(R.color.qp_surface), activity.window.navigationBarColor)
-                }
-            }
 
-            SmartPrintThemePreference.save(context, SmartPrintTheme.DARK)
+        fun verifyTheme(theme: SmartPrintTheme, expectedNightMode: Int, useLightSystemBars: Boolean) {
+            SmartPrintThemePreference.save(context, theme)
             ActivityScenario.launch(QrScannerActivity::class.java).use { scenario ->
                 scenario.onActivity { activity ->
                     val nightMode = activity.resources.configuration.uiMode and
                         android.content.res.Configuration.UI_MODE_NIGHT_MASK
-                    assertEquals(android.content.res.Configuration.UI_MODE_NIGHT_YES, nightMode)
-                    assertEquals(activity.getColor(R.color.qp_surface), activity.window.statusBarColor)
-                    assertEquals(activity.getColor(R.color.qp_surface), activity.window.navigationBarColor)
+                    assertEquals(expectedNightMode, nightMode)
+
+                    // Android 15 may report transparent raw bar colours after enforcing edge-to-edge.
+                    // Verify the content backdrop behind those bars and the system icon contrast flags.
+                    val content = activity.findViewById<ViewGroup>(android.R.id.content)
+                    val scannerRoot = content.getChildAt(0)
+                    val backdrop = scannerRoot.background as? android.graphics.drawable.LayerDrawable
+                    assertTrue("Scanner background must extend behind edge-to-edge system bars", backdrop != null)
+                    val surface = backdrop!!.getDrawable(0) as? android.graphics.drawable.GradientDrawable
+                    assertTrue("Scanner backdrop must start with the themed surface", surface != null)
+                    assertEquals(activity.getColor(R.color.qp_surface), surface!!.colors?.firstOrNull())
+
+                    val bars = androidx.core.view.WindowInsetsControllerCompat(
+                        activity.window,
+                        activity.window.decorView
+                    )
+                    assertEquals(useLightSystemBars, bars.isAppearanceLightStatusBars)
+                    assertEquals(useLightSystemBars, bars.isAppearanceLightNavigationBars)
                 }
             }
+        }
+
+        try {
+            verifyTheme(SmartPrintTheme.LIGHT, android.content.res.Configuration.UI_MODE_NIGHT_NO, true)
+            verifyTheme(SmartPrintTheme.DARK, android.content.res.Configuration.UI_MODE_NIGHT_YES, false)
         } finally {
             SmartPrintThemePreference.save(context, SmartPrintTheme.LIGHT)
+            if (cameraWasGranted) {
+                instrumentation.uiAutomation.grantRuntimePermission(context.packageName, Manifest.permission.CAMERA)
+            } else {
+                instrumentation.uiAutomation.revokeRuntimePermission(context.packageName, Manifest.permission.CAMERA)
+            }
         }
     }
 
@@ -356,11 +374,23 @@ class MainActivityInstrumentedTest {
 class QrScannerPermissionInstrumentedTest {
     @Test
     fun explainsCameraPermissionBeforeStartingTheScanner() {
-        ActivityScenario.launch(QrScannerActivity::class.java).use {
-            onView(withText("Camera access needed")).check(matches(isDisplayed()))
-            onView(withText("Allow camera for QR scanning."))
-                .check(matches(isDisplayed()))
-            onView(withText("Allow camera")).check(matches(isDisplayed()))
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        val cameraWasGranted = context.checkSelfPermission(Manifest.permission.CAMERA) ==
+            PackageManager.PERMISSION_GRANTED
+        instrumentation.uiAutomation.revokeRuntimePermission(context.packageName, Manifest.permission.CAMERA)
+        try {
+            ActivityScenario.launch(QrScannerActivity::class.java).use {
+                onView(withText("Camera access needed")).check(matches(isDisplayed()))
+                onView(withText("Allow camera for QR scanning.")).check(matches(isDisplayed()))
+                onView(withText("Allow camera")).check(matches(isDisplayed()))
+            }
+        } finally {
+            if (cameraWasGranted) {
+                instrumentation.uiAutomation.grantRuntimePermission(context.packageName, Manifest.permission.CAMERA)
+            } else {
+                instrumentation.uiAutomation.revokeRuntimePermission(context.packageName, Manifest.permission.CAMERA)
+            }
         }
     }
 }

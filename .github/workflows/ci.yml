@@ -30,7 +30,7 @@ jobs:
       - name: Install portal dependencies
         run: pnpm install --frozen-lockfile
       - name: Test public, admin, shop and station route boundaries
-        run: node --experimental-strip-types --test apps/portal/tests/portal-routing.test.ts apps/portal/tests/theme-responsive.test.ts
+        run: node --experimental-strip-types --test apps/portal/tests/portal-routing.test.ts apps/portal/tests/table-layout.test.ts apps/portal/tests/theme-responsive.test.ts
       - name: Install Chromium for real-browser appearance and viewport checks
         run: npx --yes --package=playwright@1.56.1 playwright install --with-deps chromium
       - name: Verify theme persistence and responsive layouts in Chromium
