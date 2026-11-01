@@ -134,10 +134,10 @@ function ShopConsole({ tokens, onSignOut }: { tokens: AuthTokens; onSignOut: () 
   async function refreshPrintQueue() {
     try {
       const latest = await getShopPrintJobsPage(tokens.accessToken, 0);
+      const currentIds = new Set(printJobs.map(job => job.id));
+      const newlyDiscovered = latest.filter(job => !currentIds.has(job.id)).length;
+      if (newlyDiscovered > 0) setQueueApiOffset(offset => offset + newlyDiscovered);
       setPrintJobs(current => {
-        const currentIds = new Set(current.map(job => job.id));
-        const newlyDiscovered = latest.filter(job => !currentIds.has(job.id)).length;
-        if (newlyDiscovered > 0) setQueueApiOffset(offset => offset + newlyDiscovered);
         const byId = new Map(current.map(job => [job.id, job]));
         for (const job of latest) byId.set(job.id, job);
         return Array.from(byId.values()).sort((left, right) =>
