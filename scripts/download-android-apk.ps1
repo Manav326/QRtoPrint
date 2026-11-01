@@ -13,6 +13,8 @@ if (Get-Variable -Name PSNativeCommandUseErrorActionPreference -ErrorAction Sile
 
 $workflow = 'ci.yml'
 $artifactName = 'smartprint-android-debug'
+# Older successful CI runs retain the pre-SmartPrint artifact label.
+$legacyArtifactName = 'qrtoprint-android-debug'
 
 if (-not (Get-Command gh -ErrorAction SilentlyContinue)) {
     throw 'GitHub CLI (gh) was not found. Install it from https://cli.github.com/ and retry.'
@@ -103,80 +105,93 @@ try {
         throw ("No completed successful CI runs were found for branch '{0}'. Check GitHub Actions and try again." -f $Branch)
     }
 
+    $artifactNames = @($artifactName, $legacyArtifactName)
     $sourceRun = $null
+    $sourceArtifactName = $null
     foreach ($run in $candidates) {
         $runDirectory = Join-Path $candidateRoot ([string]$run.databaseId)
         New-Item -ItemType Directory -Force -Path $runDirectory | Out-Null
         Write-Host ("Checking run {0}, commit {1}, created {2}..." -f $run.databaseId, $run.headSha, $run.createdAt) -ForegroundColor Cyan
 
-        # Keep searching older successful runs when a newer run did not build
-        # Android or its retained artifact has expired.
-        $downloadOutput = @()
-        $downloadExitCode = 1
-        try {
-            $downloadOutput = @(& gh run download ([string]$run.databaseId) --repo $repository --name $artifactName --dir $runDirectory 2>&1)
-            $downloadExitCode = $LASTEXITCODE
-        } catch {
-            $downloadOutput += $_.Exception.Message
+        # Try the current SmartPrint artifact first. Older successful CI runs
+        # may still use the previous QRtoPrint artifact name.
+        foreach ($candidateArtifactName in $artifactNames) {
+            $artifactDirectory = Join-Path $runDirectory $candidateArtifactName
+            New-Item -ItemType Directory -Force -Path $artifactDirectory | Out-Null
+            Write-Host ("Trying Android artifact '{0}'..." -f $candidateArtifactName) -ForegroundColor DarkCyan
+
+            $downloadOutput = @()
             $downloadExitCode = 1
-        }
-
-        if ($downloadExitCode -ne 0) {
-            $reason = ($downloadOutput | ForEach-Object { [string]$_ } | Where-Object { $_.Trim() }) -join ' '
-            if ($reason) {
-                Write-Host ("No '{0}' artifact in run {1}; checking an older successful run. {2}" -f $artifactName, $run.databaseId, $reason) -ForegroundColor Yellow
-            } else {
-                Write-Host ("No '{0}' artifact in run {1}; checking an older successful run." -f $artifactName, $run.databaseId) -ForegroundColor Yellow
-            }
-            continue
-        }
-
-        $apkFiles = @(Get-ChildItem -LiteralPath $runDirectory -Filter 'app-debug.apk' -File -Recurse -ErrorAction SilentlyContinue |
-            Where-Object { $_.Length -gt 1MB })
-        if ($apkFiles.Count -ne 1) {
-            Write-Host ("Run {0} did not contain exactly one plausible app-debug.apk; checking an older successful run." -f $run.databaseId) -ForegroundColor Yellow
-            continue
-        }
-
-        $candidateApk = $apkFiles[0]
-        $validApk = $false
-        $validationError = $null
-        try {
-            Add-Type -AssemblyName System.IO.Compression.FileSystem
-            $archive = [System.IO.Compression.ZipFile]::OpenRead($candidateApk.FullName)
             try {
-                $entryNames = @($archive.Entries | ForEach-Object { $_.FullName })
-                $dexEntries = @($entryNames | Where-Object { $_ -match '^classes(\d*)?\.dex$' })
-                $validApk = ($entryNames -contains 'AndroidManifest.xml') -and ($dexEntries.Count -gt 0)
-                if (-not $validApk) {
-                    $validationError = 'AndroidManifest.xml or classes*.dex is missing.'
-                }
-            } finally {
-                $archive.Dispose()
+                $downloadOutput = @(& gh run download ([string]$run.databaseId) --repo $repository --name $candidateArtifactName --dir $artifactDirectory 2>&1)
+                $downloadExitCode = $LASTEXITCODE
+            } catch {
+                $downloadOutput += $_.Exception.Message
+                $downloadExitCode = 1
             }
-        } catch {
-            $validationError = $_.Exception.Message
+
+            if ($downloadExitCode -ne 0) {
+                $reason = ($downloadOutput | ForEach-Object { [string]$_ } | Where-Object { $_.Trim() }) -join ' '
+                if ($reason) {
+                    Write-Host ("Artifact '{0}' is not available in run {1}. {2}" -f $candidateArtifactName, $run.databaseId, $reason) -ForegroundColor Yellow
+                } else {
+                    Write-Host ("Artifact '{0}' is not available in run {1}." -f $candidateArtifactName, $run.databaseId) -ForegroundColor Yellow
+                }
+                continue
+            }
+
+            $apkFiles = @(Get-ChildItem -LiteralPath $artifactDirectory -Filter 'app-debug.apk' -File -Recurse -ErrorAction SilentlyContinue |
+                Where-Object { $_.Length -gt 1MB })
+            if ($apkFiles.Count -ne 1) {
+                Write-Host ("Run {0}, artifact '{1}', did not contain exactly one plausible app-debug.apk." -f $run.databaseId, $candidateArtifactName) -ForegroundColor Yellow
+                continue
+            }
+
+            $candidateApk = $apkFiles[0]
+            $validApk = $false
+            $validationError = $null
+            try {
+                Add-Type -AssemblyName System.IO.Compression.FileSystem
+                $archive = [System.IO.Compression.ZipFile]::OpenRead($candidateApk.FullName)
+                try {
+                    $entryNames = @($archive.Entries | ForEach-Object { $_.FullName })
+                    $dexEntries = @($entryNames | Where-Object { $_ -match '^classes(\d*)?\.dex$' })
+                    $validApk = ($entryNames -contains 'AndroidManifest.xml') -and ($dexEntries.Count -gt 0)
+                    if (-not $validApk) {
+                        $validationError = 'AndroidManifest.xml or classes*.dex is missing.'
+                    }
+                } finally {
+                    $archive.Dispose()
+                }
+            } catch {
+                $validationError = $_.Exception.Message
+            }
+
+            if (-not $validApk) {
+                Write-Host ("Run {0}, artifact '{1}', contained an invalid APK ({2})." -f $run.databaseId, $candidateArtifactName, $validationError) -ForegroundColor Yellow
+                continue
+            }
+
+            Copy-Item -LiteralPath $candidateApk.FullName -Destination $stagedApk
+            if (-not (Test-Path -LiteralPath $stagedApk -PathType Leaf) -or
+                (Get-Item -LiteralPath $stagedApk).Length -ne $candidateApk.Length) {
+                Remove-Item -LiteralPath $stagedApk -Force -ErrorAction SilentlyContinue
+                Write-Host ("APK staging verification failed for run {0}, artifact '{1}'." -f $run.databaseId, $candidateArtifactName) -ForegroundColor Yellow
+                continue
+            }
+
+            $sourceRun = $run
+            $sourceArtifactName = $candidateArtifactName
+            break
         }
 
-        if (-not $validApk) {
-            Write-Host ("Run {0} contained an invalid APK ({1}); checking an older successful run." -f $run.databaseId, $validationError) -ForegroundColor Yellow
-            continue
+        if ($sourceRun) {
+            break
         }
-
-        Copy-Item -LiteralPath $candidateApk.FullName -Destination $stagedApk
-        if (-not (Test-Path -LiteralPath $stagedApk -PathType Leaf) -or
-            (Get-Item -LiteralPath $stagedApk).Length -ne $candidateApk.Length) {
-            Remove-Item -LiteralPath $stagedApk -Force -ErrorAction SilentlyContinue
-            Write-Host ("APK staging verification failed for run {0}; checking an older successful run." -f $run.databaseId) -ForegroundColor Yellow
-            continue
-        }
-
-        $sourceRun = $run
-        break
     }
 
     if (-not $sourceRun -or -not (Test-Path -LiteralPath $stagedApk -PathType Leaf)) {
-        throw ("No installable '{0}' APK was found in the 100 most recent successful CI runs on '{1}'. Android artifacts are retained for 30 days; run a successful Android CI build and try again." -f $artifactName, $Branch)
+        throw ("No installable SmartPrint Android debug APK was found in the 100 most recent successful CI runs on '{0}'. Android artifacts are retained for 30 days; run a successful Android CI build and try again." -f $Branch)
     }
 
     $apkHash = (Get-FileHash -LiteralPath $stagedApk -Algorithm SHA256).Hash
@@ -201,6 +216,7 @@ try {
 
     Write-Host ''
     Write-Host ("SmartPrint Android debug APK downloaded from CI run {0}." -f $sourceRun.databaseId) -ForegroundColor Green
+    Write-Host ("CI artifact: {0}" -f $sourceArtifactName)
     Write-Host ("Branch: {0}; commit: {1}" -f $sourceRun.headBranch, $sourceRun.headSha)
     Write-Host ("APK: {0}" -f $finalApk)
     Write-Host ("SHA-256: {0}" -f $apkHash)
