@@ -1116,12 +1116,12 @@ function ShopConsole({ tokens, onSignOut }: { tokens: AuthTokens; onSignOut: () 
     setBusyJobId(null);
   }
 
-  async function recordFileRefund(job: ShopPrintJob, values: { refundMethod: "UPI" | "CASH"; refundReference: string | null; reason: string; rejectedPageNumbers: number[] }) {
+  async function recordFileRefund(job: ShopPrintJob, values: { refundMethod: "UPI" | "CASH"; refundReference: string | null; reason: string; rejectedPageNumbers: number[]; idempotencyKey: string }) {
     setBusyJobId(job.id);
     setError("");
     try {
       const result = await recordShopPrintRefund(tokens.accessToken, job.id, {
-        ...values, confirmedSent: true, idempotencyKey: crypto.randomUUID()
+        ...values, confirmedSent: true
       });
       setToast(`Refund of ${formatMoney(result.amountMinor, result.currency)} recorded for ${job.document.originalFileName}. The return was logged under the signed-in shopkeeper.`);
       setRefundJob(null);
@@ -2062,7 +2062,7 @@ function DocumentPreviewModal({name,url,mediaType,job,readOnly=false,onClose,onA
 
 function RefundModal({job,token,busy,onClose,onSubmit}:{
   job:ShopPrintJob; token:string; busy:boolean; onClose:()=>void;
-  onSubmit:(values:{refundMethod:"UPI"|"CASH";refundReference:string|null;reason:string;rejectedPageNumbers:number[]})=>void;
+  onSubmit:(values:{refundMethod:"UPI"|"CASH";refundReference:string|null;reason:string;rejectedPageNumbers:number[];idempotencyKey:string})=>void;
 }) {
   const [rejectedPages,setRejectedPages]=useState<Set<number>>(()=>{
     try{return new Set<number>(JSON.parse(job.rejectedPageNumbersJson||"[]") as number[]);}catch{return new Set<number>();}
@@ -2074,6 +2074,7 @@ function RefundModal({job,token,busy,onClose,onSubmit}:{
   const [reference,setReference]=useState("");
   const [reason,setReason]=useState("Customer rejected selected pages after shop preview.");
   const [confirmed,setConfirmed]=useState(false);
+  const refundRequest=useRef<{signature:string;key:string}|null>(null);
   const selectedPages=Array.from(rejectedPages).sort((a,b)=>a-b);
   const selectionKey=selectedPages.join(",");
   const alreadyRejected=(()=>{try{return new Set<number>(JSON.parse(job.rejectedPageNumbersJson||"[]") as number[]);}catch{return new Set<number>();}})();
@@ -2115,7 +2116,14 @@ function RefundModal({job,token,busy,onClose,onSubmit}:{
        estimateError?<span className="inline-error">{estimateError}</span>:
        estimate?<><span>{estimate.acceptedPageCount} pages will remain in the print job.</span><strong>Return {formatMoney(additional,estimate.currency)}</strong><small>Cumulative returned: {formatMoney(estimate.cumulativeRefundAmountMinor,estimate.currency)} · remaining payment: {formatMoney(estimate.remainingPaidAmountMinor,estimate.currency)}</small></>:<span>Select page(s) to see the refund amount.</span>}
     </div>
-    {estimate&&additional>0&&<form className="refund-form" onSubmit={event=>{event.preventDefault();if(canSubmit)onSubmit({refundMethod:method,refundReference:method==="UPI"?reference.trim():null,reason:reason.trim(),rejectedPageNumbers:selectedPages});}}>
+    {estimate&&additional>0&&<form className="refund-form" onSubmit={event=>{
+      event.preventDefault();
+      if(!canSubmit)return;
+      const payload={refundMethod:method,refundReference:method==="UPI"?reference.trim():null,reason:reason.trim(),rejectedPageNumbers:selectedPages};
+      const signature=JSON.stringify(payload);
+      if(refundRequest.current?.signature!==signature)refundRequest.current={signature,key:crypto.randomUUID()};
+      onSubmit({...payload,idempotencyKey:refundRequest.current.key});
+    }}>
       <label>Refund returned by<select value={method} onChange={event=>setMethod(event.target.value as "UPI"|"CASH")}><option value="UPI">UPI transfer</option><option value="CASH">Cash returned at counter</option></select></label>
       {method==="UPI"&&<label>Refund transaction reference<input value={reference} onChange={event=>setReference(event.target.value)} maxLength={100} placeholder="Enter the refund UPI reference" required/></label>}
       <label>Reason for rejecting these pages<textarea rows={3} maxLength={300} value={reason} onChange={event=>setReason(event.target.value)} required/></label>
