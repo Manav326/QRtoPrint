@@ -1350,3 +1350,17 @@
   .queue-batch-file-main>.amount-cell{grid-column:1/-1}
   .queue-batch-summary-row>td{min-width:90px}
 }
+
+
+/* Customer selection, transfer and payment clarity */
+.customer-file-remove{display:inline-flex;align-items:center;justify-content:center;gap:4px;min-height:32px;padding:6px 8px;border:1px solid #ead1d1;border-radius:7px;background:#fff8f8;color:#a74747;font-size:10px;font-weight:800;cursor:pointer;white-space:nowrap}
+.customer-file-remove:disabled{opacity:.5;cursor:not-allowed}
+.customer-payment-model-note{margin:0;padding-top:2px;color:#65738a;font-size:10px;line-height:1.55}
+.customer-upload-progress>div{position:relative}
+.customer-upload-progress>div b{position:absolute;left:0;top:0;bottom:0;width:22%;border-radius:20px;background:rgba(233,118,43,.45);animation:customer-upload-indeterminate 1.15s ease-in-out infinite alternate}
+.customer-upload-progress>small{font-size:10px;font-weight:500;color:#718097}
+@keyframes customer-upload-indeterminate{from{transform:translateX(0)}to{transform:translateX(350%)}}
+.customer-entry.smartprint-native .customer-file-remove{background:var(--native-surface);border-color:var(--native-border);color:#f08d8d}
+.customer-entry.smartprint-native .customer-payment-model-note,
+.customer-entry.smartprint-native .customer-upload-progress>small{color:var(--native-muted)}
+@media(prefers-reduced-motion:reduce){.customer-upload-progress>div b{animation:none;left:38%;}}
