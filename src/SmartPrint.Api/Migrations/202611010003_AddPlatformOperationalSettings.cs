@@ -70,21 +70,17 @@ public sealed class AddPlatformOperationalSettings : Migration
             name: "IX_PlatformOperationalSettingsAudits_CreatedUtc",
             table: "PlatformOperationalSettingsAudits", column: "CreatedUtc");
 
-        migrationBuilder.InsertData(
-            table: "PlatformOperationalSettings",
-            columns: new[]
-            {
+        migrationBuilder.Sql("""
+            INSERT INTO "PlatformOperationalSettings" (
                 "Id", "TrialMaxMonthlyPrintJobs", "CloudCompletedDocumentRetentionDays",
                 "AgentCompletedDocumentRetentionDays", "AbandonedDocumentRetentionDays",
                 "PendingLocalUploadRetentionDays", "ExpiredUploadTicketRetentionDays",
                 "EmptyCustomerSessionRetentionDays", "StaleRefreshTokenRetentionDays",
                 "ApiRetentionSweepHours", "AgentRetentionSweepHours",
                 "AllowPaidJobClaimsWhenSuspended", "UpdatedUtc"
-            },
-            values: new object[]
-            {
-                1, 3000, 30, 30, 30, 30, 7, 90, 30, 24, 6, true, DateTimeOffset.UtcNow
-            });
+            )
+            VALUES (1, 3000, 30, 30, 30, 30, 7, 90, 30, 24, 6, TRUE, CURRENT_TIMESTAMP);
+            """);
     }
 
     protected override void Down(MigrationBuilder migrationBuilder)
