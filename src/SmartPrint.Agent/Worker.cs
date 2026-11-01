@@ -39,10 +39,12 @@ public sealed class Worker(
         var lastRetentionSweepUtc = DateTimeOffset.MinValue;
         var completedDocumentRetention = configuredCompletedDocumentRetention;
         var retentionSweepInterval = TimeSpan.FromHours(configuredRetentionSweepHours);
+        var hasReceivedPlatformRetentionPolicy = false;
         while (!stoppingToken.IsCancellationRequested)
         {
             var sweepNow = DateTimeOffset.UtcNow;
-            if (sweepNow - lastRetentionSweepUtc >= retentionSweepInterval)
+            if (hasReceivedPlatformRetentionPolicy &&
+                sweepNow - lastRetentionSweepUtc >= retentionSweepInterval)
             {
                 try
                 {
@@ -106,10 +108,13 @@ public sealed class Worker(
                 else if (heartbeat.IsSuccessStatusCode)
                 {
                     var serverConfiguration = await heartbeat.Content.ReadFromJsonAsync<AgentHeartbeatResponse>(cancellationToken: stoppingToken);
-                    if (serverConfiguration?.AgentCompletedDocumentRetentionDays is int retentionDays)
+                    if (serverConfiguration?.AgentCompletedDocumentRetentionDays is int retentionDays &&
+                        serverConfiguration.AgentRetentionSweepHours is int sweepHours)
+                    {
                         completedDocumentRetention = TimeSpan.FromDays(Math.Clamp(retentionDays, 1, 3650));
-                    if (serverConfiguration?.AgentRetentionSweepHours is int sweepHours)
                         retentionSweepInterval = TimeSpan.FromHours(Math.Clamp(sweepHours, 1, 24));
+                        hasReceivedPlatformRetentionPolicy = true;
+                    }
                     if (Uri.TryCreate(serverConfiguration?.PublicBaseUrl, UriKind.Absolute, out var configuredBaseUri) &&
                         configuredBaseUri.Scheme == Uri.UriSchemeHttps && configuredBaseUri.AbsolutePath == "/" &&
                         string.IsNullOrEmpty(configuredBaseUri.Query) && string.IsNullOrEmpty(configuredBaseUri.Fragment) && string.IsNullOrEmpty(configuredBaseUri.UserInfo))
