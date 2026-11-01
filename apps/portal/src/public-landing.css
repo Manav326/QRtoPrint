@@ -321,3 +321,15 @@ html[data-theme="dark"] .sp-public .sp-button-quiet { color: #d0c8ff; }
 html[data-theme="dark"] .sp-public .sp-final-cta p,
 html[data-theme="dark"] .sp-public .sp-final-cta h2 { color: #fff; }
 html[data-theme="dark"] .sp-public .sp-connection-section :where(h2,p,span,b,small) { color: inherit; }
+
+
+html[data-theme="dark"] .sp-public .sp-theme-toggle {
+  --border: #3b465b;
+  --surface-2: #182335;
+  --surface-3: #27354a;
+  --text: #eef2fb;
+}
+html[data-theme="dark"] .sp-public .sp-theme-toggle:hover {
+  border-color: #8b78ec;
+}
+.sp-public { overflow-x: clip; overflow-y: visible; }
