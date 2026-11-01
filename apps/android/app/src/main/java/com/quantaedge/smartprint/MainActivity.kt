@@ -68,7 +68,6 @@ class MainActivity : AppCompatActivity() {
         private const val FILES = 2
         private const val SCAN_PRINT = 3
         private const val ACTIVITY = 4
-        private const val PROFILE = 90
         private const val SWITCH_SHOP = 91
         private const val MAX_TREE_FILES = 500
         private const val MAX_TREE_DEPTH = 12
@@ -289,16 +288,33 @@ class MainActivity : AppCompatActivity() {
                 isVisible = false
                 setOnMenuItemClickListener { switchShop(); true }
             }
-            menu.add(Menu.NONE, PROFILE, Menu.NONE, "Account").apply {
-                setIcon(R.drawable.ic_account)
-                setContentDescription("Account")
-                setTooltipText("SmartPrint account")
-                setShowAsAction(android.view.MenuItem.SHOW_AS_ACTION_ALWAYS)
-                setOnMenuItemClickListener {
-                    showProfile()
-                    true
+            val accountAction = ImageView(this@MainActivity).apply {
+                contentDescription = "Account"
+                setImageResource(R.drawable.ic_account)
+                imageTintList = ColorStateList.valueOf(this@MainActivity.getColor(R.color.qp_text))
+                scaleType = ImageView.ScaleType.CENTER_INSIDE
+                setPadding(dp(12), dp(12), dp(12), dp(12))
+                val selectableBackground = android.util.TypedValue()
+                if (this@MainActivity.theme.resolveAttribute(
+                        android.R.attr.selectableItemBackgroundBorderless,
+                        selectableBackground,
+                        true
+                    )
+                ) {
+                    setBackgroundResource(selectableBackground.resourceId)
                 }
+                isClickable = true
+                isFocusable = true
+                setOnClickListener { showProfile() }
             }
+            addView(
+                accountAction,
+                androidx.appcompat.widget.Toolbar.LayoutParams(
+                    dp(48),
+                    dp(48),
+                    Gravity.END or Gravity.CENTER_VERTICAL
+                )
+            )
         }
         root.addView(toolbar, LinearLayout.LayoutParams(-1, dp(62)))
         content = FrameLayout(this)
