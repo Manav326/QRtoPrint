@@ -648,7 +648,7 @@ function ShopConsole({ tokens, onSignOut }: { tokens: AuthTokens; onSignOut: () 
             <div className="connection-pill"><span className="live-dot"/><span>Cloud connected</span></div>
             <button className="icon-button theme-button" aria-label={dark ? "Switch to light theme" : "Switch to dark theme"} onClick={() => setDark(!dark)}>{dark ? <Sun size={18}/> : <Moon size={18}/>}</button>
             <div className="topbar-divider"/>
-            <span className="topbar-product-tag"><span className="mode-indicator"/> Shop console</span>
+            <span className="topbar-product-tag"><span className="mode-indicator"/> {isDesktopApp() ? "Desktop workspace" : "Shop console"}</span>
           </div>
         </header>
 
