@@ -1976,7 +1976,9 @@ function PrintQueuePage({ jobs, printers, agentDevices, searchQuery, loadingBatc
           const statusLabels=Array.from(new Set(batch.jobs.map(job=>job.status)));
           const settings=Array.from(new Set(batch.jobs.map(job=>`${job.colourMode} · ${job.isDuplex?"Double":"Single"}-sided`)));
           const payableJobs=batch.jobs.filter(job=>job.status!=="REJECTED"&&job.status!=="REFUNDED");
-          const totalCopies=payableJobs.reduce((sum,job)=>sum+job.copies,0);
+          const totalPrintedPages=payableJobs.reduce((sum,job)=>sum+job.pageCount*job.copies,0);
+          const monoPrintedPages=payableJobs.reduce((sum,job)=>sum+(job.colourMode==="Mono"?job.pageCount*job.copies:0),0);
+          const colourPrintedPages=payableJobs.reduce((sum,job)=>sum+(job.colourMode==="Colour"?job.pageCount*job.copies:0),0);
           const totalAmount=payableJobs.reduce((sum,job)=>sum+Math.max(0,job.quotedAmountMinor),0);
           const printersInBatch=Array.from(new Set(batch.jobs.map(job=>job.printerName||"Not assigned")));
           const expanded=expandedBatchKeys.has(batch.key);
@@ -1986,7 +1988,7 @@ function PrintQueuePage({ jobs, printers, agentDevices, searchQuery, loadingBatc
             <tr className="queue-batch-summary-row">
               <td><strong className="job-id">{batch.batchId?"Batch · "+first.jobNumber:first.jobNumber}</strong><small className="batch-summary-sub">{batch.jobs.length} file(s) shown</small></td>
               <td><div className="customer-cell"><strong>{folders.length} folder group(s)</strong><span>{folders.slice(0,3).join(" · ")}{folders.length>3?" · +"+(folders.length-3):""}</span></div></td>
-              <td><div className="detail-cell"><strong>{totalCopies} copies</strong><span>{settings.length===1?settings[0]:"Mixed settings"}</span></div></td>
+              <td><div className="detail-cell"><strong>{totalPrintedPages} printed pages</strong><span>{monoPrintedPages} B&W · {colourPrintedPages} Colour</span></div></td>
               <td className="amount-cell">{totalAmount>0?formatMoney(totalAmount,first.currency):"Not quoted"}</td>
               <td><div className="queue-printer-cell"><strong>{printersInBatch.length===1?printersInBatch[0]:"Multiple printers"}</strong><small>{waiting.length} awaiting review</small></div></td>
               <td><Status label={label} tone={tone}/></td>
@@ -1998,7 +2000,7 @@ function PrintQueuePage({ jobs, printers, agentDevices, searchQuery, loadingBatc
             </tr>
             {expanded&&<tr className="queue-batch-detail-row"><td colSpan={8}><div className="queue-batch-files">{batch.jobs.map(job=><article className="queue-batch-file-card" key={job.id}>
               <div className="queue-batch-file-main">
-                <div><strong>{job.document.originalFileName}</strong><small>{job.batchGroupName??"Loose files"} · {job.pageCount} pages × {job.copies} · {job.colourMode} · {job.isDuplex?"Double-sided":"Single-sided"}</small></div>
+                <div><strong>{job.document.originalFileName}</strong><small>{job.batchGroupName??"Loose files"} · {job.pageCount} source pages × {job.copies} = {job.pageCount*job.copies} printed · {job.colourMode} · {job.isDuplex?"Double-sided":"Single-sided"}</small></div>
                 <Status label={prettyStatus(job.status)} tone={job.status==="REJECTED"?"red":job.status==="COMPLETED"||job.status==="LOCAL_QUEUE_READY"?"green":job.status==="AWAITING_SHOP_APPROVAL"?"amber":"blue"}/>
                 <strong className="amount-cell">{job.quotedAmountMinor>0?formatMoney(job.quotedAmountMinor,job.currency):"—"}</strong>
               </div>
@@ -2049,7 +2051,7 @@ function BatchReviewModal({jobs,busy,decisions,retrying,onDecision,onClose,onPre
         return <div className={accepted?"batch-review-row accepted":"batch-review-row rejected"} key={job.id}>
           <label className="batch-review-checkbox"><input type="checkbox" checked={accepted} disabled={busy} onChange={event=>onDecision(job.id,event.target.checked)}/></label>
           <span className="batch-review-index">{index+1}</span>
-          <div className="batch-review-file"><strong>{job.document.originalFileName}</strong><small>{job.pageCount} pages × {job.copies} · {job.colourMode} · {job.isDuplex?"Double-sided":"Single-sided"} · {formatMoney(job.quotedAmountMinor,job.currency)}</small><Status label={accepted?"Accepted":"Marked for rejection"} tone={accepted?"green":"red"}/></div>
+          <div className="batch-review-file"><strong>{job.document.originalFileName}</strong><small>{job.pageCount} source pages × {job.copies} = {job.pageCount*job.copies} printed · {job.colourMode} · {job.isDuplex?"Double-sided":"Single-sided"} · {formatMoney(job.quotedAmountMinor,job.currency)}</small><Status label={accepted?"Accepted":"Marked for rejection"} tone={accepted?"green":"red"}/></div>
           <button className="subtle-button" type="button" disabled={busy} onClick={()=>onPreview(job)}>Preview</button>
         </div>;
       })}
@@ -2070,7 +2072,7 @@ function DocumentPreviewModal({name,url,mediaType,job,readOnly=false,onClose,onA
   name:string;url:string;mediaType:string;job:ShopPrintJob;readOnly?:boolean;onClose:()=>void;onApprove:()=>void;onReject:()=>void;onRefund:()=>void;
 }) {
   const isPdf=mediaType==="application/pdf";
-  const previewSummary = `${job.pageCount} page(s) · ${job.copies} copy/copies requested. Preview displays the uploaded original once.`;
+  const previewSummary = `${job.pageCount} source page(s) × ${job.copies} copy/copies = ${job.pageCount*job.copies} printed page(s). Preview displays the uploaded original once.`;
   return <Modal title={name} subtitle={readOnly ? `Read-only preview · ${previewSummary}` : job.batchId ? `File review · Batch ${job.batchId.slice(0,8).toUpperCase()} · ${previewSummary}` : previewSummary} onClose={onClose}>
     <div className="shop-document-preview">{isPdf?<iframe src={url} title={name}/>:<img src={url} alt={name}/>}</div>
     {["AWAITING_SHOP_APPROVAL","AWAITING_PAYMENT","AWAITING_CUSTOMER_PAYMENT","PAYMENT_REPORTED","AWAITING_COUNTER_PAYMENT"].includes(job.status)&&<div className="file-review-note"><Check size={16}/><span>{readOnly ? "This preview is part of the batch review. Keep or change this file's decision in the batch panel after closing the preview." : "Review this file independently. Accepting or rejecting it will not change any other file in the batch."}</span></div>}
@@ -3439,7 +3441,7 @@ function CustomerPrintFlow({publicCode,sessionToken,paymentOptions,localAgent,lo
         {Array.from(new Set(uploadedBatch.map(item=>item.job.batchGroupName??"Loose files"))).map(groupName=><section className="customer-uploaded-folder" key={groupName}>
           <strong>{groupName}</strong>
           {uploadedBatch.filter(item=>(item.job.batchGroupName??"Loose files")===groupName).map(item=><button type="button" key={item.job.id} className={uploaded.job.id===item.job.id?"customer-uploaded-batch-item active":"customer-uploaded-batch-item"} onClick={()=>selectUploadedFile(item)}>
-            <span className="batch-file-index"><FileText size={14}/></span><span className="batch-file-copy"><strong>{item.document.originalFileName}</strong><small>{item.job.pageCount} {item.job.pageCount===1?"page":"pages"} · {printSettingsByJobId[item.job.id]?.copies??item.job.copies} copies · {printSettingsByJobId[item.job.id]?.colourMode??"Mono"} · {(printSettingsByJobId[item.job.id]?.isDuplex??false)?"Double-sided":"Single-sided"} · {item.job.quotedAmountMinor>0?formatMoney(item.job.quotedAmountMinor,item.job.currency):"Awaiting quote"}</small></span>
+            <span className="batch-file-index"><FileText size={14}/></span><span className="batch-file-copy"><strong>{item.document.originalFileName}</strong><small>{item.job.pageCount} source pages × {printSettingsByJobId[item.job.id]?.copies??item.job.copies} = {item.job.pageCount*(printSettingsByJobId[item.job.id]?.copies??item.job.copies)} printed · {printSettingsByJobId[item.job.id]?.colourMode??"Mono"} · {(printSettingsByJobId[item.job.id]?.isDuplex??false)?"Double-sided":"Single-sided"} · {item.job.quotedAmountMinor>0?formatMoney(item.job.quotedAmountMinor,item.job.currency):"Awaiting quote"}</small></span>
             <Status
               label={prettyStatus(batchStatuses[item.job.id]?.status??item.job.status??"UPLOADED")}
               tone={["REJECTED","PAYMENT_REJECTED"].includes((batchStatuses[item.job.id]?.status??item.job.status??"").toUpperCase())?"red":
