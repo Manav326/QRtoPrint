@@ -121,6 +121,49 @@ async function assertNoHorizontalOverflow(page, route, viewport) {
   return measurement;
 }
 
+
+async function assertWorkspaceContrast(page, route) {
+  const result = await page.evaluate(() => {
+    const shell = document.querySelector(".app-shell");
+    if (!shell) return null;
+    const style = getComputedStyle(shell);
+    const parse = value => {
+      const match = value.trim().match(/^#([0-9a-f]{6})$/i);
+      if (!match) return null;
+      const hex = match[1];
+      return [0, 2, 4].map(offset => parseInt(hex.slice(offset, offset + 2), 16) / 255)
+        .map(channel => channel <= 0.04045 ? channel / 12.92 : ((channel + 0.055) / 1.055) ** 2.4);
+    };
+    const luminance = channels => channels[0] * 0.2126 + channels[1] * 0.7152 + channels[2] * 0.0722;
+    const contrast = (foreground, background) => {
+      const fg = parse(foreground), bg = parse(background);
+      if (!fg || !bg) return null;
+      const [high, low] = [luminance(fg), luminance(bg)].sort((a, b) => b - a);
+      return (high + 0.05) / (low + 0.05);
+    };
+    const foregrounds = ["--text", "--muted", "--faint", "--accent", "--green", "--amber", "--red", "--blue"];
+    const backgrounds = ["--bg", "--surface"];
+    const checks = [];
+    for (const foreground of foregrounds) {
+      for (const background of backgrounds) {
+        checks.push({
+          foreground,
+          background,
+          ratio: contrast(style.getPropertyValue(foreground), style.getPropertyValue(background))
+        });
+      }
+    }
+    return checks;
+  });
+  if (!result) return;
+  for (const check of result) {
+    assert.ok(
+      check.ratio !== null && check.ratio >= 4.5,
+      `${route.label} has insufficient ${check.foreground} contrast against ${check.background}: ${JSON.stringify(check)}`
+    );
+  }
+}
+
 async function assertThemeToggle(page) {
   const darkToggle = page.getByRole("button", { name: "Switch to dark theme" });
   const lightToggle = page.getByRole("button", { name: "Switch to light theme" });
@@ -173,8 +216,10 @@ try {
       await waitForRoute(page, route.ready);
 
       const lightLayout = await assertNoHorizontalOverflow(page, route, viewport);
+      await assertWorkspaceContrast(page, route);
       const theme = await assertThemeToggle(page);
       const darkLayout = await assertNoHorizontalOverflow(page, route, viewport);
+      await assertWorkspaceContrast(page, route);
 
       if (route.auth && viewport.width <= 850) {
         await page.getByRole("button", { name: "Open navigation" }).click();
