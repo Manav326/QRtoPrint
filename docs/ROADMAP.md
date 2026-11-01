@@ -74,8 +74,8 @@ Acceptance: both transfer modes use one server-owned job lifecycle. LAN mode req
 - [x] Multi-file and recursive folder import through Android's Storage Access Framework; file and folder export to a user-selected provider.
 - [x] Native saved-document picker integrated with the customer portal; multi-file selection hands original files into the existing separate-file batch upload contract (fresh-branch CI and physical-device acceptance tracked in `docs/ANDROID_ENHANCEMENT_TRACKER.md`).
 - [x] WebView HTTP request filter limiting cleartext traffic to private IPv4 Agent upload endpoints on TCP 17842.
-- [x] JVM tests for QR route validation, print-format/size policy, local storage, duplicate preservation, path traversal and bounded folder-transfer budgets; CI Android debug build and APK artifact.
-- [x] Windows PowerShell helper to download the latest successful Android debug artifact and optionally install it via ADB.
+- [x] JVM tests for QR route validation, print-format/size policy, local storage, duplicate preservation, path traversal and bounded folder-transfer budgets; CI Android debug build and the `smartprint-android-debug` artifact.
+- [x] Windows PowerShell helper to download the latest successful `smartprint-android-debug` artifact and optionally install it via ADB.
 - [x] Android emulator UI tests for library landing, folder creation/navigation and camera permission explanation (API 35).\n- [ ] Physical Android UI tests across OS versions and different file-manager/document providers.
 - [ ] Real shop-Wi-Fi test matrix for Android WebView Local Network Access, private endpoint discovery, client isolation and paired Agent upload.
 - [ ] Signed release bundle, Play Store listing, update channel and production release signing.
