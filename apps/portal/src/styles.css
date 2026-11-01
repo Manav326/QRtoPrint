@@ -1571,3 +1571,170 @@
 @media(max-width:560px){.refund-selection-actions{align-items:flex-start}.refund-selection-actions .secondary-button{width:100%}}
 
 .payment-record-amount-wrap{display:grid;justify-items:end;gap:3px;min-width:0}.payment-record-refund-summary{max-width:190px;text-align:right;font-size:8px;line-height:1.4;color:var(--muted);white-space:normal}
+
+/* Table overflow guardrails: wrap variable-length values inside their own cells. */
+.table-scroll {
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  overflow-x: auto;
+  overflow-y: hidden;
+  overscroll-behavior-x: contain;
+  -webkit-overflow-scrolling: touch;
+}
+table th,
+table td {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  word-break: normal;
+}
+
+/* The print queue remains a compact, scrollable data table on narrow screens. */
+.queue-table-scroll {
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  -webkit-overflow-scrolling: touch;
+}
+.queue-jobs-table {
+  width: 100%;
+  min-width: 1100px;
+  table-layout: fixed;
+  white-space: normal;
+}
+.queue-jobs-table th,
+.queue-jobs-table td {
+  white-space: normal;
+  overflow-wrap: anywhere;
+  word-break: normal;
+  vertical-align: top;
+}
+.queue-jobs-table th:nth-child(1),
+.queue-jobs-table td:nth-child(1) { width: 130px; }
+.queue-jobs-table th:nth-child(2),
+.queue-jobs-table td:nth-child(2) { width: 180px; }
+.queue-jobs-table th:nth-child(3),
+.queue-jobs-table td:nth-child(3) { width: 165px; }
+.queue-jobs-table th:nth-child(4),
+.queue-jobs-table td:nth-child(4) { width: 95px; }
+.queue-jobs-table th:nth-child(5),
+.queue-jobs-table td:nth-child(5) { width: 175px; }
+.queue-jobs-table th:nth-child(6),
+.queue-jobs-table td:nth-child(6) { width: 110px; }
+.queue-jobs-table th:nth-child(7),
+.queue-jobs-table td:nth-child(7) { width: 120px; }
+.queue-jobs-table th:nth-child(8),
+.queue-jobs-table td:nth-child(8) { width: 125px; }
+.queue-jobs-table .queue-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+.queue-printer-cell {
+  min-width: 0;
+  max-width: 220px;
+}
+.queue-printer-cell strong,
+.queue-printer-cell small {
+  white-space: normal;
+  overflow-wrap: anywhere;
+  word-break: normal;
+}
+.queue-batch-file-card { min-width: 0; }
+.queue-batch-file-main > div > small {
+  display: block;
+  overflow-wrap: anywhere;
+  word-break: normal;
+  line-height: 1.5;
+}
+.queue-batch-file-output {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+  margin-top: 10px;
+  padding: 9px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface-2);
+}
+.queue-batch-file-output > span {
+  color: var(--muted);
+  font-size: 8px;
+  font-weight: 800;
+  letter-spacing: .7px;
+  text-transform: uppercase;
+}
+.queue-batch-file-output code {
+  display: block;
+  min-width: 0;
+  color: var(--text);
+  font: 9px/1.55 "DM Sans", sans-serif;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  user-select: text;
+}
+.customer-history-facts {
+  flex-wrap: wrap;
+}
+.platform-table-scroll {
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  -webkit-overflow-scrolling: touch;
+}
+.platform-tenant-table .platform-shop-cell small,
+.platform-tenant-table .platform-subscription-cell small,
+.platform-tenant-table .platform-device-cell small {
+  white-space: normal;
+  overflow-wrap: anywhere;
+  word-break: normal;
+  line-height: 1.45;
+}
+@media (max-width: 720px) {
+  .queue-batch-file-main {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+  .queue-batch-file-main > div > small {
+    line-height: 1.55;
+  }
+  .queue-batch-file-actions {
+    align-items: stretch;
+  }
+  .queue-batch-file-actions button,
+  .queue-batch-file-actions select {
+    max-width: 100%;
+  }
+}
+
+
+/* Keep queue status chips and action labels inside their allocated columns. */
+.queue-jobs-table .status-badge {
+  max-width: 100%;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  line-height: 1.4;
+}
+.queue-jobs-table .queue-actions button {
+  white-space: nowrap;
+}
+.queue-pdf-path {
+  display: block;
+  font-size: 8px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+/* Subscription descriptors are variable-length table content, not fixed labels. */
+.platform-subs-copy small {
+  white-space: normal;
+  overflow-wrap: anywhere;
+  word-break: normal;
+  line-height: 1.45;
+}
