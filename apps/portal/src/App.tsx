@@ -963,8 +963,9 @@ function ShopConsole({ tokens, onSignOut }: { tokens: AuthTokens; onSignOut: () 
   }
 
   async function rejectPayment(payment: ShopPayment) {
-    const cancellationWarning = payment.status === "AWAITING_CUSTOMER_PAYMENT" && payment.method === "UPI"
-      ? "Before cancelling, check your bank/UPI ledger and ask the customer whether they paid. They may have paid before submitting a UTR. If the credit is present, verify this attempt instead of cancelling it.\n\n"
+    const cancellationWarning = payment.method === "UPI" &&
+      ["AWAITING_CUSTOMER_PAYMENT","CUSTOMER_REPORTED"].includes(payment.status)
+      ? "Before rejecting this UPI attempt, check your bank/UPI ledger against the full amount and the customer's reference. A submitted or missing UTR does not prove that money was or was not received. If the credit is present, verify this attempt instead of rejecting it.\n\n"
       : "";
     const reason = await promptInApp(
       cancellationWarning + (payment.batchPaymentId
