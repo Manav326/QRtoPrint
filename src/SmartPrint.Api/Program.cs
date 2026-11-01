@@ -6535,9 +6535,17 @@ publicApi.MapPost("/payments/{paymentId:guid}/report", async (
     }
 
     var payment = await db.PrintPayments.SingleOrDefaultAsync(
-        item => item.Id == paymentId && item.TenantId == session.TenantId, ct);
+        item => item.Id == paymentId && item.TenantId == session.TenantId && item.BatchPaymentId == null, ct);
     if (payment is null)
     {
+        var isBatchAllocation = await db.PrintPayments.AsNoTracking().AnyAsync(
+            item => item.Id == paymentId && item.TenantId == session.TenantId && item.BatchPaymentId != null, ct);
+        if (isBatchAllocation)
+            return Results.Conflict(new
+            {
+                code = "batch_payment_parent_required",
+                message = "This file is part of a batch payment. Submit the UPI reference once from the batch checkout."
+            });
         return Results.NotFound();
     }
 
