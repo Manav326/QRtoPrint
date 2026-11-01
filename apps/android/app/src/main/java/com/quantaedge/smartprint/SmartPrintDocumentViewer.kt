@@ -2,6 +2,7 @@ package com.quantaedge.smartprint
 
 import android.app.Activity
 import android.content.Context
+import android.content.res.ColorStateList
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.Color
@@ -40,7 +41,9 @@ class SmartPrintDocumentViewer(
     startFile: File,
     private val imageSiblings: List<File>,
     startPosition: Int? = null,
-    private val onNavigateImage: (File) -> Unit
+    private val onNavigateImage: (File) -> Unit,
+    private val folderBreadcrumbs: List<Pair<String, String>> = emptyList(),
+    private val onNavigateFolder: (String) -> Unit = {}
 ) : LinearLayout(context) {
     companion object {
         private const val MAX_PAGE_EDGE = 2200
@@ -61,6 +64,21 @@ class SmartPrintDocumentViewer(
     private val worker: ExecutorService = Executors.newSingleThreadExecutor()
     private val disposed = AtomicBoolean(false)
     private val stage = FrameLayout(context)
+    private val breadcrumbScroller = HorizontalScrollView(context).apply {
+        isHorizontalScrollBarEnabled = false
+        clipToPadding = false
+        overScrollMode = View.OVER_SCROLL_NEVER
+        setPadding(dp(12), dp(2), dp(12), dp(4))
+    }
+    private val breadcrumbRow = LinearLayout(context).apply {
+        orientation = LinearLayout.HORIZONTAL
+        gravity = Gravity.CENTER_VERTICAL
+    }
+    private val bottomPanel = LinearLayout(context).apply {
+        orientation = LinearLayout.VERTICAL
+        background = SmartPrintGlass.surface(context, 18, R.color.qp_glass_card)
+        setPadding(dp(7), dp(3), dp(7), dp(5))
+    }
     private val pageImage = ZoomableDocumentImageView(context) { direction ->
         if (isPdf) showPdfPage(currentPage + direction)
         else navigateImage(currentImageIndex + direction)
@@ -80,9 +98,9 @@ class SmartPrintDocumentViewer(
         setPadding(dp(10), dp(7), dp(10), dp(7))
         includeFontPadding = false
     }
-    private val previousPage = readerControl("‹", "Previous page")
-    private val nextPage = readerControl("›", "Next page")
-    private val rotatePage = readerControl("↻", "Rotate view")
+    private val previousPage = readerControl(R.drawable.ic_chevron_left, "Previous page")
+    private val nextPage = readerControl(R.drawable.ic_chevron_right, "Next page")
+    private val rotatePage = readerControl(R.drawable.ic_rotate, "Rotate view")
     private val filmstrip = HorizontalScrollView(context).apply {
         isHorizontalScrollBarEnabled = false
         clipToPadding = false
@@ -111,29 +129,9 @@ class SmartPrintDocumentViewer(
         background = SmartPrintGlass.backdrop(context)
         clipToPadding = false
 
-        if (isPdf) {
-            val pageControls = LinearLayout(context).apply {
-                orientation = LinearLayout.HORIZONTAL
-                gravity = Gravity.CENTER_VERTICAL
-                setPadding(dp(8), 0, dp(8), 0)
-            }
-            previousPage.setOnClickListener { showPdfPage(currentPage - 1) }
-            nextPage.setOnClickListener { showPdfPage(currentPage + 1) }
-            rotatePage.setOnClickListener {
-                rotationDegrees = (rotationDegrees + 90) % 360
-                renderCurrentPdfPage()
-            }
-            pageControls.addView(previousPage, LinearLayout.LayoutParams(dp(42), dp(40)))
-            pageControls.addView(pageCounter, LinearLayout.LayoutParams(0, dp(40), 1f))
-            pageControls.addView(rotatePage, LinearLayout.LayoutParams(dp(42), dp(40)))
-            pageControls.addView(nextPage, LinearLayout.LayoutParams(dp(42), dp(40)))
-            addView(pageControls, LinearLayout.LayoutParams(-1, dp(44)))
-        } else if (imageSiblings.size > 1) {
-            pageCounter.text = "Photo ${currentImageIndex + 1} of ${imageSiblings.size}"
-            pageCounter.gravity = Gravity.CENTER_VERTICAL
-            pageCounter.setPadding(dp(16), 0, dp(16), 0)
-            addView(pageCounter, LinearLayout.LayoutParams(-1, dp(30)))
-        }
+        updateBreadcrumbs()
+        breadcrumbScroller.addView(breadcrumbRow, HorizontalScrollView.LayoutParams(-2, -1))
+        addView(breadcrumbScroller, LinearLayout.LayoutParams(-1, dp(35)))
 
         stage.setBackgroundColor(Color.rgb(24, 26, 36))
         stage.addView(pageImage, FrameLayout.LayoutParams(-1, -1))
@@ -141,13 +139,57 @@ class SmartPrintDocumentViewer(
         addView(stage, LinearLayout.LayoutParams(-1, 0, 1f))
 
         filmstrip.addView(thumbnailRow, FrameLayout.LayoutParams(-2, -1))
-        addView(filmstrip, LinearLayout.LayoutParams(-1, dp(if (isPdf) 88 else 82)))
-
         if (isPdf) {
+            previousPage.setOnClickListener { showPdfPage(currentPage - 1) }
+            nextPage.setOnClickListener { showPdfPage(currentPage + 1) }
+            rotatePage.setOnClickListener {
+                rotationDegrees = (rotationDegrees + 90) % 360
+                renderCurrentPdfPage()
+            }
+            val pageControls = LinearLayout(context).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                setPadding(dp(5), dp(4), dp(5), dp(3))
+            }
+            pageControls.addView(previousPage, LinearLayout.LayoutParams(dp(46), dp(46)))
+            pageControls.addView(pageCounter, LinearLayout.LayoutParams(0, dp(46), 1f).apply {
+                marginStart = dp(7)
+                marginEnd = dp(7)
+            })
+            pageControls.addView(rotatePage, LinearLayout.LayoutParams(dp(46), dp(46)))
+            pageControls.addView(nextPage, LinearLayout.LayoutParams(dp(46), dp(46)).apply {
+                marginStart = dp(7)
+            })
+            bottomPanel.addView(filmstrip, LinearLayout.LayoutParams(-1, dp(82)))
+            bottomPanel.addView(pageControls, LinearLayout.LayoutParams(-1, dp(53)))
+            addView(bottomPanel, LinearLayout.LayoutParams(-1, -2))
             showLoading("Opening PDF…")
             loadPdfPageCount()
+        } else if (imageSiblings.size > 1) {
+            previousPage.contentDescription = "Previous photo"
+            nextPage.contentDescription = "Next photo"
+            previousPage.setOnClickListener { navigateImage(currentImageIndex - 1) }
+            nextPage.setOnClickListener { navigateImage(currentImageIndex + 1) }
+            val imageControls = LinearLayout(context).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                setPadding(dp(5), dp(4), dp(5), dp(3))
+            }
+            imageControls.addView(previousPage, LinearLayout.LayoutParams(dp(46), dp(46)))
+            imageControls.addView(pageCounter, LinearLayout.LayoutParams(0, dp(46), 1f).apply {
+                marginStart = dp(7)
+                marginEnd = dp(7)
+            })
+            imageControls.addView(nextPage, LinearLayout.LayoutParams(dp(46), dp(46)))
+            bottomPanel.addView(filmstrip, LinearLayout.LayoutParams(-1, dp(76)))
+            bottomPanel.addView(imageControls, LinearLayout.LayoutParams(-1, dp(53)))
+            addView(bottomPanel, LinearLayout.LayoutParams(-1, -2))
+            updateImageControls()
+            showLoading("Opening image…")
+            loadImage(currentImageIndex)
         } else {
-            if (imageSiblings.size > 1) showLoading("Opening image…") else showLoading("Opening image…")
+            bottomPanel.visibility = View.GONE
+            showLoading("Opening image…")
             loadImage(currentImageIndex)
         }
     }
@@ -201,6 +243,59 @@ class SmartPrintDocumentViewer(
         previousPage.alpha = if (previousPage.isEnabled) 1f else 0.32f
         nextPage.alpha = if (nextPage.isEnabled) 1f else 0.32f
         rotatePage.alpha = if (pageCount > 0) 1f else 0.32f
+    }
+
+    private fun updateImageControls() {
+        if (imageSiblings.size <= 1) return
+        pageCounter.text = "Photo ${currentImageIndex + 1} of ${imageSiblings.size}"
+        previousPage.isEnabled = currentImageIndex > 0
+        nextPage.isEnabled = currentImageIndex < imageSiblings.lastIndex
+        previousPage.alpha = if (previousPage.isEnabled) 1f else 0.32f
+        nextPage.alpha = if (nextPage.isEnabled) 1f else 0.32f
+    }
+
+    private fun updateBreadcrumbs() {
+        breadcrumbRow.removeAllViews()
+        fun separator() {
+            if (breadcrumbRow.childCount > 0) {
+                breadcrumbRow.addView(TextView(context).apply {
+                    text = "›"
+                    textSize = 13f
+                    setTextColor(getColor(R.color.qp_muted))
+                    setPadding(dp(7), 0, dp(7), 0)
+                }, LinearLayout.LayoutParams(-2, -2))
+            }
+        }
+        folderBreadcrumbs.forEach { (label, path) ->
+            separator()
+            breadcrumbRow.addView(TextView(context).apply {
+                text = label
+                textSize = 12f
+                setTextColor(getColor(R.color.qp_primary))
+                setPadding(dp(3), dp(6), dp(3), dp(6))
+                contentDescription = "Open folder $label"
+                isClickable = true
+                isFocusable = true
+                setOnClickListener { onNavigateFolder(path) }
+                val selectable = android.util.TypedValue()
+                if (context.theme.resolveAttribute(
+                        android.R.attr.selectableItemBackground,
+                        selectable,
+                        true
+                    )
+                ) setBackgroundResource(selectable.resourceId)
+            }, LinearLayout.LayoutParams(-2, -2))
+        }
+        separator()
+        breadcrumbRow.addView(TextView(context).apply {
+            text = currentFile.name
+            textSize = 12f
+            setTypeface(typeface, android.graphics.Typeface.BOLD)
+            setTextColor(getColor(R.color.qp_text))
+            setPadding(dp(3), dp(6), dp(3), dp(6))
+            maxLines = 1
+        }, LinearLayout.LayoutParams(-2, -2))
+        breadcrumbScroller.post { breadcrumbScroller.fullScroll(View.FOCUS_RIGHT) }
     }
 
     private fun renderCurrentPdfPage() {
@@ -299,8 +394,9 @@ class SmartPrintDocumentViewer(
         if (imageSiblings.isEmpty() || index !in imageSiblings.indices || disposed.get()) return
         currentImageIndex = index
         currentFile = imageSiblings[index]
+        updateBreadcrumbs()
+        updateImageControls()
         val request = ++renderVersion
-        if (imageSiblings.size > 1) pageCounter.text = "Photo ${index + 1} of ${imageSiblings.size}"
         showLoading("Opening image…")
         submitRender {
             try {
@@ -539,28 +635,20 @@ class SmartPrintDocumentViewer(
         }
     }
 
-    private fun readerControl(label: String, description: String): TextView {
-        val selectable = android.util.TypedValue()
-        val ripple = if (context.theme.resolveAttribute(
-                android.R.attr.selectableItemBackgroundBorderless,
-                selectable,
-                true
-            )
-        ) selectable.resourceId else 0
-        return TextView(context).apply {
-            text = label
-            textSize = 24f
-            gravity = Gravity.CENTER
-            minWidth = dp(40)
-            minHeight = dp(40)
+    private fun readerControl(iconResource: Int, description: String): AppCompatImageView =
+        AppCompatImageView(context).apply {
+            setImageResource(iconResource)
+            imageTintList = ColorStateList.valueOf(getColor(R.color.qp_text))
+            scaleType = ImageView.ScaleType.CENTER
             contentDescription = description
-            setTextColor(getColor(R.color.qp_text))
+            setPadding(dp(10), dp(10), dp(10), dp(10))
             background = SmartPrintGlass.surface(context, 14, R.color.qp_glass_card)
-            elevation = dp(3).toFloat()
+            elevation = dp(2).toFloat()
             isClickable = true
             isFocusable = true
+            minimumWidth = dp(46)
+            minimumHeight = dp(46)
         }
-    }
 
     private fun roundedBackground(color: Int, radius: Int) =
         GradientDrawable().apply {
