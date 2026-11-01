@@ -79,3 +79,26 @@ export function shopSectionFromPath(pathname: string): ShopSection {
 export function shopPathForSection(section: ShopSection): string {
   return shopSectionPaths[section];
 }
+
+
+export type AdminSection = "Overview" | "Tenants" | "Plans" | "Subscriptions" | "Operations";
+
+const adminSectionPaths: Record<AdminSection, string> = {
+  "Overview": "/admin",
+  "Tenants": "/admin/tenants",
+  "Plans": "/admin/plans",
+  "Subscriptions": "/admin/subscriptions",
+  "Operations": "/admin/operations"
+};
+
+export function adminSectionFromPath(pathname: string): AdminSection {
+  const path = normalizePath(pathname);
+  const match = Object.entries(adminSectionPaths).find(([, sectionPath]) =>
+    path === sectionPath || (sectionPath !== "/admin" && path.startsWith(`${sectionPath}/`))
+  );
+  return (match?.[0] as AdminSection | undefined) ?? "Overview";
+}
+
+export function adminPathForSection(section: AdminSection): string {
+  return adminSectionPaths[section];
+}
