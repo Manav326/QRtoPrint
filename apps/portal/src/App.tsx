@@ -74,15 +74,22 @@ function ShopConsole({ tokens, onSignOut }: { tokens: AuthTokens; onSignOut: () 
     try { return window.localStorage.getItem("qrtoprint.sidebar-collapsed") === "true"; } catch { return false; }
   });
   const reloadInFlight = useRef(false);
-  const desktopEnrollmentAttempted = useRef(false);
+  const desktopAgentSyncTimer = useRef<number | null>(null);
+  const desktopAgentSyncInFlight = useRef(false);
+  const desktopAgentSyncAttempts = useRef(0);
+  const desktopConnectInFlight = useRef(false);
+  const locallyAuthorizedAgentId = useRef<string | null>(null);
   const [localAgentStatus, setLocalAgentStatus] = useState<DesktopAgentStatus | null>(null);
   const [localAgentConflict, setLocalAgentConflict] = useState(false);
+  const [cloudStatus, setCloudStatus] = useState<"checking" | "connected" | "unavailable">("checking");
   const [profile, setProfile] = useState<ShopProfile | null>(null);
   const [printers, setPrinters] = useState<PrinterDevice[]>([]);
   const [stations, setStations] = useState<QrStation[]>([]);
   const [pricing, setPricing] = useState<ShopPricingProfile | null>(null);
   const [printJobs, setPrintJobs] = useState<ShopPrintJob[]>([]);
   const [agentDevices, setAgentDevices] = useState<AgentDevice[]>([]);
+  const agentDevicesRef = useRef<AgentDevice[]>([]);
+  agentDevicesRef.current = agentDevices;
   const [paymentSettings, setPaymentSettings] = useState<ShopPaymentSettings | null>(null);
   const [payments, setPayments] = useState<ShopPayment[]>([]);
   const [refunds, setRefunds] = useState<ShopRefund[]>([]);
@@ -115,16 +122,20 @@ function ShopConsole({ tokens, onSignOut }: { tokens: AuthTokens; onSignOut: () 
       setStations(snapshot.stations);
       setPricing(snapshot.pricing);
       setPrintJobs(snapshot.printJobs);
+      agentDevicesRef.current = snapshot.agentDevices;
       setAgentDevices(snapshot.agentDevices);
+      setCloudStatus("connected");
       setPaymentSettings(snapshot.paymentSettings);
       setPayments(snapshot.payments);
       setRefunds(snapshot.refunds);
       setSubscription(snapshot.subscription);
-      if (isDesktopApp() && !desktopEnrollmentAttempted.current) {
-        desktopEnrollmentAttempted.current = true;
-        await connectLocalComputer(true, snapshot.agentDevices);
+      if (isDesktopApp()) {
+        // The Windows service may still be starting after installation or reboot.
+        // Keep discovery off the initial shop-data load and retry quietly.
+        scheduleDesktopAgentSync(0);
       }
     } catch (exception) {
+      setCloudStatus("unavailable");
       if (exception instanceof ApiError && exception.status === 401) {
         try { await onSignOut(); }
         catch (signOutError) { setError(signOutError instanceof Error ? signOutError.message : "Could not clear the secure desktop session."); }
@@ -177,6 +188,13 @@ function ShopConsole({ tokens, onSignOut }: { tokens: AuthTokens; onSignOut: () 
     // A token change is the only trigger; mutations call reload explicitly.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tokens.accessToken]);
+
+  useEffect(() => () => {
+    if (desktopAgentSyncTimer.current !== null) {
+      window.clearTimeout(desktopAgentSyncTimer.current);
+      desktopAgentSyncTimer.current = null;
+    }
+  }, []);
 
   const today = new Intl.DateTimeFormat("en-IN", { weekday: "long", day: "numeric", month: "long" }).format(new Date());
 
@@ -266,9 +284,11 @@ function ShopConsole({ tokens, onSignOut }: { tokens: AuthTokens; onSignOut: () 
 
   async function connectLocalComputer(
     silent = false,
-    knownAgents: AgentDevice[] = agentDevices,
+    knownAgents: AgentDevice[] = agentDevicesRef.current,
     allowPreviousShopReconnection = false
   ) {
+    if (desktopConnectInFlight.current) return;
+    desktopConnectInFlight.current = true;
     if (!silent) {
       setAgentBusy(true);
       setError("");
@@ -308,6 +328,7 @@ function ShopConsole({ tokens, onSignOut }: { tokens: AuthTokens; onSignOut: () 
 
       const authorization = await createAgentEnrollmentCode(tokens.accessToken);
       const enrolled = await enrollLocalAgent(authorization.code);
+      locallyAuthorizedAgentId.current = enrolled.agentDeviceId;
       setLocalAgentStatus({
         serviceReachable: true,
         paired: true,
@@ -321,6 +342,7 @@ function ShopConsole({ tokens, onSignOut }: { tokens: AuthTokens; onSignOut: () 
       // first run instead of waiting for the next manual reload.
       try {
         const refreshedSnapshot = await loadShopData(tokens.accessToken);
+        agentDevicesRef.current = refreshedSnapshot.agentDevices;
         setAgentDevices(refreshedSnapshot.agentDevices);
         setPrinters(refreshedSnapshot.printers);
       } catch {
@@ -334,12 +356,105 @@ function ShopConsole({ tokens, onSignOut }: { tokens: AuthTokens; onSignOut: () 
       if (exception instanceof ApiError && exception.status === 401) {
         try { await onSignOut(); }
         catch (signOutError) { setError(signOutError instanceof Error ? signOutError.message : "Could not clear the secure desktop session."); }
-      } else {
+      } else if (!silent) {
         const message = exception instanceof Error ? exception.message : "Could not connect this computer to the shop.";
         setError(message);
       }
     } finally {
+      desktopConnectInFlight.current = false;
       if (!silent) setAgentBusy(false);
+    }
+  }
+
+  function nextDesktopAgentRetryDelay(): number {
+    const exponent = Math.min(desktopAgentSyncAttempts.current, 4);
+    desktopAgentSyncAttempts.current += 1;
+    return Math.min(2_000 * (2 ** exponent), 30_000);
+  }
+
+  function scheduleDesktopAgentSync(delayMs: number): void {
+    if (!isDesktopApp()) return;
+    if (desktopAgentSyncTimer.current !== null) {
+      window.clearTimeout(desktopAgentSyncTimer.current);
+    }
+    desktopAgentSyncTimer.current = window.setTimeout(() => {
+      desktopAgentSyncTimer.current = null;
+      void synchronizeDesktopAgent();
+    }, delayMs);
+  }
+
+  async function synchronizeDesktopAgent(): Promise<void> {
+    if (!isDesktopApp() || desktopAgentSyncInFlight.current) return;
+    desktopAgentSyncInFlight.current = true;
+    try {
+      const status = await getLocalAgentStatus();
+      setLocalAgentStatus(status);
+
+      if (!status.serviceReachable) {
+        setLocalAgentConflict(false);
+        scheduleDesktopAgentSync(nextDesktopAgentRetryDelay());
+        return;
+      }
+
+      if (status.paired && status.agentDeviceId) {
+        let currentShopDevice = locallyAuthorizedAgentId.current === status.agentDeviceId ||
+          agentDevicesRef.current.some(agent =>
+            !agent.revokedUtc && agent.id === status.agentDeviceId
+          );
+
+        if (!currentShopDevice) {
+          // The pipe response can be lost after the service has safely enrolled.
+          // Refresh cloud ownership before showing a cross-shop warning.
+          try {
+            const refreshedSnapshot = await loadShopData(tokens.accessToken);
+            agentDevicesRef.current = refreshedSnapshot.agentDevices;
+            setAgentDevices(refreshedSnapshot.agentDevices);
+            setPrinters(refreshedSnapshot.printers);
+            currentShopDevice = refreshedSnapshot.agentDevices.some(agent =>
+              !agent.revokedUtc && agent.id === status.agentDeviceId
+            );
+          } catch {
+            scheduleDesktopAgentSync(nextDesktopAgentRetryDelay());
+            return;
+          }
+        }
+
+        setLocalAgentConflict(!currentShopDevice);
+        if (currentShopDevice) {
+          desktopAgentSyncAttempts.current = 0;
+          scheduleDesktopAgentSync(15_000);
+        } else {
+          // Never move a computer across shops without the previous owner revoking it.
+          scheduleDesktopAgentSync(60_000);
+        }
+        return;
+      }
+
+      setLocalAgentConflict(false);
+      await connectLocalComputer(true, agentDevicesRef.current);
+      const verifiedStatus = await getLocalAgentStatus();
+      setLocalAgentStatus(verifiedStatus);
+
+      if (verifiedStatus.serviceReachable && verifiedStatus.paired && verifiedStatus.agentDeviceId) {
+        const belongsToCurrentShop =
+          locallyAuthorizedAgentId.current === verifiedStatus.agentDeviceId ||
+          agentDevicesRef.current.some(agent =>
+            !agent.revokedUtc && agent.id === verifiedStatus.agentDeviceId
+          );
+        setLocalAgentConflict(!belongsToCurrentShop);
+        if (belongsToCurrentShop) {
+          desktopAgentSyncAttempts.current = 0;
+          scheduleDesktopAgentSync(15_000);
+          return;
+        }
+      }
+
+      scheduleDesktopAgentSync(nextDesktopAgentRetryDelay());
+    } catch {
+      // Startup, network and temporary pipe failures recover without owner action.
+      scheduleDesktopAgentSync(nextDesktopAgentRetryDelay());
+    } finally {
+      desktopAgentSyncInFlight.current = false;
     }
   }
 
@@ -668,7 +783,10 @@ function ShopConsole({ tokens, onSignOut }: { tokens: AuthTokens; onSignOut: () 
             <div className="breadcrumb"><span>Shop workspace</span><span className="crumb-slash">/</span><strong>{active}</strong></div>
           </div>
           <div className="topbar-actions">
-            <div className="connection-pill"><span className="live-dot"/><span>Cloud connected</span></div>
+            <div className="connection-pill" role="status" aria-live="polite" title={cloudStatus === "connected" ? "The latest shop data refresh succeeded." : cloudStatus === "checking" ? "Checking your shop connection." : "The latest shop data refresh could not reach the cloud service."}>
+              <span className="live-dot" style={{ opacity: cloudStatus === "unavailable" ? 0.45 : 1 }}/>
+              <span>{cloudStatus === "connected" ? "Cloud connected" : cloudStatus === "checking" ? "Checking cloud" : "Cloud unavailable"}</span>
+            </div>
             <button className="icon-button theme-button" aria-label={dark ? "Switch to light theme" : "Switch to dark theme"} onClick={() => setDark(!dark)}>{dark ? <Sun size={18}/> : <Moon size={18}/>}</button>
             <div className="topbar-divider"/>
             <span className="topbar-product-tag"><span className="mode-indicator"/> {isDesktopApp() ? "Desktop workspace" : "Shop console"}</span>
