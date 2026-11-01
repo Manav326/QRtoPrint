@@ -374,9 +374,21 @@ try {
   for (const route of routes.filter(item => item.auth)) {
     const context = await browser.newContext({ viewport: { width: 1280, height: 900 } });
     const page = await preparePage(context, route);
+    const signedInToken = route.auth === "admin" ? adminToken : shopToken;
+    await page.route("**/api/v1/auth/login", request => request.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        tokenType: "Bearer",
+        accessToken: signedInToken,
+        refreshToken: "visual-qa-refresh-token",
+        accessTokenExpiresUtc: "2099-01-01T00:00:00.000Z"
+      })
+    }));
     await page.goto(`${baseUrl}${route.path}`, { waitUntil: "domcontentloaded" });
     await waitForRoute(page, ".app-shell");
     await page.getByRole("button", { name: "Switch to dark theme" }).click();
+    await page.waitForFunction(() => document.documentElement.dataset.theme === "dark");
     if (route.auth === "admin") {
       await page.locator(".topbar").getByRole("button", { name: "Sign out" }).click();
     } else {
@@ -385,7 +397,17 @@ try {
     await waitForRoute(page, ".auth-screen");
     assert.equal(await page.locator("html").getAttribute("data-theme"), "dark", `${route.label} sign-out must preserve Dark.`);
     assert.equal(await page.evaluate(() => localStorage.getItem("qrtoprint.theme")), "dark");
-    results.push({ check: `${route.label} actual sign-out preserves theme`, passed: true });
+
+    await page.getByLabel("Email address").fill("theme-qa@example.invalid");
+    await page.getByLabel("Password").fill("ThemeQa-Password-2026!");
+    const signInLabel = route.auth === "admin" ? "Sign in to administration" : "Sign in to workspace";
+    await page.getByRole("button", { name: signInLabel }).click();
+    await waitForRoute(page, ".app-shell");
+    assert.equal(await page.locator("html").getAttribute("data-theme"), "dark", `${route.label} sign-in must restore Dark.`);
+    await page.reload({ waitUntil: "domcontentloaded" });
+    await waitForRoute(page, ".app-shell");
+    assert.equal(await page.locator("html").getAttribute("data-theme"), "dark", `${route.label} refresh after sign-in must preserve Dark.`);
+    results.push({ check: `${route.label} actual sign-out, sign-in and refresh preserve theme`, passed: true });
     await context.close();
   }
 
