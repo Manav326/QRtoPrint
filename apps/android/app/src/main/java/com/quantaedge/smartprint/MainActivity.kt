@@ -684,35 +684,6 @@ class MainActivity : AppCompatActivity() {
         content.addView(scanPrintView(), frameParams())
     }
 
-    private fun showConnectedShop() {
-        resetToolbar("Print")
-        navigation.menu.findItem(SCAN_PRINT).isChecked = true
-        content.removeAllViews()
-        val column = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            gravity = Gravity.CENTER_HORIZONTAL
-            setPadding(dp(24), dp(28), dp(24), dp(24))
-        }
-        val icon = ImageView(this).apply {
-            setImageResource(R.drawable.ic_nav_scan_print)
-            imageTintList = ColorStateList.valueOf(getColor(R.color.qp_primary))
-            setPadding(dp(18), dp(18), dp(18), dp(18))
-            background = roundedDrawable(getColor(R.color.qp_soft), dp(22))
-        }
-        column.addView(icon, LinearLayout.LayoutParams(dp(76), dp(76)))
-        column.addView(text("Shop connected", 21, R.color.qp_text, true).apply {
-            setPadding(0, dp(15), 0, dp(4))
-        })
-        column.addView(text(portalHost ?: "Ready to print", 13, R.color.qp_muted, false))
-        column.addView(button("Open print flow", true).apply {
-            setOnClickListener { showPrint() }
-        }, linearParams().apply { topMargin = dp(20) })
-        column.addView(button("Switch shop", false).apply {
-            setOnClickListener { switchShop() }
-        }, linearParams().apply { topMargin = dp(8) })
-        content.addView(column, frameParams())
-    }
-
     private fun scanPrintView(): View {
         val column = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -740,17 +711,6 @@ class MainActivity : AppCompatActivity() {
             setOnClickListener { showFiles() }
         }, LinearLayout.LayoutParams(-1, dp(44)).apply { topMargin = dp(8) })
         return column
-    }
-
-    private fun journeyIcon(resourceId: Int): ImageView = ImageView(this).apply {
-        setImageResource(resourceId)
-        imageTintList = ColorStateList.valueOf(getColor(R.color.qp_primary))
-        background = android.graphics.drawable.GradientDrawable().apply {
-            setColor(getColor(R.color.qp_soft))
-            cornerRadius = dp(15).toFloat()
-        }
-        setPadding(dp(12), dp(12), dp(12), dp(12))
-        importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
     }
 
     private fun showActivity() {
