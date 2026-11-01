@@ -373,4 +373,6 @@ class QrScannerPermissionInstrumentedTest {
             onView(withText("Allow camera for QR scanning."))
                 .check(matches(isDisplayed()))
             onView(withText("Allow camera")).check(matches(isDisplayed()))
-        }}
+        }
+    }
+}
