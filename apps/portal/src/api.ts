@@ -151,7 +151,11 @@ export interface AgentDevice {
 }
 
 export class ApiError extends Error {
-  constructor(message: string, public readonly status: number) {
+  constructor(
+    message: string,
+    public readonly status: number,
+    public readonly code: string | null = null
+  ) {
     super(message);
     this.name = "ApiError";
   }
@@ -318,11 +322,15 @@ export async function apiRequest<T>(
   }
 
   if (!response.ok) {
-    const body = payload as { title?: string; detail?: string; message?: string; errors?: Record<string, string[]> } | null;
+    const body = payload as { code?: string; title?: string; detail?: string; message?: string; errors?: Record<string, string[]> } | null;
     const validation = body?.errors
       ? Object.values(body.errors).flat().join(" ")
       : "";
-    throw new ApiError(validation || body?.detail || body?.message || body?.title || `Request failed (${response.status}).`, response.status);
+    throw new ApiError(
+      validation || body?.detail || body?.message || body?.title || `Request failed (${response.status}).`,
+      response.status,
+      body?.code ?? null
+    );
   }
 
   return payload as T;
