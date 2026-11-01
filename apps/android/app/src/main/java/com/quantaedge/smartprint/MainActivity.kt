@@ -1445,6 +1445,7 @@ class MainActivity : AppCompatActivity() {
             row.addView(pageMark, LinearLayout.LayoutParams(dp(36), dp(40)))
             val meta = LinearLayout(this).apply {
                 orientation = LinearLayout.VERTICAL
+                minimumWidth = dp(64)
                 setPadding(dp(10), 0, dp(6), 0)
             }
             meta.addView(text("Page ${position + 1}", 12, R.color.qp_text, true))
@@ -1452,7 +1453,7 @@ class MainActivity : AppCompatActivity() {
                 if (page.rotationDegrees == 0) "Original" else "${page.rotationDegrees}°",
                 10, R.color.qp_muted, false
             ).apply { setPadding(0, dp(2), 0, 0) })
-            row.addView(meta, LinearLayout.LayoutParams(0, -2, 1f))
+            row.addView(meta, LinearLayout.LayoutParams(-2, -2))
             val actions = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
             actions.addView(button("View", false).apply {
                 minHeight = dp(34)
