@@ -2,7 +2,7 @@ import { Fragment, useEffect, useRef, useState, type ReactNode } from "react";
 import {
   Activity, ArrowRight, Check, Clock3, Copy, CreditCard, FileText, FileUp, FolderOpen, LayoutDashboard,
   LifeBuoy, LogOut, Menu, Monitor, Plus, Printer, QrCode, Search, Settings,
-  ShieldCheck, Sun, Users, Wallet, X, PanelLeftClose, PanelLeftOpen, RotateCcw
+  ShieldCheck, Users, Wallet, X, PanelLeftClose, PanelLeftOpen, RotateCcw
 } from "lucide-react";
 import QRCode from "react-qr-code";
 import AuthScreen from "./AuthScreen";
@@ -48,6 +48,7 @@ const sections: { label: Section; icon: typeof LayoutDashboard }[] = [
 
 export default function App() {
   const route = resolvePortalRoute(window.location.pathname);
+  const [dark, setDark] = useState(readDarkModePreference);
   const toggleTheme = () => setDark(value => !value);
   useEffect(() => {
     saveDarkModePreference(dark);
@@ -74,7 +75,7 @@ export default function App() {
     };
     if (!tokens) return <PlatformAdminAuthScreen onAuthenticated={setTokens} dark={dark} onToggleTheme={toggleTheme}/>;
     if (!isPlatformAdminSession(tokens)) {
-      return <ScopeAccessDenied scope="platform administration" onSignOut={onAdminSignOut}/>;
+      return <ScopeAccessDenied scope="platform administration" onSignOut={onAdminSignOut} dark={dark} onToggleTheme={toggleTheme}/>;
     }
     return <PlatformAdminConsole tokens={tokens} onSignOut={onAdminSignOut} dark={dark} onToggleTheme={toggleTheme}/>;
   }
@@ -118,7 +119,6 @@ function ShopConsole({ tokens, onSignOut, dark, onToggleTheme }: { tokens: AuthT
     window.addEventListener("popstate", syncSectionFromPath);
     return () => window.removeEventListener("popstate", syncSectionFromPath);
   }, []);
-  const [dark, setDark] = useState(readDarkModePreference);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(readSidebarCollapsedPreference);
   const reloadInFlight = useRef(false);
