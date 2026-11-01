@@ -383,7 +383,7 @@ jobs:
           push: true
           build-args: |
             VITE_SMARTPRINT_RELEASES_API_URL=${{ github.api_url }}/repos/${{ github.repository }}/releases/latest
-            VITE_SMARTPRINT_RELEASES_URL=${{ github.server_url }}/${{ github.repository }}/releases/latest
+            VITE_SMARTPRINT_RELEASES_URL=${{ github.server_url }}/${{ github.repository }}/releases
           tags: |
             ghcr.io/manav326/qrtoprint-portal:latest
             ghcr.io/manav326/qrtoprint-portal:sha-${{ github.sha }}
