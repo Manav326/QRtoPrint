@@ -1607,6 +1607,7 @@ class MainActivity : AppCompatActivity() {
             }
             val pages = DocumentBatchComposer.pageEdits(file).toMutableList()
             clearPdfEditorPreview()
+            folderPath = file.parentFile?.let { store.pathOf(it) }.orEmpty()
             editingPdf = file
             editingPdfPageIndex = 0
             renderPdfEditor(file, pages)
@@ -1629,7 +1630,7 @@ class MainActivity : AppCompatActivity() {
         pickerMode = false
         toolbar.title = "Edit PDF"
         toolbar.setNavigationIcon(android.R.drawable.ic_media_previous)
-        toolbar.navigationContentDescription = "Back to My Files"
+        toolbar.navigationContentDescription = "Back to ${file.parentFile?.name ?: "My Files"}"
         toolbar.setNavigationOnClickListener { closePdfEditor() }
         toolbar.menu.findItem(OPEN_WITH)?.isVisible = false
         setBottomNavigationVisible(false)
