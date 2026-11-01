@@ -1232,44 +1232,53 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun showEntryMenu(anchor: View, file: File) {
-        val menu = PopupMenu(this, anchor)
-        if (!file.isDirectory) menu.menu.add("Open")
-        menu.menu.add("Rename")
-        menu.menu.add(if (file.isDirectory) "Export folder" else "Export")
-        if (!file.isDirectory && file.extension.equals("pdf", true)) menu.menu.add("Edit PDF pages")
-        menu.menu.add("Move to folder")
-        val siblingItems = file.parentFile?.let { store.list(it) }.orEmpty()
-        val position = siblingItems.indexOfFirst { it.canonicalPath == file.canonicalPath }
-        if (position > 0) menu.menu.add("Move earlier")
-        if (position >= 0 && position < siblingItems.lastIndex) menu.menu.add("Move later")
-        if (!file.isDirectory) menu.menu.add("Share")
-        menu.menu.add("Delete")
-        menu.setOnMenuItemClickListener { item ->
-            when (item.title.toString()) {
-                "Open" -> openDocument(file)
-                "Edit PDF pages" -> showPdfEditor(file)
-                "Rename" -> nameDialog("Rename", file.name) { name ->
-                    try { store.rename(file, name); selectedFilePaths.remove(file.canonicalPath); showFiles() }
-                    catch (e: Exception) { toast("Rename failed: ${message(e)}") }
-                }
-                "Export" -> { exportFile = file; exportOne.launch(file.name) }
-                "Export folder" -> { exportFolder = file; exportTree.launch(null) }
-                "Move to folder" -> showMoveDestinationPicker(file)
-                "Move earlier" -> { try { store.reorder(file, -1); showFiles() } catch (e: Exception) { toast("Reorder failed: ${message(e)}") } }
-                "Move later" -> { try { store.reorder(file, 1); showFiles() } catch (e: Exception) { toast("Reorder failed: ${message(e)}") } }
-                "Share" -> shareDocument(file)
-                "Delete" -> MaterialAlertDialogBuilder(this)
-                    .setTitle("Delete ${if (file.isDirectory) "folder" else "document"}?")
-                    .setMessage("This removes the saved copy from this phone only.")
-                    .setNegativeButton("Cancel", null)
-                    .setPositiveButton("Delete") { _, _ ->
-                        try { store.delete(file); showFiles() }
-                        catch (e: Exception) { toast("Delete failed: ${message(e)}") }
-                    }.show()
-            }
-            true
+        val actions = mutableListOf<Pair<String, () -> Unit>>()
+        if (!file.isDirectory) actions += "Open" to { openDocument(file) }
+        if (!file.isDirectory && file.extension.equals("pdf", true)) {
+            actions += "Edit PDF" to { showPdfEditor(file) }
         }
-        menu.show()
+        actions += "Rename" to {
+            nameDialog("Rename", file.name) { name ->
+                try {
+                    store.rename(file, name)
+                    selectedFilePaths.remove(file.canonicalPath)
+                    expandedFolderPaths.remove(file.canonicalPath)
+                    showFiles()
+                } catch (e: Exception) { toast("Rename failed: " + message(e)) }
+            }
+        }
+        actions += (if (file.isDirectory) "Export folder" else "Export") to {
+            if (file.isDirectory) { exportFolder = file; exportTree.launch(null) }
+            else { exportFile = file; exportOne.launch(file.name) }
+        }
+        actions += "Move to folder" to { showMoveDestinationPicker(file) }
+        val siblings = file.parentFile?.let { store.list(it) }.orEmpty()
+        val position = siblings.indexOfFirst { it.canonicalPath == file.canonicalPath }
+        if (position > 0) actions += "Move earlier" to {
+            try { store.reorder(file, -1); showFiles() }
+            catch (e: Exception) { toast("Reorder failed: " + message(e)) }
+        }
+        if (position >= 0 && position < siblings.lastIndex) actions += "Move later" to {
+            try { store.reorder(file, 1); showFiles() }
+            catch (e: Exception) { toast("Reorder failed: " + message(e)) }
+        }
+        if (!file.isDirectory) actions += "Share" to { shareDocument(file) }
+        actions += "Delete" to {
+            showConfirmSheet(
+                if (file.isDirectory) "Delete folder?" else "Delete file?",
+                "This removes the local copy.",
+                "Delete",
+                destructive = true
+            ) {
+                try {
+                    store.delete(file)
+                    selectedFilePaths.remove(file.canonicalPath)
+                    expandedFolderPaths.remove(file.canonicalPath)
+                    showFiles()
+                } catch (e: Exception) { toast("Delete failed: " + message(e)) }
+            }
+        }
+        showOptionSheet(if (file.isDirectory) "Folder actions" else "File actions", actions)
     }
 
     private fun showMoveDestinationPicker(file: File) {
@@ -1286,20 +1295,18 @@ class MainActivity : AppCompatActivity() {
                     destinations.add(path)
                 }
             }
-        val labels = destinations.map { if (it.isBlank()) "My files" else "My files / " + it.replace("/", " / ") }
-        MaterialAlertDialogBuilder(this)
-            .setTitle("Move to folder")
-            .setItems(labels.toTypedArray()) { _, index ->
+        val labels = destinations.map { if (it.isBlank()) "My Files" else it.replace("/", "  /  ") }
+        val actions = labels.mapIndexed { index, label ->
+            label to {
                 try {
                     store.move(file, destinations[index])
                     selectedFilePaths.remove(file.canonicalPath)
+                    expandedFolderPaths.remove(file.canonicalPath)
                     showFiles()
-                } catch (e: Exception) {
-                    toast("Move failed: ${message(e)}")
-                }
+                } catch (e: Exception) { toast("Move failed: " + message(e)) }
             }
-            .setNegativeButton("Cancel", null)
-            .show()
+        }
+        showOptionSheet("Move to folder", actions)
     }
 
     private fun exportSelected(files: List<File>) {
