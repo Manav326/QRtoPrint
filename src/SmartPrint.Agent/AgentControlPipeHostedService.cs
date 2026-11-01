@@ -96,7 +96,7 @@ public sealed class AgentControlPipeHostedService(
             var count = await reader.ReadAsync(requestBuffer.AsMemory(requestLength, 1), ct);
             if (count == 0)
                 break;
-            if (requestBuffer[requestLength] == '\\n')
+            if (requestBuffer[requestLength] == '\n')
             {
                 requestComplete = true;
                 break;
@@ -104,7 +104,7 @@ public sealed class AgentControlPipeHostedService(
             requestLength += count;
         }
 
-        var requestLine = new string(requestBuffer, 0, requestLength).TrimEnd('\\r');
+        var requestLine = new string(requestBuffer, 0, requestLength).TrimEnd('\r');
         if (!requestComplete ||
             string.IsNullOrWhiteSpace(requestLine) ||
             Encoding.UTF8.GetByteCount(requestLine) > MaximumRequestBytes)
