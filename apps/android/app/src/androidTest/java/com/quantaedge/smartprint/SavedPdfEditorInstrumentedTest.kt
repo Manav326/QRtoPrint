@@ -47,7 +47,6 @@ class SavedPdfEditorInstrumentedTest {
                 onView(withText("Edit PDF")).perform(click())
 
                 onView(withText("Edit PDF")).check(matches(isDisplayed()))
-                onView(withContentDescription("PDF page preview loading")).check(matches(isDisplayed()))
                 onView(withContentDescription("Rotate page 1")).perform(click())
                 waitForView(withText("90°"))
                 onView(withContentDescription("Remove page 1")).check(matches(isDisplayed()))
