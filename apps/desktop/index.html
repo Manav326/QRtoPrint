@@ -9,6 +9,8 @@
         try { theme = localStorage.getItem("qrtoprint.theme") === "dark" ? "dark" : "light"; } catch {}
         document.documentElement.dataset.theme = theme;
         document.documentElement.style.colorScheme = theme;
+        const color = document.querySelector('meta[name="theme-color"]');
+        if (color) color.content = theme === "dark" ? "#0c0f16" : "#f4f6fa";
       })();
     </script>
     <meta name="theme-color" content="#0c0f16" />
