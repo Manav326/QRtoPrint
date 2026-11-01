@@ -190,13 +190,13 @@ object CustomerAccountClient {
                 quotedAmountMinor = job.optLong("quotedAmountMinor"),
                 createdUtc = job.optString("createdUtc"),
                 shopName = job.optString("shopName"),
-                originalFileName = job.optString("originalFileName").ifBlank { "Print document" },
+                originalFileName = job.optString("originalFileName").takeUnless { it.isBlank() || it == "null" } ?: "Print document",
                 paidAmountMinor = job.optLong("paidAmountMinor"),
                 refundedAmountMinor = job.optLong("refundedAmountMinor"),
-                paymentStatus = job.optString("paymentStatus"),
-                paymentMethod = job.optString("paymentMethod"),
+                paymentStatus = job.optString("paymentStatus").takeUnless { it.isBlank() || it == "null" }.orEmpty(),
+                paymentMethod = job.optString("paymentMethod").takeUnless { it.isBlank() || it == "null" }.orEmpty(),
                 rejectedPageNumbersJson = job.optString("rejectedPageNumbersJson", "[]"),
-                outputCompletedUtc = job.optString("outputCompletedUtc").takeIf { it.isNotBlank() }
+                outputCompletedUtc = job.optString("outputCompletedUtc").takeUnless { it.isBlank() || it == "null" }
             )
         }
     }
