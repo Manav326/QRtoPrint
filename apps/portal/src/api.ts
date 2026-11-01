@@ -443,6 +443,7 @@ export interface ShopPayment {
   method: "UPI" | "CASH";
   status: string;
   amountMinor: number;
+  refundedAmountMinor?: number;
   currency: string;
   paymentReference?: string | null;
   upiIdSnapshot?: string | null;
