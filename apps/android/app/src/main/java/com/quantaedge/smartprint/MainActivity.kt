@@ -1021,6 +1021,79 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    private inner class FloatingItemDragShadowBuilder(
+        private val dragView: View
+    ) : View.DragShadowBuilder(dragView) {
+        override fun onProvideShadowMetrics(
+            outShadowSize: android.graphics.Point,
+            outShadowTouchPoint: android.graphics.Point
+        ) {
+            outShadowSize.set(dragView.width, dragView.height)
+            outShadowTouchPoint.set(dragView.width / 2, dp(24))
+        }
+
+        override fun onDrawShadow(canvas: android.graphics.Canvas) {
+            val shadowPaint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
+                color = getColor(R.color.qp_card)
+                setShadowLayer(dp(9).toFloat(), 0f, dp(4).toFloat(), 0x66000000)
+            }
+            canvas.drawRoundRect(
+                0f, 0f, dragView.width.toFloat(), dragView.height.toFloat(),
+                dp(11).toFloat(), dp(11).toFloat(), shadowPaint
+            )
+            dragView.draw(canvas)
+        }
+    }
+
+    private fun addFolderBreadcrumbs(parentView: LinearLayout, path: String, isPicker: Boolean) {
+        val scroll = HorizontalScrollView(this).apply {
+            isHorizontalScrollBarEnabled = false
+            clipToPadding = false
+            overScrollMode = View.OVER_SCROLL_NEVER
+            setPadding(dp(2), dp(2), dp(2), dp(7))
+        }
+        val segments = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+        }
+
+        fun addSeparator() {
+            if (segments.childCount > 0) {
+                segments.addView(text("›", 13, R.color.qp_muted, false).apply {
+                    setPadding(dp(7), 0, dp(7), 0)
+                }, LinearLayout.LayoutParams(-2, -2))
+            }
+        }
+
+        fun addFolder(label: String, targetPath: String) {
+            addSeparator()
+            segments.addView(text(label, 12, R.color.qp_primary, true).apply {
+                contentDescription = "Open folder $label"
+                isClickable = true
+                isFocusable = true
+                setPadding(dp(2), dp(5), dp(2), dp(5))
+                val selectable = android.util.TypedValue()
+                if (theme.resolveAttribute(android.R.attr.selectableItemBackground, selectable, true)) {
+                    setBackgroundResource(selectable.resourceId)
+                }
+                setOnClickListener {
+                    if (isPicker) pickerPath = targetPath else folderPath = targetPath
+                    refreshLibrary(preserveScroll = false)
+                }
+            }, LinearLayout.LayoutParams(-2, -2))
+        }
+
+        addFolder("My Files", "")
+        var currentPath = ""
+        path.trim('/').split('/').filter { it.isNotBlank() }.forEach { segment ->
+            currentPath = if (currentPath.isBlank()) segment else "$currentPath/$segment"
+            addFolder(segment, currentPath)
+        }
+        scroll.addView(segments, HorizontalScrollView.LayoutParams(-2, -1))
+        parentView.addView(scroll, LinearLayout.LayoutParams(-1, dp(35)))
+        scroll.post { scroll.fullScroll(View.FOCUS_RIGHT) }
+    }
+
     private fun libraryView(isPicker: Boolean): View {
         val scroll = ScrollView(this).apply { isFillViewport = true; clipToPadding = false }
         val column = LinearLayout(this).apply {
@@ -1097,23 +1170,7 @@ class MainActivity : AppCompatActivity() {
             column.addView(searchRow, linearParams().apply { bottomMargin = dp(10) })
         }
 
-        val crumb = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-            setPadding(dp(2), dp(3), dp(2), dp(8))
-        }
-        val breadcrumbText = if (path.isBlank()) "My Files" else "My Files  ›  " + path.replace("/", "  ›  ")
-        crumb.addView(text(breadcrumbText, 12, R.color.qp_muted, true),
-            LinearLayout.LayoutParams(0, -2, 1f))
-        if (path.isNotEmpty()) {
-            val up = button("Back", false).apply { minHeight = dp(34) }
-            crumb.addView(up)
-            up.setOnClickListener {
-                if (isPicker) pickerPath = parent(pickerPath) else folderPath = parent(folderPath)
-                refreshLibrary(preserveScroll = false)
-            }
-        }
-        column.addView(crumb, linearParams())
+        addFolderBreadcrumbs(column, path, isPicker)
 
         if (!isPicker) {
             val actions = LinearLayout(this).apply {
@@ -1249,6 +1306,7 @@ class MainActivity : AppCompatActivity() {
             gravity = Gravity.CENTER_VERTICAL
             setPadding(dp(8 + depth * 15), dp(7), dp(5), dp(7))
             minimumHeight = dp(52)
+            elevation = dp(3).toFloat()
             background = roundedDrawable(
                 if (file.isDirectory && expandedFolderPaths.contains(file.canonicalPath)) getColor(R.color.qp_soft) else getColor(R.color.qp_surface),
                 dp(9)
@@ -1281,7 +1339,7 @@ class MainActivity : AppCompatActivity() {
         details.addView(text(info, 10, R.color.qp_muted, false).apply { setPadding(0, dp(2), 0, 0) })
         row.addView(details, LinearLayout.LayoutParams(0, -2, 1f))
 
-        if (file.isDirectory) {
+        if (file.isDirectory && isPicker) {
             val expanded = expandedFolderPaths.contains(file.canonicalPath)
             val chevron = ImageView(this).apply {
                 setImageResource(R.drawable.ic_chevron_right)
@@ -1327,7 +1385,7 @@ class MainActivity : AppCompatActivity() {
 
         if (!isPicker && showActions) {
             val more = ImageView(this).apply {
-                setImageResource(android.R.drawable.ic_menu_more)
+                setImageResource(R.drawable.ic_more_vertical)
                 imageTintList = ColorStateList.valueOf(getColor(R.color.qp_muted))
                 contentDescription = "More options for " + file.name
                 setPadding(dp(8), dp(8), dp(8), dp(8))
@@ -1352,12 +1410,10 @@ class MainActivity : AppCompatActivity() {
                 else -> openDocument(file)
             }
         }
-        if (!isPicker && showActions && file.isDirectory) {
-            row.setOnLongClickListener { showEntryMenu(row, file); true }
-        } else if (!isPicker && showActions) {
+        if (!isPicker && showActions) {
             row.setOnLongClickListener {
                 val clip = ClipData.newPlainText("SmartPrint item order", file.name)
-                row.startDragAndDrop(clip, View.DragShadowBuilder(row), file.canonicalPath, 0)
+                row.startDragAndDrop(clip, FloatingItemDragShadowBuilder(row), file.canonicalPath, 0)
             }
             row.setOnDragListener { _, event ->
                 when (event.action) {
@@ -1397,6 +1453,14 @@ class MainActivity : AppCompatActivity() {
 
     private fun showEntryMenu(anchor: View, file: File) {
         val actions = mutableListOf<Pair<String, () -> Unit>>()
+        if (file.isDirectory && runCatching { store.list(file).isNotEmpty() }.getOrDefault(false)) {
+            val isExpanded = expandedFolderPaths.contains(file.canonicalPath)
+            actions += (if (isExpanded) "Collapse in list" else "Expand in list") to {
+                if (isExpanded) expandedFolderPaths.remove(file.canonicalPath)
+                else expandedFolderPaths.add(file.canonicalPath)
+                refreshLibrary()
+            }
+        }
         if (!file.isDirectory) actions += "Open" to { openDocument(file) }
         if (!file.isDirectory && supportsInAppViewer(file)) actions += "Open with another app" to { openDocumentExternally(file) }
         if (!file.isDirectory && file.extension.equals("pdf", true)) {
@@ -1580,10 +1644,7 @@ class MainActivity : AppCompatActivity() {
                 orientation = LinearLayout.HORIZONTAL
                 gravity = Gravity.CENTER_VERTICAL
             }
-            actions.addView(button("View", false).apply {
-                minHeight = dp(42)
-                minWidth = dp(0)
-                contentDescription = "Preview page ${position + 1}"
+            actions.addView(iconActionButton(R.drawable.ic_preview, "Preview page ${position + 1}").apply {
                 setOnClickListener {
                     try {
                         showImageSheet("Page ${position + 1}", DocumentBatchComposer.renderPagePreview(file, page))
@@ -1592,19 +1653,13 @@ class MainActivity : AppCompatActivity() {
                     }
                 }
             }, LinearLayout.LayoutParams(0, dp(42), 1f))
-            actions.addView(button("↻", false).apply {
-                minHeight = dp(42)
-                minWidth = dp(0)
-                contentDescription = "Rotate page ${position + 1}"
+            actions.addView(iconActionButton(R.drawable.ic_rotate, "Rotate page ${position + 1}").apply {
                 setOnClickListener {
                     pages[position] = page.copy(rotationDegrees = (page.rotationDegrees + 90) % 360)
                     renderPdfEditor(file, pages)
                 }
-            }, LinearLayout.LayoutParams(0, dp(42), 1f).apply { marginStart = dp(4) })
-            actions.addView(button("↑", false).apply {
-                minHeight = dp(42)
-                minWidth = dp(0)
-                contentDescription = "Move page ${position + 1} up"
+            }, LinearLayout.LayoutParams(0, dp(42), 1f).apply { marginStart = dp(5) })
+            actions.addView(iconActionButton(R.drawable.ic_arrow_up, "Move page ${position + 1} up").apply {
                 isEnabled = position > 0
                 alpha = if (position > 0) 1f else 0.4f
                 setOnClickListener {
@@ -1614,11 +1669,8 @@ class MainActivity : AppCompatActivity() {
                         renderPdfEditor(file, pages)
                     }
                 }
-            }, LinearLayout.LayoutParams(0, dp(42), 1f).apply { marginStart = dp(4) })
-            actions.addView(button("↓", false).apply {
-                minHeight = dp(42)
-                minWidth = dp(0)
-                contentDescription = "Move page ${position + 1} down"
+            }, LinearLayout.LayoutParams(0, dp(42), 1f).apply { marginStart = dp(5) })
+            actions.addView(iconActionButton(R.drawable.ic_arrow_down, "Move page ${position + 1} down").apply {
                 isEnabled = position < pages.lastIndex
                 alpha = if (position < pages.lastIndex) 1f else 0.4f
                 setOnClickListener {
@@ -1628,11 +1680,8 @@ class MainActivity : AppCompatActivity() {
                         renderPdfEditor(file, pages)
                     }
                 }
-            }, LinearLayout.LayoutParams(0, dp(42), 1f).apply { marginStart = dp(4) })
-            actions.addView(button("×", false).apply {
-                minHeight = dp(42)
-                minWidth = dp(0)
-                contentDescription = "Remove page ${position + 1}"
+            }, LinearLayout.LayoutParams(0, dp(42), 1f).apply { marginStart = dp(5) })
+            actions.addView(iconActionButton(R.drawable.ic_delete, "Remove page ${position + 1}").apply {
                 setOnClickListener {
                     if (pages.size <= 1) {
                         toast("A PDF needs one page.")
@@ -1641,7 +1690,7 @@ class MainActivity : AppCompatActivity() {
                         renderPdfEditor(file, pages)
                     }
                 }
-            }, LinearLayout.LayoutParams(0, dp(42), 1f).apply { marginStart = dp(4) })
+            }, LinearLayout.LayoutParams(0, dp(42), 1f).apply { marginStart = dp(5) })
             row.addView(actions, LinearLayout.LayoutParams(-1, dp(42)).apply { topMargin = dp(8) })
             row.setOnLongClickListener {
                 showConfirmSheet("Remove page?", "The original stays unchanged.", "Remove", destructive = true) {
@@ -1656,7 +1705,7 @@ class MainActivity : AppCompatActivity() {
             }
             column.addView(row, linearParams().apply { bottomMargin = dp(5) })
         }
-        column.addView(text("Swipe-free · Use arrows to reorder.", 10, R.color.qp_muted, false)
+        column.addView(text("Use the page controls to preview, rotate, reorder or remove pages.", 10, R.color.qp_muted, false)
             .apply { setPadding(dp(2), dp(8), 0, 0) })
         content.addView(scroll, frameParams())
     }
@@ -1683,6 +1732,22 @@ class MainActivity : AppCompatActivity() {
             }
         }.start()
     }
+
+    private fun iconActionButton(iconResource: Int, description: String): ImageView =
+        ImageView(this).apply {
+            setImageResource(iconResource)
+            imageTintList = ColorStateList.valueOf(getColor(R.color.qp_text))
+            contentDescription = description
+            scaleType = ImageView.ScaleType.CENTER
+            setPadding(dp(9), dp(9), dp(9), dp(9))
+            background = roundedDrawable(
+                getColor(R.color.qp_surface), dp(11), getColor(R.color.qp_outline)
+            )
+            isClickable = true
+            isFocusable = true
+            minimumWidth = dp(42)
+            minimumHeight = dp(42)
+        }
 
     private fun sheetRoot(title: String, subtitle: String? = null): Pair<BottomSheetDialog, LinearLayout> {
         val dialog = BottomSheetDialog(this)
@@ -2315,10 +2380,27 @@ class MainActivity : AppCompatActivity() {
             }.orEmpty()
             (if (siblings.any { sameDocument(it, file) }) siblings else siblings + file)
         }
-        val reader = SmartPrintDocumentViewer(this, file, images, startPosition) { current ->
-            viewingDocument = current
-            toolbar.title = current.name
+        val folderPath = file.parentFile?.let { store.pathOf(it) }.orEmpty()
+        val breadcrumbs = mutableListOf("My Files" to "")
+        var breadcrumbPath = ""
+        folderPath.split('/').filter { it.isNotBlank() }.forEach { segment ->
+            breadcrumbPath = if (breadcrumbPath.isBlank()) segment else "$breadcrumbPath/$segment"
+            breadcrumbs += segment to breadcrumbPath
         }
+        val reader = SmartPrintDocumentViewer(
+            this,
+            file,
+            images,
+            startPosition,
+            onNavigateImage = { current -> viewingDocument = current },
+            folderBreadcrumbs = breadcrumbs,
+            onNavigateFolder = { destination ->
+                folderPath = destination
+                closeDocumentViewer()
+                this@MainActivity.folderPath = destination
+                showFiles()
+            }
+        )
         documentViewer = reader
         content.addView(reader, frameParams())
     }
