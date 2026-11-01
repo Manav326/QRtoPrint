@@ -65,6 +65,29 @@ public sealed class TenantModelTests
             nameof(PrintJobEvent.TenantId), nameof(PrintJobEvent.PrintJobId));
         AssertCompositeForeignKey(model.FindEntityType(typeof(PrintPayment))!,
             nameof(PrintPayment.TenantId), nameof(PrintPayment.PrintJobId));
+
+        var batchPayment = model.FindEntityType(typeof(PrintBatchPayment))!;
+        Assert.Equal("PrintBatchPayments", batchPayment.GetTableName());
+        AssertCompositeForeignKey(batchPayment,
+            nameof(PrintBatchPayment.TenantId), nameof(PrintBatchPayment.CustomerSessionId));
+        var batchSessionRelationship = Assert.Single(batchPayment.GetForeignKeys(), relationship =>
+            relationship.Properties.Any(property => property.Name == nameof(PrintBatchPayment.CustomerSessionId)));
+        Assert.Equal(DeleteBehavior.Restrict, batchSessionRelationship.DeleteBehavior);
+        var activeBatchPaymentIndex = Assert.Single(batchPayment.GetIndexes(), index =>
+            index.Properties.Select(property => property.Name)
+                .SequenceEqual(new[] { nameof(PrintBatchPayment.TenantId), nameof(PrintBatchPayment.BatchId) }));
+        Assert.True(activeBatchPaymentIndex.IsUnique);
+        Assert.Equal(
+            "\\"Status\\" IN ('AWAITING_CUSTOMER_PAYMENT','CUSTOMER_REPORTED','CASH_AWAITING_PAYMENT')",
+            activeBatchPaymentIndex.GetFilter());
+
+        var batchAllocationRelationship = Assert.Single(
+            model.FindEntityType(typeof(PrintPayment))!.GetForeignKeys(),
+            relationship => relationship.Properties.Any(property => property.Name == nameof(PrintPayment.BatchPaymentId)));
+        Assert.Equal(DeleteBehavior.Restrict, batchAllocationRelationship.DeleteBehavior);
+        Assert.True(model.FindEntityType(typeof(PrintPayment))!
+            .FindProperty(nameof(PrintPayment.BatchPaymentId))!.IsNullable);
+
         AssertCompositeForeignKey(model.FindEntityType(typeof(ShopPaymentProfile))!,
             nameof(ShopPaymentProfile.TenantId));
 
