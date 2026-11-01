@@ -3341,10 +3341,22 @@ function CustomerPrintFlow({publicCode,sessionToken,paymentOptions,localAgent,lo
   const batchCheckoutFileCount=batchCheckoutUsesPayment?batchPayment!.fileCount:batchPayableItems.length;
   const batchCheckoutCurrency=batchCheckoutUsesPayment?batchPayment!.currency:(batchPayableItems[0]?.job.currency??"INR");
   const quoteEntries=quoteItems.map(item=>({item,quote:quotesByJobId[item.job.id]})).filter(entry=>!!entry.quote);
-  const batchQuoteTotal=quoteEntries.reduce((total,entry)=>{
-    const status=batchStatuses[entry.item.job.id]?.status??entry.item.job.status;
-    return status==="REJECTED"||status==="REFUNDED"?total:total+(entry.quote?.quotedAmountMinor??0);
-  },0);
+  const acceptedQuoteEntries=quoteEntries.filter(entry=>
+    !["REJECTED","REFUNDED"].includes(statusForBatchItem(entry.item))
+  );
+  const batchQuoteTotal=acceptedQuoteEntries.reduce((total,entry)=>
+    total+(entry.quote?.quotedAmountMinor??0),0);
+  const batchOriginalPages=quoteEntries.reduce((total,entry)=>
+    total+(entry.quote?.pageCount??entry.item.job.pageCount),0);
+  const batchMonoPrintedPages=acceptedQuoteEntries.reduce((total,entry)=>
+    total+(entry.quote?.colourMode==="Mono"?(entry.quote.pageCount*entry.quote.copies):0),0);
+  const batchColourPrintedPages=acceptedQuoteEntries.reduce((total,entry)=>
+    total+(entry.quote?.colourMode==="Colour"?(entry.quote.pageCount*entry.quote.copies):0),0);
+  const batchPrintedPages=batchMonoPrintedPages+batchColourPrintedPages;
+  const batchMonoAmount=acceptedQuoteEntries.reduce((total,entry)=>
+    total+(entry.quote?.colourMode==="Mono"?(entry.quote.quotedAmountMinor??0):0),0);
+  const batchColourAmount=acceptedQuoteEntries.reduce((total,entry)=>
+    total+(entry.quote?.colourMode==="Colour"?(entry.quote.quotedAmountMinor??0):0),0);
   const canSendBatch=quoteItems.length>0&&quoteEntries.length===quoteItems.length&&quoteEntries.some(entry=>entry.quote?.status==="AWAITING_CUSTOMER_APPROVAL");
   const canCalculateBatch=quoteItems.some(item=>{
     const status=batchStatuses[item.job.id]?.status??item.job.status;
@@ -3444,9 +3456,15 @@ function CustomerPrintFlow({publicCode,sessionToken,paymentOptions,localAgent,lo
     </>}
     {error&&<div className="customer-flow-error" role="alert">{error}</div>}
     {quoteEntries.length>0&&<div className="customer-quote-card customer-batch-quote-card">
-      <div><span>BATCH QUOTE</span><strong>{formatMoney(batchQuoteTotal,quoteEntries[0].quote!.currency)}</strong><small>{quoteEntries.length} files · {quoteEntries.reduce((sum,entry)=>sum+entry.item.job.pageCount,0)} pages</small></div>
-      <div className="customer-batch-quote-lines">{quoteEntries.map(entry=><div key={entry.item.job.id}><span>{entry.item.document.originalFileName}{(batchStatuses[entry.item.job.id]?.status??entry.item.job.status)==="REJECTED"?" · Rejected":""}</span><strong>{(batchStatuses[entry.item.job.id]?.status??entry.item.job.status)==="REJECTED"?"Excluded":formatMoney(entry.quote!.quotedAmountMinor,entry.quote!.currency)}</strong></div>)}</div>
-      <p className="customer-payment-model-note">After the shop reviews the batch, pay once for all accepted files. Files the shop rejects are excluded from checkout.</p>
+      <div><span>BATCH QUOTE</span><strong>{formatMoney(batchQuoteTotal,quoteEntries[0].quote!.currency)}</strong><small>{quoteEntries.length} files · {batchOriginalPages} source pages · {batchPrintedPages} printed pages</small></div>
+      <div className="customer-batch-quote-lines">{quoteEntries.map(entry=><div key={entry.item.job.id}><span>{entry.item.document.originalFileName}{["REJECTED","REFUNDED"].includes(statusForBatchItem(entry.item))?" · Rejected":""}</span><strong>{["REJECTED","REFUNDED"].includes(statusForBatchItem(entry.item))?"Excluded":formatMoney(entry.quote!.quotedAmountMinor,entry.quote!.currency)}</strong></div>)}</div>
+      <div className="customer-batch-print-breakdown">
+        <div><span>B&W · {batchMonoPrintedPages} printed pages</span><strong>{formatMoney(batchMonoAmount,quoteEntries[0].quote!.currency)}</strong></div>
+        <div><span>Colour · {batchColourPrintedPages} printed pages</span><strong>{formatMoney(batchColourAmount,quoteEntries[0].quote!.currency)}</strong></div>
+        <div className="customer-batch-print-total"><span>Total printed pages</span><strong>{batchPrintedPages}</strong></div>
+        <div className="customer-batch-print-total"><span>Total payable</span><strong>{formatMoney(batchQuoteTotal,quoteEntries[0].quote!.currency)}</strong></div>
+      </div>
+      <p className="customer-payment-model-note">Printed pages = source pages × copies for each file. Amounts use the shop's saved B&W/Colour rate card. Rejected files are excluded. After review, pay once for all accepted files.</p>
     </div>}
     {canSendBatch&&<button className="customer-flow-button" disabled={busy} onClick={()=>void acceptQuote()}>{busy?<span className="button-spinner"/>:"Send batch to shop"}</button>}
       {jobStatus?.status==="QUOTE_EXPIRED"&&<button className="customer-flow-button" disabled={busy} onClick={()=>{setQuote(null);setQuotesByJobId(current=>{const next={...current};if(uploaded)delete next[uploaded.job.id];return next;});setJobStatus(null);setPayment(null);}}>Request a fresh quote</button>}
