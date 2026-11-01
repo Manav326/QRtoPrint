@@ -12,7 +12,7 @@ import {
   ApiError, isPlatformAdminSession, acceptCustomerQuote, approveShopPrintJob, assignShopPrintJobPrinter, calculateCustomerQuote, getShopCustomerHistory, getShopCustomers, getShopReportSummary,
   confirmShopPrintOutput, dispatchShopPrintJob,
   createAgentEnrollmentCode, createCustomerSession, createPrinter, createStation,
-  downloadShopDocument, getCustomerJobStatus, getShopJobEvents, getShopPrintJobsPage, loadShopData,
+  downloadShopDocument, getCustomerJobStatus, getShopJobEvents, getShopPrinters, getShopPrintJobsPage, loadShopData,
   logout, readStoredTokens, rejectShopPrintJob, rejectShopPayment, revokeAgentDevice,
   reportCustomerUpiPayment, renewCustomerPrintSession, resumeCustomerSession, rotateStationCode, startCustomerPayment, storeTokens,
   updatePrinterActive, updateShopPaymentSettings, updateShopPricing,
@@ -79,6 +79,7 @@ function ShopConsole({ tokens, onSignOut }: { tokens: AuthTokens; onSignOut: () 
   const [loadingOlderQueueJobs, setLoadingOlderQueueJobs] = useState(false);
   const [queueApiOffset, setQueueApiOffset] = useState(0);
   const [queueSearch, setQueueSearch] = useState("");
+  const queueSearchGeneration = useRef(0);
   const [agentDevices, setAgentDevices] = useState<AgentDevice[]>([]);
   const [paymentSettings, setPaymentSettings] = useState<ShopPaymentSettings | null>(null);
   const [payments, setPayments] = useState<ShopPayment[]>([]);
@@ -134,7 +135,11 @@ function ShopConsole({ tokens, onSignOut }: { tokens: AuthTokens; onSignOut: () 
 
   async function refreshPrintQueue() {
     try {
-      const latest = await getShopPrintJobsPage(tokens.accessToken, 0, 100, queueSearch);
+      const [latest, latestPrinters] = await Promise.all([
+        getShopPrintJobsPage(tokens.accessToken, 0, 100, queueSearch),
+        getShopPrinters(tokens.accessToken)
+      ]);
+      setPrinters(latestPrinters);
       const currentIds = new Set(printJobs.map(job => job.id));
       const hasNewJobs = latest.some(job => !currentIds.has(job.id));
       if (hasNewJobs) {
@@ -181,13 +186,16 @@ function ShopConsole({ tokens, onSignOut }: { tokens: AuthTokens; onSignOut: () 
 
   async function searchPrintQueue(value: string) {
     const normalized = value.trim().slice(0, 120);
+    const generation = ++queueSearchGeneration.current;
     setQueueSearch(normalized);
     try {
       const matches = await getShopPrintJobsPage(tokens.accessToken, 0, 100, normalized);
+      if (generation !== queueSearchGeneration.current) return;
       setPrintJobs(matches);
       setQueueApiOffset(matches.length);
       setHasMoreQueueJobs(matches.length === 100);
     } catch (exception) {
+      if (generation !== queueSearchGeneration.current) return;
       setError(exception instanceof Error ? exception.message : "Could not search the print queue.");
     }
   }
