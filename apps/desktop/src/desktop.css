@@ -408,3 +408,19 @@ body[data-app-shell="desktop"] .app-shell.light {
   --muted: #5f6b80;
   --faint: #626f84;
 }
+
+
+/* The desktop surface has its own higher-specificity palette. Keep its
+   semantic/secondary labels at the same contrast as the browser workspace. */
+html[data-theme="dark"] body[data-app-shell="desktop"] .app-shell:not(.light) {
+  --muted: #aab6ca;
+  --faint: #8996aa;
+}
+html[data-theme="light"] body[data-app-shell="desktop"] .app-shell.light {
+  --muted: #5f6b80;
+  --faint: #626f84;
+  --green: #126f4c;
+  --amber: #86520b;
+  --red: #b23d4d;
+  --blue: #2d5fa8;
+}
