@@ -2755,12 +2755,14 @@ shop.MapPost("/print-jobs/{jobId:guid}/reject", async (
         return Results.Ok(new { job.Id, job.JobNumber, job.Status, DuplicateRequest = true });
     }
 
-    if (job.Status != "AWAITING_SHOP_APPROVAL")
+    if (job.Status is not ("AWAITING_SHOP_APPROVAL" or "AWAITING_PAYMENT" or
+                          "AWAITING_CUSTOMER_PAYMENT" or "PAYMENT_REPORTED" or
+                          "AWAITING_COUNTER_PAYMENT"))
     {
         return Results.Conflict(new
         {
             code = "job_not_ready_for_rejection",
-            message = "Only jobs accepted by the customer and awaiting shop approval can be rejected here."
+            message = "Only a file that has not been handed to the shop computer can be rejected here. Paid files use the file-level refund review."
         });
     }
 
@@ -4710,8 +4712,12 @@ shop.MapPost("/payments/{paymentId:guid}/verify", async (
             filePayment.UpdatedUtc = batchVerifiedUtc;
             var batchJob = jobsById[filePayment.PrintJobId];
             var batchPreviousStatus = batchJob.Status;
-            batchJob.Status = "PAID_AUTHORISED";
-            batchJob.UpdatedUtc = batchVerifiedUtc;
+            var fileWasRejected = batchJob.Status is "REJECTED" or "REFUNDED";
+            if (!fileWasRejected)
+            {
+                batchJob.Status = "PAID_AUTHORISED";
+                batchJob.UpdatedUtc = batchVerifiedUtc;
+            }
             db.PrintJobEvents.Add(new PrintJobEvent
             {
                 TenantId = tenantId,
@@ -4720,9 +4726,11 @@ shop.MapPost("/payments/{paymentId:guid}/verify", async (
                 NewStatus = batchJob.Status,
                 ActorType = "ShopUser",
                 ActorId = actorId,
-                ReasonCode = batchPayment.Method == "UPI"
-                    ? "BATCH_UPI_PAYMENT_MANUALLY_VERIFIED"
-                    : "BATCH_CASH_RECEIVED_AT_COUNTER",
+                ReasonCode = fileWasRejected
+                    ? "BATCH_PAYMENT_VERIFIED_FOR_REJECTED_FILE_REFUND"
+                    : batchPayment.Method == "UPI"
+                        ? "BATCH_UPI_PAYMENT_MANUALLY_VERIFIED"
+                        : "BATCH_CASH_RECEIVED_AT_COUNTER",
                 CreatedUtc = batchVerifiedUtc
             });
         }
@@ -4797,7 +4805,9 @@ shop.MapPost("/payments/{paymentId:guid}/verify", async (
     payment.VerifiedUtc = now;
     payment.UpdatedUtc = now;
     var previousStatus = job.Status;
-    job.Status = "PAID_AUTHORISED";
+    var fileWasRejected = job.Status is "REJECTED" or "REFUNDED";
+    if (!fileWasRejected)
+        job.Status = "PAID_AUTHORISED";
     job.UpdatedUtc = now;
     db.PrintJobEvents.Add(new PrintJobEvent
     {
@@ -4807,9 +4817,11 @@ shop.MapPost("/payments/{paymentId:guid}/verify", async (
         NewStatus = job.Status,
         ActorType = "ShopUser",
         ActorId = GetActorId(principal),
-        ReasonCode = payment.Method == "UPI"
-            ? "UPI_PAYMENT_MANUALLY_VERIFIED"
-            : "CASH_RECEIVED_AT_COUNTER",
+        ReasonCode = fileWasRejected
+            ? "PAYMENT_VERIFIED_FOR_REJECTED_FILE_REFUND"
+            : payment.Method == "UPI"
+                ? "UPI_PAYMENT_MANUALLY_VERIFIED"
+                : "CASH_RECEIVED_AT_COUNTER",
         CreatedUtc = now
     });
     try
