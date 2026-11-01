@@ -19,7 +19,7 @@ export default function PlatformAdminConsole({
   onSignOut
 }: {
   tokens: AuthTokens;
-  onSignOut: () => void;
+  onSignOut: () => Promise<void>;
 }) {
   const [section, setSection] = useState<Section>("Overview");
   const [dark, setDark] = useState(true);
@@ -100,8 +100,13 @@ export default function PlatformAdminConsole({
 
   async function signOut() {
     setSigningOut(true);
-    try { await logout(tokens.accessToken); } catch { /* Local sign-out always clears this browser session. */ }
-    onSignOut();
+    try { await logout(tokens.accessToken); } catch { /* Local sign-out still clears the secure session. */ }
+    try {
+      await onSignOut();
+    } catch (exception) {
+      setTenantActionError(exception instanceof Error ? exception.message : "Could not clear the secure desktop session.");
+      setSigningOut(false);
+    }
   }
 
   function navigate(next: Section) {

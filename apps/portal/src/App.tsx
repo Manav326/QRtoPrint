@@ -22,6 +22,7 @@ import {
   type QrStation, type ShopCustomer, type ShopCustomerHistory, type ShopCustomerPage, type ShopPricingProfile, type ShopPrintJob, type ShopProfile, type ShopReportSummary, type ShopSubscriptionSummary,
   type UploadedPrintJob
 } from "./api";
+import { enrollLocalAgent, getLocalAgentStatus, isDesktopApp, type DesktopAgentStatus } from "./desktop-bridge";
 
 type Section = "Overview" | "Print Queue" | "Printers" | "QR Stations" | "Print Agent" | "Pricing" | "Subscription" | "Payments" | "Customers" | "Reports" | "Settings";
 type Modal = "printer" | "station" | null;
@@ -56,13 +57,16 @@ export default function App() {
       : <PublicLandingPage />;
   }
 
-  const onSignOut = () => { storeTokens(null); setTokens(null); };
+  const onSignOut = async () => {
+    await storeTokens(null);
+    setTokens(null);
+  };
   return isPlatformAdminSession(tokens)
     ? <PlatformAdminConsole tokens={tokens} onSignOut={onSignOut}/>
     : <ShopConsole tokens={tokens} onSignOut={onSignOut}/>;
 }
 
-function ShopConsole({ tokens, onSignOut }: { tokens: AuthTokens; onSignOut: () => void }) {
+function ShopConsole({ tokens, onSignOut }: { tokens: AuthTokens; onSignOut: () => Promise<void> }) {
   const [active, setActive] = useState<Section>("Overview");
   const [dark, setDark] = useState(true);
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -70,6 +74,19 @@ function ShopConsole({ tokens, onSignOut }: { tokens: AuthTokens; onSignOut: () 
     try { return window.localStorage.getItem("qrtoprint.sidebar-collapsed") === "true"; } catch { return false; }
   });
   const reloadInFlight = useRef(false);
+  const desktopAgentSyncTimer = useRef<number | null>(null);
+  const desktopAgentSyncInFlight = useRef(false);
+  const desktopAgentSyncAttempts = useRef(0);
+  const desktopConnectInFlight = useRef(false);
+  const locallyAuthorizedAgentId = useRef<string | null>(null);
+  const [localAgentStatus, setLocalAgentStatus] = useState<DesktopAgentStatus | null>(null);
+  const [localAgentConflict, setLocalAgentConflict] = useState(false);
+  const [localAgentRevoked, setLocalAgentRevoked] = useState(false);
+  const [localAgentNeedsRepair, setLocalAgentNeedsRepair] = useState(false);
+  const [localAgentEnrollmentIssue, setLocalAgentEnrollmentIssue] = useState<{ code: string | null; message: string } | null>(null);
+  const localAgentEnrollmentIssueRef = useRef<{ code: string | null; message: string } | null>(null);
+  const [localAgentOwnershipChecking, setLocalAgentOwnershipChecking] = useState(false);
+  const [cloudStatus, setCloudStatus] = useState<"checking" | "connected" | "unavailable">("checking");
   const [profile, setProfile] = useState<ShopProfile | null>(null);
   const [printers, setPrinters] = useState<PrinterDevice[]>([]);
   const [stations, setStations] = useState<QrStation[]>([]);
@@ -84,6 +101,8 @@ function ShopConsole({ tokens, onSignOut }: { tokens: AuthTokens; onSignOut: () 
   const queuePageGeneration = useRef(0);
   const queueFirstPageIds = useRef<Set<string>>(new Set());
   const [agentDevices, setAgentDevices] = useState<AgentDevice[]>([]);
+  const agentDevicesRef = useRef<AgentDevice[]>([]);
+  agentDevicesRef.current = agentDevices;
   const [paymentSettings, setPaymentSettings] = useState<ShopPaymentSettings | null>(null);
   const [payments, setPayments] = useState<ShopPayment[]>([]);
   const [refunds, setRefunds] = useState<ShopRefund[]>([]);
@@ -123,14 +142,30 @@ function ShopConsole({ tokens, onSignOut }: { tokens: AuthTokens; onSignOut: () 
       queueFirstPageIds.current = new Set(snapshot.printJobs.map(job => job.id));
       setHasMoreQueueJobs(snapshot.printJobs.length === 100);
       setQueueApiOffset(snapshot.printJobs.length);
+      agentDevicesRef.current = snapshot.agentDevices;
       setAgentDevices(snapshot.agentDevices);
+      setCloudStatus("connected");
       setPaymentSettings(snapshot.paymentSettings);
       setPayments(snapshot.payments);
       setRefunds(snapshot.refunds);
       setSubscription(snapshot.subscription);
       setApiConnectionState("connected");
+      setCloudStatus("connected");
+      if (isDesktopApp()) {
+        // The Windows service may still be starting after installation or reboot.
+        // Keep discovery off the initial shop-data load and retry quietly.
+        scheduleDesktopAgentSync(0);
+      }
     } catch (exception) {
-      handleShopApiError(exception, "Could not load your shop.");
+    } catch (exception) {
+      setCloudStatus("unavailable");
+      if (exception instanceof ApiError && exception.status === 401) {
+        storeTokens(null);
+        try { await onSignOut(); }
+        catch (signOutError) { setError(signOutError instanceof Error ? signOutError.message : "Could not clear the secure desktop session."); }
+      } else {
+        handleShopApiError(exception, "Could not load your shop.");
+      }
     } finally {
       setLoading(false);
       reloadInFlight.current = false;
@@ -273,6 +308,13 @@ function ShopConsole({ tokens, onSignOut }: { tokens: AuthTokens; onSignOut: () 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tokens.accessToken]);
 
+  useEffect(() => () => {
+    if (desktopAgentSyncTimer.current !== null) {
+      window.clearTimeout(desktopAgentSyncTimer.current);
+      desktopAgentSyncTimer.current = null;
+    }
+  }, []);
+
   useEffect(() => {
     if (active === "Print Queue") return;
     let mounted = true;
@@ -326,7 +368,8 @@ function ShopConsole({ tokens, onSignOut }: { tokens: AuthTokens; onSignOut: () 
 
   async function signOut() {
     try { await logout(tokens.accessToken); } catch { /* Local sign-out still clears the session. */ }
-    onSignOut();
+    try { await onSignOut(); }
+    catch (exception) { setError(exception instanceof Error ? exception.message : "Could not clear the secure desktop session."); }
   }
 
   async function submitPrinter(values: {
@@ -407,12 +450,327 @@ function ShopConsole({ tokens, onSignOut }: { tokens: AuthTokens; onSignOut: () 
     }
   }
 
+  async function connectLocalComputer(
+    silent = false,
+    knownAgents: AgentDevice[] = agentDevicesRef.current,
+    allowPreviousShopReconnection = false
+  ) {
+    if (desktopConnectInFlight.current) return;
+    desktopConnectInFlight.current = true;
+    if (!silent) {
+      setAgentBusy(true);
+      setError("");
+      localAgentEnrollmentIssueRef.current = null;
+      setLocalAgentEnrollmentIssue(null);
+    }
+    try {
+      const status = await getLocalAgentStatus();
+      setLocalAgentStatus(status);
+      setLocalAgentConflict(false);
+      setLocalAgentOwnershipChecking(false);
+      setLocalAgentRevoked(status.status === "REVOKED");
+      setLocalAgentNeedsRepair(status.status === "IDENTITY_UNAVAILABLE");
+
+      if (!status.serviceReachable) {
+        if (!silent) setError("The SmartPrint background service is not responding. Restart Windows or repair SmartPrint, then retry.");
+        return;
+      }
+
+      if (status.paired) {
+        const currentShopDevice = knownAgents.find(agent =>
+          !agent.revokedUtc && agent.id === status.agentDeviceId
+        );
+        const revokedCurrentShopDevice = knownAgents.find(agent =>
+          agent.revokedUtc && agent.id === status.agentDeviceId
+        );
+        if (!currentShopDevice) {
+          if (revokedCurrentShopDevice) {
+            // This shop revoked this exact device. Only an explicit reconnect
+            // action may create a fresh authorization; background sync never does.
+            setLocalAgentRevoked(true);
+            if (silent) return;
+          } else {
+            setLocalAgentConflict(true);
+            if (!allowPreviousShopReconnection) {
+              if (!silent) setError("This computer is still paired with another shop. Its owner must revoke it before you can connect it here.");
+              return;
+            }
+
+            const confirmed = await confirmInApp(
+              "Continue only after the previous shop owner has revoked this computer from that shop's Print Agent page. SmartPrint will verify the revocation with the server before changing this computer's connection.",
+              "Reconnect this computer?",
+              "Check and reconnect"
+            );
+            if (!confirmed) return;
+          }
+        } else {
+          setLocalAgentRevoked(false);
+          setToast("This computer is already connected to your shop.");
+          return;
+        }
+      }
+
+      const authorization = await createAgentEnrollmentCode(tokens.accessToken);
+      const enrolled = await enrollLocalAgent(authorization.code);
+      if (!enrolled.success) {
+        const message = enrolled.message || "This computer could not be connected to the shop.";
+        if (enrolled.code) throw new ApiError(message, 409, enrolled.code);
+        throw new Error(message);
+      }
+      locallyAuthorizedAgentId.current = enrolled.agentDeviceId;
+      let postEnrollmentStatus = status;
+      try {
+        // Read back the local listener state after enrollment. Failure here must
+        // not undo a successful cloud pairing or interrupt the owner's workflow.
+        postEnrollmentStatus = await getLocalAgentStatus();
+      } catch {
+        // Keep the last known listener status; the background health loop retries.
+      }
+      setLocalAgentStatus({
+        serviceReachable: true,
+        localApiReachable: postEnrollmentStatus.localApiReachable,
+        apiBaseUrl: postEnrollmentStatus.apiBaseUrl,
+        paired: true,
+        agentDeviceId: enrolled.agentDeviceId,
+        status: "CONNECTED"
+      });
+      setLocalAgentConflict(false);
+      setLocalAgentRevoked(false);
+      setLocalAgentNeedsRepair(false);
+      localAgentEnrollmentIssueRef.current = null;
+      setLocalAgentEnrollmentIssue(null);
+      setLocalAgentOwnershipChecking(false);
+
+      // Enrollment creates the AgentDevice in the cloud immediately. Refresh its
+      // shop-scoped record so the UI recognizes this computer as connected on the
+      // first run instead of waiting for the next manual reload.
+      try {
+        const refreshedSnapshot = await loadShopData(tokens.accessToken);
+        agentDevicesRef.current = refreshedSnapshot.agentDevices;
+        setAgentDevices(refreshedSnapshot.agentDevices);
+        setPrinters(refreshedSnapshot.printers);
+      } catch {
+        // Keep the successful local enrollment state; the next normal refresh
+        // will synchronize the cloud inventory without enrolling a second time.
+      }
+
+      setToast("This computer is securely connected. SmartPrint is discovering its printers.");
+      if (!silent) await reload();
+    } catch (exception) {
+      if (exception instanceof ApiError && exception.status === 401) {
+        try { await onSignOut(); }
+        catch (signOutError) { setError(signOutError instanceof Error ? signOutError.message : "Could not clear the secure desktop session."); }
+      } else if (exception instanceof ApiError && exception.status === 409) {
+        const issue = { code: exception.code, message: exception.message };
+        localAgentEnrollmentIssueRef.current = issue;
+        setLocalAgentEnrollmentIssue(issue);
+        setLocalAgentConflict(exception.code === "agent_already_enrolled");
+        setLocalAgentRevoked(false);
+        setLocalAgentNeedsRepair(false);
+        setLocalAgentOwnershipChecking(false);
+        if (!silent) setError(exception.message);
+      } else if (!silent) {
+        const message = exception instanceof Error ? exception.message : "Could not connect this computer to the shop.";
+        setError(message);
+      }
+    } finally {
+      desktopConnectInFlight.current = false;
+      if (!silent) setAgentBusy(false);
+    }
+  }
+
+  function nextDesktopAgentRetryDelay(): number {
+    const exponent = Math.min(desktopAgentSyncAttempts.current, 4);
+    desktopAgentSyncAttempts.current += 1;
+    return Math.min(2_000 * (2 ** exponent), 30_000);
+  }
+
+  function scheduleDesktopAgentSync(delayMs: number): void {
+    if (!isDesktopApp()) return;
+    if (desktopAgentSyncTimer.current !== null) {
+      window.clearTimeout(desktopAgentSyncTimer.current);
+    }
+    desktopAgentSyncTimer.current = window.setTimeout(() => {
+      desktopAgentSyncTimer.current = null;
+      void synchronizeDesktopAgent();
+    }, delayMs);
+  }
+
+  async function synchronizeDesktopAgent(): Promise<void> {
+    if (!isDesktopApp() || desktopAgentSyncInFlight.current) return;
+    desktopAgentSyncInFlight.current = true;
+    try {
+      const status = await getLocalAgentStatus();
+      setLocalAgentStatus(status);
+
+      if (!status.serviceReachable) {
+        setLocalAgentConflict(false);
+        setLocalAgentOwnershipChecking(false);
+        scheduleDesktopAgentSync(nextDesktopAgentRetryDelay());
+        return;
+      }
+
+      // A server-revoked identity is intentionally not auto-enrolled again.
+      // The shop owner can reconnect it with one explicit click, without typing a code.
+      if (status.status === "REVOKED") {
+        setLocalAgentRevoked(true);
+        setLocalAgentNeedsRepair(false);
+        setLocalAgentConflict(false);
+        setLocalAgentOwnershipChecking(false);
+        scheduleDesktopAgentSync(60_000);
+        return;
+      }
+
+      if (status.status === "IDENTITY_UNAVAILABLE") {
+        // Don't create endless one-time enrollment codes while the old cloud
+        // device may still be active. Let the owner review/revoke it first.
+        setLocalAgentNeedsRepair(true);
+        setLocalAgentRevoked(false);
+        setLocalAgentConflict(false);
+        setLocalAgentOwnershipChecking(false);
+        scheduleDesktopAgentSync(60_000);
+        return;
+      }
+
+      if (localAgentEnrollmentIssueRef.current) {
+        // The API has already explained why enrollment cannot proceed. Do not
+        // keep creating short-lived one-time authorizations in the background.
+        setLocalAgentEnrollmentIssue(localAgentEnrollmentIssueRef.current);
+        setLocalAgentConflict(localAgentEnrollmentIssueRef.current.code === "agent_already_enrolled");
+        setLocalAgentOwnershipChecking(false);
+        return;
+      }
+
+      setLocalAgentNeedsRepair(false);
+      if (status.paired && status.agentDeviceId) {
+        let deviceRecord = agentDevicesRef.current.find(agent =>
+          agent.id === status.agentDeviceId
+        );
+
+        if (deviceRecord?.revokedUtc) {
+          setLocalAgentRevoked(true);
+          setLocalAgentConflict(false);
+          setLocalAgentOwnershipChecking(false);
+          scheduleDesktopAgentSync(60_000);
+          return;
+        }
+
+        if (!deviceRecord) {
+          // Verify cloud ownership before declaring another-shop pairing.
+          setLocalAgentOwnershipChecking(true);
+          try {
+            const refreshedSnapshot = await loadShopData(tokens.accessToken);
+            agentDevicesRef.current = refreshedSnapshot.agentDevices;
+            setAgentDevices(refreshedSnapshot.agentDevices);
+            setPrinters(refreshedSnapshot.printers);
+            deviceRecord = refreshedSnapshot.agentDevices.find(agent =>
+              agent.id === status.agentDeviceId
+            );
+          } catch {
+            scheduleDesktopAgentSync(nextDesktopAgentRetryDelay());
+            return;
+          }
+        }
+
+        if (deviceRecord?.revokedUtc) {
+          setLocalAgentRevoked(true);
+          setLocalAgentConflict(false);
+          setLocalAgentOwnershipChecking(false);
+          scheduleDesktopAgentSync(60_000);
+          return;
+        }
+
+        if (!deviceRecord && locallyAuthorizedAgentId.current === status.agentDeviceId) {
+          // Enrollment succeeded but its shop record has not appeared yet.
+          // Keep checking; do not mislabel it as another shop or re-enroll it.
+          setLocalAgentRevoked(false);
+          setLocalAgentConflict(false);
+          setLocalAgentOwnershipChecking(true);
+          scheduleDesktopAgentSync(nextDesktopAgentRetryDelay());
+          return;
+        }
+
+        const belongsToCurrentShop = Boolean(deviceRecord && !deviceRecord.revokedUtc);
+        setLocalAgentOwnershipChecking(false);
+        setLocalAgentRevoked(false);
+        setLocalAgentConflict(!belongsToCurrentShop);
+        if (belongsToCurrentShop) {
+          desktopAgentSyncAttempts.current = 0;
+          scheduleDesktopAgentSync(15_000);
+        } else {
+          // Never move a computer across shops without the previous owner revoking it.
+          scheduleDesktopAgentSync(60_000);
+        }
+        return;
+      }
+
+      setLocalAgentRevoked(false);
+      setLocalAgentConflict(false);
+      setLocalAgentOwnershipChecking(false);
+      await connectLocalComputer(true, agentDevicesRef.current);
+      const verifiedStatus = await getLocalAgentStatus();
+      setLocalAgentStatus(verifiedStatus);
+
+      if (verifiedStatus.status === "REVOKED") {
+        setLocalAgentRevoked(true);
+        setLocalAgentNeedsRepair(false);
+        setLocalAgentConflict(false);
+        setLocalAgentOwnershipChecking(false);
+        scheduleDesktopAgentSync(60_000);
+        return;
+      }
+
+      if (verifiedStatus.serviceReachable && verifiedStatus.paired && verifiedStatus.agentDeviceId) {
+        const verifiedRecord = agentDevicesRef.current.find(agent =>
+          agent.id === verifiedStatus.agentDeviceId
+        );
+        if (verifiedRecord?.revokedUtc) {
+          setLocalAgentRevoked(true);
+          setLocalAgentConflict(false);
+          setLocalAgentOwnershipChecking(false);
+          scheduleDesktopAgentSync(60_000);
+          return;
+        }
+        if (verifiedRecord && !verifiedRecord.revokedUtc) {
+          setLocalAgentRevoked(false);
+          setLocalAgentOwnershipChecking(false);
+          setLocalAgentConflict(false);
+          desktopAgentSyncAttempts.current = 0;
+          scheduleDesktopAgentSync(15_000);
+          return;
+        }
+        if (locallyAuthorizedAgentId.current === verifiedStatus.agentDeviceId) {
+          setLocalAgentRevoked(false);
+          setLocalAgentConflict(false);
+          setLocalAgentOwnershipChecking(true);
+          scheduleDesktopAgentSync(nextDesktopAgentRetryDelay());
+          return;
+        }
+        setLocalAgentRevoked(false);
+        setLocalAgentConflict(true);
+        setLocalAgentOwnershipChecking(false);
+      }
+
+      scheduleDesktopAgentSync(nextDesktopAgentRetryDelay());
+    } catch {
+      // Startup, network and temporary pipe failures recover without owner action.
+      scheduleDesktopAgentSync(nextDesktopAgentRetryDelay());
+    } finally {
+      desktopAgentSyncInFlight.current = false;
+    }
+  }
+
   async function revokeAgent(agent: AgentDevice) {
     if (!(await confirmInApp(`Revoke the Print Agent on ${agent.deviceName}? It will no longer be able to report printers or connect to this shop.`, "Revoke Print Agent", "Revoke agent"))) return;
     setAgentBusy(true);
     setError("");
     try {
       await revokeAgentDevice(tokens.accessToken, agent.id);
+      if (localAgentStatus?.agentDeviceId === agent.id) {
+        setLocalAgentRevoked(true);
+        setLocalAgentConflict(false);
+        setLocalAgentOwnershipChecking(false);
+      }
       setToast("Agent access revoked.");
       await reload();
     } catch (exception) {
@@ -732,6 +1090,10 @@ function ShopConsole({ tokens, onSignOut }: { tokens: AuthTokens; onSignOut: () 
             <div className="breadcrumb"><span>Shop workspace</span><span className="crumb-slash">/</span><strong>{active}</strong></div>
           </div>
           <div className="topbar-actions">
+            <div className="connection-pill" role="status" aria-live="polite" title={cloudStatus === "connected" ? "The latest shop data refresh succeeded." : cloudStatus === "checking" ? "Checking your shop connection." : "The latest shop data refresh could not reach the cloud service."}>
+              <span className="live-dot" style={{ opacity: cloudStatus === "unavailable" ? 0.45 : 1 }}/>
+              <span>{cloudStatus === "connected" ? "Cloud connected" : cloudStatus === "checking" ? "Checking cloud" : "Cloud unavailable"}</span>
+            </div>
             <button className="icon-button theme-button" aria-label={dark ? "Switch to light theme" : "Switch to dark theme"} onClick={() => setDark(!dark)}>{dark ? <Sun size={18}/> : <Moon size={18}/>}</button>
             <div className="service-status-row" aria-label="Live shop system status">
               <span className={"service-status "+apiConnectionState} title="API connection"><i/>API {apiConnectionState === "connected" ? "Connected" : apiConnectionState === "degraded" ? "Degraded" : apiConnectionState === "offline" ? "Offline" : "Checking"}</span>
@@ -739,7 +1101,7 @@ function ShopConsole({ tokens, onSignOut }: { tokens: AuthTokens; onSignOut: () 
               <span className={"service-status "+(usablePrinterCount > 0 ? "connected" : offlinePrinterCount > 0 ? "offline" : "checking")} title="Active printer availability"><i/>Printers {usablePrinterCount > 0 ? usablePrinterCount+" available" : offlinePrinterCount > 0 ? offlinePrinterCount+" unavailable" : "Unavailable"}</span>
             </div>
             <div className="topbar-divider"/>
-            <span className="topbar-product-tag"><span className="mode-indicator"/> Shop console</span>
+            <span className="topbar-product-tag"><span className="mode-indicator"/> {isDesktopApp() ? "Desktop workspace" : "Shop console"}</span>
           </div>
         </header>
 
@@ -755,7 +1117,7 @@ function ShopConsole({ tokens, onSignOut }: { tokens: AuthTokens; onSignOut: () 
           {active === "Overview" && <Overview profile={profile} printers={printers} stations={stations} printJobs={printJobs} pricing={pricing} agentDevices={agentDevices} paymentSettings={paymentSettings} onNavigate={navAction}/>}
           {active === "Printers" && <PrintersPage printers={printers} onAdd={() => setModal("printer")} onToggle={togglePrinter}/>}
           {active === "QR Stations" && <StationsPage stations={stations} profile={profile} onAdd={() => setModal("station")} onToggle={toggleStation} onGenerate={createFreshStationCode}/>}
-          {active === "Print Agent" && <PrintAgentPage agents={agentDevices} enrollmentCode={enrollmentCode} busy={agentBusy} onGenerate={generateAgentCode} onRevoke={revokeAgent}/>}
+          {active === "Print Agent" && <PrintAgentPage agents={agentDevices} enrollmentCode={enrollmentCode} busy={agentBusy} onGenerate={generateAgentCode} onRevoke={revokeAgent} desktop={isDesktopApp()} localAgentStatus={localAgentStatus} localAgentConflict={localAgentConflict} localAgentRevoked={localAgentRevoked} localAgentNeedsRepair={localAgentNeedsRepair} localAgentEnrollmentIssue={localAgentEnrollmentIssue} localAgentOwnershipChecking={localAgentOwnershipChecking} onConnect={()=>void connectLocalComputer()} onReconnectAfterRevocation={()=>void connectLocalComputer(false,agentDevices,true)}/>}
           {active === "Pricing" && pricing && <PricingPage pricing={pricing} onSave={savePricing} busy={busy}/>}
           {active === "Subscription" && subscription && <SubscriptionPage summary={subscription}/>}
           {active === "Payments" && paymentSettings && <PaymentsPage settings={paymentSettings} payments={payments} refunds={refunds} onSave={savePaymentSettings} onVerify={verifyPayment} onReject={rejectPayment} busy={busy} busyJobId={busyJobId}/>}
@@ -1150,15 +1512,61 @@ function StationsPage({ stations, profile, onAdd, onToggle, onGenerate }: {
 
 
 
-function PrintAgentPage({agents,enrollmentCode,busy,onGenerate,onRevoke}:{
+function PrintAgentPage({agents,enrollmentCode,busy,onGenerate,onRevoke,desktop,localAgentStatus,localAgentConflict,localAgentRevoked,localAgentNeedsRepair,localAgentEnrollmentIssue,localAgentOwnershipChecking,onConnect,onReconnectAfterRevocation}:{
   agents:AgentDevice[];
   enrollmentCode:{code:string;expiresUtc:string}|null;
   busy:boolean;
   onGenerate:()=>void;
   onRevoke:(agent:AgentDevice)=>void;
+  desktop:boolean;
+  localAgentStatus:DesktopAgentStatus|null;
+  localAgentConflict:boolean;
+  localAgentRevoked:boolean;
+  localAgentNeedsRepair:boolean;
+  localAgentEnrollmentIssue:{code:string|null;message:string}|null;
+  localAgentOwnershipChecking:boolean;
+  onConnect:()=>void;
+  onReconnectAfterRevocation:()=>void;
 }) {
+  const connected = Boolean(localAgentStatus?.paired && agents.some(agent =>
+    !agent.revokedUtc && agent.id === localAgentStatus.agentDeviceId
+  ));
   return <div className="agent-page">
     <section className="panel agent-pairing-panel">
+      {desktop ? <div className="desktop-agent-connect">
+        <div className="agent-intro">
+          <div className="agent-hero-icon"><Monitor size={22}/></div>
+          <div><div className="eyebrow"><span className="eyebrow-line"/>THIS COMPUTER</div><h2>Your print computer</h2><p>SmartPrint connects this computer to your shop automatically. The background print service stays active even when you close this window.</p></div>
+        </div>
+        <div className="desktop-agent-status">
+          <span className={connected ? "desktop-agent-indicator connected" : localAgentConflict ? "desktop-agent-indicator conflict" : "desktop-agent-indicator"} />
+          <div><strong>{connected ? "Connected to this shop" : localAgentRevoked ? "Disconnected by the shop owner" : localAgentNeedsRepair ? "Connection needs repair" : localAgentEnrollmentIssue ? (localAgentConflict ? "Existing shop pairing needs revocation" : "Connection needs attention") : localAgentConflict ? "Connected to another shop" : localAgentOwnershipChecking ? "Checking shop registration" : localAgentStatus?.serviceReachable ? "Ready to connect" : "Print service not responding"}</strong>
+            <small>{connected ? (localAgentStatus?.localApiReachable === false ? "Connected to your shop. Cloud printing remains available; local-network uploads are reconnecting automatically." : "Printer discovery and job hand-off are managed by the SmartPrint service.") : localAgentRevoked ? "This computer was revoked and will not reconnect automatically. Select Reconnect this computer when your shop is ready; no pairing code is needed." : localAgentNeedsRepair ? "Windows could not read this computer's saved pairing. Check the paired-computer list below; revoke its old entry if it is still active, then select Repair connection. No code entry is needed." : localAgentEnrollmentIssue ? localAgentEnrollmentIssue.message : localAgentConflict ? "For security, this computer cannot be moved until its previous shop owner revokes it." : localAgentOwnershipChecking ? "SmartPrint is verifying this computer's saved registration with your shop. It will not transfer or re-enroll it while ownership is uncertain." : localAgentStatus?.serviceReachable ? "Your owner session will authorize a one-time connection. No pairing code is shown." : "SmartPrint is starting or reconnecting its background service. It will retry automatically."}</small>
+          </div>
+        </div>
+        <div className="desktop-agent-actions">
+          {localAgentConflict ? (
+            <button className="primary-button" disabled={busy} onClick={onReconnectAfterRevocation}>
+              {busy ? <span className="button-spinner"/> : <><RotateCcw size={15}/> I’ve had the previous shop revoke this computer</>}
+            </button>
+          ) : localAgentOwnershipChecking ? (
+            <span role="status" aria-live="polite">Checking shop registration…</span>
+          ) : localAgentRevoked ? (
+            <button className="primary-button" disabled={busy} onClick={onConnect}>
+              {busy ? <span className="button-spinner"/> : <><RotateCcw size={15}/> Reconnect this computer</>}
+            </button>
+          ) : localAgentNeedsRepair ? (
+            <button className="primary-button" disabled={busy} onClick={onConnect}>
+              {busy ? <span className="button-spinner"/> : <><RotateCcw size={15}/> Repair connection</>}
+            </button>
+          ) : (
+            <button className="primary-button" disabled={busy || connected || Boolean(localAgentStatus?.paired)} onClick={onConnect}>
+              {busy ? <span className="button-spinner"/> : <><Monitor size={15}/>{localAgentStatus?.serviceReachable ? "Connect this computer" : "Retry connection"}</>}
+            </button>
+          )}
+          <span>Your shop data remains protected by your account and this computer's Windows security.</span>
+        </div>
+      </div> : <>
       <div className="agent-intro">
         <div className="agent-hero-icon"><Monitor size={22}/></div>
         <div><div className="eyebrow"><span className="eyebrow-line"/>LOCAL PRINT CONNECTIVITY</div><h2>Connect your shop computer</h2><p>Pair the Windows computer where your printers are installed. The agent reports printer inventory and health without exposing the agent secret in the browser.</p></div>
@@ -1178,6 +1586,7 @@ function PrintAgentPage({agents,enrollmentCode,busy,onGenerate,onRevoke}:{
       </div>
       <div className="agent-security-note"><ShieldCheck size={16}/><span>The pairing code expires after 10 minutes. The agent secret is returned only once and stored on the Windows machine using DPAPI LocalMachine encryption. Revoke a computer here if it is replaced or lost.</span></div>
       <div className="agent-generate-row"><span>Pairing codes are single use. Generating a new one does not revoke already paired computers.</span><button className="primary-button" disabled={busy} onClick={onGenerate}>{busy?<span className="button-spinner"/>:<><Plus size={15}/> Generate pairing code</>}</button></div>
+      </>}
     </section>
     <section className="panel agent-device-panel">
       <div className="collection-header"><div><h2>Paired Windows computers</h2><p>Agent connection history and the number of discovered printer queues.</p></div><span className="setup-count">{agents.filter(agent=>!agent.revokedUtc).length} active</span></div>

@@ -9,12 +9,39 @@ namespace SmartPrint.Agent;
 public sealed class AgentCredentialStore
 {
     private static readonly byte[] Entropy = Encoding.UTF8.GetBytes("QRtoPrint.Agent.Identity.v1");
-    private readonly string identityPath = Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
-        "QRtoPrint",
-        "agent.identity");
+    private readonly string identityPath;
+    private readonly string revocationMarkerPath;
+    private readonly object sync = new();
+
+    public AgentCredentialStore(string? identityPath = null)
+    {
+        this.identityPath = string.IsNullOrWhiteSpace(identityPath)
+            ? Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
+                "QRtoPrint",
+                "agent.identity")
+            : Path.GetFullPath(identityPath);
+
+        revocationMarkerPath = this.identityPath + ".revoked";
+    }
 
     public AgentCredentials? Load()
+    {
+        lock (sync)
+        {
+            return LoadCore();
+        }
+    }
+
+    public bool IsRevoked()
+    {
+        lock (sync)
+        {
+            return !File.Exists(identityPath) && File.Exists(revocationMarkerPath);
+        }
+    }
+
+    private AgentCredentials? LoadCore()
     {
         if (!File.Exists(identityPath))
         {
@@ -34,39 +61,124 @@ public sealed class AgentCredentialStore
         }
     }
 
-    public void Save(AgentCredentials credentials)
+    public void Delete()
     {
-        ArgumentNullException.ThrowIfNull(credentials);
+        lock (sync)
+        {
+            DeleteCore();
+            DeleteRevocationMarkerCore();
+        }
+    }
+
+    public bool DeleteIfMatches(AgentCredentials expectedCredentials)
+    {
+        ArgumentNullException.ThrowIfNull(expectedCredentials);
+        lock (sync)
+        {
+            var current = LoadCore();
+            if (current is null ||
+                current.AgentDeviceId != expectedCredentials.AgentDeviceId ||
+                !string.Equals(current.ApiBaseUrl, expectedCredentials.ApiBaseUrl, StringComparison.Ordinal) ||
+                !SecretsMatch(current.AgentSecret, expectedCredentials.AgentSecret))
+            {
+                return false;
+            }
+
+            // Persist the revocation tombstone before removing the credential.
+            // If marker creation fails (disk/ACL issues), keep the old identity so
+            // the desktop can never mistake a failed revoke for a fresh installation.
+            WriteRevocationMarker();
+            DeleteCore();
+            return true;
+        }
+    }
+
+    private void DeleteCore()
+    {
+        if (File.Exists(identityPath))
+        {
+            File.Delete(identityPath);
+        }
+
+        var temporaryPath = identityPath + ".tmp";
+        if (File.Exists(temporaryPath))
+        {
+            File.Delete(temporaryPath);
+        }
+    }
+
+    private void DeleteRevocationMarkerCore()
+    {
+        if (File.Exists(revocationMarkerPath))
+        {
+            File.Delete(revocationMarkerPath);
+        }
+    }
+
+    private void WriteRevocationMarker()
+    {
         var directory = Path.GetDirectoryName(identityPath)
             ?? throw new InvalidOperationException("Could not determine the agent identity directory.");
         Directory.CreateDirectory(directory);
         SecurePermissions(directory);
+        File.WriteAllText(revocationMarkerPath, DateTimeOffset.UtcNow.ToString("O"), Encoding.UTF8);
+    }
 
-        var plainBytes = JsonSerializer.SerializeToUtf8Bytes(credentials);
+    private static bool SecretsMatch(string currentSecret, string expectedSecret)
+    {
+        var currentBytes = Encoding.UTF8.GetBytes(currentSecret);
+        var expectedBytes = Encoding.UTF8.GetBytes(expectedSecret);
         try
         {
-            var protectedBytes = ProtectedData.Protect(plainBytes, Entropy, DataProtectionScope.LocalMachine);
+            return currentBytes.Length == expectedBytes.Length &&
+                CryptographicOperations.FixedTimeEquals(currentBytes, expectedBytes);
+        }
+        finally
+        {
+            CryptographicOperations.ZeroMemory(currentBytes);
+            CryptographicOperations.ZeroMemory(expectedBytes);
+        }
+    }
+
+    public void Save(AgentCredentials credentials)
+    {
+        ArgumentNullException.ThrowIfNull(credentials);
+        lock (sync)
+        {
+            var directory = Path.GetDirectoryName(identityPath)
+                ?? throw new InvalidOperationException("Could not determine the agent identity directory.");
+            Directory.CreateDirectory(directory);
+            SecurePermissions(directory);
+
+            var plainBytes = JsonSerializer.SerializeToUtf8Bytes(credentials);
             try
             {
-                var tempPath = identityPath + ".tmp";
-                File.WriteAllBytes(tempPath, protectedBytes);
-                if (File.Exists(identityPath))
+                var protectedBytes = ProtectedData.Protect(plainBytes, Entropy, DataProtectionScope.LocalMachine);
+                try
                 {
-                    File.Replace(tempPath, identityPath, null, ignoreMetadataErrors: true);
+                    var tempPath = identityPath + ".tmp";
+                    File.WriteAllBytes(tempPath, protectedBytes);
+                    if (File.Exists(identityPath))
+                    {
+                        File.Replace(tempPath, identityPath, null, ignoreMetadataErrors: true);
+                    }
+                    else
+                    {
+                        File.Move(tempPath, identityPath);
+                    }
+
+                    // A fresh, explicit enrollment clears a previous server revocation.
+                    DeleteRevocationMarkerCore();
                 }
-                else
+                finally
                 {
-                    File.Move(tempPath, identityPath);
+                    CryptographicOperations.ZeroMemory(protectedBytes);
                 }
             }
             finally
             {
-                CryptographicOperations.ZeroMemory(protectedBytes);
+                CryptographicOperations.ZeroMemory(plainBytes);
             }
-        }
-        finally
-        {
-            CryptographicOperations.ZeroMemory(plainBytes);
         }
     }
 

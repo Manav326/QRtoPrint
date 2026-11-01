@@ -87,3 +87,35 @@ public sealed record AgentLocalUploadStatusResponse(
     DateTimeOffset ExpiresUtc,
     bool SafeToDelete = false,
     DateTimeOffset? DeleteAfterUtc = null);
+public static class AgentLocalQueueBatchSelector
+{
+    public static IReadOnlyList<T> SelectNext<T>(
+        IReadOnlyList<T> items,
+        ref int nextIndex,
+        int maximumItems)
+    {
+        ArgumentNullException.ThrowIfNull(items);
+        if (maximumItems <= 0)
+            throw new ArgumentOutOfRangeException(nameof(maximumItems));
+
+        if (items.Count == 0)
+        {
+            nextIndex = 0;
+            return Array.Empty<T>();
+        }
+
+        var startIndex = ((nextIndex % items.Count) + items.Count) % items.Count;
+        var count = Math.Min(maximumItems, items.Count - startIndex);
+        var selected = new T[count];
+        for (var index = 0; index < count; index++)
+        {
+            selected[index] = items[startIndex + index];
+        }
+
+        nextIndex = startIndex + count;
+        if (nextIndex >= items.Count)
+            nextIndex = 0;
+        return selected;
+    }
+}
+

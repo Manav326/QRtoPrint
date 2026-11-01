@@ -2,6 +2,7 @@ using System.ComponentModel;
 using System.Net;
 using System.Net.Http.Json;
 using System.Security.Cryptography;
+using System.Text.Json;
 
 namespace SmartPrint.Agent;
 
@@ -15,6 +16,7 @@ public sealed class Worker(
     LocalAgentApiState localAgentApiState,
     IConfiguration configuration) : BackgroundService
 {
+    private int printClaimBatchOffset;
     private readonly TimeSpan pollInterval = TimeSpan.FromSeconds(
         Math.Clamp(configuration.GetValue<int?>("Agent:PollIntervalSeconds") ?? 30, 10, 300));
     private readonly string pdfExportDirectory = ResolvePdfExportDirectory(configuration);
@@ -69,9 +71,10 @@ public sealed class Worker(
             {
                 credentials = credentialStore.Load();
             }
-            catch (CryptographicException exception)
+            catch (Exception exception) when (
+                exception is CryptographicException or IOException or JsonException or UnauthorizedAccessException)
             {
-                logger.LogCritical(exception, "The stored agent identity could not be decrypted. Re-pair this computer.");
+                logger.LogError(exception, "The saved Agent identity could not be read. Cloud printing is paused until the owner repairs the local pairing.");
                 await Task.Delay(pollInterval, stoppingToken);
                 continue;
             }
@@ -101,9 +104,27 @@ public sealed class Worker(
                     },
                     stoppingToken);
 
-                if (heartbeat.StatusCode == HttpStatusCode.Unauthorized || heartbeat.StatusCode == HttpStatusCode.Forbidden)
+                if (heartbeat.StatusCode == HttpStatusCode.Unauthorized)
                 {
-                    logger.LogError("The shop revoked this agent identity. Re-pairing is required before the agent can sync.");
+                    // An invalid/revoked device secret cannot be reused. Removing the
+                    // local DPAPI identity allows the owner to start a fresh enrollment;
+                    // the API still decides whether the previous shop actually revoked it.
+                    if (credentialStore.DeleteIfMatches(credentials))
+                    {
+                        logger.LogError("The shop no longer accepts this Agent identity. Local credentials were cleared; connect this computer again from the desktop app after the shop owner authorises it.");
+                    }
+                    else
+                    {
+                        // The owner may have completed a new enrollment while this
+                        // old heartbeat was in flight. Never delete that newer identity.
+                        logger.LogInformation("A stale heartbeat was rejected after the local Agent identity changed. The newer pairing was preserved.");
+                    }
+                }
+                else if (heartbeat.StatusCode == HttpStatusCode.Forbidden)
+                {
+                    // A forbidden response may also mean the shop is suspended. Keep
+                    // the identity so this cannot become an accidental cross-shop move.
+                    logger.LogWarning("The current shop does not permit this Agent to sync. The saved device identity was retained.");
                 }
                 else if (heartbeat.IsSuccessStatusCode)
                 {
@@ -482,7 +503,9 @@ public sealed class Worker(
 
     private async Task ProcessAuthorizedPrintJobsAsync(HttpClient client, AgentCredentials credentials, CancellationToken ct)
     {
-        var proofs = localQueueStore.GetAcknowledgedJobs().Select(x => new AgentLocalQueueProof(x.JobId, x.Sha256, x.SizeBytes)).Take(100).ToArray();
+        var acknowledgedJobs = localQueueStore.GetAcknowledgedJobs();
+        var batch = AgentLocalQueueBatchSelector.SelectNext(acknowledgedJobs, ref printClaimBatchOffset, 100);
+        var proofs = batch.Select(x => new AgentLocalQueueProof(x.JobId, x.Sha256, x.SizeBytes)).ToArray();
         if (proofs.Length == 0) return;
         using var response = await SendAgentRequestAsync(client, credentials, "api/v1/agent/jobs/print-claim", new AgentPrintClaimRequest(proofs), ct);
         if (!response.IsSuccessStatusCode)

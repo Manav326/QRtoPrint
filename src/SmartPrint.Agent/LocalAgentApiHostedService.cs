@@ -1,4 +1,5 @@
 using System.Security.Cryptography;
+using System.Text.Json;
 using System.Net.Http.Json;
 using Microsoft.AspNetCore.Mvc;
 using SmartPrint.Documents;
@@ -78,11 +79,25 @@ public sealed class LocalAgentApiHostedService(
     AgentLocalQueueStore localQueueStore,
     IHttpClientFactory httpClientFactory,
     LocalAgentApiState state,
-    ILogger<LocalAgentApiHostedService> logger) : IHostedService, IAsyncDisposable
+    ILogger<LocalAgentApiHostedService> logger,
+    IHostApplicationLifetime hostLifetime) : IHostedService, IAsyncDisposable
 {
     private WebApplication? application;
+    private CancellationTokenSource? retryLifetime;
+    private Task? retryTask;
 
-    public async Task StartAsync(CancellationToken cancellationToken)
+    public Task StartAsync(CancellationToken cancellationToken)
+    {
+        if (retryTask is not null)
+            return Task.CompletedTask;
+
+        cancellationToken.ThrowIfCancellationRequested();
+        retryLifetime = CancellationTokenSource.CreateLinkedTokenSource(hostLifetime.ApplicationStopping);
+        retryTask = StartWithRetryAsync(retryLifetime.Token);
+        return Task.CompletedTask;
+    }
+
+    private async Task StartWithRetryAsync(CancellationToken cancellationToken)
     {
         if (!configuration.GetValue("Agent:LocalApi:Enabled", true))
         {
@@ -90,6 +105,56 @@ public sealed class LocalAgentApiHostedService(
             return;
         }
 
+        var delay = TimeSpan.FromSeconds(2);
+        while (!cancellationToken.IsCancellationRequested)
+        {
+            try
+            {
+                await StartApplicationAsync(cancellationToken);
+                var runningApplication = application
+                    ?? throw new InvalidOperationException("The local Agent listener did not retain its application host.");
+
+                await runningApplication.WaitForShutdownAsync(cancellationToken);
+                if (cancellationToken.IsCancellationRequested)
+                    return;
+
+                state.IsRunning = false;
+                throw new InvalidOperationException("The local Agent listener stopped unexpectedly.");
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                return;
+            }
+            catch (Exception exception)
+            {
+                state.IsRunning = false;
+                if (application is not null)
+                {
+                    await application.DisposeAsync();
+                    application = null;
+                }
+
+                logger.LogWarning(
+                    exception,
+                    "The local Agent listener could not stay online. Cloud printing remains available; retrying the LAN listener in {RetrySeconds} seconds.",
+                    delay.TotalSeconds);
+            }
+
+            try
+            {
+                await Task.Delay(delay, cancellationToken);
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                return;
+            }
+
+            delay = TimeSpan.FromSeconds(Math.Min(delay.TotalSeconds * 2, 30));
+        }
+    }
+
+    private async Task StartApplicationAsync(CancellationToken cancellationToken)
+    {
         const int port = LocalNetworkEndpointDiscovery.DefaultPort;
 
         try
@@ -122,7 +187,8 @@ public sealed class LocalAgentApiHostedService(
             // Retain loopback-only static origins for local development. The production
             // HTTPS origin is supplied dynamically by the authenticated API heartbeat.
             state.SetConfiguredOrigins(allowedOrigins.Where(origin =>
-                Uri.TryCreate(origin, UriKind.Absolute, out var configuredUri) && configuredUri.IsLoopback));
+                Uri.TryCreate(origin, UriKind.Absolute, out var configuredUri) &&
+                (configuredUri.IsLoopback || string.Equals(configuredUri.Host, "tauri.localhost", StringComparison.OrdinalIgnoreCase))));
             builder.Services.AddCors(options => options.AddPolicy("CustomerPortal", policy =>
             {
                 policy.SetIsOriginAllowed(state.IsOriginAllowed)
@@ -132,6 +198,7 @@ public sealed class LocalAgentApiHostedService(
             }));
 
             var app = builder.Build();
+            application = app;
             app.Use(async (context, next) =>
             {
                 if (context.Request.Headers.TryGetValue("Origin", out var origin) &&
@@ -152,23 +219,32 @@ public sealed class LocalAgentApiHostedService(
                     var credentials = credentialStore.Load();
                     if (credentials is null)
                     {
-                        return Results.Problem(
-                            statusCode: StatusCodes.Status503ServiceUnavailable,
-                            title: "This computer is not paired with a print shop.");
+                        return Results.Json(new
+                        {
+                            title = credentialStore.IsRevoked()
+                                ? "This computer's SmartPrint pairing was revoked by its shop owner."
+                                : "This computer is not paired with a print shop.",
+                            apiBaseUrl = configuration["Agent:ApiBaseUrl"]
+                        }, statusCode: StatusCodes.Status503ServiceUnavailable);
                     }
 
                     return Results.Ok(new
                     {
                         agentDeviceId = credentials.AgentDeviceId,
                         protocolVersion = 1,
-                        status = "LOCAL_ENDPOINT_READY"
+                        status = "LOCAL_ENDPOINT_READY",
+                        apiBaseUrl = credentials.ApiBaseUrl
                     });
                 }
-                catch (CryptographicException)
+                catch (Exception exception) when (
+                    exception is CryptographicException or IOException or JsonException or UnauthorizedAccessException)
                 {
-                    return Results.Problem(
-                        statusCode: StatusCodes.Status503ServiceUnavailable,
-                        title: "The local agent identity is unavailable.");
+                    logger.LogWarning("SmartPrint local identity status is unavailable ({FailureType}).", exception.GetType().Name);
+                    return Results.Json(new
+                    {
+                        title = "The local agent identity is unavailable.",
+                        apiBaseUrl = configuration["Agent:ApiBaseUrl"]
+                    }, statusCode: StatusCodes.Status503ServiceUnavailable);
                 }
             }).RequireCors("CustomerPortal");
 
@@ -429,12 +505,11 @@ public sealed class LocalAgentApiHostedService(
             .WithMetadata(new RequestSizeLimitAttribute(21 * 1024 * 1024))
             .RequireCors("CustomerPortal");
 
-            application = app;
             await application.StartAsync(cancellationToken);
             state.IsRunning = true;
             logger.LogInformation("Local Agent status endpoint is listening on port {Port}.", port);
         }
-        catch (Exception exception) when (exception is not OperationCanceledException)
+        catch
         {
             state.IsRunning = false;
             if (application is not null)
@@ -442,18 +517,23 @@ public sealed class LocalAgentApiHostedService(
                 await application.DisposeAsync();
                 application = null;
             }
-            logger.LogError(exception, "The Local Agent API could not start. Cloud-assisted printing will continue; LAN discovery is disabled.");
+            throw;
         }
     }
 
     public async Task StopAsync(CancellationToken cancellationToken)
     {
         state.IsRunning = false;
-        if (application is null) return;
+        retryLifetime?.Cancel();
+        if (retryTask is not null)
+            await retryTask;
 
-        await application.StopAsync(cancellationToken);
-        await application.DisposeAsync();
-        application = null;
+        if (application is not null)
+        {
+            await application.StopAsync(cancellationToken);
+            await application.DisposeAsync();
+            application = null;
+        }
     }
 
 
@@ -503,10 +583,9 @@ public sealed class LocalAgentApiHostedService(
 
     public async ValueTask DisposeAsync()
     {
-        if (application is not null)
-        {
-            await application.DisposeAsync();
-            application = null;
-        }
+        await StopAsync(CancellationToken.None);
+        retryLifetime?.Dispose();
+        retryLifetime = null;
+        retryTask = null;
     }
 }

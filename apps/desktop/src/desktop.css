@@ -1,0 +1,396 @@
+/* Native SmartPrint workspace — Windows desktop design system */
+body[data-app-shell="desktop"] {
+  min-width: 1000px;
+  min-height: 680px;
+  overflow: hidden;
+  background: #0b1020;
+  color: #eef2fb;
+  font-family: "Segoe UI Variable", "Segoe UI", sans-serif;
+  font-size: 14px;
+}
+body[data-app-shell="desktop"] #root { min-height: 100vh; }
+body[data-app-shell="desktop"] button,
+body[data-app-shell="desktop"] input,
+body[data-app-shell="desktop"] select,
+body[data-app-shell="desktop"] textarea {
+  font-family: "Segoe UI Variable", "Segoe UI", sans-serif;
+}
+body[data-app-shell="desktop"] .app-shell {
+  --bg: #0b1020;
+  --sidebar: #111a2a;
+  --surface: #141f32;
+  --surface-2: #19263b;
+  --surface-3: #202f47;
+  --border: #293852;
+  --border-soft: #24324a;
+  --text: #eef2fb;
+  --muted: #a5b2c8;
+  --faint: #7888a3;
+  --accent: #a99bff;
+  --accent-strong: #7867ee;
+  --accent-soft: rgba(145, 128, 255, .15);
+  --green: #63d9aa;
+  --amber: #f1c47a;
+  --red: #f28c98;
+  --blue: #86b5ff;
+  min-height: 100vh;
+  height: 100vh;
+  overflow: hidden;
+  background:
+    radial-gradient(ellipse at 72% -14%, rgba(111, 96, 218, .18), transparent 42%),
+    radial-gradient(ellipse at 8% 90%, rgba(42, 127, 143, .08), transparent 38%),
+    var(--bg);
+  color: var(--text);
+}
+body[data-app-shell="desktop"] .app-shell.light {
+  --bg: #edf2f8;
+  --sidebar: #f8faff;
+  --surface: #fff;
+  --surface-2: #f4f7fc;
+  --surface-3: #eaf0f8;
+  --border: #dce4ef;
+  --border-soft: #e7edf5;
+  --text: #202d42;
+  --muted: #62718a;
+  --faint: #8492a8;
+  --accent: #624fd0;
+  --accent-strong: #6653dc;
+  --accent-soft: rgba(102, 83, 220, .10);
+  --green: #16875d;
+  --amber: #9a6719;
+  --red: #c64e5c;
+  --blue: #386fc4;
+  background: radial-gradient(ellipse at 72% -14%, rgba(124, 108, 225, .11), transparent 42%), var(--bg);
+}
+
+body[data-app-shell="desktop"] .sidebar {
+  position: relative;
+  inset: auto;
+  z-index: 20;
+  width: 258px;
+  flex: 0 0 258px;
+  min-height: 100vh;
+  height: 100vh;
+  overflow-y: auto;
+  padding: 27px 18px 18px;
+  border-right: 1px solid var(--border);
+  background: linear-gradient(180deg, var(--sidebar), color-mix(in srgb, var(--sidebar) 92%, #6c5be8));
+  box-shadow: 14px 0 45px rgba(2, 8, 20, .12);
+}
+body[data-app-shell="desktop"] .brand-lockup {
+  padding: 0 8px 25px;
+  margin-bottom: 20px;
+  border-bottom: 1px solid var(--border);
+  gap: 12px;
+}
+body[data-app-shell="desktop"] .brand-mark {
+  width: 43px;
+  height: 43px;
+  border-radius: 13px;
+  box-shadow: 0 8px 24px rgba(120, 98, 237, .34);
+}
+body[data-app-shell="desktop"] .brand-name { font-size: 21px; }
+body[data-app-shell="desktop"] .brand-caption { font-size: 9px; letter-spacing: 1.7px; }
+body[data-app-shell="desktop"] .workspace-switcher {
+  gap: 12px;
+  padding: 13px 12px;
+  margin-bottom: 28px;
+  border-radius: 13px;
+  background: linear-gradient(135deg, var(--surface-2), var(--surface));
+}
+body[data-app-shell="desktop"] .shop-avatar { width: 39px; height: 39px; border-radius: 12px; }
+body[data-app-shell="desktop"] .workspace-copy strong,
+body[data-app-shell="desktop"] .profile-copy strong { color: var(--text); font-size: 13px; }
+body[data-app-shell="desktop"] .workspace-copy span,
+body[data-app-shell="desktop"] .profile-copy span { color: var(--muted); font-size: 12px; }
+body[data-app-shell="desktop"] .nav-label {
+  padding: 0 12px 11px;
+  color: var(--faint);
+  font-size: 10px;
+  letter-spacing: 1.5px;
+}
+body[data-app-shell="desktop"] .primary-nav { gap: 6px; }
+body[data-app-shell="desktop"] .nav-item {
+  width: 100%;
+  height: 46px;
+  padding: 0 13px;
+  gap: 13px;
+  border-radius: 11px;
+  color: var(--muted);
+  font-size: 14px;
+  font-weight: 600;
+}
+body[data-app-shell="desktop"] .nav-item svg { width: 19px; height: 19px; }
+body[data-app-shell="desktop"] .nav-item:hover { background: var(--surface-2); color: var(--text); }
+body[data-app-shell="desktop"] .nav-item.active {
+  color: var(--accent);
+  background: linear-gradient(90deg, var(--accent-soft), color-mix(in srgb, var(--accent-soft) 30%, transparent));
+  box-shadow: inset 3px 0 0 var(--accent), 0 5px 16px rgba(4, 9, 21, .12);
+}
+body[data-app-shell="desktop"] .sidebar-bottom { padding-top: 22px; }
+body[data-app-shell="desktop"] .plan-card { padding: 13px 11px; border-radius: 12px; margin-bottom: 14px; }
+body[data-app-shell="desktop"] .plan-card strong { color: var(--text); font-size: 11px; }
+body[data-app-shell="desktop"] .plan-card span { color: var(--muted); font-size: 10px; }
+body[data-app-shell="desktop"] .support-link { margin-bottom: 18px; }
+body[data-app-shell="desktop"] .profile-row { padding: 17px 3px 0; gap: 11px; }
+body[data-app-shell="desktop"] .profile-avatar { width: 37px; height: 37px; font-size: 12px; }
+body[data-app-shell="desktop"] .sidebar-toggle,
+body[data-app-shell="desktop"] .mobile-menu,
+body[data-app-shell="desktop"] .sidebar-close,
+body[data-app-shell="desktop"] .mobile-scrim { display: none !important; }
+
+/* The shop desktop does not collapse into a mobile navigation pattern. */
+body[data-app-shell="desktop"] .app-shell.sidebar-collapsed .sidebar {
+  width: 258px;
+  flex-basis: 258px;
+  padding: 27px 18px 18px;
+}
+body[data-app-shell="desktop"] .app-shell.sidebar-collapsed .brand-lockup {
+  justify-content: flex-start;
+  padding: 0 8px 25px;
+  gap: 12px;
+}
+body[data-app-shell="desktop"] .app-shell.sidebar-collapsed .brand-lockup > div:not(.brand-mark),
+body[data-app-shell="desktop"] .app-shell.sidebar-collapsed .workspace-copy,
+body[data-app-shell="desktop"] .app-shell.sidebar-collapsed .tenant-status-dot,
+body[data-app-shell="desktop"] .app-shell.sidebar-collapsed .nav-label,
+body[data-app-shell="desktop"] .app-shell.sidebar-collapsed .nav-item span,
+body[data-app-shell="desktop"] .app-shell.sidebar-collapsed .plan-card > div:nth-child(2),
+body[data-app-shell="desktop"] .app-shell.sidebar-collapsed .profile-copy {
+  display: flex !important;
+}
+body[data-app-shell="desktop"] .app-shell.sidebar-collapsed .nav-item {
+  justify-content: flex-start;
+  padding: 0 13px;
+  width: 100%;
+}
+
+body[data-app-shell="desktop"] .main-panel {
+  position: relative;
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  height: 100vh;
+  overflow: hidden;
+}
+body[data-app-shell="desktop"] .topbar {
+  position: relative;
+  z-index: 5;
+  flex: 0 0 76px;
+  height: 76px;
+  padding: 0 42px;
+  border-bottom: 1px solid var(--border);
+  background: color-mix(in srgb, var(--sidebar) 90%, transparent);
+  backdrop-filter: blur(18px);
+}
+body[data-app-shell="desktop"] .breadcrumb { gap: 12px; font-size: 13px; }
+body[data-app-shell="desktop"] .breadcrumb strong { font-weight: 700; }
+body[data-app-shell="desktop"] .topbar-actions { gap: 19px; }
+body[data-app-shell="desktop"] .connection-pill { gap: 9px; font-size: 12px; color: var(--muted); }
+body[data-app-shell="desktop"] .live-dot { width: 8px; height: 8px; }
+body[data-app-shell="desktop"] .icon-button { width: 38px; height: 38px; border-radius: 10px; }
+body[data-app-shell="desktop"] .topbar-product-tag { font-size: 12px; color: var(--muted); }
+body[data-app-shell="desktop"] .mode-indicator { width: 8px; height: 8px; }
+body[data-app-shell="desktop"] .main-panel > .content-wrap {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+}
+body[data-app-shell="desktop"] .content-wrap {
+  width: 100%;
+  max-width: 1900px;
+  margin: 0 auto;
+  padding: 36px 42px 28px;
+}
+body[data-app-shell="desktop"] .page-heading {
+  align-items: center;
+  gap: 24px;
+  margin-bottom: 24px;
+  padding: 25px 28px;
+  border: 1px solid var(--border);
+  border-radius: 18px;
+  background:
+    radial-gradient(ellipse at 88% 5%, rgba(139, 121, 255, .13), transparent 44%),
+    linear-gradient(125deg, var(--surface), color-mix(in srgb, var(--surface-2) 74%, var(--surface)));
+  box-shadow: 0 14px 36px rgba(1, 8, 22, .10), inset 0 1px 0 rgba(255,255,255,.025);
+}
+body[data-app-shell="desktop"] .eyebrow { margin-bottom: 11px; font-size: 10px; letter-spacing: 1.7px; }
+body[data-app-shell="desktop"] .page-heading h1 {
+  margin-bottom: 7px;
+  color: var(--text);
+  font: 750 30px/1.18 "Segoe UI Variable", "Segoe UI", sans-serif;
+  letter-spacing: -.8px;
+}
+body[data-app-shell="desktop"] .page-heading p { color: var(--muted); font-size: 14px; line-height: 1.55; }
+body[data-app-shell="desktop"] .heading-actions { gap: 11px; }
+body[data-app-shell="desktop"] .date-chip {
+  gap: 9px;
+  padding: 11px 13px;
+  border-radius: 10px;
+  color: var(--muted);
+  background: var(--surface-2);
+  font-size: 12px;
+}
+body[data-app-shell="desktop"] .primary-button,
+body[data-app-shell="desktop"] .secondary-button {
+  min-height: 42px;
+  padding: 10px 16px;
+  border-radius: 10px;
+  font-size: 13px;
+  font-weight: 700;
+}
+body[data-app-shell="desktop"] .stat-grid { gap: 17px; margin-bottom: 18px; }
+body[data-app-shell="desktop"] .metric-card {
+  min-height: 150px;
+  padding: 20px 21px 18px;
+  border-radius: 16px;
+  box-shadow: 0 9px 28px rgba(1, 8, 22, .07);
+  background: linear-gradient(145deg, var(--surface), color-mix(in srgb, var(--surface-2) 48%, var(--surface)));
+}
+body[data-app-shell="desktop"] .metric-top { margin-bottom: 15px; }
+body[data-app-shell="desktop"] .metric-icon { width: 39px; height: 39px; border-radius: 11px; }
+body[data-app-shell="desktop"] .metric-label { margin-bottom: 7px; font-size: 12px; color: var(--muted); }
+body[data-app-shell="desktop"] .metric-value { margin-bottom: 9px; font-size: 27px; }
+body[data-app-shell="desktop"] .metric-foot { gap: 8px; font-size: 11px; color: var(--faint); }
+body[data-app-shell="desktop"] .dashboard-grid { gap: 18px; margin-bottom: 18px; }
+body[data-app-shell="desktop"] .panel {
+  padding: 22px 23px;
+  border-radius: 16px;
+  box-shadow: 0 9px 28px rgba(1, 8, 22, .06);
+}
+body[data-app-shell="desktop"] .panel-heading { gap: 18px; }
+body[data-app-shell="desktop"] .panel-heading h2 { margin-bottom: 6px; color: var(--text); font-size: 16px; }
+body[data-app-shell="desktop"] .panel-heading p { color: var(--muted); font-size: 12px; line-height: 1.55; }
+body[data-app-shell="desktop"] .chart-area { height: 190px; margin-top: 17px; }
+body[data-app-shell="desktop"] .chart-y-labels,
+body[data-app-shell="desktop"] .bar-group > span { font-size: 10px; }
+body[data-app-shell="desktop"] .chart-legend { margin-top: 22px; font-size: 11px; }
+body[data-app-shell="desktop"] .chart-legend strong { font-size: 22px; }
+body[data-app-shell="desktop"] .printer-summary { padding: 15px 0; }
+body[data-app-shell="desktop"] .printer-summary strong { color: var(--text); font-size: 12px; }
+body[data-app-shell="desktop"] .printer-summary span { color: var(--muted); font-size: 11px; }
+body[data-app-shell="desktop"] .device-copy strong { font-size: 11px; color: var(--text); }
+body[data-app-shell="desktop"] .device-copy span { font-size: 10px; color: var(--muted); }
+body[data-app-shell="desktop"] .status-badge { padding: 5px 8px; font-size: 10px; }
+body[data-app-shell="desktop"] th { padding: 13px 16px; font-size: 10px; color: var(--faint); }
+body[data-app-shell="desktop"] td { padding: 14px 16px; font-size: 12px; color: var(--muted); }
+body[data-app-shell="desktop"] .customer-cell strong,
+body[data-app-shell="desktop"] .detail-cell strong { font-size: 13px; color: var(--text); }
+body[data-app-shell="desktop"] .customer-cell span,
+body[data-app-shell="desktop"] .detail-cell span,
+body[data-app-shell="desktop"] .time-cell { font-size: 11px; color: var(--muted); }
+body[data-app-shell="desktop"] .amount-cell { font-size: 13px; color: var(--text); }
+body[data-app-shell="desktop"] .search-field { height: 40px; border-radius: 9px; }
+body[data-app-shell="desktop"] .search-field input { width: 180px; font-size: 12px; }
+body[data-app-shell="desktop"] .app-footer { margin-top: 22px; padding-top: 17px; font-size: 10px; }
+body[data-app-shell="desktop"] .inline-error,
+body[data-app-shell="desktop"] .inline-success {
+  padding: 13px 15px;
+  border-radius: 10px;
+  margin-bottom: 16px;
+  font-size: 13px;
+}
+body[data-app-shell="desktop"] .modal-card {
+  width: min(100%, 620px);
+  padding: 25px;
+  border-radius: 18px;
+}
+body[data-app-shell="desktop"] .modal-heading h2 { font-size: 20px; }
+body[data-app-shell="desktop"] .modal-heading p,
+body[data-app-shell="desktop"] .modal-body { font-size: 13px; }
+body[data-app-shell="desktop"] .modal-form label,
+body[data-app-shell="desktop"] .settings-form label { font-size: 12px; }
+body[data-app-shell="desktop"] .modal-form input,
+body[data-app-shell="desktop"] .modal-form select,
+body[data-app-shell="desktop"] .settings-form input { min-height: 43px; font-size: 13px; }
+
+body[data-app-shell="desktop"] .auth-screen {
+  min-height: 100vh;
+  background:
+    radial-gradient(ellipse at 18% 20%, rgba(116, 98, 224, .19), transparent 34%),
+    radial-gradient(ellipse at 83% 86%, rgba(52, 156, 143, .11), transparent 32%),
+    #0b1020;
+  font-family: "Segoe UI Variable", "Segoe UI", sans-serif;
+}
+body[data-app-shell="desktop"] .auth-topbar { height: 82px; padding-inline: 55px; }
+body[data-app-shell="desktop"] .auth-layout {
+  width: min(1190px, calc(100% - 100px));
+  grid-template-columns: minmax(0, 1fr) minmax(410px, 470px);
+  gap: 75px;
+  padding: 56px 0;
+}
+body[data-app-shell="desktop"] .auth-story h1 { font-size: 54px; }
+body[data-app-shell="desktop"] .auth-story > p { font-size: 14px; }
+body[data-app-shell="desktop"] .auth-benefits strong { font-size: 13px; }
+body[data-app-shell="desktop"] .auth-benefits small { font-size: 11px; }
+body[data-app-shell="desktop"] .auth-card { padding: 31px; border-radius: 20px; }
+body[data-app-shell="desktop"] .auth-card-heading h2 { font-size: 23px; }
+body[data-app-shell="desktop"] .auth-form label { font-size: 12px; }
+body[data-app-shell="desktop"] .auth-input { height: 47px; }
+body[data-app-shell="desktop"] .auth-input input { font-size: 13px; }
+body[data-app-shell="desktop"] .auth-tabs button,
+body[data-app-shell="desktop"] .auth-submit { font-size: 12px; }
+body[data-app-shell="desktop"] .auth-footer { padding-inline: 55px; font-size: 10px; }
+
+body[data-app-shell="desktop"] .desktop-agent-connect { display: grid; gap: 24px; }
+body[data-app-shell="desktop"] .desktop-agent-connect .agent-intro p {
+  max-width: 760px;
+  font-size: 14px;
+  line-height: 1.65;
+}
+body[data-app-shell="desktop"] .desktop-agent-connect .agent-intro h2 { font-size: 22px; }
+body[data-app-shell="desktop"] .desktop-agent-status {
+  display: flex;
+  align-items: flex-start;
+  gap: 15px;
+  padding: 20px 22px;
+  border: 1px solid var(--border);
+  border-radius: 15px;
+  background: linear-gradient(135deg, var(--surface-2), var(--surface));
+}
+body[data-app-shell="desktop"] .desktop-agent-indicator {
+  flex: 0 0 11px;
+  width: 11px;
+  height: 11px;
+  margin-top: 6px;
+  border-radius: 50%;
+  background: var(--amber);
+  box-shadow: 0 0 0 5px color-mix(in srgb, var(--amber) 14%, transparent);
+}
+body[data-app-shell="desktop"] .desktop-agent-indicator.connected { background: var(--green); box-shadow: 0 0 0 5px color-mix(in srgb, var(--green) 14%, transparent); }
+body[data-app-shell="desktop"] .desktop-agent-indicator.conflict { background: var(--red); box-shadow: 0 0 0 5px color-mix(in srgb, var(--red) 14%, transparent); }
+body[data-app-shell="desktop"] .desktop-agent-status strong {
+  display: block;
+  color: var(--text);
+  font: 700 15px "Segoe UI Variable", "Segoe UI", sans-serif;
+  margin-bottom: 6px;
+}
+body[data-app-shell="desktop"] .desktop-agent-status small {
+  display: block;
+  max-width: 760px;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.6;
+}
+body[data-app-shell="desktop"] .desktop-agent-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 15px; }
+body[data-app-shell="desktop"] .desktop-agent-actions > span { color: var(--muted); font-size: 13px; }
+body[data-app-shell="desktop"] .desktop-agent-actions .primary-button { min-height: 44px; padding-inline: 19px; }
+body[data-app-shell="desktop"] .desktop-agent-actions .primary-button:disabled { opacity: .58; cursor: not-allowed; }
+
+@media (max-width: 1180px) {
+  body[data-app-shell="desktop"] .sidebar { width: 238px; flex-basis: 238px; }
+  body[data-app-shell="desktop"] .content-wrap { padding-inline: 28px; }
+  body[data-app-shell="desktop"] .topbar { padding-inline: 28px; }
+  body[data-app-shell="desktop"] .dashboard-grid { grid-template-columns: minmax(0, 1.15fr) minmax(255px, .9fr); }
+  body[data-app-shell="desktop"] .auth-layout { gap: 40px; }
+}
+@media (max-height: 760px) {
+  body[data-app-shell="desktop"] .content-wrap { padding-top: 22px; padding-bottom: 18px; }
+  body[data-app-shell="desktop"] .page-heading { padding-block: 19px; margin-bottom: 18px; }
+  body[data-app-shell="desktop"] .metric-card { min-height: 132px; padding-block: 15px; }
+  body[data-app-shell="desktop"] .chart-area { height: 150px; }
+}

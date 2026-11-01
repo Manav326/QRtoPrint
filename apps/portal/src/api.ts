@@ -1,3 +1,4 @@
+import { getLocalAgentStatus, isDesktopApp, writeDesktopSession } from "./desktop-bridge";
 export interface AuthTokens {
   tokenType: string;
   accessToken: string;
@@ -150,15 +151,101 @@ export interface AgentDevice {
 }
 
 export class ApiError extends Error {
-  constructor(message: string, public readonly status: number) {
+  constructor(
+    message: string,
+    public readonly status: number,
+    public readonly code: string | null = null
+  ) {
     super(message);
     this.name = "ApiError";
   }
 }
 
-const apiBase = (import.meta.env.VITE_API_BASE_URL || "").replace(/\/$/, "");
+const defaultApiBase = (import.meta.env.VITE_API_BASE_URL || "").replace(/\/$/, "");
+let apiBase = defaultApiBase;
+let desktopApiBaseRefresh: Promise<void> | null = null;
+let lastDesktopApiBaseRefreshUtc = 0;
+
+export function configureApiBaseUrl(value: string | null | undefined): boolean {
+  if (!value) return false;
+  try {
+    const parsed = new URL(value);
+    if (
+      !(parsed.protocol === "https:" ||
+        (parsed.protocol === "http:" && ["localhost", "127.0.0.1", "::1"].includes(parsed.hostname))) ||
+      !parsed.hostname ||
+      parsed.username ||
+      parsed.password ||
+      parsed.pathname !== "/" ||
+      parsed.search ||
+      parsed.hash
+    ) return false;
+
+    apiBase = parsed.origin;
+    return true;
+  } catch {
+    // Keep the previously validated base URL if the local service returns invalid data.
+    return false;
+  }
+}
+
+async function refreshDesktopApiBaseUrl(force = false): Promise<void> {
+  if (!isDesktopApp()) return;
+  if (desktopApiBaseRefresh) return desktopApiBaseRefresh;
+  if (!force && Date.now() - lastDesktopApiBaseRefreshUtc < 30_000) return;
+
+  desktopApiBaseRefresh = getLocalAgentStatus()
+    .then(status => {
+      if (configureApiBaseUrl(status.apiBaseUrl)) {
+        lastDesktopApiBaseRefreshUtc = Date.now();
+      } else {
+        // Retry shortly when the Windows service is still starting or not installed.
+        lastDesktopApiBaseRefreshUtc = Date.now() - 25_000;
+      }
+    })
+    .catch(() => {
+      lastDesktopApiBaseRefreshUtc = Date.now() - 25_000;
+    })
+    .finally(() => {
+      desktopApiBaseRefresh = null;
+    });
+
+  return desktopApiBaseRefresh;
+}
 
 let refreshInFlight: Promise<AuthTokens | null> | null = null;
+let desktopSessionWrite: Promise<void> = Promise.resolve();
+
+async function fetchApiResponse(path: string, options: RequestInit): Promise<Response> {
+  const requestBase = apiBase;
+  const method = (options.method || "GET").toUpperCase();
+
+  try {
+    return await fetch(`${requestBase}${path}`, options);
+  } catch {
+    // Refresh the destination after any desktop network failure so the next
+    // explicit owner action uses the current URL. Only reads are safe to replay:
+    // the server may have committed a write before its response was lost.
+    const canRetry = ["GET", "HEAD", "OPTIONS"].includes(method);
+    let destinationChanged = false;
+    if (isDesktopApp()) {
+      await refreshDesktopApiBaseUrl(true);
+      destinationChanged = apiBase !== requestBase;
+      if (canRetry && destinationChanged) {
+        try {
+          return await fetch(`${apiBase}${path}`, options);
+        } catch {
+          // Surface one stable network error below using the latest origin.
+        }
+      }
+    }
+
+    const message = !canRetry
+      ? "The connection was lost before SmartPrint could confirm this action. Check the latest job or order status before trying again."
+      : `Unable to reach Smart Print API at ${apiBase}. Check that the network is available.`;
+    throw new ApiError(message, 0);
+  }
+}
 
 async function refreshStoredSession(expectedAccessToken: string): Promise<AuthTokens | null> {
   const stored = readStoredTokens();
@@ -179,18 +266,18 @@ async function refreshStoredSession(expectedAccessToken: string): Promise<AuthTo
     refreshInFlight = apiRequest<AuthTokens>("/api/v1/auth/refresh", {
       method: "POST",
       body: JSON.stringify({ refreshToken: source.refreshToken })
-    }).then(tokens => {
+    }).then(async tokens => {
       const latest = readStoredTokens();
       if (!latest) return null;
       if (latest.refreshToken === source.refreshToken) {
-        storeTokens(tokens);
+        await storeTokens(tokens);
         return tokens;
       }
       return latest;
-    }).catch(error => {
+    }).catch(async error => {
       if (error instanceof ApiError && error.status === 401) {
         const latest = readStoredTokens();
-        if (latest?.refreshToken === source.refreshToken) storeTokens(null);
+        if (latest?.refreshToken === source.refreshToken) await storeTokens(null);
         return null;
       }
       throw error;
@@ -207,6 +294,8 @@ export async function apiRequest<T>(
   options: RequestInit = {},
   accessToken?: string
 ): Promise<T> {
+  await refreshDesktopApiBaseUrl();
+
   const send = async (bearerToken?: string): Promise<Response> => {
     const headers = new Headers(options.headers);
     headers.set("Accept", "application/json");
@@ -215,11 +304,7 @@ export async function apiRequest<T>(
       headers.set("Content-Type", "application/json");
     }
 
-    try {
-      return await fetch(`${apiBase}${path}`, { ...options, headers });
-    } catch {
-      throw new ApiError(`Unable to reach Smart Print API at ${apiBase}. Check that the API is running and the network is available.`, 0);
-    }
+    return fetchApiResponse(path, { ...options, headers });
   };
 
   let response = await send(accessToken);
@@ -237,11 +322,15 @@ export async function apiRequest<T>(
   }
 
   if (!response.ok) {
-    const body = payload as { title?: string; detail?: string; message?: string; errors?: Record<string, string[]> } | null;
+    const body = payload as { code?: string; title?: string; detail?: string; message?: string; errors?: Record<string, string[]> } | null;
     const validation = body?.errors
       ? Object.values(body.errors).flat().join(" ")
       : "";
-    throw new ApiError(validation || body?.detail || body?.message || body?.title || `Request failed (${response.status}).`, response.status);
+    throw new ApiError(
+      validation || body?.detail || body?.message || body?.title || `Request failed (${response.status}).`,
+      response.status,
+      body?.code ?? null
+    );
   }
 
   return payload as T;
@@ -256,9 +345,20 @@ export function readStoredTokens(): AuthTokens | null {
   }
 }
 
-export function storeTokens(tokens: AuthTokens | null): void {
+export function storeTokens(tokens: AuthTokens | null): Promise<void> {
   if (tokens) sessionStorage.setItem("qrtoprint.auth", JSON.stringify(tokens));
   else sessionStorage.removeItem("qrtoprint.auth");
+
+  if (!isDesktopApp()) return Promise.resolve();
+
+  // Serialize native writes so a late token-rotation write cannot overwrite a
+  // newer sign-out or a newer session. Callers that rotate credentials can await
+  // the write before allowing the next authenticated request.
+  const serialized = tokens ? JSON.stringify(tokens) : null;
+  desktopSessionWrite = desktopSessionWrite
+    .catch(() => undefined)
+    .then(() => writeDesktopSession(serialized));
+  return desktopSessionWrite;
 }
 
 export const signIn = (email: string, password: string) =>
@@ -1089,7 +1189,7 @@ export async function downloadShopDocument(token: string, jobId: string): Promis
   >(`/api/v1/shop/print-jobs/${jobId}/preview-source`, {}, token);
 
   if (source.mode === "CLOUD") {
-    const response = await fetch(`${apiBase}/api/v1/shop/print-jobs/${jobId}/document`, {
+    const response = await fetchApiResponse(`/api/v1/shop/print-jobs/${jobId}/document`, {
       headers: { Accept: "application/pdf,image/jpeg,image/png", Authorization: `Bearer ${token}` },
       cache: "no-store"
     });
