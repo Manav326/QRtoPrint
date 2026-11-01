@@ -65,7 +65,7 @@ The CI Android job also uploads JVM and emulator test reports as `qrtoprint-andr
 ## Automated Android UI tests
 
 The CI Android job also launches an Android 15 (API 35) emulator and runs
-`connectedDebugAndroidTest`. Current instrumented coverage includes SmartPrint home/navigation, global guest-account entry, Scan & Print explanation, nested-folder operations, scanner permission explanation, encrypted account-token storage, mixed PDF/image batch composition and saved-PDF page edits. The merged Android baseline passed [CI run 41219803734](https://github.com/Manav326/QRtoPrint/actions/runs/41219803734); each subsequent branch change must pass CI before it is treated as verified. This remains emulator/API/unit coverage; it does not replace physical-device camera, Google Play services scanner, file-manager provider, shop Wi-Fi, payment or printer validation.
+`connectedDebugAndroidTest`. Current instrumented coverage includes SmartPrint home/navigation, global guest-account entry, Scan & Print explanation, nested-folder operations, scanner permission explanation, encrypted account-token storage, mixed PDF/image batch composition and saved-PDF page edits. The merged Android baseline passed CI; each subsequent branch change must pass CI before it is treated as verified. This remains emulator/API/unit coverage; it does not replace physical-device camera, Google Play services scanner, file-manager provider, shop Wi-Fi, payment or printer validation.
 
 
 ## Customer-app recovery and hardening
