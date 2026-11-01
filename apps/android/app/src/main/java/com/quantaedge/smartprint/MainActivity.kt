@@ -978,6 +978,7 @@ class MainActivity : AppCompatActivity() {
         toolbar.title = "Print"
         toolbar.setNavigationIcon(android.R.drawable.ic_media_previous)
         toolbar.setNavigationOnClickListener { showFiles() }
+        accountAction.visibility = View.VISIBLE
         navigation.visibility = View.VISIBLE
         navigation.menu.findItem(SCAN_PRINT).isChecked = true
         content.removeAllViews()
