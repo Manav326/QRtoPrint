@@ -2514,7 +2514,7 @@ shop.MapPost("/print-batches/{batchId:guid}/review", async (
 
     await using var transaction = await db.Database.BeginTransactionAsync(ct);
     var lockedJobs = await db.PrintJobs.FromSqlInterpolated(
-        $"SELECT * FROM \"PrintJobs\" WHERE \"TenantId\" = {tenantId} AND \"BatchId\" = {batchId} AND \"Status\" IN ('AWAITING_SHOP_APPROVAL','AWAITING_PAYMENT','REJECTED') FOR UPDATE")
+        $"SELECT * FROM \"PrintJobs\" WHERE \"TenantId\" = {tenantId} AND \"BatchId\" = {batchId} AND \"Status\" IN ('AWAITING_SHOP_APPROVAL','AWAITING_PAYMENT','PAYMENT_REJECTED','REJECTED') FOR UPDATE")
         .ToListAsync(ct);
     var lockedJobIds = lockedJobs.Select(job => job.Id).ToHashSet();
     if (lockedJobs.Count != reviewedIds.Length || reviewedIds.Any(id => !lockedJobIds.Contains(id)))
@@ -2624,7 +2624,7 @@ shop.MapPost("/print-batches/{batchId:guid}/review", async (
                     CreatedUtc = now
                 });
             }
-            else if (job.Status != "AWAITING_PAYMENT")
+            else if (job.Status is not ("AWAITING_PAYMENT" or "PAYMENT_REJECTED"))
             {
                 await transaction.RollbackAsync(ct);
                 return Results.Conflict(new
@@ -2642,7 +2642,7 @@ shop.MapPost("/print-batches/{batchId:guid}/review", async (
             if (job.Status == "REJECTED")
                 continue;
 
-            if (job.Status is not ("AWAITING_SHOP_APPROVAL" or "AWAITING_PAYMENT"))
+            if (job.Status is not ("AWAITING_SHOP_APPROVAL" or "AWAITING_PAYMENT" or "PAYMENT_REJECTED"))
             {
                 await transaction.RollbackAsync(ct);
                 return Results.Conflict(new
