@@ -3,6 +3,16 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <script>
+      (() => {
+        let theme = "light";
+        try {
+          theme = localStorage.getItem("qrtoprint.theme") === "dark" ? "dark" : "light";
+        } catch {}
+        document.documentElement.dataset.theme = theme;
+        document.documentElement.style.colorScheme = theme;
+      })();
+    </script>
     <meta name="theme-color" content="#7660df" />
     <meta name="description" content="SmartPrint connects local print shops and customers. Scan a shop QR code, send documents and manage print jobs in one seamless workflow." />
     <meta property="og:title" content="SmartPrint — From their phone to your printer" />
