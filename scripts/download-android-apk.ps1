@@ -64,7 +64,7 @@ $newInstalled = $false
 try {
     New-Item -ItemType Directory -Force -Path $stageDirectory, $candidateRoot | Out-Null
 
-    Write-Host ("Finding the newest successful CI run on '{0}' that contains '{1}'..." -f $Branch, $artifactName) -ForegroundColor Cyan
+    Write-Host ("Finding the newest successful CI run on '{0}' with '{1}' (older runs are also checked using their previous artifact name)..." -f $Branch, $artifactName) -ForegroundColor Cyan
 
     # Avoid gh --jq here. On Windows PowerShell, native argument quoting can
     # strip quotes inside a jq expression and make values such as "completed"
