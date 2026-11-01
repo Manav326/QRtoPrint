@@ -1,5 +1,6 @@
 FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
-LABEL org.opencontainers.image.source="https://github.com/Manav326/QRtoPrint"
+ARG SOURCE_REPOSITORY=
+LABEL org.opencontainers.image.source="${SOURCE_REPOSITORY}"
 LABEL org.opencontainers.image.description="QRtoPrint tenant-scoped ASP.NET Core API"
 WORKDIR /source
 COPY . .
