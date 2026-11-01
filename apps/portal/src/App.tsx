@@ -1155,7 +1155,7 @@ function ShopConsole({ tokens, onSignOut }: { tokens: AuthTokens; onSignOut: () 
       // may currently be filtered or paginated, so its visible rows are not
       // a safe source for per-file acceptance/rejection decisions.
       const allBatchJobs = await getShopPrintBatchJobs(tokens.accessToken, batchId);
-      const reviewableStatuses=new Set(["AWAITING_SHOP_APPROVAL","AWAITING_PAYMENT","REJECTED"]);
+      const reviewableStatuses=new Set(["AWAITING_SHOP_APPROVAL","AWAITING_PAYMENT","PAYMENT_REJECTED","REJECTED"]);
       const waiting = allBatchJobs.filter(job => reviewableStatuses.has(job.status));
       if (waiting.length === 0) {
         setBatchReviewJobs(null);
@@ -1865,8 +1865,8 @@ function PaymentsPage({settings,payments,refunds,onSave,onVerify,onReject,busy,b
         <div className="payment-method-heading"><div className="payment-method-icon"><Printer size={19}/></div><div><strong>Cash at counter</strong><small>Allow customers to select cash and pay in person.</small></div><label className="switch"><input type="checkbox" checked={cashEnabled} onChange={event=>setCashEnabled(event.target.checked)}/><span/></label></div>
       </div>
       <div className="payment-method-card instant-payment-setting">
-        <div className="payment-method-heading"><div className="payment-method-icon"><Zap size={19}/></div><div><strong>Instant payment after upload</strong><small>Calculate the price automatically and let customers pay the whole batch without quote acceptance or shop pre-approval. You can still review files individually and refund rejected files.</small></div><label className="switch"><input type="checkbox" checked={instantPaymentEnabled} onChange={event=>setInstantPaymentEnabled(event.target.checked)}/><span/></label></div>
-        <p className="instant-payment-setting-note">Requires your print rate card and at least one payment method to be enabled. UPI references and cash are still verified by the shop before printing.</p>
+        <div className="payment-method-heading"><div className="payment-method-icon"><Zap size={19}/></div><div><strong>Instant payment after upload</strong><small>Customers can pay as soon as the rate-card quote is calculated, without a separate shop pre-approval. Once payment starts, file decisions are locked; after payment is verified, refund rejected files before printer handoff.</small></div><label className="switch"><input type="checkbox" checked={instantPaymentEnabled} onChange={event=>setInstantPaymentEnabled(event.target.checked)}/><span/></label></div>
+        <p className="instant-payment-setting-note">Requires your print rate card and at least one payment method. UPI references and cash are still verified by the shop before printing. Leave this off when you want to review and approve every quote before customers can pay.</p>
       </div>
       <div className="payment-security-note"><ShieldCheck size={16}/><span>SmartPrint by QuantaEdge does not receive, hold or route your customer print revenue. Verify every UPI reference against your own bank/UPI app; cash must be physically received. SmartPrint platform subscription charges are billed separately.</span></div>
       <div className="payment-settings-footer"><span>Last updated {new Date(settings.updatedUtc).toLocaleString()}</span><button className="primary-button" disabled={busy||(!upiEnabled&&!cashEnabled)||(upiEnabled&&(!upiId.trim()||!payeeName.trim()))} onClick={()=>onSave({upiEnabled,upiId:upiEnabled?upiId.trim():null,payeeName:upiEnabled?payeeName.trim():null,cashEnabled,instantPaymentEnabled})}>{busy?<span className="button-spinner"/>:"Save payment methods"}</button></div>
@@ -1940,7 +1940,7 @@ function PrintQueuePage({ jobs, printers, agentDevices, searchQuery, loadingBatc
     return ()=>window.clearInterval(timer);
   },[autoRefresh,refreshSeconds]);
 
-  const reviewableBatchFileStatuses=new Set(["AWAITING_SHOP_APPROVAL","AWAITING_PAYMENT","REJECTED"]);
+  const reviewableBatchFileStatuses=new Set(["AWAITING_SHOP_APPROVAL","AWAITING_PAYMENT","PAYMENT_REJECTED","REJECTED"]);
   const reviewBatches=Array.from(new Map(jobs.filter(job=>job.batchId&&reviewableBatchFileStatuses.has(job.status)).map(job=>[job.batchId!,job])).keys());
   const onlineAgentIds = new Set(agentDevices.filter(agent =>
     !agent.revokedUtc && agent.status === "Online" && !!agent.lastSeenUtc &&
@@ -3067,8 +3067,9 @@ function CustomerPrintFlow({publicCode,sessionToken,paymentOptions,localAgent,lo
     try {
       for(const item of items) {
         const existingQuote=nextQuotes[item.job.id];
-        const status=batchStatuses[item.job.id]?.status??item.job.status;
-        if(existingQuote&&existingQuote.status!=="QUOTE_EXPIRED")continue;
+        const status=batchStatuses[item.job.id]?.status??
+          (uploaded?.job.id===item.job.id?jobStatus?.status:null)??item.job.status;
+        if(status!=="QUOTE_EXPIRED"&&existingQuote&&existingQuote.status!=="QUOTE_EXPIRED")continue;
         if(!["AWAITING_CONFIGURATION","UPLOADED","Uploaded","QUOTE_EXPIRED"].includes(status))continue;
         const settings=printSettingsByJobId[item.job.id]??{colourMode:"Mono" as const,isDuplex:false,copies:1};
         try {
@@ -3397,10 +3398,12 @@ function CustomerPrintFlow({publicCode,sessionToken,paymentOptions,localAgent,lo
     total+(entry.quote?.colourMode==="Colour"?(entry.quote!.quotedAmountMinor??0):0),0);
   const canSendBatch=quoteItems.length>0&&quoteEntries.length===quoteItems.length&&quoteEntries.some(entry=>entry.quote?.status==="AWAITING_CUSTOMER_APPROVAL");
   const canCalculateBatch=quoteItems.some(item=>{
-    const status=batchStatuses[item.job.id]?.status??item.job.status;
+    const status=batchStatuses[item.job.id]?.status??
+      (uploaded?.job.id===item.job.id?jobStatus?.status:null)??item.job.status;
+    if(status==="QUOTE_EXPIRED")return true;
     if(quotesByJobId[item.job.id]&&quotesByJobId[item.job.id].status!=="QUOTE_EXPIRED")return false;
     return !quotesByJobId[item.job.id]||quotesByJobId[item.job.id].status==="QUOTE_EXPIRED"||
-      ["AWAITING_CONFIGURATION","UPLOADED","Uploaded","QUOTE_EXPIRED"].includes(status);
+      ["AWAITING_CONFIGURATION","UPLOADED","Uploaded"].includes(status);
   });
 
   return <section className="customer-print-flow">
