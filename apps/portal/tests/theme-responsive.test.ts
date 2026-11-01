@@ -89,7 +89,9 @@ test("workspace styles retain one authoritative appearance palette", () => {
   const desktop = read("../../desktop/src/desktop.css");
   assert.ok(!css.includes("--accent:#ff9a52"));
   assert.ok(!css.includes("--accent:#e96f23"));
-  assert.match(css, /\\.app-shell\\.light\\s*\\{[^}]*--accent:\\s*#7258e8/s);
-  assert.match(desktop, /--faint:\\s*#626f84/);
-  assert.match(desktop, /--faint:\\s*#8996aa/);
+  assert.ok(css.includes(".app-shell.light{color-scheme:light;--bg:#f4f6fa"));
+  assert.ok(desktop.includes("--muted: #5f6b80;"));
+  assert.ok(desktop.includes("--faint: #626f84;"));
+  assert.ok(desktop.includes("--muted: #aab6ca;"));
+  assert.ok(desktop.includes("--faint: #8996aa;"));
 });
