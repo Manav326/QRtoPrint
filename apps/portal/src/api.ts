@@ -13,7 +13,7 @@ export function isPlatformAdminSession(tokens: AuthTokens | null): boolean {
     if (segments.length !== 3) return false;
     const encoded = segments[1].replace(/-/g, "+").replace(/_/g, "/");
     const payload = JSON.parse(atob(encoded.padEnd(Math.ceil(encoded.length / 4) * 4, "="))) as {
-      tenant_id?: string;
+      tenant_id?: string | null;
       platform_role?: string | string[];
     };
     const roles = Array.isArray(payload.platform_role)
@@ -23,6 +23,13 @@ export function isPlatformAdminSession(tokens: AuthTokens | null): boolean {
   } catch {
     return false;
   }
+}
+
+export type AuthScope = "admin" | "shop";
+
+function currentAuthScope(): AuthScope {
+  const path = window.location.pathname.replace(/\\/+$/, "") || "/";
+  return path === "/admin" || path.startsWith("/admin/") ? "admin" : "shop";
 }
 
 export interface PlatformOverview {
@@ -336,20 +343,42 @@ export async function apiRequest<T>(
   return payload as T;
 }
 
-export function readStoredTokens(): AuthTokens | null {
+function isSerializedPlatformAdmin(raw: string): boolean {
   try {
-    const raw = sessionStorage.getItem("qrtoprint.auth");
-    return raw ? JSON.parse(raw) as AuthTokens : null;
+    const parsed = JSON.parse(raw) as AuthTokens;
+    return isPlatformAdminSession(parsed);
+  } catch {
+    return false;
+  }
+}
+
+export function readStoredTokens(scope: AuthScope = currentAuthScope()): AuthTokens | null {
+  try {
+    const scopedKey = `qrtoprint.auth.${scope}`;
+    const scoped = sessionStorage.getItem(scopedKey);
+    if (scoped) return JSON.parse(scoped) as AuthTokens;
+
+    // Migrate a pre-scope session once, but never copy it into the wrong
+    // application. This keeps existing users signed in without allowing an
+    // admin token to become a shop session (or vice versa).
+    const legacy = sessionStorage.getItem("qrtoprint.auth");
+    if (!legacy) return null;
+    const legacyScope: AuthScope = isSerializedPlatformAdmin(legacy) ? "admin" : "shop";
+    if (legacyScope !== scope) return null;
+    sessionStorage.setItem(scopedKey, legacy);
+    sessionStorage.removeItem("qrtoprint.auth");
+    return JSON.parse(legacy) as AuthTokens;
   } catch {
     return null;
   }
 }
 
-export function storeTokens(tokens: AuthTokens | null): Promise<void> {
-  if (tokens) sessionStorage.setItem("qrtoprint.auth", JSON.stringify(tokens));
-  else sessionStorage.removeItem("qrtoprint.auth");
+export function storeTokens(tokens: AuthTokens | null, scope: AuthScope = currentAuthScope()): Promise<void> {
+  const scopedKey = `qrtoprint.auth.${scope}`;
+  if (tokens) sessionStorage.setItem(scopedKey, JSON.stringify(tokens));
+  else sessionStorage.removeItem(scopedKey);
 
-  if (!isDesktopApp()) return Promise.resolve();
+  if (!isDesktopApp() || scope !== "shop") return Promise.resolve();
 
   // Serialize native writes so a late token-rotation write cannot overwrite a
   // newer sign-out or a newer session. Callers that rotate credentials can await
