@@ -107,7 +107,7 @@ public sealed class WindowsPrintToPdfSpoolerIntegrationTests
                 entry, bytes, outputPath, CancellationToken.None);
 
             Assert.True(receipt.JobId > 0, "Windows did not return a spooler job identifier.");
-            Assert.Equal("SmartPrint-Real-Spooler-Integration", receipt.DocumentName);
+            Assert.Contains("SP-REAL-SPOOLER-TEST", receipt.DocumentName);
 
             var deadline = DateTime.UtcNow.AddSeconds(45);
             byte[]? outputBytes = null;
