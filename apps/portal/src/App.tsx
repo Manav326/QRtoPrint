@@ -2881,6 +2881,13 @@ function CustomerPrintFlow({publicCode,sessionToken,paymentOptions,localAgent,lo
   const [batchStatuses,setBatchStatuses]=useState<Record<string,CustomerJobStatus>>({});
   const [payment,setPayment]=useState<CustomerPayment|null>(null);
   const [batchPayment,setBatchPayment]=useState<CustomerBatchPayment|null>(null);
+
+  function rememberBatchPayment(candidate?:CustomerBatchPayment|null) {
+    if(!candidate)return;
+    setBatchPayment(current=>
+      !current||Date.parse(candidate.createdUtc)>=Date.parse(current.createdUtc)
+        ?candidate:current);
+  }
   const [paymentReference,setPaymentReference]=useState("");
   const [paymentMethod,setPaymentMethod]=useState<"UPI"|"CASH">(paymentOptions.upiEnabled?"UPI":"CASH");
   const [busy,setBusy]=useState(false);
@@ -2953,8 +2960,11 @@ function CustomerPrintFlow({publicCode,sessionToken,paymentOptions,localAgent,lo
           return map;
         },{});
         setBatchStatuses(current=>({...current,...fresh}));
-        const latestBatchPayment=results.find(item=>item?.[1].payment?.batchPayment)?.[1].payment?.batchPayment;
-        if(latestBatchPayment)setBatchPayment(latestBatchPayment);
+        const latestBatchPayment=results
+          .map(item=>item?.[1].payment?.batchPayment??null)
+          .filter((item):item is CustomerBatchPayment=>item!==null)
+          .sort((left,right)=>Date.parse(right.createdUtc)-Date.parse(left.createdUtc))[0];
+        rememberBatchPayment(latestBatchPayment);
         const selectedId=uploaded?.job.id;
         if(selectedId&&fresh[selectedId]){
           const selected=fresh[selectedId];
@@ -2964,7 +2974,7 @@ function CustomerPrintFlow({publicCode,sessionToken,paymentOptions,localAgent,lo
           } else {
             setJobStatus(selected);
             setPayment(selected.payment??null);
-            if(selected.payment?.batchPayment)setBatchPayment(selected.payment.batchPayment);
+            rememberBatchPayment(selected.payment?.batchPayment);
           }
         }
       } finally {refreshing=false;}
@@ -2989,7 +2999,7 @@ function CustomerPrintFlow({publicCode,sessionToken,paymentOptions,localAgent,lo
       }
       setJobStatus(refreshed);
       setPayment(refreshed.payment??null);
-      if(refreshed.payment?.batchPayment)setBatchPayment(refreshed.payment.batchPayment);
+      rememberBatchPayment(refreshed.payment?.batchPayment);
     }).catch(exception=>{
       if(active)setError(exception instanceof ApiError?exception.message:"Could not restore this print request.");
     });
@@ -3095,7 +3105,7 @@ function CustomerPrintFlow({publicCode,sessionToken,paymentOptions,localAgent,lo
         const selected=freshStatuses[uploaded.job.id];
         setJobStatus(selected);
         setPayment(selected.payment??null);
-        if(selected.payment?.batchPayment)setBatchPayment(selected.payment.batchPayment);
+        rememberBatchPayment(selected.payment?.batchPayment);
       }
       const selectedQuote=uploaded?nextQuotes[uploaded.job.id]??null:null;
       setQuote(selectedQuote??Object.values(nextQuotes)[0]??null);
@@ -3175,7 +3185,7 @@ function CustomerPrintFlow({publicCode,sessionToken,paymentOptions,localAgent,lo
         if(!active)return;
         setJobStatus(refreshed);
         setPayment(refreshed.payment??null);
-        if(refreshed.payment?.batchPayment)setBatchPayment(refreshed.payment.batchPayment);
+        rememberBatchPayment(refreshed.payment?.batchPayment);
       }).catch(()=>{/* Retry on the next interval without interrupting the flow. */});
     },8000);
     return ()=>{
@@ -3195,13 +3205,16 @@ function CustomerPrintFlow({publicCode,sessionToken,paymentOptions,localAgent,lo
       return map;
     },{});
     setBatchStatuses(current=>({...current,...fresh}));
-    const latestBatchPayment=results.find(item=>item?.[1].payment?.batchPayment)?.[1].payment?.batchPayment;
-    if(latestBatchPayment)setBatchPayment(latestBatchPayment);
+    const latestBatchPayment=results
+      .map(item=>item?.[1].payment?.batchPayment??null)
+      .filter((item):item is CustomerBatchPayment=>item!==null)
+      .sort((left,right)=>Date.parse(right.createdUtc)-Date.parse(left.createdUtc))[0];
+    rememberBatchPayment(latestBatchPayment);
     const selected=uploaded?fresh[uploaded.job.id]:null;
     if(selected){
       setJobStatus(selected);
       setPayment(selected.payment??null);
-      if(selected.payment?.batchPayment)setBatchPayment(selected.payment.batchPayment);
+      rememberBatchPayment(selected.payment?.batchPayment);
     }
   }
 
@@ -3242,7 +3255,7 @@ function CustomerPrintFlow({publicCode,sessionToken,paymentOptions,localAgent,lo
         const refreshed=await getCustomerJobStatus(sessionToken,uploaded.job.id);
         setJobStatus(refreshed);
         setPayment(refreshed.payment??null);
-        if(refreshed.payment?.batchPayment)setBatchPayment(refreshed.payment.batchPayment);
+        rememberBatchPayment(refreshed.payment?.batchPayment);
       }
     } catch(exception) {
       setError(exception instanceof ApiError?exception.message:"The payment reference could not be submitted.");
