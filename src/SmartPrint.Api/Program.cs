@@ -1753,6 +1753,10 @@ shop.MapGet("/print-jobs", async (
                 .Where(printer => printer.TenantId == tenantId && printer.Id == job.PrinterDeviceId)
                 .Select(printer => printer.QueueName)
                 .FirstOrDefault(),
+            PrinterStatus = db.PrinterDevices
+                .Where(printer => printer.TenantId == tenantId && printer.Id == job.PrinterDeviceId)
+                .Select(printer => printer.Status)
+                .FirstOrDefault(),
             job.ClaimedByAgentDeviceId,
             job.AgentLeaseExpiresUtc,
             job.LocalQueueReceivedUtc,
