@@ -78,7 +78,8 @@ public sealed class LocalAgentApiHostedService(
     AgentLocalQueueStore localQueueStore,
     IHttpClientFactory httpClientFactory,
     LocalAgentApiState state,
-    ILogger<LocalAgentApiHostedService> logger) : IHostedService, IAsyncDisposable
+    ILogger<LocalAgentApiHostedService> logger,
+    IHostApplicationLifetime hostLifetime) : IHostedService, IAsyncDisposable
 {
     private WebApplication? application;
     private CancellationTokenSource? retryLifetime;
@@ -89,7 +90,8 @@ public sealed class LocalAgentApiHostedService(
         if (retryTask is not null)
             return Task.CompletedTask;
 
-        retryLifetime = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        cancellationToken.ThrowIfCancellationRequested();
+        retryLifetime = CancellationTokenSource.CreateLinkedTokenSource(hostLifetime.ApplicationStopping);
         retryTask = StartWithRetryAsync(retryLifetime.Token);
         return Task.CompletedTask;
     }
@@ -108,7 +110,15 @@ public sealed class LocalAgentApiHostedService(
             try
             {
                 await StartApplicationAsync(cancellationToken);
-                return;
+                var runningApplication = application
+                    ?? throw new InvalidOperationException("The local Agent listener did not retain its application host.");
+
+                await runningApplication.WaitForShutdownAsync(cancellationToken);
+                if (cancellationToken.IsCancellationRequested)
+                    return;
+
+                state.IsRunning = false;
+                throw new InvalidOperationException("The local Agent listener stopped unexpectedly.");
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
             {
@@ -116,9 +126,16 @@ public sealed class LocalAgentApiHostedService(
             }
             catch (Exception exception)
             {
+                state.IsRunning = false;
+                if (application is not null)
+                {
+                    await application.DisposeAsync();
+                    application = null;
+                }
+
                 logger.LogWarning(
                     exception,
-                    "The local Agent listener could not start. Cloud printing remains available; retrying the LAN listener in {RetrySeconds} seconds.",
+                    "The local Agent listener could not stay online. Cloud printing remains available; retrying the LAN listener in {RetrySeconds} seconds.",
                     delay.TotalSeconds);
             }
 
