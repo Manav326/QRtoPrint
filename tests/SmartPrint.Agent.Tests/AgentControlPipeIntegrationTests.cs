@@ -21,7 +21,7 @@ public sealed class AgentControlPipeIntegrationTests
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
         var deviceId = Guid.NewGuid();
         const string agentSecret = "integration-test-agent-secret";
-        const string enrollmentCode = "QRTP-Integration-Test-Code-0001";
+        const string enrollmentCode = "QRTP-Integration-Test-Code-00001";
 
         using var portProbe = new TcpListener(IPAddress.Loopback, 0);
         portProbe.Start();

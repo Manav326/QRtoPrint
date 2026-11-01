@@ -54,6 +54,8 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "SmartPrint desktop frontend build failed." }
           cargo check --manifest-path apps/desktop/src-tauri/Cargo.toml --target x86_64-pc-windows-msvc
           if ($LASTEXITCODE -ne 0) { throw "SmartPrint native desktop host compilation failed." }
+          cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml --target x86_64-pc-windows-msvc
+          if ($LASTEXITCODE -ne 0) { throw "SmartPrint native desktop host tests failed." }
       - name: Generate reproducible frontend and Rust dependency locks
         shell: pwsh
         run: |
