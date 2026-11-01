@@ -33,6 +33,9 @@ public sealed class AddBatchCheckoutPayments : Migration
                 CONSTRAINT "CK_PrintBatchPayments_AmountMinor" CHECK ("AmountMinor" > 0),
                 CONSTRAINT "FK_PrintBatchPayments_Tenants_TenantId"
                     FOREIGN KEY ("TenantId") REFERENCES "Tenants" ("Id") ON DELETE CASCADE,
+                CONSTRAINT "FK_PrintBatchPayments_CustomerPrintSessions_TenantId_CustomerSessionId"
+                    FOREIGN KEY ("TenantId", "CustomerSessionId")
+                    REFERENCES "CustomerPrintSessions" ("TenantId", "Id") ON DELETE RESTRICT,
                 CONSTRAINT "FK_PrintBatchPayments_AspNetUsers_VerifiedByUserId"
                     FOREIGN KEY ("VerifiedByUserId") REFERENCES "AspNetUsers" ("Id") ON DELETE RESTRICT
             );
