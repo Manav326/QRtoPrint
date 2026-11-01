@@ -987,7 +987,7 @@ class MainActivity : AppCompatActivity() {
         ), LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
         if (path.isNotEmpty()) {
             val up = button("Up", false)
-            crumb.addView(up, LinearLayout.LayoutParams(-2, dp(40)))
+            crumb.addView(up, LinearLayout.LayoutParams(-2, dp(48)))
             up.setOnClickListener {
                 if (isPicker) pickerPath = parent(pickerPath) else folderPath = parent(folderPath)
                 refreshLibrary()
@@ -1020,7 +1020,7 @@ class MainActivity : AppCompatActivity() {
                 isEnabled = validSelection
                 alpha = if (validSelection) 1f else 0.45f
                 setOnClickListener { chooseFiles(chooserSelection) }
-            }, LinearLayout.LayoutParams(0, dp(44), 1f))
+            }, LinearLayout.LayoutParams(0, dp(48), 1f))
             selectionActions.addView(button("Clear", false).apply {
                 isEnabled = chooserSelection.isNotEmpty()
                 setOnClickListener { chooserSelectedFilePaths.clear(); refreshLibrary() }
@@ -1109,7 +1109,7 @@ class MainActivity : AppCompatActivity() {
                 contentDescription = "Select " + file.name
                 setOnCheckedChangeListener { _, checked -> setChooserFileSelected(file, checked) }
             }
-            row.addView(selected, LinearLayout.LayoutParams(dp(42), dp(44)))
+            row.addView(selected, LinearLayout.LayoutParams(dp(48), dp(44)))
         } else if (isPicker && !file.isDirectory) {
             row.addView(button("Select", true).apply {
                 minWidth = dp(72)
@@ -1479,12 +1479,12 @@ class MainActivity : AppCompatActivity() {
                                     }
                                     auth?.accessToken.orEmpty()
                                 }
-                                parts.size == 2 && parts[0] == "getCustomerPrintSession" ->
+                                parts.size == 2 && parts[0] == "getCustomerPrintSession" && isActiveStationCode(parts[1]) ->
                                     customerPrintSessionStore.read(parts[1]).orEmpty()
-                                parts.size == 3 && parts[0] == "saveCustomerPrintSession" -> {
+                                parts.size == 3 && parts[0] == "saveCustomerPrintSession" && isActiveStationCode(parts[1]) -> {
                                     customerPrintSessionStore.save(parts[1], parts[2]); "OK"
                                 }
-                                parts.size == 2 && parts[0] == "clearCustomerPrintSession" -> {
+                                parts.size == 2 && parts[0] == "clearCustomerPrintSession" && isActiveStationCode(parts[1]) -> {
                                     customerPrintSessionStore.clear(parts[1]); "OK"
                                 }
                                 else -> ""
@@ -1553,6 +1553,11 @@ class MainActivity : AppCompatActivity() {
         }
         webView = view
         return view
+    }
+
+    private fun isActiveStationCode(candidate: String): Boolean {
+        val activeCode = portalUrl?.let { Uri.parse(it).lastPathSegment } ?: return false
+        return candidate.matches(Regex("^[A-Za-z0-9_-]{32}$")) && candidate == activeCode
     }
 
     private fun allowedAgentUpload(uri: Uri): Boolean =
