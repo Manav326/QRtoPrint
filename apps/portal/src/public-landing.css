@@ -153,7 +153,7 @@
 .sp-download-button{width:100%;height:45px;font-size:11px}
 .sp-button-secondary{background:#f0edff;color:#6d56d5!important}
 .sp-button-secondary:hover{background:#e7e1ff;transform:translateY(-2px)}
-.sp-download-note{display:block;text-align:center;margin-top:11px;color:#9099a9;font-size:8px}.sp-release-link{display:flex;align-items:center;justify-content:center;gap:5px;margin-top:10px;color:#7561d0;font-size:9px;font-weight:700}.sp-release-link:hover{text-decoration:underline}
+.sp-download-note{display:block;text-align:center;margin-top:11px;color:#9099a9;font-size:8px}.sp-download-unavailable{display:flex;align-items:center;justify-content:center;min-height:49px;padding:0 14px;border:1px solid #e2e5ec;border-radius:11px;background:#f1f2f6;color:#8991a1;font-size:11px;font-weight:700;text-align:center;cursor:not-allowed}.sp-release-pending{max-width:310px;margin:12px auto 0;color:#858e9d;font-size:9px;line-height:1.65;text-align:center}
 .sp-download-footnote{display:flex;justify-content:center;align-items:center;gap:7px;margin:25px 0 0;color:#8792a3;font-size:9px}.sp-download-footnote svg{color:#24a27a}
 .sp-final-cta{max-width:1180px;margin:0 auto 70px;padding:48px 57px;background:linear-gradient(120deg,#6f58dc,#8976ed);border-radius:22px;color:white;display:flex;align-items:center;justify-content:space-between;gap:30px;position:relative;overflow:hidden}
 .sp-final-cta:after{content:"";position:absolute;width:350px;height:350px;border:1px solid #ffffff25;border-radius:50%;right:17%;top:-240px;box-shadow:0 0 0 45px #ffffff09,0 0 0 90px #ffffff07}

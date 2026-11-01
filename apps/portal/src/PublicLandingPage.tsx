@@ -1,11 +1,8 @@
 import {
-  ArrowRight, ArrowUpRight, Check, ChevronRight, Cloud, Download, FileCheck2, FileText,
+  ArrowRight, ArrowUpRight, Check, ChevronRight, Cloud, FileCheck2, FileText,
   LockKeyhole, Monitor, Printer, QrCode, ShieldCheck, Smartphone, Store, Wifi
 } from "lucide-react";
 import "./public-landing.css";
-
-const WINDOWS_DOWNLOAD = "https://github.com/Manav326/QRtoPrint/releases/latest/download/SmartPrint-Windows-Setup.exe";
-const ANDROID_DOWNLOAD = "https://github.com/Manav326/QRtoPrint/releases/latest/download/SmartPrint-Android.apk";
 
 export default function PublicLandingPage() {
   return (
@@ -140,19 +137,19 @@ export default function PublicLandingPage() {
             <article className="sp-download-card">
               <div className="sp-download-icon sp-windows-icon"><Monitor size={25}/></div><div className="sp-download-platform">FOR SHOP OWNERS · WINDOWS 10/11</div>
               <h3>SmartPrint for Windows</h3><p>Install the shop Agent on the computer connected to your printers. The guided setup will help connect it to your shop workspace.</p>
-              <a className="sp-button-primary sp-download-button" href={WINDOWS_DOWNLOAD}>Download Windows setup <ArrowDownIcon/></a>
-              <small className="sp-download-note">Windows x64 · Guided installation</small>
-              <a className="sp-release-link" href="https://github.com/Manav326/QRtoPrint/releases/latest" target="_blank" rel="noreferrer">View latest version &amp; release notes <ArrowUpRight size={12}/></a>
+              <span className="sp-download-unavailable sp-download-button" aria-disabled="true">Signed Windows setup coming soon</span>
+              <small className="sp-download-note">Windows x64 · Guided installation · Public code signing pending</small>
+              <p className="sp-release-pending">The installer has passed automated build validation. It will be downloadable after the trusted Windows publisher certificate is configured and the signed release is published.</p>
             </article>
             <article className="sp-download-card">
               <div className="sp-download-icon sp-android-icon"><Smartphone size={25}/></div><div className="sp-download-platform">FOR CUSTOMERS · ANDROID</div>
               <h3>SmartPrint for Android</h3><p>Scan shop QR codes, organise documents in your library and send files through the connected SmartPrint customer journey.</p>
-              <a className="sp-button-secondary sp-download-button" href={ANDROID_DOWNLOAD}>Download Android APK <ArrowDownIcon/></a>
-              <small className="sp-download-note">Android 8.0 or later · APK installation</small>
-              <a className="sp-release-link" href="https://github.com/Manav326/QRtoPrint/releases/latest" target="_blank" rel="noreferrer">View latest version &amp; release notes <ArrowUpRight size={12}/></a>
+              <span className="sp-download-unavailable sp-download-button" aria-disabled="true">Signed Android APK coming soon</span>
+              <small className="sp-download-note">Android 8.0 or later · APK installation · Production signing pending</small>
+              <p className="sp-release-pending">Android unit and emulator tests have passed. The customer APK will be available after the permanent release keystore is configured and the signed release is published.</p>
             </article>
           </div>
-          <p className="sp-download-footnote"><ShieldCheck size={14}/> Download links are served from SmartPrint's official release channel.</p>
+          <p className="sp-download-footnote"><ShieldCheck size={14}/> Official signed downloads will appear here after release publication.</p>
         </section>
 
         <section className="sp-final-cta">
@@ -169,6 +166,3 @@ export default function PublicLandingPage() {
   );
 }
 
-function ArrowDownIcon() {
-  return <Download size={16}/>;
-}
