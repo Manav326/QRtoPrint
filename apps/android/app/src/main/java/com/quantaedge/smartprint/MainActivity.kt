@@ -579,6 +579,48 @@ class MainActivity : AppCompatActivity() {
         hero.addView(heroContent)
         column.addView(hero, linearParams())
 
+        if (!isPicker) {
+            val usedBytes = store.storageUsageBytes()
+            val freeBytes = filesDir.usableSpace
+            val storage = card()
+            val storageContent = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                setPadding(dp(14), dp(11), dp(14), dp(11))
+            }
+            storageContent.addView(text(
+                "On-device storage · ${android.text.format.Formatter.formatFileSize(this, usedBytes)} used",
+                13, R.color.qp_text, true
+            ))
+            storageContent.addView(text(
+                "${android.text.format.Formatter.formatFileSize(this, freeBytes)} free on this device. Documents remain in private app storage until you export or delete them.",
+                11, R.color.qp_muted, false
+            ).apply { setPadding(0, dp(4), 0, 0) })
+            storage.addView(storageContent)
+            column.addView(storage, linearParams().apply { topMargin = dp(10) })
+
+            val searchRow = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+            }
+            val search = EditText(this).apply {
+                hint = "Search this folder"
+                maxLines = 1
+                setSingleLine(true)
+                setText(librarySearchQuery)
+            }
+            searchRow.addView(search, LinearLayout.LayoutParams(0, dp(48), 1f))
+            searchRow.addView(button("Search", false).apply {
+                setOnClickListener {
+                    librarySearchQuery = search.text.toString().trim()
+                    showFiles()
+                }
+            }, LinearLayout.LayoutParams(-2, dp(48)).apply { marginStart = dp(8) })
+            searchRow.addView(button("Clear", false).apply {
+                setOnClickListener { librarySearchQuery = ""; showFiles() }
+            }, LinearLayout.LayoutParams(-2, dp(48)).apply { marginStart = dp(6) })
+            column.addView(searchRow, linearParams().apply { topMargin = dp(12) })
+        }
+
         val actions = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
         actions.addView(button("Import files", false).apply {
             setOnClickListener { importFiles.launch(arrayOf("*/*")); navigation.menu.findItem(FILES).isChecked = true }
@@ -949,7 +991,9 @@ class MainActivity : AppCompatActivity() {
         }
 
         val folder = try { store.folder(path) } catch (_: Exception) { store.root }
-        val entries = store.list(folder)
+        val entries = store.list(folder).filter {
+            librarySearchQuery.isBlank() || it.name.contains(librarySearchQuery, ignoreCase = true)
+        }
         val selectedHere = entries.filter { !it.isDirectory && selectedFilePaths.contains(it.canonicalPath) }
         val chooserSelection = if (isPicker && fileChooserAllowsMultiple) selectedChooserFiles() else emptyList()
         if (isPicker && fileChooserAllowsMultiple) {
@@ -1014,6 +1058,7 @@ class MainActivity : AppCompatActivity() {
             val empty = card()
             empty.addView(text(
                 if (isPicker) "No printable files here. Import a document or open another folder."
+                else if (librarySearchQuery.isNotBlank()) "No files or folders match “$librarySearchQuery” in this folder."
                 else "No documents here yet. Scan paper pages, import files or create a folder to get started.",
                 14, R.color.qp_muted, false
             ).apply { setPadding(dp(18), dp(22), dp(18), dp(22)) })
@@ -1149,10 +1194,7 @@ class MainActivity : AppCompatActivity() {
                 }
                 "Export" -> { exportFile = file; exportOne.launch(file.name) }
                 "Export folder" -> { exportFolder = file; exportTree.launch(null) }
-                "Move to folder" -> nameDialog("Destination folder path", file.parentFile?.let { store.pathOf(it) }.orEmpty()) { path ->
-                    try { store.move(file, path); selectedFilePaths.remove(file.canonicalPath); showFiles() }
-                    catch (e: Exception) { toast("Move failed: ${message(e)}") }
-                }
+                "Move to folder" -> showMoveDestinationPicker(file)
                 "Move earlier" -> { try { store.reorder(file, -1); showFiles() } catch (e: Exception) { toast("Reorder failed: ${message(e)}") } }
                 "Move later" -> { try { store.reorder(file, 1); showFiles() } catch (e: Exception) { toast("Reorder failed: ${message(e)}") } }
                 "Share" -> shareDocument(file)
@@ -1168,6 +1210,36 @@ class MainActivity : AppCompatActivity() {
             true
         }
         menu.show()
+    }
+
+    private fun showMoveDestinationPicker(file: File) {
+        val sourcePath = runCatching { store.pathOf(file) }.getOrDefault("")
+        val currentParent = file.parentFile?.let { store.pathOf(it) }.orEmpty()
+        val destinations = mutableListOf("")
+        store.root.walkTopDown()
+            .filter { it.isDirectory && it.canonicalPath != store.root.canonicalPath }
+            .take(MAX_TREE_FILES)
+            .forEach { directory ->
+                val path = runCatching { store.pathOf(directory) }.getOrNull() ?: return@forEach
+                if (path != currentParent &&
+                    !(file.isDirectory && (path == sourcePath || path.startsWith("$sourcePath/")))) {
+                    destinations.add(path)
+                }
+            }
+        val labels = destinations.map { if (it.isBlank()) "My files" else "My files / " + it.replace("/", " / ") }
+        MaterialAlertDialogBuilder(this)
+            .setTitle("Move to folder")
+            .setItems(labels.toTypedArray()) { _, index ->
+                try {
+                    store.move(file, destinations[index])
+                    selectedFilePaths.remove(file.canonicalPath)
+                    showFiles()
+                } catch (e: Exception) {
+                    toast("Move failed: ${message(e)}")
+                }
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
     }
 
     private fun exportSelected(files: List<File>) {
@@ -1764,13 +1836,15 @@ class MainActivity : AppCompatActivity() {
     }
     private fun text(value: String, size: Int, color: Int, bold: Boolean) = TextView(this).apply {
         text = value
-        textSize = size.toFloat()
+        textSize = maxOf(size, 12).toFloat()
         setTextColor(getColor(color))
         if (bold) setTypeface(typeface, android.graphics.Typeface.BOLD)
     }
     private fun button(value: String, primary: Boolean) = MaterialButton(this).apply {
         text = value
         isAllCaps = false
+        minHeight = dp(48)
+        minWidth = dp(48)
         cornerRadius = dp(12)
         if (primary) {
             backgroundTintList = android.content.res.ColorStateList.valueOf(getColor(R.color.qp_primary))
