@@ -136,8 +136,15 @@ function ShopConsole({ tokens, onSignOut }: { tokens: AuthTokens; onSignOut: () 
     try {
       const latest = await getShopPrintJobsPage(tokens.accessToken, 0, 100, queueSearch);
       const currentIds = new Set(printJobs.map(job => job.id));
-      const newlyDiscovered = latest.filter(job => !currentIds.has(job.id)).length;
-      if (newlyDiscovered > 0) setQueueApiOffset(offset => offset + newlyDiscovered);
+      const hasNewJobs = latest.some(job => !currentIds.has(job.id));
+      if (hasNewJobs) {
+        // A new record shifts every offset page. Reset to a fresh first page
+        // rather than risking skipped or duplicated older records.
+        setPrintJobs(latest);
+        setQueueApiOffset(latest.length);
+        setHasMoreQueueJobs(latest.length === 100);
+        return;
+      }
       setPrintJobs(current => {
         const byId = new Map(current.map(job => [job.id, job]));
         for (const job of latest) byId.set(job.id, job);
@@ -145,7 +152,7 @@ function ShopConsole({ tokens, onSignOut }: { tokens: AuthTokens; onSignOut: () 
           Date.parse(right.createdUtc) - Date.parse(left.createdUtc) || right.id.localeCompare(left.id)
         );
       });
-      setHasMoreQueueJobs(current => current || latest.length === 100);
+      setHasMoreQueueJobs(latest.length === 100 || printJobs.length > latest.length);
     } catch (exception) {
       setError(exception instanceof Error ? exception.message : "Could not refresh the print queue.");
     }
