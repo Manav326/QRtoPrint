@@ -2,9 +2,6 @@ package com.quantaedge.smartprint
 
 import android.content.Context
 import android.graphics.Bitmap
-import android.Manifest
-import android.content.pm.PackageManager
-import androidx.test.platform.app.InstrumentationRegistry
 import java.io.File
 import androidx.test.core.app.ActivityScenario
 import androidx.test.core.app.ApplicationProvider
@@ -123,10 +120,6 @@ class MainActivityInstrumentedTest {
     @Test
     fun qrScannerUsesTheSavedLightAndDarkThemeForItsNativeChrome() {
         val context = ApplicationProvider.getApplicationContext<Context>()
-        val instrumentation = InstrumentationRegistry.getInstrumentation()
-        val cameraWasGranted = context.checkSelfPermission(Manifest.permission.CAMERA) ==
-            PackageManager.PERMISSION_GRANTED
-        instrumentation.uiAutomation.grantRuntimePermission(context.packageName, Manifest.permission.CAMERA)
 
         fun verifyTheme(theme: SmartPrintTheme, expectedNightMode: Int, useLightSystemBars: Boolean) {
             SmartPrintThemePreference.save(context, theme)
@@ -157,15 +150,13 @@ class MainActivityInstrumentedTest {
         }
 
         try {
+            // The theme/backdrop contract is independent of camera access. Avoid
+            // granting/revoking a runtime permission from inside the instrumentation
+            // process; Android terminates the app UID when runtime grants change.
             verifyTheme(SmartPrintTheme.LIGHT, android.content.res.Configuration.UI_MODE_NIGHT_NO, true)
             verifyTheme(SmartPrintTheme.DARK, android.content.res.Configuration.UI_MODE_NIGHT_YES, false)
         } finally {
             SmartPrintThemePreference.save(context, SmartPrintTheme.LIGHT)
-            if (cameraWasGranted) {
-                instrumentation.uiAutomation.grantRuntimePermission(context.packageName, Manifest.permission.CAMERA)
-            } else {
-                instrumentation.uiAutomation.revokeRuntimePermission(context.packageName, Manifest.permission.CAMERA)
-            }
         }
     }
 
@@ -374,23 +365,12 @@ class MainActivityInstrumentedTest {
 class QrScannerPermissionInstrumentedTest {
     @Test
     fun explainsCameraPermissionBeforeStartingTheScanner() {
-        val context = ApplicationProvider.getApplicationContext<Context>()
-        val instrumentation = InstrumentationRegistry.getInstrumentation()
-        val cameraWasGranted = context.checkSelfPermission(Manifest.permission.CAMERA) ==
-            PackageManager.PERMISSION_GRANTED
-        instrumentation.uiAutomation.revokeRuntimePermission(context.packageName, Manifest.permission.CAMERA)
-        try {
-            ActivityScenario.launch(QrScannerActivity::class.java).use {
-                onView(withText("Camera access needed")).check(matches(isDisplayed()))
-                onView(withText("Allow camera for QR scanning.")).check(matches(isDisplayed()))
-                onView(withText("Allow camera")).check(matches(isDisplayed()))
-            }
-        } finally {
-            if (cameraWasGranted) {
-                instrumentation.uiAutomation.grantRuntimePermission(context.packageName, Manifest.permission.CAMERA)
-            } else {
-                instrumentation.uiAutomation.revokeRuntimePermission(context.packageName, Manifest.permission.CAMERA)
-            }
-        }
-    }
-}
+        // The CI emulator installs this app with runtime permissions denied.
+        // Do not change a package permission from the instrumentation process:
+        // Android kills the app UID when a runtime permission grant changes.
+        ActivityScenario.launch(QrScannerActivity::class.java).use {
+            onView(withText("Camera access needed")).check(matches(isDisplayed()))
+            onView(withText("Allow camera for QR scanning."))
+                .check(matches(isDisplayed()))
+            onView(withText("Allow camera")).check(matches(isDisplayed()))
+        }}
