@@ -145,6 +145,8 @@ class MainActivityInstrumentedTest {
             onView(withHint("Name")).perform(replaceText("Nested"), closeSoftKeyboard())
             onView(withText("Save")).perform(click())
             onView(withText("Nested")).check(matches(isDisplayed()))
+            onView(withText("Nested")).perform(click())
+            onView(withText("Scan here")).check(matches(isDisplayed()))
 
             androidx.test.espresso.Espresso.pressBack()
             onView(withText("Scan here")).check(matches(isDisplayed()))
