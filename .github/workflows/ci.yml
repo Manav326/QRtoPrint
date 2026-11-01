@@ -27,6 +27,8 @@ jobs:
       - run: pnpm install --no-frozen-lockfile
       - run: pnpm typecheck
       - run: pnpm build
+      - name: Validate portal Nginx proxy configuration
+        run: docker run --rm -v "$GITHUB_WORKSPACE/apps/portal/nginx.conf:/etc/nginx/conf.d/default.conf:ro" nginx:alpine nginx -t
 
   dotnet:
     runs-on: windows-latest
