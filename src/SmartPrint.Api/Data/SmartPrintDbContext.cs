@@ -144,6 +144,7 @@ public sealed class SmartPrintDbContext(DbContextOptions<SmartPrintDbContext> op
             entity.HasKey(x => x.TenantId);
             entity.Property(x => x.UpiId).HasMaxLength(160);
             entity.Property(x => x.PayeeName).HasMaxLength(120);
+            entity.Property(x => x.InstantPaymentEnabled).HasDefaultValue(false);
             entity.HasOne<Tenant>().WithOne().HasForeignKey<ShopPaymentProfile>(x => x.TenantId).OnDelete(DeleteBehavior.Cascade);
         });
 
