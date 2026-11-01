@@ -88,7 +88,7 @@ This is the recommended local end-to-end test path. The phone opens the same pub
     .\scripts\docker-up-local.ps1
 
    The helper reuses .env.local and the existing database/document volumes. It asks once for the tunnel connector token and stores it in the Git-ignored .secrets/cloudflare/tunnel-token file. The token is not printed or placed in the environment file.
-4. The only application URL is PUBLIC_BASE_URL in .env.local. It defaults to the value in .env.example. Change it in .env.local to use another HTTPS origin. The portal and API share this hostname; Nginx routes /api and /health internally to the API.
+4. The only application URL is PUBLIC_BASE_URL in .env.local. The helper asks for it when no value is configured; it has no domain fallback. The portal and API share this hostname; Nginx routes /api and /health internally to the API.
 
 The phone opens that Cloudflare HTTPS URL. When the customer taps Check shop Wi-Fi, Chrome may request Local Network Access permission for the shop computer. No certificate installation is required. Cloud-assisted upload remains available when local access is unavailable.
 
