@@ -103,11 +103,10 @@ begin
   if ExitCode <> 0 then
     RaiseException('SmartPrint could not install or start the background print service. No printer connection has been changed. Restart Windows and run setup again.');
 
-  ServiceInstallSucceeded := True;
-
   // Remove legacy Agent files from the old install layout only after the
-  // replacement Windows service has started successfully. If setup fails
-  // earlier, DeinitializeSetup can still restart the old service binary.
+  // replacement Windows service has started successfully. The previous Agent
+  // binary remains side-by-side until a later cleanup; failed service switches
+  // restore the previous executable path before setup reports failure.
   DeleteFile(ExpandConstant('{app}\SmartPrint.Agent.exe'));
   DeleteFile(ExpandConstant('{app}\SmartPrint.Agent.dll'));
   DeleteFile(ExpandConstant('{app}\SmartPrint.Agent.deps.json'));
