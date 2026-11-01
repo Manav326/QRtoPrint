@@ -281,7 +281,7 @@ class MainActivity : AppCompatActivity() {
         toolbar = MaterialToolbar(this).apply {
             title = "Home"
             setTitleTextColor(getColor(R.color.qp_text))
-            setTitleTextAppearance(R.style.TextAppearance_SmartPrint_Toolbar)
+            setTitleTextAppearance(this@MainActivity, R.style.TextAppearance_SmartPrint_Toolbar)
             setBackgroundColor(getColor(R.color.qp_surface))
             elevation = 0f
             menu.add(Menu.NONE, SWITCH_SHOP, Menu.NONE, "Switch shop").apply {
