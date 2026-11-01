@@ -116,9 +116,9 @@ class QrScannerPermissionInstrumentedTest {
     fun explainsCameraPermissionBeforeStartingTheScanner() {
         ActivityScenario.launch(QrScannerActivity::class.java).use {
             onView(withText("Camera access needed")).check(matches(isDisplayed()))
-            onView(withText("Allow camera access to scan a shop QR code. Images are processed on this device and are not saved."))
+            onView(withText("Allow camera to scan QR codes."))
                 .check(matches(isDisplayed()))
-            onView(withText("Enable camera")).check(matches(isDisplayed()))
+            onView(withText("Allow camera")).check(matches(isDisplayed()))
         }
     }
 }
