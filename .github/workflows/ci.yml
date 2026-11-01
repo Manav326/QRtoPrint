@@ -31,6 +31,19 @@ jobs:
         run: pnpm install --frozen-lockfile
       - name: Test public, admin, shop and station route boundaries
         run: node --experimental-strip-types --test apps/portal/tests/portal-routing.test.ts apps/portal/tests/theme-responsive.test.ts
+      - name: Install Chromium for real-browser appearance and viewport checks
+        run: npx --yes --package=playwright@1.56.1 playwright install --with-deps chromium
+      - name: Verify theme persistence and responsive layouts in Chromium
+        run: |
+          npx --yes --package=playwright@1.56.1 -c 'PLAYWRIGHT_MODULE_DIR="$(dirname "$(readlink -f "$(command -v playwright)")")" node apps/portal/tests/theme-responsive.browser.mjs'
+      - name: Upload responsive browser screenshots
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: smartprint-responsive-browser-qa
+          path: artifacts/theme-responsive/
+          if-no-files-found: warn
+          retention-days: 14
       - run: pnpm typecheck
       - run: pnpm build
       - name: Typecheck native desktop frontend
