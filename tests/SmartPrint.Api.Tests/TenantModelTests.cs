@@ -78,7 +78,7 @@ public sealed class TenantModelTests
                 .SequenceEqual(new[] { nameof(PrintBatchPayment.TenantId), nameof(PrintBatchPayment.BatchId) }));
         Assert.True(activeBatchPaymentIndex.IsUnique);
         Assert.Equal(
-            "\\"Status\\" IN ('AWAITING_CUSTOMER_PAYMENT','CUSTOMER_REPORTED','CASH_AWAITING_PAYMENT')",
+            "\"Status\" IN ('AWAITING_CUSTOMER_PAYMENT','CUSTOMER_REPORTED','CASH_AWAITING_PAYMENT')",
             activeBatchPaymentIndex.GetFilter());
 
         var batchAllocationRelationship = Assert.Single(
