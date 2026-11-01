@@ -2799,20 +2799,26 @@ shop.MapPost("/print-jobs/{jobId:guid}/reject", async (
         return Results.Forbid();
     }
 
-    var job = await db.PrintJobs.SingleOrDefaultAsync(
-        item => item.Id == jobId && item.TenantId == tenantId, ct);
+    await using var transaction = await db.Database.BeginTransactionAsync(ct);
+    var lockedJobs = await db.PrintJobs.FromSqlInterpolated(
+        $"SELECT * FROM \"PrintJobs\" WHERE \"Id\" = {jobId} AND \"TenantId\" = {tenantId} FOR UPDATE")
+        .ToListAsync(ct);
+    var job = lockedJobs.SingleOrDefault();
     if (job is null)
     {
+        await transaction.RollbackAsync(ct);
         return Results.NotFound();
     }
 
     if (job.Status == "REJECTED")
     {
+        await transaction.RollbackAsync(ct);
         return Results.Ok(new { job.Id, job.JobNumber, job.Status, DuplicateRequest = true });
     }
 
     if (job.Status is not ("AWAITING_SHOP_APPROVAL" or "AWAITING_PAYMENT"))
     {
+        await transaction.RollbackAsync(ct);
         return Results.Conflict(new
         {
             code = "job_not_ready_for_rejection",
@@ -2837,6 +2843,7 @@ shop.MapPost("/print-jobs/{jobId:guid}/reject", async (
         CreatedUtc = now
     });
     await db.SaveChangesAsync(ct);
+    await transaction.CommitAsync(ct);
     return Results.Ok(new { job.Id, job.JobNumber, job.Status, job.UpdatedUtc });
 });
 
