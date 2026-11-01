@@ -5,7 +5,7 @@ on:
       - "v*"
 
 permissions:
-  contents: write
+  contents: read
 
 env:
   SMARTPRINT_PUBLIC_BASE_URL: ${{ vars.SMARTPRINT_PUBLIC_BASE_URL || 'https://qr-test.paintpulp.com' }}
@@ -71,19 +71,25 @@ jobs:
             throw "Configure WINDOWS_SIGNING_CERT_BASE64 and WINDOWS_SIGNING_CERT_PASSWORD before publishing a public Windows installer."
           }
           $certificatePath = Join-Path $env:RUNNER_TEMP "smartprint-code-signing.pfx"
-          [System.IO.File]::WriteAllBytes($certificatePath, [Convert]::FromBase64String($env:WINDOWS_SIGNING_CERT_BASE64))
-          $programFilesX86 = [Environment]::GetFolderPath("ProgramFilesX86")
-          $windowsKits = Join-Path $programFilesX86 "Windows Kits\10\bin"
-          $signTool = Get-ChildItem $windowsKits -Filter signtool.exe -Recurse -ErrorAction Stop |
-            Where-Object { $_.FullName -match "\\x64\\signtool\.exe$" } |
-            Sort-Object FullName -Descending | Select-Object -First 1
-          if (-not $signTool) { throw "Windows SDK SignTool was not found." }
-          $installer = "artifacts/agent-installer/SmartPrint-Windows-Setup.exe"
-          & $signTool.FullName sign /v /fd SHA256 /f $certificatePath /p $env:WINDOWS_SIGNING_CERT_PASSWORD /tr http://timestamp.digicert.com /td SHA256 $installer
-          if ($LASTEXITCODE -ne 0) { throw "Windows installer signing failed." }
-          & $signTool.FullName verify /pa /v $installer
-          if ($LASTEXITCODE -ne 0) { throw "Windows installer signature verification failed." }
-          Remove-Item -LiteralPath $certificatePath -Force
+          try {
+            [System.IO.File]::WriteAllBytes($certificatePath, [Convert]::FromBase64String($env:WINDOWS_SIGNING_CERT_BASE64))
+            $windowsKits = Join-Path ([Environment]::GetFolderPath("ProgramFilesX86")) "Windows Kits\10\bin"
+            $signTool = Get-ChildItem $windowsKits -Filter signtool.exe -Recurse -ErrorAction Stop |
+              Where-Object { $_.Directory.Name -eq "x64" } |
+              Sort-Object { [version]$_.Directory.Parent.Name } -Descending |
+              Select-Object -First 1
+            if (-not $signTool) { throw "Windows SDK SignTool was not found." }
+            $installer = "artifacts/agent-installer/SmartPrint-Windows-Setup.exe"
+            & $signTool.FullName sign /v /fd SHA256 /f $certificatePath /p $env:WINDOWS_SIGNING_CERT_PASSWORD /tr http://timestamp.digicert.com /td SHA256 $installer
+            if ($LASTEXITCODE -ne 0) { throw "Windows installer signing failed." }
+            & $signTool.FullName verify /pa /v $installer
+            if ($LASTEXITCODE -ne 0) { throw "Windows installer signature verification failed." }
+          }
+          finally {
+            if (Test-Path -LiteralPath $certificatePath) {
+              Remove-Item -LiteralPath $certificatePath -Force
+            }
+          }
       - name: Upload Windows installer
         uses: actions/upload-artifact@v4
         with:
@@ -156,6 +162,8 @@ jobs:
 
   publish-release:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     needs:
       - windows-setup
       - android-release
