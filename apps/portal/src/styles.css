@@ -1449,3 +1449,68 @@
 .customer-entry.smartprint-native .customer-batch-print-breakdown>div{color:var(--native-muted)}
 .customer-entry.smartprint-native .customer-batch-print-breakdown>div strong{color:var(--native-text)}
 .customer-entry.smartprint-native .customer-batch-print-breakdown .customer-batch-print-total{border-color:var(--native-border);color:var(--native-text)}
+
+@media print{
+  .station-card.print-active .qr-paper .qr-powered{
+    display:flex!important;
+    visibility:visible!important;
+    opacity:1!important;
+    width:100%!important;
+    min-height:46px!important;
+    margin-top:auto!important;
+    padding-top:10px!important;
+    flex-direction:column!important;
+    align-items:center!important;
+    gap:5px!important;
+    border-top:1px solid #e7ebf2!important;
+  }
+  .station-card.print-active .qr-paper .qr-powered small,
+  .station-card.print-active .qr-paper .qr-powered-lockup,
+  .station-card.print-active .qr-paper .qr-powered-wordmark,
+  .station-card.print-active .qr-paper .qr-powered-wordmark strong,
+  .station-card.print-active .qr-paper .qr-powered-wordmark span,
+  .station-card.print-active .qr-paper .qr-powered-wordmark small{
+    display:flex!important;
+    visibility:visible!important;
+    opacity:1!important;
+  }
+  .station-card.print-active .qr-paper .qr-powered-lockup{
+    min-height:30px!important;
+    flex-direction:row!important;
+    align-items:center!important;
+    justify-content:center!important;
+    gap:6px!important;
+  }
+  .station-card.print-active .qr-paper .qr-quantaedge-mark{
+    display:block!important;
+    visibility:visible!important;
+    opacity:1!important;
+    width:25px!important;
+    height:25px!important;
+    max-height:25px!important;
+    object-fit:contain!important;
+    print-color-adjust:exact!important;
+    -webkit-print-color-adjust:exact!important;
+  }
+  .station-card.print-active .qr-paper .qr-quantaedge-mark-fallback{
+    display:grid!important;
+    visibility:visible!important;
+    opacity:1!important;
+  }
+  .station-card.print-active .qr-paper .qr-powered-wordmark{
+    flex-direction:column!important;
+    align-items:flex-start!important;
+    justify-content:center!important;
+    gap:2px!important;
+  }
+  .station-card.print-active .qr-paper .qr-powered-wordmark strong{
+    display:block!important;
+    color:#152038!important;
+    print-color-adjust:exact!important;
+    -webkit-print-color-adjust:exact!important;
+  }
+  .station-card.print-active .qr-paper .qr-powered-wordmark small{
+    display:block!important;
+    color:#566176!important;
+  }
+}
