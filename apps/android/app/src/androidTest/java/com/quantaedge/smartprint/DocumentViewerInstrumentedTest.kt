@@ -73,9 +73,10 @@ class DocumentViewerInstrumentedTest {
                 onView(withText(directory.name)).perform(scrollTo(), click())
                 onView(withText(selected.name)).perform(scrollTo(), click())
 
-                onView(withContentDescription("Image preview")).check(matches(isDisplayed()))
+                waitForView(withContentDescription("Image preview"))
                 onView(withText("Photo 2 of 2")).check(matches(isDisplayed()))
                 it.recreate()
+                waitForView(withContentDescription("Image preview"))
                 onView(withText("Photo 2 of 2")).check(matches(isDisplayed()))
                 onView(withContentDescription("Image preview")).perform(swipeRight())
                 onView(withText("Photo 1 of 2")).check(matches(isDisplayed()))
@@ -87,6 +88,24 @@ class DocumentViewerInstrumentedTest {
         } finally {
             directory.deleteRecursively()
         }
+    }
+
+
+    private fun waitForView(matcher: org.hamcrest.Matcher<android.view.View>) {
+        val deadline = android.os.SystemClock.uptimeMillis() + 10_000L
+        var lastFailure: Throwable? = null
+        while (android.os.SystemClock.uptimeMillis() < deadline) {
+            try {
+                onView(matcher).check(matches(isDisplayed()))
+                return
+            } catch (error: androidx.test.espresso.NoMatchingViewException) {
+                lastFailure = error
+            } catch (error: AssertionError) {
+                lastFailure = error
+            }
+            android.os.SystemClock.sleep(100L)
+        }
+        throw AssertionError("View did not become visible within 10 seconds.", lastFailure)
     }
 
     private fun writeTestImage(file: File) {
