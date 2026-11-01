@@ -16,6 +16,8 @@ test("generic portal tables allow long values to wrap inside their own cells", (
 
 test("print queue columns stay constrained and scroll inside their own viewport", () => {
   assert.match(app, /className="table-scroll queue-table-scroll"><table className="queue-jobs-table">/);
+  assert.match(app, /const singleSavedPdfPath = batch\.jobs\.length === 1 \? verifiedPdfExportPath\(first\) : null;/);
+  assert.match(app, /className="queue-pdf-path"/);
   assert.match(styles, /\.queue-jobs-table\s*\{[^}]*min-width:\s*1100px[^}]*table-layout:\s*fixed/s);
   assert.match(styles, /\.queue-table-scroll\s*\{[^}]*overflow-x:\s*auto/s);
   assert.match(styles, /\.queue-jobs-table \.queue-actions\s*\{[^}]*flex-wrap:\s*wrap/s);
@@ -54,4 +56,6 @@ test("PDF output path is only returned for a completed PDF export receipt", () =
 test("platform tables retain a scroll container and intentional minimum widths", () => {
   assert.match(styles, /\.platform-table-scroll\s*\{[^}]*overflow-x:\s*auto/s);
   assert.match(styles, /\.platform-tenant-table\{[^}]*min-width:830px/s);
+  assert.match(styles, /\.platform-subs-copy small\s*\{[^}]*white-space:\s*normal/s);
+  assert.match(styles, /\.queue-jobs-table \.status-badge\s*\{[^}]*white-space:\s*normal/s);
 });
