@@ -3,6 +3,12 @@ on:
   push:
     tags:
       - "v*"
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: Existing stable version tag to publish (for example v0.1.0)
+        required: true
+        type: string
 
 concurrency:
   group: smartprint-release-${{ github.ref }}
@@ -13,6 +19,7 @@ permissions:
 
 env:
   SMARTPRINT_PUBLIC_BASE_URL: ${{ vars.SMARTPRINT_PUBLIC_BASE_URL }}
+  RELEASE_TAG: ${{ inputs.release_tag || github.ref_name }}
 
 jobs:
   validate-release-config:
@@ -21,7 +28,7 @@ jobs:
       - name: Require a stable semantic-version tag
         shell: bash
         run: |
-          if [[ ! "$GITHUB_REF_NAME" =~ ^v[0-9]+[.][0-9]+[.][0-9]+$ ]]; then
+          if [[ ! "$RELEASE_TAG" =~ ^v[0-9]+[.][0-9]+[.][0-9]+$ ]]; then
             echo "::error::Use a stable version tag such as v0.1.0. Pre-release tags are not published as latest."
             exit 1
           fi
@@ -111,7 +118,7 @@ jobs:
           choco install innosetup --no-progress -y
           New-Item -ItemType Directory -Force -Path artifacts/agent-installer | Out-Null
           $iscc = "C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
-          & $iscc "/DSmartPrintPublicUrl=$env:SMARTPRINT_PUBLIC_BASE_URL" "/DSmartPrintVersion=$env:GITHUB_REF_NAME" "/DSmartPrintBuildId=$env:GITHUB_RUN_NUMBER" scripts/build-windows-installer.iss
+          & $iscc "/DSmartPrintPublicUrl=$env:SMARTPRINT_PUBLIC_BASE_URL" "/DSmartPrintVersion=$env:RELEASE_TAG" "/DSmartPrintBuildId=$env:GITHUB_RUN_NUMBER" scripts/build-windows-installer.iss
           if ($LASTEXITCODE -ne 0) { throw "SmartPrint Windows installer compilation failed." }
       - name: Confirm Windows installer is intentionally unsigned for the beta channel
         shell: pwsh
@@ -134,10 +141,10 @@ jobs:
     needs: validate-release-config
     runs-on: ubuntu-latest
     env:
-      ANDROID_SIGNING_KEYSTORE_BASE64: ${{ secrets.ANDROID_SIGNING_KEYSTORE_BASE64 }}
-      ANDROID_SIGNING_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_SIGNING_KEYSTORE_PASSWORD }}
-      ANDROID_SIGNING_KEY_ALIAS: ${{ secrets.ANDROID_SIGNING_KEY_ALIAS }}
-      ANDROID_SIGNING_KEY_PASSWORD: ${{ secrets.ANDROID_SIGNING_KEY_PASSWORD }}
+      ANDROID_SIGNING_KEYSTORE_BASE64: ${{ secrets.ANDROID_SIGNING_KEYSTORE_BASE64 || vars.ANDROID_SIGNING_KEYSTORE_BASE64 }}
+      ANDROID_SIGNING_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_SIGNING_KEYSTORE_PASSWORD || vars.ANDROID_SIGNING_KEYSTORE_PASSWORD }}
+      ANDROID_SIGNING_KEY_ALIAS: ${{ secrets.ANDROID_SIGNING_KEY_ALIAS || vars.ANDROID_SIGNING_KEY_ALIAS }}
+      ANDROID_SIGNING_KEY_PASSWORD: ${{ secrets.ANDROID_SIGNING_KEY_PASSWORD || vars.ANDROID_SIGNING_KEY_PASSWORD }}
     outputs:
       available: ${{ steps.check-signing.outputs.available }}
     steps:
@@ -161,16 +168,13 @@ jobs:
               ((missing+=1))
             fi
           done
-          if (( present == 0 )); then
-            echo "available=false" >> "$GITHUB_OUTPUT"
-            echo "::notice::Android release skipped. Configure the four Android signing secrets to publish the signed APK."
-            exit 0
-          fi
           if (( missing > 0 )); then
-            echo "::error::Android signing is only partially configured. Add all four Android signing secrets together."
+            echo "::error::A signed Android APK is mandatory for a stable SmartPrint release."
+            echo "::error::Missing Android signing values: check the repository Actions secrets or variables named in this job."
             exit 1
           fi
           echo "available=true" >> "$GITHUB_OUTPUT"
+          echo "All Android signing inputs are present; the release job will build and verify the signed APK."
 
       - uses: actions/checkout@v7
         if: steps.check-signing.outputs.available == 'true'
@@ -207,7 +211,7 @@ jobs:
           gradle --no-daemon -p apps/android \
             -PsmartPrintServiceUrl="$SMARTPRINT_PUBLIC_BASE_URL" \
             -PsmartPrintVersionCode="$GITHUB_RUN_NUMBER" \
-            -PsmartPrintVersionName="$GITHUB_REF_NAME" \
+            -PsmartPrintVersionName="$RELEASE_TAG" \
             :app:testDebugUnitTest :app:assembleRelease
           mkdir -p artifacts/android
           cp apps/android/app/build/outputs/apk/release/app-release.apk artifacts/android/SmartPrint-Android.apk
@@ -264,7 +268,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           REPOSITORY: ${{ github.repository }}
-          RELEASE_TAG: ${{ github.ref_name }}
+          RELEASE_TAG: ${{ inputs.release_tag || github.ref_name }}
         shell: bash
         run: |
           python - <<'PY'
@@ -321,7 +325,8 @@ jobs:
         uses: softprops/action-gh-release@v3
         with:
           token: ${{ github.token }}
-          name: SmartPrint ${{ github.ref_name }}
+          tag_name: ${{ inputs.release_tag || github.ref_name }}
+          name: SmartPrint ${{ inputs.release_tag || github.ref_name }}
           draft: true
           generate_release_notes: true
           overwrite_files: false
@@ -331,7 +336,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           REPOSITORY: ${{ github.repository }}
-          RELEASE_TAG: ${{ github.ref_name }}
+          RELEASE_TAG: ${{ inputs.release_tag || github.ref_name }}
         shell: bash
         run: |
           python - <<'PY'
