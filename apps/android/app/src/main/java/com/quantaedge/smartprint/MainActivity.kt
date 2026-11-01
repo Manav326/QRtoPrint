@@ -28,6 +28,7 @@ import android.widget.FrameLayout
 import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.ScrollView
+import android.widget.HorizontalScrollView
 import android.widget.TextView
 import android.widget.Toast
 import androidx.activity.result.ActivityResultLauncher
@@ -1093,7 +1094,7 @@ class MainActivity : AppCompatActivity() {
             currentPath = if (currentPath.isBlank()) segment else "$currentPath/$segment"
             addFolder(segment, currentPath)
         }
-        scroll.addView(segments, HorizontalScrollView.LayoutParams(-2, -1))
+        scroll.addView(segments, FrameLayout.LayoutParams(-2, -1))
         parentView.addView(scroll, LinearLayout.LayoutParams(-1, dp(35)))
         scroll.post { scroll.fullScroll(View.FOCUS_RIGHT) }
     }
@@ -1690,7 +1691,7 @@ class MainActivity : AppCompatActivity() {
                 marginEnd = dp(6)
             })
         }
-        pageStrip.addView(pageStripRow, android.widget.HorizontalScrollView.LayoutParams(-2, -1))
+        pageStrip.addView(pageStripRow, android.widget.FrameLayout.LayoutParams(-2, -1))
         editor.addView(pageStrip, LinearLayout.LayoutParams(-1, dp(56)))
 
         val actions = LinearLayout(this).apply {
