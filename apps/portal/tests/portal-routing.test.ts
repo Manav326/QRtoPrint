@@ -79,9 +79,11 @@ test("admin workspace sections have stable deep links and restore nested views",
 });
 
 
-test("theme defaults to light, persists independently of logout, and applies globally", async () => {
+test("theme defaults to light, survives logout, and applies to the document root", async () => {
   const values = new Map<string, string>();
   const originalWindow = (globalThis as { window?: unknown }).window;
+  const originalDocument = (globalThis as { document?: unknown }).document;
+  const documentElement = { dataset: {} as Record<string, string>, style: {} as Record<string, string> };
   Object.defineProperty(globalThis, "window", {
     configurable: true,
     value: {
@@ -97,19 +99,41 @@ test("theme defaults to light, persists independently of logout, and applies glo
       }
     }
   });
+  Object.defineProperty(globalThis, "document", {
+    configurable: true,
+    value: { documentElement }
+  });
   try {
     assert.equal(readDarkModePreference(), false);
-    assert.equal(readSidebarCollapsedPreference(), false);
-    saveDarkModePreference(false);
-    saveSidebarCollapsedPreference(true);
-    assert.equal(readDarkModePreference(), false);
-    assert.equal(readSidebarCollapsedPreference(), true);
+    assert.equal(documentElement.dataset.theme, undefined);
+    applyThemePreference(false);
+    assert.equal(documentElement.dataset.theme, "light");
+    assert.equal(documentElement.style.colorScheme, "light");
+
     saveDarkModePreference(true);
-    saveSidebarCollapsedPreference(false);
+    applyThemePreference(true);
     assert.equal(readDarkModePreference(), true);
-    assert.equal(readSidebarCollapsedPreference(), false);
+    assert.equal(documentElement.dataset.theme, "dark");
+    assert.equal(documentElement.style.colorScheme, "dark");
+
+    saveSidebarCollapsedPreference(true);
+    assert.equal(readSidebarCollapsedPreference(), true);
+
+    await storeTokens({
+      tokenType: "Bearer",
+      accessToken: "test-access",
+      refreshToken: "test-refresh",
+      accessTokenExpiresUtc: "2026-11-02T00:00:00Z"
+    }, "shop");
+    await storeTokens(null, "shop");
+
+    assert.equal(values.has("qrtoprint.auth.shop"), false);
+    assert.equal(readDarkModePreference(), true);
+    assert.equal(values.get("qrtoprint.theme"), "dark");
   } finally {
     if (originalWindow === undefined) delete (globalThis as { window?: unknown }).window;
     else Object.defineProperty(globalThis, "window", { configurable: true, value: originalWindow });
+    if (originalDocument === undefined) delete (globalThis as { document?: unknown }).document;
+    else Object.defineProperty(globalThis, "document", { configurable: true, value: originalDocument });
   }
 });
