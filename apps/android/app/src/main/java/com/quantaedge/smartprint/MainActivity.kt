@@ -281,7 +281,7 @@ class MainActivity : AppCompatActivity() {
         toolbar = MaterialToolbar(this).apply {
             title = "Home"
             setTitleTextColor(getColor(R.color.qp_text))
-            setTitleTextAppearance(R.style.TextAppearance_SmartPrint_Toolbar)
+            setTitleTextAppearance(R.style.SmartPrintToolbar)
             setBackgroundColor(getColor(R.color.qp_surface))
             elevation = 0f
             menu.add(Menu.NONE, SWITCH_SHOP, Menu.NONE, "Switch shop").apply {
@@ -341,8 +341,8 @@ class MainActivity : AppCompatActivity() {
             }
             labelVisibilityMode = BottomNavigationView.LABEL_VISIBILITY_LABELED
             setItemHorizontalTranslationEnabled(false)
-            setItemTextAppearanceActive(R.style.TextAppearance_SmartPrint_Navigation)
-            setItemTextAppearanceInactive(R.style.TextAppearance_SmartPrint_Navigation)
+            setItemTextAppearanceActive(R.style.SmartPrintNavigation)
+            setItemTextAppearanceInactive(R.style.SmartPrintNavigation)
             itemIconSize = dp(21)
             setItemPaddingTop(dp(4))
             setItemPaddingBottom(dp(4))
