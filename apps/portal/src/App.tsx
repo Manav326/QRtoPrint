@@ -329,8 +329,17 @@ function ShopConsole({ tokens, onSignOut }: { tokens: AuthTokens; onSignOut: () 
       const authorization = await createAgentEnrollmentCode(tokens.accessToken);
       const enrolled = await enrollLocalAgent(authorization.code);
       locallyAuthorizedAgentId.current = enrolled.agentDeviceId;
+      let postEnrollmentStatus = status;
+      try {
+        // Read back the local listener state after enrollment. Failure here must
+        // not undo a successful cloud pairing or interrupt the owner's workflow.
+        postEnrollmentStatus = await getLocalAgentStatus();
+      } catch {
+        // Keep the last known listener status; the background health loop retries.
+      }
       setLocalAgentStatus({
         serviceReachable: true,
+        localApiReachable: postEnrollmentStatus.localApiReachable,
         paired: true,
         agentDeviceId: enrolled.agentDeviceId,
         status: "CONNECTED"
