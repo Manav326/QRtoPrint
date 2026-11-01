@@ -1393,6 +1393,7 @@ export interface CustomerBatchPayment {
 
 export interface CustomerPayment {
   id: string;
+  batchPaymentId?: string | null;
   method: "UPI" | "CASH";
   status: string;
   amountMinor: number;
