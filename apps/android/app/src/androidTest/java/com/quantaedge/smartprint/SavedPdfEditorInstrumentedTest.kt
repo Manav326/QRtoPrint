@@ -47,16 +47,17 @@ class SavedPdfEditorInstrumentedTest {
                 onView(withText("Edit PDF")).perform(click())
 
                 onView(withText("Edit PDF")).check(matches(isDisplayed()))
-                onView(withText("Page 1")).check(matches(isDisplayed()))
-                onView(withContentDescription("Rotate page 1")).perform(scrollTo(), click())
-                onView(withText("90°")).perform(scrollTo()).check(matches(isDisplayed()))
-                onView(withContentDescription("Move page 2 up")).perform(scrollTo()).check(matches(isDisplayed()))
-                onView(withContentDescription("Remove page 1")).perform(scrollTo()).check(matches(isDisplayed()))
-                onView(withContentDescription("Preview page 1")).perform(scrollTo(), click())
+                onView(withContentDescription("PDF page preview loading")).check(matches(isDisplayed()))
+                onView(withContentDescription("Rotate page 1")).perform(click())
+                waitForView(withText("90°"))
+                onView(withContentDescription("Remove page 1")).check(matches(isDisplayed()))
+                waitForView(withContentDescription("Page preview ready"))
+                onView(withContentDescription("Preview page 1")).perform(click())
                 onView(withText("Close")).check(matches(isDisplayed()))
                 onView(withText("Close")).perform(click())
-                onView(withContentDescription("Move page 2 up")).perform(scrollTo(), click())
-                onView(withText("Save copy")).perform(scrollTo(), click())
+                onView(withContentDescription("Select page 2")).perform(click())
+                onView(withContentDescription("Move page 2 up")).perform(click())
+                onView(withContentDescription("Save edited PDF copy")).perform(click())
             }
             val saveDeadline = System.currentTimeMillis() + 10_000
             while (!edited.isFile && System.currentTimeMillis() < saveDeadline) {
@@ -86,6 +87,23 @@ class SavedPdfEditorInstrumentedTest {
             source.delete()
             edited.delete()
         }
+    }
+
+    private fun waitForView(matcher: org.hamcrest.Matcher<android.view.View>) {
+        val deadline = SystemClock.uptimeMillis() + 10_000L
+        var lastFailure: Throwable? = null
+        while (SystemClock.uptimeMillis() < deadline) {
+            try {
+                onView(matcher).check(matches(isDisplayed()))
+                return
+            } catch (error: androidx.test.espresso.NoMatchingViewException) {
+                lastFailure = error
+            } catch (error: AssertionError) {
+                lastFailure = error
+            }
+            SystemClock.sleep(100L)
+        }
+        throw AssertionError("Expected PDF editor content did not become visible.", lastFailure)
     }
 
     private fun sha256(file: File): ByteArray =
