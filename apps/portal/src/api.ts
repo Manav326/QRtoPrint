@@ -28,7 +28,7 @@ export function isPlatformAdminSession(tokens: AuthTokens | null): boolean {
 export type AuthScope = "admin" | "shop";
 
 function currentAuthScope(): AuthScope {
-  const path = window.location.pathname.replace(/\\/+$/, "") || "/";
+  const path = window.location.pathname.replace(/\/+$/, "") || "/";
   return path === "/admin" || path.startsWith("/admin/") ? "admin" : "shop";
 }
 
