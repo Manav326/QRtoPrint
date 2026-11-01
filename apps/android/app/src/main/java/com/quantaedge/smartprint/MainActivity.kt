@@ -69,6 +69,7 @@ class MainActivity : AppCompatActivity() {
         private const val SCAN_PRINT = 3
         private const val ACTIVITY = 4
         private const val SWITCH_SHOP = 91
+        private const val OPEN_WITH = 92
         private const val MAX_TREE_FILES = 500
         private const val MAX_TREE_DEPTH = 12
         private const val FOLDER_PICKER_ACCEPT = "application/x-smartprint-folder-selection"
@@ -80,6 +81,9 @@ class MainActivity : AppCompatActivity() {
     private lateinit var toolbar: MaterialToolbar
     private lateinit var content: FrameLayout
     private lateinit var navigation: BottomNavigationView
+    private lateinit var accountAction: ImageView
+    private var documentViewer: SmartPrintDocumentViewer? = null
+    private var viewingDocument: File? = null
     private var webView: WebView? = null
     private var folderPath = ""
     private var pickerPath = ""
@@ -165,6 +169,7 @@ class MainActivity : AppCompatActivity() {
             profileVisible -> returnFromProfile()
             pickerMode && pickerPath.isNotBlank() -> { pickerPath = parent(pickerPath); refreshLibrary() }
             pickerMode -> cancelPicker()
+            documentViewer != null -> closeDocumentViewer()
             editingPdf != null -> showFiles()
             navigation.selectedItemId == SCAN_PRINT && webView?.canGoBack() == true -> webView?.goBack()
             navigation.selectedItemId == SCAN_PRINT -> showScanPrint()
@@ -290,6 +295,12 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    override fun onDestroy() {
+        documentViewer?.dispose()
+        documentViewer = null
+        super.onDestroy()
+    }
+
     private fun buildLayout() {
         window.statusBarColor = getColor(R.color.qp_surface)
         window.navigationBarColor = getColor(R.color.qp_surface)
@@ -312,7 +323,15 @@ class MainActivity : AppCompatActivity() {
                 isVisible = false
                 setOnMenuItemClickListener { switchShop(); true }
             }
-            val accountAction = ImageView(this@MainActivity).apply {
+            menu.add(Menu.NONE, OPEN_WITH, Menu.NONE, "Open with another app").apply {
+                setShowAsAction(android.view.MenuItem.SHOW_AS_ACTION_NEVER)
+                isVisible = false
+                setOnMenuItemClickListener {
+                    viewingDocument?.let(::openDocumentExternally)
+                    true
+                }
+            }
+            accountAction = ImageView(this@MainActivity).apply {
                 contentDescription = "Account"
                 setImageResource(R.drawable.ic_account)
                 imageTintList = ColorStateList.valueOf(this@MainActivity.getColor(R.color.qp_text))
@@ -401,6 +420,8 @@ class MainActivity : AppCompatActivity() {
         toolbar.navigationIcon = null
         toolbar.setNavigationOnClickListener(null)
         toolbar.menu.findItem(SWITCH_SHOP)?.isVisible = portalUrl != null
+        toolbar.menu.findItem(OPEN_WITH)?.isVisible = false
+        accountAction.visibility = View.VISIBLE
         navigation.visibility = View.VISIBLE
     }
 
@@ -1291,6 +1312,7 @@ class MainActivity : AppCompatActivity() {
     private fun showEntryMenu(anchor: View, file: File) {
         val actions = mutableListOf<Pair<String, () -> Unit>>()
         if (!file.isDirectory) actions += "Open" to { openDocument(file) }
+        if (!file.isDirectory && supportsInAppViewer(file)) actions += "Open with another app" to { openDocumentExternally(file) }
         if (!file.isDirectory && file.extension.equals("pdf", true)) {
             actions += "Edit PDF" to { showPdfEditor(file) }
         }
@@ -2163,7 +2185,74 @@ class MainActivity : AppCompatActivity() {
         return "$base-${System.currentTimeMillis()}$ext"
     }
 
+    private fun supportsInAppViewer(file: File): Boolean {
+        if (!file.isFile) return false
+        return file.extension.lowercase(Locale.ROOT) in setOf(
+            "pdf", "jpg", "jpeg", "png", "webp", "bmp", "gif"
+        )
+    }
+
+    private fun showDocumentViewer(file: File) {
+        if (!supportsInAppViewer(file)) {
+            openDocumentExternally(file)
+            return
+        }
+        if (!file.exists() || !file.isFile) {
+            toast("This document is no longer available.")
+            return
+        }
+
+        documentViewer?.dispose()
+        viewingDocument = file
+        pickerMode = false
+        profileVisible = false
+        toolbar.title = file.name
+        toolbar.setNavigationIcon(android.R.drawable.ic_media_previous)
+        toolbar.navigationContentDescription = "Back to My Files"
+        toolbar.setNavigationOnClickListener { closeDocumentViewer() }
+        toolbar.menu.findItem(SWITCH_SHOP)?.isVisible = false
+        toolbar.menu.findItem(OPEN_WITH)?.isVisible = true
+        accountAction.visibility = View.GONE
+        navigation.visibility = View.GONE
+        content.removeAllViews()
+
+        val images = if (file.extension.equals("pdf", true)) {
+            emptyList()
+        } else {
+            val siblings = file.parentFile?.let { folder ->
+                runCatching {
+                    store.list(folder).filter { candidate ->
+                        candidate.isFile && candidate.extension.lowercase(Locale.ROOT) in
+                            setOf("jpg", "jpeg", "png", "webp", "bmp", "gif")
+                    }
+                }.getOrDefault(emptyList())
+            }.orEmpty()
+            (if (siblings.any { sameDocument(it, file) }) siblings else siblings + file)
+        }
+        val reader = SmartPrintDocumentViewer(this, file, images) { current ->
+            viewingDocument = current
+            toolbar.title = current.name
+        }
+        documentViewer = reader
+        content.addView(reader, frameParams())
+    }
+
+    private fun sameDocument(left: File, right: File): Boolean =
+        runCatching { left.canonicalPath == right.canonicalPath }.getOrDefault(false)
+
+    private fun closeDocumentViewer() {
+        documentViewer?.dispose()
+        documentViewer = null
+        viewingDocument = null
+        showFiles()
+    }
+
     private fun openDocument(file: File) {
+        if (supportsInAppViewer(file)) showDocumentViewer(file)
+        else openDocumentExternally(file)
+    }
+
+    private fun openDocumentExternally(file: File) {
         try {
             val uri = FileProvider.getUriForFile(this, "$packageName.documents", file)
             val intent = Intent(Intent.ACTION_VIEW).apply {
