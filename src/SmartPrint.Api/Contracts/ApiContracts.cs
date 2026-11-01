@@ -72,7 +72,8 @@ public sealed record ShopPaymentSettingsRequest(
     bool UpiEnabled,
     string? UpiId,
     string? PayeeName,
-    bool CashEnabled);
+    bool CashEnabled,
+    bool InstantPaymentEnabled = false);
 
 public sealed record StartPrintPaymentRequest(string Method);
 
