@@ -15,7 +15,7 @@
 - Supported transitions are Active → Suspended/Inactive and Suspended → Active/Inactive. Inactive is terminal; reactivation is not supported.
 - Suspension blocks new QR sessions, print submissions, quotes, payment starts, new Agent claims and new authorisation/dispatch actions. Read-only history and limited recovery operations remain available so already-paid or physically submitted jobs can be reconciled, refunded, rejected or confirmed.
 - The shop API enforces subscription access and feature entitlements server-side. Portal navigation is not an enforcement boundary.
-- API rate limits are partitioned by source IP for authentication/public/QR traffic, by Agent ID for authenticated Agent traffic, and by hashed print-session token for document upload. The current defaults are 20 authentication requests/minute, 120 public requests/minute, 30 Agent requests/minute, 30 QR session creations/minute and 8 document uploads/minute. Review these values against production traffic and trusted proxy configuration.
+- API rate limits use source-IP partitions so clients cannot bypass them by changing untrusted session or Agent headers. The current defaults are 20 authentication requests/minute, 120 public requests/minute, 30 Agent requests/minute, 30 QR session creations/minute and 8 document uploads/minute. Review these values against production traffic and trusted proxy configuration.
 
 ## 2. QR session security
 
