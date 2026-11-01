@@ -252,14 +252,14 @@ class MainActivity : AppCompatActivity() {
             setTitleTextColor(getColor(R.color.qp_text))
             setBackgroundColor(getColor(R.color.qp_surface))
             elevation = dp(1).toFloat()
-            val accountAction = ImageView(this).apply {
+            val accountAction = ImageView(this@MainActivity).apply {
                 contentDescription = "Account"
                 setImageResource(R.drawable.ic_account)
-                imageTintList = ColorStateList.valueOf(getColor(R.color.qp_text))
+                imageTintList = ColorStateList.valueOf(this@MainActivity.getColor(R.color.qp_text))
                 scaleType = ImageView.ScaleType.CENTER_INSIDE
                 setPadding(dp(12), dp(12), dp(12), dp(12))
                 val selectableBackground = android.util.TypedValue()
-                if (theme.resolveAttribute(
+                if (this@MainActivity.theme.resolveAttribute(
                         android.R.attr.selectableItemBackgroundBorderless,
                         selectableBackground,
                         true
