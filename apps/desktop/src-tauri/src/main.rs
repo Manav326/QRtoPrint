@@ -27,20 +27,24 @@ struct AgentPipeResponse {
     success: bool,
     agent_device_id: Option<String>,
     message: Option<String>,
+    service_reachable: Option<bool>,
+    paired: Option<bool>,
+    status: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct AgentPipeRequest<'a> {
     operation: &'static str,
-    enrollment_code: &'a str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    enrollment_code: Option<&'a str>,
 }
 
 #[tauri::command]
 async fn get_local_agent_status() -> LocalAgentStatus {
     let client = match reqwest::Client::builder().timeout(Duration::from_secs(2)).build() {
         Ok(client) => client,
-        Err(_) => return unavailable_status(),
+        Err(_) => return pipe_agent_status().unwrap_or_else(|_| unavailable_status()),
     };
 
     match client.get(AGENT_STATUS_URL).send().await {
@@ -51,21 +55,25 @@ async fn get_local_agent_status() -> LocalAgentStatus {
             status: "UNPAIRED".into(),
         },
         Ok(response) if response.status().is_success() => {
-            let payload = response.json::<serde_json::Value>().await.ok();
-            let id = payload.as_ref()
-                .and_then(|value| value.get("agentDeviceId"))
-                .and_then(serde_json::Value::as_str)
-                .map(str::to_owned);
-            LocalAgentStatus {
-                service_reachable: true,
-                paired: id.is_some(),
-                agent_device_id: id,
-                status: payload
-                    .and_then(|value| value.get("status").and_then(serde_json::Value::as_str).map(str::to_owned))
-                    .unwrap_or_else(|| "CONNECTED".into()),
+            match response.json::<serde_json::Value>().await {
+                Ok(payload) => {
+                    let id = payload.get("agentDeviceId")
+                        .and_then(serde_json::Value::as_str)
+                        .map(str::to_owned);
+                    LocalAgentStatus {
+                        service_reachable: true,
+                        paired: id.is_some(),
+                        agent_device_id: id,
+                        status: payload.get("status")
+                            .and_then(serde_json::Value::as_str)
+                            .unwrap_or("CONNECTED")
+                            .to_owned(),
+                    }
+                }
+                Err(_) => pipe_agent_status().unwrap_or_else(|_| unavailable_status()),
             }
         }
-        Ok(_) | Err(_) => unavailable_status(),
+        Ok(_) | Err(_) => pipe_agent_status().unwrap_or_else(|_| unavailable_status()),
     }
 }
 
@@ -78,6 +86,55 @@ fn unavailable_status() -> LocalAgentStatus {
     }
 }
 
+#[cfg(windows)]
+fn send_agent_pipe_request(request: &AgentPipeRequest<'_>) -> Result<AgentPipeResponse, String> {
+    use std::fs::OpenOptions;
+
+    let mut pipe = OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(agent_pipe_path())
+        .map_err(|_| "The SmartPrint background service is not ready. Please retry shortly.".to_string())?;
+
+    let request = serde_json::to_vec(request)
+        .map_err(|_| "Could not prepare the SmartPrint service request.".to_string())?;
+    pipe.write_all(&request)
+        .and_then(|_| pipe.write_all(b"\n"))
+        .and_then(|_| pipe.flush())
+        .map_err(|_| "Could not send the request to the SmartPrint background service.".to_string())?;
+
+    let mut response_line = String::new();
+    BufReader::new(pipe)
+        .read_line(&mut response_line)
+        .map_err(|_| "The SmartPrint background service did not return a response.".to_string())?;
+    serde_json::from_str(&response_line)
+        .map_err(|_| "The SmartPrint background service returned an invalid response.".to_string())
+}
+
+#[cfg(windows)]
+fn pipe_agent_status() -> Result<LocalAgentStatus, String> {
+    let response = send_agent_pipe_request(&AgentPipeRequest {
+        operation: "status",
+        enrollment_code: None,
+    })?;
+    if !response.success || response.service_reachable != Some(true) {
+        return Err(response.message.unwrap_or_else(|| "The local Agent identity could not be read.".into()));
+    }
+
+    let paired = response.paired.unwrap_or(false);
+    Ok(LocalAgentStatus {
+        service_reachable: true,
+        paired,
+        agent_device_id: response.agent_device_id,
+        status: response.status.unwrap_or_else(|| if paired { "CONNECTED" } else { "UNPAIRED" }.into()),
+    })
+}
+
+#[cfg(not(windows))]
+fn pipe_agent_status() -> Result<LocalAgentStatus, String> {
+    Err("The local Windows Agent pipe is unavailable on this platform.".into())
+}
+
 #[tauri::command]
 fn enroll_local_agent(enrollment_code: String) -> Result<AgentPipeResponse, String> {
     if enrollment_code.len() != 32 ||
@@ -87,25 +144,10 @@ fn enroll_local_agent(enrollment_code: String) -> Result<AgentPipeResponse, Stri
 
     #[cfg(windows)]
     {
-        use std::fs::OpenOptions;
-        let mut pipe = OpenOptions::new()
-            .read(true)
-            .write(true)
-            .open(agent_pipe_path())
-            .map_err(|_| "The SmartPrint background service is not ready. Repair or reinstall SmartPrint, then retry.".to_string())?;
-
-        let request = serde_json::to_vec(&AgentPipeRequest { operation: "enroll", enrollment_code: &enrollment_code })
-            .map_err(|_| "Could not prepare secure computer enrollment.".to_string())?;
-        pipe.write_all(&request).map_err(|_| "Could not send enrollment to the SmartPrint service.".to_string())?;
-        pipe.write_all(b"\n").map_err(|_| "Could not finish the enrollment request.".to_string())?;
-        pipe.flush().map_err(|_| "Could not finish the enrollment request.".to_string())?;
-
-        let mut response_line = String::new();
-        BufReader::new(pipe)
-            .read_line(&mut response_line)
-            .map_err(|_| "The SmartPrint service did not return an enrollment result.".to_string())?;
-        let response: AgentPipeResponse = serde_json::from_str(&response_line)
-            .map_err(|_| "The SmartPrint service returned an invalid enrollment result.".to_string())?;
+        let response = send_agent_pipe_request(&AgentPipeRequest {
+            operation: "enroll",
+            enrollment_code: Some(&enrollment_code),
+        })?;
         if !response.success {
             return Err(response.message.clone().unwrap_or_else(|| "This computer could not be connected to the shop.".into()));
         }

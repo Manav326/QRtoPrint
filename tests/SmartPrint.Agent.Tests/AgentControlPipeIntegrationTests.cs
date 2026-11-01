@@ -79,38 +79,37 @@ public sealed class AgentControlPipeIntegrationTests
         var service = new AgentControlPipeHostedService(
             configuration,
             NullLogger<AgentControlPipeHostedService>.Instance,
-            new AgentEnrollmentHandler(credentialStore));
+            new AgentEnrollmentHandler(credentialStore),
+            credentialStore);
 
         try
         {
             Assert.Equal(@"\\.\pipe\QRtoPrint.SmartPrint.Agent.Control", AgentControlPipeHostedService.PipePath);
             await service.StartAsync(timeout.Token);
 
-            using var pipe = new NamedPipeClientStream(
-                ".",
-                AgentControlPipeHostedService.PipeName,
-                PipeDirection.InOut,
-                PipeOptions.Asynchronous);
-            await pipe.ConnectAsync(10_000, timeout.Token);
-
-            using var reader = new StreamReader(pipe, Encoding.UTF8, false, 1024, leaveOpen: true);
-            await using var writer = new StreamWriter(pipe, new UTF8Encoding(false), 1024, leaveOpen: true)
+            using (var initialStatus = await SendPipeRequestAsync("status", null, timeout.Token))
             {
-                AutoFlush = true,
-                NewLine = "\n"
-            };
+                Assert.True(initialStatus.RootElement.GetProperty("success").GetBoolean());
+                Assert.True(initialStatus.RootElement.GetProperty("serviceReachable").GetBoolean());
+                Assert.False(initialStatus.RootElement.GetProperty("paired").GetBoolean());
+                Assert.Equal("UNPAIRED", initialStatus.RootElement.GetProperty("status").GetString());
+            }
 
-            var request = JsonSerializer.Serialize(
-                new { operation = "enroll", enrollmentCode },
-                new JsonSerializerOptions(JsonSerializerDefaults.Web));
-            await writer.WriteLineAsync(request);
-            var responseLine = await reader.ReadLineAsync(timeout.Token);
-            Assert.False(string.IsNullOrWhiteSpace(responseLine));
+            using (var response = await SendPipeRequestAsync("enroll", enrollmentCode, timeout.Token))
+            {
+                Assert.True(response.RootElement.GetProperty("success").GetBoolean());
+                Assert.Equal(deviceId, response.RootElement.GetProperty("agentDeviceId").GetGuid());
+                Assert.True(response.RootElement.GetProperty("message").ValueKind is JsonValueKind.Null);
+            }
 
-            using var response = JsonDocument.Parse(responseLine!);
-            Assert.True(response.RootElement.GetProperty("success").GetBoolean());
-            Assert.Equal(deviceId, response.RootElement.GetProperty("agentDeviceId").GetGuid());
-            Assert.True(response.RootElement.GetProperty("message").ValueKind is JsonValueKind.Null);
+            using (var pairedStatus = await SendPipeRequestAsync("status", null, timeout.Token))
+            {
+                Assert.True(pairedStatus.RootElement.GetProperty("success").GetBoolean());
+                Assert.True(pairedStatus.RootElement.GetProperty("serviceReachable").GetBoolean());
+                Assert.True(pairedStatus.RootElement.GetProperty("paired").GetBoolean());
+                Assert.Equal(deviceId, pairedStatus.RootElement.GetProperty("agentDeviceId").GetGuid());
+                Assert.Equal("CONNECTED", pairedStatus.RootElement.GetProperty("status").GetString());
+            }
 
             Assert.True(await apiRequestTask.WaitAsync(timeout.Token));
             var savedCredentials = credentialStore.Load();
@@ -129,4 +128,33 @@ public sealed class AgentControlPipeIntegrationTests
                 Directory.Delete(identityDirectory, recursive: true);
         }
     }
+
+    private static async Task<JsonDocument> SendPipeRequestAsync(
+        string operation,
+        string? enrollmentCode,
+        CancellationToken cancellationToken)
+    {
+        using var pipe = new NamedPipeClientStream(
+            ".",
+            AgentControlPipeHostedService.PipeName,
+            PipeDirection.InOut,
+            PipeOptions.Asynchronous);
+        await pipe.ConnectAsync(10_000, cancellationToken);
+
+        using var reader = new StreamReader(pipe, Encoding.UTF8, false, 1024, leaveOpen: true);
+        await using var writer = new StreamWriter(pipe, new UTF8Encoding(false), 1024, leaveOpen: true)
+        {
+            AutoFlush = true,
+            NewLine = "\\n"
+        };
+
+        var request = JsonSerializer.Serialize(
+            new { operation, enrollmentCode },
+            new JsonSerializerOptions(JsonSerializerDefaults.Web));
+        await writer.WriteLineAsync(request);
+        var responseLine = await reader.ReadLineAsync(cancellationToken);
+        Assert.False(string.IsNullOrWhiteSpace(responseLine));
+        return JsonDocument.Parse(responseLine!);
+    }
+
 }

@@ -1,5 +1,6 @@
 using System.IO.Pipes;
 using System.Security.AccessControl;
+using System.Security.Cryptography;
 using System.Security.Principal;
 using System.Text;
 using System.Text.Json;
@@ -10,7 +11,8 @@ namespace SmartPrint.Agent;
 public sealed class AgentControlPipeHostedService(
     IConfiguration configuration,
     ILogger<AgentControlPipeHostedService> logger,
-    IAgentEnrollmentHandler enrollmentHandler) : BackgroundService
+    IAgentEnrollmentHandler enrollmentHandler,
+    AgentCredentialStore credentialStore) : BackgroundService
 {
     public const string PipeName = "QRtoPrint.SmartPrint.Agent.Control";
     public const string PipePath = @"\\.\pipe\" + PipeName;
@@ -126,8 +128,34 @@ public sealed class AgentControlPipeHostedService(
         }
 
         if (request is null ||
-            !string.Equals(request.Operation, "enroll", StringComparison.Ordinal) ||
-            string.IsNullOrWhiteSpace(request.EnrollmentCode) ||
+            (!string.Equals(request.Operation, "status", StringComparison.Ordinal) &&
+             !string.Equals(request.Operation, "enroll", StringComparison.Ordinal)))
+        {
+            await writer.WriteLineAsync(JsonSerializer.Serialize(new PipeResponse(false, null, "Invalid SmartPrint service operation."), PipeJsonOptions));
+            return;
+        }
+
+        if (string.Equals(request.Operation, "status", StringComparison.Ordinal))
+        {
+            try
+            {
+                var credentials = credentialStore.Load();
+                var paired = credentials is not null;
+                await writer.WriteLineAsync(JsonSerializer.Serialize(
+                    new PipeResponse(true, credentials?.AgentDeviceId, null, true, paired, paired ? "CONNECTED" : "UNPAIRED"),
+                    PipeJsonOptions));
+            }
+            catch (Exception exception) when (exception is CryptographicException or IOException or JsonException)
+            {
+                logger.LogWarning("SmartPrint local identity status could not be read ({FailureType}).", exception.GetType().Name);
+                await writer.WriteLineAsync(JsonSerializer.Serialize(
+                    new PipeResponse(false, null, "The local SmartPrint identity could not be read.", true, false, "IDENTITY_UNAVAILABLE"),
+                    PipeJsonOptions));
+            }
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(request.EnrollmentCode) ||
             request.EnrollmentCode.Length != 32 ||
             !request.EnrollmentCode.All(IsBase64UrlCharacter))
         {
@@ -162,6 +190,12 @@ public sealed class AgentControlPipeHostedService(
     private static bool IsBase64UrlCharacter(char value) =>
         value is >= 'a' and <= 'z' or >= 'A' and <= 'Z' or >= '0' and <= '9' or '-' or '_';
 
-    private sealed record PipeRequest(string Operation, string EnrollmentCode);
-    private sealed record PipeResponse(bool Success, Guid? AgentDeviceId, string? Message);
+    private sealed record PipeRequest(string Operation, string? EnrollmentCode);
+    private sealed record PipeResponse(
+        bool Success,
+        Guid? AgentDeviceId,
+        string? Message,
+        bool? ServiceReachable = null,
+        bool? Paired = null,
+        string? Status = null);
 }
