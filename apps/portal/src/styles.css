@@ -885,6 +885,7 @@
   --native-text:#191b2a;
   --native-muted:#686d7d;
   --native-accent:#6557d2;
+  --native-accent-text:#ffffff;
   min-height:100%;
   width:100%;
   display:block;
@@ -1043,6 +1044,7 @@
   font-size:10px;
 }
 .customer-entry.smartprint-native .customer-flow-button {
+  color:var(--native-accent-text);
   min-height:44px;
   height:auto;
   padding:10px 14px;
@@ -1145,6 +1147,7 @@
     --native-text:#eff0f7;
     --native-muted:#a4a9b7;
     --native-accent:#b6afff;
+    --native-accent-text:#17152a;
   }
   .customer-entry.smartprint-native .customer-upload-zone,
   .customer-entry.smartprint-native .customer-upload-mode,
