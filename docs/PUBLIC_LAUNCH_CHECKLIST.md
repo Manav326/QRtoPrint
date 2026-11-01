@@ -15,7 +15,7 @@ This checklist tracks the public website, non-technical Windows setup, Android r
 - [x] Add Windows and Android download cards wired to stable GitHub Release asset URLs.
 - [x] Add public metadata, social preview metadata and a SmartPrint favicon.
 - [x] Preserve the existing `/s/{publicCode}` customer QR route ahead of public landing-page routing.
-- [ ] Run portal type-check/build on the current main commit and resolve any failures.
+- [x] Run portal type-check/build on the current main commit and resolve any failures (CI run 344 passed).
 - [ ] Deploy the updated portal and verify `https://qr-test.paintpulp.com/` on desktop and mobile.
 - [ ] Complete keyboard, contrast, screen-reader and responsive browser checks.
 - [ ] Publish and link the actual Terms of Service and Privacy Policy pages.
@@ -29,9 +29,11 @@ This checklist tracks the public website, non-technical Windows setup, Android r
 - [x] Package the Agent with the existing service-install and service-uninstall scripts.
 - [x] Reuse the existing service installer to register the Windows Service and Private-profile firewall rule without showing a terminal.
 - [x] Add a bounded local readiness check against `/api/v1/local/status` before setup reports success.
+- [x] Allow repairs/upgrades to reuse a saved pairing only after an authenticated cloud heartbeat succeeds.
+- [x] Stop a previously running Agent service before replacing files and attempt to restore it if setup exits before service reinstallation succeeds.
 - [x] Add CI steps intended to compile and retain an unsigned installer validation artifact.
 - [x] Add a tag-based release step that requires a Windows code-signing PFX and verifies the installer signature before publication.
-- [ ] Verify the Inno Setup compilation job succeeds on GitHub Actions; fix any compiler or packaging failures.
+- [x] Verify the Inno Setup compilation job succeeds on GitHub Actions; the installer compiled and its validation artifact uploaded in CI run 344.
 - [ ] Verify the resulting installer contains only customer-relevant files and installs cleanly on a fresh Windows 10/11 x64 machine.
 - [ ] Test a normal shop-owner Windows account with UAC elevation, no preinstalled .NET runtime and no terminal usage.
 - [ ] Test expired, malformed, already-used and wrong-shop pairing codes, including safe recovery after a failed pairing.
@@ -45,6 +47,7 @@ This checklist tracks the public website, non-technical Windows setup, Android r
 - [x] Keep the native Android customer companion and existing QR/customer workflow.
 - [x] Add configurable release version, canonical service URL and release signing to Gradle.
 - [x] Add a release workflow that builds a release APK and verifies its signature with `apksigner`.
+- [x] Pass Android JVM unit tests, debug APK build and emulator UI tests in CI run 344 (API 35 emulator).
 - [ ] Generate the production Android keystore and configure the four Android signing secrets in GitHub Actions.
 - [ ] Back up the keystore and credentials securely outside GitHub; do not rotate this signing identity for ordinary updates.
 - [ ] Install the release APK on physical Android 8+ devices and verify QR scanning, document import, account flows and print submission.
@@ -70,13 +73,20 @@ This checklist tracks the public website, non-technical Windows setup, Android r
 
 ## E. Deployment and production acceptance
 
-- [ ] Confirm the main-branch CI run passes portal, API, Agent, Windows installer and Android debug validation.
+- [x] Confirm the main-branch CI run passes portal, API, Agent, Windows installer and Android debug validation (CI run 344, commit `e0017b8`).
+- [x] Build/publish the API and portal container images to GHCR and pass the migration/API-readiness/portal-response smoke test (CI run 344).
 - [ ] Deploy the current main-branch portal/API images to the intended staging environment.
 - [ ] Verify existing shop login, new shop registration and platform-admin routing after deployment.
 - [ ] Verify existing printed QR station URLs and active shop sessions still work.
 - [ ] Run end-to-end customer upload, quote, shop review, manual payment verification, dispatch and output confirmation.
 - [ ] Verify no test or development build is presented as a production-signed download.
 - [ ] Complete a production go/no-go review with Windows, Android, printer, security and download-link evidence.
+
+## Current verified CI evidence
+
+- Main commit: `e0017b865dc7f34d56172541a0e79c4ad7a63437`.
+- CI run 344: [GitHub Actions run](https://github.com/Manav326/QRtoPrint/actions/runs/41261051262) — portal, .NET API/Agent, unit tests, Windows installer compilation, Android JVM/emulator tests, GHCR image publication and container smoke tests all completed successfully.
+- GitHub Releases currently has no published release. The Windows validation artifact is unsigned and the Android artifact is a debug build; neither is a public customer download.
 
 ## Guardrails
 
