@@ -4,6 +4,9 @@
 #ifndef SmartPrintVersion
   #define SmartPrintVersion "0.1.0"
 #endif
+#ifndef SmartPrintBuildId
+  #define SmartPrintBuildId "local"
+#endif
 
 [Setup]
 SourceDir=..\
@@ -33,7 +36,7 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 Name: "desktopicon"; Description: "Create a desktop shortcut"; GroupDescription: "Additional shortcuts:"; Flags: unchecked
 
 [Files]
-Source: "artifacts\agent\*"; DestDir: "{app}\agent\{#SmartPrintVersion}"; Excludes: "pair-agent.ps1,appsettings.example.json,README.md,agent-service-lifecycle.ps1"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "artifacts\agent\*"; DestDir: "{app}\agent\{#SmartPrintVersion}-{#SmartPrintBuildId}"; Excludes: "pair-agent.ps1,appsettings.example.json,README.md,agent-service-lifecycle.ps1"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "artifacts\desktop\MicrosoftEdgeWebView2RuntimeInstallerX64.exe"; DestDir: "{tmp}"; Flags: deleteafterinstall
 Source: "artifacts\desktop\*"; DestDir: "{app}"; Excludes: "MicrosoftEdgeWebView2RuntimeInstallerX64.exe"; Flags: ignoreversion recursesubdirs createallsubdirs
 
@@ -46,7 +49,7 @@ Name: "{group}\Uninstall SmartPrint"; Filename: "{uninstallexe}"
 Filename: "{app}\SmartPrint.Desktop.exe"; Description: "Launch SmartPrint"; Flags: postinstall nowait skipifsilent
 
 [UninstallRun]
-Filename: "{sys}\WindowsPowerShell\v1.0\powershell.exe"; Parameters: "-NoProfile -NonInteractive -ExecutionPolicy Bypass -File ""{app}\agent\{#SmartPrintVersion}\uninstall-agent-service.ps1"""; Flags: runhidden waituntilterminated skipifdoesntexist
+Filename: "{sys}\WindowsPowerShell\v1.0\powershell.exe"; Parameters: "-NoProfile -NonInteractive -ExecutionPolicy Bypass -File ""{app}\agent\{#SmartPrintVersion}-{#SmartPrintBuildId}\uninstall-agent-service.ps1"""; Flags: runhidden waituntilterminated skipifdoesntexist
 
 [Code]
 function IsWebView2Installed: Boolean;
@@ -94,11 +97,11 @@ begin
   PowerShellPath := ExpandConstant('{sys}\WindowsPowerShell\v1.0\powershell.exe');
   Parameters :=
     '-NoProfile -NonInteractive -ExecutionPolicy Bypass -File "' +
-    ExpandConstant('{app}\agent\{#SmartPrintVersion}\install-agent-service.ps1') +
-    '" -AgentExePath "' + ExpandConstant('{app}\agent\{#SmartPrintVersion}\SmartPrint.Agent.exe') +
+    ExpandConstant('{app}\agent\{#SmartPrintVersion}-{#SmartPrintBuildId}\install-agent-service.ps1') +
+    '" -AgentExePath "' + ExpandConstant('{app}\agent\{#SmartPrintVersion}-{#SmartPrintBuildId}\SmartPrint.Agent.exe') +
     '" -AgentVersion "{#SmartPrintVersion}" -CustomerPortalOrigin "{#SmartPrintPublicUrl}" -ApiBaseUrl "{#SmartPrintPublicUrl}"';
 
-  if not Exec(PowerShellPath, Parameters, ExpandConstant('{app}\agent\{#SmartPrintVersion}'), SW_HIDE, ewWaitUntilTerminated, ExitCode) then
+  if not Exec(PowerShellPath, Parameters, ExpandConstant('{app}\agent\{#SmartPrintVersion}-{#SmartPrintBuildId}'), SW_HIDE, ewWaitUntilTerminated, ExitCode) then
     RaiseException('SmartPrint could not start its background service installer.');
   if ExitCode <> 0 then
     RaiseException('SmartPrint could not install or start the background print service. No printer connection has been changed. Restart Windows and run setup again.');

@@ -193,7 +193,13 @@ fn get_agent_api_base_url() -> Option<String> {
 
 fn is_canonical_api_origin(value: &str) -> bool {
     reqwest::Url::parse(value).map(|parsed| {
-        matches!(parsed.scheme(), "https" | "http") &&
+        let secure = parsed.scheme() == "https";
+        let local_development_http = parsed.scheme() == "http" &&
+            parsed.host_str().map(|host| {
+                host.eq_ignore_ascii_case("localhost") || host == "127.0.0.1" || host == "::1"
+            }).unwrap_or(false);
+
+        (secure || local_development_http) &&
         parsed.host_str().is_some() &&
         parsed.username().is_empty() &&
         parsed.password().is_none() &&

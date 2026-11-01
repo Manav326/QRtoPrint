@@ -70,9 +70,10 @@ public sealed class Worker(
             {
                 credentials = credentialStore.Load();
             }
-            catch (CryptographicException exception)
+            catch (Exception exception) when (
+                exception is CryptographicException or IOException or JsonException or UnauthorizedAccessException)
             {
-                logger.LogCritical(exception, "The stored agent identity could not be decrypted. Re-pair this computer.");
+                logger.LogError(exception, "The saved Agent identity could not be read. Cloud printing is paused until the owner repairs the local pairing.");
                 await Task.Delay(pollInterval, stoppingToken);
                 continue;
             }

@@ -167,7 +167,8 @@ export function configureApiBaseUrl(value: string | null | undefined): void {
   try {
     const parsed = new URL(value);
     if (
-      !["https:", "http:"].includes(parsed.protocol) ||
+      !(parsed.protocol === "https:" ||
+        (parsed.protocol === "http:" && ["localhost", "127.0.0.1", "::1"].includes(parsed.hostname))) ||
       !parsed.hostname ||
       parsed.username ||
       parsed.password ||

@@ -111,7 +111,7 @@ jobs:
           choco install innosetup --no-progress -y
           New-Item -ItemType Directory -Force -Path artifacts/agent-installer | Out-Null
           $iscc = "C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
-          & $iscc "/DSmartPrintPublicUrl=$env:SMARTPRINT_PUBLIC_BASE_URL" "/DSmartPrintVersion=$env:GITHUB_REF_NAME" scripts/build-windows-installer.iss
+          & $iscc "/DSmartPrintPublicUrl=$env:SMARTPRINT_PUBLIC_BASE_URL" "/DSmartPrintVersion=$env:GITHUB_REF_NAME" "/DSmartPrintBuildId=$env:GITHUB_RUN_NUMBER" scripts/build-windows-installer.iss
           if ($LASTEXITCODE -ne 0) { throw "SmartPrint Windows installer compilation failed." }
       - name: Confirm Windows installer is intentionally unsigned for the beta channel
         shell: pwsh
