@@ -24,10 +24,6 @@ export function getLocalAgentStatus(): Promise<DesktopAgentStatus> {
   return invoke<DesktopAgentStatus>("get_local_agent_status");
 }
 
-export function getAgentApiBaseUrl(): Promise<string | null> {
-  return invoke<string | null>("get_agent_api_base_url");
-}
-
 export function enrollLocalAgent(enrollmentCode: string): Promise<DesktopEnrollmentResult> {
   return invoke<DesktopEnrollmentResult>("enroll_local_agent", { enrollmentCode });
 }

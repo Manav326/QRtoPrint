@@ -173,44 +173,7 @@ fn pipe_agent_status() -> Result<LocalAgentStatus, String> {
 }
 
 #[tauri::command]
-fn get_agent_api_base_url() -> Option<String> {
-    #[cfg(windows)]
-    {
-        return send_agent_pipe_request(&AgentPipeRequest {
-            operation: "status",
-            enrollment_code: None,
-        })
-        .ok()
-        .filter(|response| response.service_reachable == Some(true))
-        .and_then(|response| response.api_base_url)
-        .filter(|value| is_canonical_api_origin(value));
-    }
-    #[cfg(not(windows))]
-    {
-        None
-    }
-}
-
-fn is_canonical_api_origin(value: &str) -> bool {
-    reqwest::Url::parse(value).map(|parsed| {
-        let secure = parsed.scheme() == "https";
-        let local_development_http = parsed.scheme() == "http" &&
-            parsed.host_str().map(|host| {
-                host.eq_ignore_ascii_case("localhost") || host == "127.0.0.1" || host == "::1"
-            }).unwrap_or(false);
-
-        (secure || local_development_http) &&
-        parsed.host_str().is_some() &&
-        parsed.username().is_empty() &&
-        parsed.password().is_none() &&
-        parsed.path() == "/" &&
-        parsed.query().is_none() &&
-        parsed.fragment().is_none()
-    }).unwrap_or(false)
-}
-
-#[tauri::command]
-fn enroll_local_agent(enrollment_code: String) -> Result<AgentPipeResponse, String> {
+async fn enroll_local_agent(enrollment_code: String) -> Result<AgentPipeResponse, String> {
     if enrollment_code.len() != 32 ||
         !enrollment_code.bytes().all(|byte| byte.is_ascii_alphanumeric() || byte == b'-' || byte == b'_') {
         return Err("The service returned an invalid one-time enrollment authorization.".into());
@@ -339,7 +302,6 @@ fn main() {
     tauri::Builder::default()
         .invoke_handler(tauri::generate_handler![
             get_local_agent_status,
-            get_agent_api_base_url,
             enroll_local_agent,
             read_secure_session,
             write_secure_session

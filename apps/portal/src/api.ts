@@ -1,4 +1,4 @@
-import { getAgentApiBaseUrl, isDesktopApp, writeDesktopSession } from "./desktop-bridge";
+import { getLocalAgentStatus, isDesktopApp, writeDesktopSession } from "./desktop-bridge";
 export interface AuthTokens {
   tokenType: string;
   accessToken: string;
@@ -190,9 +190,9 @@ async function refreshDesktopApiBaseUrl(force = false): Promise<void> {
   if (desktopApiBaseRefresh) return desktopApiBaseRefresh;
   if (!force && Date.now() - lastDesktopApiBaseRefreshUtc < 30_000) return;
 
-  desktopApiBaseRefresh = getAgentApiBaseUrl()
-    .then(value => {
-      if (configureApiBaseUrl(value)) {
+  desktopApiBaseRefresh = getLocalAgentStatus()
+    .then(status => {
+      if (configureApiBaseUrl(status.apiBaseUrl)) {
         lastDesktopApiBaseRefreshUtc = Date.now();
       } else {
         // Retry shortly when the Windows service is still starting or not installed.
