@@ -6,6 +6,13 @@ val smartPrintServiceUrl = providers.gradleProperty("smartPrintServiceUrl")
     .orElse("https://print.thinkwithsujeet.in")
     .get()
     .trimEnd('/')
+val smartPrintVersionCode = providers.gradleProperty("smartPrintVersionCode").orNull?.toIntOrNull() ?: 1
+val smartPrintVersionName = providers.gradleProperty("smartPrintVersionName").orElse("0.1.0").get()
+val releaseKeystorePath = providers.environmentVariable("ANDROID_SIGNING_KEYSTORE_FILE").orNull
+val releaseKeystorePassword = providers.environmentVariable("ANDROID_SIGNING_KEYSTORE_PASSWORD").orNull
+val releaseKeyAlias = providers.environmentVariable("ANDROID_SIGNING_KEY_ALIAS").orNull
+val releaseKeyPassword = providers.environmentVariable("ANDROID_SIGNING_KEY_PASSWORD").orNull
+val hasReleaseSigning = listOf(releaseKeystorePath, releaseKeystorePassword, releaseKeyAlias, releaseKeyPassword).all { !it.isNullOrBlank() }
 
 android {
     buildFeatures { buildConfig = true }
@@ -15,14 +22,27 @@ android {
         applicationId = "com.thinkwithsujeet.qrtoprint"
         minSdk = 26
         targetSdk = 35
-        versionCode = 1
-        versionName = "0.1.0"
+        versionCode = smartPrintVersionCode
+        versionName = smartPrintVersionName
         buildConfigField("String", "SERVICE_BASE_URL", "\"$smartPrintServiceUrl\"")
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+    }
+    signingConfigs {
+        if (hasReleaseSigning) {
+            create("release") {
+                storeFile = file(releaseKeystorePath!!)
+                storePassword = releaseKeystorePassword
+                keyAlias = releaseKeyAlias
+                keyPassword = releaseKeyPassword
+            }
+        }
     }
     buildTypes {
         release {
             isMinifyEnabled = false
+            if (hasReleaseSigning) {
+                signingConfig = signingConfigs.getByName("release")
+            }
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
         }
     }
