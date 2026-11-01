@@ -281,6 +281,7 @@ export interface ShopReportSummary {
   pendingPaymentCount: number;
   jobsByStatus: { status: string; count: number }[];
   verifiedCollectionsByMethod: { method: string; currency: string; paymentCount: number; amountMinor: number }[];
+  refundsRecordedByMethod: { method: string; currency: string; refundCount: number; amountMinor: number }[];
 }
 export interface ShopPayment {
   id: string;

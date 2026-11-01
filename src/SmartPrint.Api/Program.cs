@@ -1694,7 +1694,6 @@ shop.MapGet("/reports/summary", async (
     var verifiedPayments = db.PrintPayments.AsNoTracking().Where(payment =>
         payment.TenantId == tenantId &&
         (payment.Status == "VERIFIED" || payment.Status == "PARTIALLY_REFUNDED") &&
-        payment.AmountMinor > payment.RefundedAmountMinor &&
         payment.VerifiedUtc != null &&
         payment.VerifiedUtc >= fromUtc &&
         payment.VerifiedUtc < toUtc);
@@ -1706,7 +1705,24 @@ shop.MapGet("/reports/summary", async (
             method = group.Key.Method,
             currency = group.Key.Currency,
             paymentCount = group.Count(),
-            amountMinor = group.Sum(payment => payment.AmountMinor - payment.RefundedAmountMinor)
+            amountMinor = group.Sum(payment => payment.AmountMinor)
+        })
+        .OrderBy(group => group.currency)
+        .ThenBy(group => group.method)
+        .ToListAsync(ct);
+
+    var refundsRecordedByMethod = await db.PrintRefunds.AsNoTracking()
+        .Where(refund => refund.TenantId == tenantId &&
+                         refund.Status == "RECORDED_AS_SENT" &&
+                         refund.RefundedUtc >= fromUtc &&
+                         refund.RefundedUtc < toUtc)
+        .GroupBy(refund => new { refund.Method, refund.Currency })
+        .Select(group => new
+        {
+            method = group.Key.Method,
+            currency = group.Key.Currency,
+            refundCount = group.Count(),
+            amountMinor = group.Sum(refund => refund.AmountMinor)
         })
         .OrderBy(group => group.currency)
         .ThenBy(group => group.method)
@@ -1730,7 +1746,8 @@ shop.MapGet("/reports/summary", async (
         pagesRequested,
         pendingPaymentCount,
         jobsByStatus,
-        verifiedCollectionsByMethod
+        verifiedCollectionsByMethod,
+        refundsRecordedByMethod
     });
 });
 
@@ -4367,6 +4384,23 @@ publicApi.MapPost("/sessions/current/jobs", async (
     {
         await using var transaction = await db.Database.BeginTransactionAsync(ct);
         await entitlements.AcquireQuotaLockAsync(session.TenantId, TenantQuotaResource.MonthlyPrintJob, ct);
+        var racedJob = await db.PrintJobs.AsNoTracking()
+            .Where(item => item.TenantId == session.TenantId && item.IdempotencyKey == idempotencyKey)
+            .Select(item => new { item.Id, item.CustomerSessionId, item.BatchId, item.JobNumber, item.Status, item.PageCount, item.CreatedUtc })
+            .SingleOrDefaultAsync(ct);
+        if (racedJob is not null)
+        {
+            await transaction.RollbackAsync(ct);
+            await storage.DeleteAsync(stored.StorageKey);
+            if (racedJob.CustomerSessionId != session.Id)
+                return Results.Conflict(new { code = "idempotency_key_reused", message = "This request key has already been used for another customer session." });
+            var racedDocument = await db.PrintDocuments.AsNoTracking()
+                .Where(item => item.TenantId == session.TenantId && item.PrintJobId == racedJob.Id)
+                .Select(item => new { item.OriginalFileName, item.MediaType, item.SizeBytes, item.Sha256, item.PageSizesJson })
+                .SingleOrDefaultAsync(ct);
+            return Results.Ok(new { Job = racedJob, Document = racedDocument, DuplicateRequest = true });
+        }
+
         var batchJobSizes = await (
             from batchJob in db.PrintJobs.AsNoTracking()
             join batchDocument in db.PrintDocuments.AsNoTracking()
@@ -4379,10 +4413,13 @@ publicApi.MapPost("/sessions/current/jobs", async (
             .Where(ticket => ticket.TenantId == session.TenantId &&
                              ticket.CustomerSessionId == session.Id &&
                              ticket.BatchId == batchId &&
-                             ticket.CompletedUtc == null)
+                             ticket.CompletedUtc == null &&
+                             ticket.ExpiresUtc > now)
             .Select(ticket => ticket.SizeBytes).ToListAsync(ct);
-        if (batchJobSizes.Count + pendingBatchTicketSizes.Count >= 20 ||
-            batchJobSizes.Sum() + pendingBatchTicketSizes.Sum() + file.Length > 50L * 1024 * 1024)
+        if (!PrintBatchCapacityRules.CanAdd(
+            batchJobSizes.Count + pendingBatchTicketSizes.Count,
+            checked(batchJobSizes.Sum() + pendingBatchTicketSizes.Sum()),
+            file.Length))
         {
             await transaction.RollbackAsync(ct);
             await storage.DeleteAsync(stored.StorageKey);
@@ -4576,12 +4613,6 @@ publicApi.MapPost("/sessions/current/local-upload-tickets", async (
         return Results.Problem(statusCode: StatusCodes.Status413PayloadTooLarge, title: "This document exceeds the maximum size configured for this shop's plan.");
     }
 
-    var quota = await entitlements.CheckCapacityAsync(session.TenantId, TenantQuotaResource.MonthlyPrintJob, ct);
-    if (!quota.Allowed)
-    {
-        return Results.Conflict(new { code = quota.Code, message = quota.Message, current = quota.Current, maximum = quota.Maximum });
-    }
-
     var ticket = new LocalPrintUploadTicket
     {
         TenantId = session.TenantId,
@@ -4601,6 +4632,44 @@ publicApi.MapPost("/sessions/current/local-upload-tickets", async (
         CreatedUtc = now,
         ExpiresUtc = now.AddMinutes(15)
     };
+    await using var transaction = await db.Database.BeginTransactionAsync(ct);
+    await entitlements.AcquireQuotaLockAsync(session.TenantId, TenantQuotaResource.MonthlyPrintJob, ct);
+
+    var racedTicket = await db.LocalPrintUploadTickets.AsNoTracking()
+        .SingleOrDefaultAsync(item => item.TenantId == session.TenantId &&
+            item.CustomerSessionId == session.Id && item.IdempotencyKey == idempotencyKey, ct);
+    if (racedTicket is not null)
+    {
+        await transaction.RollbackAsync(ct);
+        var sameRequest = racedTicket.SizeBytes == request.SizeBytes &&
+            string.Equals(racedTicket.Sha256, sha, StringComparison.OrdinalIgnoreCase) &&
+            racedTicket.OriginalFileName == originalName &&
+            CryptographicOperations.FixedTimeEquals(
+                Convert.FromHexString(racedTicket.GrantHash),
+                Convert.FromHexString(grantHash));
+        if (!sameRequest)
+            return Results.Conflict(new { code = "local_upload_idempotency_conflict", message = "This upload attempt key is already associated with a different document." });
+        if (racedTicket.CompletedUtc is null && racedTicket.ExpiresUtc <= now)
+            return Results.Conflict(new { code = "local_upload_ticket_expired", message = "This local upload attempt expired. Start a new upload attempt." });
+        return Results.Ok(new
+        {
+            racedTicket.Id,
+            racedTicket.PrintJobId,
+            racedTicket.BatchId,
+            racedTicket.JobNumber,
+            racedTicket.AgentDeviceId,
+            racedTicket.ExpiresUtc,
+            Completed = racedTicket.CompletedUtc != null
+        });
+    }
+
+    var quota = await entitlements.CheckCapacityAsync(session.TenantId, TenantQuotaResource.MonthlyPrintJob, ct);
+    if (!quota.Allowed)
+    {
+        await transaction.RollbackAsync(ct);
+        return Results.Conflict(new { code = quota.Code, message = quota.Message, current = quota.Current, maximum = quota.Maximum });
+    }
+
     var batchJobSizes = await (
         from batchJob in db.PrintJobs.AsNoTracking()
         join batchDocument in db.PrintDocuments.AsNoTracking()
@@ -4613,17 +4682,22 @@ publicApi.MapPost("/sessions/current/local-upload-tickets", async (
         .Where(item => item.TenantId == session.TenantId &&
                        item.CustomerSessionId == session.Id &&
                        item.BatchId == batchId &&
-                       item.CompletedUtc == null)
+                       item.CompletedUtc == null &&
+                       item.ExpiresUtc > now)
         .Select(item => item.SizeBytes).ToListAsync(ct);
-    if (batchJobSizes.Count + pendingBatchTicketSizes.Count >= 20 ||
-        batchJobSizes.Sum() + pendingBatchTicketSizes.Sum() + request.SizeBytes > 50L * 1024 * 1024)
+    if (!PrintBatchCapacityRules.CanAdd(
+        batchJobSizes.Count + pendingBatchTicketSizes.Count,
+        checked(batchJobSizes.Sum() + pendingBatchTicketSizes.Sum()),
+        request.SizeBytes))
     {
+        await transaction.RollbackAsync(ct);
         return Results.Problem(statusCode: StatusCodes.Status413PayloadTooLarge,
             title: "A print batch can contain up to 20 files and 50 MB in total.");
     }
 
     db.LocalPrintUploadTickets.Add(ticket);
     await db.SaveChangesAsync(ct);
+    await transaction.CommitAsync(ct);
 
     return Results.Created($"/api/v1/public/sessions/current/local-upload-tickets/{ticket.Id}", new
     {

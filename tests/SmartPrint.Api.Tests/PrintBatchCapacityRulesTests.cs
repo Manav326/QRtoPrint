@@ -1,0 +1,33 @@
+using SmartPrint.Api.Domain;
+
+namespace SmartPrint.Api.Tests;
+
+public sealed class PrintBatchCapacityRulesTests
+{
+    [Fact]
+    public void AllowsTheTwentiethFileAndRejectsTheTwentyFirst()
+    {
+        Assert.True(PrintBatchCapacityRules.CanAdd(19, 19, 1));
+        Assert.False(PrintBatchCapacityRules.CanAdd(20, 20, 1));
+    }
+
+    [Fact]
+    public void AllowsExactlyFiftyMegabytesAndRejectsAnyByteOver()
+    {
+        Assert.True(PrintBatchCapacityRules.CanAdd(0, 0, PrintBatchCapacityRules.MaximumTotalBytes));
+        Assert.False(PrintBatchCapacityRules.CanAdd(1, PrintBatchCapacityRules.MaximumTotalBytes, 1));
+    }
+
+    [Fact]
+    public void RejectsOversizedIncomingFilesAndNegativeInputs()
+    {
+        Assert.False(PrintBatchCapacityRules.CanAdd(0, 0, PrintBatchCapacityRules.MaximumTotalBytes + 1));
+        Assert.Throws<ArgumentOutOfRangeException>(() => PrintBatchCapacityRules.CanAdd(-1, 0, 1));
+        Assert.Throws<ArgumentOutOfRangeException>(() => PrintBatchCapacityRules.CanAdd(0, -1, 1));
+        Assert.Throws<ArgumentOutOfRangeException>(() => PrintBatchCapacityRules.CanAdd(0, 0, 0));
+    }
+
+    [Fact]
+    public void DoesNotOverflowWhenExistingByteCountIsLarge()
+        => Assert.False(PrintBatchCapacityRules.CanAdd(1, long.MaxValue, 1));
+}
