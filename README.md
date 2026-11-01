@@ -14,7 +14,7 @@ SmartPrint by QuantaEdge (QRtoPrint) is a multi-tenant SaaS platform for QR-init
 
 ## Preferred domain
 
-The application has one public origin, configured per deployment in PUBLIC_BASE_URL. The customer portal, shop portal, platform administration, API and station QR links all use that origin; do not add separate API or admin hostnames for this application.
+The application has one public origin, configured per deployment in PUBLIC_BASE_URL. The customer portal, shop portal, platform administration, API and station QR links all use that origin; do not add separate API or admin hostnames for this application. Set IMAGE_NAMESPACE in .env to the GHCR namespace that owns the API and portal images. Both values are required; neither has a baked-in production default.
 
 ## Repository status
 
@@ -35,16 +35,16 @@ CI builds the Android debug APK and runs JVM unit tests. A real-device matrix (Q
 
 ## Public SmartPrint downloads
 
-The public landing page links to the latest SmartPrint release:
+The public landing page reads the latest stable GitHub release metadata and renders a download link only when that exact release contains the corresponding binary:
 
 - Windows shop installer: resolved from the latest published stable release metadata.
 - Android customer APK: resolved from the latest published stable release metadata when that release contains the verified signed APK.
 
 The Windows installer is intentionally unsigned for the interim beta channel. The website marks it **Available** with a compact status tag and a short note that Windows may show a first-run security prompt. Some managed Windows 11 devices may block unsigned installers. Do not advise customers to disable Windows security protections. The Android card stays **Coming soon** until the production signing keystore is configured.
 
-Every stable release is retained indefinitely as its own versioned GitHub Release; publishing a newer version updates the `latest` pointer but does not delete or replace older versions. The release workflow uploads to a draft, verifies the enabled assets and SHA-256 manifest, and refuses to overwrite a published tag. Windows can publish independently. Android is included only after all four Android signing secrets are configured.
+Every stable release is retained indefinitely as its own versioned GitHub Release; publishing a newer version updates the `latest` pointer but does not delete or replace older versions. The release workflow requires all four Android signing secrets, uploads both installers to an unpublished draft, verifies the APK signature, asset names, sizes and SHA-256 manifest, and refuses to publish a release that does not contain the signed Android APK. It never creates a Windows-only partial release.
 
-Create a version tag (for example, `v0.1.0`) after the current main-branch CI passes and the public origin is confirmed. The `.github/workflows/release.yml` workflow builds the guided Windows installer and publishes it unsigned with a SHA-256 checksum. When Android credentials are present, it also builds, verifies and publishes the signed Android APK.
+Create a version tag (for example, `v0.1.0`) only after the intended changes are merged to `main`, main-branch CI passes, `SMARTPRINT_PUBLIC_BASE_URL` matches the deployment, and all four Android signing secrets are configured. The `.github/workflows/release.yml` workflow builds the guided Windows installer and production-signed Android APK, verifies both packages and publishes them together with a SHA-256 checksum.
 
 Required GitHub Actions repository secrets for Android (not required for the Windows beta):
 
