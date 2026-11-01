@@ -2,7 +2,7 @@ import { Fragment, useEffect, useRef, useState, type ReactNode } from "react";
 import {
   Activity, ArrowRight, Check, Clock3, Copy, CreditCard, FileText, FileUp, FolderOpen, LayoutDashboard,
   LifeBuoy, LogOut, Menu, Moon, Monitor, Plus, Printer, QrCode, Search, Settings,
-  ShieldCheck, Sun, Users, Wallet, X, PanelLeftClose, PanelLeftOpen, RotateCcw
+  ShieldCheck, Sun, Users, Wallet, X, PanelLeftClose, PanelLeftOpen, RotateCcw, Zap
 } from "lucide-react";
 import QRCode from "react-qr-code";
 import AuthScreen from "./AuthScreen";
@@ -2876,7 +2876,7 @@ function smartPrintNativeBoundary(status:string|undefined,hasQuote:boolean):stri
   }
 }
 
-function CustomerPrintFlow({publicCode,sessionToken,paymentOptions,localAgent,localReady}:{publicCode:string;sessionToken:string;paymentOptions:{upiEnabled:boolean;upiId?:string|null;payeeName?:string|null;cashEnabled:boolean};localAgent:CustomerLocalAgent|null;localReady:boolean}) {
+function CustomerPrintFlow({publicCode,sessionToken,paymentOptions,localAgent,localReady}:{publicCode:string;sessionToken:string;paymentOptions:{upiEnabled:boolean;upiId?:string|null;payeeName?:string|null;cashEnabled:boolean;instantPaymentEnabled:boolean};localAgent:CustomerLocalAgent|null;localReady:boolean}) {
   const nativeAppMode = navigator.userAgent.includes("SmartPrintAndroid/1");
   const initialDraft=readStoredCustomerDraft(publicCode,sessionToken);
   const [files,setFiles]=useState<File[]>([]);
@@ -3057,6 +3057,7 @@ function CustomerPrintFlow({publicCode,sessionToken,paymentOptions,localAgent,lo
       setQuote(null);setJobStatus(null);setPayment(null);setPaymentReference("");
       setSelectedFileIndex(0);
       setFiles([]);
+      if(paymentOptions.instantPaymentEnabled)await getQuote(results);
     } catch(exception) {
       setPrintSettingsByJobId(savedSettings);
       setUploadedBatch(results);
@@ -3070,8 +3071,8 @@ function CustomerPrintFlow({publicCode,sessionToken,paymentOptions,localAgent,lo
     setUploaded(item);setQuote(quotesByJobId[item.job.id]??null);setJobStatus(null);setPayment(null);setPaymentReference("");setError("");
   }
 
-  async function getQuote() {
-    const items=uploadedBatch.length?uploadedBatch:(uploaded?[uploaded]:[]);
+  async function getQuote(itemsOverride?:UploadedPrintJob[]) {
+    const items=itemsOverride??(uploadedBatch.length?uploadedBatch:(uploaded?[uploaded]:[]));
     if(items.length===0)return;
     setBusy(true);setError("");setJobStatus(null);
     const nextQuotes={...quotesByJobId};
@@ -3092,6 +3093,21 @@ function CustomerPrintFlow({publicCode,sessionToken,paymentOptions,localAgent,lo
         }
       }
       setQuotesByJobId(nextQuotes);
+      const statusResults=await Promise.all(items.map(async item=>{
+        try{return [item.job.id,await getCustomerJobStatus(sessionToken,item.job.id)] as const;}
+        catch{return null;}
+      }));
+      const freshStatuses=statusResults.reduce<Record<string,CustomerJobStatus>>((map,item)=>{
+        if(item)map[item[0]]=item[1];
+        return map;
+      },{});
+      setBatchStatuses(current=>({...current,...freshStatuses}));
+      if(uploaded&&freshStatuses[uploaded.job.id]){
+        const selected=freshStatuses[uploaded.job.id];
+        setJobStatus(selected);
+        setPayment(selected.payment??null);
+        if(selected.payment?.batchPayment)setBatchPayment(selected.payment.batchPayment);
+      }
       const selectedQuote=uploaded?nextQuotes[uploaded.job.id]??null:null;
       setQuote(selectedQuote??Object.values(nextQuotes)[0]??null);
       if(failures.length) setError(`Could not quote: ${failures.join(", ")}. Retry the batch quote.`);
