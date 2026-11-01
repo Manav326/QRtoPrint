@@ -220,6 +220,10 @@ class MainActivity : AppCompatActivity() {
             documentViewer != null -> closeDocumentViewer()
             editingPdf != null -> showFiles()
             navigation.selectedItemId == SCAN_PRINT && webView?.canGoBack() == true -> webView?.goBack()
+            navigation.selectedItemId == FILES && folderPath.isNotEmpty() -> {
+                folderPath = parent(folderPath)
+                showFiles()
+            }
             navigation.selectedItemId == SCAN_PRINT -> showHome()
             navigation.selectedItemId != HOME -> showHome()
             folderPath.isNotEmpty() -> { folderPath = parent(folderPath); showFiles() }
