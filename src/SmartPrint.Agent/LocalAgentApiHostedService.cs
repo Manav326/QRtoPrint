@@ -197,6 +197,7 @@ public sealed class LocalAgentApiHostedService(
             }));
 
             var app = builder.Build();
+            application = app;
             app.Use(async (context, next) =>
             {
                 if (context.Request.Headers.TryGetValue("Origin", out var origin) &&
@@ -494,7 +495,6 @@ public sealed class LocalAgentApiHostedService(
             .WithMetadata(new RequestSizeLimitAttribute(21 * 1024 * 1024))
             .RequireCors("CustomerPortal");
 
-            application = app;
             await application.StartAsync(cancellationToken);
             state.IsRunning = true;
             logger.LogInformation("Local Agent status endpoint is listening on port {Port}.", port);
