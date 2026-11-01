@@ -3001,6 +3001,10 @@ function CustomerPrintFlow({publicCode,sessionToken,paymentOptions,localAgent,lo
   },[file]);
 
   async function upload() {
+    if(batchLockedForPayment){
+      setError("This batch already has a payment attempt. Start a new batch for additional files.");
+      return;
+    }
     if(files.length===0)return;
     if(uploadMode==="LOCAL"&&!localReady) {
       setError(nativeAppMode ? "Check shop Wi-Fi." : "Check shop Wi-Fi access above before starting a direct local upload.");
@@ -3240,6 +3244,10 @@ function CustomerPrintFlow({publicCode,sessionToken,paymentOptions,localAgent,lo
   }
 
   function chooseFiles(next:File[], nativeGroupNames?:string[]) {
+    if(batchLockedForPayment){
+      setError("This batch already has a payment attempt. Start a new batch for additional files.");
+      return;
+    }
     let nestedSkipped=0;
     const rootFiles=next.filter(candidate=>{
       const relativePath=(candidate as File & {webkitRelativePath?:string}).webkitRelativePath??"";
@@ -3322,6 +3330,8 @@ function CustomerPrintFlow({publicCode,sessionToken,paymentOptions,localAgent,lo
     name, files:files.filter(candidate=>groupNameForFile(candidate)===name)
   }));
   const quoteItems=uploadedBatch.length?uploadedBatch:(uploaded?[uploaded]:[]);
+  const batchLockedForPayment=(batchPayment!==null&&batchPayment.status!=="REJECTED")||
+    (payment!==null&&!payment.batchPayment&&["AWAITING_CUSTOMER_PAYMENT","CUSTOMER_REPORTED","CASH_AWAITING_PAYMENT","VERIFIED","PARTIALLY_REFUNDED"].includes(payment.status));
   const statusForBatchItem=(item:UploadedPrintJob)=>
     uploaded?.job.id===item.job.id&&jobStatus?.status
       ? jobStatus.status
@@ -3378,13 +3388,13 @@ function CustomerPrintFlow({publicCode,sessionToken,paymentOptions,localAgent,lo
     </div>:null}
     <div className="customer-upload-picker-grid">
       <label className="customer-upload-zone">
-        <input type="file" multiple accept=".pdf,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png" onChange={event=>{chooseFiles(Array.from(event.currentTarget.files||[]),consumeSmartPrintNativePickerGroups());event.currentTarget.value="";}}/>
+        <input type="file" multiple disabled={batchLockedForPayment} accept=".pdf,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png" onChange={event=>{chooseFiles(Array.from(event.currentTarget.files||[]),consumeSmartPrintNativePickerGroups());event.currentTarget.value="";}}/>
         <span className="customer-upload-icon"><FileUp size={21}/></span>
         <strong>Select multiple files</strong>
         <small>Choose up to 20 PDF, JPG or PNG documents at once</small>
       </label>
       <label className="customer-upload-zone folder-upload-zone">
-        <input type="file" multiple accept={nativeAppMode?"application/x-smartprint-folder-selection":".pdf,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png"} {...({webkitdirectory:"true",directory:"true"} as any)} onChange={event=>{chooseFiles(Array.from(event.currentTarget.files||[]),consumeSmartPrintNativePickerGroups());event.currentTarget.value="";}}/>
+        <input type="file" multiple disabled={batchLockedForPayment} accept={nativeAppMode?"application/x-smartprint-folder-selection":".pdf,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png"} {...({webkitdirectory:"true",directory:"true"} as any)} onChange={event=>{chooseFiles(Array.from(event.currentTarget.files||[]),consumeSmartPrintNativePickerGroups());event.currentTarget.value="";}}/>
         <span className="customer-upload-icon"><FolderOpen size={21}/></span>
         <strong>{nativeAppMode?"Choose folders":"Add a folder"}</strong>
         <small>{nativeAppMode?"Select multiple folders at once":"Choose one folder; select again to add another to this batch"}</small>
@@ -3441,6 +3451,7 @@ function CustomerPrintFlow({publicCode,sessionToken,paymentOptions,localAgent,lo
     {uploaded&&<>
       {uploadedBatch.length>0&&<div className="customer-uploaded-batch">
         <div className="customer-uploaded-batch-head"><strong>Batch · {uploadedBatch.length} files</strong><span>Select a file to view its status. Pay once for all accepted files.</span></div>
+        {batchLockedForPayment&&<p className="customer-payment-model-note">This batch is locked because a payment attempt has started. Add more documents in a new batch to keep each checkout total accurate.</p>}
         {Array.from(new Set(uploadedBatch.map(item=>item.job.batchGroupName??"Loose files"))).map(groupName=><section className="customer-uploaded-folder" key={groupName}>
           <strong>{groupName}</strong>
           {uploadedBatch.filter(item=>(item.job.batchGroupName??"Loose files")===groupName).map(item=><button type="button" key={item.job.id} className={uploaded.job.id===item.job.id?"customer-uploaded-batch-item active":"customer-uploaded-batch-item"} onClick={()=>selectUploadedFile(item)}>
