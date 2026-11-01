@@ -3013,9 +3013,7 @@ function CustomerPrintFlow({publicCode,sessionToken,paymentOptions,localAgent,lo
             setJobStatus(null);
             setPayment(null);
           } else {
-            setJobStatus(selected);
-            setPayment(selected.payment??null);
-            rememberBatchPayment(selected.payment?.batchPayment);
+            rememberCustomerStatus(selected);
           }
         }
       } finally {refreshing=false;}
