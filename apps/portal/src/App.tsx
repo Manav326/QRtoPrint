@@ -144,12 +144,14 @@ function ShopConsole({ tokens, onSignOut }: { tokens: AuthTokens; onSignOut: () 
   }
 
   async function refreshPrintQueue() {
+    const generation = queuePageGeneration.current;
     try {
       const [latest, latestPrinters, latestAgents] = await Promise.all([
         getShopPrintJobsPage(tokens.accessToken, 0, 100, queueSearch),
         getShopPrinters(tokens.accessToken),
         getShopAgentDevices(tokens.accessToken)
       ]);
+      if (generation !== queuePageGeneration.current) return;
       setApiConnectionState("connected");
       setPrinters(latestPrinters);
       setAgentDevices(latestAgents);
