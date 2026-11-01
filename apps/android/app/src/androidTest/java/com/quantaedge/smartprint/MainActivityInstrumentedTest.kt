@@ -92,6 +92,9 @@ class MainActivityInstrumentedTest {
                     val surface = activity.getColor(R.color.qp_surface)
                     assertTrue("Light primary text contrast", contrast(activity.getColor(R.color.qp_text), surface) >= 4.5)
                     assertTrue("Light muted text contrast", contrast(activity.getColor(R.color.qp_muted), surface) >= 4.5)
+                    assertTrue("Light primary button contrast", contrast(activity.getColor(R.color.qp_primary_content), activity.getColor(R.color.qp_primary)) >= 4.5)
+                    assertTrue("Light danger button contrast", contrast(activity.getColor(R.color.qp_danger_content), activity.getColor(R.color.qp_danger)) >= 4.5)
+                    assertTrue("Light hero secondary text contrast", contrast(activity.getColor(R.color.qp_hero_muted), activity.getColor(R.color.qp_hero)) >= 4.5)
                 }
             }
 
@@ -101,6 +104,9 @@ class MainActivityInstrumentedTest {
                     val surface = activity.getColor(R.color.qp_surface)
                     assertTrue("Dark primary text contrast", contrast(activity.getColor(R.color.qp_text), surface) >= 4.5)
                     assertTrue("Dark muted text contrast", contrast(activity.getColor(R.color.qp_muted), surface) >= 4.5)
+                    assertTrue("Dark primary button contrast", contrast(activity.getColor(R.color.qp_primary_content), activity.getColor(R.color.qp_primary)) >= 4.5)
+                    assertTrue("Dark danger button contrast", contrast(activity.getColor(R.color.qp_danger_content), activity.getColor(R.color.qp_danger)) >= 4.5)
+                    assertTrue("Dark hero secondary text contrast", contrast(activity.getColor(R.color.qp_hero_muted), activity.getColor(R.color.qp_hero)) >= 4.5)
                 }
             }
         } finally {
