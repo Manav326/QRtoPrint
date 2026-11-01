@@ -1,6 +1,10 @@
 package com.quantaedge.smartprint
 
 import android.content.Context
+import android.graphics.Bitmap
+import android.Manifest
+import androidx.test.platform.app.InstrumentationRegistry
+import java.io.File
 import androidx.test.core.app.ActivityScenario
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.espresso.Espresso.onView
@@ -111,6 +115,91 @@ class MainActivityInstrumentedTest {
             }
         } finally {
             SmartPrintThemePreference.save(context, SmartPrintTheme.LIGHT)
+        }
+    }
+
+
+    @Test
+    fun qrScannerUsesTheSavedLightAndDarkThemeForItsNativeChrome() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        instrumentation.uiAutomation.grantRuntimePermission(context.packageName, Manifest.permission.CAMERA)
+        try {
+            SmartPrintThemePreference.save(context, SmartPrintTheme.LIGHT)
+            ActivityScenario.launch(QrScannerActivity::class.java).use { scenario ->
+                scenario.onActivity { activity ->
+                    val nightMode = activity.resources.configuration.uiMode and
+                        android.content.res.Configuration.UI_MODE_NIGHT_MASK
+                    assertEquals(android.content.res.Configuration.UI_MODE_NIGHT_NO, nightMode)
+                    assertEquals(activity.getColor(R.color.qp_surface), activity.window.statusBarColor)
+                    assertEquals(activity.getColor(R.color.qp_surface), activity.window.navigationBarColor)
+                }
+            }
+
+            SmartPrintThemePreference.save(context, SmartPrintTheme.DARK)
+            ActivityScenario.launch(QrScannerActivity::class.java).use { scenario ->
+                scenario.onActivity { activity ->
+                    val nightMode = activity.resources.configuration.uiMode and
+                        android.content.res.Configuration.UI_MODE_NIGHT_MASK
+                    assertEquals(android.content.res.Configuration.UI_MODE_NIGHT_YES, nightMode)
+                    assertEquals(activity.getColor(R.color.qp_surface), activity.window.statusBarColor)
+                    assertEquals(activity.getColor(R.color.qp_surface), activity.window.navigationBarColor)
+                }
+            }
+        } finally {
+            SmartPrintThemePreference.save(context, SmartPrintTheme.LIGHT)
+        }
+    }
+
+    @Test
+    fun documentViewerUsesThemeAwareTextForItsPageCounter() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val firstImage = File(context.cacheDir, "smartprint-theme-viewer-first.png")
+        val secondImage = File(context.cacheDir, "smartprint-theme-viewer-second.png")
+        fun writeImage(file: File) {
+            val bitmap = Bitmap.createBitmap(16, 16, Bitmap.Config.ARGB_8888)
+            try {
+                file.outputStream().use { stream ->
+                    assertTrue(bitmap.compress(Bitmap.CompressFormat.PNG, 100, stream))
+                }
+            } finally {
+                bitmap.recycle()
+            }
+        }
+        writeImage(firstImage)
+        writeImage(secondImage)
+
+        fun verify(theme: SmartPrintTheme) {
+            SmartPrintThemePreference.save(context, theme)
+            ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+                scenario.onActivity { activity ->
+                    val viewer = SmartPrintDocumentViewer(
+                        activity,
+                        firstImage,
+                        listOf(firstImage, secondImage),
+                        0
+                    ) {}
+                    try {
+                        val counterField = SmartPrintDocumentViewer::class.java
+                            .getDeclaredField("pageCounter")
+                            .apply { isAccessible = true }
+                        val counter = counterField.get(viewer) as android.widget.TextView
+                        assertEquals("Photo 1 of 2", counter.text.toString())
+                        assertEquals(activity.getColor(R.color.qp_text), counter.currentTextColor)
+                    } finally {
+                        viewer.dispose()
+                    }
+                }
+            }
+        }
+
+        try {
+            verify(SmartPrintTheme.LIGHT)
+            verify(SmartPrintTheme.DARK)
+        } finally {
+            SmartPrintThemePreference.save(context, SmartPrintTheme.LIGHT)
+            firstImage.delete()
+            secondImage.delete()
         }
     }
 
