@@ -6,6 +6,7 @@ import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.Color
 import android.graphics.Matrix
+import android.graphics.drawable.GradientDrawable
 import android.graphics.pdf.PdfRenderer
 import android.os.ParcelFileDescriptor
 import android.view.GestureDetector
@@ -13,28 +14,26 @@ import android.view.Gravity
 import android.view.MotionEvent
 import android.view.ScaleGestureDetector
 import android.view.View
+import android.view.ViewGroup
 import android.widget.FrameLayout
 import android.widget.HorizontalScrollView
 import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.TextView
 import androidx.appcompat.widget.AppCompatImageView
-import com.google.android.material.button.MaterialButton
-import com.google.android.material.card.MaterialCardView
+import androidx.exifinterface.media.ExifInterface
 import java.io.File
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
+import java.util.concurrent.RejectedExecutionException
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.min
 
 /**
- * Private, read-only viewer for documents already stored in SmartPrint.
- *
- * PDF pages and thumbnails are rendered off the UI thread. Only the current
- * page and a small thumbnail window are decoded at a time to keep memory use
- * bounded even for long documents.
+ * Full-screen, read-only document reader for files in SmartPrint's private library.
+ * Rendering is performed off the UI thread and thumbnails are kept to a small window.
  */
 class SmartPrintDocumentViewer(
     context: Context,
@@ -44,47 +43,48 @@ class SmartPrintDocumentViewer(
 ) : LinearLayout(context) {
     companion object {
         private const val MAX_PAGE_EDGE = 2200
-        private const val MAX_THUMB_EDGE = 180
         private const val MAX_IMAGE_EDGE = 2600
-        private const val THUMBNAIL_RADIUS_DP = 10
+        private const val THUMBNAIL_EDGE = 150
+        private const val THUMBNAIL_WINDOW = 4
     }
 
-    private data class PageThumbnail(val pageIndex: Int, val bitmap: Bitmap)
-    private data class PdfFrame(
+    private data class Thumbnail(val index: Int, val bitmap: Bitmap)
+    private data class RenderedDocument(
         val pageCount: Int,
-        val pageIndex: Int,
-        val pageBitmap: Bitmap,
-        val thumbnails: List<PageThumbnail>
+        val index: Int,
+        val bitmap: Bitmap,
+        val thumbnails: List<Thumbnail>
     )
 
-    private val host = context as? Activity ?: error("Document viewer requires an Activity context.")
+    private val host = context as? Activity ?: error("The document reader requires an Activity.")
     private val worker: ExecutorService = Executors.newSingleThreadExecutor()
     private val disposed = AtomicBoolean(false)
     private val stage = FrameLayout(context)
     private val pageImage = ZoomableDocumentImageView(context) { direction ->
-        if (!isPdf) navigateImage(direction)
+        if (isPdf) showPdfPage(currentPage + direction)
+        else navigateImage(currentImageIndex + direction)
     }
     private val feedback = TextView(context).apply {
         gravity = Gravity.CENTER
         textSize = 13f
         setTextColor(Color.WHITE)
-        setPadding(dp(24), dp(12), dp(24), dp(12))
+        setPadding(dp(18), dp(10), dp(18), dp(10))
+        background = roundedBackground(Color.argb(205, 20, 22, 32), dp(18))
     }
-    private val pageLabel = TextView(context).apply {
-        textSize = 12f
+    private val pageCounter = TextView(context).apply {
         gravity = Gravity.CENTER
+        textSize = 12f
         setTextColor(getColor(R.color.qp_text))
-        contentDescription = "Document page position"
+        includeFontPadding = false
     }
-    private val previousButton = actionButton("‹", "Previous page")
-    private val nextButton = actionButton("›", "Next page")
-    private val rotateButton = actionButton("↻", "Rotate current page")
-    private val imagePreviousButton = actionButton("‹", "Previous photo")
-    private val imageNextButton = actionButton("›", "Next photo")
-    private val thumbnailScroller = HorizontalScrollView(context).apply {
+    private val previousPage = readerControl("‹", "Previous page")
+    private val nextPage = readerControl("›", "Next page")
+    private val rotatePage = readerControl("↻", "Rotate view")
+    private val filmstrip = HorizontalScrollView(context).apply {
         isHorizontalScrollBarEnabled = false
         clipToPadding = false
-        setPadding(dp(8), dp(6), dp(8), dp(8))
+        overScrollMode = View.OVER_SCROLL_NEVER
+        setPadding(dp(10), dp(5), dp(10), dp(7))
         visibility = View.GONE
     }
     private val thumbnailRow = LinearLayout(context).apply {
@@ -92,82 +92,58 @@ class SmartPrintDocumentViewer(
         gravity = Gravity.CENTER_VERTICAL
     }
 
-    private var currentFile: File = startFile
+    private var currentFile = startFile
     private var currentPage = 0
     private var pageCount = 0
     private var rotationDegrees = 0
     private var renderVersion = 0
-    private var currentImageIndex = imageSiblings.indexOfFirst {
-        sameFile(it, startFile)
-    }.coerceAtLeast(0)
+    private var currentImageIndex = imageSiblings.indexOfFirst { sameFile(it, startFile) }.coerceAtLeast(0)
     private val displayedBitmaps = mutableListOf<Bitmap>()
     private val isPdf = startFile.extension.equals("pdf", ignoreCase = true)
 
     init {
         orientation = VERTICAL
         setBackgroundColor(getColor(R.color.qp_surface))
-        setPadding(dp(10), dp(8), dp(10), dp(10))
+        clipToPadding = false
 
-        val controls = LinearLayout(context).apply {
-            orientation = HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-            setPadding(0, 0, 0, dp(8))
-        }
         if (isPdf) {
-            previousButton.setOnClickListener { showPdfPage(currentPage - 1) }
-            nextButton.setOnClickListener { showPdfPage(currentPage + 1) }
-            rotateButton.setOnClickListener {
+            val pageControls = LinearLayout(context).apply {
+                orientation = HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                setPadding(dp(8), 0, dp(8), 0)
+            }
+            previousPage.setOnClickListener { showPdfPage(currentPage - 1) }
+            nextPage.setOnClickListener { showPdfPage(currentPage + 1) }
+            rotatePage.setOnClickListener {
                 rotationDegrees = (rotationDegrees + 90) % 360
                 renderCurrentPdfPage()
             }
-            controls.addView(previousButton, LinearLayout.LayoutParams(dp(48), dp(42)))
-            controls.addView(pageLabel, LinearLayout.LayoutParams(0, dp(42), 1f))
-            controls.addView(rotateButton, LinearLayout.LayoutParams(dp(54), dp(42)))
-            controls.addView(nextButton, LinearLayout.LayoutParams(dp(48), dp(42)))
-        } else {
-            imagePreviousButton.setOnClickListener { navigateImage(-1) }
-            imageNextButton.setOnClickListener { navigateImage(1) }
-            controls.addView(imagePreviousButton, LinearLayout.LayoutParams(dp(48), dp(42)))
-            controls.addView(pageLabel, LinearLayout.LayoutParams(0, dp(42), 1f))
-            controls.addView(imageNextButton, LinearLayout.LayoutParams(dp(48), dp(42)))
+            pageControls.addView(previousPage, LinearLayout.LayoutParams(dp(42), dp(40)))
+            pageControls.addView(pageCounter, LinearLayout.LayoutParams(0, dp(40), 1f))
+            pageControls.addView(rotatePage, LinearLayout.LayoutParams(dp(42), dp(40)))
+            pageControls.addView(nextPage, LinearLayout.LayoutParams(dp(42), dp(40)))
+            addView(pageControls, LinearLayout.LayoutParams(-1, dp(44)))
+        } else if (imageSiblings.size > 1) {
+            pageCounter.text = "Photo ${currentImageIndex + 1} of ${imageSiblings.size}"
+            pageCounter.gravity = Gravity.CENTER_VERTICAL
+            pageCounter.setPadding(dp(16), 0, dp(16), 0)
+            addView(pageCounter, LinearLayout.LayoutParams(-1, dp(30)))
         }
-        addView(controls, LinearLayout.LayoutParams(-1, dp(50)))
 
-        stage.setBackgroundColor(Color.rgb(22, 25, 35))
+        stage.setBackgroundColor(Color.rgb(24, 26, 36))
         stage.addView(pageImage, FrameLayout.LayoutParams(-1, -1))
-        stage.addView(
-            feedback,
-            FrameLayout.LayoutParams(-1, -2, Gravity.CENTER)
-        )
+        stage.addView(feedback, FrameLayout.LayoutParams(-2, -2, Gravity.CENTER))
         addView(stage, LinearLayout.LayoutParams(-1, 0, 1f))
 
-        thumbnailScroller.addView(
-            thumbnailRow,
-            HorizontalScrollView.LayoutParams(-2, -1)
-        )
-        addView(thumbnailScroller, LinearLayout.LayoutParams(-1, dp(102)))
-
-        val guidance = TextView(context).apply {
-            text = if (isPdf) {
-                "Pinch to zoom · Drag to move · Use page thumbnails to jump"
-            } else {
-                "Pinch to zoom · Drag to move · Swipe to change photos"
-            }
-            textSize = 10f
-            gravity = Gravity.CENTER
-            setTextColor(getColor(R.color.qp_muted))
-            setPadding(0, dp(5), 0, 0)
-        }
-        addView(guidance, LinearLayout.LayoutParams(-1, dp(22)))
+        filmstrip.addView(thumbnailRow, HorizontalScrollView.LayoutParams(-2, -1))
+        addView(filmstrip, LinearLayout.LayoutParams(-1, dp(if (isPdf) 88 else 82)))
 
         if (isPdf) {
-            thumbnailScroller.visibility = View.VISIBLE
-            showLoading("Loading PDF…")
+            showLoading("Opening PDF…")
             loadPdfPageCount()
         } else {
-            updateImageControls()
-            showLoading("Opening image…")
-            loadImage(currentFile)
+            if (imageSiblings.size > 1) showLoading("Opening image…") else showLoading("Opening image…")
+            loadImage(currentImageIndex)
         }
     }
 
@@ -176,29 +152,32 @@ class SmartPrintDocumentViewer(
         renderVersion++
         worker.shutdownNow()
         clearDisplayedBitmaps()
-        pageImage.setDocumentBitmap(null)
     }
 
     private fun loadPdfPageCount() {
         submitRender {
-            val count = ParcelFileDescriptor.open(
-                currentFile,
-                ParcelFileDescriptor.MODE_READ_ONLY
-            ).use { descriptor ->
-                PdfRenderer(descriptor).use { renderer -> renderer.pageCount }
-            }
-            require(count > 0) { "This PDF does not contain any pages." }
-            host.runOnUiThread {
-                if (disposed.get()) return@runOnUiThread
-                pageCount = count
-                updatePdfControls()
-                renderCurrentPdfPage()
+            try {
+                val count = ParcelFileDescriptor.open(
+                    currentFile,
+                    ParcelFileDescriptor.MODE_READ_ONLY
+                ).use { descriptor ->
+                    PdfRenderer(descriptor).use { renderer -> renderer.pageCount }
+                }
+                require(count > 0) { "This PDF has no pages to display." }
+                host.runOnUiThread {
+                    if (disposed.get()) return@runOnUiThread
+                    pageCount = count
+                    updatePdfControls()
+                    renderCurrentPdfPage()
+                }
+            } catch (error: Exception) {
+                showRenderError(++renderVersion, error)
             }
         }
     }
 
     private fun showPdfPage(index: Int) {
-        if (!isPdf || pageCount <= 0) return
+        if (!isPdf || pageCount <= 0 || disposed.get()) return
         val target = index.coerceIn(0, pageCount - 1)
         if (target == currentPage) return
         currentPage = target
@@ -208,12 +187,12 @@ class SmartPrintDocumentViewer(
     }
 
     private fun updatePdfControls() {
-        pageLabel.text = "Page ${if (pageCount == 0) 1 else currentPage + 1} of ${max(1, pageCount)}"
-        previousButton.isEnabled = currentPage > 0
-        nextButton.isEnabled = pageCount > 0 && currentPage < pageCount - 1
-        rotateButton.isEnabled = pageCount > 0
-        previousButton.alpha = if (previousButton.isEnabled) 1f else 0.4f
-        nextButton.alpha = if (nextButton.isEnabled) 1f else 0.4f
+        pageCounter.text = "Page ${if (pageCount == 0) 1 else currentPage + 1} of ${max(1, pageCount)}"
+        previousPage.isEnabled = currentPage > 0
+        nextPage.isEnabled = pageCount > 0 && currentPage < pageCount - 1
+        previousPage.alpha = if (previousPage.isEnabled) 1f else 0.32f
+        nextPage.alpha = if (nextPage.isEnabled) 1f else 0.32f
+        rotatePage.alpha = if (pageCount > 0) 1f else 0.32f
     }
 
     private fun renderCurrentPdfPage() {
@@ -222,56 +201,53 @@ class SmartPrintDocumentViewer(
         val file = currentFile
         val requestedPage = currentPage
         val requestedRotation = rotationDegrees
-        showLoading("Rendering page ${requestedPage + 1} of $pageCount…")
+        showLoading("Rendering page ${requestedPage + 1}…")
         submitRender {
-            var frame: PdfFrame? = null
             try {
-                frame = renderPdfFrame(file, requestedPage, requestedRotation)
-                val result = frame
+                val rendered = renderPdfFrame(file, requestedPage, requestedRotation)
                 host.runOnUiThread {
                     if (disposed.get() || request != renderVersion) {
-                        recycleFrame(result)
+                        recycle(rendered)
                         return@runOnUiThread
                     }
                     clearDisplayedBitmaps()
-                    pageCount = result.pageCount
-                    currentPage = result.pageIndex
-                    displayedBitmaps.add(result.pageBitmap)
-                    pageImage.setDocumentBitmap(result.pageBitmap)
-                    result.thumbnails.forEach { displayedBitmaps.add(it.bitmap) }
+                    pageCount = rendered.pageCount
+                    currentPage = rendered.index
+                    displayedBitmaps.add(rendered.bitmap)
+                    pageImage.setDocumentBitmap(rendered.bitmap)
+                    rendered.thumbnails.forEach { displayedBitmaps.add(it.bitmap) }
                     showFeedback(false)
                     updatePdfControls()
-                    showThumbnails(result.thumbnails)
+                    showThumbnails(rendered.thumbnails, isPdf = true)
                 }
             } catch (error: Exception) {
-                frame?.let(::recycleFrame)
                 showRenderError(request, error)
             }
         }
     }
 
-    private fun renderPdfFrame(file: File, requestedPage: Int, rotation: Int): PdfFrame {
+    private fun renderPdfFrame(file: File, requestedPage: Int, rotation: Int): RenderedDocument {
         return ParcelFileDescriptor.open(file, ParcelFileDescriptor.MODE_READ_ONLY).use { descriptor ->
             PdfRenderer(descriptor).use { renderer ->
-                require(renderer.pageCount > 0) { "This PDF does not contain any pages." }
-                val pageIndex = requestedPage.coerceIn(0, renderer.pageCount - 1)
-                val raw = renderPage(renderer, pageIndex, MAX_PAGE_EDGE)
-                val mainBitmap = rotateBitmap(raw, rotation)
-                if (mainBitmap !== raw) raw.recycle()
+                require(renderer.pageCount > 0) { "This PDF has no pages to display." }
+                val index = requestedPage.coerceIn(0, renderer.pageCount - 1)
+                val pageBitmap = renderer.openPageBitmap(index, MAX_PAGE_EDGE)
+                val displayBitmap = rotateBitmap(pageBitmap, rotation)
+                if (displayBitmap !== pageBitmap) pageBitmap.recycle()
 
-                val first = max(0, pageIndex - 2)
-                val last = min(renderer.pageCount - 1, pageIndex + 2)
-                val thumbnails = mutableListOf<PageThumbnail>()
+                val thumbnails = mutableListOf<Thumbnail>()
                 try {
-                    for (index in first..last) {
-                        val thumbnailRaw = renderPage(renderer, index, MAX_THUMB_EDGE)
-                        val thumbnail = if (index == pageIndex) rotateBitmap(thumbnailRaw, rotation) else thumbnailRaw
-                        if (thumbnail !== thumbnailRaw) thumbnailRaw.recycle()
-                        thumbnails.add(PageThumbnail(index, thumbnail))
+                    val first = max(0, index - THUMBNAIL_WINDOW)
+                    val last = min(renderer.pageCount - 1, index + THUMBNAIL_WINDOW)
+                    for (pageIndex in first..last) {
+                        val raw = renderer.openPageBitmap(pageIndex, THUMBNAIL_EDGE)
+                        val thumb = if (pageIndex == index) rotateBitmap(raw, rotation) else raw
+                        if (thumb !== raw) raw.recycle()
+                        thumbnails.add(Thumbnail(pageIndex, thumb))
                     }
-                    PdfFrame(renderer.pageCount, pageIndex, mainBitmap, thumbnails)
+                    RenderedDocument(renderer.pageCount, index, displayBitmap, thumbnails)
                 } catch (error: Exception) {
-                    mainBitmap.recycle()
+                    if (!displayBitmap.isRecycled) displayBitmap.recycle()
                     thumbnails.forEach { if (!it.bitmap.isRecycled) it.bitmap.recycle() }
                     throw error
                 }
@@ -279,12 +255,13 @@ class SmartPrintDocumentViewer(
         }
     }
 
-    private fun renderPage(renderer: PdfRenderer, pageIndex: Int, maxEdge: Int): Bitmap {
-        renderer.openPage(pageIndex).use { page ->
+    private fun PdfRenderer.openPageBitmap(index: Int, maxEdge: Int): Bitmap {
+        openPage(index).use { page ->
             val scale = min(1f, maxEdge.toFloat() / max(page.width, page.height).toFloat())
             val width = max(1, (page.width * scale).toInt())
             val height = max(1, (page.height * scale).toInt())
             val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+            bitmap.eraseColor(Color.WHITE)
             val transform = Matrix().apply {
                 setScale(width.toFloat() / page.width, height.toFloat() / page.height)
             }
@@ -298,6 +275,97 @@ class SmartPrintDocumentViewer(
         }
     }
 
+    private fun loadImage(index: Int) {
+        if (imageSiblings.isEmpty() || index !in imageSiblings.indices || disposed.get()) return
+        currentImageIndex = index
+        currentFile = imageSiblings[index]
+        val request = ++renderVersion
+        if (imageSiblings.size > 1) pageCounter.text = "Photo ${index + 1} of ${imageSiblings.size}"
+        showLoading("Opening image…")
+        submitRender {
+            try {
+                val rendered = renderImageFrame(index)
+                host.runOnUiThread {
+                    if (disposed.get() || request != renderVersion) {
+                        recycle(rendered)
+                        return@runOnUiThread
+                    }
+                    clearDisplayedBitmaps()
+                    displayedBitmaps.add(rendered.bitmap)
+                    pageImage.setDocumentBitmap(rendered.bitmap)
+                    pageImage.contentDescription = "Image preview"
+                    rendered.thumbnails.forEach { displayedBitmaps.add(it.bitmap) }
+                    showFeedback(false)
+                    showThumbnails(rendered.thumbnails, isPdf = false)
+                    if (imageSiblings.size > 1) pageCounter.text = "Photo ${currentImageIndex + 1} of ${imageSiblings.size}"
+                }
+            } catch (error: Exception) {
+                showRenderError(request, error)
+            }
+        }
+    }
+
+    private fun renderImageFrame(index: Int): RenderedDocument {
+        val file = imageSiblings[index]
+        val mainBitmap = decodeImage(file, MAX_IMAGE_EDGE)
+        val thumbnails = mutableListOf<Thumbnail>()
+        try {
+            val first = max(0, index - THUMBNAIL_WINDOW)
+            val last = min(imageSiblings.lastIndex, index + THUMBNAIL_WINDOW)
+            for (imageIndex in first..last) {
+                val thumbnail = decodeImage(imageSiblings[imageIndex], THUMBNAIL_EDGE)
+                thumbnails.add(Thumbnail(imageIndex, thumbnail))
+            }
+            RenderedDocument(imageSiblings.size, index, mainBitmap, thumbnails)
+        } catch (error: Exception) {
+            if (!mainBitmap.isRecycled) mainBitmap.recycle()
+            thumbnails.forEach { if (!it.bitmap.isRecycled) it.bitmap.recycle() }
+            throw error
+        }
+    }
+
+    private fun decodeImage(file: File, maxEdge: Int): Bitmap {
+        require(file.isFile && file.length() > 0) { "This image is empty or unavailable." }
+        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        BitmapFactory.decodeFile(file.absolutePath, bounds)
+        require(bounds.outWidth > 0 && bounds.outHeight > 0) { "This image could not be decoded." }
+        var sample = 1
+        while (max(bounds.outWidth / sample, bounds.outHeight / sample) > maxEdge) sample *= 2
+        val decoded = BitmapFactory.decodeFile(
+            file.absolutePath,
+            BitmapFactory.Options().apply {
+                inSampleSize = sample
+                inPreferredConfig = Bitmap.Config.ARGB_8888
+            }
+        ) ?: error("This image could not be decoded.")
+        val orientation = runCatching {
+            ExifInterface(file).getAttributeInt(
+                ExifInterface.TAG_ORIENTATION,
+                ExifInterface.ORIENTATION_NORMAL
+            )
+        }.getOrDefault(ExifInterface.ORIENTATION_NORMAL)
+        val degrees = when (orientation) {
+            ExifInterface.ORIENTATION_ROTATE_90, ExifInterface.ORIENTATION_TRANSPOSE -> 90
+            ExifInterface.ORIENTATION_ROTATE_180 -> 180
+            ExifInterface.ORIENTATION_ROTATE_270, ExifInterface.ORIENTATION_TRANSVERSE -> 270
+            else -> 0
+        }
+        val mirrored = orientation == ExifInterface.ORIENTATION_FLIP_HORIZONTAL ||
+            orientation == ExifInterface.ORIENTATION_FLIP_VERTICAL
+        if (degrees == 0 && !mirrored) return decoded
+        val matrix = Matrix().apply {
+            if (mirrored) preScale(-1f, 1f)
+            if (degrees != 0) postRotate(degrees.toFloat())
+        }
+        return try {
+            Bitmap.createBitmap(decoded, 0, 0, decoded.width, decoded.height, matrix, true)
+                .also { if (it !== decoded) decoded.recycle() }
+        } catch (error: Exception) {
+            decoded.recycle()
+            throw error
+        }
+    }
+
     private fun rotateBitmap(bitmap: Bitmap, degrees: Int): Bitmap {
         val normalized = ((degrees % 360) + 360) % 360
         if (normalized == 0) return bitmap
@@ -305,119 +373,90 @@ class SmartPrintDocumentViewer(
         return Bitmap.createBitmap(bitmap, 0, 0, bitmap.width, bitmap.height, matrix, true)
     }
 
-    private fun showThumbnails(thumbnails: List<PageThumbnail>) {
+    private fun showThumbnails(thumbnails: List<Thumbnail>, isPdf: Boolean) {
         thumbnailRow.removeAllViews()
+        if (thumbnails.isEmpty() || (isPdf && pageCount <= 1) || (!isPdf && imageSiblings.size <= 1)) {
+            filmstrip.visibility = View.GONE
+            return
+        }
+        filmstrip.visibility = View.VISIBLE
         thumbnails.forEach { thumbnail ->
-            val card = MaterialCardView(context).apply {
-                radius = dp(THUMBNAIL_RADIUS_DP).toFloat()
-                cardElevation = 0f
-                strokeWidth = dp(if (thumbnail.pageIndex == currentPage) 2 else 1)
-                strokeColor = getColor(
-                    if (thumbnail.pageIndex == currentPage) R.color.qp_primary else R.color.qp_outline
-                )
-                setCardBackgroundColor(getColor(R.color.qp_card))
-                contentDescription = "Go to page ${thumbnail.pageIndex + 1}"
-                isClickable = true
-                isFocusable = true
-                setOnClickListener { showPdfPage(thumbnail.pageIndex) }
-            }
-            val column = LinearLayout(context).apply {
+            val frame = LinearLayout(context).apply {
                 orientation = VERTICAL
                 gravity = Gravity.CENTER
-                setPadding(dp(4), dp(4), dp(4), dp(4))
-            }
-            val image = ImageView(context).apply {
-                setImageBitmap(thumbnail.bitmap)
-                scaleType = ImageView.ScaleType.FIT_CENTER
-                contentDescription = "Page ${thumbnail.pageIndex + 1} thumbnail"
-            }
-            column.addView(image, LinearLayout.LayoutParams(dp(58), dp(62)))
-            column.addView(
-                TextView(context).apply {
-                    text = (thumbnail.pageIndex + 1).toString()
-                    textSize = 9f
-                    gravity = Gravity.CENTER
-                    setTextColor(getColor(R.color.qp_text))
-                },
-                LinearLayout.LayoutParams(-1, dp(16))
-            )
-            card.addView(column)
-            thumbnailRow.addView(
-                card,
-                LinearLayout.LayoutParams(dp(76), dp(88)).apply { marginEnd = dp(7) }
-            )
-        }
-    }
-
-    private fun loadImage(file: File) {
-        val request = ++renderVersion
-        showLoading("Opening image…")
-        submitRender {
-            var bitmap: Bitmap? = null
-            try {
-                bitmap = decodeImage(file)
-                val result = bitmap
-                host.runOnUiThread {
-                    if (disposed.get() || request != renderVersion) {
-                        if (!result.isRecycled) result.recycle()
-                        return@runOnUiThread
-                    }
-                    clearDisplayedBitmaps()
-                    displayedBitmaps.add(result)
-                    pageImage.setDocumentBitmap(result)
-                    pageImage.contentDescription = "Current document: ${file.name}"
-                    showFeedback(false)
-                    updateImageControls()
+                setPadding(dp(4), dp(3), dp(4), dp(3))
+                contentDescription = if (isPdf) {
+                    "Go to page ${thumbnail.index + 1}"
+                } else {
+                    "Open photo ${thumbnail.index + 1}"
                 }
-            } catch (error: Exception) {
-                bitmap?.let { if (!it.isRecycled) it.recycle() }
-                showRenderError(request, error)
+                isClickable = true
+                isFocusable = true
+                val selectable = android.util.TypedValue()
+                if (context.theme.resolveAttribute(
+                        android.R.attr.selectableItemBackground,
+                        selectable,
+                        true
+                    )
+                ) setBackgroundResource(selectable.resourceId)
+                setOnClickListener {
+                    if (isPdf) showPdfPage(thumbnail.index) else navigateImage(thumbnail.index)
+                }
+            }
+            val preview = ImageView(context).apply {
+                setImageBitmap(thumbnail.bitmap)
+                scaleType = if (isPdf) ImageView.ScaleType.FIT_CENTER else ImageView.ScaleType.CENTER_CROP
+                setBackgroundColor(if (isPdf) Color.WHITE else Color.rgb(38, 40, 52))
+                contentDescription = if (isPdf) {
+                    "Page ${thumbnail.index + 1} thumbnail"
+                } else {
+                    "Photo ${thumbnail.index + 1} thumbnail"
+                }
+            }
+            frame.addView(
+                preview,
+                LinearLayout.LayoutParams(dp(62), dp(58))
+            )
+            if (isPdf) {
+                frame.addView(
+                    TextView(context).apply {
+                        text = (thumbnail.index + 1).toString()
+                        textSize = 9f
+                        gravity = Gravity.CENTER
+                        setTextColor(getColor(R.color.qp_muted))
+                    },
+                    LinearLayout.LayoutParams(-1, dp(15))
+                )
+            } else {
+                val active = thumbnail.index == currentImageIndex
+                frame.addView(View(context).apply {
+                    setBackgroundColor(if (active) getColor(R.color.qp_primary) else Color.TRANSPARENT)
+                }, LinearLayout.LayoutParams(-1, dp(3)))
+            }
+            thumbnailRow.addView(
+                frame,
+                LinearLayout.LayoutParams(dp(70), dp(if (isPdf) 82 else 66)).apply {
+                    marginEnd = dp(5)
+                }
+            )
+            if (thumbnail.index == currentPage && isPdf || thumbnail.index == currentImageIndex && !isPdf) {
+                filmstrip.post {
+                    val target = frame.left - (filmstrip.width - frame.width) / 2
+                    filmstrip.smoothScrollTo(target.coerceAtLeast(0), 0)
+                }
             }
         }
     }
 
-    private fun decodeImage(file: File): Bitmap {
-        require(file.isFile && file.length() > 0) { "This image is empty or unavailable." }
-        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-        BitmapFactory.decodeFile(file.absolutePath, bounds)
-        require(bounds.outWidth > 0 && bounds.outHeight > 0) { "This image could not be decoded." }
-        var sample = 1
-        while (max(bounds.outWidth / sample, bounds.outHeight / sample) > MAX_IMAGE_EDGE) {
-            sample *= 2
-        }
-        return BitmapFactory.decodeFile(
-            file.absolutePath,
-            BitmapFactory.Options().apply {
-                inSampleSize = sample
-                inPreferredConfig = Bitmap.Config.ARGB_8888
-            }
-        ) ?: error("This image could not be decoded.")
-    }
-
-    private fun updateImageControls() {
-        pageLabel.text = "Photo ${currentImageIndex + 1} of ${max(1, imageSiblings.size)}"
-        imagePreviousButton.isEnabled = currentImageIndex > 0
-        imageNextButton.isEnabled = currentImageIndex < imageSiblings.lastIndex
-        imagePreviousButton.alpha = if (imagePreviousButton.isEnabled) 1f else 0.4f
-        imageNextButton.alpha = if (imageNextButton.isEnabled) 1f else 0.4f
-    }
-
-    private fun navigateImage(direction: Int) {
-        if (isPdf || disposed.get()) return
-        val target = currentImageIndex + direction
-        if (target !in imageSiblings.indices) return
-        val next = imageSiblings[target]
-        if (!next.isFile) return
-        onNavigateImage(next)
+    private fun navigateImage(index: Int) {
+        if (isPdf || disposed.get() || index !in imageSiblings.indices || index == currentImageIndex) return
+        loadImage(index)
+        onNavigateImage(imageSiblings[index])
     }
 
     private fun showLoading(message: String) {
         feedback.text = message
         feedback.visibility = View.VISIBLE
-    }
-
-    private fun showFeedback(visible: Boolean) {
-        feedback.visibility = if (visible) View.VISIBLE else View.GONE
     }
 
     private fun showRenderError(request: Int, error: Exception) {
@@ -429,6 +468,10 @@ class SmartPrintDocumentViewer(
         }
     }
 
+    private fun showFeedback(visible: Boolean) {
+        feedback.visibility = if (visible) View.VISIBLE else View.GONE
+    }
+
     private fun clearDisplayedBitmaps() {
         pageImage.setDocumentBitmap(null)
         thumbnailRow.removeAllViews()
@@ -436,39 +479,47 @@ class SmartPrintDocumentViewer(
         displayedBitmaps.clear()
     }
 
-    private fun recycleFrame(frame: PdfFrame) {
-        if (!frame.pageBitmap.isRecycled) frame.pageBitmap.recycle()
-        frame.thumbnails.forEach { if (!it.bitmap.isRecycled) it.bitmap.recycle() }
+    private fun recycle(rendered: RenderedDocument) {
+        if (!rendered.bitmap.isRecycled) rendered.bitmap.recycle()
+        rendered.thumbnails.forEach { if (!it.bitmap.isRecycled) it.bitmap.recycle() }
     }
 
     private fun submitRender(task: () -> Unit) {
         if (disposed.get()) return
         try {
-            worker.execute {
-                if (!disposed.get()) task()
-            }
-        } catch (_: java.util.concurrent.RejectedExecutionException) {
-            // The viewer was closed while a render was being queued.
+            worker.execute { if (!disposed.get()) task() }
+        } catch (_: RejectedExecutionException) {
+            // The reader was closed while a render was being queued.
         }
     }
 
-    private fun actionButton(label: String, description: String): MaterialButton {
-        return MaterialButton(context).apply {
+    private fun readerControl(label: String, description: String): TextView {
+        val selectable = android.util.TypedValue()
+        val ripple = if (context.theme.resolveAttribute(
+                android.R.attr.selectableItemBackgroundBorderless,
+                selectable,
+                true
+            )
+        ) selectable.resourceId else 0
+        return TextView(context).apply {
             text = label
-            contentDescription = description
-            isAllCaps = false
-            minWidth = dp(0)
+            textSize = 24f
+            gravity = Gravity.CENTER
+            minWidth = dp(40)
             minHeight = dp(40)
-            insetTop = 0
-            insetBottom = 0
-            cornerRadius = dp(11)
-            textSize = 19f
-            strokeWidth = dp(1)
-            strokeColor = android.content.res.ColorStateList.valueOf(getColor(R.color.qp_outline))
-            backgroundTintList = android.content.res.ColorStateList.valueOf(getColor(R.color.qp_card))
+            contentDescription = description
             setTextColor(getColor(R.color.qp_text))
+            if (ripple != 0) setBackgroundResource(ripple)
+            isClickable = true
+            isFocusable = true
         }
     }
+
+    private fun roundedBackground(color: Int, radius: Int) =
+        GradientDrawable().apply {
+            setColor(color)
+            cornerRadius = radius.toFloat()
+        }
 
     private fun sameFile(left: File, right: File): Boolean =
         runCatching { left.canonicalPath == right.canonicalPath }.getOrDefault(false)
@@ -477,10 +528,7 @@ class SmartPrintDocumentViewer(
     private fun dp(value: Int): Int = (value * resources.displayMetrics.density).toInt()
 }
 
-/**
- * Matrix-backed image surface with pinch zoom, drag-to-pan, double-tap reset,
- * and horizontal swipe callbacks when the image is at its fitted zoom.
- */
+/** Matrix-based image canvas with pinch zoom, panning, double-tap fit and swipe navigation. */
 private class ZoomableDocumentImageView(
     context: Context,
     private val onSwipe: (Int) -> Unit
@@ -495,11 +543,10 @@ private class ZoomableDocumentImageView(
         context,
         object : ScaleGestureDetector.SimpleOnScaleGestureListener() {
             override fun onScale(detector: ScaleGestureDetector): Boolean {
-                val target = (currentScale * detector.scaleFactor)
-                    .coerceIn(minimumScale, minimumScale * 5f)
-                val factor = target / currentScale
-                displayMatrix.postScale(factor, factor, detector.focusX, detector.focusY)
+                val target = (currentScale * detector.scaleFactor).coerceIn(minimumScale, minimumScale * 6f)
+                displayMatrix.postScale(target / currentScale, target / currentScale, detector.focusX, detector.focusY)
                 currentScale = target
+                constrainToViewport()
                 imageMatrix = displayMatrix
                 return true
             }
@@ -510,12 +557,10 @@ private class ZoomableDocumentImageView(
         context,
         object : GestureDetector.SimpleOnGestureListener() {
             override fun onDown(event: MotionEvent): Boolean = true
-
             override fun onDoubleTap(event: MotionEvent): Boolean {
                 fitToView()
                 return true
             }
-
             override fun onFling(
                 first: MotionEvent?,
                 second: MotionEvent,
@@ -540,7 +585,7 @@ private class ZoomableDocumentImageView(
         scaleType = ScaleType.MATRIX
         adjustViewBounds = false
         isFocusable = true
-        contentDescription = "Document page"
+        contentDescription = "Document preview"
     }
 
     fun setDocumentBitmap(bitmap: Bitmap?) {
@@ -556,21 +601,36 @@ private class ZoomableDocumentImageView(
     private fun fitToView() {
         val image = drawable ?: return
         if (width <= 0 || height <= 0 || image.intrinsicWidth <= 0 || image.intrinsicHeight <= 0) return
-        val fit = min(
+        minimumScale = min(
             width.toFloat() / image.intrinsicWidth.toFloat(),
             height.toFloat() / image.intrinsicHeight.toFloat()
-        )
-        minimumScale = fit.coerceAtLeast(0.01f)
+        ).coerceAtLeast(0.01f)
         currentScale = minimumScale
         displayMatrix.reset()
         displayMatrix.postScale(minimumScale, minimumScale)
-        val renderedWidth = image.intrinsicWidth * minimumScale
-        val renderedHeight = image.intrinsicHeight * minimumScale
         displayMatrix.postTranslate(
-            (width - renderedWidth) / 2f,
-            (height - renderedHeight) / 2f
+            (width - image.intrinsicWidth * minimumScale) / 2f,
+            (height - image.intrinsicHeight * minimumScale) / 2f
         )
         imageMatrix = displayMatrix
+    }
+
+    private fun constrainToViewport() {
+        val image = drawable ?: return
+        val values = FloatArray(9)
+        displayMatrix.getValues(values)
+        val scale = values[Matrix.MSCALE_X]
+        val scaledWidth = image.intrinsicWidth * scale
+        val scaledHeight = image.intrinsicHeight * scale
+        var x = values[Matrix.MTRANS_X]
+        var y = values[Matrix.MTRANS_Y]
+        x = if (scaledWidth <= width) (width - scaledWidth) / 2f
+        else x.coerceIn(width - scaledWidth, 0f)
+        y = if (scaledHeight <= height) (height - scaledHeight) / 2f
+        else y.coerceIn(height - scaledHeight, 0f)
+        values[Matrix.MTRANS_X] = x
+        values[Matrix.MTRANS_Y] = y
+        displayMatrix.setValues(values)
     }
 
     override fun onSizeChanged(width: Int, height: Int, oldWidth: Int, oldHeight: Int) {
@@ -588,9 +648,8 @@ private class ZoomableDocumentImageView(
             }
             MotionEvent.ACTION_MOVE -> {
                 if (event.pointerCount == 1 && !scaleDetector.isInProgress) {
-                    val dx = event.x - lastX
-                    val dy = event.y - lastY
-                    displayMatrix.postTranslate(dx, dy)
+                    displayMatrix.postTranslate(event.x - lastX, event.y - lastY)
+                    constrainToViewport()
                     imageMatrix = displayMatrix
                 }
                 lastX = event.x
