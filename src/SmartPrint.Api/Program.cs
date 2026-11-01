@@ -4886,7 +4886,7 @@ shop.MapPost("/payments/{paymentId:guid}/verify", async (
     }
 
     var payment = await db.PrintPayments.SingleOrDefaultAsync(
-        item => item.Id == paymentId && item.TenantId == tenantId, ct);
+        item => item.Id == paymentId && item.TenantId == tenantId && item.BatchPaymentId == null, ct);
     if (payment is null)
     {
         await transaction.RollbackAsync(ct);
@@ -5093,7 +5093,7 @@ shop.MapPost("/payments/{paymentId:guid}/reject", async (
     }
 
     var payment = await db.PrintPayments.SingleOrDefaultAsync(
-        item => item.Id == paymentId && item.TenantId == tenantId, ct);
+        item => item.Id == paymentId && item.TenantId == tenantId && item.BatchPaymentId == null, ct);
     if (payment is null)
     {
         await transaction.RollbackAsync(ct);
