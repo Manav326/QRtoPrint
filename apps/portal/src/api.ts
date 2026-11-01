@@ -1236,6 +1236,7 @@ export function applyShopPrintBatchReview(
     reviewedCount: number;
     acceptedCount: number;
     rejectedCount: number;
+    quoteRefreshRequiredCount: number;
     updatedUtc: string;
     nextStep: string;
   }>(`/api/v1/shop/print-batches/${batchId}/review`, {
