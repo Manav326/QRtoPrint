@@ -59,5 +59,6 @@ test("shop workspace sections have stable deep links and restore correctly", () 
   }
 
   assert.equal(shopSectionFromPath("/shop/settings/"), "Settings");
+  assert.equal(shopSectionFromPath("/shop/queue/jobs/42"), "Print Queue");
   assert.equal(shopSectionFromPath("/shop/unknown"), "Overview");
 });
