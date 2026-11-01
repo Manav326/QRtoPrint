@@ -45,6 +45,6 @@ try {
     exit 10
 }
 catch {
-    Write-Error $_
+    [Console]::Error.WriteLine($_.Exception.Message)
     exit 1
 }
