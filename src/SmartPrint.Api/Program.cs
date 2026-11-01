@@ -4639,8 +4639,13 @@ shop.MapGet("/payments", async (
         .Take(100)
         .ToListAsync(ct);
 
+    var recentBatchPayments = db.PrintBatchPayments.AsNoTracking()
+        .Where(item => item.TenantId == tenantId)
+        .OrderByDescending(item => item.CreatedUtc)
+        .Take(100);
+
     var batchPaymentRows = await (
-        from batchPayment in db.PrintBatchPayments.AsNoTracking()
+        from batchPayment in recentBatchPayments
         join payment in db.PrintPayments.AsNoTracking()
             on new { batchPayment.TenantId, BatchPaymentId = (Guid?)batchPayment.Id }
             equals new { payment.TenantId, payment.BatchPaymentId }
