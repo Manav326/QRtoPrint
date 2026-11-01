@@ -15,6 +15,7 @@ public sealed class Worker(
     LocalAgentApiState localAgentApiState,
     IConfiguration configuration) : BackgroundService
 {
+    private int printClaimBatchOffset;
     private readonly TimeSpan pollInterval = TimeSpan.FromSeconds(
         Math.Clamp(configuration.GetValue<int?>("Agent:PollIntervalSeconds") ?? 30, 10, 300));
     private readonly string pdfExportDirectory = ResolvePdfExportDirectory(configuration);
@@ -492,7 +493,9 @@ public sealed class Worker(
 
     private async Task ProcessAuthorizedPrintJobsAsync(HttpClient client, AgentCredentials credentials, CancellationToken ct)
     {
-        var proofs = localQueueStore.GetAcknowledgedJobs().Select(x => new AgentLocalQueueProof(x.JobId, x.Sha256, x.SizeBytes)).Take(100).ToArray();
+        var acknowledgedJobs = localQueueStore.GetAcknowledgedJobs();
+        var batch = AgentLocalQueueBatchSelector.SelectNext(acknowledgedJobs, ref printClaimBatchOffset, 100);
+        var proofs = batch.Select(x => new AgentLocalQueueProof(x.JobId, x.Sha256, x.SizeBytes)).ToArray();
         if (proofs.Length == 0) return;
         using var response = await SendAgentRequestAsync(client, credentials, "api/v1/agent/jobs/print-claim", new AgentPrintClaimRequest(proofs), ct);
         if (!response.IsSuccessStatusCode)
