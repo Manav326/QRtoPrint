@@ -21,7 +21,7 @@ jobs:
       - name: Require a stable semantic-version tag
         shell: bash
         run: |
-          if [[ ! "$GITHUB_REF_NAME" =~ ^v[0-9]+\\.[0-9]+\\.[0-9]+$ ]]; then
+          if [[ ! "$GITHUB_REF_NAME" =~ ^v[0-9]+[.][0-9]+[.][0-9]+$ ]]; then
             echo "::error::Use a stable version tag such as v0.1.0. Pre-release tags are not published as latest."
             exit 1
           fi
