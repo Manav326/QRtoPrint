@@ -21,6 +21,7 @@ import eightbitlab.com.blurview.BlurView
 import android.view.View
 import android.view.ViewGroup
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 
 @RunWith(AndroidJUnit4::class)
 class MainActivityInstrumentedTest {
@@ -64,6 +65,48 @@ class MainActivityInstrumentedTest {
         }
     }
 
+
+    @Test
+    fun readableTextRolesMeetContrastInLightAndDarkThemes() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        fun luminance(color: Int): Double {
+            fun channel(value: Int): Double {
+                val normalized = value / 255.0
+                return if (normalized <= 0.04045) normalized / 12.92
+                else Math.pow((normalized + 0.055) / 1.055, 2.4)
+            }
+            return 0.2126 * channel(android.graphics.Color.red(color)) +
+                0.7152 * channel(android.graphics.Color.green(color)) +
+                0.0722 * channel(android.graphics.Color.blue(color))
+        }
+        fun contrast(foreground: Int, background: Int): Double {
+            val first = luminance(foreground)
+            val second = luminance(background)
+            return (maxOf(first, second) + 0.05) / (minOf(first, second) + 0.05)
+        }
+
+        try {
+            SmartPrintThemePreference.save(context, SmartPrintTheme.LIGHT)
+            ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+                scenario.onActivity { activity ->
+                    val surface = activity.getColor(R.color.qp_surface)
+                    assertTrue("Light primary text contrast", contrast(activity.getColor(R.color.qp_text), surface) >= 4.5)
+                    assertTrue("Light muted text contrast", contrast(activity.getColor(R.color.qp_muted), surface) >= 4.5)
+                }
+            }
+
+            SmartPrintThemePreference.save(context, SmartPrintTheme.DARK)
+            ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+                scenario.onActivity { activity ->
+                    val surface = activity.getColor(R.color.qp_surface)
+                    assertTrue("Dark primary text contrast", contrast(activity.getColor(R.color.qp_text), surface) >= 4.5)
+                    assertTrue("Dark muted text contrast", contrast(activity.getColor(R.color.qp_muted), surface) >= 4.5)
+                }
+            }
+        } finally {
+            SmartPrintThemePreference.save(context, SmartPrintTheme.LIGHT)
+        }
+    }
 
     @Test
     fun rendersCompactSmartPrintHomeAndFourDestinations() {
