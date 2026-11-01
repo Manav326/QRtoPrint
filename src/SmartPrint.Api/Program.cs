@@ -99,13 +99,13 @@ builder.Services.AddRateLimiter(options =>
         RateLimitPartition.GetFixedWindowLimiter(GetRateLimitPartitionKey(context.HttpContext),
             _ => new FixedWindowRateLimiterOptions { PermitLimit = 120, Window = TimeSpan.FromMinutes(1), QueueLimit = 0 }));
     options.AddPolicy("agent-api", context =>
-        RateLimitPartition.GetFixedWindowLimiter(GetRateLimitPartitionKey(context.HttpContext),
+        RateLimitPartition.GetFixedWindowLimiter(GetAgentRateLimitPartitionKey(context.HttpContext),
             _ => new FixedWindowRateLimiterOptions { PermitLimit = 30, Window = TimeSpan.FromMinutes(1), QueueLimit = 0 }));
     options.AddPolicy("qr-session", context =>
         RateLimitPartition.GetFixedWindowLimiter(GetRateLimitPartitionKey(context.HttpContext),
             _ => new FixedWindowRateLimiterOptions { PermitLimit = 30, Window = TimeSpan.FromMinutes(1), QueueLimit = 0 }));
     options.AddPolicy("document-upload", context =>
-        RateLimitPartition.GetFixedWindowLimiter(GetRateLimitPartitionKey(context.HttpContext),
+        RateLimitPartition.GetFixedWindowLimiter(GetSessionRateLimitPartitionKey(context.HttpContext),
             _ => new FixedWindowRateLimiterOptions { PermitLimit = 8, Window = TimeSpan.FromMinutes(1), QueueLimit = 0 }));
 });
 var configuredCorsOrigins = builder.Configuration.GetSection("Cors:AllowedOrigins")
@@ -1694,7 +1694,6 @@ shop.MapGet("/reports/summary", async (
 
     var verifiedPayments = db.PrintPayments.AsNoTracking().Where(payment =>
         payment.TenantId == tenantId &&
-        (payment.Status == "VERIFIED" || payment.Status == "PARTIALLY_REFUNDED") &&
         payment.VerifiedUtc != null &&
         payment.VerifiedUtc >= fromUtc &&
         payment.VerifiedUtc < toUtc);
@@ -5497,6 +5496,54 @@ publicApi.MapGet("/sessions/current", async (
 static string GetRateLimitPartitionKey(HttpContext context) =>
     context.Connection.RemoteIpAddress?.ToString() ?? "unknown";
 
+static string GetSessionRateLimitPartitionKey(HttpContext context)
+{
+    var sessionToken = context.Request.Headers["X-Print-Session"].FirstOrDefault();
+    return string.IsNullOrWhiteSpace(sessionToken)
+        ? GetRateLimitPartitionKey(context)
+        : $"session:{HashOpaqueToken(sessionToken)}";
+}
+
+static string GetAgentRateLimitPartitionKey(HttpContext context)
+{
+    var agentId = context.Request.Headers["X-Print-Agent-Id"].FirstOrDefault();
+    return Guid.TryParse(agentId, out var parsed)
+        ? $"agent:{parsed:D}"
+        : GetRateLimitPartitionKey(context);
+}
+
+static bool IsTenantRecoveryOperation(HttpContext context, bool shopOperations)
+{
+    if (HttpMethods.IsGet(context.Request.Method) || HttpMethods.IsHead(context.Request.Method))
+        return true;
+
+    var path = context.Request.Path.Value ?? string.Empty;
+    if (shopOperations)
+    {
+        return HttpMethods.IsPost(context.Request.Method) &&
+            (path.EndsWith("/confirm-output", StringComparison.OrdinalIgnoreCase) ||
+             path.EndsWith("/refund-preview", StringComparison.OrdinalIgnoreCase) ||
+             path.EndsWith("/refund", StringComparison.OrdinalIgnoreCase) ||
+             path.EndsWith("/reject", StringComparison.OrdinalIgnoreCase));
+    }
+
+    if (HttpMethods.IsPatch(context.Request.Method) &&
+        path.EndsWith("/revoke", StringComparison.OrdinalIgnoreCase))
+        return true;
+
+    if (!HttpMethods.IsPost(context.Request.Method))
+        return false;
+
+    return path.EndsWith("/heartbeat", StringComparison.OrdinalIgnoreCase) ||
+        path.EndsWith("/printers/sync", StringComparison.OrdinalIgnoreCase) ||
+        path.EndsWith("/received", StringComparison.OrdinalIgnoreCase) ||
+        path.EndsWith("/pdf-exported", StringComparison.OrdinalIgnoreCase) ||
+        path.EndsWith("/spooler-accepted", StringComparison.OrdinalIgnoreCase) ||
+        path.EndsWith("/print-blocked", StringComparison.OrdinalIgnoreCase) ||
+        path.EndsWith("/output-unconfirmed", StringComparison.OrdinalIgnoreCase) ||
+        path.EndsWith("/spooler-status", StringComparison.OrdinalIgnoreCase);
+}
+
 static async ValueTask<object?> EnforceTenantActiveAsync(
     EndpointFilterInvocationContext context,
     EndpointFilterDelegate next,
@@ -5543,9 +5590,9 @@ static async ValueTask<object?> EnforceTenantActiveAsync(
         .Where(item => item.Id == resolvedTenantId)
         .Select(item => item.Status)
         .SingleOrDefaultAsync(http.RequestAborted);
-    if (!TenantAccessRules.IsActive(status))
+    if (!TenantAccessRules.IsActive(status) && !IsTenantRecoveryOperation(http, allowSubscriptionRead))
         return Results.Problem(statusCode: StatusCodes.Status403Forbidden,
-            title: "This shop is suspended or inactive. Contact the platform team for assistance.");
+            title: "This shop is suspended or inactive. New print work is blocked; existing jobs and financial recovery remain accessible.");
 
     return await next(context);
 }
