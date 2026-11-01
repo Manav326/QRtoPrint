@@ -1401,3 +1401,58 @@ export function publishPlatformPlanVersion(token: string, planId: string, versio
     token
   );
 }
+
+
+export interface PlatformOperationalSettings {
+  trialMaxMonthlyPrintJobs: number;
+  cloudCompletedDocumentRetentionDays: number;
+  agentCompletedDocumentRetentionDays: number;
+  abandonedDocumentRetentionDays: number;
+  pendingLocalUploadRetentionDays: number;
+  expiredUploadTicketRetentionDays: number;
+  emptyCustomerSessionRetentionDays: number;
+  staleRefreshTokenRetentionDays: number;
+  apiRetentionSweepHours: number;
+  agentRetentionSweepHours: number;
+  allowPaidJobClaimsWhenSuspended: boolean;
+  updatedByUserId: string | null;
+  updatedUtc: string;
+}
+
+export interface PlatformOperationalSettingsInput {
+  trialMaxMonthlyPrintJobs: number;
+  cloudCompletedDocumentRetentionDays: number;
+  agentCompletedDocumentRetentionDays: number;
+  abandonedDocumentRetentionDays: number;
+  pendingLocalUploadRetentionDays: number;
+  expiredUploadTicketRetentionDays: number;
+  emptyCustomerSessionRetentionDays: number;
+  staleRefreshTokenRetentionDays: number;
+  apiRetentionSweepHours: number;
+  agentRetentionSweepHours: number;
+  allowPaidJobClaimsWhenSuspended: boolean;
+  reason: string;
+}
+
+export interface PlatformOperationalSettingsAudit {
+  id: string;
+  reason: string;
+  actorUserId: string | null;
+  createdUtc: string;
+  changesJson: string;
+}
+
+export function getPlatformOperationalSettings(token: string) {
+  return apiRequest<PlatformOperationalSettings>("/api/v1/platform/settings/operations", {}, token);
+}
+
+export function getPlatformOperationalSettingsHistory(token: string) {
+  return apiRequest<PlatformOperationalSettingsAudit[]>("/api/v1/platform/settings/operations/history", {}, token);
+}
+
+export function updatePlatformOperationalSettings(token: string, values: PlatformOperationalSettingsInput) {
+  return apiRequest<PlatformOperationalSettings>("/api/v1/platform/settings/operations", {
+    method: "PUT",
+    body: JSON.stringify(values)
+  }, token);
+}
