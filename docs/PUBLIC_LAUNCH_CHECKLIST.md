@@ -21,7 +21,7 @@ This checklist tracks the public website, non-technical Windows setup, Android r
 - [ ] Publish and link the actual Terms of Service and Privacy Policy pages.
 - [x] Keep Android download disabled until a production-signed APK is published; do not link the CI debug APK.
 - [x] Keep the unsigned Windows beta download notice concise and truthful, including first-run Windows security prompts and the possibility of managed-device blocks.
-- [ ] Publish the first unsigned Windows beta release, then verify its latest-download URL anonymously over HTTPS.
+- [ ] Publish the first unsigned Windows beta release and verify its latest-download URL anonymously over HTTPS before deploying the landing page with the active download link.
 
 ## B. Windows Agent installer for shop owners
 
@@ -63,7 +63,7 @@ This checklist tracks the public website, non-technical Windows setup, Android r
 - [x] Add a tag-triggered release workflow for version tags matching `v*`.
 - [x] Publish the stable Windows asset name `SmartPrint-Windows-Setup.exe`; add `SmartPrint-Android.apk` only when its production signing credentials are configured.
 - [x] Generate a `SHA256SUMS.txt` manifest for exactly the binaries included in each version.
-- [x] Document stable GitHub Release asset names and keep download controls unavailable until those assets are published.
+- [x] Document stable GitHub Release asset names; keep Android disabled until its APK is published and deploy the Windows Available link only after the first Windows release exists.
 - [x] Add a version/release-notes link from each download card.
 - [x] Default release builds to `https://qr-test.paintpulp.com` through the `SMARTPRINT_PUBLIC_BASE_URL` repository variable, with an explicit default.
 - [x] Validate the configured release origin as a canonical HTTPS origin before building either installer.

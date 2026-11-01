@@ -88,6 +88,14 @@ jobs:
           New-Item -ItemType Directory -Force -Path artifacts/agent-installer | Out-Null
           & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" /DSmartPrintPublicUrl="https://qr-test.paintpulp.com" scripts/build-windows-installer.iss
           if ($LASTEXITCODE -ne 0) { throw "Inno Setup compilation failed." }
+      - name: Verify Windows beta installer is unsigned
+        shell: pwsh
+        run: |
+          $installer = "artifacts/agent-installer/SmartPrint-Windows-Setup.exe"
+          $signature = Get-AuthenticodeSignature -LiteralPath $installer
+          if ($signature.Status -ne [System.Management.Automation.SignatureStatus]::NotSigned) {
+            throw "The Windows validation artifact must be intentionally unsigned for the beta distribution channel."
+          }
       - name: Upload Windows installer validation artifact
         uses: actions/upload-artifact@v7
         with:
