@@ -190,7 +190,7 @@ class MainActivity : AppCompatActivity() {
                         allowLocalDevelopment = BuildConfig.DEBUG
                     ))
                 } catch (_: Exception) {
-                    toast("This is not a valid SmartPrint shop QR code.")
+                    toast("This is not a valid Smart Print shop QR code.")
                 }
             }
         }
@@ -458,7 +458,7 @@ class MainActivity : AppCompatActivity() {
         val auth = customerAccountStore.read()
 
         column.addView(text(
-            if (auth == null) "Guest access is ready" else "SmartPrint customer",
+            if (auth == null) "Guest access is ready" else "Smart Print customer",
             12, R.color.qp_muted, false
         ).apply { setPadding(0, dp(4), 0, dp(16)) })
 
@@ -482,7 +482,7 @@ class MainActivity : AppCompatActivity() {
                 orientation = LinearLayout.VERTICAL
                 setPadding(dp(12), 0, 0, 0)
             }
-            details.addView(text(auth.displayName.ifBlank { "SmartPrint customer" }, 16, R.color.qp_text, true))
+            details.addView(text(auth.displayName.ifBlank { "Smart Print customer" }, 16, R.color.qp_text, true))
             details.addView(text(auth.email, 12, R.color.qp_muted, false).apply {
                 setPadding(0, dp(3), 0, 0)
             })
@@ -574,7 +574,7 @@ class MainActivity : AppCompatActivity() {
     private fun accountServiceUrl(): String = BuildConfig.SERVICE_BASE_URL
 
     private fun authenticateCustomer(name: String, email: String, password: String, create: Boolean) {
-        toast(if (create) "Creating your SmartPrint account…" else "Signing in…")
+        toast(if (create) "Creating your Smart Print account…" else "Signing in…")
         Thread {
             try {
                 val auth = if (create) {
@@ -587,7 +587,7 @@ class MainActivity : AppCompatActivity() {
                 runOnUiThread {
                     accountCreateMode = false
                     showProfile()
-                    toast(if (create) "Your SmartPrint account is ready." else "You're signed in.")
+                    toast(if (create) "Your Smart Print account is ready." else "You're signed in.")
                 }
             } catch (e: Exception) {
                 runOnUiThread { toast("Account request failed: ${message(e)}") }
@@ -1392,7 +1392,7 @@ class MainActivity : AppCompatActivity() {
         if (files.isEmpty()) return
         archiveFiles = files.toList()
         selectedFilePaths.clear()
-        exportArchive.launch("SmartPrint files ${SimpleDateFormat("yyyyMMdd-HHmmss", Locale.ROOT).format(Date())}.zip")
+        exportArchive.launch("Smart Print files ${SimpleDateFormat("yyyyMMdd-HHmmss", Locale.ROOT).format(Date())}.zip")
     }
 
     private fun preparePrintBatch(files: List<File>) {
@@ -1403,13 +1403,13 @@ class MainActivity : AppCompatActivity() {
         Thread {
             try {
                 val pages = DocumentBatchComposer.compose(orderedFiles, output)
-                val name = "SmartPrint print batch ${SimpleDateFormat("yyyyMMdd-HHmmss", Locale.ROOT).format(Date())}.pdf"
+                val name = "Smart Print print batch ${SimpleDateFormat("yyyyMMdd-HHmmss", Locale.ROOT).format(Date())}.pdf"
                 val saved = FileInputStream(output).use { store.importFile(it, name, destinationPath) }
                 runOnUiThread {
                     folderPath = destinationPath
                     selectedFilePaths.clear()
                     if (portalUrl != null) showPrint() else showFiles()
-                    toast("Prepared ${orderedFiles.size} documents as one $pages-page PDF: ${saved.name}. Attach this PDF to one SmartPrint print order.")
+                    toast("Prepared ${orderedFiles.size} documents as one $pages-page PDF: ${saved.name}. Attach this PDF to one Smart Print print order.")
                 }
             } catch (e: Exception) {
                 runOnUiThread { toast("Batch preparation failed: ${message(e)}") }
@@ -1816,7 +1816,7 @@ class MainActivity : AppCompatActivity() {
                     !allowedAgentUpload(uri) &&
                     !allowedLocalDevelopmentEndpoint(uri)) {
                     return WebResourceResponse(
-                        "text/plain", "UTF-8", 403, "Blocked by SmartPrint", emptyMap(),
+                        "text/plain", "UTF-8", 403, "Blocked by Smart Print", emptyMap(),
                         ByteArrayInputStream("Only the selected private-LAN development portal and paired-Agent upload endpoints are allowed over HTTP.".toByteArray())
                     )
                 }
