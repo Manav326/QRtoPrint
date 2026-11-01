@@ -13,6 +13,7 @@ import {
   type AuthTokens, type PlatformOverview, type PlatformTenantsPage, type PlatformTenant
 } from "./api";
 import { readDarkModePreference, readSidebarCollapsedPreference, saveDarkModePreference, saveSidebarCollapsedPreference } from "./ui-preferences";
+import { formatIstDate, formatIstDateTime } from "./date-time";
 
 type Section = "Overview" | "Tenants" | "Plans" | "Subscriptions" | "Operations";
 
@@ -260,7 +261,7 @@ export default function PlatformAdminConsole({
                     <ShieldCheck size={15}/>
                     <span>Aggregate operational metrics only. This console does not expose customer documents, UPI details, passwords, or shop payment credentials.</span>
                   </div>
-                  <div className="platform-generated-note">Snapshot generated {new Date(overview.generatedUtc).toLocaleString("en-IN")}.</div>
+                  <div className="platform-generated-note">Snapshot generated {formatIstDateTime(overview.generatedUtc)}.</div>
                 </>
               ) : !overviewError ? <div className="panel platform-loading">No platform summary is available.</div> : null}
             </section>
@@ -292,7 +293,7 @@ export default function PlatformAdminConsole({
                 {statusHistory === null ? <div className="platform-loading-inline">Loading status history…</div> :
                   statusHistory.length === 0 ? <div className="platform-loading-inline">No status changes have been recorded.</div> :
                   <div className="platform-status-history-list">{statusHistory.map(item => <div className="platform-status-history-row" key={item.id}>
-                    <strong>{item.previousStatus} → {item.newStatus}</strong><span>{item.reason}</span><small>{new Date(item.createdUtc).toLocaleString("en-IN")} · {item.actorUserId || "Platform administrator"}</small>
+                    <strong>{item.previousStatus} → {item.newStatus}</strong><span>{item.reason}</span><small>{formatIstDateTime(item.createdUtc)} · {item.actorUserId || "Platform administrator"}</small>
                   </div>)}</div>}
               </section>}
               {tenants && (
@@ -305,10 +306,10 @@ export default function PlatformAdminConsole({
                           <tr key={tenant.id}>
                             <td><div className="platform-shop-cell"><div className="platform-shop-icon"><Building2 size={15}/></div><div><strong>{tenant.businessName}</strong><small>{tenant.slug}</small></div></div></td>
                             <td><span className={`platform-tenant-badge ${toneForStatus(tenant.status)}`}>{prettyStatus(tenant.status)}</span></td>
-                            <td><div className="platform-subscription-cell"><strong>{tenant.planCode || "Unassigned"}</strong><small>{tenant.subscriptionStatus ? prettyStatus(tenant.subscriptionStatus) : "No subscription"}</small>{tenant.subscriptionPeriodEndUtc && <small>Until {new Date(tenant.subscriptionPeriodEndUtc).toLocaleDateString("en-IN")}</small>}</div></td>
+                            <td><div className="platform-subscription-cell"><strong>{tenant.planCode || "Unassigned"}</strong><small>{tenant.subscriptionStatus ? prettyStatus(tenant.subscriptionStatus) : "No subscription"}</small>{tenant.subscriptionPeriodEndUtc && <small>Until {formatIstDate(tenant.subscriptionPeriodEndUtc)}</small>}</div></td>
                             <td><div className="platform-device-cell"><strong>{tenant.activePrinterCount} / {tenant.printerCount} printers</strong><small>{tenant.agentCount} paired agents</small></div></td>
                             <td><strong className="platform-numeric">{tenant.jobsLast30Days.toLocaleString("en-IN")}</strong></td>
-                            <td><span className="platform-date">{new Date(tenant.createdUtc).toLocaleDateString("en-IN")}</span></td>
+                            <td><span className="platform-date">{formatIstDate(tenant.createdUtc)}</span></td>
                             <td><div className="platform-tenant-actions">
                               {tenant.status === "Active" && <>
                                 <button className="secondary-button" onClick={() => void changeTenantStatus(tenant, "Suspended")} disabled={tenantActionId === tenant.id || tenantLoading} title="Block new print activity while preserving recovery"><PauseCircle size={13}/> Suspend</button>
