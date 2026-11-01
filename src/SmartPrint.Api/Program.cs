@@ -5826,10 +5826,11 @@ publicApi.MapPost("/batches/{batchId:guid}/payments", async (
     if (session is null) return Results.Unauthorized();
 
     await using var transaction = await db.Database.BeginTransactionAsync(ct);
-    var jobs = await db.PrintJobs.FromSqlInterpolated(
+    var jobs = (await db.PrintJobs.FromSqlInterpolated(
         $"SELECT * FROM \"PrintJobs\" WHERE \"TenantId\" = {session.TenantId} AND \"CustomerSessionId\" = {session.Id} AND \"BatchId\" = {batchId} FOR UPDATE")
+        .ToListAsync(ct))
         .OrderBy(item => item.CreatedUtc)
-        .ToListAsync(ct);
+        .ToList();
     if (jobs.Count == 0) return Results.NotFound();
 
     var activeBatchPayment = await db.PrintBatchPayments.SingleOrDefaultAsync(
@@ -5878,6 +5879,38 @@ publicApi.MapPost("/batches/{batchId:guid}/payments", async (
             code = "batch_has_no_payable_files",
             message = "There are no accepted files awaiting payment in this batch."
         });
+
+    var expiredQuotes = payableJobs
+        .Where(job => job.QuoteExpiresUtc is null || job.QuoteExpiresUtc <= now)
+        .ToArray();
+    if (expiredQuotes.Length > 0)
+    {
+        foreach (var expiredJob in expiredQuotes)
+        {
+            var previousStatus = expiredJob.Status;
+            expiredJob.Status = "QUOTE_EXPIRED";
+            expiredJob.UpdatedUtc = now;
+            db.PrintJobEvents.Add(new PrintJobEvent
+            {
+                TenantId = expiredJob.TenantId,
+                PrintJobId = expiredJob.Id,
+                PreviousStatus = previousStatus,
+                NewStatus = expiredJob.Status,
+                ActorType = "System",
+                ReasonCode = "QUOTE_EXPIRED_BEFORE_BATCH_CHECKOUT",
+                CreatedUtc = now
+            });
+        }
+
+        await db.SaveChangesAsync(ct);
+        await transaction.CommitAsync(ct);
+        return Results.Conflict(new
+        {
+            code = "batch_quote_expired",
+            jobIds = expiredQuotes.Select(job => job.Id).ToArray(),
+            message = "At least one accepted file has an expired quote. Refresh the affected quote(s) before starting batch checkout. No payment was started."
+        });
+    }
 
     if (payableJobs.Any(job => job.QuotedAmountMinor <= 0 || job.Currency != "INR"))
         return Results.Conflict(new
