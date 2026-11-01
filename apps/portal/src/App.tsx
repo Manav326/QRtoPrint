@@ -1089,7 +1089,7 @@ function ShopConsole({ tokens, onSignOut }: { tokens: AuthTokens; onSignOut: () 
     const acceptCount=batchJobs.filter(job=>accepted.has(job.id)).length;
     const rejectCount=batchJobs.length-acceptCount;
     if (!(await confirmInApp(
-      `Accept ${acceptCount} file(s) and reject ${rejectCount} file(s)? The decisions will be applied together. Rejected paid files must be refunded before printing.`,
+      `Accept ${acceptCount} file(s) and reject ${rejectCount} file(s) before checkout? The decisions will be applied together. Once payment starts, rejected files go through the refund workflow.`,
       "Confirm batch review",
       "Apply review"
     ))) return;
@@ -1150,10 +1150,7 @@ function ShopConsole({ tokens, onSignOut }: { tokens: AuthTokens; onSignOut: () 
       // may currently be filtered or paginated, so its visible rows are not
       // a safe source for per-file acceptance/rejection decisions.
       const allBatchJobs = await getShopPrintBatchJobs(tokens.accessToken, batchId);
-      const reviewableStatuses=new Set([
-        "AWAITING_SHOP_APPROVAL","AWAITING_PAYMENT","AWAITING_CUSTOMER_PAYMENT",
-        "PAYMENT_REPORTED","AWAITING_COUNTER_PAYMENT"
-      ]);
+      const reviewableStatuses=new Set(["AWAITING_SHOP_APPROVAL","AWAITING_PAYMENT"]);
       const waiting = allBatchJobs.filter(job => reviewableStatuses.has(job.status));
       if (waiting.length === 0) {
         setBatchReviewJobs(null);
@@ -1938,10 +1935,7 @@ function PrintQueuePage({ jobs, printers, agentDevices, searchQuery, loadingBatc
     return ()=>window.clearInterval(timer);
   },[autoRefresh,refreshSeconds]);
 
-  const reviewableBatchFileStatuses=new Set([
-    "AWAITING_SHOP_APPROVAL","AWAITING_PAYMENT","AWAITING_CUSTOMER_PAYMENT",
-    "PAYMENT_REPORTED","AWAITING_COUNTER_PAYMENT"
-  ]);
+  const reviewableBatchFileStatuses=new Set(["AWAITING_SHOP_APPROVAL","AWAITING_PAYMENT"]);
   const reviewBatches=Array.from(new Map(jobs.filter(job=>job.batchId&&reviewableBatchFileStatuses.has(job.status)).map(job=>[job.batchId!,job])).keys());
   const onlineAgentIds = new Set(agentDevices.filter(agent =>
     !agent.revokedUtc && agent.status === "Online" && !!agent.lastSeenUtc &&
@@ -2006,8 +2000,8 @@ function PrintQueuePage({ jobs, printers, agentDevices, searchQuery, loadingBatc
               <div className="queue-batch-file-actions">
                 <button className="subtle-button" disabled={busyJobId===job.id} onClick={()=>onPreview(job)}>Preview</button>
                 <button className="subtle-button" disabled={busyJobId===job.id} onClick={()=>onHistory(job)}>History</button>
-                {job.status==="AWAITING_SHOP_APPROVAL"&&<><button className="subtle-button approve-action" disabled={busyJobId===job.id} onClick={()=>onApprove(job)}>Accept</button><button className="subtle-button reject-action" disabled={busyJobId===job.id} onClick={()=>onReject(job)}>Reject</button></>}
-                {["AWAITING_PAYMENT","AWAITING_CUSTOMER_PAYMENT","PAYMENT_REPORTED","AWAITING_COUNTER_PAYMENT"].includes(job.status)&&<button className="subtle-button reject-action" disabled={busyJobId===job.id} onClick={()=>onReject(job)}>Reject file</button>}
+                {job.status==="AWAITING_SHOP_APPROVAL"&&<button className="subtle-button approve-action" disabled={busyJobId===job.id} onClick={()=>onApprove(job)}>Accept</button>}
+                {["AWAITING_SHOP_APPROVAL","AWAITING_PAYMENT"].includes(job.status)&&<button className="subtle-button reject-action" disabled={busyJobId===job.id} onClick={()=>onReject(job)}>Reject file</button>}
                 {(job.status==="PAID_AUTHORISED"||job.status==="REJECTED")&&(job.payment?.status==="VERIFIED"||job.payment?.status==="PARTIALLY_REFUNDED")&&!job.localQueueReceivedUtc&&!job.claimedByAgentDeviceId&&<button className="subtle-button reject-action" disabled={busyJobId===job.id} onClick={()=>onRefund(job)}>{job.status==="REJECTED"?"Refund rejected file":"Review pages / refund"}</button>}
                 {(job.status==="PAID_AUTHORISED"||job.status==="LOCAL_QUEUE_CLAIMED")&&<select aria-label={"Assign printer for "+job.jobNumber} value={job.printerDeviceId||""} disabled={busyJobId===job.id||dispatchablePrinters.length===0||!!job.localQueueReceivedUtc||(job.status==="LOCAL_QUEUE_CLAIMED"&&!!job.agentLeaseExpiresUtc&&new Date(job.agentLeaseExpiresUtc).getTime()>Date.now())} onChange={event=>onAssignPrinter(job,event.target.value)}>
                   <option value="">{dispatchablePrinters.length===0?"No live agent printer":"Select printer"}</option>
@@ -2059,7 +2053,7 @@ function BatchReviewModal({jobs,busy,decisions,retrying,onDecision,onClose,onPre
         </div>;
       })}
     </section>)}</div>
-    <div className="batch-review-summary"><span><strong>{acceptedCount}</strong> accepted</span><span><strong>{rejectedCount}</strong> rejected</span><span><strong>{acceptedPrintedPages}</strong> printed pages</span><span><strong>{acceptedMonoPages}</strong> B&W · <strong>{acceptedColourPages}</strong> Colour</span><span><strong>{formatMoney(acceptedTotal,jobs[0]?.currency??"INR")}</strong> accepted value</span><small>Printed pages = source pages × copies. Unpaid rejected files are excluded; rejected paid files require a full refund before printing.</small></div>
+    <div className="batch-review-summary"><span><strong>{acceptedCount}</strong> accepted</span><span><strong>{rejectedCount}</strong> rejected</span><span><strong>{acceptedPrintedPages}</strong> printed pages</span><span><strong>{acceptedMonoPages}</strong> B&W · <strong>{acceptedColourPages}</strong> Colour</span><span><strong>{formatMoney(acceptedTotal,jobs[0]?.currency??"INR")}</strong> accepted value</span><small>Printed pages = source pages × copies. Reject before checkout to exclude a file; once payment starts, finish verification before recording a file-level refund.</small></div>
     <div className="modal-actions"><button className="secondary-button" onClick={onClose} disabled={busy}>Keep reviewing</button><button className="primary-button" disabled={busy||jobs.length===0} onClick={()=>onApply(acceptedIds)}>{busy?<span className="button-spinner"/>:"Apply review"}</button></div>
   </Modal>;
 }
@@ -2078,11 +2072,11 @@ function DocumentPreviewModal({name,url,mediaType,job,readOnly=false,onClose,onA
   const previewSummary = `${job.pageCount} source page(s) × ${job.copies} copy/copies = ${job.pageCount*job.copies} printed page(s). Preview displays the uploaded original once.`;
   return <Modal title={name} subtitle={readOnly ? `Read-only preview · ${previewSummary}` : job.batchId ? `File review · Batch ${job.batchId.slice(0,8).toUpperCase()} · ${previewSummary}` : previewSummary} onClose={onClose}>
     <div className="shop-document-preview">{isPdf?<iframe src={url} title={name}/>:<img src={url} alt={name}/>}</div>
-    {["AWAITING_SHOP_APPROVAL","AWAITING_PAYMENT","AWAITING_CUSTOMER_PAYMENT","PAYMENT_REPORTED","AWAITING_COUNTER_PAYMENT"].includes(job.status)&&<div className="file-review-note"><Check size={16}/><span>{readOnly ? "This preview is part of the batch review. Keep or change this file's decision in the batch panel after closing the preview." : "Review this file independently. Accepting or rejecting it will not change any other file in the batch."}</span></div>}
+    {["AWAITING_SHOP_APPROVAL","AWAITING_PAYMENT"].includes(job.status)&&<div className="file-review-note"><Check size={16}/><span>{readOnly ? "This preview is part of the batch review. Keep or change this file's decision in the batch panel after closing the preview." : "Review this file independently. Accepting or rejecting it will not change any other file in the batch."}</span></div>}
     {job.status==="PAID_AUTHORISED"&&(job.payment?.status==="VERIFIED"||job.payment?.status==="PARTIALLY_REFUNDED")&&<div className="file-refund-note"><Wallet size={16}/><span>Paid amount: <strong>{formatMoney(job.payment.amountMinor,job.payment.currency)}</strong>. A refund can be recorded while this file has not yet been handed to the shop computer.</span></div>}
     <div className="modal-actions">
-      {job.status==="AWAITING_SHOP_APPROVAL"&&!readOnly&&<><button className="secondary-button reject-action" onClick={onReject}><X size={15}/> Reject this file</button><button className="primary-button" onClick={onApprove}><Check size={15}/> Accept this file</button></>}
-      {!readOnly&&["AWAITING_PAYMENT","AWAITING_CUSTOMER_PAYMENT","PAYMENT_REPORTED","AWAITING_COUNTER_PAYMENT"].includes(job.status)&&<button className="secondary-button reject-action" onClick={onReject}><X size={15}/> Reject this file</button>}
+      {!readOnly&&job.status==="AWAITING_SHOP_APPROVAL"&&<button className="primary-button" onClick={onApprove}><Check size={15}/> Accept this file</button>}
+      {!readOnly&&["AWAITING_SHOP_APPROVAL","AWAITING_PAYMENT"].includes(job.status)&&<button className="secondary-button reject-action" onClick={onReject}><X size={15}/> Reject this file</button>}
       {!readOnly&&(job.status==="PAID_AUTHORISED"||job.status==="REJECTED")&&(job.payment?.status==="VERIFIED"||job.payment?.status==="PARTIALLY_REFUNDED")&&!job.localQueueReceivedUtc&&!job.claimedByAgentDeviceId&&<button className="secondary-button reject-action" onClick={onRefund}><RotateCcw size={15}/> {job.status==="REJECTED"?"Refund rejected file":"Review pages & refund"}</button>}
       <button className="secondary-button" onClick={onClose}>Close preview</button>
     </div>
