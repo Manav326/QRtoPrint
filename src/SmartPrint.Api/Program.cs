@@ -6713,6 +6713,7 @@ publicApi.MapGet("/jobs/{jobId:guid}/status", async (
     var paymentStatus = payment is null ? null : new
     {
         payment.Id,
+        payment.BatchPaymentId,
         payment.Method,
         payment.Status,
         payment.AmountMinor,
