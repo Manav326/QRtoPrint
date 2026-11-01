@@ -41,6 +41,7 @@ public sealed class PostgresMigrationUpgradeTests
 
         // Reproduce the local-upload completion transaction at the exact monthly quota boundary.
         settings.TrialMaxMonthlyPrintJobs = 1;
+        await db.SaveChangesAsync();
         var now = DateTimeOffset.UtcNow;
         var tenant = new Tenant
         {
@@ -121,6 +122,32 @@ public sealed class PostgresMigrationUpgradeTests
         Assert.True(decision.Allowed, decision.Message);
         Assert.Equal(0L, decision.Current);
         Assert.Equal(1L, decision.Maximum);
+
+        // Materialising the completed reservation as a PrintJob must preserve the quota count.
+        db.PrintJobs.Add(new PrintJob
+        {
+            Id = ticket.PrintJobId,
+            TenantId = ticket.TenantId,
+            QrStationId = ticket.QrStationId,
+            PrinterDeviceId = ticket.PrinterDeviceId,
+            CustomerSessionId = ticket.CustomerSessionId,
+            JobNumber = ticket.JobNumber,
+            Status = "AWAITING_CONFIGURATION",
+            IdempotencyKey = $"LOCAL-{ticket.Id:N}",
+            PageCount = 1,
+            Copies = 1,
+            Currency = "INR",
+            QuotedAmountMinor = 0,
+            CreatedUtc = now,
+            UpdatedUtc = now
+        });
+        await db.SaveChangesAsync();
+
+        var afterMaterialisation = await entitlements.CheckCapacityAsync(
+            tenant.Id, TenantQuotaResource.MonthlyPrintJob, CancellationToken.None);
+        Assert.False(afterMaterialisation.Allowed);
+        Assert.Equal(1L, afterMaterialisation.Current);
+        Assert.Equal(1L, afterMaterialisation.Maximum);
         await transaction.RollbackAsync();
     }
 }
