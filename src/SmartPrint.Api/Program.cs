@@ -4543,34 +4543,34 @@ shop.MapPost("/payments/{paymentId:guid}/verify", async (
         }
 
         var actorId = GetActorId(principal);
-        var now = DateTimeOffset.UtcNow;
+        var batchVerifiedUtc = DateTimeOffset.UtcNow;
         batchPayment.Status = "VERIFIED";
         batchPayment.VerifiedByUserId = actorId;
-        batchPayment.VerifiedUtc = now;
-        batchPayment.UpdatedUtc = now;
+        batchPayment.VerifiedUtc = batchVerifiedUtc;
+        batchPayment.UpdatedUtc = batchVerifiedUtc;
         var jobsById = batchJobs.ToDictionary(item => item.Id);
         foreach (var filePayment in batchFilePayments)
         {
             filePayment.Status = "VERIFIED";
             filePayment.VerifiedByUserId = actorId;
-            filePayment.VerifiedUtc = now;
-            filePayment.UpdatedUtc = now;
-            var job = jobsById[filePayment.PrintJobId];
-            var previousStatus = job.Status;
-            job.Status = "PAID_AUTHORISED";
-            job.UpdatedUtc = now;
+            filePayment.VerifiedUtc = batchVerifiedUtc;
+            filePayment.UpdatedUtc = batchVerifiedUtc;
+            var batchJob = jobsById[filePayment.PrintJobId];
+            var batchPreviousStatus = batchJob.Status;
+            batchJob.Status = "PAID_AUTHORISED";
+            batchJob.UpdatedUtc = batchVerifiedUtc;
             db.PrintJobEvents.Add(new PrintJobEvent
             {
                 TenantId = tenantId,
-                PrintJobId = job.Id,
-                PreviousStatus = previousStatus,
-                NewStatus = job.Status,
+                PrintJobId = batchJob.Id,
+                PreviousStatus = batchPreviousStatus,
+                NewStatus = batchJob.Status,
                 ActorType = "ShopUser",
                 ActorId = actorId,
                 ReasonCode = batchPayment.Method == "UPI"
                     ? "BATCH_UPI_PAYMENT_MANUALLY_VERIFIED"
                     : "BATCH_CASH_RECEIVED_AT_COUNTER",
-                CreatedUtc = now
+                CreatedUtc = batchVerifiedUtc
             });
         }
 
@@ -4597,7 +4597,7 @@ shop.MapPost("/payments/{paymentId:guid}/verify", async (
             batchPayment.AmountMinor,
             batchPayment.Currency,
             FileCount = batchFilePayments.Count,
-            NextStep = "The batch payment is verified. Each accepted file is now authorised and can be assigned to a live printer."
+            NextStep = "The batch payment is verified. Each accepted file is batchVerifiedUtc authorised and can be assigned to a live printer."
         });
     }
 
@@ -4638,26 +4638,26 @@ shop.MapPost("/payments/{paymentId:guid}/verify", async (
         return Results.NotFound();
     }
 
-    var now = DateTimeOffset.UtcNow;
+    var batchVerifiedUtc = DateTimeOffset.UtcNow;
     payment.Status = "VERIFIED";
     payment.VerifiedByUserId = GetActorId(principal);
-    payment.VerifiedUtc = now;
-    payment.UpdatedUtc = now;
-    var previousStatus = job.Status;
-    job.Status = "PAID_AUTHORISED";
-    job.UpdatedUtc = now;
+    payment.VerifiedUtc = batchVerifiedUtc;
+    payment.UpdatedUtc = batchVerifiedUtc;
+    var batchPreviousStatus = batchJob.Status;
+    batchJob.Status = "PAID_AUTHORISED";
+    batchJob.UpdatedUtc = batchVerifiedUtc;
     db.PrintJobEvents.Add(new PrintJobEvent
     {
         TenantId = tenantId,
-        PrintJobId = job.Id,
-        PreviousStatus = previousStatus,
-        NewStatus = job.Status,
+        PrintJobId = batchJob.Id,
+        PreviousStatus = batchPreviousStatus,
+        NewStatus = batchJob.Status,
         ActorType = "ShopUser",
         ActorId = GetActorId(principal),
         ReasonCode = payment.Method == "UPI"
             ? "UPI_PAYMENT_MANUALLY_VERIFIED"
             : "CASH_RECEIVED_AT_COUNTER",
-        CreatedUtc = now
+        CreatedUtc = batchVerifiedUtc
     });
     try
     {
@@ -4680,9 +4680,9 @@ shop.MapPost("/payments/{paymentId:guid}/verify", async (
         payment.Id,
         payment.Status,
         payment.VerifiedUtc,
-        JobId = job.Id,
-        JobNumber = job.JobNumber,
-        JobStatus = job.Status,
+        JobId = batchJob.Id,
+        JobNumber = batchJob.JobNumber,
+        JobStatus = batchJob.Status,
         NextStep = "Payment is verified. Assign this job to a live printer on its paired computer. The agent will secure the document locally before you explicitly start printing."
     });
 });
@@ -4749,30 +4749,30 @@ shop.MapPost("/payments/{paymentId:guid}/reject", async (
         }
 
         var actorId = GetActorId(principal);
-        var now = DateTimeOffset.UtcNow;
+        var batchRejectedUtc = DateTimeOffset.UtcNow;
         batchPayment.Status = "REJECTED";
         batchPayment.RejectionReason = reason;
-        batchPayment.UpdatedUtc = now;
+        batchPayment.UpdatedUtc = batchRejectedUtc;
         var jobsById = batchJobs.ToDictionary(item => item.Id);
         foreach (var filePayment in batchFilePayments)
         {
             filePayment.Status = "REJECTED";
             filePayment.RejectionReason = reason;
-            filePayment.UpdatedUtc = now;
-            var job = jobsById[filePayment.PrintJobId];
-            var previousStatus = job.Status;
-            job.Status = "PAYMENT_REJECTED";
-            job.UpdatedUtc = now;
+            filePayment.UpdatedUtc = batchRejectedUtc;
+            var batchJob = jobsById[filePayment.PrintJobId];
+            var batchPreviousStatus = batchJob.Status;
+            batchJob.Status = "PAYMENT_REJECTED";
+            batchJob.UpdatedUtc = batchRejectedUtc;
             db.PrintJobEvents.Add(new PrintJobEvent
             {
                 TenantId = tenantId,
-                PrintJobId = job.Id,
-                PreviousStatus = previousStatus,
-                NewStatus = job.Status,
+                PrintJobId = batchJob.Id,
+                PreviousStatus = batchPreviousStatus,
+                NewStatus = batchJob.Status,
                 ActorType = "ShopUser",
                 ActorId = actorId,
                 ReasonCode = "SHOP_REJECTED_BATCH_PAYMENT_REPORT",
-                CreatedUtc = now
+                CreatedUtc = batchRejectedUtc
             });
         }
 
@@ -4833,23 +4833,23 @@ shop.MapPost("/payments/{paymentId:guid}/reject", async (
         return Results.NotFound();
     }
 
-    var now = DateTimeOffset.UtcNow;
+    var batchRejectedUtc = DateTimeOffset.UtcNow;
     payment.Status = "REJECTED";
     payment.RejectionReason = reason;
-    payment.UpdatedUtc = now;
-    var previousStatus = job.Status;
-    job.Status = "PAYMENT_REJECTED";
-    job.UpdatedUtc = now;
+    payment.UpdatedUtc = batchRejectedUtc;
+    var batchPreviousStatus = batchJob.Status;
+    batchJob.Status = "PAYMENT_REJECTED";
+    batchJob.UpdatedUtc = batchRejectedUtc;
     db.PrintJobEvents.Add(new PrintJobEvent
     {
         TenantId = tenantId,
-        PrintJobId = job.Id,
-        PreviousStatus = previousStatus,
-        NewStatus = job.Status,
+        PrintJobId = batchJob.Id,
+        PreviousStatus = batchPreviousStatus,
+        NewStatus = batchJob.Status,
         ActorType = "ShopUser",
         ActorId = GetActorId(principal),
         ReasonCode = "SHOP_REJECTED_PAYMENT_REPORT",
-        CreatedUtc = now
+        CreatedUtc = batchRejectedUtc
     });
     try
     {
@@ -4872,9 +4872,9 @@ shop.MapPost("/payments/{paymentId:guid}/reject", async (
         payment.Id,
         payment.Status,
         payment.RejectionReason,
-        JobId = job.Id,
-        JobStatus = job.Status,
-        job.UpdatedUtc
+        JobId = batchJob.Id,
+        JobStatus = batchJob.Status,
+        batchJob.UpdatedUtc
     });
 });
 
