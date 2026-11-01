@@ -72,6 +72,18 @@ class MainActivityInstrumentedTest {
         }
     }
 
+
+    @Test
+    fun systemBackFromPrintTabReturnsHome() {
+        ActivityScenario.launch(MainActivity::class.java).use {
+            val label = com.google.android.material.R.id.navigation_bar_item_small_label_view
+            onView(allOf(withId(label), withText("Print"))).perform(click())
+            onView(withText("Connect to a shop")).check(matches(isDisplayed()))
+            androidx.test.espresso.Espresso.pressBack()
+            onView(withText("Your space")).check(matches(isDisplayed()))
+        }
+    }
+
     @Test
     fun foldersCanOpenAndExpandInline() {
         val folderName = "CI School " + System.currentTimeMillis()
@@ -88,6 +100,8 @@ class MainActivityInstrumentedTest {
             onView(withHint("Name")).perform(replaceText("Nested"), closeSoftKeyboard())
             onView(withText("Save")).perform(click())
             onView(withText("Nested")).check(matches(isDisplayed()))
+            onView(withText("Scan here")).check(matches(isDisplayed()))
+            it.recreate()
             onView(withText("Scan here")).check(matches(isDisplayed()))
             onView(withText("Back")).perform(click())
             onView(withContentDescription("Expand $folderName")).perform(click())
