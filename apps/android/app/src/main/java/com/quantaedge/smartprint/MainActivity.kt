@@ -1061,7 +1061,9 @@ class MainActivity : AppCompatActivity() {
                 minHeight = dp(34)
                 isEnabled = chooserSelection.isNotEmpty() &&
                     PrintBatchSelectionPolicy.validationError(chooserSelection) == null
-                setOnClickListener { chooseFiles(chooserSelection) }
+                setOnClickListener {
+                    chooseFiles(chooserSelection, chooserSelection.map(::printBatchGroupName))
+                }
             }, LinearLayout.LayoutParams(-2, dp(34)).apply { marginStart = dp(6) })
             column.addView(selectionRow, linearParams().apply { bottomMargin = dp(10) })
         }
@@ -2004,7 +2006,12 @@ class MainActivity : AppCompatActivity() {
         refreshLibrary()
     }
 
-    private fun chooseFile(file: File) = chooseFiles(listOf(file), listOf("Loose files"))
+    private fun printBatchGroupName(file: File): String {
+        val parentPath = file.parentFile?.let { runCatching { store.pathOf(it) }.getOrDefault("") }.orEmpty()
+        return parentPath.replace("/", " - ").take(80).ifBlank { "Loose files" }
+    }
+
+    private fun chooseFile(file: File) = chooseFiles(listOf(file), listOf(printBatchGroupName(file)))
 
     private fun chooseFiles(files: List<File>, groupNames: List<String>? = null) {
         val callback = fileCallback
@@ -2020,7 +2027,7 @@ class MainActivity : AppCompatActivity() {
                 FileProvider.getUriForFile(this, "$packageName.documents", file)
             }.toTypedArray()
             val safeGroupNames = groupNames?.takeIf { it.size == files.size }
-                ?: List(files.size) { "Loose files" }
+                ?: files.map(::printBatchGroupName)
             val metadataScript = "window.__smartPrintNativePickerGroups = " +
                 JSONArray().apply { safeGroupNames.forEach { put(it) } }.toString() + ";"
             val deliverSelection = {

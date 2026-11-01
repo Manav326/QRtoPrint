@@ -2632,9 +2632,12 @@ type StoredCustomerDraft = {
   quotesByJobId?: Record<string,PrintQuoteResult>;
 };
 
+const nativeCustomerFileGroups = new WeakMap<File,string>();
+
 function customerFileFingerprint(file:File):string {
   const relativePath=(file as File & {webkitRelativePath?:string}).webkitRelativePath??"";
-  return `${relativePath}\u0000${file.name}\u0000${file.size}\u0000${file.lastModified}\u0000${file.type}`;
+  const nativeGroup=relativePath?"":(nativeCustomerFileGroups.get(file)??"");
+  return `${relativePath||nativeGroup}\u0000${file.name}\u0000${file.size}\u0000${file.lastModified}\u0000${file.type}`;
 }
 
 function customerBatchGroupName(file:File):string {
@@ -3063,6 +3066,10 @@ function CustomerPrintFlow({publicCode,sessionToken,paymentOptions,localAgent,lo
       return true;
     });
     const supported=rootFiles.filter(candidate=>/\.(pdf|jpe?g|png)$/i.test(candidate.name));
+    for(const candidate of supported){
+      const nativeGroup=nativeGroupNames?.[next.indexOf(candidate)]?.trim().slice(0,80);
+      if(nativeGroup)nativeCustomerFileGroups.set(candidate,nativeGroup);
+    }
     const unsupportedSkipped=rootFiles.length-supported.length;
     if(supported.length===0){setError("Choose printable PDF, JPG or PNG files.");return;}
     const oversized=supported.find(candidate=>candidate.size<=0||candidate.size>20*1024*1024);
