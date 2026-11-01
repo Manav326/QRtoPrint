@@ -26,7 +26,7 @@ const fields: Array<{ key: NumericKey; label: string; hint: string; min: number;
   { key: "trialMaxMonthlyPrintJobs", label: "Trial monthly print quota", hint: "Print jobs per calendar month. Default is 3,000. Paid plan quotas remain versioned under Plans & entitlements.", min: 1, max: 10_000_000 },
   { key: "cloudCompletedDocumentRetentionDays", label: "Cloud completed documents", hint: "Days after confirmed physical output or verified PDF export before source files are purged.", min: 1, max: 3650 },
   { key: "agentCompletedDocumentRetentionDays", label: "Windows Agent completed documents", hint: "Days local source documents and managed PDF exports remain after output confirmation.", min: 1, max: 3650 },
-  { key: "abandonedDocumentRetentionDays", label: "Abandoned unpaid documents", hint: "Days terminal rejected or quote-expired files are retained when no payment or refund hold exists.", min: 1, max: 3650 },
+  { key: "abandonedDocumentRetentionDays", label: "Rejected / fully refunded documents", hint: "Days terminal rejected, quote-expired or fully refunded files are retained when no financial hold exists.", min: 1, max: 3650 },
   { key: "pendingLocalUploadRetentionDays", label: "Pending local uploads", hint: "Days after a local upload becomes terminal unpaid before the API authorises the Agent to delete it.", min: 1, max: 3650 },
   { key: "expiredUploadTicketRetentionDays", label: "Expired upload tickets", hint: "Extra days after an unfinished local upload expires before its ticket record is removed.", min: 1, max: 3650 },
   { key: "emptyCustomerSessionRetentionDays", label: "Empty customer sessions", hint: "Days expired sessions without jobs or upload tickets are kept.", min: 1, max: 3650 },
