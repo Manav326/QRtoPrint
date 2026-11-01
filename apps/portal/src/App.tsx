@@ -1974,7 +1974,6 @@ function PrintQueuePage({ jobs, printers, agentDevices, searchQuery, loadingBatc
           const waiting=batch.jobs.filter(job=>reviewableBatchFileStatuses.has(job.status));
           const folders=Array.from(new Set(batch.jobs.map(job=>job.batchGroupName??"Loose files")));
           const statusLabels=Array.from(new Set(batch.jobs.map(job=>job.status)));
-          const settings=Array.from(new Set(batch.jobs.map(job=>`${job.colourMode} · ${job.isDuplex?"Double":"Single"}-sided`)));
           const payableJobs=batch.jobs.filter(job=>job.status!=="REJECTED"&&job.status!=="REFUNDED");
           const totalPrintedPages=payableJobs.reduce((sum,job)=>sum+job.pageCount*job.copies,0);
           const monoPrintedPages=payableJobs.reduce((sum,job)=>sum+(job.colourMode==="Mono"?job.pageCount*job.copies:0),0);
@@ -2041,7 +2040,11 @@ function BatchReviewModal({jobs,busy,decisions,retrying,onDecision,onClose,onPre
   const acceptedIds=jobs.filter(job=>decisions[job.id]??true).map(job=>job.id);
   const acceptedCount=acceptedIds.length;
   const rejectedCount=jobs.length-acceptedCount;
-  const acceptedTotal=jobs.filter(job=>decisions[job.id]??true).reduce((sum,job)=>sum+Math.max(0,job.quotedAmountMinor),0);
+  const acceptedJobs=jobs.filter(job=>decisions[job.id]??true);
+  const acceptedTotal=acceptedJobs.reduce((sum,job)=>sum+Math.max(0,job.quotedAmountMinor),0);
+  const acceptedPrintedPages=acceptedJobs.reduce((sum,job)=>sum+job.pageCount*job.copies,0);
+  const acceptedMonoPages=acceptedJobs.reduce((sum,job)=>sum+(job.colourMode==="Mono"?job.pageCount*job.copies:0),0);
+  const acceptedColourPages=acceptedJobs.reduce((sum,job)=>sum+(job.colourMode==="Colour"?job.pageCount*job.copies:0),0);
   const folders=Array.from(new Set(jobs.map(job=>job.batchGroupName??"Loose files")));
   return <Modal title={retrying?"Retry batch review":"Review batch"} subtitle={retrying?"Some decisions did not save. Only the files still awaiting review are shown; each keeps its previous accept/reject choice.":"All files start accepted. Uncheck only files the shop cannot print; undo any change before applying."} onClose={onClose}>
     <div className="batch-review-list">{folders.map(folderName=><section className="batch-review-folder" key={folderName}>
@@ -2056,7 +2059,7 @@ function BatchReviewModal({jobs,busy,decisions,retrying,onDecision,onClose,onPre
         </div>;
       })}
     </section>)}</div>
-    <div className="batch-review-summary"><span><strong>{acceptedCount}</strong> accepted</span><span><strong>{rejectedCount}</strong> rejected</span><span><strong>{formatMoney(acceptedTotal,jobs[0]?.currency??"INR")}</strong> accepted value</span><small>Unpaid rejected files are excluded before payment. Decisions are kept if an individual update needs retrying.</small></div>
+    <div className="batch-review-summary"><span><strong>{acceptedCount}</strong> accepted</span><span><strong>{rejectedCount}</strong> rejected</span><span><strong>{acceptedPrintedPages}</strong> printed pages</span><span><strong>{acceptedMonoPages}</strong> B&W · <strong>{acceptedColourPages}</strong> Colour</span><span><strong>{formatMoney(acceptedTotal,jobs[0]?.currency??"INR")}</strong> accepted value</span><small>Printed pages = source pages × copies. Unpaid rejected files are excluded; rejected paid files require a full refund before printing.</small></div>
     <div className="modal-actions"><button className="secondary-button" onClick={onClose} disabled={busy}>Keep reviewing</button><button className="primary-button" disabled={busy||jobs.length===0} onClick={()=>onApply(acceptedIds)}>{busy?<span className="button-spinner"/>:"Apply review"}</button></div>
   </Modal>;
 }
@@ -3351,14 +3354,14 @@ function CustomerPrintFlow({publicCode,sessionToken,paymentOptions,localAgent,lo
   const batchOriginalPages=quoteEntries.reduce((total,entry)=>
     total+(entry.quote?.pageCount??entry.item.job.pageCount),0);
   const batchMonoPrintedPages=acceptedQuoteEntries.reduce((total,entry)=>
-    total+(entry.quote?.colourMode==="Mono"?(entry.quote.pageCount*entry.quote.copies):0),0);
+    total+(entry.quote?.colourMode==="Mono"?(entry.quote!.pageCount*entry.quote!.copies):0),0);
   const batchColourPrintedPages=acceptedQuoteEntries.reduce((total,entry)=>
-    total+(entry.quote?.colourMode==="Colour"?(entry.quote.pageCount*entry.quote.copies):0),0);
+    total+(entry.quote?.colourMode==="Colour"?(entry.quote!.pageCount*entry.quote!.copies):0),0);
   const batchPrintedPages=batchMonoPrintedPages+batchColourPrintedPages;
   const batchMonoAmount=acceptedQuoteEntries.reduce((total,entry)=>
-    total+(entry.quote?.colourMode==="Mono"?(entry.quote.quotedAmountMinor??0):0),0);
+    total+(entry.quote?.colourMode==="Mono"?(entry.quote!.quotedAmountMinor??0):0),0);
   const batchColourAmount=acceptedQuoteEntries.reduce((total,entry)=>
-    total+(entry.quote?.colourMode==="Colour"?(entry.quote.quotedAmountMinor??0):0),0);
+    total+(entry.quote?.colourMode==="Colour"?(entry.quote!.quotedAmountMinor??0):0),0);
   const canSendBatch=quoteItems.length>0&&quoteEntries.length===quoteItems.length&&quoteEntries.some(entry=>entry.quote?.status==="AWAITING_CUSTOMER_APPROVAL");
   const canCalculateBatch=quoteItems.some(item=>{
     const status=batchStatuses[item.job.id]?.status??item.job.status;
