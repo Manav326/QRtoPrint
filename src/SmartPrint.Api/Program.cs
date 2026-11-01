@@ -1806,6 +1806,10 @@ shop.MapGet("/customers/{customerId:guid}/jobs", async (
 shop.MapGet("/print-jobs", async (
     ClaimsPrincipal principal,
     SmartPrintDbContext db,
+    int? offset,
+    int? take,
+    string? search,
+    Guid? batchId,
     CancellationToken ct) =>
 {
     if (!TryGetTenantId(principal, out var tenantId))
@@ -1813,7 +1817,14 @@ shop.MapGet("/print-jobs", async (
         return Results.Forbid();
     }
 
-    var jobs = await (
+    // Keep paging bounded; the shop UI uses 100-row pages and an exact batch
+    // lookup so a filtered queue can never silently omit sibling files.
+    var boundedOffset = Math.Clamp(offset ?? 0, 0, 1_000_000);
+    var boundedTake = Math.Clamp(take ?? 100, 1, 100);
+    var searchTerm = search?.Trim();
+    if (searchTerm?.Length > 120) searchTerm = searchTerm[..120];
+
+    var query =
         from job in db.PrintJobs.AsNoTracking()
         join document in db.PrintDocuments.AsNoTracking()
             on new { job.TenantId, PrintJobId = job.Id } equals new { document.TenantId, document.PrintJobId }
@@ -1884,12 +1895,31 @@ shop.MapGet("/print-jobs", async (
                 document.MediaType,
                 document.SizeBytes
             }
-        })
-        .Take(100)
+        };
+
+    if (batchId.HasValue)
+    {
+        query = query.Where(job => job.BatchId == batchId.Value);
+    }
+
+    if (!string.IsNullOrWhiteSpace(searchTerm))
+    {
+        var normalizedSearch = searchTerm.ToLowerInvariant();
+        query = query.Where(job =>
+            job.JobNumber.ToLower().Contains(normalizedSearch) ||
+            (job.BatchGroupName != null && job.BatchGroupName.ToLower().Contains(normalizedSearch)) ||
+            job.Document.OriginalFileName.ToLower().Contains(normalizedSearch) ||
+            (job.PrinterName != null && job.PrinterName.ToLower().Contains(normalizedSearch)));
+    }
+
+    var jobs = await query
+        .OrderByDescending(job => job.CreatedUtc)
+        .ThenByDescending(job => job.Id)
+        .Skip(boundedOffset)
+        .Take(boundedTake)
         .ToListAsync(ct);
     return Results.Ok(jobs);
 });
-
 
 
 
