@@ -3091,7 +3091,7 @@ function CustomerPrintFlow({publicCode,sessionToken,paymentOptions,localAgent,lo
       setQuote(null);setJobStatus(null);setPayment(null);setPaymentReference("");
       setSelectedFileIndex(0);
       setFiles([]);
-      if(paymentOptions.instantPaymentEnabled)await getQuote(results);
+      if(paymentOptions.instantPaymentEnabled)await getQuote(results,savedSettings);
     } catch(exception) {
       setPrintSettingsByJobId(savedSettings);
       setUploadedBatch(results);
@@ -3105,7 +3105,7 @@ function CustomerPrintFlow({publicCode,sessionToken,paymentOptions,localAgent,lo
     setUploaded(item);setQuote(quotesByJobId[item.job.id]??null);setJobStatus(null);setPayment(null);setPaymentReference("");setError("");
   }
 
-  async function getQuote(itemsOverride?:UploadedPrintJob[]) {
+  async function getQuote(itemsOverride?:UploadedPrintJob[],settingsOverride?:Record<string,CustomerSavedPrintSettings>) {
     const items=itemsOverride??(uploadedBatch.length?uploadedBatch:(uploaded?[uploaded]:[]));
     if(items.length===0)return;
     setBusy(true);setError("");setJobStatus(null);
@@ -3122,7 +3122,7 @@ function CustomerPrintFlow({publicCode,sessionToken,paymentOptions,localAgent,lo
         if(quoteExpired
           ? !["QUOTE_EXPIRED","AWAITING_CUSTOMER_APPROVAL","AWAITING_SHOP_APPROVAL","AWAITING_PAYMENT","PAYMENT_REJECTED"].includes(status)
           : !["AWAITING_CONFIGURATION","UPLOADED","Uploaded"].includes(status))continue;
-        const settings=printSettingsByJobId[item.job.id]??{colourMode:"Mono" as const,isDuplex:false,copies:1};
+        const settings=settingsOverride?.[item.job.id]??printSettingsByJobId[item.job.id]??{colourMode:"Mono" as const,isDuplex:false,copies:1};
         try {
           nextQuotes[item.job.id]=await calculateCustomerQuote(sessionToken,item.job.id,{
             colourMode:settings.colourMode,paperSize:"A4",isDuplex:settings.isDuplex,copies:settings.copies
