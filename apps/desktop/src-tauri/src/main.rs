@@ -169,10 +169,10 @@ mod credential_store {
 
     pub fn write(session: Option<String>) -> Result<(), String> {
         unsafe {
-            let target = target();
+            let mut target_name = target();
             match session {
                 None => {
-                    if CredDeleteW(target.as_ptr(), CRED_TYPE_GENERIC, 0) == 0 {
+                    if CredDeleteW(target_name.as_ptr(), CRED_TYPE_GENERIC, 0) == 0 {
                         let error = GetLastError();
                         if error != ERROR_NOT_FOUND {
                             return Err(format!("Windows secure storage could not clear the session ({error})."));
@@ -180,9 +180,10 @@ mod credential_store {
                     }
                 }
                 Some(value) => {
-                    if value.len() > 2_400 { return Err("The saved session exceeds the secure storage limit.".into()); }
+                    if value.len() > 2_400 {
+                        return Err("The saved session exceeds the secure storage limit.".into());
+                    }
                     let mut bytes = value.into_bytes();
-                    let mut target_name = target();
                     let mut user_name: Vec<u16> = "SmartPrint".encode_utf16().chain(std::iter::once(0)).collect();
                     let mut credential: CREDENTIALW = std::mem::zeroed();
                     credential.Type = CRED_TYPE_GENERIC;
