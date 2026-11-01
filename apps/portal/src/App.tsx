@@ -2580,7 +2580,10 @@ function CustomerPrintFlow({publicCode,sessionToken,paymentOptions,localAgent,lo
           catch{return null;}
         }));
         if(!active)return;
-        const fresh=Object.fromEntries(results.filter((item):item is readonly [string,CustomerJobStatus]=>item!==null));
+        const fresh=results.reduce<Record<string,Awaited<ReturnType<typeof getCustomerJobStatus>>>>((map,item)=>{
+          if(item)map[item[0]]=item[1];
+          return map;
+        },{});
         setBatchStatuses(current=>({...current,...fresh}));
         const selectedId=uploaded?.job.id;
         if(selectedId&&fresh[selectedId]){
