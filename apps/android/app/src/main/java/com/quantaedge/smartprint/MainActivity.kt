@@ -2075,8 +2075,8 @@ class MainActivity : AppCompatActivity() {
                 .putString("portalHost", link.host)
                 .apply()
             toolbar.menu.findItem(SWITCH_SHOP)?.isVisible = true
-            ensureWebView().loadUrl(link.url)
             showPrint()
+            ensureWebView().loadUrl(link.url)
         }
     }
 
