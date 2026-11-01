@@ -161,8 +161,13 @@ jobs:
               ((missing+=1))
             fi
           done
+          if (( present == 0 )); then
+            echo "available=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::Android release skipped. Configure the four Android signing secrets to publish the signed APK."
+            exit 0
+          fi
           if (( missing > 0 )); then
-            echo "::error::A signed Android APK is mandatory for this release. Configure all four Android signing secrets before pushing a release tag."
+            echo "::error::Android signing is only partially configured. Add all four Android signing secrets together."
             exit 1
           fi
           echo "available=true" >> "$GITHUB_OUTPUT"
@@ -400,10 +405,9 @@ jobs:
               published = json.loads(response.read())
           if published.get("draft") or published.get("tag_name") != tag:
               raise SystemExit("GitHub did not confirm publication of the verified stable release.")
-          if "SmartPrint-Android.apk" not in binaries:
-              raise SystemExit("Refusing to publish a release without the required signed Android APK.")
+          android_status = "and signed Android APK" if "SmartPrint-Android.apk" in binaries else "without Android until signing is configured"
           print(
-              f"Published {tag} with the unsigned Windows beta installer and signed Android APK. "
+              f"Published {tag} with the unsigned Windows beta installer {android_status}. "
               "Older releases are not modified or deleted."
           )
           PY
