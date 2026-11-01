@@ -10,6 +10,7 @@ concurrency:
   cancel-in-progress: false
 
 permissions:
+  actions: write
   contents: write
 
 jobs:
@@ -30,34 +31,50 @@ jobs:
               repo,
               per_page: 100,
             });
-            const stableTag = tags.find(({ name }) => /^v\d+\.\d+\.\d+$/.test(name));
-            if (stableTag) {
-              core.notice(`Stable release tag ${stableTag.name} already exists; no bootstrap release is needed.`);
-              return;
-            }
-
-            const gradleFile = fs.readFileSync("apps/android/app/build.gradle.kts", "utf8");
-            const match = gradleFile.match(
-              /val smartPrintVersionName = providers\.gradleProperty\("smartPrintVersionName"\)\.orElse\("([^"]+)"\)\.get\(\)/
-            );
-            if (!match || !/^\d+\.\d+\.\d+$/.test(match[1])) {
-              core.setFailed("Could not derive a stable X.Y.Z version from smartPrintVersionName in apps/android/app/build.gradle.kts.");
-              return;
-            }
-
-            const tag = `v${match[1]}`;
-            try {
-              await github.rest.git.createRef({
-                owner,
-                repo,
-                ref: `refs/tags/${tag}`,
-                sha: context.sha,
-              });
-              core.notice(`Created ${tag} at ${context.sha}; the signed Android release workflow will now run.`);
-            } catch (error) {
-              if (error.status === 422) {
-                core.notice(`Tag ${tag} already exists; leaving the existing tag untouched.`);
+            let tag = tags.find(({ name }) => /^v\d+\.\d+\.\d+$/.test(name))?.name;
+            if (!tag) {
+              const gradleFile = fs.readFileSync("apps/android/app/build.gradle.kts", "utf8");
+              const match = gradleFile.match(
+                /val smartPrintVersionName = providers\.gradleProperty\("smartPrintVersionName"\)\.orElse\("([^"]+)"\)\.get\(\)/
+              );
+              if (!match || !/^\d+\.\d+\.\d+$/.test(match[1])) {
+                core.setFailed("Could not derive a stable X.Y.Z version from smartPrintVersionName in apps/android/app/build.gradle.kts.");
                 return;
               }
-              throw error;
+
+              tag = `v${match[1]}`;
+              try {
+                await github.rest.git.createRef({
+                  owner,
+                  repo,
+                  ref: `refs/tags/${tag}`,
+                  sha: context.sha,
+                });
+                core.notice(`Created ${tag} at ${context.sha}.`);
+              } catch (error) {
+                if (error.status !== 422) throw error;
+                core.notice(`Tag ${tag} already exists; leaving the existing tag untouched.`);
+              }
+            } else {
+              core.notice(`Found existing stable tag ${tag}; checking whether its release still needs publishing.`);
             }
+
+            try {
+              const { data: release } = await github.rest.repos.getReleaseByTag({ owner, repo, tag });
+              if (!release.draft) {
+                core.notice(`Stable release ${tag} is already published; nothing to do.`);
+                return;
+              }
+              core.notice(`Release ${tag} is still a draft; dispatching a clean release retry.`);
+            } catch (error) {
+              if (error.status !== 404) throw error;
+            }
+
+            await github.rest.actions.createWorkflowDispatch({
+              owner,
+              repo,
+              workflow_id: "release.yml",
+              ref: "main",
+              inputs: { release_tag: tag },
+            });
+            core.notice(`Dispatched the signed release workflow for ${tag}.`);
