@@ -1,0 +1,86 @@
+# SmartPrint Public Website & Distribution Launch Checklist
+
+Last updated: 2026-11-01
+
+This checklist tracks the public website, non-technical Windows setup, Android release and public software distribution. A checked source-code item means the implementation is present in the repository; it does not imply a successful CI run, deployment or physical-device acceptance.
+
+## A. Public website and shop entry
+
+- [x] Replace the unauthenticated root page with the SmartPrint public marketing landing page.
+- [x] Add the custom storefront-plus-printer **For print shops** entry in the top-right header.
+- [x] Route shop entry to the existing sign-in flow at `/shop`.
+- [x] Allow direct shop registration at `/shop?mode=register`.
+- [x] Add a return-to-website link to the existing authentication screen.
+- [x] Explain the customer QR journey, shop review/approval, Agent and printer connection.
+- [x] Add Windows and Android download cards wired to stable GitHub Release asset URLs.
+- [x] Add public metadata, social preview metadata and a SmartPrint favicon.
+- [x] Preserve the existing `/s/{publicCode}` customer QR route ahead of public landing-page routing.
+- [ ] Run portal type-check/build on the current main commit and resolve any failures.
+- [ ] Deploy the updated portal and verify `https://qr-test.paintpulp.com/` on desktop and mobile.
+- [ ] Complete keyboard, contrast, screen-reader and responsive browser checks.
+- [ ] Publish and link the actual Terms of Service and Privacy Policy pages.
+- [ ] Confirm each latest-release download URL serves a file anonymously over HTTPS.
+
+## B. Windows Agent installer for shop owners
+
+- [x] Keep the existing self-contained Windows x64 Agent and DPAPI-protected pairing identity.
+- [x] Allow the existing Agent pairing command to receive a one-time enrollment code non-interactively through configuration.
+- [x] Add an Inno Setup wizard that asks for the shop's one-time pairing code and uses the configured public HTTPS origin.
+- [x] Package the Agent with the existing service-install and service-uninstall scripts.
+- [x] Reuse the existing service installer to register the Windows Service and Private-profile firewall rule without showing a terminal.
+- [x] Add a bounded local readiness check against `/api/v1/local/status` before setup reports success.
+- [x] Add CI steps intended to compile and retain an unsigned installer validation artifact.
+- [x] Add a tag-based release step that requires a Windows code-signing PFX and verifies the installer signature before publication.
+- [ ] Verify the Inno Setup compilation job succeeds on GitHub Actions; fix any compiler or packaging failures.
+- [ ] Verify the resulting installer contains only customer-relevant files and installs cleanly on a fresh Windows 10/11 x64 machine.
+- [ ] Test a normal shop-owner Windows account with UAC elevation, no preinstalled .NET runtime and no terminal usage.
+- [ ] Test expired, malformed, already-used and wrong-shop pairing codes, including safe recovery after a failed pairing.
+- [ ] Verify service startup after restart, local status, cloud heartbeat and printer discovery in the shop workspace.
+- [ ] Test a real printer, Microsoft Print to PDF, Direct LAN upload and cloud-assisted fallback after installation.
+- [ ] Configure and protect the trusted Windows code-signing certificate secrets.
+- [ ] Decide whether a tray companion and silent auto-update are needed for the first public release.
+
+## C. Android customer app
+
+- [x] Keep the native Android customer companion and existing QR/customer workflow.
+- [x] Add configurable release version, canonical service URL and release signing to Gradle.
+- [x] Add a release workflow that builds a release APK and verifies its signature with `apksigner`.
+- [ ] Generate the production Android keystore and configure the four Android signing secrets in GitHub Actions.
+- [ ] Back up the keystore and credentials securely outside GitHub; do not rotate this signing identity for ordinary updates.
+- [ ] Install the release APK on physical Android 8+ devices and verify QR scanning, document import, account flows and print submission.
+- [ ] Validate Local Network Access and shop-Wi-Fi upload with a real paired Agent.
+- [ ] Publish the first signed APK as a public Release asset.
+- [ ] Decide on Play Store listing and update distribution after direct APK acceptance.
+
+## D. Versioned release channel
+
+- [x] Add a tag-triggered release workflow for version tags matching `v*`.
+- [x] Publish intended stable asset names: `SmartPrint-Windows-Setup.exe` and `SmartPrint-Android.apk`.
+- [x] Generate a `SHA256SUMS.txt` file for both public downloads.
+- [x] Wire the landing page to the stable GitHub `releases/latest/download` URLs.
+- [x] Add a version/release-notes link from each download card.
+- [x] Default release builds to `https://qr-test.paintpulp.com` through the `SMARTPRINT_PUBLIC_BASE_URL` repository variable, with an explicit default.
+- [ ] Configure the Windows signing secrets and Android signing secrets.
+- [ ] Set `SMARTPRINT_PUBLIC_BASE_URL` to the actual canonical deployment origin before tagging.
+- [ ] Run the first tagged release and verify both release assets and checksums.
+- [ ] Test download links from a signed-out browser and a mobile device.
+- [ ] Establish a versioning and rollback policy; retain older releases for support.
+
+## E. Deployment and production acceptance
+
+- [ ] Confirm the main-branch CI run passes portal, API, Agent, Windows installer and Android debug validation.
+- [ ] Deploy the current main-branch portal/API images to the intended staging environment.
+- [ ] Verify existing shop login, new shop registration and platform-admin routing after deployment.
+- [ ] Verify existing printed QR station URLs and active shop sessions still work.
+- [ ] Run end-to-end customer upload, quote, shop review, manual payment verification, dispatch and output confirmation.
+- [ ] Verify no test or development build is presented as a production-signed download.
+- [ ] Complete a production go/no-go review with Windows, Android, printer, security and download-link evidence.
+
+## Guardrails
+
+- Keep the existing customer QR route and shop/API contracts intact.
+- Do not ask shop owners to open PowerShell, Command Prompt or a terminal for normal installation.
+- Do not publish a debug APK as the public customer app.
+- Do not publish an unsigned Windows installer as a trusted SmartPrint release.
+- Keep the Android release keystore stable and backed up.
+- Treat an Agent local readiness response as local-service verification only; the shop workspace must independently confirm the cloud heartbeat and printer inventory.
