@@ -2249,7 +2249,7 @@ class MainActivity : AppCompatActivity() {
         )
     }
 
-    private fun showDocumentViewer(file: File, startPosition: Int = 0) {
+    private fun showDocumentViewer(file: File, startPosition: Int? = null) {
         if (!supportsInAppViewer(file)) {
             openDocumentExternally(file)
             return
