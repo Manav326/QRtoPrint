@@ -1027,6 +1027,16 @@ export function getShopJobEvents(token: string, jobId: string) {
   return apiRequest<ShopJobEvent[]>(`/api/v1/shop/print-jobs/${jobId}/events`, {}, token);
 }
 
+export function getShopPrintJobsPage(token: string, offset: number, take = 100) {
+  const safeOffset = Math.max(0, Math.floor(offset));
+  const safeTake = Math.max(1, Math.min(100, Math.floor(take)));
+  return apiRequest<ShopPrintJob[]>(
+    `/api/v1/shop/print-jobs?offset=${safeOffset}&take=${safeTake}`,
+    {},
+    token
+  );
+}
+
 export function approveShopPrintJob(token: string, jobId: string) {
   return apiRequest<{ id: string; jobNumber: string; status: string; updatedUtc: string; nextStep?: string }>(
     `/api/v1/shop/print-jobs/${jobId}/approve`,
