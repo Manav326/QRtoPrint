@@ -641,6 +641,7 @@ class SmartPrintDocumentViewer(
             imageTintList = ColorStateList.valueOf(getColor(R.color.qp_text))
             scaleType = ImageView.ScaleType.CENTER
             contentDescription = description
+            tooltipText = description
             setPadding(dp(10), dp(10), dp(10), dp(10))
             background = SmartPrintGlass.surface(context, 14, R.color.qp_glass_card)
             elevation = dp(2).toFloat()
