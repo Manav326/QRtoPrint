@@ -14,7 +14,7 @@ SmartPrint by QuantaEdge (QRtoPrint) is a multi-tenant SaaS platform for QR-init
 
 ## Preferred domain
 
-thinkwithsujeet.in is the preferred domain zone. The application has one public origin, configured per deployment in PUBLIC_BASE_URL. The customer portal, shop portal, platform administration, API and station QR links all use that origin; do not add separate API or admin hostnames for this application.
+The application has one public origin, configured per deployment in PUBLIC_BASE_URL. The customer portal, shop portal, platform administration, API and station QR links all use that origin; do not add separate API or admin hostnames for this application.
 
 ## Repository status
 
@@ -146,7 +146,7 @@ The script prompts securely for a password and creates or repairs only a tenantl
 
 Install the Windows Agent on the computer physically connected to the printer. Pair it with PUBLIC_BASE_URL and install the Windows Service using the exact same customer origin. The Agent learns later URL changes from the authenticated heartbeat and updates its API destination and local CORS allowlist without re-pairing.
 
-During a hostname migration, keep the previous hostname routed to the portal until Agents have updated. If older Agent installations were paired to api.thinkwithsujeet.in, temporarily add that hostname as a second Cloudflare Published application route to http://portal:80 so their existing heartbeat can receive the new canonical URL. Keep the old print hostname routed too if old QR codes are still in use.
+During a hostname migration, keep every previously configured public or legacy Agent API hostname routed to the portal until Agents have updated and old QR codes are no longer in circulation. Legacy Agent heartbeats must continue to reach the API long enough to receive the new canonical URL.
 
 Direct LAN uploads still require the phone and Agent to share the shop LAN, the browser's Local Network Access permission when requested, and the Agent's Private-profile firewall rule on TCP 17842. Cloud-assisted upload remains the fallback.
 
