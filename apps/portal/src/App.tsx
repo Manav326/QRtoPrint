@@ -1,7 +1,7 @@
 import { Fragment, useEffect, useRef, useState, type ReactNode } from "react";
 import {
   Activity, ArrowRight, Check, Clock3, Copy, CreditCard, FileText, FileUp, FolderOpen, LayoutDashboard,
-  LifeBuoy, LogOut, Menu, Moon, Monitor, Plus, Printer, QrCode, Search, Settings,
+  LifeBuoy, LogOut, Menu, Monitor, Plus, Printer, QrCode, Search, Settings,
   ShieldCheck, Sun, Users, Wallet, X, PanelLeftClose, PanelLeftOpen, RotateCcw
 } from "lucide-react";
 import QRCode from "react-qr-code";
@@ -2448,7 +2448,7 @@ async function copyText(value:string) {
   try { document.execCommand("copy"); } finally { helper.remove(); }
 }
 
-function CustomerEntry({publicCode}:{publicCode:string}) {
+function CustomerEntry({publicCode,dark,onToggleTheme}:{publicCode:string;dark:boolean;onToggleTheme:()=>void}) {
   const [result,setResult]=useState<Awaited<ReturnType<typeof createCustomerSession>>|null>(null);
   const [error,setError]=useState("");
   const [loading,setLoading]=useState(true);
@@ -2524,7 +2524,7 @@ function CustomerEntry({publicCode}:{publicCode:string}) {
 
   const nativeAppMode = navigator.userAgent.includes("SmartPrintAndroid/1");
   return <div className={nativeAppMode ? "customer-entry smartprint-native" : "customer-entry"}><div className="customer-entry-glow"/>
-    <header className="customer-entry-brand"><div className="brand-mark"><QrCode size={21}/></div><div><div className="brand-name">smart<span>print</span></div><div className="brand-caption">BY QUANTAEDGE</div></div></header>
+    <header className="customer-entry-brand"><div className="customer-entry-brand-lockup"><div className="brand-mark"><QrCode size={21}/></div><div><div className="brand-name">smart<span>print</span></div><div className="brand-caption">BY QUANTAEDGE</div></div></div><ThemeToggleButton dark={dark} onToggle={onToggleTheme}/></header>
     <main className="customer-entry-card">
       {loading?<><div className="customer-entry-spinner"><span className="button-spinner"/></div><h1>{nativeAppMode?"Connecting…":"Connecting to your print shop"}</h1>{!nativeAppMode&&<p>Creating a secure, time-limited session for this QR station.</p>}</>:
       error?<><div className="entry-error-icon"><X size={23}/></div><div className="entry-eyebrow">STATION UNAVAILABLE</div><h1>{nativeAppMode?"Shop unavailable":"This QR station can't be reached"}</h1>{!nativeAppMode&&<p>{error}</p>}<button className="primary-button" onClick={()=>window.location.reload()}>Try again</button></>:
