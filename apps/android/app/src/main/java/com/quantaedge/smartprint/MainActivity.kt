@@ -101,6 +101,9 @@ class MainActivity : AppCompatActivity() {
     private var archiveFiles: List<File> = emptyList()
     private var accountCreateMode = false
     private var editingPdf: File? = null
+    private var editingPdfPageIndex = 0
+    private var editingPdfPreviewBitmap: android.graphics.Bitmap? = null
+    private var editingPdfPreviewRequest = 0
     private val selectedFilePaths = linkedSetOf<String>()
     private val chooserSelectedFilePaths = linkedSetOf<String>()
     private val chooserSelectedFolderPaths = linkedSetOf<String>()
@@ -221,7 +224,7 @@ class MainActivity : AppCompatActivity() {
             pickerMode && pickerPath.isNotBlank() -> { pickerPath = parent(pickerPath); refreshLibrary(preserveScroll = false) }
             pickerMode -> cancelPicker()
             documentViewer != null -> closeDocumentViewer()
-            editingPdf != null -> showFiles()
+            editingPdf != null -> closePdfEditor()
             navigation.selectedItemId == SCAN_PRINT && webView?.canGoBack() == true -> webView?.goBack()
             navigation.selectedItemId == FILES && folderPath.isNotEmpty() -> {
                 folderPath = parent(folderPath)
@@ -353,6 +356,7 @@ class MainActivity : AppCompatActivity() {
     override fun onDestroy() {
         documentViewer?.dispose()
         documentViewer = null
+        clearPdfEditorPreview()
         super.onDestroy()
     }
 
@@ -1575,7 +1579,9 @@ class MainActivity : AppCompatActivity() {
                 "Only saved PDFs can be edited here."
             }
             val pages = DocumentBatchComposer.pageEdits(file).toMutableList()
+            clearPdfEditorPreview()
             editingPdf = file
+            editingPdfPageIndex = 0
             renderPdfEditor(file, pages)
         } catch (e: Exception) {
             toast("Could not open the PDF editor: ${message(e)}")
@@ -1583,131 +1589,214 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun renderPdfEditor(file: File, pages: MutableList<PdfPageEdit>) {
+        if (pages.isEmpty()) {
+            toast("This PDF has no editable pages.")
+            closePdfEditor()
+            return
+        }
+        clearPdfEditorPreview()
+        val selectedIndex = editingPdfPageIndex.coerceIn(0, pages.lastIndex)
+        editingPdfPageIndex = selectedIndex
+        val selectedPage = pages[selectedIndex]
+
         pickerMode = false
         toolbar.title = "Edit PDF"
         toolbar.setNavigationIcon(android.R.drawable.ic_media_previous)
-        toolbar.setNavigationOnClickListener { showFiles() }
+        toolbar.navigationContentDescription = "Back to My Files"
+        toolbar.setNavigationOnClickListener { closePdfEditor() }
+        toolbar.menu.findItem(OPEN_WITH)?.isVisible = false
         setBottomNavigationVisible(false)
         content.removeAllViews()
 
-        val scroll = ScrollView(this).apply { isFillViewport = true; clipToPadding = false }
-        val column = LinearLayout(this).apply {
+        val editor = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(dp(16), dp(14), dp(16), dp(24))
+            setPadding(dp(12), dp(8), dp(12), dp(10))
+            clipToPadding = false
         }
-        scroll.addView(column)
 
-        column.addView(text(file.name, 15, R.color.qp_text, true))
-        column.addView(text(
-            "Rasterized copy · Original kept.",
-            11, R.color.qp_muted, false
-        ).apply { setPadding(0, dp(4), 0, dp(12)) })
-        column.addView(button("Save copy", true).apply {
-            setOnClickListener { savePdfEdits(file, pages.toList()) }
-        }, linearParams().apply { bottomMargin = dp(12) })
+        val heading = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(3), dp(2), dp(3), dp(7))
+        }
+        val fileDetails = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        fileDetails.addView(text(file.name, 13, R.color.qp_text, true).apply {
+            maxLines = 1
+            ellipsize = android.text.TextUtils.TruncateAt.MIDDLE
+        })
+        fileDetails.addView(text("Rasterized copy · Original kept", 10, R.color.qp_muted, false)
+            .apply { setPadding(0, dp(2), 0, 0) })
+        heading.addView(fileDetails, LinearLayout.LayoutParams(0, -2, 1f))
+        heading.addView(text("Page ${selectedIndex + 1} of ${pages.size}", 11, R.color.qp_muted, true))
+        editor.addView(heading, linearParams())
 
-        pages.forEachIndexed { position, page ->
-            val row = LinearLayout(this).apply {
-                orientation = LinearLayout.VERTICAL
-                setPadding(dp(9), dp(8), dp(7), dp(8))
-                background = roundedDrawable(getColor(R.color.qp_card), dp(11), getColor(R.color.qp_outline))
-            }
-            val pageHeader = LinearLayout(this).apply {
-                orientation = LinearLayout.HORIZONTAL
-                gravity = Gravity.CENTER_VERTICAL
-            }
-            val pageMark = TextView(this).apply {
-                text = (position + 1).toString()
-                textSize = 13f
+        val previewStage = FrameLayout(this).apply {
+            setBackgroundColor(android.graphics.Color.rgb(24, 26, 36))
+        }
+        val pagePreview = ImageView(this).apply {
+            scaleType = ImageView.ScaleType.FIT_CENTER
+            contentDescription = "PDF page preview"
+            adjustViewBounds = false
+            setPadding(dp(5), dp(5), dp(5), dp(5))
+        }
+        val previewStatus = TextView(this).apply {
+            text = "Preparing page preview…"
+            textSize = 12f
+            gravity = Gravity.CENTER
+            setTextColor(android.graphics.Color.WHITE)
+            background = roundedDrawable(android.graphics.Color.argb(175, 20, 22, 32), dp(12))
+            setPadding(dp(14), dp(9), dp(14), dp(9))
+        }
+        previewStage.addView(pagePreview, FrameLayout.LayoutParams(-1, -1))
+        previewStage.addView(previewStatus, FrameLayout.LayoutParams(-2, -2, Gravity.CENTER))
+        editor.addView(previewStage, LinearLayout.LayoutParams(-1, 0, 1f))
+
+        val pageStrip = android.widget.HorizontalScrollView(this).apply {
+            isHorizontalScrollBarEnabled = false
+            clipToPadding = false
+            overScrollMode = View.OVER_SCROLL_NEVER
+            setPadding(dp(1), dp(7), dp(1), dp(7))
+        }
+        val pageStripRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+        }
+        pages.forEachIndexed { index, _ ->
+            val selected = index == selectedIndex
+            val pageChip = TextView(this).apply {
+                text = (index + 1).toString()
+                textSize = 12f
                 gravity = Gravity.CENTER
                 setTypeface(typeface, android.graphics.Typeface.BOLD)
-                setTextColor(getColor(R.color.qp_primary))
-                background = roundedDrawable(getColor(R.color.qp_soft), dp(9))
-            }
-            pageHeader.addView(pageMark, LinearLayout.LayoutParams(dp(36), dp(40)))
-            val meta = LinearLayout(this).apply {
-                orientation = LinearLayout.VERTICAL
-                setPadding(dp(10), 0, dp(6), 0)
-            }
-            meta.addView(text("Page ${position + 1}", 12, R.color.qp_text, true))
-            meta.addView(text(
-                if (page.rotationDegrees == 0) "Original" else "${page.rotationDegrees}°",
-                10, R.color.qp_muted, false
-            ).apply { setPadding(0, dp(2), 0, 0) })
-            pageHeader.addView(meta, LinearLayout.LayoutParams(0, -2, 1f))
-            row.addView(pageHeader, linearParams())
-
-            // Keep every page action on its own full-width row. A horizontal
-            // action strip below the metadata avoids clipping the final action
-            // on narrow phones while preserving generous touch targets.
-            val actions = LinearLayout(this).apply {
-                orientation = LinearLayout.HORIZONTAL
-                gravity = Gravity.CENTER_VERTICAL
-            }
-            actions.addView(iconActionButton(R.drawable.ic_preview, "Preview page ${position + 1}").apply {
+                setTextColor(getColor(if (selected) R.color.qp_primary_content else R.color.qp_text))
+                contentDescription = "Select page ${index + 1}"
+                isClickable = true
+                isFocusable = true
+                background = roundedDrawable(
+                    getColor(if (selected) R.color.qp_primary else R.color.qp_card),
+                    dp(10),
+                    if (selected) getColor(R.color.qp_primary) else getColor(R.color.qp_outline)
+                )
                 setOnClickListener {
-                    try {
-                        showImageSheet("Page ${position + 1}", DocumentBatchComposer.renderPagePreview(file, page))
-                    } catch (e: Exception) {
-                        toast("Preview failed: ${message(e)}")
-                    }
-                }
-            }, LinearLayout.LayoutParams(0, dp(42), 1f))
-            actions.addView(iconActionButton(R.drawable.ic_rotate, "Rotate page ${position + 1}").apply {
-                setOnClickListener {
-                    pages[position] = page.copy(rotationDegrees = (page.rotationDegrees + 90) % 360)
+                    editingPdfPageIndex = index
                     renderPdfEditor(file, pages)
                 }
-            }, LinearLayout.LayoutParams(0, dp(42), 1f).apply { marginStart = dp(5) })
-            actions.addView(iconActionButton(R.drawable.ic_arrow_up, "Move page ${position + 1} up").apply {
-                isEnabled = position > 0
-                alpha = if (position > 0) 1f else 0.4f
-                setOnClickListener {
-                    if (position > 0) {
-                        val value = pages.removeAt(position)
-                        pages.add(position - 1, value)
-                        renderPdfEditor(file, pages)
-                    }
-                }
-            }, LinearLayout.LayoutParams(0, dp(42), 1f).apply { marginStart = dp(5) })
-            actions.addView(iconActionButton(R.drawable.ic_arrow_down, "Move page ${position + 1} down").apply {
-                isEnabled = position < pages.lastIndex
-                alpha = if (position < pages.lastIndex) 1f else 0.4f
-                setOnClickListener {
-                    if (position < pages.lastIndex) {
-                        val value = pages.removeAt(position)
-                        pages.add(position + 1, value)
-                        renderPdfEditor(file, pages)
-                    }
-                }
-            }, LinearLayout.LayoutParams(0, dp(42), 1f).apply { marginStart = dp(5) })
-            actions.addView(iconActionButton(R.drawable.ic_delete, "Remove page ${position + 1}").apply {
-                setOnClickListener {
-                    if (pages.size <= 1) {
-                        toast("A PDF needs one page.")
-                    } else {
-                        pages.removeAt(position)
-                        renderPdfEditor(file, pages)
-                    }
-                }
-            }, LinearLayout.LayoutParams(0, dp(42), 1f).apply { marginStart = dp(5) })
-            row.addView(actions, LinearLayout.LayoutParams(-1, dp(42)).apply { topMargin = dp(8) })
-            row.setOnLongClickListener {
-                showConfirmSheet("Remove page?", "The original stays unchanged.", "Remove", destructive = true) {
-                    if (pages.size <= 1) {
-                        toast("A PDF needs one page.")
-                    } else {
-                        pages.removeAt(position)
-                        renderPdfEditor(file, pages)
-                    }
-                }
-                true
             }
-            column.addView(row, linearParams().apply { bottomMargin = dp(5) })
+            pageStripRow.addView(pageChip, LinearLayout.LayoutParams(dp(42), dp(42)).apply {
+                marginEnd = dp(6)
+            })
         }
-        column.addView(text("Use the page controls to preview, rotate, reorder or remove pages.", 10, R.color.qp_muted, false)
-            .apply { setPadding(dp(2), dp(8), 0, 0) })
-        content.addView(scroll, frameParams())
+        pageStrip.addView(pageStripRow, android.widget.HorizontalScrollView.LayoutParams(-2, -1))
+        editor.addView(pageStrip, LinearLayout.LayoutParams(-1, dp(56)))
+
+        val actions = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            background = SmartPrintGlass.surface(this@MainActivity, 16, R.color.qp_glass_card)
+            setPadding(dp(5), dp(5), dp(5), dp(5))
+        }
+        actions.addView(iconActionButton(R.drawable.ic_preview, "Preview page ${selectedIndex + 1}").apply {
+            setOnClickListener {
+                try {
+                    val copy = editingPdfPreviewBitmap?.copy(android.graphics.Bitmap.Config.ARGB_8888, false)
+                    if (copy != null) showImageSheet("Page ${selectedIndex + 1}", copy)
+                    else toast("The page preview is still loading.")
+                } catch (e: Exception) {
+                    toast("Preview failed: ${message(e)}")
+                }
+            }
+        }, LinearLayout.LayoutParams(0, dp(46), 1f))
+        actions.addView(iconActionButton(R.drawable.ic_rotate, "Rotate page ${selectedIndex + 1}").apply {
+            setOnClickListener {
+                pages[selectedIndex] = selectedPage.copy(rotationDegrees = (selectedPage.rotationDegrees + 90) % 360)
+                renderPdfEditor(file, pages)
+            }
+        }, LinearLayout.LayoutParams(0, dp(46), 1f).apply { marginStart = dp(3) })
+        actions.addView(iconActionButton(R.drawable.ic_arrow_up, "Move page ${selectedIndex + 1} up").apply {
+            isEnabled = selectedIndex > 0
+            alpha = if (selectedIndex > 0) 1f else 0.4f
+            setOnClickListener {
+                if (selectedIndex > 0) {
+                    val value = pages.removeAt(selectedIndex)
+                    pages.add(selectedIndex - 1, value)
+                    editingPdfPageIndex = selectedIndex - 1
+                    renderPdfEditor(file, pages)
+                }
+            }
+        }, LinearLayout.LayoutParams(0, dp(46), 1f).apply { marginStart = dp(3) })
+        actions.addView(iconActionButton(R.drawable.ic_arrow_down, "Move page ${selectedIndex + 1} down").apply {
+            isEnabled = selectedIndex < pages.lastIndex
+            alpha = if (selectedIndex < pages.lastIndex) 1f else 0.4f
+            setOnClickListener {
+                if (selectedIndex < pages.lastIndex) {
+                    val value = pages.removeAt(selectedIndex)
+                    pages.add(selectedIndex + 1, value)
+                    editingPdfPageIndex = selectedIndex + 1
+                    renderPdfEditor(file, pages)
+                }
+            }
+        }, LinearLayout.LayoutParams(0, dp(46), 1f).apply { marginStart = dp(3) })
+        actions.addView(iconActionButton(R.drawable.ic_delete, "Remove page ${selectedIndex + 1}").apply {
+            setOnClickListener {
+                if (pages.size <= 1) {
+                    toast("A PDF needs one page.")
+                } else {
+                    pages.removeAt(selectedIndex)
+                    editingPdfPageIndex = selectedIndex.coerceAtMost(pages.lastIndex)
+                    renderPdfEditor(file, pages)
+                }
+            }
+        }, LinearLayout.LayoutParams(0, dp(46), 1f).apply { marginStart = dp(3) })
+        actions.addView(iconActionButton(R.drawable.ic_save, "Save edited PDF copy").apply {
+            setOnClickListener { savePdfEdits(file, pages.toList()) }
+        }, LinearLayout.LayoutParams(0, dp(46), 1f).apply { marginStart = dp(3) })
+        editor.addView(actions, LinearLayout.LayoutParams(-1, dp(56)))
+
+        content.addView(editor, frameParams())
+
+        val previewRequest = ++editingPdfPreviewRequest
+        Thread {
+            val rendered = runCatching {
+                DocumentBatchComposer.renderPagePreview(file, selectedPage)
+            }.getOrNull()
+            runOnUiThread {
+                if (previewRequest != editingPdfPreviewRequest || editingPdf != file ||
+                    isFinishing || isDestroyed) {
+                    rendered?.let { if (!it.isRecycled) it.recycle() }
+                    return@runOnUiThread
+                }
+                if (rendered == null) {
+                    previewStatus.text = "Could not render this page."
+                    return@runOnUiThread
+                }
+                editingPdfPreviewBitmap?.let { if (!it.isRecycled) it.recycle() }
+                editingPdfPreviewBitmap = rendered
+                pagePreview.setImageBitmap(rendered)
+                previewStatus.visibility = View.GONE
+            }
+        }.start()
+        pageStrip.post {
+            val selectedView = pageStripRow.getChildAt(selectedIndex)
+            if (selectedView != null) {
+                pageStrip.smoothScrollTo(
+                    (selectedView.left - (pageStrip.width - selectedView.width) / 2).coerceAtLeast(0),
+                    0
+                )
+            }
+        }
+    }
+
+    private fun clearPdfEditorPreview() {
+        editingPdfPreviewRequest++
+        editingPdfPreviewBitmap?.let { if (!it.isRecycled) it.recycle() }
+        editingPdfPreviewBitmap = null
+    }
+
+    private fun closePdfEditor() {
+        clearPdfEditorPreview()
+        editingPdf = null
+        editingPdfPageIndex = 0
+        showFiles()
     }
 
     private fun savePdfEdits(source: File, edits: List<PdfPageEdit>) {
@@ -1722,6 +1811,8 @@ class MainActivity : AppCompatActivity() {
                 runOnUiThread {
                     folderPath = destinationPath
                     editingPdf = null
+                    clearPdfEditorPreview()
+                    editingPdfPageIndex = 0
                     showFiles()
                     toast("Saved ${saved.name} with $pageCount pages. The original PDF is unchanged.")
                 }
