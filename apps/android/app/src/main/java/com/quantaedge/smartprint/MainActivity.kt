@@ -2357,7 +2357,7 @@ class MainActivity : AppCompatActivity() {
         viewingDocument = file
         pickerMode = false
         profileVisible = false
-        toolbar.title = file.name
+        toolbar.title = ""
         toolbar.setNavigationIcon(android.R.drawable.ic_media_previous)
         toolbar.navigationContentDescription = "Back to My Files"
         toolbar.setNavigationOnClickListener { closeDocumentViewer() }
@@ -2395,8 +2395,9 @@ class MainActivity : AppCompatActivity() {
             onNavigateImage = { current -> viewingDocument = current },
             folderBreadcrumbs = breadcrumbs,
             onNavigateFolder = { destination ->
-                folderPath = destination
-                closeDocumentViewer()
+                documentViewer?.dispose()
+                documentViewer = null
+                viewingDocument = null
                 this@MainActivity.folderPath = destination
                 showFiles()
             }
