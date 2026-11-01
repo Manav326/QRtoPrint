@@ -379,7 +379,8 @@ platform.MapPatch("/tenants/{tenantId:guid}/status", async (
             job.Status != "COMPLETED" &&
             job.Status != "REJECTED" &&
             job.Status != "PAYMENT_REJECTED" &&
-            job.Status != "QUOTE_EXPIRED", ct);
+            job.Status != "QUOTE_EXPIRED" &&
+            job.Status != "REFUNDED", ct);
         var pendingPayments = await db.PrintPayments.LongCountAsync(payment =>
             payment.TenantId == tenant.Id &&
             (payment.Status == "AWAITING_CUSTOMER_PAYMENT" ||
@@ -3484,7 +3485,7 @@ agentApi.MapGet("/local-uploads/{jobId:guid}/status", async (
             .Select(item => new { item.Status, item.UpdatedUtc, item.OutputConfirmedUtc })
             .SingleOrDefaultAsync(ct);
         if (job is not null &&
-            (job.Status is "REJECTED" or "PAYMENT_REJECTED" or "QUOTE_EXPIRED") &&
+            (job.Status is "REJECTED" or "PAYMENT_REJECTED" or "QUOTE_EXPIRED" or "REFUNDED") &&
             job.OutputConfirmedUtc == null)
         {
             var hasFinancialHold = await db.PrintPayments.AsNoTracking().AnyAsync(payment =>
