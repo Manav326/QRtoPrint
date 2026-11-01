@@ -84,6 +84,7 @@ class MainActivity : AppCompatActivity() {
     private var folderPath = ""
     private var pickerPath = ""
     private var pickerMode = false
+    private var pendingImportDestinationPath = ""
     private var portalUrl: String? = null
     private var portalHost: String? = null
     private var fileCallback: ValueCallback<Array<Uri>>? = null
@@ -212,9 +213,10 @@ class MainActivity : AppCompatActivity() {
             var ok = 0
             var failed = 0
             uris.forEach { uri ->
-                try { importUri(uri, if (pickerMode) pickerPath else folderPath); ok++ }
+                try { importUri(uri, pendingImportDestinationPath); ok++ }
                 catch (_: Exception) { failed++ }
             }
+            pendingImportDestinationPath = ""
             reportImport(ok, failed)
             refreshLibrary()
         }
@@ -629,6 +631,7 @@ class MainActivity : AppCompatActivity() {
             iconPadding = dp(8)
             iconGravity = MaterialButton.ICON_GRAVITY_TEXT_START
             setOnClickListener {
+                pendingImportDestinationPath = ""
                 importFiles.launch(arrayOf("*/*"))
                 navigation.selectedItemId = FILES
             }
@@ -1011,7 +1014,10 @@ class MainActivity : AppCompatActivity() {
             }
             actions.addView(button("Import files", false).apply {
                 minHeight = dp(38)
-                setOnClickListener { importFiles.launch(arrayOf("application/pdf", "image/jpeg", "image/png")) }
+                setOnClickListener {
+                    pendingImportDestinationPath = if (pickerMode) pickerPath else folderPath
+                    importFiles.launch(arrayOf("application/pdf", "image/jpeg", "image/png"))
+                }
             }, LinearLayout.LayoutParams(0, dp(38), 1f))
             actions.addView(button("Import folder", false).apply {
                 minHeight = dp(38)
@@ -1429,10 +1435,13 @@ class MainActivity : AppCompatActivity() {
 
         pages.forEachIndexed { position, page ->
             val row = LinearLayout(this).apply {
-                orientation = LinearLayout.HORIZONTAL
-                gravity = Gravity.CENTER_VERTICAL
+                orientation = LinearLayout.VERTICAL
                 setPadding(dp(9), dp(8), dp(7), dp(8))
                 background = roundedDrawable(getColor(R.color.qp_card), dp(11), getColor(R.color.qp_outline))
+            }
+            val pageHeader = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
             }
             val pageMark = TextView(this).apply {
                 text = (position + 1).toString()
@@ -1442,10 +1451,9 @@ class MainActivity : AppCompatActivity() {
                 setTextColor(getColor(R.color.qp_primary))
                 background = roundedDrawable(getColor(R.color.qp_soft), dp(9))
             }
-            row.addView(pageMark, LinearLayout.LayoutParams(dp(36), dp(40)))
+            pageHeader.addView(pageMark, LinearLayout.LayoutParams(dp(36), dp(40)))
             val meta = LinearLayout(this).apply {
                 orientation = LinearLayout.VERTICAL
-                minimumWidth = dp(64)
                 setPadding(dp(10), 0, dp(6), 0)
             }
             meta.addView(text("Page ${position + 1}", 12, R.color.qp_text, true))
@@ -1453,11 +1461,19 @@ class MainActivity : AppCompatActivity() {
                 if (page.rotationDegrees == 0) "Original" else "${page.rotationDegrees}°",
                 10, R.color.qp_muted, false
             ).apply { setPadding(0, dp(2), 0, 0) })
-            row.addView(meta, LinearLayout.LayoutParams(-2, -2))
-            val actions = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+            pageHeader.addView(meta, LinearLayout.LayoutParams(0, -2, 1f))
+            row.addView(pageHeader, linearParams())
+
+            // Keep every page action on its own full-width row. A horizontal
+            // action strip below the metadata avoids clipping the final action
+            // on narrow phones while preserving generous touch targets.
+            val actions = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+            }
             actions.addView(button("View", false).apply {
-                minHeight = dp(34)
-                minWidth = dp(44)
+                minHeight = dp(42)
+                minWidth = dp(0)
                 contentDescription = "Preview page ${position + 1}"
                 setOnClickListener {
                     try {
@@ -1466,19 +1482,19 @@ class MainActivity : AppCompatActivity() {
                         toast("Preview failed: ${message(e)}")
                     }
                 }
-            })
+            }, LinearLayout.LayoutParams(0, dp(42), 1f))
             actions.addView(button("↻", false).apply {
-                minHeight = dp(34)
-                minWidth = dp(38)
+                minHeight = dp(42)
+                minWidth = dp(0)
                 contentDescription = "Rotate page ${position + 1}"
                 setOnClickListener {
                     pages[position] = page.copy(rotationDegrees = (page.rotationDegrees + 90) % 360)
                     renderPdfEditor(file, pages)
                 }
-            }, LinearLayout.LayoutParams(-2, dp(34)).apply { marginStart = dp(4) })
+            }, LinearLayout.LayoutParams(0, dp(42), 1f).apply { marginStart = dp(4) })
             actions.addView(button("↑", false).apply {
-                minHeight = dp(34)
-                minWidth = dp(34)
+                minHeight = dp(42)
+                minWidth = dp(0)
                 contentDescription = "Move page ${position + 1} up"
                 isEnabled = position > 0
                 alpha = if (position > 0) 1f else 0.4f
@@ -1489,10 +1505,10 @@ class MainActivity : AppCompatActivity() {
                         renderPdfEditor(file, pages)
                     }
                 }
-            }, LinearLayout.LayoutParams(-2, dp(34)).apply { marginStart = dp(4) })
+            }, LinearLayout.LayoutParams(0, dp(42), 1f).apply { marginStart = dp(4) })
             actions.addView(button("↓", false).apply {
-                minHeight = dp(34)
-                minWidth = dp(34)
+                minHeight = dp(42)
+                minWidth = dp(0)
                 contentDescription = "Move page ${position + 1} down"
                 isEnabled = position < pages.lastIndex
                 alpha = if (position < pages.lastIndex) 1f else 0.4f
@@ -1503,10 +1519,10 @@ class MainActivity : AppCompatActivity() {
                         renderPdfEditor(file, pages)
                     }
                 }
-            }, LinearLayout.LayoutParams(-2, dp(34)).apply { marginStart = dp(4) })
+            }, LinearLayout.LayoutParams(0, dp(42), 1f).apply { marginStart = dp(4) })
             actions.addView(button("×", false).apply {
-                minHeight = dp(34)
-                minWidth = dp(34)
+                minHeight = dp(42)
+                minWidth = dp(0)
                 contentDescription = "Remove page ${position + 1}"
                 setOnClickListener {
                     if (pages.size <= 1) {
@@ -1516,8 +1532,8 @@ class MainActivity : AppCompatActivity() {
                         renderPdfEditor(file, pages)
                     }
                 }
-            }, LinearLayout.LayoutParams(-2, dp(34)).apply { marginStart = dp(4) })
-            row.addView(actions)
+            }, LinearLayout.LayoutParams(0, dp(42), 1f).apply { marginStart = dp(4) })
+            row.addView(actions, LinearLayout.LayoutParams(-1, dp(42)).apply { topMargin = dp(8) })
             row.setOnLongClickListener {
                 showConfirmSheet("Remove page?", "The original stays unchanged.", "Remove", destructive = true) {
                     if (pages.size <= 1) {
