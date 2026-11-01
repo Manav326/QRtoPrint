@@ -39,3 +39,41 @@ export type AuthScope = "admin" | "shop";
 export function authStorageKey(scope: AuthScope): string {
   return `qrtoprint.auth.${scope}`;
 }
+
+
+export type ShopSection =
+  | "Overview"
+  | "Print Queue"
+  | "Printers"
+  | "QR Stations"
+  | "Print Agent"
+  | "Pricing"
+  | "Subscription"
+  | "Payments"
+  | "Customers"
+  | "Reports"
+  | "Settings";
+
+const shopSectionPaths: Record<ShopSection, string> = {
+  "Overview": "/shop",
+  "Print Queue": "/shop/queue",
+  "Printers": "/shop/printers",
+  "QR Stations": "/shop/qr-stations",
+  "Print Agent": "/shop/print-agent",
+  "Pricing": "/shop/pricing",
+  "Subscription": "/shop/subscription",
+  "Payments": "/shop/payments",
+  "Customers": "/shop/customers",
+  "Reports": "/shop/reports",
+  "Settings": "/shop/settings"
+};
+
+export function shopSectionFromPath(pathname: string): ShopSection {
+  const path = normalizePath(pathname);
+  const match = Object.entries(shopSectionPaths).find(([, sectionPath]) => sectionPath === path);
+  return match?.[0] as ShopSection | undefined ?? "Overview";
+}
+
+export function shopPathForSection(section: ShopSection): string {
+  return shopSectionPaths[section];
+}
