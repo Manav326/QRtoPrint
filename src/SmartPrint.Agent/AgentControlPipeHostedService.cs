@@ -58,6 +58,7 @@ public sealed class AgentControlPipeHostedService(
     }
 
     private const uint PipeAccessDuplex = 0x00000003;
+    private const uint PipeFirstInstance = 0x00080000;
     private const uint FileFlagOverlapped = 0x40000000;
     private const uint PipeRejectRemoteClients = 0x00000008;
 
@@ -114,7 +115,7 @@ public sealed class AgentControlPipeHostedService(
 
             var handle = CreateNamedPipeNative(
                 PipePath,
-                PipeAccessDuplex | FileFlagOverlapped,
+                PipeAccessDuplex | PipeFirstInstance | FileFlagOverlapped,
                 PipeRejectRemoteClients,
                 maxInstances: 1,
                 outBufferSize: 4096,
