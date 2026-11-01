@@ -1064,7 +1064,7 @@ class MainActivity : AppCompatActivity() {
             setPadding(dp(8 + depth * 15), dp(7), dp(5), dp(7))
             minimumHeight = dp(52)
             background = roundedDrawable(
-                if (file.isDirectory) getColor(R.color.qp_soft) else getColor(R.color.qp_surface),
+                if (file.isDirectory && expandedFolderPaths.contains(file.canonicalPath)) getColor(R.color.qp_soft) else getColor(R.color.qp_surface),
                 dp(9)
             )
         }
