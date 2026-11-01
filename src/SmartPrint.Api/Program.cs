@@ -1197,6 +1197,29 @@ shop.MapPatch("/printers/{printerId:guid}/active", async (
         return Results.NotFound();
     }
 
+    if (!isActive)
+    {
+        var activeJobNumber = await db.PrintJobs.AsNoTracking()
+            .Where(job => job.TenantId == tenantId &&
+                          job.PrinterDeviceId == printerId &&
+                          (job.Status == "LOCAL_QUEUE_CLAIMED" ||
+                           job.Status == "PRINT_SUBMITTING" ||
+                           job.Status == "SPOOLER_ACCEPTED" ||
+                           job.Status == "PRINTING"))
+            .OrderByDescending(job => job.CreatedUtc)
+            .Select(job => job.JobNumber)
+            .FirstOrDefaultAsync(ct);
+
+        if (!string.IsNullOrWhiteSpace(activeJobNumber))
+        {
+            return Results.Conflict(new
+            {
+                code = "printer_has_active_output",
+                message = $"Printer cannot be disabled while job {activeJobNumber} is active in the Windows Agent or spooler. Resolve that same job first; disabling it does not cancel Windows output."
+            });
+        }
+    }
+
     printer.IsActive = isActive;
     printer.UpdatedUtc = DateTimeOffset.UtcNow;
     await db.SaveChangesAsync(ct);
@@ -1674,6 +1697,8 @@ shop.MapGet("/customers/{customerId:guid}/jobs", async (
 shop.MapGet("/print-jobs", async (
     ClaimsPrincipal principal,
     SmartPrintDbContext db,
+    int? offset,
+    int? take,
     CancellationToken ct) =>
 {
     if (!TryGetTenantId(principal, out var tenantId))
@@ -1681,12 +1706,14 @@ shop.MapGet("/print-jobs", async (
         return Results.Forbid();
     }
 
+    var boundedOffset = Math.Clamp(offset ?? 0, 0, 1_000_000);
+    var boundedTake = Math.Clamp(take ?? 100, 1, 100);
     var jobs = await (
         from job in db.PrintJobs.AsNoTracking()
         join document in db.PrintDocuments.AsNoTracking()
             on new { job.TenantId, PrintJobId = job.Id } equals new { document.TenantId, document.PrintJobId }
         where job.TenantId == tenantId
-        orderby job.CreatedUtc descending
+        orderby job.CreatedUtc descending, job.Id descending
         select new
         {
             job.Id,
@@ -1752,7 +1779,8 @@ shop.MapGet("/print-jobs", async (
                 document.SizeBytes
             }
         })
-        .Take(100)
+        .Skip(boundedOffset)
+        .Take(boundedTake)
         .ToListAsync(ct);
     return Results.Ok(jobs);
 });
