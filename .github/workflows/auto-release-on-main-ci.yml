@@ -101,7 +101,7 @@ jobs:
             }
 
             const parseVersion = (name) => {
-              const match = /^v(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)$/.exec(name);
+              const match = /^v(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/.exec(name);
               return match
                 ? { name, major: Number(match[1]), minor: Number(match[2]), patch: Number(match[3]) }
                 : null;
@@ -161,7 +161,7 @@ jobs:
                 return;
               }
               const source = Buffer.from(sourceFile.content, sourceFile.encoding).toString("utf8");
-              const match = /val smartPrintVersionName = providers\\.gradleProperty\\("smartPrintVersionName"\\)\\.orElse\\("([0-9]+\\.[0-9]+\\.[0-9]+)"\\)\\.get\\(\\)/.exec(source);
+              const match = /val smartPrintVersionName = providers\.gradleProperty\("smartPrintVersionName"\)\.orElse\("([0-9]+\.[0-9]+\.[0-9]+)"\)\.get\(\)/.exec(source);
               if (!match) {
                 core.setFailed("Could not derive a stable X.Y.Z version from smartPrintVersionName in apps/android/app/build.gradle.kts.");
                 return;
