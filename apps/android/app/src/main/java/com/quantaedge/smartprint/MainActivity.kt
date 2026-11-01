@@ -1394,6 +1394,7 @@ class MainActivity : AppCompatActivity() {
                 setImageResource(R.drawable.ic_more_vertical)
                 imageTintList = ColorStateList.valueOf(getColor(R.color.qp_muted))
                 contentDescription = "More options for " + file.name
+                tooltipText = contentDescription
                 setPadding(dp(8), dp(8), dp(8), dp(8))
                 isClickable = true
                 isFocusable = true
@@ -1861,6 +1862,7 @@ class MainActivity : AppCompatActivity() {
             setImageResource(iconResource)
             imageTintList = ColorStateList.valueOf(getColor(R.color.qp_text))
             contentDescription = description
+            tooltipText = description
             scaleType = ImageView.ScaleType.CENTER
             setPadding(dp(9), dp(9), dp(9), dp(9))
             background = roundedDrawable(
