@@ -2897,6 +2897,7 @@ shop.MapPost("/print-jobs/{jobId:guid}/refund", async (
     }
 
     var now = DateTimeOffset.UtcNow;
+    var previousJobStatus = job.Status;
     var fullyRefunded = cumulative >= payment!.AmountMinor || rejected.Length == job.PageCount;
     var refund = new PrintRefund { TenantId = tenantId, PrintJobId = job.Id, PrintPaymentId = payment.Id, IdempotencyKey = key!,
         AmountMinor = additional, Currency = payment.Currency, Method = method!, Status = "RECORDED_AS_SENT",
@@ -2910,7 +2911,7 @@ shop.MapPost("/print-jobs/{jobId:guid}/refund", async (
     payment.Status = fullyRefunded ? "REFUNDED" : "PARTIALLY_REFUNDED";
     payment.UpdatedUtc = now;
     db.PrintRefunds.Add(refund);
-    db.PrintJobEvents.Add(new PrintJobEvent { TenantId = tenantId, PrintJobId = job.Id, PreviousStatus = "PAID_AUTHORISED",
+    db.PrintJobEvents.Add(new PrintJobEvent { TenantId = tenantId, PrintJobId = job.Id, PreviousStatus = previousJobStatus,
         NewStatus = job.Status, ActorType = "ShopUser", ActorId = actorId,
         ReasonCode = fullyRefunded ? "SHOP_FILE_FULLY_REFUNDED" : "SHOP_PAGES_REJECTED_PARTIAL_REFUND_RECORDED", CreatedUtc = now });
 
