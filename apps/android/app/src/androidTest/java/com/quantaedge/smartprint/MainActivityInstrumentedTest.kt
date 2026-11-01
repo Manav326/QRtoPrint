@@ -25,6 +25,47 @@ import org.junit.Assert.assertEquals
 @RunWith(AndroidJUnit4::class)
 class MainActivityInstrumentedTest {
     @Test
+    fun appearanceDefaultsToLightAndPersistsAcrossSignOutAndActivityRestart() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        context.getSharedPreferences(
+            SmartPrintThemePreference.PREFERENCES_NAME,
+            Context.MODE_PRIVATE
+        ).edit().clear().commit()
+        SmartPrintThemePreference.apply(context)
+        assertEquals(SmartPrintTheme.LIGHT, SmartPrintThemePreference.read(context))
+
+        try {
+            ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+                scenario.onActivity { activity ->
+                    val nightMode = activity.resources.configuration.uiMode and
+                        android.content.res.Configuration.UI_MODE_NIGHT_MASK
+                    assertEquals(android.content.res.Configuration.UI_MODE_NIGHT_NO, nightMode)
+                }
+                onView(withContentDescription("Account")).perform(click())
+                onView(withText("Appearance")).check(matches(isDisplayed()))
+                onView(withText("Light theme")).check(matches(isDisplayed()))
+                onView(withText("Dark theme")).perform(click())
+            }
+
+            assertEquals(SmartPrintTheme.DARK, SmartPrintThemePreference.read(context))
+            // The app's customer sign-out clears authentication only, not UI preferences.
+            CustomerAccountStore(context).clear()
+            assertEquals(SmartPrintTheme.DARK, SmartPrintThemePreference.read(context))
+
+            ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+                scenario.onActivity { activity ->
+                    val nightMode = activity.resources.configuration.uiMode and
+                        android.content.res.Configuration.UI_MODE_NIGHT_MASK
+                    assertEquals(android.content.res.Configuration.UI_MODE_NIGHT_YES, nightMode)
+                }
+            }
+        } finally {
+            SmartPrintThemePreference.save(context, SmartPrintTheme.LIGHT)
+        }
+    }
+
+
+    @Test
     fun rendersCompactSmartPrintHomeAndFourDestinations() {
         ActivityScenario.launch(MainActivity::class.java).use {
             onView(withText("Your space")).check(matches(isDisplayed()))
