@@ -2020,26 +2020,32 @@ class MainActivity : AppCompatActivity() {
         strokeWidth = dp(1)
         strokeColor = getColor(R.color.qp_outline)
         setCardBackgroundColor(getColor(R.color.qp_card))
+        useCompatPadding = false
     }
     private fun text(value: String, size: Int, color: Int, bold: Boolean) = TextView(this).apply {
         text = value
-        textSize = maxOf(size, 12).toFloat()
+        textSize = maxOf(size, 11).toFloat()
         setTextColor(getColor(color))
         if (bold) setTypeface(typeface, android.graphics.Typeface.BOLD)
+        includeFontPadding = false
     }
     private fun button(value: String, primary: Boolean) = MaterialButton(this).apply {
         text = value
         isAllCaps = false
-        minHeight = dp(48)
-        minWidth = dp(48)
+        minHeight = dp(42)
+        minWidth = dp(0)
+        insetTop = 0
+        insetBottom = 0
         cornerRadius = dp(12)
+        setPadding(dp(12), dp(7), dp(12), dp(7))
+        textSize = 13f
         if (primary) {
-            backgroundTintList = android.content.res.ColorStateList.valueOf(getColor(R.color.qp_primary))
+            backgroundTintList = ColorStateList.valueOf(getColor(R.color.qp_primary))
             setTextColor(getColor(android.R.color.white))
         } else {
             strokeWidth = dp(1)
-            strokeColor = android.content.res.ColorStateList.valueOf(getColor(R.color.qp_outline))
-            backgroundTintList = android.content.res.ColorStateList.valueOf(getColor(R.color.qp_card))
+            strokeColor = ColorStateList.valueOf(getColor(R.color.qp_outline))
+            backgroundTintList = ColorStateList.valueOf(getColor(R.color.qp_card))
             setTextColor(getColor(R.color.qp_text))
         }
     }
