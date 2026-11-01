@@ -52,8 +52,8 @@ if ([string]::IsNullOrWhiteSpace($destinationParent)) {
 }
 New-Item -ItemType Directory -Force -Path $destinationParent | Out-Null
 
-$stageDirectory = Join-Path $destinationParent ('.qrtoprint-android-stage-' + [Guid]::NewGuid().ToString('N'))
-$candidateRoot = Join-Path $destinationParent ('.qrtoprint-android-candidates-' + [Guid]::NewGuid().ToString('N'))
+$stageDirectory = Join-Path $destinationParent ('.smartprint-android-stage-' + [Guid]::NewGuid().ToString('N'))
+$candidateRoot = Join-Path $destinationParent ('.smartprint-android-candidates-' + [Guid]::NewGuid().ToString('N'))
 $stagedApk = Join-Path $stageDirectory 'app-debug.apk'
 $oldApkPath = $null
 $oldMoved = $false
