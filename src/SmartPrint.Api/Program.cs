@@ -2715,15 +2715,20 @@ agentApi.MapPost("/enroll", async (
     }
 
     var fingerprintHash = HashOpaqueToken(request.Fingerprint);
+
+    // Serialize enrollments for the same physical Windows identity across tenants.
+    // This prevents two shops from claiming the same PC during concurrent activation.
+    await db.Database.ExecuteSqlInterpolatedAsync(
+        $"SELECT pg_advisory_xact_lock(hashtextextended({fingerprintHash}, 0))", ct);
+
     if (await db.AgentDevices.AnyAsync(
-        device => device.TenantId == enrollment.TenantId &&
-                  device.FingerprintHash == fingerprintHash && device.RevokedUtc == null, ct))
+        device => device.FingerprintHash == fingerprintHash && device.RevokedUtc == null, ct))
     {
         await transaction.RollbackAsync(ct);
         return Results.Conflict(new
         {
             code = "agent_already_enrolled",
-            message = "This Windows computer is already paired with this shop. Revoke the previous pairing before enrolling it again."
+            message = "This computer is still paired with an active SmartPrint shop. Ask the owner of that shop to revoke its pairing before reconnecting it."
         });
     }
 

@@ -260,7 +260,11 @@ function ShopConsole({ tokens, onSignOut }: { tokens: AuthTokens; onSignOut: () 
     }
   }
 
-  async function connectLocalComputer(silent = false, knownAgents: AgentDevice[] = agentDevices) {
+  async function connectLocalComputer(
+    silent = false,
+    knownAgents: AgentDevice[] = agentDevices,
+    allowPreviousShopReconnection = false
+  ) {
     if (!silent) {
       setAgentBusy(true);
       setError("");
@@ -281,11 +285,21 @@ function ShopConsole({ tokens, onSignOut }: { tokens: AuthTokens; onSignOut: () 
         );
         if (!currentShopDevice) {
           setLocalAgentConflict(true);
-          if (!silent) setError("This computer is already connected to a different shop. Revoke it from the previous shop's Print Agent page before moving it. SmartPrint will not transfer it automatically.");
+          if (!allowPreviousShopReconnection) {
+            if (!silent) setError("This computer is still paired with another shop. Its owner must revoke it before you can connect it here.");
+            return;
+          }
+
+          const confirmed = await confirmInApp(
+            "Continue only after the previous shop owner has revoked this computer from that shop's Print Agent page. SmartPrint will verify the revocation with the server before changing this computer's connection.",
+            "Reconnect this computer?",
+            "Check and reconnect"
+          );
+          if (!confirmed) return;
+        } else {
+          setToast("This computer is already connected to your shop.");
           return;
         }
-        setToast("This computer is already connected to your shop.");
-        return;
       }
 
       const authorization = await createAgentEnrollmentCode(tokens.accessToken);
@@ -313,8 +327,13 @@ function ShopConsole({ tokens, onSignOut }: { tokens: AuthTokens; onSignOut: () 
       setToast("This computer is securely connected. SmartPrint is discovering its printers.");
       if (!silent) await reload();
     } catch (exception) {
-      const message = exception instanceof Error ? exception.message : "Could not connect this computer to the shop.";
-      setError(message);
+      if (exception instanceof ApiError && exception.status === 401) {
+        storeTokens(null);
+        onSignOut();
+      } else {
+        const message = exception instanceof Error ? exception.message : "Could not connect this computer to the shop.";
+        setError(message);
+      }
     } finally {
       if (!silent) setAgentBusy(false);
     }
@@ -664,7 +683,7 @@ function ShopConsole({ tokens, onSignOut }: { tokens: AuthTokens; onSignOut: () 
           {active === "Overview" && <Overview profile={profile} printers={printers} stations={stations} printJobs={printJobs} pricing={pricing} onNavigate={navAction}/>}
           {active === "Printers" && <PrintersPage printers={printers} onAdd={() => setModal("printer")} onToggle={togglePrinter}/>}
           {active === "QR Stations" && <StationsPage stations={stations} profile={profile} onAdd={() => setModal("station")} onToggle={toggleStation} onGenerate={createFreshStationCode}/>}
-          {active === "Print Agent" && <PrintAgentPage agents={agentDevices} enrollmentCode={enrollmentCode} busy={agentBusy} onGenerate={generateAgentCode} onRevoke={revokeAgent} desktop={isDesktopApp()} localAgentStatus={localAgentStatus} localAgentConflict={localAgentConflict} onConnect={()=>void connectLocalComputer()}/>}
+          {active === "Print Agent" && <PrintAgentPage agents={agentDevices} enrollmentCode={enrollmentCode} busy={agentBusy} onGenerate={generateAgentCode} onRevoke={revokeAgent} desktop={isDesktopApp()} localAgentStatus={localAgentStatus} localAgentConflict={localAgentConflict} onConnect={()=>void connectLocalComputer()} onReconnectAfterRevocation={()=>void connectLocalComputer(false,agentDevices,true)}/>}
           {active === "Pricing" && pricing && <PricingPage pricing={pricing} onSave={savePricing} busy={busy}/>}
           {active === "Subscription" && subscription && <SubscriptionPage summary={subscription}/>}
           {active === "Payments" && paymentSettings && <PaymentsPage settings={paymentSettings} payments={payments} refunds={refunds} onSave={savePaymentSettings} onVerify={verifyPayment} onReject={rejectPayment} busy={busy} busyJobId={busyJobId}/>}
@@ -1042,7 +1061,7 @@ function StationsPage({ stations, profile, onAdd, onToggle, onGenerate }: {
 
 
 
-function PrintAgentPage({agents,enrollmentCode,busy,onGenerate,onRevoke,desktop,localAgentStatus,localAgentConflict,onConnect}:{
+function PrintAgentPage({agents,enrollmentCode,busy,onGenerate,onRevoke,desktop,localAgentStatus,localAgentConflict,onConnect,onReconnectAfterRevocation}:{
   agents:AgentDevice[];
   enrollmentCode:{code:string;expiresUtc:string}|null;
   busy:boolean;
@@ -1052,6 +1071,7 @@ function PrintAgentPage({agents,enrollmentCode,busy,onGenerate,onRevoke,desktop,
   localAgentStatus:DesktopAgentStatus|null;
   localAgentConflict:boolean;
   onConnect:()=>void;
+  onReconnectAfterRevocation:()=>void;
 }) {
   const connected = Boolean(localAgentStatus?.paired && agents.some(agent =>
     !agent.revokedUtc && agent.id === localAgentStatus.agentDeviceId
@@ -1070,9 +1090,15 @@ function PrintAgentPage({agents,enrollmentCode,busy,onGenerate,onRevoke,desktop,
           </div>
         </div>
         <div className="desktop-agent-actions">
-          <button className="primary-button" disabled={busy || connected || localAgentConflict || Boolean(localAgentStatus?.paired)} onClick={onConnect}>
-            {busy ? <span className="button-spinner"/> : <><Monitor size={15}/>{localAgentStatus?.serviceReachable ? "Connect this computer" : "Retry connection"}</>}
-          </button>
+          {localAgentConflict ? (
+            <button className="primary-button" disabled={busy} onClick={onReconnectAfterRevocation}>
+              {busy ? <span className="button-spinner"/> : <><RotateCcw size={15}/> I’ve had the previous shop revoke this computer</>}
+            </button>
+          ) : (
+            <button className="primary-button" disabled={busy || connected || Boolean(localAgentStatus?.paired)} onClick={onConnect}>
+              {busy ? <span className="button-spinner"/> : <><Monitor size={15}/>{localAgentStatus?.serviceReachable ? "Connect this computer" : "Retry connection"}</>}
+            </button>
+          )}
           <span>Your shop data remains protected by your account and this computer's Windows security.</span>
         </div>
       </div> : <>

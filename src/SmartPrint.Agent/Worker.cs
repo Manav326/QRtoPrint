@@ -101,9 +101,19 @@ public sealed class Worker(
                     },
                     stoppingToken);
 
-                if (heartbeat.StatusCode == HttpStatusCode.Unauthorized || heartbeat.StatusCode == HttpStatusCode.Forbidden)
+                if (heartbeat.StatusCode == HttpStatusCode.Unauthorized)
                 {
-                    logger.LogError("The shop revoked this agent identity. Re-pairing is required before the agent can sync.");
+                    // An invalid/revoked device secret cannot be reused. Removing the
+                    // local DPAPI identity allows the owner to start a fresh enrollment;
+                    // the API still decides whether the previous shop actually revoked it.
+                    credentialStore.Delete();
+                    logger.LogError("The shop no longer accepts this Agent identity. Local credentials were cleared; connect this computer again from the desktop app after the shop owner authorises it.");
+                }
+                else if (heartbeat.StatusCode == HttpStatusCode.Forbidden)
+                {
+                    // A forbidden response may also mean the shop is suspended. Keep
+                    // the identity so this cannot become an accidental cross-shop move.
+                    logger.LogWarning("The current shop does not permit this Agent to sync. The saved device identity was retained.");
                 }
                 else if (heartbeat.IsSuccessStatusCode)
                 {

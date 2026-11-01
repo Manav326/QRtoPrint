@@ -31,3 +31,17 @@ body[data-app-shell="desktop"] .auth-layout { width: min(1180px,calc(100% - 72px
   body[data-app-shell="desktop"] .content-wrap { padding-top: 22px; }
   body[data-app-shell="desktop"] .page-heading { margin-bottom: 18px; }
 }
+
+body[data-app-shell="desktop"] .desktop-agent-connect { display: grid; gap: 22px; }
+body[data-app-shell="desktop"] .desktop-agent-connect .agent-intro p { max-width: 720px; font-size: 13px; }
+body[data-app-shell="desktop"] .desktop-agent-connect .agent-intro h2 { font-size: 20px; }
+body[data-app-shell="desktop"] .desktop-agent-status { display: flex; align-items: flex-start; gap: 13px; padding: 17px 18px; border: 1px solid var(--border); border-radius: 13px; background: var(--surface-2); }
+body[data-app-shell="desktop"] .desktop-agent-indicator { flex: 0 0 10px; width: 10px; height: 10px; margin-top: 5px; border-radius: 50%; background: var(--amber); box-shadow: 0 0 0 4px color-mix(in srgb, var(--amber) 14%, transparent); }
+body[data-app-shell="desktop"] .desktop-agent-indicator.connected { background: var(--green); box-shadow: 0 0 0 4px color-mix(in srgb, var(--green) 14%, transparent); }
+body[data-app-shell="desktop"] .desktop-agent-indicator.conflict { background: var(--red); box-shadow: 0 0 0 4px color-mix(in srgb, var(--red) 14%, transparent); }
+body[data-app-shell="desktop"] .desktop-agent-status strong { display: block; color: var(--text); font: 700 14px Manrope, sans-serif; margin-bottom: 5px; }
+body[data-app-shell="desktop"] .desktop-agent-status small { display: block; max-width: 700px; color: var(--muted); font-size: 12px; line-height: 1.55; }
+body[data-app-shell="desktop"] .desktop-agent-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 14px; }
+body[data-app-shell="desktop"] .desktop-agent-actions > span { color: var(--muted); font-size: 12px; }
+body[data-app-shell="desktop"] .desktop-agent-actions .primary-button { min-height: 42px; padding-inline: 17px; }
+body[data-app-shell="desktop"] .desktop-agent-actions .primary-button:disabled { opacity: .58; cursor: not-allowed; }

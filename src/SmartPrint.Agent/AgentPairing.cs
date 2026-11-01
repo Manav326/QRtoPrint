@@ -68,8 +68,20 @@ public static class AgentPairing
         using var response = await client.PostAsJsonAsync("api/v1/agent/enroll", request, cancellationToken);
         if (!response.IsSuccessStatusCode)
         {
-            var message = await response.Content.ReadAsStringAsync(cancellationToken);
-            throw new InvalidOperationException($"Pairing failed ({(int)response.StatusCode}): {message}");
+            var responseBody = await response.Content.ReadAsStringAsync(cancellationToken);
+            if (response.StatusCode == System.Net.HttpStatusCode.Conflict &&
+                responseBody.Contains("\"agent_already_enrolled\"", StringComparison.Ordinal))
+            {
+                throw new InvalidOperationException(
+                    "This computer is still paired with an active SmartPrint shop. Ask the owner of that shop to revoke its pairing before reconnecting it.");
+            }
+
+            throw new InvalidOperationException(response.StatusCode switch
+            {
+                System.Net.HttpStatusCode.Unauthorized => "The one-time computer authorization expired or was already used. Please try again.",
+                System.Net.HttpStatusCode.Forbidden => "Your shop account is not permitted to connect another computer.",
+                _ => $"Computer enrollment failed with HTTP {(int)response.StatusCode}. Please try again."
+            });
         }
 
         var enrolled = await response.Content.ReadFromJsonAsync<AgentEnrollmentResponse>(cancellationToken: cancellationToken)

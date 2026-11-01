@@ -25,7 +25,7 @@ The installer places the desktop executable in the SmartPrint application folder
 
 The one-time authorization is never rendered in the UI, put in a command line, or written to logs. The named pipe grants access to authenticated Windows users and the service identities; possession of the authorization alone is short-lived and single-use. The API remains responsible for verifying the shop owner's permissions and assigning the device to the authenticated tenant.
 
-A computer already paired to another shop is not silently re-assigned. Revoke the old device in its previous shop before connecting it to a different shop. This avoids transferring a machine while its previous owner still considers it active.
+A computer can have only one active SmartPrint shop pairing across the platform. If it is already connected to another shop, the desktop offers a separate **Connect after revocation** action. The previous shop owner must first revoke the device from that shop's Print Agent page; the API checks this server-side under a per-machine transaction lock, and refuses the new enrollment while any old active record remains. After revocation, the new owner can retry and the Agent replaces its old DPAPI identity only after the API accepts the fresh, single-use authorization. A normal startup never transfers a machine automatically.
 
 ## Local session and device secrets
 

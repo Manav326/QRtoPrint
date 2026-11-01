@@ -46,6 +46,9 @@ public sealed class PostgresMigrationUpgradeTests
         Assert.Contains(
             "202611010003_AddPlatformOperationalSettings",
             await db.Database.GetAppliedMigrationsAsync());
+        Assert.Contains(
+            "202611010004_ActiveAgentFingerprints",
+            await db.Database.GetAppliedMigrationsAsync());
 
         // Reproduce the local-upload completion transaction at the exact monthly quota boundary.
         settings.TrialMaxMonthlyPrintJobs = 1;
@@ -62,6 +65,14 @@ public sealed class PostgresMigrationUpgradeTests
             DeviceName = "Quota test Agent",
             FingerprintHash = new string('a', 64),
             SecretHash = new string('b', 64)
+        };
+        var revokedAgent = new AgentDevice
+        {
+            TenantId = tenant.Id,
+            DeviceName = "Previously revoked Agent",
+            FingerprintHash = new string('a', 64),
+            SecretHash = new string('c', 64),
+            RevokedUtc = now
         };
         var printer = new PrinterDevice
         {
@@ -114,7 +125,9 @@ public sealed class PostgresMigrationUpgradeTests
             ExpiresUtc = now.AddMinutes(15)
         };
 
-        db.AddRange(tenant, agent, printer, station, session, subscription, ticket);
+        // A revoked machine identity can be re-enrolled, while the active record
+        // for that same fingerprint remains unique within this tenant.
+        db.AddRange(tenant, agent, revokedAgent, printer, station, session, subscription, ticket);
         await db.SaveChangesAsync();
 
         var entitlements = new TenantEntitlementService(db);

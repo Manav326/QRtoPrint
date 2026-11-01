@@ -34,6 +34,20 @@ public sealed class AgentCredentialStore
         }
     }
 
+    public void Delete()
+    {
+        if (File.Exists(identityPath))
+        {
+            File.Delete(identityPath);
+        }
+
+        var temporaryPath = identityPath + ".tmp";
+        if (File.Exists(temporaryPath))
+        {
+            File.Delete(temporaryPath);
+        }
+    }
+
     public void Save(AgentCredentials credentials)
     {
         ArgumentNullException.ThrowIfNull(credentials);
