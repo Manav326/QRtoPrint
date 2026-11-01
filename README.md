@@ -159,6 +159,7 @@ Inspect the deployment with docker compose --env-file .env -f compose.yml ps and
 - [Premium design system](docs/DESIGN_SYSTEM.md)
 - [Security and operations](docs/SECURITY_AND_OPERATIONS.md)
 - [Delivery roadmap and acceptance criteria](docs/ROADMAP.md)
+- [Public website and download launch checklist](docs/PUBLIC_LAUNCH_CHECKLIST.md)
 
 ## Delivery principles
 
