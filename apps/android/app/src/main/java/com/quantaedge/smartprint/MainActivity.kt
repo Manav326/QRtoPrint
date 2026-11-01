@@ -582,48 +582,6 @@ class MainActivity : AppCompatActivity() {
         hero.addView(heroContent)
         column.addView(hero, linearParams())
 
-        if (!isPicker) {
-            val usedBytes = store.storageUsageBytes()
-            val freeBytes = filesDir.usableSpace
-            val storage = card()
-            val storageContent = LinearLayout(this).apply {
-                orientation = LinearLayout.VERTICAL
-                setPadding(dp(14), dp(11), dp(14), dp(11))
-            }
-            storageContent.addView(text(
-                "On-device storage · ${android.text.format.Formatter.formatFileSize(this, usedBytes)} used",
-                13, R.color.qp_text, true
-            ))
-            storageContent.addView(text(
-                "${android.text.format.Formatter.formatFileSize(this, freeBytes)} free on this device. Documents remain in private app storage until you export or delete them.",
-                11, R.color.qp_muted, false
-            ).apply { setPadding(0, dp(4), 0, 0) })
-            storage.addView(storageContent)
-            column.addView(storage, linearParams().apply { topMargin = dp(10) })
-
-            val searchRow = LinearLayout(this).apply {
-                orientation = LinearLayout.HORIZONTAL
-                gravity = Gravity.CENTER_VERTICAL
-            }
-            val search = EditText(this).apply {
-                hint = "Search this folder"
-                maxLines = 1
-                setSingleLine(true)
-                setText(librarySearchQuery)
-            }
-            searchRow.addView(search, LinearLayout.LayoutParams(0, dp(48), 1f))
-            searchRow.addView(button("Search", false).apply {
-                setOnClickListener {
-                    librarySearchQuery = search.text.toString().trim()
-                    showFiles()
-                }
-            }, LinearLayout.LayoutParams(-2, dp(48)).apply { marginStart = dp(8) })
-            searchRow.addView(button("Clear", false).apply {
-                setOnClickListener { librarySearchQuery = ""; showFiles() }
-            }, LinearLayout.LayoutParams(-2, dp(48)).apply { marginStart = dp(6) })
-            column.addView(searchRow, linearParams().apply { topMargin = dp(12) })
-        }
-
         val actions = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
         actions.addView(button("Import files", false).apply {
             setOnClickListener { importFiles.launch(arrayOf("*/*")); navigation.menu.findItem(FILES).isChecked = true }
@@ -955,6 +913,48 @@ class MainActivity : AppCompatActivity() {
         ).apply { setPadding(0, dp(7), 0, 0) })
         hero.addView(heroText)
         column.addView(hero, linearParams())
+
+        if (!isPicker) {
+            val usedBytes = store.storageUsageBytes()
+            val freeBytes = filesDir.usableSpace
+            val storage = card()
+            val storageContent = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                setPadding(dp(14), dp(11), dp(14), dp(11))
+            }
+            storageContent.addView(text(
+                "On-device storage · ${android.text.format.Formatter.formatFileSize(this, usedBytes)} used",
+                13, R.color.qp_text, true
+            ))
+            storageContent.addView(text(
+                "${android.text.format.Formatter.formatFileSize(this, freeBytes)} free on this device. Documents remain in private app storage until you export or delete them.",
+                11, R.color.qp_muted, false
+            ).apply { setPadding(0, dp(4), 0, 0) })
+            storage.addView(storageContent)
+            column.addView(storage, linearParams().apply { topMargin = dp(10) })
+
+            val searchRow = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+            }
+            val search = EditText(this).apply {
+                hint = "Search this folder"
+                maxLines = 1
+                setSingleLine(true)
+                setText(librarySearchQuery)
+            }
+            searchRow.addView(search, LinearLayout.LayoutParams(0, dp(48), 1f))
+            searchRow.addView(button("Search", false).apply {
+                setOnClickListener {
+                    librarySearchQuery = search.text.toString().trim()
+                    showFiles()
+                }
+            }, LinearLayout.LayoutParams(-2, dp(48)).apply { marginStart = dp(8) })
+            searchRow.addView(button("Clear", false).apply {
+                setOnClickListener { librarySearchQuery = ""; showFiles() }
+            }, LinearLayout.LayoutParams(-2, dp(48)).apply { marginStart = dp(6) })
+            column.addView(searchRow, linearParams().apply { topMargin = dp(12) })
+        }
 
         val actions = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
         val importButton = button("Import files", false)
