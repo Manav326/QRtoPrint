@@ -1,9 +1,10 @@
 import { useState, type FormEvent } from "react";
-import { ArrowRight, Eye, EyeOff, LockKeyhole, Mail, Printer, ShieldCheck, Sparkles, Store, UserRound } from "lucide-react";
+import { ArrowLeft, ArrowRight, Eye, EyeOff, LockKeyhole, Mail, Printer, ShieldCheck, Sparkles, Store, UserRound } from "lucide-react";
 import { ApiError, registerShop, signIn, storeTokens, type AuthTokens } from "./api";
 
 export default function AuthScreen({ onAuthenticated }: { onAuthenticated: (tokens: AuthTokens) => void }) {
-  const [mode, setMode] = useState<"signin" | "register">("signin");
+  const initialMode = new URLSearchParams(window.location.search).get("mode") === "register" ? "register" : "signin";
+  const [mode, setMode] = useState<"signin" | "register">(initialMode);
   const [showPassword, setShowPassword] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -39,7 +40,7 @@ export default function AuthScreen({ onAuthenticated }: { onAuthenticated: (toke
       <div className="auth-glow auth-glow-one"/><div className="auth-glow auth-glow-two"/>
       <header className="auth-topbar">
         <div className="brand-lockup auth-brand"><div className="brand-mark"><Printer size={21}/></div><div><div className="brand-name">smart<span>print</span></div><div className="brand-caption">BY QRtoPrint</div></div></div>
-        <span className="auth-top-note"><ShieldCheck size={15}/> Secure Smart Print workspace</span>
+        <div className="auth-top-actions"><a className="auth-home-link" href="/"><ArrowLeft size={14}/> Back to website</a><span className="auth-top-note"><ShieldCheck size={15}/> Secure Smart Print workspace</span></div>
       </header>
       <main className="auth-layout">
         <section className="auth-story">
