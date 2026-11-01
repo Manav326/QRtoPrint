@@ -143,7 +143,7 @@ export default function PublicLandingPage() {
               <h3>SmartPrint for Windows</h3><p>Install the shop Agent on the computer connected to your printers. The guided setup will help connect it to your shop workspace.</p>
               <a className="sp-download-link-button sp-download-button" href="https://github.com/Manav326/QRtoPrint/releases/latest/download/SmartPrint-Windows-Setup.exe">Download Windows installer <ArrowRight size={16}/></a>
               <small className="sp-download-note">Windows x64 · Guided installation · SmartPrint official release</small>
-              <p className="sp-download-security-note">Windows may show a first-run security prompt. Some managed Windows 11 devices may block unsigned installers.</p>
+              <p className="sp-download-security-note">Windows may show an Unknown Publisher or SmartScreen prompt. Setup requires administrator approval, and some managed Windows 11 devices may block unsigned installers.</p>
             </article>
             <article className="sp-download-card">
               <div className="sp-download-icon sp-android-icon"><Smartphone size={25}/></div>
