@@ -1901,3 +1901,16 @@ html[data-theme="light"] .auth-footer {
 html[data-theme="light"] .auth-input input::placeholder {
   color: #69758a;
 }
+
+
+/* Customer QR light surfaces: secondary labels and brand captions must not fade
+   into pale cards or the page background. */
+html[data-theme="light"] .customer-entry :where(p,small,.customer-entry-footer,.customer-entry-brand .brand-caption,.entry-eyebrow) {
+  color: #5f6b80;
+}
+
+/* Landing-page utility copy sits on light panels; preserve white text in the
+   intentionally dark connection panel and violet call-to-action. */
+html[data-theme="light"] .sp-public :where(.sp-public-footer>span,.sp-download-platform,.sp-download-note,.sp-download-security-note,.sp-release-pending,.sp-download-footnote,.sp-art-phone-caption,.sp-art-shop-caption,.sp-art-document small,.sp-art-shop-head small,.sp-art-printer small,.sp-proof-strip small,.sp-step-card p,.sp-customer-mini-phone small,.sp-download-card p) {
+  color: #5f6b80;
+}
