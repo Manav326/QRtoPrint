@@ -78,10 +78,10 @@ jobs:
           New-Item -ItemType Directory -Force -Path artifacts/agent-installer | Out-Null
           & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" /DSmartPrintPublicUrl="https://qr-test.paintpulp.com" scripts/build-windows-installer.iss
           if ($LASTEXITCODE -ne 0) { throw "Inno Setup compilation failed." }
-      - name: Upload customer Windows installer
+      - name: Upload Windows installer validation artifact
         uses: actions/upload-artifact@v4
         with:
-          name: qrtoprint-windows-setup
+          name: qrtoprint-windows-setup-validation
           path: artifacts/agent-installer/SmartPrint-Windows-Setup.exe
           if-no-files-found: error
           retention-days: 30
