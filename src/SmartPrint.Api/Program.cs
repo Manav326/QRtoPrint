@@ -2731,20 +2731,26 @@ shop.MapPost("/print-jobs/{jobId:guid}/approve", async (
         return Results.Forbid();
     }
 
-    var job = await db.PrintJobs.SingleOrDefaultAsync(
-        item => item.Id == jobId && item.TenantId == tenantId, ct);
+    await using var transaction = await db.Database.BeginTransactionAsync(ct);
+    var lockedJobs = await db.PrintJobs.FromSqlInterpolated(
+        $"SELECT * FROM \"PrintJobs\" WHERE \"Id\" = {jobId} AND \"TenantId\" = {tenantId} FOR UPDATE")
+        .ToListAsync(ct);
+    var job = lockedJobs.SingleOrDefault();
     if (job is null)
     {
+        await transaction.RollbackAsync(ct);
         return Results.NotFound();
     }
 
     if (job.Status == "AWAITING_PAYMENT")
     {
+        await transaction.RollbackAsync(ct);
         return Results.Ok(new { job.Id, job.JobNumber, job.Status, job.UpdatedUtc, DuplicateRequest = true });
     }
 
     if (job.Status != "AWAITING_SHOP_APPROVAL")
     {
+        await transaction.RollbackAsync(ct);
         return Results.Conflict(new
         {
             code = "job_not_ready_for_shop_approval",
@@ -2770,6 +2776,7 @@ shop.MapPost("/print-jobs/{jobId:guid}/approve", async (
             CreatedUtc = now
         });
         await db.SaveChangesAsync(ct);
+        await transaction.CommitAsync(ct);
         return Results.Conflict(new { code = "quote_expired", message = "The customer must request a new quote before this job can proceed." });
     }
 
@@ -2788,6 +2795,7 @@ shop.MapPost("/print-jobs/{jobId:guid}/approve", async (
         CreatedUtc = now
     });
     await db.SaveChangesAsync(ct);
+    await transaction.CommitAsync(ct);
 
     var paymentSettings = await db.ShopPaymentProfiles.AsNoTracking()
         .SingleOrDefaultAsync(item => item.TenantId == tenantId, ct);
