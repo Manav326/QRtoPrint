@@ -3,7 +3,6 @@ on:
   push:
     tags:
       - "v*"
-  create:
   workflow_dispatch:
     inputs:
       release_tag:
@@ -24,7 +23,6 @@ env:
 
 jobs:
   validate-release-config:
-    if: github.event_name != 'create' || (github.event.ref_type == 'tag' && startsWith(github.event.ref, 'v'))
     runs-on: ubuntu-latest
     steps:
       - name: Require a stable semantic-version tag
