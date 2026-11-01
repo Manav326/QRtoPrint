@@ -63,6 +63,92 @@ public sealed class WindowsPrintExecutorTests
 }
 
 
+public sealed class WindowsPrintToPdfSpoolerIntegrationTests
+{
+    [Fact]
+    public async Task SubmitsRealGdiJobThroughMicrosoftPrintToPdfAndVerifiesDriverOutput()
+    {
+        // The workflow opts in only after proving the Microsoft queue and driver exist.
+        // Local unit-test runs remain hardware-independent unless explicitly opted in.
+        if (!string.Equals(
+                Environment.GetEnvironmentVariable("SMARTPRINT_RUN_WINDOWS_SPOOLER_INTEGRATION"),
+                "1",
+                StringComparison.Ordinal))
+            return;
+
+        Assert.True(OperatingSystem.IsWindows(), "The Windows spooler integration test requires a Windows runner.");
+
+        const string queueName = "Microsoft Print to PDF";
+        using var bitmap = new SkiaSharp.SKBitmap(180, 240);
+        bitmap.Erase(SkiaSharp.SKColors.White);
+        using (var canvas = new SkiaSharp.SKCanvas(bitmap))
+        using (var paint = new SkiaSharp.SKPaint { Color = new SkiaSharp.SKColor(32, 96, 180), IsAntialias = true })
+            canvas.DrawRect(new SkiaSharp.SKRect(18, 18, 162, 222), paint);
+        using var image = SkiaSharp.SKImage.FromBitmap(bitmap);
+        using var encoded = image.Encode(SkiaSharp.SKEncodedImageFormat.Png, 100);
+        var bytes = encoded.ToArray();
+        var outputDirectory = Path.Combine(
+            Path.GetTempPath(),
+            "smartprint-real-spooler-" + Guid.NewGuid().ToString("N"));
+        var outputPath = Path.Combine(outputDirectory, "microsoft-print-to-pdf-spooler-output.pdf");
+        var entry = new AgentLocalQueueEntry(
+            Guid.NewGuid(), "SP-REAL-SPOOLER-TEST", Guid.NewGuid(), queueName, queueName,
+            "real-spooler-test.png", "image/png",
+            Convert.ToHexString(SHA256.HashData(bytes)).ToLowerInvariant(), bytes.LongLength,
+            1, 1, "Colour", "A4", false, "INR", 100, "SmartPrint-Real-Spooler-Integration",
+            "ACKNOWLEDGED", DateTimeOffset.UtcNow, DateTimeOffset.UtcNow.AddMinutes(3),
+            OutputMode: PrinterOutputModeRules.Physical);
+
+        try
+        {
+            // This calls OpenPrinterW/CreateDCW/StartDocW/StartPage/EndPage/EndDoc
+            // against the installed Windows queue. It does not call ExportPdf().
+            var receipt = new WindowsPrintExecutor().PrintToFile(
+                entry, bytes, outputPath, CancellationToken.None);
+
+            Assert.True(receipt.JobId > 0, "Windows did not return a spooler job identifier.");
+            Assert.Equal("SmartPrint-Real-Spooler-Integration", receipt.DocumentName);
+
+            var deadline = DateTime.UtcNow.AddSeconds(45);
+            byte[]? outputBytes = null;
+            while (DateTime.UtcNow < deadline)
+            {
+                if (File.Exists(outputPath))
+                {
+                    try
+                    {
+                        var candidate = await File.ReadAllBytesAsync(outputPath);
+                        if (candidate.Length > 1000 &&
+                            candidate.AsSpan(0, 5).SequenceEqual("%PDF-"u8) &&
+                            System.Text.Encoding.ASCII.GetString(candidate).Contains("%%EOF", StringComparison.Ordinal))
+                        {
+                            outputBytes = candidate;
+                            break;
+                        }
+                    }
+                    catch (IOException)
+                    {
+                        // The Windows print processor may still be finalizing the output file.
+                    }
+                }
+
+                await Task.Delay(500);
+            }
+
+            Assert.NotNull(outputBytes);
+            Assert.True(outputBytes!.Length > 1000, "The Windows printer driver produced an empty or truncated PDF.");
+            Assert.StartsWith("%PDF-", System.Text.Encoding.ASCII.GetString(outputBytes, 0, 5));
+            Assert.Contains("%%EOF", System.Text.Encoding.ASCII.GetString(outputBytes), StringComparison.Ordinal);
+        }
+        finally
+        {
+            CryptographicOperations.ZeroMemory(bytes);
+            if (Directory.Exists(outputDirectory))
+                Directory.Delete(outputDirectory, recursive: true);
+        }
+    }
+}
+
 public sealed class PdfExportExecutorTests
 {
     [Fact]

@@ -45,7 +45,39 @@ public sealed class WindowsPrintExecutor
         return true;
     });
 
-    public SpoolerPrintReceipt Print(AgentLocalQueueEntry entry, byte[] bytes, CancellationToken cancellationToken)
+    public SpoolerPrintReceipt Print(AgentLocalQueueEntry entry, byte[] bytes, CancellationToken cancellationToken) =>
+        PrintCore(entry, bytes, cancellationToken, outputFilePath: null);
+
+    /// <summary>
+    /// Submits a real Windows GDI print job to the selected printer queue, directing
+    /// file-capable printer drivers to the supplied output path through DOCINFO.lpszOutput.
+    /// This is used by spooler integration tests; normal production printing uses Print().
+    /// </summary>
+    public SpoolerPrintReceipt PrintToFile(
+        AgentLocalQueueEntry entry,
+        byte[] bytes,
+        string outputFilePath,
+        CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(outputFilePath))
+            throw new ArgumentException("A fully qualified output file path is required.", nameof(outputFilePath));
+
+        var fullOutputPath = Path.GetFullPath(outputFilePath);
+        if (File.Exists(fullOutputPath))
+            throw new IOException("The requested spooler output path already exists.");
+
+        var outputDirectory = Path.GetDirectoryName(fullOutputPath)
+            ?? throw new ArgumentException("The output path must include a directory.", nameof(outputFilePath));
+        Directory.CreateDirectory(outputDirectory);
+
+        return PrintCore(entry, bytes, cancellationToken, fullOutputPath);
+    }
+
+    private SpoolerPrintReceipt PrintCore(
+        AgentLocalQueueEntry entry,
+        byte[] bytes,
+        CancellationToken cancellationToken,
+        string? outputFilePath)
     {
         if (!OperatingSystem.IsWindows())
             throw new PrintExecutionBlockedException("WINDOWS_REQUIRED", "Physical printing is available only on the Windows Print Agent.");
@@ -85,7 +117,12 @@ public sealed class WindowsPrintExecutor
                 : entry.SpoolerJobName;
             if (documentName.Length > 180) documentName = documentName[..180];
 
-            var info = new DocInfoW { Size = Marshal.SizeOf<DocInfoW>(), DocumentName = documentName };
+            var info = new DocInfoW
+            {
+                Size = Marshal.SizeOf<DocInfoW>(),
+                DocumentName = documentName,
+                OutputFile = outputFilePath
+            };
             var spoolerId = StartDocW(dc, ref info);
             if (spoolerId <= 0) throw Blocked("SPOOLER_START_FAILED", "Windows did not accept the print document.");
             docStarted = true;
