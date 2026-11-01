@@ -47,15 +47,6 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - name: Install desktop dependencies
         run: pnpm install --no-frozen-lockfile
-      - name: Compile the native Windows desktop host
-        shell: pwsh
-        run: |
-          pnpm --filter @qrtoprint/desktop build
-          if ($LASTEXITCODE -ne 0) { throw "SmartPrint desktop frontend build failed." }
-          cargo check --manifest-path apps/desktop/src-tauri/Cargo.toml --target x86_64-pc-windows-msvc
-          if ($LASTEXITCODE -ne 0) { throw "SmartPrint native desktop host compilation failed." }
-          cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml --target x86_64-pc-windows-msvc
-          if ($LASTEXITCODE -ne 0) { throw "SmartPrint native desktop host tests failed." }
       - name: Generate reproducible frontend and Rust dependency locks
         shell: pwsh
         run: |
@@ -74,6 +65,15 @@ jobs:
             apps/desktop/src-tauri/Cargo.lock
           if-no-files-found: error
           retention-days: 7
+      - name: Compile the native Windows desktop host
+        shell: pwsh
+        run: |
+          pnpm --filter @qrtoprint/desktop build
+          if ($LASTEXITCODE -ne 0) { throw "SmartPrint desktop frontend build failed." }
+          cargo check --manifest-path apps/desktop/src-tauri/Cargo.toml --target x86_64-pc-windows-msvc
+          if ($LASTEXITCODE -ne 0) { throw "SmartPrint native desktop host compilation failed." }
+          cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml --target x86_64-pc-windows-msvc
+          if ($LASTEXITCODE -ne 0) { throw "SmartPrint native desktop host tests failed." }
       - name: Build native Windows desktop executable
         shell: pwsh
         run: |
