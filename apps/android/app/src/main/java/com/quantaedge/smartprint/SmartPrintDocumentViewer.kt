@@ -313,8 +313,12 @@ class SmartPrintDocumentViewer(
             val first = max(0, index - THUMBNAIL_WINDOW)
             val last = min(imageSiblings.lastIndex, index + THUMBNAIL_WINDOW)
             for (imageIndex in first..last) {
-                val thumbnail = decodeImage(imageSiblings[imageIndex], THUMBNAIL_EDGE)
-                thumbnails.add(Thumbnail(imageIndex, thumbnail))
+                try {
+                    val thumbnail = decodeImage(imageSiblings[imageIndex], THUMBNAIL_EDGE)
+                    thumbnails.add(Thumbnail(imageIndex, thumbnail))
+                } catch (_: Exception) {
+                    // A damaged neighbouring photo must not prevent opening the selected one.
+                }
             }
             RenderedDocument(imageSiblings.size, index, mainBitmap, thumbnails)
         } catch (error: Exception) {
@@ -339,19 +343,21 @@ class SmartPrintDocumentViewer(
             }
         ) ?: error("This image could not be decoded.")
         val orientation = runCatching {
-            ExifInterface(file).getAttributeInt(
+            ExifInterface(file.absolutePath).getAttributeInt(
                 ExifInterface.TAG_ORIENTATION,
                 ExifInterface.ORIENTATION_NORMAL
             )
         }.getOrDefault(ExifInterface.ORIENTATION_NORMAL)
         val degrees = when (orientation) {
             ExifInterface.ORIENTATION_ROTATE_90, ExifInterface.ORIENTATION_TRANSPOSE -> 90
-            ExifInterface.ORIENTATION_ROTATE_180 -> 180
+            ExifInterface.ORIENTATION_ROTATE_180, ExifInterface.ORIENTATION_FLIP_VERTICAL -> 180
             ExifInterface.ORIENTATION_ROTATE_270, ExifInterface.ORIENTATION_TRANSVERSE -> 270
             else -> 0
         }
         val mirrored = orientation == ExifInterface.ORIENTATION_FLIP_HORIZONTAL ||
-            orientation == ExifInterface.ORIENTATION_FLIP_VERTICAL
+            orientation == ExifInterface.ORIENTATION_FLIP_VERTICAL ||
+            orientation == ExifInterface.ORIENTATION_TRANSPOSE ||
+            orientation == ExifInterface.ORIENTATION_TRANSVERSE
         if (degrees == 0 && !mirrored) return decoded
         val matrix = Matrix().apply {
             if (mirrored) preScale(-1f, 1f)
