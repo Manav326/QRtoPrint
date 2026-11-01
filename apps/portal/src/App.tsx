@@ -1990,7 +1990,9 @@ function PrintQueuePage({ jobs, printers, agentDevices, searchQuery, loadingBatc
           const totalAmount=payableJobs.reduce((sum,job)=>sum+Math.max(0,job.quotedAmountMinor),0);
           const printersInBatch=Array.from(new Set(batch.jobs.map(job=>job.printerName||"Not assigned")));
           const expanded=expandedBatchKeys.has(batch.key);
-          const label=statusLabels.length===1?prettyStatus(statusLabels[0]):`${statusLabels.length} states`;
+          const allPdfsSaved = batch.jobs.length > 0 && batch.jobs.every(job => !!verifiedPdfExportPath(job));
+          const singleSavedPdfPath = batch.jobs.length === 1 ? verifiedPdfExportPath(first) : null;
+          const label=statusLabels.length===1?(allPdfsSaved?"PDF saved":prettyStatus(statusLabels[0])):`${statusLabels.length} states`;
           const tone=statusLabels.every(status=>status==="COMPLETED"||status==="LOCAL_QUEUE_READY")?"green":statusLabels.some(status=>status==="AWAITING_SHOP_APPROVAL"||status==="AWAITING_CUSTOMER_APPROVAL"||status==="OUTPUT_UNCONFIRMED")?"amber":"blue";
           return <Fragment key={batch.key}>
             <tr className="queue-batch-summary-row">
@@ -1998,7 +2000,15 @@ function PrintQueuePage({ jobs, printers, agentDevices, searchQuery, loadingBatc
               <td><div className="customer-cell"><strong>{folders.length} folder group(s)</strong><span>{folders.slice(0,3).join(" · ")}{folders.length>3?" · +"+(folders.length-3):""}</span></div></td>
               <td><div className="detail-cell"><strong>{totalCopies} copies</strong><span>{settings.length===1?settings[0]:"Mixed settings"}</span></div></td>
               <td className="amount-cell">{totalAmount>0?formatMoney(totalAmount,first.currency):"Not quoted"}</td>
-              <td><div className="queue-printer-cell"><strong>{printersInBatch.length===1?printersInBatch[0]:"Multiple printers"}</strong><small>{waiting.length} awaiting review</small></div></td>
+              <td><div className="queue-printer-cell">
+                {singleSavedPdfPath ? <>
+                  <strong>PDF saved</strong>
+                  <small className="queue-pdf-path">{singleSavedPdfPath}</small>
+                </> : <>
+                  <strong>{printersInBatch.length===1?printersInBatch[0]:"Multiple printers"}</strong>
+                  <small>{waiting.length} awaiting review</small>
+                </>}
+              </div></td>
               <td><Status label={label} tone={tone}/></td>
               <td className="time-cell">{new Date(first.createdUtc).toLocaleString()}</td>
               <td><div className="queue-actions">
@@ -2012,7 +2022,7 @@ function PrintQueuePage({ jobs, printers, agentDevices, searchQuery, loadingBatc
                 <Status label={prettyStatus(job.status)} tone={job.status==="REJECTED"?"red":job.status==="COMPLETED"||job.status==="LOCAL_QUEUE_READY"?"green":job.status==="AWAITING_SHOP_APPROVAL"?"amber":"blue"}/>
                 <strong className="amount-cell">{job.quotedAmountMinor>0?formatMoney(job.quotedAmountMinor,job.currency):"—"}</strong>
               </div>
-              {verifiedPdfExportPath(job) && <div className="queue-batch-file-output">
+              {batch.jobs.length > 1 && verifiedPdfExportPath(job) && <div className="queue-batch-file-output">
                 <span>Saved PDF location</span>
                 <code>{verifiedPdfExportPath(job)}</code>
               </div>}
