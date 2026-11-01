@@ -30,7 +30,7 @@ jobs:
       - name: Install portal dependencies
         run: pnpm install --frozen-lockfile
       - name: Test public, admin, shop and station route boundaries
-        run: node --experimental-strip-types --test apps/portal/tests/portal-routing.test.ts
+        run: node --experimental-strip-types --test apps/portal/tests/portal-routing.test.ts apps/portal/tests/theme-responsive.test.ts
       - run: pnpm typecheck
       - run: pnpm build
       - name: Typecheck native desktop frontend
