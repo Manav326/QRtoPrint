@@ -46,6 +46,16 @@ public sealed class DocumentRetentionRulesTests
             "CLOUD", status, null, null, Cutoff.AddDays(-40), hasFinancialHold,
             null, Cutoff, Cutoff));
 
+    [Theory]
+    [InlineData("REJECTED")]
+    [InlineData("PAYMENT_REJECTED")]
+    [InlineData("QUOTE_EXPIRED")]
+    [InlineData("REFUNDED")]
+    public void RetainsTerminalJobsWithACompletedPdfExport(string status)
+        => Assert.False(DocumentRetentionRules.ShouldPurgeCloudDocument(
+            "CLOUD", status, null, Cutoff.AddDays(-40), Cutoff.AddDays(-40),
+            false, null, Cutoff, Cutoff));
+
     [Fact]
     public void DoesNotPurgeDocumentTwice()
         => Assert.False(DocumentRetentionRules.ShouldPurgeCloudDocument(
