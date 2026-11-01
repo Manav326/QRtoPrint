@@ -857,7 +857,30 @@ customerApi.MapGet("/jobs", async (
             job.Currency,
             job.QuotedAmountMinor,
             job.CreatedUtc,
-            ShopName = profile.DisplayName
+            job.RejectedPageNumbersJson,
+            job.OutputCompletedUtc,
+            ShopName = profile.DisplayName,
+            OriginalFileName = db.PrintDocuments.AsNoTracking()
+                .Where(document => document.TenantId == job.TenantId && document.PrintJobId == job.Id)
+                .Select(document => document.OriginalFileName)
+                .FirstOrDefault(),
+            PaidAmountMinor = db.PrintPayments.AsNoTracking()
+                .Where(payment => payment.TenantId == job.TenantId && payment.PrintJobId == job.Id &&
+                    (payment.Status == "VERIFIED" || payment.Status == "PARTIALLY_REFUNDED" || payment.Status == "REFUNDED"))
+                .Sum(payment => (long?)payment.AmountMinor) ?? 0L,
+            RefundedAmountMinor = db.PrintPayments.AsNoTracking()
+                .Where(payment => payment.TenantId == job.TenantId && payment.PrintJobId == job.Id)
+                .Sum(payment => (long?)payment.RefundedAmountMinor) ?? 0L,
+            PaymentStatus = db.PrintPayments.AsNoTracking()
+                .Where(payment => payment.TenantId == job.TenantId && payment.PrintJobId == job.Id)
+                .OrderByDescending(payment => payment.UpdatedUtc)
+                .Select(payment => payment.Status)
+                .FirstOrDefault(),
+            PaymentMethod = db.PrintPayments.AsNoTracking()
+                .Where(payment => payment.TenantId == job.TenantId && payment.PrintJobId == job.Id)
+                .OrderByDescending(payment => payment.UpdatedUtc)
+                .Select(payment => payment.Method)
+                .FirstOrDefault()
         })
         .Take(100)
         .ToListAsync(ct);
