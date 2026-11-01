@@ -60,6 +60,8 @@ This checklist tracks the public website, non-technical Windows setup, Android r
 - [x] Wire the landing page to the stable GitHub `releases/latest/download` URLs.
 - [x] Add a version/release-notes link from each download card.
 - [x] Default release builds to `https://qr-test.paintpulp.com` through the `SMARTPRINT_PUBLIC_BASE_URL` repository variable, with an explicit default.
+- [x] Validate the configured release origin as a canonical HTTPS origin before building either installer.
+- [x] Limit GitHub Release write permission to the publication job and fail if any expected release asset is missing.
 - [ ] Configure the Windows signing secrets and Android signing secrets.
 - [ ] Set `SMARTPRINT_PUBLIC_BASE_URL` to the actual canonical deployment origin before tagging.
 - [ ] Run the first tagged release and verify both release assets and checksums.
