@@ -68,7 +68,7 @@ public sealed class DocumentRetentionWorker(
                 where document.StorageMode == "CLOUD" &&
                       document.PurgedUtc == null &&
                       ((job.Status == "COMPLETED" && completedUtc != null && completedUtc <= completedCutoff) ||
-                       ((job.Status == "REJECTED" || job.Status == "PAYMENT_REJECTED" || job.Status == "QUOTE_EXPIRED") &&
+                       ((job.Status == "REJECTED" || job.Status == "PAYMENT_REJECTED" || job.Status == "QUOTE_EXPIRED" || job.Status == "REFUNDED") &&
                         job.OutputConfirmedUtc == null && job.UpdatedUtc <= abandonedCutoff && !hasFinancialHold))
                 orderby job.UpdatedUtc, document.Id
                 select new
