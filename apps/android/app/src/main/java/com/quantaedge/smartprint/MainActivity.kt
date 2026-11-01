@@ -65,7 +65,6 @@ class MainActivity : AppCompatActivity() {
         private const val FILES = 2
         private const val SCAN_PRINT = 3
         private const val ACTIVITY = 4
-        private const val PROFILE = 90
         private const val MAX_TREE_FILES = 500
         private const val MAX_TREE_DEPTH = 12
     }
@@ -271,7 +270,7 @@ class MainActivity : AppCompatActivity() {
                 isFocusable = true
                 setOnClickListener { showProfile() }
             }
-            toolbar.addView(
+            addView(
                 accountAction,
                 androidx.appcompat.widget.Toolbar.LayoutParams(
                     dp(48),
