@@ -2784,10 +2784,10 @@ function customerBatchGroupName(file:File):string {
 
 function normalizeCustomerCopies(value:string):string {
   const trimmed=value.trim();
-  if(!/^\\d+$/.test(trimmed))return "1";
+  if(!/^\d+$/.test(trimmed))return "1";
   const copies=Number(trimmed);
   if(!Number.isFinite(copies))return "100";
-  return String(Math.min(100,Math.max(1,Math.trunc(copies))));
+  return String(Math.min(100,Math.max(1,Math.trunc(copies)));
 }
 
 function readStoredCustomerDraft(publicCode:string,sessionToken:string):StoredCustomerDraft|null {
@@ -3400,7 +3400,7 @@ function CustomerPrintFlow({publicCode,sessionToken,paymentOptions,localAgent,lo
             const index=files.findIndex(candidate=>customerFileFingerprint(candidate)===fingerprint);
             return <div className={selectedFileIndex===index?"customer-folder-file-row selected":"customer-folder-file-row"} key={fingerprint}>
               <button type="button" className="customer-folder-file-name" onClick={()=>setSelectedFileIndex(index)}><FileText size={15}/><span><strong>{selected.name}</strong><small>{formatBytes(selected.size)}</small></span></button>
-              <label className="customer-folder-copies"><span>Copies</span><input type="text" inputMode="numeric" pattern="[0-9]*" maxLength={3} value={own.copies} onChange={event=>setFileSettings(current=>({...current,[fingerprint]:{...(current[fingerprint]??own),copies:event.currentTarget.value.replace(/\\D/g,"").slice(0,3)}}))} onBlur={event=>setFileSettings(current=>({...current,[fingerprint]:{...(current[fingerprint]??own),copies:normalizeCustomerCopies(event.currentTarget.value)}}))}/></label>
+              <label className="customer-folder-copies"><span>Copies</span><input type="text" inputMode="numeric" pattern="[0-9]*" maxLength={3} value={own.copies} onChange={event=>setFileSettings(current=>({...current,[fingerprint]:{...(current[fingerprint]??own),copies:event.currentTarget.value.replace(/\D/g,"").slice(0,3)}}))} onBlur={event=>setFileSettings(current=>({...current,[fingerprint]:{...(current[fingerprint]??own),copies:normalizeCustomerCopies(event.currentTarget.value)}}))}/></label>
               <button type="button" className={own.custom?"customer-file-custom active":"customer-file-custom"} onClick={()=>setFileSettings(current=>({...current,[fingerprint]:{...(current[fingerprint]??own),custom:!own.custom,colourMode:own.custom?own.colourMode:defaults.colourMode,isDuplex:own.custom?own.isDuplex:defaults.isDuplex}}))}>{own.custom?"Custom":"Folder"}</button>
               <button type="button" className="customer-file-remove" aria-label={`Remove ${selected.name} from this selection`} title="Remove from this selection" disabled={busy} onClick={()=>removeSelectedFile(fingerprint)}><X size={13}/><span>Remove</span></button>
               {own.custom&&<div className="customer-file-overrides">
