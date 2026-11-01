@@ -57,13 +57,16 @@ export default function App() {
       : <PublicLandingPage />;
   }
 
-  const onSignOut = () => { storeTokens(null); setTokens(null); };
+  const onSignOut = async () => {
+    await storeTokens(null);
+    setTokens(null);
+  };
   return isPlatformAdminSession(tokens)
     ? <PlatformAdminConsole tokens={tokens} onSignOut={onSignOut}/>
     : <ShopConsole tokens={tokens} onSignOut={onSignOut}/>;
 }
 
-function ShopConsole({ tokens, onSignOut }: { tokens: AuthTokens; onSignOut: () => void }) {
+function ShopConsole({ tokens, onSignOut }: { tokens: AuthTokens; onSignOut: () => Promise<void> }) {
   const [active, setActive] = useState<Section>("Overview");
   const [dark, setDark] = useState(true);
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -123,8 +126,8 @@ function ShopConsole({ tokens, onSignOut }: { tokens: AuthTokens; onSignOut: () 
       }
     } catch (exception) {
       if (exception instanceof ApiError && exception.status === 401) {
-        storeTokens(null);
-        onSignOut();
+        try { await onSignOut(); }
+        catch (signOutError) { setError(signOutError instanceof Error ? signOutError.message : "Could not clear the secure desktop session."); }
       } else {
         setError(exception instanceof Error ? exception.message : "Could not load your shop.");
       }
@@ -179,7 +182,8 @@ function ShopConsole({ tokens, onSignOut }: { tokens: AuthTokens; onSignOut: () 
 
   async function signOut() {
     try { await logout(tokens.accessToken); } catch { /* Local sign-out still clears the session. */ }
-    onSignOut();
+    try { await onSignOut(); }
+    catch (exception) { setError(exception instanceof Error ? exception.message : "Could not clear the secure desktop session."); }
   }
 
   async function submitPrinter(values: {
@@ -328,8 +332,8 @@ function ShopConsole({ tokens, onSignOut }: { tokens: AuthTokens; onSignOut: () 
       if (!silent) await reload();
     } catch (exception) {
       if (exception instanceof ApiError && exception.status === 401) {
-        storeTokens(null);
-        onSignOut();
+        try { await onSignOut(); }
+        catch (signOutError) { setError(signOutError instanceof Error ? signOutError.message : "Could not clear the secure desktop session."); }
       } else {
         const message = exception instanceof Error ? exception.message : "Could not connect this computer to the shop.";
         setError(message);
