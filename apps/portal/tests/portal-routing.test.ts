@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { adminPathForSection, adminSectionFromPath, authStorageKey, resolvePortalRoute, shopPathForSection, shopSectionFromPath } from "../src/portal-routing.ts";
+import { readDarkModePreference, readSidebarCollapsedPreference, saveDarkModePreference, saveSidebarCollapsedPreference } from "../src/ui-preferences.ts";
 
 test("public root stays public even when a user has a stored session", () => {
   assert.deepEqual(resolvePortalRoute("/"), { kind: "public" });
@@ -74,4 +75,34 @@ test("admin workspace sections have stable deep links and restore nested views",
   assert.equal(adminSectionFromPath("/admin/tenants/42"), "Tenants");
   assert.equal(adminSectionFromPath("/admin/plans/version/3"), "Plans");
   assert.equal(adminSectionFromPath("/admin/unknown"), "Overview");
+});
+
+
+test("theme and sidebar preferences are saved consistently for the native/web shells", () => {
+  const values = new Map<string, string>();
+  const originalWindow = (globalThis as { window?: unknown }).window;
+  Object.defineProperty(globalThis, "window", {
+    configurable: true,
+    value: {
+      localStorage: {
+        getItem: (key: string) => values.get(key) ?? null,
+        setItem: (key: string, value: string) => values.set(key, value)
+      }
+    }
+  });
+  try {
+    assert.equal(readDarkModePreference(), true);
+    assert.equal(readSidebarCollapsedPreference(), false);
+    saveDarkModePreference(false);
+    saveSidebarCollapsedPreference(true);
+    assert.equal(readDarkModePreference(), false);
+    assert.equal(readSidebarCollapsedPreference(), true);
+    saveDarkModePreference(true);
+    saveSidebarCollapsedPreference(false);
+    assert.equal(readDarkModePreference(), true);
+    assert.equal(readSidebarCollapsedPreference(), false);
+  } finally {
+    if (originalWindow === undefined) delete (globalThis as { window?: unknown }).window;
+    else Object.defineProperty(globalThis, "window", { configurable: true, value: originalWindow });
+  }
 });

@@ -301,6 +301,7 @@ public sealed class SmartPrintDbContext(DbContextOptions<SmartPrintDbContext> op
                 .HasPrincipalKey(x => new { x.TenantId, x.Id })
                 .OnDelete(DeleteBehavior.Restrict);
             entity.Property(x => x.JobNumber).HasMaxLength(32).IsRequired();
+            entity.Property(x => x.BatchGroupName).HasMaxLength(PrintBatchGroupRules.MaximumNameLength);
             entity.Property(x => x.Status).HasMaxLength(40).IsRequired();
             entity.Property(x => x.IdempotencyKey).HasMaxLength(100).IsRequired();
             entity.Property(x => x.ColourMode).HasMaxLength(12).IsRequired();
@@ -435,6 +436,7 @@ public sealed class SmartPrintDbContext(DbContextOptions<SmartPrintDbContext> op
             entity.ToTable("LocalPrintUploadTickets");
             entity.HasKey(x => x.Id);
             entity.Property(x => x.JobNumber).HasMaxLength(32).IsRequired();
+            entity.Property(x => x.BatchGroupName).HasMaxLength(PrintBatchGroupRules.MaximumNameLength);
             entity.Property(x => x.IdempotencyKey).HasMaxLength(100).IsRequired();
             entity.Property(x => x.GrantHash).HasMaxLength(64).IsRequired();
             entity.Property(x => x.OriginalFileName).HasMaxLength(255).IsRequired();

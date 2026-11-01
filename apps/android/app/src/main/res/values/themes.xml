@@ -2,6 +2,12 @@
     <style name="Theme.SmartPrint" parent="Theme.Material3.DayNight.NoActionBar">
         <item name="colorPrimary">@color/qp_primary</item>
         <item name="colorSecondary">@color/qp_primary</item>
+        <item name="colorOnPrimary">@color/qp_primary_content</item>
+        <item name="colorSurface">@color/qp_card</item>
+        <item name="colorOnSurface">@color/qp_text</item>
+        <item name="colorOnSurfaceVariant">@color/qp_muted</item>
+        <item name="colorOutline">@color/qp_outline</item>
+        <item name="android:windowBackground">@color/qp_surface</item>
         <item name="android:fontFamily">sans</item>
         <item name="android:statusBarColor">@color/qp_surface</item>
         <item name="android:navigationBarColor">@color/qp_surface</item>
@@ -9,5 +15,16 @@
         <item name="android:windowLightNavigationBar">true</item>
         <item name="android:windowActionModeOverlay">true</item>
         <item name="android:colorAccent">@color/qp_primary</item>
+    </style>
+    <style name="TextAppearance.SmartPrint.Navigation" parent="@android:style/TextAppearance.Material">
+        <item name="android:fontFamily">sans</item>
+        <item name="android:textSize">10sp</item>
+        <item name="android:letterSpacing">0.01</item>
+        <item name="android:textStyle">normal</item>
+    </style>
+    <style name="TextAppearance.SmartPrint.Toolbar" parent="@android:style/TextAppearance.Material">
+        <item name="android:fontFamily">sans</item>
+        <item name="android:textSize">18sp</item>
+        <item name="android:textStyle">bold</item>
     </style>
 </resources>

@@ -1,14 +1,25 @@
 <resources>
-    <color name="qp_icon_background">#11182D</color>
-    <color name="qp_primary">#A6A4FF</color>
-    <color name="qp_primary_dark">#8784F3</color>
-    <color name="qp_soft">#34345C</color>
-    <color name="qp_surface">#111827</color>
-    <color name="qp_card">#1C2639</color>
-    <color name="qp_hero">#252F5B</color>
-    <color name="qp_hero_text">#FFFFFF</color>
-    <color name="qp_hero_muted">#D8DEF4</color>
-    <color name="qp_text">#F1F4FC</color>
-    <color name="qp_muted">#AAB4C8</color>
-    <color name="qp_outline">#344158</color>
+    <color name="qp_icon_background">#11131B</color>
+    <color name="qp_primary">#9B8CFF</color>
+    <color name="qp_primary_dark">#826EFF</color>
+    <color name="qp_primary_content">#17152A</color>
+    <color name="qp_danger_content">#27151A</color>
+    <color name="qp_soft">#302B4F</color>
+    <color name="qp_surface">#0C0F16</color>
+    <color name="qp_card">#141A25</color>
+    <color name="qp_hero">#10141D</color>
+    <color name="qp_hero_text">#F0F3FA</color>
+    <color name="qp_hero_muted">#A5B2C8</color>
+    <color name="qp_text">#F0F3FA</color>
+    <color name="qp_muted">#8B96A9</color>
+    <color name="qp_outline">#252E3D</color>
+    <color name="qp_danger">#EF818A</color>
+    <color name="qp_glass_top_overlay">#E610141D</color>
+    <color name="qp_glass_bottom_overlay">#E610141D</color>
+    <color name="qp_glass_card">#D9141A25</color>
+    <color name="qp_glass_inset">#C8192130</color>
+    <color name="qp_glass_border">#3D9CAFC9</color>
+    <color name="qp_glass_edge">#29FFFFFF</color>
+    <color name="qp_glass_warm_glow">#18F49167</color>
+    <color name="qp_glass_cool_glow">#16709DD6</color>
 </resources>
