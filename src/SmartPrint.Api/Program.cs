@@ -6076,16 +6076,20 @@ publicApi.MapPost("/jobs/{jobId:guid}/payments", async (
         return Results.Unauthorized();
     }
 
-    var job = await db.PrintJobs.SingleOrDefaultAsync(
-        item => item.Id == jobId && item.TenantId == session.TenantId &&
-                item.CustomerSessionId == session.Id, ct);
+    await using var transaction = await db.Database.BeginTransactionAsync(ct);
+    var lockedJobs = await db.PrintJobs.FromSqlInterpolated(
+        $"SELECT * FROM \"PrintJobs\" WHERE \"Id\" = {jobId} AND \"TenantId\" = {session.TenantId} AND \"CustomerSessionId\" = {session.Id} FOR UPDATE")
+        .ToListAsync(ct);
+    var job = lockedJobs.SingleOrDefault();
     if (job is null)
     {
+        await transaction.RollbackAsync(ct);
         return Results.NotFound();
     }
 
     if (job.Status is not ("AWAITING_PAYMENT" or "PAYMENT_REJECTED"))
     {
+        await transaction.RollbackAsync(ct);
         return Results.Conflict(new
         {
             code = "job_not_ready_for_payment",
@@ -6099,6 +6103,7 @@ publicApi.MapPost("/jobs/{jobId:guid}/payments", async (
         (request.Method == "UPI" && !settings.UpiEnabled) ||
         (request.Method == "CASH" && !settings.CashEnabled))
     {
+        await transaction.RollbackAsync(ct);
         return Results.Conflict(new
         {
             code = "payment_method_unavailable",
@@ -6115,6 +6120,7 @@ publicApi.MapPost("/jobs/{jobId:guid}/payments", async (
         ct);
     if (activePayment is not null)
     {
+        await transaction.RollbackAsync(ct);
         if (activePayment.Method != request.Method)
         {
             return Results.Conflict(new
@@ -6158,9 +6164,11 @@ publicApi.MapPost("/jobs/{jobId:guid}/payments", async (
     try
     {
         await db.SaveChangesAsync(ct);
+        await transaction.CommitAsync(ct);
     }
     catch (DbUpdateException)
     {
+        await transaction.RollbackAsync(ct);
         return Results.Conflict(new
         {
             code = "payment_attempt_already_active",
