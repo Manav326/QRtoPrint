@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { mkdirSync } from "node:fs";
-import { join, dirname } from "node:path";
+import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { spawn } from "node:child_process";
 
@@ -122,11 +122,8 @@ async function assertNoHorizontalOverflow(page, route, viewport) {
 }
 
 
-async function assertWorkspaceContrast(page, route) {
+async function assertRouteContrast(page, route) {
   const result = await page.evaluate(() => {
-    const shell = document.querySelector(".app-shell");
-    if (!shell) return null;
-    const style = getComputedStyle(shell);
     const parse = value => {
       const match = value.trim().match(/^#([0-9a-f]{6})$/i);
       if (!match) return null;
@@ -141,29 +138,58 @@ async function assertWorkspaceContrast(page, route) {
       const [high, low] = [luminance(fg), luminance(bg)].sort((a, b) => b - a);
       return (high + 0.05) / (low + 0.05);
     };
-    const foregrounds = ["--text", "--muted", "--faint", "--accent", "--green", "--amber", "--red", "--blue"];
-    const backgrounds = ["--bg", "--surface"];
     const checks = [];
-    for (const foreground of foregrounds) {
-      for (const background of backgrounds) {
-        checks.push({
-          foreground,
-          background,
-          ratio: contrast(style.getPropertyValue(foreground), style.getPropertyValue(background))
-        });
+    const shell = document.querySelector(".app-shell");
+    if (shell) {
+      const style = getComputedStyle(shell);
+      for (const foreground of ["--text", "--muted", "--faint", "--accent", "--green", "--amber", "--red", "--blue"]) {
+        for (const background of ["--bg", "--surface"]) {
+          checks.push({
+            scope: "workspace",
+            foreground,
+            background,
+            ratio: contrast(style.getPropertyValue(foreground), style.getPropertyValue(background))
+          });
+        }
+      }
+    }
+    const landing = document.querySelector(".sp-public");
+    if (landing) {
+      const style = getComputedStyle(landing);
+      for (const foreground of ["--sp-ink", "--sp-muted"]) {
+        for (const background of ["--sp-bg", "--sp-panel"]) {
+          checks.push({
+            scope: "landing",
+            foreground,
+            background,
+            ratio: contrast(style.getPropertyValue(foreground), style.getPropertyValue(background))
+          });
+        }
+      }
+    }
+    const auth = document.querySelector(".auth-screen");
+    if (auth) {
+      const style = getComputedStyle(auth);
+      for (const foreground of ["--auth-text", "--auth-muted"]) {
+        for (const background of ["--auth-bg", "--auth-panel"]) {
+          checks.push({
+            scope: "authentication",
+            foreground,
+            background,
+            ratio: contrast(style.getPropertyValue(foreground), style.getPropertyValue(background))
+          });
+        }
       }
     }
     return checks;
   });
-  if (!result) return;
   for (const check of result) {
     assert.ok(
       check.ratio !== null && check.ratio >= 4.5,
-      `${route.label} has insufficient ${check.foreground} contrast against ${check.background}: ${JSON.stringify(check)}`
+      `${route.label} has insufficient ${check.scope} ${check.foreground} contrast against ${check.background}: ${JSON.stringify(check)}`
     );
   }
 }
-
 async function assertThemeToggle(page) {
   const darkToggle = page.getByRole("button", { name: "Switch to dark theme" });
   const lightToggle = page.getByRole("button", { name: "Switch to light theme" });
@@ -216,10 +242,14 @@ try {
       await waitForRoute(page, route.ready);
 
       const lightLayout = await assertNoHorizontalOverflow(page, route, viewport);
-      await assertWorkspaceContrast(page, route);
+      await assertRouteContrast(page, route);
+      const lightScreenshot = `${route.label}-${viewport.label}-light.png`;
+      await page.screenshot({ path: join(artifactDirectory, lightScreenshot), fullPage: true, animations: "disabled" });
       const theme = await assertThemeToggle(page);
       const darkLayout = await assertNoHorizontalOverflow(page, route, viewport);
-      await assertWorkspaceContrast(page, route);
+      await assertRouteContrast(page, route);
+      const darkScreenshot = `${route.label}-${viewport.label}-dark.png`;
+      await page.screenshot({ path: join(artifactDirectory, darkScreenshot), fullPage: true, animations: "disabled" });
 
       if (route.auth && viewport.width <= 850) {
         await page.getByRole("button", { name: "Open navigation" }).click();
@@ -228,8 +258,6 @@ try {
         await page.locator(".sidebar.sidebar-open").waitFor({ state: "hidden" });
       }
 
-      const filename = `${route.label}-${viewport.label}-${theme}.png`;
-      await page.screenshot({ path: join(artifactDirectory, filename), fullPage: true, animations: "disabled" });
       results.push({
         route: route.label,
         viewport: viewport.label,
