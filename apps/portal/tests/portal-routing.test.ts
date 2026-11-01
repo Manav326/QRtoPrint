@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { authStorageKey, resolvePortalRoute } from "../src/portal-routing.ts";
+import { authStorageKey, resolvePortalRoute, shopPathForSection, shopSectionFromPath } from "../src/portal-routing.ts";
 
 test("public root stays public even when a user has a stored session", () => {
   assert.deepEqual(resolvePortalRoute("/"), { kind: "public" });
@@ -34,4 +34,30 @@ test("admin and shop browser credentials use independent session keys", () => {
   assert.equal(authStorageKey("admin"), "qrtoprint.auth.admin");
   assert.equal(authStorageKey("shop"), "qrtoprint.auth.shop");
   assert.notEqual(authStorageKey("admin"), authStorageKey("shop"));
+});
+
+
+test("shop workspace sections have stable deep links and restore correctly", () => {
+  const sections = [
+    "Overview",
+    "Print Queue",
+    "Printers",
+    "QR Stations",
+    "Print Agent",
+    "Pricing",
+    "Subscription",
+    "Payments",
+    "Customers",
+    "Reports",
+    "Settings"
+  ] as const;
+
+  for (const section of sections) {
+    const path = shopPathForSection(section);
+    assert.ok(path === "/shop" || path.startsWith("/shop/"));
+    assert.equal(shopSectionFromPath(path), section);
+  }
+
+  assert.equal(shopSectionFromPath("/shop/settings/"), "Settings");
+  assert.equal(shopSectionFromPath("/shop/unknown"), "Overview");
 });
