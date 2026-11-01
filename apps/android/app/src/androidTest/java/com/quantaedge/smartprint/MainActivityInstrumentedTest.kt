@@ -77,13 +77,13 @@ class MainActivityInstrumentedTest {
         ActivityScenario.launch(MainActivity::class.java).use {
             val label = com.google.android.material.R.id.navigation_bar_item_small_label_view
             onView(allOf(withId(label), withText("Files"))).perform(click())
-            onView(withText("＋ Folder")).perform(click())
+            onView(withText("New folder")).perform(click())
             onView(withHint("Name")).perform(replaceText(folderName), closeSoftKeyboard())
             onView(withText("Save")).perform(click())
 
             onView(withText(folderName)).check(matches(isDisplayed()))
             onView(withText(folderName)).perform(click())
-            onView(withText("＋ Folder")).perform(click())
+            onView(withText("New folder")).perform(click())
             onView(withHint("Name")).perform(replaceText("Nested"), closeSoftKeyboard())
             onView(withText("Save")).perform(click())
             onView(withText("Nested")).check(matches(isDisplayed()))
@@ -99,7 +99,7 @@ class MainActivityInstrumentedTest {
         ActivityScenario.launch(MainActivity::class.java).use {
             val label = com.google.android.material.R.id.navigation_bar_item_small_label_view
             onView(allOf(withId(label), withText("Files"))).perform(click())
-            onView(withText("＋ Folder")).perform(click())
+            onView(withText("New folder")).perform(click())
             onView(withHint("Name")).perform(replaceText("CI Sheet Folder"), closeSoftKeyboard())
             onView(withText("Save")).perform(click())
             onView(withContentDescription("More options for CI Sheet Folder")).perform(click())
