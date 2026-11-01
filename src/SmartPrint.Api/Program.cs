@@ -4714,7 +4714,7 @@ shop.MapPost("/payments/{paymentId:guid}/verify", async (
             var batchJob = jobsById[filePayment.PrintJobId];
             var batchPreviousStatus = batchJob.Status;
             var batchFileWasRejected = batchJob.Status is "REJECTED" or "REFUNDED";
-            if (!batchFileWasRejected)
+            if (!singleFileWasRejected)
             {
                 batchJob.Status = "PAID_AUTHORISED";
                 batchJob.UpdatedUtc = batchVerifiedUtc;
@@ -4727,7 +4727,7 @@ shop.MapPost("/payments/{paymentId:guid}/verify", async (
                 NewStatus = batchJob.Status,
                 ActorType = "ShopUser",
                 ActorId = actorId,
-                ReasonCode = batchFileWasRejected
+                ReasonCode = singleFileWasRejected
                     ? "BATCH_PAYMENT_VERIFIED_FOR_REJECTED_FILE_REFUND"
                     : batchPayment.Method == "UPI"
                         ? "BATCH_UPI_PAYMENT_MANUALLY_VERIFIED"
