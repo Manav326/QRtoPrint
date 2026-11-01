@@ -1048,7 +1048,7 @@ class MainActivity : AppCompatActivity() {
     private fun addLibraryEntries(parentView: LinearLayout, entries: List<File>, isPicker: Boolean, depth: Int) {
         entries.forEach { entry ->
             if (!isPicker || entry.isDirectory || DocumentNamePolicy.isPrintable(entry.name, entry.length())) {
-                parentView.addView(entryView(entry, isPicker, depth), linearParams().apply { bottomMargin = dp(4) })
+                parentView.addView(entryView(entry, isPicker, depth), linearParams())
                 if (entry.isDirectory && expandedFolderPaths.contains(entry.canonicalPath) && depth < MAX_TREE_DEPTH) {
                     val children = runCatching { store.list(entry).toList() }.getOrDefault(emptyList())
                     if (children.isNotEmpty()) addLibraryEntries(parentView, children, isPicker, depth + 1)
@@ -1062,10 +1062,10 @@ class MainActivity : AppCompatActivity() {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
             setPadding(dp(8 + depth * 15), dp(7), dp(5), dp(7))
-            minimumHeight = dp(54)
+            minimumHeight = dp(52)
             background = roundedDrawable(
-                if (file.isDirectory) getColor(R.color.qp_surface) else getColor(R.color.qp_card),
-                dp(11), getColor(R.color.qp_outline)
+                if (file.isDirectory) getColor(R.color.qp_soft) else getColor(R.color.qp_surface),
+                dp(9)
             )
         }
         val icon = ImageView(this).apply {
