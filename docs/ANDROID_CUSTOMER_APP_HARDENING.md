@@ -5,26 +5,26 @@ Scope: the SmartPrint Android application remains customer-facing. Shop staff co
 ## Implementation checklist
 
 ### Security and session continuity
-- [ ] Bind production QR station URLs to the configured SmartPrint service origin.
-- [ ] Keep the native WebView message bridge pinned to the configured origin; never trust a host supplied by a QR code.
-- [ ] Persist guest print-session tokens encrypted with Android Keystore and scope them by station.
-- [ ] Persist non-secret active-job drafts per station so a restarted WebView can restore uploaded jobs.
-- [ ] Preserve WebView state on Android Activity recreation.
-- [ ] Add an explicit switch-shop flow without discarding another shop's active session.
+- [x] Bind production QR station URLs to the configured SmartPrint service origin.
+- [x] Keep the native WebView message bridge pinned to the configured origin; never trust a host supplied by a QR code.
+- [x] Persist guest print-session tokens encrypted with Android Keystore and scope them by station.
+- [x] Persist non-secret active-job drafts per station so a restarted WebView can restore uploaded jobs.
+- [x] Preserve WebView state on Android Activity recreation.
+- [x] Add an explicit switch-shop flow without discarding another shop's active session.
 
 ### Customer print journey
-- [ ] Save one PDF by default from document scanning; do not also expose duplicate page-image derivatives in the same folder.
-- [ ] Refresh and display status for every file in a multi-file batch.
-- [ ] Make customer navigation/back handling return to the previous screen.
-- [ ] Explain image-based PDF conversion before combine/edit operations.
-- [ ] Add useful date and job context to account activity/history.
+- [x] Save one PDF by default from document scanning; do not also expose duplicate page-image derivatives in the same folder.
+- [x] Refresh and display status for every file in a multi-file batch.
+- [x] Make customer navigation/back handling return to the previous screen.
+- [x] Explain image-based PDF conversion before combine/edit operations.
+- [x] Add useful date and job context to account activity/history.
 
 ### Library, accessibility and reliability
-- [ ] Add library search/filter.
-- [ ] Replace free-form move-to-folder path entry with a folder picker.
-- [ ] Show document-library storage usage and available device space.
-- [ ] Add free-space preflight protection to imports.
-- [ ] Improve minimum touch targets and small supporting text.
+- [x] Add library search/filter.
+- [x] Replace free-form move-to-folder path entry with a folder picker.
+- [x] Show document-library storage usage and available device space.
+- [x] Add free-space preflight protection to imports.
+- [x] Improve minimum touch targets and small supporting text.
 - [ ] Tighten or explicitly constrain cleartext networking without breaking private-LAN Agent upload.
 
 ### Release validation
