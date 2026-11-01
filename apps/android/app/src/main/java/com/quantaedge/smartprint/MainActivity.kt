@@ -122,6 +122,8 @@ class MainActivity : AppCompatActivity() {
     private lateinit var documentScanLauncher: ActivityResultLauncher<IntentSenderRequest>
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        // Restore the explicit app preference before AppCompat inflates theme-aware UI.
+        SmartPrintThemePreference.apply(this)
         super.onCreate(savedInstanceState)
         WindowCompat.setDecorFitsSystemWindows(window, false)
         val lightSystemBars = (resources.configuration.uiMode and android.content.res.Configuration.UI_MODE_NIGHT_MASK) ==
@@ -533,6 +535,30 @@ class MainActivity : AppCompatActivity() {
         }
         scroll.addView(column)
         val auth = customerAccountStore.read()
+
+        val appearanceCard = card()
+        val appearanceContent = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(14), dp(13), dp(14), dp(13))
+        }
+        appearanceContent.addView(text("Appearance", 15, R.color.qp_text, true))
+        appearanceContent.addView(text(
+            "Choose how SmartPrint looks on this device. This setting is kept when you sign out.",
+            11, R.color.qp_muted, false
+        ).apply { setPadding(0, dp(4), 0, dp(12)) })
+        val currentTheme = SmartPrintThemePreference.read(this)
+        val themeChoices = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+        }
+        themeChoices.addView(button("Light theme", currentTheme == SmartPrintTheme.LIGHT).apply {
+            setOnClickListener { SmartPrintThemePreference.save(this@MainActivity, SmartPrintTheme.LIGHT) }
+        }, LinearLayout.LayoutParams(0, dp(42), 1f))
+        themeChoices.addView(button("Dark theme", currentTheme == SmartPrintTheme.DARK).apply {
+            setOnClickListener { SmartPrintThemePreference.save(this@MainActivity, SmartPrintTheme.DARK) }
+        }, LinearLayout.LayoutParams(0, dp(42), 1f).apply { marginStart = dp(8) })
+        appearanceContent.addView(themeChoices)
+        appearanceCard.addView(appearanceContent)
+        column.addView(appearanceCard, linearParams().apply { bottomMargin = dp(16) })
 
         column.addView(text(
             if (auth == null) "Guest access is ready" else "Smart Print customer",
