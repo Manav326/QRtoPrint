@@ -67,11 +67,15 @@ This checklist tracks the public website, non-technical Windows setup, Android r
 - [x] Default release builds to `https://qr-test.paintpulp.com` through the `SMARTPRINT_PUBLIC_BASE_URL` repository variable, with an explicit default.
 - [x] Validate the configured release origin as a canonical HTTPS origin before building either installer.
 - [x] Limit GitHub Release write permission to the publication job and fail if any expected release asset is missing.
+- [x] Retain every published stable version; new versions move the latest-release pointer without deleting older releases.
+- [x] Create releases as drafts, verify the two packages and SHA-256 manifest before publication, and allow retry only while a release remains a draft.
+- [x] Refuse reuse of a published version tag and disable asset overwrites during upload.
+- [ ] Enable repository-side immutable-release protection and protect the `v*` tag pattern against updates/deletion.
 - [ ] Configure the Windows signing secrets and Android signing secrets.
 - [ ] Set `SMARTPRINT_PUBLIC_BASE_URL` to the actual canonical deployment origin before tagging.
 - [ ] Run the first tagged release and verify both release assets and checksums.
 - [ ] Test download links from a signed-out browser and a mobile device.
-- [ ] Establish a versioning and rollback policy; retain older releases for support.
+- [x] Establish a stable semantic-version policy and retain all published stable releases indefinitely; use tag-specific URLs for rollback.
 
 ## E. Deployment and production acceptance
 
@@ -86,10 +90,10 @@ This checklist tracks the public website, non-technical Windows setup, Android r
 
 ## Current verified CI evidence
 
-- The green CI baseline is run 352 at commit `a2ebb4772052c4a9001424f50a6b7074f02dbac0`. Landing-page download-gating changes were committed afterward and require their own CI result before being marked verified.
-
-- Latest verified code commit: `f42a112b98912b13a4a192d28ad6cda03cb1c8fb`.
-- CI run 351: [GitHub Actions run](https://github.com/Manav326/QRtoPrint/actions/runs/41261715735) — portal, .NET API/Agent, API and Agent tests, the Windows non-interactive pairing-status smoke test, Inno Setup compilation, Android JVM/emulator tests, GHCR image publication and container smoke tests all completed successfully.
+- Latest verified CI run before the release-safety changes is run 360 at commit `c25d97e6c116c812f861c85343d319f1e662e6e4`; all four jobs passed: portal, .NET API/Agent and Windows installer validation, Android unit/emulator tests, and GHCR container publication/smoke tests.
+- CI run 360: [GitHub Actions run](https://github.com/Manav326/QRtoPrint/actions/runs/41263086214).
+- The release-safety workflow changes and the release-notice CSS correction were committed after run 360 and still require a fresh CI run before they can be marked verified.
+- Earlier CI run 351 also passed the non-interactive Agent pairing-status smoke test and the first full installer validation.
 - Earlier CI run 344 also passed the first full installer and container validation.
 - GitHub Releases currently has no published release. The Windows validation artifact is unsigned and the Android artifact is a debug build; neither is a public customer download. The public landing page now shows non-clickable release-pending states instead of broken latest-download URLs.
 
