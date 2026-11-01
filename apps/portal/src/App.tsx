@@ -1073,8 +1073,10 @@ function ShopConsole({ tokens, onSignOut }: { tokens: AuthTokens; onSignOut: () 
     if (failedIds.size > 0) {
       let retryJobs: ShopPrintJob[];
       try {
-        const latest = await getShopPrintJobsPage(tokens.accessToken, 0, 100, queueSearch);
-        retryJobs = latest.filter(job => failedIds.has(job.id) && job.status === "AWAITING_SHOP_APPROVAL");
+        const batchId = batchJobs.find(job => job.batchId)?.batchId;
+        if (!batchId) throw new Error("The batch identifier is unavailable. Refresh the queue and reopen the batch.");
+        const latestBatch = await getShopPrintBatchJobs(tokens.accessToken, batchId);
+        retryJobs = latestBatch.filter(job => failedIds.has(job.id) && job.status === "AWAITING_SHOP_APPROVAL");
       } catch {
         // A failed status refresh leaves the outcome unknown. Do not offer a
         // blind retry that could repeat a decision whose first request landed.
