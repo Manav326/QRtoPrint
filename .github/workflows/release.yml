@@ -90,6 +90,15 @@ jobs:
           Copy-Item -LiteralPath $nativeExe -Destination "artifacts/desktop/SmartPrint.Desktop.exe"
           Get-ChildItem -Path "apps/desktop/src-tauri/target/release" -Filter "*.dll" -File |
             Copy-Item -Destination "artifacts/desktop" -Force
+      - name: Bundle the Microsoft WebView2 Evergreen bootstrapper
+        shell: pwsh
+        run: |
+          $bootstrapper = "artifacts/desktop/MicrosoftEdgeWebView2RuntimeInstallerX64.exe"
+          Invoke-WebRequest -Uri "https://go.microsoft.com/fwlink/p/?LinkId=2124703" -OutFile $bootstrapper -MaximumRedirection 10
+          $signature = Get-AuthenticodeSignature -LiteralPath $bootstrapper
+          if ($signature.Status -ne [System.Management.Automation.SignatureStatus]::Valid -or $signature.SignerCertificate.Subject -notmatch "Microsoft") {
+            throw "The downloaded WebView2 prerequisite did not pass Microsoft Authenticode verification."
+          }
       - name: Publish self-contained Windows Agent
         shell: pwsh
         run: |
