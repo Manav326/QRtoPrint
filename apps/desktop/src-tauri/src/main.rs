@@ -16,6 +16,7 @@ const SESSION_TARGET: &str = "QRtoPrint.SmartPrint.Session";
 #[serde(rename_all = "camelCase")]
 struct LocalAgentStatus {
     service_reachable: bool,
+    local_api_reachable: bool,
     paired: bool,
     agent_device_id: Option<String>,
     status: String,
@@ -30,6 +31,7 @@ struct AgentPipeResponse {
     service_reachable: Option<bool>,
     paired: Option<bool>,
     status: Option<String>,
+    local_api_reachable: Option<bool>,
 }
 
 #[derive(Debug, Serialize)]
@@ -57,6 +59,7 @@ async fn get_local_agent_status() -> LocalAgentStatus {
             if is_unpaired {
                 LocalAgentStatus {
                     service_reachable: true,
+                    local_api_reachable: true,
                     paired: false,
                     agent_device_id: None,
                     status: "UNPAIRED".into(),
@@ -73,6 +76,7 @@ async fn get_local_agent_status() -> LocalAgentStatus {
                         .map(str::to_owned);
                     LocalAgentStatus {
                         service_reachable: true,
+                        local_api_reachable: true,
                         paired: id.is_some(),
                         agent_device_id: id,
                         status: payload.get("status")
@@ -91,6 +95,7 @@ async fn get_local_agent_status() -> LocalAgentStatus {
 fn unavailable_status() -> LocalAgentStatus {
     LocalAgentStatus {
         service_reachable: false,
+        local_api_reachable: false,
         paired: false,
         agent_device_id: None,
         status: "SERVICE_UNAVAILABLE".into(),
@@ -135,6 +140,7 @@ fn pipe_agent_status() -> Result<LocalAgentStatus, String> {
     let paired = response.paired.unwrap_or(false);
     Ok(LocalAgentStatus {
         service_reachable: true,
+        local_api_reachable: response.local_api_reachable.unwrap_or(false),
         paired,
         agent_device_id: response.agent_device_id,
         status: response.status.unwrap_or_else(|| if paired { "CONNECTED" } else { "UNPAIRED" }.into()),

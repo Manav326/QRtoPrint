@@ -2,6 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 
 export interface DesktopAgentStatus {
   serviceReachable: boolean;
+  localApiReachable: boolean;
   paired: boolean;
   agentDeviceId: string | null;
   status: string;

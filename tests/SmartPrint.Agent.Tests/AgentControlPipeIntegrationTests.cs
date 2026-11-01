@@ -80,7 +80,8 @@ public sealed class AgentControlPipeIntegrationTests
             configuration,
             NullLogger<AgentControlPipeHostedService>.Instance,
             new AgentEnrollmentHandler(credentialStore),
-            credentialStore);
+            credentialStore,
+            new LocalAgentApiState());
 
         try
         {
@@ -91,6 +92,7 @@ public sealed class AgentControlPipeIntegrationTests
             {
                 Assert.True(initialStatus.RootElement.GetProperty("success").GetBoolean());
                 Assert.True(initialStatus.RootElement.GetProperty("serviceReachable").GetBoolean());
+                Assert.False(initialStatus.RootElement.GetProperty("localApiReachable").GetBoolean());
                 Assert.False(initialStatus.RootElement.GetProperty("paired").GetBoolean());
                 Assert.Equal("UNPAIRED", initialStatus.RootElement.GetProperty("status").GetString());
             }
@@ -106,6 +108,7 @@ public sealed class AgentControlPipeIntegrationTests
             {
                 Assert.True(pairedStatus.RootElement.GetProperty("success").GetBoolean());
                 Assert.True(pairedStatus.RootElement.GetProperty("serviceReachable").GetBoolean());
+                Assert.False(pairedStatus.RootElement.GetProperty("localApiReachable").GetBoolean());
                 Assert.True(pairedStatus.RootElement.GetProperty("paired").GetBoolean());
                 Assert.Equal(deviceId, pairedStatus.RootElement.GetProperty("agentDeviceId").GetGuid());
                 Assert.Equal("CONNECTED", pairedStatus.RootElement.GetProperty("status").GetString());

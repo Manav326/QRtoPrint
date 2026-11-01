@@ -1208,7 +1208,7 @@ function PrintAgentPage({agents,enrollmentCode,busy,onGenerate,onRevoke,desktop,
         <div className="desktop-agent-status">
           <span className={connected ? "desktop-agent-indicator connected" : localAgentConflict ? "desktop-agent-indicator conflict" : "desktop-agent-indicator"} />
           <div><strong>{connected ? "Connected to this shop" : localAgentConflict ? "Connected to another shop" : localAgentStatus?.serviceReachable ? "Ready to connect" : "Print service not responding"}</strong>
-            <small>{connected ? "Printer discovery and job hand-off are managed by the SmartPrint service." : localAgentConflict ? "For security, this computer cannot be moved until its previous shop owner revokes it." : localAgentStatus?.serviceReachable ? "Your owner session will authorize a one-time connection. No pairing code is shown." : "Restart Windows or repair SmartPrint to start the background service, then retry."}</small>
+            <small>{connected ? (localAgentStatus?.localApiReachable === false ? "Connected to your shop. Cloud printing remains available; local-network uploads are reconnecting automatically." : "Printer discovery and job hand-off are managed by the SmartPrint service.") : localAgentConflict ? "For security, this computer cannot be moved until its previous shop owner revokes it." : localAgentStatus?.serviceReachable ? "Your owner session will authorize a one-time connection. No pairing code is shown." : "SmartPrint is starting or reconnecting its background service. It will retry automatically."}</small>
           </div>
         </div>
         <div className="desktop-agent-actions">

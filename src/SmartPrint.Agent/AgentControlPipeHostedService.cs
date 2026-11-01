@@ -12,7 +12,8 @@ public sealed class AgentControlPipeHostedService(
     IConfiguration configuration,
     ILogger<AgentControlPipeHostedService> logger,
     IAgentEnrollmentHandler enrollmentHandler,
-    AgentCredentialStore credentialStore) : BackgroundService
+    AgentCredentialStore credentialStore,
+    LocalAgentApiState localAgentApiState) : BackgroundService
 {
     public const string PipeName = "QRtoPrint.SmartPrint.Agent.Control";
     public const string PipePath = @"\\.\pipe\" + PipeName;
@@ -142,7 +143,7 @@ public sealed class AgentControlPipeHostedService(
                 var credentials = credentialStore.Load();
                 var paired = credentials is not null;
                 await writer.WriteLineAsync(JsonSerializer.Serialize(
-                    new PipeResponse(true, credentials?.AgentDeviceId, null, true, paired, paired ? "CONNECTED" : "UNPAIRED"),
+                    new PipeResponse(true, credentials?.AgentDeviceId, null, true, paired, paired ? "CONNECTED" : "UNPAIRED", localAgentApiState.IsRunning),
                     PipeJsonOptions));
             }
             catch (Exception exception) when (exception is CryptographicException or IOException or JsonException or UnauthorizedAccessException)
@@ -197,5 +198,6 @@ public sealed class AgentControlPipeHostedService(
         string? Message,
         bool? ServiceReachable = null,
         bool? Paired = null,
-        string? Status = null);
+        string? Status = null,
+        bool? LocalApiReachable = null);
 }
