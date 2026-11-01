@@ -66,7 +66,7 @@ class MainActivityInstrumentedTest {
             val navigationLabel = com.google.android.material.R.id.navigation_bar_item_small_label_view
             onView(allOf(withId(navigationLabel), withText("Activity"))).perform(click())
             onView(withContentDescription("Account")).perform(click())
-            onView(withText("Account")).check(matches(isDisplayed()))
+            onView(withText("Guest access is ready")).check(matches(isDisplayed()))
             androidx.test.espresso.Espresso.pressBack()
             onView(withText("Print history")).check(matches(isDisplayed()))
         }
