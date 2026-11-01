@@ -963,8 +963,13 @@ function ShopConsole({ tokens, onSignOut }: { tokens: AuthTokens; onSignOut: () 
   }
 
   async function rejectPayment(payment: ShopPayment) {
+    const cancellationWarning = payment.status === "AWAITING_CUSTOMER_PAYMENT" && payment.method === "UPI"
+      ? "Before cancelling, check your bank/UPI ledger and ask the customer whether they paid. They may have paid before submitting a UTR. If the credit is present, verify this attempt instead of cancelling it.\n\n"
+      : "";
     const reason = await promptInApp(
-      payment.batchPaymentId ? "Explain why this full batch payment is being rejected." : "Explain why this payment report is being rejected.",
+      cancellationWarning + (payment.batchPaymentId
+        ? "Explain why this full batch payment is being rejected."
+        : "Explain why this payment report is being rejected."),
       payment.batchPaymentId ? "Reject batch payment" : "Reject payment report",
       "Rejection reason"
     );
@@ -1089,7 +1094,7 @@ function ShopConsole({ tokens, onSignOut }: { tokens: AuthTokens; onSignOut: () 
     const acceptCount=batchJobs.filter(job=>accepted.has(job.id)).length;
     const rejectCount=batchJobs.length-acceptCount;
     if (!(await confirmInApp(
-      `Accept ${acceptCount} file(s) and reject ${rejectCount} file(s) before checkout? The decisions will be applied together. Once payment starts, rejected files go through the refund workflow.`,
+      `Accept ${acceptCount} file(s) and reject ${rejectCount} file(s)? Previously rejected files you tick will be restored only if no payment has started. Expired quotes must be recalculated before checkout. The decisions are applied together.`,
       "Confirm batch review",
       "Apply review"
     ))) return;
@@ -1150,17 +1155,17 @@ function ShopConsole({ tokens, onSignOut }: { tokens: AuthTokens; onSignOut: () 
       // may currently be filtered or paginated, so its visible rows are not
       // a safe source for per-file acceptance/rejection decisions.
       const allBatchJobs = await getShopPrintBatchJobs(tokens.accessToken, batchId);
-      const reviewableStatuses=new Set(["AWAITING_SHOP_APPROVAL","AWAITING_PAYMENT"]);
+      const reviewableStatuses=new Set(["AWAITING_SHOP_APPROVAL","AWAITING_PAYMENT","REJECTED"]);
       const waiting = allBatchJobs.filter(job => reviewableStatuses.has(job.status));
       if (waiting.length === 0) {
         setBatchReviewJobs(null);
-        setToast("This batch has no files left awaiting shop review.");
+        setToast("This batch has no files eligible for pre-checkout review.");
         return;
       }
       setBatchReviewDecisions(current => {
         const next = { ...current };
         for (const job of waiting) {
-          if (next[job.id] === undefined) next[job.id] = true;
+          if (next[job.id] === undefined) next[job.id] = job.status !== "REJECTED";
         }
         return next;
       });
@@ -1935,7 +1940,7 @@ function PrintQueuePage({ jobs, printers, agentDevices, searchQuery, loadingBatc
     return ()=>window.clearInterval(timer);
   },[autoRefresh,refreshSeconds]);
 
-  const reviewableBatchFileStatuses=new Set(["AWAITING_SHOP_APPROVAL","AWAITING_PAYMENT"]);
+  const reviewableBatchFileStatuses=new Set(["AWAITING_SHOP_APPROVAL","AWAITING_PAYMENT","REJECTED"]);
   const reviewBatches=Array.from(new Map(jobs.filter(job=>job.batchId&&reviewableBatchFileStatuses.has(job.status)).map(job=>[job.batchId!,job])).keys());
   const onlineAgentIds = new Set(agentDevices.filter(agent =>
     !agent.revokedUtc && agent.status === "Online" && !!agent.lastSeenUtc &&
@@ -1960,7 +1965,7 @@ function PrintQueuePage({ jobs, printers, agentDevices, searchQuery, loadingBatc
       <label className="queue-refresh-interval">Refresh every <input type="number" min={5} max={3600} step={1} value={refreshSeconds} onChange={event=>setRefreshSeconds(Math.max(5,Math.min(3600,Number(event.target.value)||5)))}/> seconds</label>
       <span className="queue-refresh-note">{autoRefresh?"Queue refreshes automatically while this page is open.":"Automatic refresh is off. Use Refresh queue whenever needed."}</span>
     </div>
-    {reviewBatches.length>0&&<div className="batch-review-strip"><div><strong>{reviewBatches.length} batch(es) with files waiting for review</strong><span>Review loads every file in a batch, even when this queue is searched or paginated. All waiting files start accepted.</span></div>{reviewBatches.map(batchId=><button key={batchId} className="secondary-button" disabled={loadingBatchId===batchId||!!loadingBatchId} onClick={()=>onReviewBatch(batchId)}>{loadingBatchId===batchId?<><span className="button-spinner"/>Loading full batch…</>:<>Review batch · {jobs.filter(job=>job.batchId===batchId&&reviewableBatchFileStatuses.has(job.status)).length} shown</>}</button>)}</div>}
+    {reviewBatches.length>0&&<div className="batch-review-strip"><div><strong>{reviewBatches.length} batch(es) with files waiting for review</strong><span>Review loads every eligible file in a batch, even when this queue is searched or paginated. New files start accepted; previously rejected files stay unchecked until restored.</span></div>{reviewBatches.map(batchId=><button key={batchId} className="secondary-button" disabled={loadingBatchId===batchId||!!loadingBatchId} onClick={()=>onReviewBatch(batchId)}>{loadingBatchId===batchId?<><span className="button-spinner"/>Loading full batch…</>:<>Review batch · {jobs.filter(job=>job.batchId===batchId&&reviewableBatchFileStatuses.has(job.status)).length} shown</>}</button>)}</div>}
     {jobs.length===0 ? <EmptyModule icon={<FileText size={24}/>} title="Your queue is clear" text="When a customer uploads a document through one of your QR stations, the job and its current state will appear here."/> :
       <div className="table-scroll"><table><thead><tr><th>JOB</th><th>DOCUMENT</th><th>PRINT SETTINGS</th><th>QUOTE</th><th>PRINTER / LOCAL QUEUE</th><th>STATUS</th><th>CREATED</th><th>ACTIONS</th></tr></thead><tbody>
         {queueBatches.map(batch=>{
@@ -3341,7 +3346,6 @@ function CustomerPrintFlow({publicCode,sessionToken,paymentOptions,localAgent,lo
     "PRINT_SUBMITTING","SPOOLER_ACCEPTED","PRINTING","OUTPUT_UNCONFIRMED","COMPLETED"
   ]);
   const batchCheckoutReady=quoteItems.length>0&&quoteItems.every(item=>batchCheckoutStatuses.has(statusForBatchItem(item)));
-  const batchAcceptedItems=quoteItems.filter(item=>!["REJECTED","REFUNDED"].includes(statusForBatchItem(item)));
   const batchPayableItems=quoteItems.filter(item=>["AWAITING_PAYMENT","PAYMENT_REJECTED"].includes(statusForBatchItem(item)));
   const batchPayableTotal=batchPayableItems.reduce((total,item)=>
     total+(batchStatuses[item.job.id]?.quotedAmountMinor??quotesByJobId[item.job.id]?.quotedAmountMinor??item.job.quotedAmountMinor??0),0);
@@ -3353,6 +3357,27 @@ function CustomerPrintFlow({publicCode,sessionToken,paymentOptions,localAgent,lo
   const batchCheckoutAmount=batchCheckoutUsesPayment?batchPayment!.amountMinor:batchPayableTotal;
   const batchCheckoutFileCount=batchCheckoutUsesPayment?batchPayment!.fileCount:batchPayableItems.length;
   const batchCheckoutCurrency=batchCheckoutUsesPayment?batchPayment!.currency:(batchPayableItems[0]?.job.currency??"INR");
+  const customerPaymentForBatchItem=(item:UploadedPrintJob)=>
+    uploaded?.job.id===item.job.id&&payment
+      ?payment
+      :batchStatuses[item.job.id]?.payment??null;
+  const batchPaymentItems=batchCheckoutUsesPayment
+    ?quoteItems.filter(item=>customerPaymentForBatchItem(item)?.batchPaymentId===batchPayment!.id)
+    :batchPayableItems;
+  const batchCheckoutLineItems=batchCheckoutUsesPayment?batchPaymentItems:batchPayableItems;
+  const batchPaymentAllocatedTotal=batchPaymentItems.reduce((total,item)=>
+    total+(customerPaymentForBatchItem(item)?.amountMinor??0),0);
+  const batchPaymentRefundedTotal=batchPaymentItems.reduce((total,item)=>
+    total+(customerPaymentForBatchItem(item)?.refundedAmountMinor??0),0);
+  const batchPaymentAllocationComplete=batchCheckoutUsesPayment&&
+    batchPaymentItems.length===batchPayment!.fileCount&&
+    batchPaymentAllocatedTotal===batchPayment!.amountMinor;
+  const batchCheckoutHeading=batchCheckoutUsesPayment
+    ?batchPayment!.status==="VERIFIED"?"BATCH PAYMENT VERIFIED"
+      :batchPayment!.status==="CUSTOMER_REPORTED"?"PAYMENT REFERENCE SUBMITTED"
+      :batchPayment!.status==="CASH_AWAITING_PAYMENT"?"PAY AT SHOP COUNTER"
+      :"PAYMENT FOR ACCEPTED FILES"
+    :"PAY FOR ACCEPTED FILES";
   const quoteEntries=quoteItems.map(item=>({item,quote:quotesByJobId[item.job.id]})).filter(entry=>!!entry.quote);
   const acceptedQuoteEntries=quoteEntries.filter(entry=>
     !["REJECTED","REFUNDED"].includes(statusForBatchItem(entry.item))
@@ -3514,15 +3539,25 @@ function CustomerPrintFlow({publicCode,sessionToken,paymentOptions,localAgent,lo
     </div>}
     {batchCheckoutVisible&&<section className="customer-pay-panel customer-batch-checkout-panel">
       <div className="customer-pay-heading">
-        <span>PAY FOR ACCEPTED FILES · {batchCheckoutFileCount} FILE(S)</span>
+        <span>{batchCheckoutHeading} · {batchCheckoutFileCount} FILE(S)</span>
         <strong>{formatMoney(batchCheckoutAmount,batchCheckoutCurrency)}</strong>
       </div>
       <div className="customer-batch-checkout-lines">
-        {batchAcceptedItems.map(item=>{
-          const amount=batchStatuses[item.job.id]?.quotedAmountMinor??quotesByJobId[item.job.id]?.quotedAmountMinor??item.job.quotedAmountMinor??0;
-          return <div key={item.job.id}><span>{item.document.originalFileName}</span><strong>{formatMoney(amount,item.job.currency)}</strong></div>;
+        {batchCheckoutLineItems.map(item=>{
+          const allocation=customerPaymentForBatchItem(item);
+          const amount=batchCheckoutUsesPayment
+            ?allocation?.amountMinor??0
+            :batchStatuses[item.job.id]?.quotedAmountMinor??quotesByJobId[item.job.id]?.quotedAmountMinor??item.job.quotedAmountMinor??0;
+          const refunded=batchCheckoutUsesPayment?(allocation?.refundedAmountMinor??0):0;
+          const lineStatus=batchCheckoutUsesPayment?allocation?.status:"Included in this checkout";
+          return <div key={item.job.id}>
+            <span>{item.document.originalFileName}<small>{lineStatus?String(lineStatus).replaceAll("_"," "):"Allocation loading"}{refunded>0? ` · ${formatMoney(refunded,item.job.currency)} refunded` : ""}</small></span>
+            <strong>{formatMoney(amount,item.job.currency)}</strong>
+          </div>;
         })}
       </div>
+      {batchCheckoutUsesPayment&&!batchPaymentAllocationComplete&&<p className="customer-payment-warning">Refreshing the per-file payment breakdown. Check the complete file list before paying or submitting a reference.</p>}
+      {batchCheckoutUsesPayment&&batchPaymentAllocationComplete&&batchPaymentRefundedTotal>0&&<p className="customer-payment-warning">Recorded file refunds: {formatMoney(batchPaymentRefundedTotal,batchCheckoutCurrency)}. Remaining amount after those returns: {formatMoney(Math.max(0,batchPayment!.amountMinor-batchPaymentRefundedTotal),batchCheckoutCurrency)}.</p>}
       {!batchCheckoutUsesPayment&&<>
         {batchPayment?.status==="REJECTED"&&<p className="customer-flow-error">The previous batch payment was rejected. {batchPayment.rejectionReason||"Check with the shop before trying again."}</p>}
         {paymentOptions.upiEnabled&&<button className={paymentMethod==="UPI"?"customer-choice selected":"customer-choice"} onClick={()=>setPaymentMethod("UPI")}>UPI payment</button>}
@@ -3532,7 +3567,7 @@ function CustomerPrintFlow({publicCode,sessionToken,paymentOptions,localAgent,lo
         </button>
         {!paymentOptions.upiEnabled&&!paymentOptions.cashEnabled&&<p className="customer-flow-error">{nativeAppMode?"No payment method. Ask shop.":"The shop has not configured a payment method yet. Please speak to the shop operator."}</p>}
       </>}
-      {batchCheckoutUsesPayment&&batchPayment?.method==="UPI"&&batchPayment.status==="AWAITING_CUSTOMER_PAYMENT"&&<div className="customer-upi-details">
+      {batchCheckoutUsesPayment&&batchPaymentAllocationComplete&&batchPayment?.method==="UPI"&&batchPayment.status==="AWAITING_CUSTOMER_PAYMENT"&&<div className="customer-upi-details">
         <div className="customer-upi-qr"><QRCode value={batchPayment.upiUri||"upi://pay?pa="+encodeURIComponent(batchPayment.upiIdSnapshot||"")} size={158}/></div>
         <strong>{batchPayment.payeeNameSnapshot||paymentOptions.payeeName||"Shop"}</strong>
         <span>{batchPayment.upiIdSnapshot||paymentOptions.upiId}</span>
@@ -3541,7 +3576,7 @@ function CustomerPrintFlow({publicCode,sessionToken,paymentOptions,localAgent,lo
         <button className="customer-flow-button" disabled={busy||paymentReference.trim().length<4} onClick={()=>void submitPaymentReference()}>{busy?<span className="button-spinner"/>:nativeAppMode?"Submit UTR":"Submit batch payment reference"}</button>
         <small className="customer-payment-warning">{nativeAppMode?"UTR isn't proof. Shop verifies.":"Submitting a UTR is not proof of payment. The shop verifies the full batch amount in its own UPI/bank app."}</small>
       </div>}
-      {batchCheckoutUsesPayment&&batchPayment?.method==="CASH"&&batchPayment.status==="CASH_AWAITING_PAYMENT"&&<p>Pay the displayed batch total at the shop counter. The shop will confirm receipt before authorising the accepted files.</p>}
+      {batchCheckoutUsesPayment&&batchPaymentAllocationComplete&&batchPayment?.method==="CASH"&&batchPayment.status==="CASH_AWAITING_PAYMENT"&&<p>Pay the displayed batch total at the shop counter. The shop will confirm receipt before authorising the accepted files.</p>}
       {batchCheckoutUsesPayment&&batchPayment?.status==="CUSTOMER_REPORTED"&&<p>Your batch payment reference was received. The shop must verify the full amount before any accepted file is authorised.</p>}
       {batchCheckoutUsesPayment&&batchPayment?.status==="VERIFIED"&&<div className="payment-verified-note"><Check size={14}/> Batch payment verified. Accepted files are authorised for the shop's print queue.</div>}
     </section>}
