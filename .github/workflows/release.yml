@@ -152,6 +152,7 @@ jobs:
           name: SmartPrint ${{ github.ref_name }}
           generate_release_notes: true
           make_latest: true
+          overwrite_files: true
           files: |
             artifacts/SmartPrint-Windows-Setup.exe
             artifacts/SmartPrint-Android.apk
