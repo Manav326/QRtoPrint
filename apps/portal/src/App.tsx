@@ -182,6 +182,7 @@ function ShopConsole({ tokens, onSignOut }: { tokens: AuthTokens; onSignOut: () 
       });
       setHasMoreQueueJobs(latest.length === 100 || printJobs.length > latest.length);
     } catch (exception) {
+      if (generation !== queuePageGeneration.current) return;
       handleShopApiError(exception, "Could not refresh the print queue.");
     }
   }
@@ -205,6 +206,7 @@ function ShopConsole({ tokens, onSignOut }: { tokens: AuthTokens; onSignOut: () 
       setQueueApiOffset(offset => offset + older.length);
       setHasMoreQueueJobs(older.length === 100);
     } catch (exception) {
+      if (generation !== queuePageGeneration.current) return;
       handleShopApiError(exception, "Could not load older print jobs.");
     } finally {
       loadingOlderQueueJobsRef.current = false;
