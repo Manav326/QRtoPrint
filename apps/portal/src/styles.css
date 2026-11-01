@@ -1884,3 +1884,20 @@ html[data-theme="dark"] .app-shell:not(.light) {
   --muted: #aab6ca;
   --faint: #8996aa;
 }
+
+
+/* Light login text, hints and footer copy must remain comfortably readable. */
+html[data-theme="light"] .auth-top-note,
+html[data-theme="light"] .auth-story>p,
+html[data-theme="light"] .auth-benefits small,
+html[data-theme="light"] .auth-proof,
+html[data-theme="light"] .auth-card-heading p,
+html[data-theme="light"] .auth-tabs button,
+html[data-theme="light"] .auth-input,
+html[data-theme="light"] .auth-card-footer,
+html[data-theme="light"] .auth-footer {
+  color: #5f6b80;
+}
+html[data-theme="light"] .auth-input input::placeholder {
+  color: #69758a;
+}
