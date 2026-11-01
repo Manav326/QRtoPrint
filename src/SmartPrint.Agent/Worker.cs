@@ -546,13 +546,20 @@ public sealed class Worker(
                     var destination = printExecutor.GetPdfExportPath(exportEntry, pdfExportDirectory);
                     await localQueueStore.MarkPdfExportStartedAsync(job.Id, destination, ct);
                     var documentBytes = localQueueStore.ReadDocument(job.Id);
-                    PdfExportReceipt receipt;
-                    try { receipt = printExecutor.ExportPdf(exportEntry, documentBytes, pdfExportDirectory, ct); }
+                    PdfExportExecutionResult exportResult;
+                    try
+                    {
+                        exportResult = await printExecutor.ExportPdfUsingWindowsPrinterOrFallbackAsync(
+                            exportEntry, documentBytes, destination, pdfExportDirectory, ct);
+                    }
                     finally { CryptographicOperations.ZeroMemory(documentBytes); }
 
+                    var receipt = exportResult.Receipt;
                     await localQueueStore.MarkPdfExportedAsync(job.Id, receipt, ct);
                     await ReportPdfExportedAsync(client, credentials, job.Id, receipt, ct);
-                    logger.LogInformation("Job {JobNumber} was exported as {FileName} to {OutputPath}.", job.JobNumber, receipt.FileName, receipt.OutputPath);
+                    logger.LogInformation(
+                        "Job {JobNumber} was exported as {FileName} to {OutputPath} using {ExportMethod}; spooler job {SpoolerJobId}.",
+                        job.JobNumber, receipt.FileName, receipt.OutputPath, exportResult.Method, exportResult.SpoolerJobId);
                     continue;
                 }
 

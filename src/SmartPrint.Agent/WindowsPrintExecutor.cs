@@ -7,6 +7,11 @@ using SkiaSharp;
 namespace SmartPrint.Agent;
 
 public sealed record SpoolerPrintReceipt(int JobId, string DocumentName);
+public sealed record PdfExportExecutionResult(
+    PdfExportReceipt Receipt,
+    bool UsedFallback,
+    string Method,
+    int? SpoolerJobId);
 
 public sealed class PrintExecutionBlockedException(string reasonCode, string message, Exception? inner = null)
     : Exception(message, inner)
@@ -151,8 +156,18 @@ public sealed class WindowsPrintExecutor
 
             return new SpoolerPrintReceipt(spoolerId, documentName);
         }
-        catch (PrintExecutionBlockedException)
+        catch (PrintExecutionBlockedException exception)
         {
+            // Once StartDoc succeeds, Windows owns a real spooler job. Even a later
+            // rendering/settings exception is no longer safe for automatic PDF fallback.
+            if (docStarted)
+            {
+                if (dc != IntPtr.Zero) _ = AbortDoc(dc);
+                throw new PrintSubmissionUncertainException(
+                    "SPOOLER_OUTPUT_OUTCOME_UNCERTAIN",
+                    "Windows accepted the print job before an error occurred; inspect the spooler output before retrying.",
+                    exception);
+            }
             throw;
         }
         catch (PrintSubmissionUncertainException)
@@ -179,6 +194,118 @@ public sealed class WindowsPrintExecutor
             if (dc != IntPtr.Zero) _ = DeleteDC(dc);
             if (devMode != IntPtr.Zero) Marshal.FreeHGlobal(devMode);
             if (printer != IntPtr.Zero) _ = ClosePrinter(printer);
+        }
+    }
+
+    /// <summary>
+    /// Uses the selected Windows Microsoft Print to PDF queue first. SmartPrint's
+    /// own PDF renderer is used only when Windows rejects the job before StartDoc
+    /// accepts it. A job accepted by the spooler with an uncertain output is never
+    /// duplicated through the fallback renderer.
+    /// </summary>
+    public async Task<PdfExportExecutionResult> ExportPdfUsingWindowsPrinterOrFallbackAsync(
+        AgentLocalQueueEntry entry,
+        byte[] bytes,
+        string outputPath,
+        string exportDirectory,
+        CancellationToken cancellationToken)
+    {
+        var fullOutputPath = Path.GetFullPath(outputPath);
+        if (File.Exists(fullOutputPath))
+        {
+            var existing = ReadExistingPdfExport(fullOutputPath);
+            return new PdfExportExecutionResult(existing, false, "EXISTING_VERIFIED_OUTPUT", null);
+        }
+
+        SpoolerPrintReceipt spoolerReceipt;
+        try
+        {
+            // This is the same PrintToFile -> PrintCore GDI route exercised by the
+            // GitHub Windows integration test, but now it is the production path.
+            spoolerReceipt = PrintToFile(entry, bytes, fullOutputPath, cancellationToken);
+        }
+        catch (PrintExecutionBlockedException exception)
+        {
+            if (File.Exists(fullOutputPath))
+            {
+                throw new PrintSubmissionUncertainException(
+                    "MICROSOFT_PDF_OUTPUT_OUTCOME_UNCERTAIN",
+                    "The Microsoft PDF driver failed after creating an output file; automatic fallback is disabled to avoid duplicate output.",
+                    exception);
+            }
+
+            var fallbackReceipt = ExportPdf(
+                entry with { OutputMode = PrinterOutputModeRules.PdfExport },
+                bytes,
+                exportDirectory,
+                cancellationToken);
+
+            return new PdfExportExecutionResult(
+                fallbackReceipt,
+                true,
+                $"SMARTPRINT_FALLBACK:{exception.ReasonCode}",
+                null);
+        }
+
+        var deadline = DateTimeOffset.UtcNow.AddSeconds(45);
+        while (DateTimeOffset.UtcNow < deadline)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (IsCompletePdfFile(fullOutputPath))
+            {
+                try
+                {
+                    var driverReceipt = ReadExistingPdfExport(fullOutputPath);
+                    return new PdfExportExecutionResult(
+                        driverReceipt,
+                        false,
+                        "MICROSOFT_PRINT_TO_PDF",
+                        spoolerReceipt.JobId);
+                }
+                catch (IOException)
+                {
+                    // The Microsoft print processor may still hold the file open.
+                }
+                catch (PrintExecutionBlockedException)
+                {
+                    // A partially-written file is not accepted as a completed export.
+                }
+            }
+
+            await Task.Delay(TimeSpan.FromMilliseconds(250), cancellationToken);
+        }
+
+        // StartDoc/EndDoc already succeeded. Do not produce a second document
+        // until the owner can reconcile the first Windows spooler submission.
+        throw new PrintSubmissionUncertainException(
+            "MICROSOFT_PDF_OUTPUT_TIMEOUT",
+            $"Windows accepted spooler job {spoolerReceipt.JobId}, but its PDF output did not become verifiably complete within 45 seconds.");
+    }
+
+    private static bool IsCompletePdfFile(string path)
+    {
+        try
+        {
+            using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+            if (stream.Length < 100) return false;
+
+            Span<byte> header = stackalloc byte[5];
+            if (stream.Read(header) != header.Length || !header.SequenceEqual("%PDF-"u8))
+                return false;
+
+            var tailLength = (int)Math.Min(stream.Length, 8192);
+            var tail = new byte[tailLength];
+            stream.Position = stream.Length - tailLength;
+            stream.ReadExactly(tail);
+            return System.Text.Encoding.ASCII.GetString(tail).Contains("%%EOF", StringComparison.Ordinal);
+        }
+        catch (IOException)
+        {
+            return false;
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return false;
         }
     }
 

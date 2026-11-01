@@ -101,13 +101,20 @@ public sealed class WindowsPrintToPdfSpoolerIntegrationTests
 
         try
         {
-            // This calls OpenPrinterW/CreateDCW/StartDocW/StartPage/EndPage/EndDoc
-            // against the installed Windows queue. It does not call ExportPdf().
-            var receipt = new WindowsPrintExecutor().PrintToFile(
-                entry, bytes, outputPath, CancellationToken.None);
+            // This is the same production orchestration used by Worker: Microsoft
+            // Print to PDF first, SmartPrint fallback only for a pre-submission block.
+            var result = await new WindowsPrintExecutor().ExportPdfUsingWindowsPrinterOrFallbackAsync(
+                entry with { OutputMode = PrinterOutputModeRules.PdfExport },
+                bytes,
+                outputPath,
+                outputDirectory,
+                CancellationToken.None);
 
-            Assert.True(receipt.JobId > 0, "Windows did not return a spooler job identifier.");
-            Assert.Contains("SP-REAL-SPOOLER-TEST", receipt.DocumentName);
+            Assert.False(result.UsedFallback, "The real Microsoft driver should handle this successful spooler test.");
+            Assert.Equal("MICROSOFT_PRINT_TO_PDF", result.Method);
+            Assert.True(result.SpoolerJobId is > 0, "Windows did not return a spooler job identifier.");
+            var receipt = result.Receipt;
+            Assert.Equal(outputPath, receipt.OutputPath);
 
             var deadline = DateTime.UtcNow.AddSeconds(45);
             byte[]? outputBytes = null;
@@ -145,6 +152,48 @@ public sealed class WindowsPrintToPdfSpoolerIntegrationTests
             CryptographicOperations.ZeroMemory(bytes);
             if (Directory.Exists(outputDirectory))
                 Directory.Delete(outputDirectory, recursive: true);
+        }
+    }
+}
+
+public sealed class WindowsPrintToPdfFallbackTests
+{
+    [Fact]
+    public async Task FallsBackToSmartPrintPdfOnlyWhenWindowsRejectsBeforeSpoolerSubmission()
+    {
+        using var bitmap = new SkiaSharp.SKBitmap(96, 128);
+        bitmap.Erase(SkiaSharp.SKColors.White);
+        using var image = SkiaSharp.SKImage.FromBitmap(bitmap);
+        using var encoded = image.Encode(SkiaSharp.SKEncodedImageFormat.Png, 100);
+        var bytes = encoded.ToArray();
+        var directory = Path.Combine(Path.GetTempPath(), "smartprint-pdf-fallback-" + Guid.NewGuid().ToString("N"));
+        var outputPath = Path.Combine(directory, "fallback-output.pdf");
+        var entry = new AgentLocalQueueEntry(
+            Guid.NewGuid(), "SP-TEST-PDF-FALLBACK", Guid.NewGuid(), "Microsoft Print to PDF",
+            "SmartPrint Missing Test Queue", "fallback.png", "image/png",
+            Convert.ToHexString(SHA256.HashData(bytes)).ToLowerInvariant(), bytes.LongLength,
+            1, 1, "Mono", "A4", false, "INR", 100, "unused", "ACKNOWLEDGED",
+            DateTimeOffset.UtcNow, DateTimeOffset.UtcNow.AddMinutes(3),
+            OutputMode: PrinterOutputModeRules.PdfExport);
+
+        try
+        {
+            var result = await new WindowsPrintExecutor().ExportPdfUsingWindowsPrinterOrFallbackAsync(
+                entry, bytes, outputPath, directory, CancellationToken.None);
+
+            Assert.True(result.UsedFallback);
+            Assert.StartsWith("SMARTPRINT_FALLBACK:", result.Method, StringComparison.Ordinal);
+            Assert.Null(result.SpoolerJobId);
+            Assert.True(File.Exists(result.Receipt.OutputPath));
+            Assert.Equal(outputPath, result.Receipt.OutputPath);
+            Assert.True(result.Receipt.SizeBytes > 0);
+            Assert.Equal(64, result.Receipt.Sha256.Length);
+        }
+        finally
+        {
+            CryptographicOperations.ZeroMemory(bytes);
+            if (Directory.Exists(directory))
+                Directory.Delete(directory, recursive: true);
         }
     }
 }
