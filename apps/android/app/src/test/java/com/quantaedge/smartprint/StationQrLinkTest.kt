@@ -24,10 +24,10 @@ class StationQrLinkTest {
         }
     }
 
-    @Test fun acceptsPrivateLanHttpOnlyInDebugDevelopmentMode() {
+    @Test fun acceptsConfiguredPrivateLanHttpOnlyInDebugDevelopmentMode() {
         val parsed = StationQrLink.parse(
             "http://192.168.1.20:3000/s/$code",
-            service,
+            "http://192.168.1.20:3000",
             allowLocalDevelopment = true
         )
         assertEquals("192.168.1.20", parsed.host)
@@ -40,7 +40,10 @@ class StationQrLinkTest {
             StationQrLink.parse("http://192.168.1.20:3000/s/$code", service)
         }
         assertThrows(IllegalArgumentException::class.java) {
-            StationQrLink.parse("http://203.0.113.20:3000/s/$code", service, allowLocalDevelopment = true)
+            StationQrLink.parse("http://203.0.113.20:3000/s/$code", "http://192.168.1.20:3000", allowLocalDevelopment = true)
+        }
+        assertThrows(IllegalArgumentException::class.java) {
+            StationQrLink.parse("http://192.168.1.21:3000/s/$code", "http://192.168.1.20:3000", allowLocalDevelopment = true)
         }
         assertThrows(IllegalArgumentException::class.java) {
             StationQrLink.parse("http://192.168.1.20:8080/s/$code", service, allowLocalDevelopment = true)
