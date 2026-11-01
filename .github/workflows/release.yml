@@ -12,7 +12,7 @@ permissions:
   contents: read
 
 env:
-  SMARTPRINT_PUBLIC_BASE_URL: ${{ vars.SMARTPRINT_PUBLIC_BASE_URL || 'https://qr-test.paintpulp.com' }}
+  SMARTPRINT_PUBLIC_BASE_URL: ${{ vars.SMARTPRINT_PUBLIC_BASE_URL }}
 
 jobs:
   validate-release-config:
@@ -161,13 +161,8 @@ jobs:
               ((missing+=1))
             fi
           done
-          if (( present == 0 )); then
-            echo "available=false" >> "$GITHUB_OUTPUT"
-            echo "::notice::Android release skipped. Configure the four Android signing secrets when the production keystore is ready."
-            exit 0
-          fi
           if (( missing > 0 )); then
-            echo "::error::Android signing is only partially configured. Add all four Android signing secrets together."
+            echo "::error::A signed Android APK is mandatory for this release. Configure all four Android signing secrets before pushing a release tag."
             exit 1
           fi
           echo "available=true" >> "$GITHUB_OUTPUT"
@@ -213,7 +208,12 @@ jobs:
           cp apps/android/app/build/outputs/apk/release/app-release.apk artifacts/android/SmartPrint-Android.apk
           apksigner_path="$(find "$ANDROID_HOME/build-tools" -name apksigner -type f | sort | tail -n 1)"
           test -n "$apksigner_path"
-          "$apksigner_path" verify --verbose artifacts/android/SmartPrint-Android.apk
+          verification_output="$("$apksigner_path" verify --verbose --print-certs artifacts/android/SmartPrint-Android.apk 2>&1)"
+          printf '%s\n' "$verification_output"
+          if ! grep -Eiq 'Signer #1 certificate SHA-256 digest: [[:xdigit:]]{64}' <<< "$verification_output"; then
+            echo "::error::Android APK signature verification did not report a signing certificate fingerprint."
+            exit 1
+          fi
       - name: Upload Android release APK
         if: steps.check-signing.outputs.available == 'true'
         uses: actions/upload-artifact@v7
@@ -400,10 +400,10 @@ jobs:
               published = json.loads(response.read())
           if published.get("draft") or published.get("tag_name") != tag:
               raise SystemExit("GitHub did not confirm publication of the verified stable release.")
+          if "SmartPrint-Android.apk" not in binaries:
+              raise SystemExit("Refusing to publish a release without the required signed Android APK.")
           print(
-              f"Published {tag} with the unsigned Windows beta installer"
-              + (" and signed Android APK." if "SmartPrint-Android.apk" in binaries else
-                 ". Android remains unpublished until its signing credentials are configured.")
-              + " Older releases are not modified or deleted."
+              f"Published {tag} with the unsigned Windows beta installer and signed Android APK. "
+              "Older releases are not modified or deleted."
           )
           PY
