@@ -30,6 +30,7 @@ This checklist tracks the public website, non-technical Windows setup, Android r
 - [x] Reuse the existing service installer to register the Windows Service and Private-profile firewall rule without showing a terminal.
 - [x] Add a bounded local readiness check against `/api/v1/local/status` before setup reports success.
 - [x] Allow repairs/upgrades to reuse a saved pairing only after an authenticated cloud heartbeat succeeds.
+- [x] Exercise the non-interactive `--check-pairing` command on a clean Windows runner and assert its expected unpaired exit code in CI run 351.
 - [x] Stop a previously running Agent service before replacing files and attempt to restore it if setup exits before service reinstallation succeeds.
 - [x] Add CI steps intended to compile and retain an unsigned installer validation artifact.
 - [x] Add a tag-based release step that requires a Windows code-signing PFX and verifies the installer signature before publication.
@@ -47,7 +48,7 @@ This checklist tracks the public website, non-technical Windows setup, Android r
 - [x] Keep the native Android customer companion and existing QR/customer workflow.
 - [x] Add configurable release version, canonical service URL and release signing to Gradle.
 - [x] Add a release workflow that builds a release APK and verifies its signature with `apksigner`.
-- [x] Pass Android JVM unit tests, debug APK build and emulator UI tests in CI run 344 (API 35 emulator).
+- [x] Pass Android JVM unit tests, debug APK build and emulator UI tests in CI run 351 (API 35 emulator).
 - [ ] Generate the production Android keystore and configure the four Android signing secrets in GitHub Actions.
 - [ ] Back up the keystore and credentials securely outside GitHub; do not rotate this signing identity for ordinary updates.
 - [ ] Install the release APK on physical Android 8+ devices and verify QR scanning, document import, account flows and print submission.
@@ -73,8 +74,8 @@ This checklist tracks the public website, non-technical Windows setup, Android r
 
 ## E. Deployment and production acceptance
 
-- [x] Confirm the main-branch CI run passes portal, API, Agent, Windows installer and Android debug validation (CI run 344, commit `e0017b8`).
-- [x] Build/publish the API and portal container images to GHCR and pass the migration/API-readiness/portal-response smoke test (CI run 344).
+- [x] Confirm the main-branch CI run passes portal, API, Agent, Windows installer and Android debug validation (CI run 351, commit `f42a112`).
+- [x] Build/publish the API and portal container images to GHCR and pass the migration/API-readiness/portal-response smoke test (CI run 351).
 - [ ] Deploy the current main-branch portal/API images to the intended staging environment.
 - [ ] Verify existing shop login, new shop registration and platform-admin routing after deployment.
 - [ ] Verify existing printed QR station URLs and active shop sessions still work.
@@ -84,8 +85,9 @@ This checklist tracks the public website, non-technical Windows setup, Android r
 
 ## Current verified CI evidence
 
-- Main commit: `e0017b865dc7f34d56172541a0e79c4ad7a63437`.
-- CI run 344: [GitHub Actions run](https://github.com/Manav326/QRtoPrint/actions/runs/41261051262) — portal, .NET API/Agent, unit tests, Windows installer compilation, Android JVM/emulator tests, GHCR image publication and container smoke tests all completed successfully.
+- Latest verified code commit: `f42a112b98912b13a4a192d28ad6cda03cb1c8fb`.
+- CI run 351: [GitHub Actions run](https://github.com/Manav326/QRtoPrint/actions/runs/41261715735) — portal, .NET API/Agent, API and Agent tests, the Windows non-interactive pairing-status smoke test, Inno Setup compilation, Android JVM/emulator tests, GHCR image publication and container smoke tests all completed successfully.
+- Earlier CI run 344 also passed the first full installer and container validation.
 - GitHub Releases currently has no published release. The Windows validation artifact is unsigned and the Android artifact is a debug build; neither is a public customer download.
 
 ## Guardrails
