@@ -73,7 +73,7 @@ On Windows with GitHub CLI authenticated and Android Debug Bridge (ADB) installe
 .\scripts\download-android-apk.ps1 -Install -DeviceSerial "YOUR_DEVICE_SERIAL"
 ```
 
-The script selects the latest successful main-branch CI run, downloads the `smartprint-android-debug` artifact, validates the APK and reports its SHA-256. It saves the file as `%USERPROFILE%\\Downloads\\SmartPrintAndroid\\SmartPrint-Android-debug.apk`. Use `-Install` only after enabling USB debugging and authorising the device. This is a development debug build, not a Play Store release.
+The script selects the latest successful main-branch CI run, downloads the `smartprint-android-debug` artifact, validates the APK and reports its SHA-256. It saves the file as `%USERPROFILE%\Downloads\SmartPrintAndroid\SmartPrint-Android-debug.apk`. Use `-Install` only after enabling USB debugging and authorising the device. This is a development debug build, not a Play Store release.
 
 The same CI run publishes `smartprint-android-test-reports` with JVM and emulator test evidence.
 
