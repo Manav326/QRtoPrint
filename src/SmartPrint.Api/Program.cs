@@ -5580,21 +5580,11 @@ publicApi.MapGet("/sessions/current", async (
 static string GetRateLimitPartitionKey(HttpContext context) =>
     context.Connection.RemoteIpAddress?.ToString() ?? "unknown";
 
-static string GetSessionRateLimitPartitionKey(HttpContext context)
-{
-    var sessionToken = context.Request.Headers["X-Print-Session"].FirstOrDefault();
-    return string.IsNullOrWhiteSpace(sessionToken)
-        ? GetRateLimitPartitionKey(context)
-        : $"session:{HashOpaqueToken(sessionToken)}";
-}
+static string GetSessionRateLimitPartitionKey(HttpContext context) =>
+    GetRateLimitPartitionKey(context);
 
-static string GetAgentRateLimitPartitionKey(HttpContext context)
-{
-    var agentId = context.Request.Headers["X-Print-Agent-Id"].FirstOrDefault();
-    return Guid.TryParse(agentId, out var parsed)
-        ? $"agent:{parsed:D}"
-        : GetRateLimitPartitionKey(context);
-}
+static string GetAgentRateLimitPartitionKey(HttpContext context) =>
+    GetRateLimitPartitionKey(context);
 
 static bool IsTenantRecoveryOperation(HttpContext context, bool shopOperations)
 {
