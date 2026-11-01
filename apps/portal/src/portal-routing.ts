@@ -70,8 +70,10 @@ const shopSectionPaths: Record<ShopSection, string> = {
 
 export function shopSectionFromPath(pathname: string): ShopSection {
   const path = normalizePath(pathname);
-  const match = Object.entries(shopSectionPaths).find(([, sectionPath]) => sectionPath === path);
-  return match?.[0] as ShopSection | undefined ?? "Overview";
+  const match = Object.entries(shopSectionPaths).find(([, sectionPath]) =>
+    path === sectionPath || (sectionPath !== "/shop" && path.startsWith(`${sectionPath}/`))
+  );
+  return (match?.[0] as ShopSection | undefined) ?? "Overview";
 }
 
 export function shopPathForSection(section: ShopSection): string {
