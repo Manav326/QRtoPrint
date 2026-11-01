@@ -57,6 +57,8 @@ gradle --no-daemon -p apps/android -PsmartPrintServiceUrl=https://print.thinkwit
 
 The Gradle property defaults to the canonical SmartPrint service origin and can be changed for other deployment environments. The CI workflow uploads the debug APK as `qrtoprint-android-debug`. Download it with `scripts\\download-android-apk.ps1`; add `-Install` to install it on one connected, ADB-authorised Android device. Debug builds are for development only. Release signing, physical Android/Wi-Fi validation, Play Store listing and distribution are not yet complete.
 
+The native Activity screen shows account-linked job dates, original filenames, quoted amounts, payment method/status, paid/refunded/net amounts, rejected pages and output-confirmation time. The API returns these fields through tenant-scoped document/payment queries; account history remains limited to the latest 100 jobs.
+
 The CI Android job also uploads JVM and emulator test reports as `qrtoprint-android-test-reports`, including JUnit XML and the connected-test HTML report when generated. Use the report artifact to inspect individual test cases and failures from a CI run.
 
 ## Automated Android UI tests
