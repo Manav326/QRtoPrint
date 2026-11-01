@@ -9,6 +9,7 @@ public sealed class SmartPrintDbContext(DbContextOptions<SmartPrintDbContext> op
     : IdentityDbContext<AppUser, IdentityRole<Guid>, Guid>(options)
 {
     public DbSet<Tenant> Tenants => Set<Tenant>();
+    public DbSet<TenantStatusAudit> TenantStatusAudits => Set<TenantStatusAudit>();
     public DbSet<AgentDevice> AgentDevices => Set<AgentDevice>();
     public DbSet<AgentEnrollmentCode> AgentEnrollmentCodes => Set<AgentEnrollmentCode>();
     public DbSet<ShopProfile> ShopProfiles => Set<ShopProfile>();
@@ -48,6 +49,18 @@ public sealed class SmartPrintDbContext(DbContextOptions<SmartPrintDbContext> op
             entity.Property(x => x.BusinessName).HasMaxLength(180).IsRequired();
             entity.Property(x => x.Status).HasMaxLength(24).IsRequired();
             entity.HasIndex(x => x.Slug).IsUnique();
+        });
+
+        modelBuilder.Entity<TenantStatusAudit>(entity =>
+        {
+            entity.ToTable("TenantStatusAudits");
+            entity.HasKey(x => x.Id);
+            entity.Property(x => x.PreviousStatus).HasMaxLength(24).IsRequired();
+            entity.Property(x => x.NewStatus).HasMaxLength(24).IsRequired();
+            entity.Property(x => x.Reason).HasMaxLength(500).IsRequired();
+            entity.HasIndex(x => new { x.TenantId, x.CreatedUtc });
+            entity.HasOne<Tenant>().WithMany().HasForeignKey(x => x.TenantId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<AppUser>().WithMany().HasForeignKey(x => x.ActorUserId).OnDelete(DeleteBehavior.Restrict);
         });
 
         modelBuilder.Entity<AgentDevice>(entity =>
