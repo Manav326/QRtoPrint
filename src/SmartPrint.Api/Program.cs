@@ -119,9 +119,6 @@ var corsOrigins = (configuredCorsOrigins is { Length: > 0 }
     ? configuredCorsOrigins
     : new[]
     {
-        "https://print.thinkwithsujeet.in",
-        "https://shops.thinkwithsujeet.in",
-        "https://admin.thinkwithsujeet.in",
         "http://localhost:3000",
         "http://localhost:3001"
     })
