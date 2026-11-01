@@ -1427,3 +1427,12 @@
   .app-shell .main-panel { min-height: 100vh; }
   .app-shell .topbar { position: sticky; top: 0; }
 }
+
+/* One customer payment intent for the accepted files in a reviewed batch. */
+.customer-batch-checkout-panel{margin-top:13px}
+.customer-batch-checkout-lines{display:grid;gap:6px;border-top:1px solid #e5e2f2;padding-top:9px}
+.customer-batch-checkout-lines>div{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;font-size:10px;line-height:1.45;color:#617089}
+.customer-batch-checkout-lines>div span{min-width:0;overflow-wrap:anywhere}
+.customer-batch-checkout-lines>div strong{flex:none;color:#24324a;font-weight:800}
+.customer-entry.smartprint-native .customer-batch-checkout-lines>div{color:var(--native-muted)}
+.customer-entry.smartprint-native .customer-batch-checkout-lines>div strong{color:var(--native-text)}
