@@ -134,10 +134,10 @@ jobs:
     needs: validate-release-config
     runs-on: ubuntu-latest
     env:
-      ANDROID_SIGNING_KEYSTORE_BASE64: ${{ secrets.ANDROID_SIGNING_KEYSTORE_BASE64 }}
-      ANDROID_SIGNING_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_SIGNING_KEYSTORE_PASSWORD }}
-      ANDROID_SIGNING_KEY_ALIAS: ${{ secrets.ANDROID_SIGNING_KEY_ALIAS }}
-      ANDROID_SIGNING_KEY_PASSWORD: ${{ secrets.ANDROID_SIGNING_KEY_PASSWORD }}
+      ANDROID_SIGNING_KEYSTORE_BASE64: ${{ secrets.ANDROID_SIGNING_KEYSTORE_BASE64 || vars.ANDROID_SIGNING_KEYSTORE_BASE64 }}
+      ANDROID_SIGNING_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_SIGNING_KEYSTORE_PASSWORD || vars.ANDROID_SIGNING_KEYSTORE_PASSWORD }}
+      ANDROID_SIGNING_KEY_ALIAS: ${{ secrets.ANDROID_SIGNING_KEY_ALIAS || vars.ANDROID_SIGNING_KEY_ALIAS }}
+      ANDROID_SIGNING_KEY_PASSWORD: ${{ secrets.ANDROID_SIGNING_KEY_PASSWORD || vars.ANDROID_SIGNING_KEY_PASSWORD }}
     outputs:
       available: ${{ steps.check-signing.outputs.available }}
     steps:
@@ -161,16 +161,13 @@ jobs:
               ((missing+=1))
             fi
           done
-          if (( present == 0 )); then
-            echo "available=false" >> "$GITHUB_OUTPUT"
-            echo "::notice::Android release skipped. Configure the four Android signing secrets to publish the signed APK."
-            exit 0
-          fi
           if (( missing > 0 )); then
-            echo "::error::Android signing is only partially configured. Add all four Android signing secrets together."
+            echo "::error::A signed Android APK is mandatory for a stable SmartPrint release."
+            echo "::error::Missing Android signing values: check the repository Actions secrets or variables named in this job."
             exit 1
           fi
           echo "available=true" >> "$GITHUB_OUTPUT"
+          echo "All Android signing inputs are present; the release job will build and verify the signed APK."
 
       - uses: actions/checkout@v7
         if: steps.check-signing.outputs.available == 'true'
