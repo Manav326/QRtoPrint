@@ -1103,7 +1103,7 @@ function ShopConsole({ tokens, onSignOut }: { tokens: AuthTokens; onSignOut: () 
     setBusyJobId("batch-review");
     setError("");
     try {
-      await applyShopPrintBatchReview(
+      const result=await applyShopPrintBatchReview(
         tokens.accessToken,
         batchId,
         batchJobs.map(job=>job.id),
@@ -1118,7 +1118,9 @@ function ShopConsole({ tokens, onSignOut }: { tokens: AuthTokens; onSignOut: () 
         for(const job of batchJobs)delete next[job.id];
         return next;
       });
-      setToast(`Batch review saved: ${acceptCount} accepted and ${rejectCount} rejected. All accepted files remain part of one checkout.`);
+      setToast(result.quoteRefreshRequiredCount>0
+        ?`Batch review saved: ${acceptCount} accepted and ${rejectCount} rejected. ${result.quoteRefreshRequiredCount} accepted file(s) need a fresh quote before checkout.`
+        :`Batch review saved: ${acceptCount} accepted and ${rejectCount} rejected. All accepted files remain part of one checkout.`);
     } catch(exception) {
       await reload().catch(()=>undefined);
       setError(exception instanceof Error?exception.message:"Could not apply this batch review. The decisions were not changed; refresh and retry the same review.");
@@ -2041,7 +2043,11 @@ function BatchReviewModal({jobs,busy,decisions,retrying,onDecision,onClose,onPre
   const acceptedCount=acceptedIds.length;
   const rejectedCount=jobs.length-acceptedCount;
   const acceptedJobs=jobs.filter(job=>decisions[job.id]??true);
-  const acceptedTotal=acceptedJobs.reduce((sum,job)=>sum+Math.max(0,job.quotedAmountMinor),0);
+  const quoteExpired=(job:ShopPrintJob)=>!job.quoteExpiresUtc||
+    !Number.isFinite(Date.parse(job.quoteExpiresUtc))||Date.parse(job.quoteExpiresUtc)<=Date.now();
+  const quoteRefreshRequiredCount=acceptedJobs.filter(quoteExpired).length;
+  const acceptedTotal=acceptedJobs.filter(job=>!quoteExpired(job))
+    .reduce((sum,job)=>sum+Math.max(0,job.quotedAmountMinor),0);
   const acceptedPrintedPages=acceptedJobs.reduce((sum,job)=>sum+job.pageCount*job.copies,0);
   const acceptedMonoPages=acceptedJobs.reduce((sum,job)=>sum+(job.colourMode==="Mono"?job.pageCount*job.copies:0),0);
   const acceptedColourPages=acceptedJobs.reduce((sum,job)=>sum+(job.colourMode==="Colour"?job.pageCount*job.copies:0),0);
@@ -2051,15 +2057,16 @@ function BatchReviewModal({jobs,busy,decisions,retrying,onDecision,onClose,onPre
       <div className="batch-review-folder-head"><FolderOpen size={15}/><strong>{folderName}</strong><small>{jobs.filter(job=>(job.batchGroupName??"Loose files")===folderName).length} files</small></div>
       {jobs.filter(job=>(job.batchGroupName??"Loose files")===folderName).map((job,index)=>{
         const accepted=decisions[job.id]??true;
+        const needsFreshQuote=accepted&&quoteExpired(job);
         return <div className={accepted?"batch-review-row accepted":"batch-review-row rejected"} key={job.id}>
           <label className="batch-review-checkbox"><input type="checkbox" checked={accepted} disabled={busy} onChange={event=>onDecision(job.id,event.target.checked)}/></label>
           <span className="batch-review-index">{index+1}</span>
-          <div className="batch-review-file"><strong>{job.document.originalFileName}</strong><small>{job.pageCount} source pages × {job.copies} = {job.pageCount*job.copies} printed · {job.colourMode} · {job.isDuplex?"Double-sided":"Single-sided"} · {formatMoney(job.quotedAmountMinor,job.currency)}</small><Status label={accepted?"Accepted":"Marked for rejection"} tone={accepted?"green":"red"}/></div>
+          <div className="batch-review-file"><strong>{job.document.originalFileName}</strong><small>{job.pageCount} source pages × {job.copies} = {job.pageCount*job.copies} printed · {job.colourMode} · {job.isDuplex?"Double-sided":"Single-sided"} · {needsFreshQuote?"Previous quote expired · fresh quote required":formatMoney(job.quotedAmountMinor,job.currency)}</small><Status label={!accepted?"Marked for rejection":needsFreshQuote?"Accepted · re-quote needed":"Accepted"} tone={!accepted?"red":needsFreshQuote?"amber":"green"}/></div>
           <button className="subtle-button" type="button" disabled={busy} onClick={()=>onPreview(job)}>Preview</button>
         </div>;
       })}
     </section>)}</div>
-    <div className="batch-review-summary"><span><strong>{acceptedCount}</strong> accepted</span><span><strong>{rejectedCount}</strong> rejected</span><span><strong>{acceptedPrintedPages}</strong> printed pages</span><span><strong>{acceptedMonoPages}</strong> B&W · <strong>{acceptedColourPages}</strong> Colour</span><span><strong>{formatMoney(acceptedTotal,jobs[0]?.currency??"INR")}</strong> accepted value</span><small>Printed pages = source pages × copies. Reject before checkout to exclude a file; once payment starts, finish verification before recording a file-level refund.</small></div>
+    <div className="batch-review-summary"><span><strong>{acceptedCount}</strong> accepted</span><span><strong>{rejectedCount}</strong> rejected</span><span><strong>{acceptedPrintedPages}</strong> printed pages</span><span><strong>{acceptedMonoPages}</strong> B&W · <strong>{acceptedColourPages}</strong> Colour</span><span><strong>{formatMoney(acceptedTotal,jobs[0]?.currency??"INR")}</strong> accepted value with valid quotes</span>{quoteRefreshRequiredCount>0&&<span><strong>{quoteRefreshRequiredCount}</strong> need a fresh quote</span>}<small>Printed pages = source pages × copies. Expired amounts are not included in accepted value and must be recalculated before checkout. Reject before checkout to exclude a file; once payment starts, use the file-level refund workflow.</small></div>
     <div className="modal-actions"><button className="secondary-button" onClick={onClose} disabled={busy}>Keep reviewing</button><button className="primary-button" disabled={busy||jobs.length===0} onClick={()=>onApply(acceptedIds)}>{busy?<span className="button-spinner"/>:"Apply review"}</button></div>
   </Modal>;
 }
