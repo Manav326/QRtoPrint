@@ -298,14 +298,19 @@ function ShopConsole({ tokens, onSignOut }: { tokens: AuthTokens; onSignOut: () 
     };
   }, [active, tokens.accessToken]);
 
-  const onlineAgentCount = agentDevices.filter(agent =>
+  const onlineAgentIds = new Set(agentDevices.filter(agent =>
     !agent.revokedUtc && agent.status === "Online" && !!agent.lastSeenUtc &&
     Date.parse(agent.lastSeenUtc) > Date.now() - 2 * 60 * 1000
-  ).length;
+  ).map(agent => agent.id));
+  const onlineAgentCount = onlineAgentIds.size;
   const usablePrinterCount = printers.filter(printer =>
-    printer.isActive && (printer.status === "Ready" || printer.status === "Busy" || printer.outputMode === "PDF_EXPORT")
+    printer.isActive && !!printer.agentDeviceId && onlineAgentIds.has(printer.agentDeviceId) &&
+    (printer.status === "Ready" || printer.status === "Busy" || printer.outputMode === "PDF_EXPORT")
   ).length;
-  const offlinePrinterCount = printers.filter(printer => printer.isActive && printer.status === "Offline").length;
+  const offlinePrinterCount = printers.filter(printer =>
+    printer.isActive && (!printer.agentDeviceId || !onlineAgentIds.has(printer.agentDeviceId) ||
+      printer.status === "Offline" || printer.status === "Paused")
+  ).length;
   const today = new Intl.DateTimeFormat("en-IN", { weekday: "long", day: "numeric", month: "long" }).format(new Date());
 
   async function signOut() {
