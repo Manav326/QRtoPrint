@@ -1,10 +1,78 @@
+import { useEffect, useState } from "react";
 import {
   ArrowRight, ArrowUpRight, Check, ChevronRight, Cloud, FileCheck2, FileText,
   LockKeyhole, Monitor, Printer, QrCode, ShieldCheck, Smartphone, Store, Wifi
 } from "lucide-react";
 import "./public-landing.css";
 
+type PublicRelease = {
+  tag_name: string;
+  html_url: string;
+  assets: Array<{ name: string; browser_download_url: string }>;
+};
+
+const releasesApiUrl = import.meta.env.VITE_SMARTPRINT_RELEASES_API_URL?.trim() ?? "";
+const releasesPageUrl = import.meta.env.VITE_SMARTPRINT_RELEASES_URL?.trim() ?? "";
+
+function releaseAssetUrl(release: PublicRelease | null, assetName: string): string | null {
+  const asset = release?.assets.find(candidate => candidate.name === assetName);
+  if (!asset?.browser_download_url || !releasesPageUrl) return null;
+  try {
+    const expectedOrigin = new URL(releasesPageUrl).origin;
+    const download = new URL(asset.browser_download_url);
+    return download.protocol === "https:" && download.origin === expectedOrigin
+      ? download.toString()
+      : null;
+  } catch {
+    return null;
+  }
+}
+
 export default function PublicLandingPage() {
+  const [release, setRelease] = useState<PublicRelease | null>(null);
+  const [releaseState, setReleaseState] = useState<"loading" | "ready" | "error">("loading");
+
+  useEffect(() => {
+    if (!releasesApiUrl) {
+      setReleaseState("error");
+      return;
+    }
+    const controller = new AbortController();
+    const loadLatestRelease = async () => {
+      try {
+        const response = await fetch(releasesApiUrl, {
+          headers: { Accept: "application/vnd.github+json" },
+          cache: "force-cache",
+          signal: controller.signal
+        });
+        if (response.status === 404) {
+          setRelease(null);
+          setReleaseState("ready");
+          return;
+        }
+        if (!response.ok) throw new Error(`Release lookup failed with HTTP ${response.status}.`);
+        const value: unknown = await response.json();
+        if (typeof value !== "object" || value === null || !("assets" in value) ||
+            !Array.isArray(value.assets) || !("tag_name" in value) || !("html_url" in value)) {
+          throw new Error("The release response was not in the expected format.");
+        }
+        setRelease(value as PublicRelease);
+        setReleaseState("ready");
+      } catch {
+        if (!controller.signal.aborted) {
+          setRelease(null);
+          setReleaseState("error");
+        }
+      }
+    };
+    void loadLatestRelease();
+    return () => controller.abort();
+  }, []);
+
+  const windowsDownloadUrl = releaseAssetUrl(release, "SmartPrint-Windows-Setup.exe");
+  const androidDownloadUrl = releaseAssetUrl(release, "SmartPrint-Android.apk");
+  const releaseLink = release?.html_url || releasesPageUrl;
+
   return (
     <div className="sp-public">
       <header className="sp-public-header">
@@ -138,23 +206,39 @@ export default function PublicLandingPage() {
               <div className="sp-download-icon sp-windows-icon"><Monitor size={25}/></div>
               <div className="sp-download-label-row">
                 <div className="sp-download-platform">FOR SHOP OWNERS · WINDOWS 10/11</div>
-                <span className="sp-download-tag sp-download-tag-available">Available</span>
+                <span className={windowsDownloadUrl ? "sp-download-tag sp-download-tag-available" : "sp-download-tag sp-download-tag-coming"}>
+                  {releaseState === "loading" ? "Checking" : releaseState === "error" ? "Check release" : windowsDownloadUrl ? "Available" : "Coming soon"}
+                </span>
               </div>
               <h3>SmartPrint for Windows</h3><p>Install the shop Agent on the computer connected to your printers. The guided setup will help connect it to your shop workspace.</p>
-              <a className="sp-download-link-button sp-download-button" href="https://github.com/Manav326/QRtoPrint/releases/latest/download/SmartPrint-Windows-Setup.exe">Download Windows installer <ArrowRight size={16}/></a>
-              <small className="sp-download-note">Windows x64 · Guided installation · SmartPrint official release</small>
-              <p className="sp-download-security-note">Windows may show an Unknown Publisher or SmartScreen prompt. Setup requires administrator approval, and some managed Windows 11 devices may block unsigned installers.</p>
+              {windowsDownloadUrl
+                ? <a className="sp-download-link-button sp-download-button" href={windowsDownloadUrl} rel="noopener noreferrer">Download Windows installer <ArrowRight size={16}/></a>
+                : releaseLink
+                  ? <a className="sp-download-unavailable sp-download-button" href={releaseLink} rel="noopener noreferrer">View release status <ArrowUpRight size={15}/></a>
+                  : <span className="sp-download-unavailable sp-download-button" aria-disabled="true">Windows release not published</span>}
+              <small className="sp-download-note">Windows x64 · Guided installation · Official stable release</small>
+              <p className="sp-download-security-note">The interim Windows beta installer is unsigned. Windows may show an Unknown Publisher or SmartScreen prompt; some managed devices may block unsigned installers.</p>
             </article>
             <article className="sp-download-card">
               <div className="sp-download-icon sp-android-icon"><Smartphone size={25}/></div>
               <div className="sp-download-label-row">
                 <div className="sp-download-platform">FOR CUSTOMERS · ANDROID</div>
-                <span className="sp-download-tag sp-download-tag-coming">Coming soon</span>
+                <span className={androidDownloadUrl ? "sp-download-tag sp-download-tag-available" : "sp-download-tag sp-download-tag-coming"}>
+                  {releaseState === "loading" ? "Checking" : releaseState === "error" ? "Check release" : androidDownloadUrl ? "Available" : "Coming soon"}
+                </span>
               </div>
               <h3>SmartPrint for Android</h3><p>Scan shop QR codes, organise documents in your library and send files through the connected SmartPrint customer journey.</p>
-              <span className="sp-download-unavailable sp-download-button" aria-disabled="true">Android app coming soon</span>
-              <small className="sp-download-note">Android 8.0 or later · APK distribution</small>
-              <p className="sp-release-pending">The production APK will be published after the Android release signing setup is ready.</p>
+              {androidDownloadUrl
+                ? <a className="sp-download-link-button sp-download-button" href={androidDownloadUrl} rel="noopener noreferrer">Download signed Android APK <ArrowRight size={16}/></a>
+                : releaseLink
+                  ? <a className="sp-download-unavailable sp-download-button" href={releaseLink} rel="noopener noreferrer">View release status <ArrowUpRight size={15}/></a>
+                  : <span className="sp-download-unavailable sp-download-button" aria-disabled="true">Signed APK not published</span>}
+              <small className="sp-download-note">Android 8.0 or later · Production-signed APK</small>
+              <p className="sp-release-pending">{androidDownloadUrl
+                ? `Latest stable release: ${release?.tag_name ?? "published"}.`
+                : releaseState === "error"
+                  ? "Release information is temporarily unavailable. Check the official release page."
+                  : "The signed APK download appears automatically when the latest stable release contains the verified Android package."}</p>
             </article>
           </div>
           <p className="sp-download-footnote"><ShieldCheck size={14}/> Download only from the official SmartPrint website or its linked GitHub release.</p>
