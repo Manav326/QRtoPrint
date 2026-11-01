@@ -54,6 +54,9 @@ import java.io.ByteArrayInputStream
 import java.io.File
 import java.io.FileInputStream
 import java.text.SimpleDateFormat
+import java.time.Instant
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
 import java.util.Date
 import java.util.Locale
 import java.util.zip.ZipEntry
@@ -859,8 +862,16 @@ class MainActivity : AppCompatActivity() {
                             body.addView(text(job.shopName, 12, R.color.qp_muted, false).apply {
                                 setPadding(0, dp(5), 0, 0)
                             })
+                            val createdLabel = runCatching {
+                                Instant.parse(job.createdUtc)
+                                    .atZone(ZoneId.systemDefault())
+                                    .format(DateTimeFormatter.ofPattern("dd MMM yyyy, hh:mm a", Locale.ROOT))
+                            }.getOrDefault("Date unavailable")
+                            body.addView(text(createdLabel, 12, R.color.qp_muted, false).apply {
+                                setPadding(0, dp(3), 0, 0)
+                            })
                             body.addView(text(
-                                "${job.pageCount} page(s) · ${job.copies} copy/copies · ${job.currency} ${"%.2f".format(Locale.ROOT, job.quotedAmountMinor / 100.0)}",
+                                "${job.pageCount} page(s) · ${job.copies} copy/copies · Quote ${job.currency} ${"%.2f".format(Locale.ROOT, job.quotedAmountMinor / 100.0)}",
                                 12, R.color.qp_muted, false
                             ).apply { setPadding(0, dp(4), 0, 0) })
                             item.addView(body)
