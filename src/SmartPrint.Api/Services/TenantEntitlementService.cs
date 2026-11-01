@@ -170,6 +170,9 @@ public sealed class TenantEntitlementService(SmartPrintDbContext db)
             maximum);
     }
 
+    public Task<long> GetMonthlyPrintJobUsageAsync(Guid tenantId, CancellationToken cancellationToken)
+        => CountMonthlyJobsAsync(tenantId, cancellationToken);
+
     private async Task<long> CountMonthlyJobsAsync(Guid tenantId, CancellationToken cancellationToken)
     {
         var now = DateTimeOffset.UtcNow;
