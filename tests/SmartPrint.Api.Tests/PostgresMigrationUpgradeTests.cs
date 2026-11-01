@@ -3,6 +3,7 @@ using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Migrations;
 using SmartPrint.Api.Data;
 using SmartPrint.Api.Domain;
+using SmartPrint.Api.Data;
 using SmartPrint.Api.Migrations;
 using SmartPrint.Api.Services;
 
@@ -20,6 +21,7 @@ public sealed class PostgresMigrationUpgradeTests
         var options = new DbContextOptionsBuilder<SmartPrintDbContext>()
             .UseNpgsql(connectionString, npgsql => npgsql.MigrationsAssembly(
                 typeof(InitialPlatform).Assembly.GetName().Name))
+            .ReplaceService<IMigrationsIdGenerator, LegacyCompatibleMigrationsIdGenerator>()
             .Options;
 
         await using var db = new SmartPrintDbContext(options);
@@ -28,12 +30,10 @@ public sealed class PostgresMigrationUpgradeTests
         var discoveredMigrations = db.GetService<IMigrationsAssembly>();
         Assert.Equal(
             "202610310010_CustomerPrintAccounts",
-            discoveredMigrations.FindMigrationId(nameof(CustomerPrintAccounts)));
+            discoveredMigrations.FindMigrationId("202610310010_CustomerPrintAccounts"));
 
         var migrator = db.GetService<IMigrator>();
-        // Existing migration IDs use a legacy 12-digit prefix, so resolve this historical
-        // migration by its stable name rather than having EF treat the prefix as a full ID.
-        await migrator.MigrateAsync(nameof(CustomerPrintAccounts));
+        await migrator.MigrateAsync("202610310010_CustomerPrintAccounts");
         await migrator.MigrateAsync();
 
         var settings = await db.PlatformOperationalSettings.SingleAsync(
