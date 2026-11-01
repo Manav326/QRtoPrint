@@ -59,7 +59,7 @@ The Android app must continue to reuse the existing tenant/station-bound QR sess
 - **Workflow:** [GitHub Actions run 41216111944](https://github.com/Manav326/QRtoPrint/actions/runs/41216111944)
 - **Revision:** `e2e479b43c1a3f0074ca19c4e243e8729c5b8245`
 - **Result:** workflow completed successfully, including Android 15 (API 35) emulator UI tests.
-- **Artifacts uploaded:** `qrtoprint-android-debug`, `qrtoprint-android-test-reports` and `qrtoprint-agent-win-x64`.
+- **Artifacts uploaded by this historical run:** `qrtoprint-android-debug`, `qrtoprint-android-test-reports` and `qrtoprint-agent-win-x64`. The current CI workflow uses `smartprint-android-debug` and `smartprint-android-test-reports` for Android artifacts.
 
 ## Known product follow-ups
 
