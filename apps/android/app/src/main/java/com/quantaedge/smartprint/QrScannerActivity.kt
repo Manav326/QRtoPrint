@@ -1,6 +1,7 @@
 package com.quantaedge.smartprint
 
 import android.Manifest
+import android.content.res.ColorStateList
 import android.animation.ValueAnimator
 import android.content.Intent
 import android.content.pm.PackageManager
@@ -51,7 +52,6 @@ import java.util.concurrent.atomic.AtomicBoolean
 class QrScannerActivity : AppCompatActivity() {
     companion object {
         const val EXTRA_RAW_VALUE = "qrtoprint.qr.raw_value"
-        private const val SCAN_ACCENT = 0xFF91A8FF.toInt()
     }
 
     private lateinit var permissionLauncher: ActivityResultLauncher<String>
@@ -74,9 +74,14 @@ class QrScannerActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         WindowCompat.setDecorFitsSystemWindows(window, false)
-        window.statusBarColor = Color.BLACK
-        window.navigationBarColor = Color.BLACK
-        WindowInsetsControllerCompat(window, window.decorView).isAppearanceLightStatusBars = false
+        window.statusBarColor = getColor(R.color.qp_surface)
+        window.navigationBarColor = getColor(R.color.qp_surface)
+        val useLightSystemBars =
+            (resources.configuration.uiMode and android.content.res.Configuration.UI_MODE_NIGHT_MASK) == android.content.res.Configuration.UI_MODE_NIGHT_NO
+        WindowInsetsControllerCompat(window, window.decorView).apply {
+            isAppearanceLightStatusBars = useLightSystemBars
+            isAppearanceLightNavigationBars = useLightSystemBars
+        }
 
         permissionLauncher = registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
             if (granted) bindCamera() else showPermissionPanel()
@@ -110,7 +115,7 @@ class QrScannerActivity : AppCompatActivity() {
     private fun buildScannerUi() {
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setBackgroundColor(Color.BLACK)
+            background = SmartPrintGlass.backdrop(this@QrScannerActivity)
             setPadding(dp(18), 0, dp(18), 0)
         }
 
@@ -128,15 +133,15 @@ class QrScannerActivity : AppCompatActivity() {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(8), 0, 0, 0)
         }
-        titleColumn.addView(label("SMARTPRINT BY QUANTAEDGE", 10, 0xFFB6C0D5.toInt(), true))
-        titleColumn.addView(label("Connect to a print shop", 19, Color.WHITE, true))
+        titleColumn.addView(label("SCAN SHOP QR", 9, getColor(R.color.qp_primary), true))
+        titleColumn.addView(label("Scan QR code", 18, getColor(R.color.qp_text), true))
         top.addView(titleColumn, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
         root.addView(top, LinearLayout.LayoutParams(
             ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
         ))
 
         previewHost = FrameLayout(this).apply {
-            setBackgroundColor(0xFF101522.toInt())
+            background = SmartPrintGlass.surface(this@QrScannerActivity, 22)
             clipToOutline = true
         }
         previewView = PreviewView(this).apply {
@@ -150,11 +155,12 @@ class QrScannerActivity : AppCompatActivity() {
         ).apply { topMargin = dp(4); bottomMargin = dp(14) })
 
         statusText = label(
-            "Align the QR code inside the frame. The scan happens on this device.",
-            14, 0xFFCAD2E3.toInt(), false
+            "Align QR inside frame.",
+            13, getColor(R.color.qp_muted), false
         ).apply {
             gravity = Gravity.CENTER
-            setPadding(dp(12), dp(8), dp(12), dp(12))
+            background = SmartPrintGlass.surface(this@QrScannerActivity, 15, R.color.qp_glass_inset)
+            setPadding(dp(12), dp(10), dp(12), dp(12))
         }
         root.addView(statusText, LinearLayout.LayoutParams(
             ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
@@ -168,9 +174,11 @@ class QrScannerActivity : AppCompatActivity() {
         torchButton = MaterialButton(this).apply {
             text = "Flashlight"
             isAllCaps = false
-            cornerRadius = dp(12)
-            setTextColor(Color.WHITE)
-            backgroundTintList = android.content.res.ColorStateList.valueOf(0xFF252D40.toInt())
+            cornerRadius = dp(16)
+            setTextColor(getColor(R.color.qp_text))
+            backgroundTintList = ColorStateList.valueOf(getColor(R.color.qp_glass_inset))
+            strokeColor = ColorStateList.valueOf(getColor(R.color.qp_glass_border))
+            strokeWidth = dp(1)
             isEnabled = false
             setOnClickListener { toggleTorch() }
         }
@@ -178,8 +186,8 @@ class QrScannerActivity : AppCompatActivity() {
             ViewGroup.LayoutParams.WRAP_CONTENT, dp(48)
         ))
         val privacy = label(
-            "Camera stays on your phone. No images are stored or uploaded.",
-            12, 0xFF9AA7BE.toInt(), false
+            "Scanned on device. Nothing saved.",
+            11, getColor(R.color.qp_muted), false
         ).apply { gravity = Gravity.CENTER_VERTICAL; setPadding(dp(13), 0, 0, 0) }
         bottom.addView(privacy, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
         root.addView(bottom, LinearLayout.LayoutParams(
@@ -254,14 +262,11 @@ class QrScannerActivity : AppCompatActivity() {
                 val hasFlash = camera?.cameraInfo?.hasFlashUnit() == true
                 torchButton.isEnabled = hasFlash
                 if (!hasFlash) torchEnabled = false
-                statusText.text = if (hasFlash) {
-                    "Align the QR code inside the frame. Tap Flashlight in low light."
-                } else {
-                    "Align the QR code inside the frame. The scan happens on this device."
-                }
+                statusText.text = if (hasFlash) "Align QR · Flashlight available."
+                    else "Align QR inside frame."
             } catch (_: Exception) {
                 camera = null
-                statusText.text = "Camera could not start. Close other camera apps and retry."
+                statusText.text = "Camera unavailable."
                 showRetryButton()
             }
         }, ContextCompat.getMainExecutor(this))
@@ -287,19 +292,24 @@ class QrScannerActivity : AppCompatActivity() {
             gravity = Gravity.CENTER
             setPadding(dp(26), dp(24), dp(26), dp(24))
         }
-        panel.addView(label("▦", 48, Color.WHITE, false).apply { gravity = Gravity.CENTER })
-        panel.addView(label("Camera access needed", 21, Color.WHITE, true).apply {
+        panel.addView(label("▦", 48, getColor(R.color.qp_primary), false).apply { gravity = Gravity.CENTER })
+        panel.addView(label("Camera access needed", 20, getColor(R.color.qp_text), true).apply {
             gravity = Gravity.CENTER
             setPadding(0, dp(12), 0, dp(8))
         })
         panel.addView(label(
-            "Allow camera access to scan a shop QR code. Images are processed on this device and are not saved.",
-            14, 0xFFCAD2E3.toInt(), false
+            "Allow camera for QR scanning.",
+            13, getColor(R.color.qp_muted), false
         ).apply { gravity = Gravity.CENTER; textAlignment = View.TEXT_ALIGNMENT_CENTER })
         val action = MaterialButton(this).apply {
-            text = if (permanentlyDenied) "Open app settings" else "Enable camera"
+            text = if (permanentlyDenied) "Open settings" else "Allow camera"
             isAllCaps = false
             cornerRadius = dp(12)
+            minHeight = dp(46)
+            insetTop = 0
+            insetBottom = 0
+            backgroundTintList = ColorStateList.valueOf(getColor(R.color.qp_primary))
+            setTextColor(getColor(R.color.qp_primary_content))
             setOnClickListener {
                 if (permanentlyDenied) {
                     startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:" + packageName)))
@@ -316,13 +326,21 @@ class QrScannerActivity : AppCompatActivity() {
             ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT
         ))
         torchButton.isEnabled = false
-        statusText.text = "QR scanning requires camera permission."
+        statusText.text = "Camera permission required."
     }
 
     private fun showRetryButton() {
         val retry = MaterialButton(this).apply {
-            text = "Retry camera"
+            text = "Try again"
             isAllCaps = false
+            minHeight = dp(44)
+            insetTop = 0
+            insetBottom = 0
+            cornerRadius = dp(12)
+            backgroundTintList = ColorStateList.valueOf(getColor(R.color.qp_card))
+            strokeColor = ColorStateList.valueOf(getColor(R.color.qp_outline))
+            strokeWidth = dp(1)
+            setTextColor(getColor(R.color.qp_text))
             setOnClickListener {
                 camera = null
                 bindCamera()
@@ -358,8 +376,12 @@ class QrScannerActivity : AppCompatActivity() {
         text = value
         textSize = size.toFloat()
         gravity = Gravity.CENTER
-        setTextColor(Color.WHITE)
-        setBackgroundColor(0xFF252D40.toInt())
+        setTextColor(getColor(R.color.qp_text))
+        background = android.graphics.drawable.GradientDrawable().apply {
+            setColor(getColor(R.color.qp_card))
+            cornerRadius = dp(14).toFloat()
+            setStroke(dp(1), getColor(R.color.qp_outline))
+        }
         isClickable = true
         isFocusable = true
     }
@@ -368,7 +390,7 @@ class QrScannerActivity : AppCompatActivity() {
 
     private class ScanFrameView(context: android.content.Context) : View(context) {
         private val cornerPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = SCAN_ACCENT
+            color = ContextCompat.getColor(context, R.color.qp_primary)
             style = Paint.Style.STROKE
             strokeWidth = dp(3).toFloat()
             strokeCap = Paint.Cap.ROUND

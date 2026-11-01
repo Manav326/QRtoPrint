@@ -824,6 +824,7 @@ export interface ShopPricingProfile {
 export interface ShopPrintJob {
   id: string;
   batchId?: string | null;
+  batchGroupName?: string | null;
   rejectedPageNumbersJson?: string;
   jobNumber: string;
   status: string;
@@ -863,7 +864,7 @@ export interface ShopPrintJob {
 }
 
 export interface UploadedPrintJob {
-  job: { id: string; jobNumber: string; status: string; pageCount: number; copies: number; currency: string; quotedAmountMinor: number; createdUtc: string };
+  job: { id: string; jobNumber: string; status: string; pageCount: number; copies: number; currency: string; quotedAmountMinor: number; createdUtc: string; batchGroupName?: string | null };
   document: { id: string; originalFileName: string; mediaType: string; sizeBytes: number; sha256: string; pageSizesJson: string };
   duplicateRequest: boolean;
 }
@@ -903,7 +904,9 @@ function customerUploadAttemptStorageKey(sessionToken: string, file: File): stri
   // Hash file metadata rather than storing the original filename in the key.
   // This lets a re-selected file reuse its in-flight key after a page reload,
   // while a different file gets its own key.
-  const identity = `${file.name}\u0000${file.size}\u0000${file.lastModified}\u0000${file.type}`;
+  const relativePath = (file as File & { webkitRelativePath?: string }).webkitRelativePath ?? "";
+  const nativeGroup = (file as File & { __smartPrintBatchGroup?: string }).__smartPrintBatchGroup ?? "";
+  const identity = `${relativePath || nativeGroup}\u0000${file.name}\u0000${file.size}\u0000${file.lastModified}\u0000${file.type}`;
   let first = 2166136261;
   let second = 5381;
   for (let index = 0; index < identity.length; index++) {
@@ -915,13 +918,14 @@ function customerUploadAttemptStorageKey(sessionToken: string, file: File): stri
   return `qrtoprint.customer-upload-attempt.${sessionToken.slice(0, 16)}.${fingerprint}`;
 }
 
-export async function uploadCustomerDocument(sessionToken: string, file: File, batchId?: string) {
+export async function uploadCustomerDocument(sessionToken: string, file: File, batchId?: string, batchGroupName?: string) {
   const storageKey = customerUploadAttemptStorageKey(sessionToken, file);
   const idempotencyKey = sessionStorage.getItem(storageKey) || crypto.randomUUID();
   sessionStorage.setItem(storageKey, idempotencyKey);
 
   const form = new FormData();
   form.append("file", file, file.name);
+  if (batchGroupName) form.append("batchGroupName", batchGroupName);
   const uploaded = await apiRequest<UploadedPrintJob>("/api/v1/public/sessions/current/jobs", {
     method: "POST",
     headers: {
@@ -972,7 +976,8 @@ export async function uploadCustomerDocumentLocally(
   sessionToken: string,
   file: File,
   localAgent: CustomerLocalAgentApi,
-  batchId?: string
+  batchId?: string,
+  batchGroupName?: string
 ): Promise<UploadedPrintJob> {
   const keys = customerLocalUploadAttemptStorageKeys(sessionToken, file);
   const idempotencyKey = sessionStorage.getItem(keys.idempotency) || crypto.randomUUID();
@@ -1009,7 +1014,8 @@ export async function uploadCustomerDocumentLocally(
         sizeBytes: file.size,
         sha256,
         grantToken,
-        batchId: batchId ?? null
+        batchId: batchId ?? null,
+        batchGroupName: batchGroupName ?? null
       })
     });
   } catch (exception) {
@@ -1182,16 +1188,21 @@ export function getShopJobEvents(token: string, jobId: string) {
   return apiRequest<ShopJobEvent[]>(`/api/v1/shop/print-jobs/${jobId}/events`, {}, token);
 }
 
-export function getShopPrintJobsPage(token: string, offset: number, take = 100, search = "") {
+export function getShopPrintJobsPage(token: string, offset: number, take = 100, search = "", batchId?: string) {
   const safeOffset = Math.max(0, Math.floor(offset));
   const safeTake = Math.max(1, Math.min(100, Math.floor(take)));
   const query = new URLSearchParams({ offset: String(safeOffset), take: String(safeTake) });
-  if (search.trim()) query.set("search", search.trim());
+  if (search.trim()) query.set("search", search.trim().slice(0, 120));
+  if (batchId) query.set("batchId", batchId);
   return apiRequest<ShopPrintJob[]>(
     `/api/v1/shop/print-jobs?${query.toString()}`,
     {},
     token
   );
+}
+
+export function getShopPrintBatchJobs(token: string, batchId: string) {
+  return getShopPrintJobsPage(token, 0, 100, "", batchId);
 }
 
 export function approveShopPrintJob(token: string, jobId: string) {

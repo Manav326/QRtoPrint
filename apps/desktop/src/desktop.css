@@ -5,7 +5,7 @@ body[data-app-shell="desktop"] {
   overflow: hidden;
   background: #0b1020;
   color: #eef2fb;
-  font-family: "Segoe UI Variable", "Segoe UI", sans-serif;
+  font-family: "DM Sans", "Segoe UI Variable", "Segoe UI", sans-serif;
   font-size: 14px;
 }
 body[data-app-shell="desktop"] #root { min-height: 100vh; }
@@ -16,23 +16,23 @@ body[data-app-shell="desktop"] textarea {
   font-family: "Segoe UI Variable", "Segoe UI", sans-serif;
 }
 body[data-app-shell="desktop"] .app-shell {
-  --bg: #0b1020;
-  --sidebar: #111a2a;
-  --surface: #141f32;
-  --surface-2: #19263b;
-  --surface-3: #202f47;
-  --border: #293852;
-  --border-soft: #24324a;
-  --text: #eef2fb;
-  --muted: #a5b2c8;
-  --faint: #7888a3;
-  --accent: #a99bff;
-  --accent-strong: #7867ee;
-  --accent-soft: rgba(145, 128, 255, .15);
-  --green: #63d9aa;
-  --amber: #f1c47a;
-  --red: #f28c98;
-  --blue: #86b5ff;
+  --bg: #0c0f16;
+  --sidebar: #10141d;
+  --surface: #141a25;
+  --surface-2: #192130;
+  --surface-3: #202a3a;
+  --border: #252e3d;
+  --border-soft: #202938;
+  --text: #f0f3fa;
+  --muted: #8b96a9;
+  --faint: #657187;
+  --accent: #9b8cff;
+  --accent-strong: #826eff;
+  --accent-soft: rgba(145, 124, 255, .13);
+  --green: #58d6a0;
+  --amber: #e9b96a;
+  --red: #ef818a;
+  --blue: #79aaff;
   min-height: 100vh;
   height: 100vh;
   overflow: hidden;
@@ -43,23 +43,23 @@ body[data-app-shell="desktop"] .app-shell {
   color: var(--text);
 }
 body[data-app-shell="desktop"] .app-shell.light {
-  --bg: #edf2f8;
-  --sidebar: #f8faff;
-  --surface: #fff;
-  --surface-2: #f4f7fc;
-  --surface-3: #eaf0f8;
-  --border: #dce4ef;
-  --border-soft: #e7edf5;
-  --text: #202d42;
-  --muted: #62718a;
-  --faint: #8492a8;
-  --accent: #624fd0;
-  --accent-strong: #6653dc;
-  --accent-soft: rgba(102, 83, 220, .10);
-  --green: #16875d;
-  --amber: #9a6719;
-  --red: #c64e5c;
-  --blue: #386fc4;
+  --bg: #f4f6fa;
+  --sidebar: #ffffff;
+  --surface: #ffffff;
+  --surface-2: #f8f9fc;
+  --surface-3: #eef1f7;
+  --border: #e5e9f0;
+  --border-soft: #edf0f5;
+  --text: #202638;
+  --muted: #69758a;
+  --faint: #8d97a8;
+  --accent: #7258e8;
+  --accent-strong: #6247d6;
+  --accent-soft: rgba(114, 88, 232, .1);
+  --green: #168c63;
+  --amber: #a56b13;
+  --red: #cb4d5b;
+  --blue: #3976d3;
   background: radial-gradient(ellipse at 72% -14%, rgba(124, 108, 225, .11), transparent 42%), var(--bg);
 }
 
@@ -71,7 +71,7 @@ body[data-app-shell="desktop"] .sidebar {
   flex: 0 0 258px;
   min-height: 100vh;
   height: 100vh;
-  overflow-y: auto;
+  overflow: hidden;
   padding: 27px 18px 18px;
   border-right: 1px solid var(--border);
   background: linear-gradient(180deg, var(--sidebar), color-mix(in srgb, var(--sidebar) 92%, #6c5be8));
@@ -134,36 +134,34 @@ body[data-app-shell="desktop"] .plan-card span { color: var(--muted); font-size:
 body[data-app-shell="desktop"] .support-link { margin-bottom: 18px; }
 body[data-app-shell="desktop"] .profile-row { padding: 17px 3px 0; gap: 11px; }
 body[data-app-shell="desktop"] .profile-avatar { width: 37px; height: 37px; font-size: 12px; }
-body[data-app-shell="desktop"] .sidebar-toggle,
+body[data-app-shell="desktop"] .sidebar-toggle { display: grid !important; }
 body[data-app-shell="desktop"] .mobile-menu,
 body[data-app-shell="desktop"] .sidebar-close,
 body[data-app-shell="desktop"] .mobile-scrim { display: none !important; }
 
-/* The shop desktop does not collapse into a mobile navigation pattern. */
-body[data-app-shell="desktop"] .app-shell.sidebar-collapsed .sidebar {
-  width: 258px;
-  flex-basis: 258px;
-  padding: 27px 18px 18px;
+/* Desktop shell uses a true collapsible navigation rail. */
+body[data-app-shell="desktop"] .app-shell .sidebar { min-height: 0; height: 100vh; overflow: hidden; }
+body[data-app-shell="desktop"] .app-shell .primary-nav {
+  flex: 1 1 auto; min-height: 0; overflow-y: auto; overflow-x: hidden;
+  overscroll-behavior: contain; scrollbar-width: thin; scrollbar-color: var(--border) transparent;
 }
-body[data-app-shell="desktop"] .app-shell.sidebar-collapsed .brand-lockup {
-  justify-content: flex-start;
-  padding: 0 8px 25px;
-  gap: 12px;
-}
+body[data-app-shell="desktop"] .app-shell .sidebar-bottom { flex: 0 0 auto; margin-top: auto; background: var(--sidebar); }
+body[data-app-shell="desktop"] .app-shell .sidebar-toggle { display: grid !important; }
+body[data-app-shell="desktop"] .app-shell.sidebar-collapsed .sidebar { width: 78px; flex-basis: 78px; padding: 24px 10px 16px; }
+body[data-app-shell="desktop"] .app-shell.sidebar-collapsed .brand-lockup { justify-content: center; gap: 0; padding: 0 0 25px; }
 body[data-app-shell="desktop"] .app-shell.sidebar-collapsed .brand-lockup > div:not(.brand-mark),
 body[data-app-shell="desktop"] .app-shell.sidebar-collapsed .workspace-copy,
 body[data-app-shell="desktop"] .app-shell.sidebar-collapsed .tenant-status-dot,
 body[data-app-shell="desktop"] .app-shell.sidebar-collapsed .nav-label,
 body[data-app-shell="desktop"] .app-shell.sidebar-collapsed .nav-item span,
 body[data-app-shell="desktop"] .app-shell.sidebar-collapsed .plan-card > div:nth-child(2),
-body[data-app-shell="desktop"] .app-shell.sidebar-collapsed .profile-copy {
-  display: flex !important;
-}
-body[data-app-shell="desktop"] .app-shell.sidebar-collapsed .nav-item {
-  justify-content: flex-start;
-  padding: 0 13px;
-  width: 100%;
-}
+body[data-app-shell="desktop"] .app-shell.sidebar-collapsed .plan-card > svg,
+body[data-app-shell="desktop"] .app-shell.sidebar-collapsed .profile-copy { display: none !important; }
+body[data-app-shell="desktop"] .app-shell.sidebar-collapsed .workspace-switcher { justify-content: center; padding: 10px 5px; margin-bottom: 22px; }
+body[data-app-shell="desktop"] .app-shell.sidebar-collapsed .nav-item { justify-content: center; gap: 0; width: 48px; min-width: 48px; margin-inline: auto; padding: 0; }
+body[data-app-shell="desktop"] .app-shell.sidebar-collapsed .plan-card { justify-content: center; padding: 9px; }
+body[data-app-shell="desktop"] .app-shell.sidebar-collapsed .profile-row { justify-content: center; gap: 5px; padding-inline: 0; }
+body[data-app-shell="desktop"] .app-shell.sidebar-collapsed .signout-button { width: 27px; }
 
 body[data-app-shell="desktop"] .main-panel {
   position: relative;

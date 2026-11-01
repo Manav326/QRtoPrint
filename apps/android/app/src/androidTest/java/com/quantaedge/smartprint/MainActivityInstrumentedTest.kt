@@ -7,7 +7,6 @@ import androidx.test.espresso.Espresso.onView
 import androidx.test.espresso.action.ViewActions.click
 import androidx.test.espresso.action.ViewActions.closeSoftKeyboard
 import androidx.test.espresso.action.ViewActions.replaceText
-import androidx.test.espresso.assertion.ViewAssertions.doesNotExist
 import androidx.test.espresso.assertion.ViewAssertions.matches
 import androidx.test.espresso.matcher.ViewMatchers.isDisplayed
 import androidx.test.espresso.matcher.ViewMatchers.withId
@@ -16,34 +15,53 @@ import androidx.test.espresso.matcher.ViewMatchers.withHint
 import androidx.test.espresso.matcher.ViewMatchers.withText
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import org.hamcrest.Matchers.allOf
-import org.hamcrest.Matchers.containsString
 import org.junit.Test
 import org.junit.runner.RunWith
+import eightbitlab.com.blurview.BlurView
+import android.view.View
+import android.view.ViewGroup
+import org.junit.Assert.assertEquals
 
 @RunWith(AndroidJUnit4::class)
 class MainActivityInstrumentedTest {
     @Test
-    fun rendersSmartPrintHomeAndFourTaskDestinations() {
+    fun rendersCompactSmartPrintHomeAndFourDestinations() {
         ActivityScenario.launch(MainActivity::class.java).use {
-            onView(withText(containsString("Your documents."))).check(matches(isDisplayed()))
-            onView(withText("by QuantaEdge")).check(matches(isDisplayed()))
-            onView(withText("Scan a document")).check(matches(isDisplayed()))
-            onView(withText("Import files")).check(matches(isDisplayed()))
-            val navigationLabel = com.google.android.material.R.id.navigation_bar_item_small_label_view
-            onView(allOf(withId(navigationLabel), withText("My Files"))).check(matches(isDisplayed()))
-            onView(allOf(withId(navigationLabel), withText("Scan & Print"))).check(matches(isDisplayed()))
-            onView(allOf(withId(navigationLabel), withText("Activity"))).check(matches(isDisplayed()))
+            onView(withText("Your space")).check(matches(isDisplayed()))
+            onView(withText("Recent")).check(matches(isDisplayed()))
+            onView(withText("Scan document")).check(matches(isDisplayed()))
+            onView(withText("Import")).check(matches(isDisplayed()))
+            val label = com.google.android.material.R.id.navigation_bar_item_small_label_view
+            onView(allOf(withId(label), withText("Files"))).check(matches(isDisplayed()))
+            onView(allOf(withId(label), withText("Print"))).check(matches(isDisplayed()))
+            onView(allOf(withId(label), withText("Activity"))).check(matches(isDisplayed()))
         }
     }
 
     @Test
-    fun guestCanOpenGlobalSmartPrintAccountAndSeeCustomerSignInOptions() {
+    fun nativeShellUsesTwoRealBlurOverlaysForItsNavigationChrome() {
+        ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+            scenario.onActivity { activity ->
+                val content = activity.findViewById<ViewGroup>(android.R.id.content)
+                fun countBlurViews(view: View): Int {
+                    if (view is BlurView) return 1
+                    if (view !is ViewGroup) return 0
+                    var count = 0
+                    for (index in 0 until view.childCount) count += countBlurViews(view.getChildAt(index))
+                    return count
+                }
+                assertEquals(2, countBlurViews(content))
+            }
+        }
+    }
+
+    @Test
+    fun guestAccountShowsCompactSignInForm() {
         val context = ApplicationProvider.getApplicationContext<Context>()
         CustomerAccountStore(context).clear()
         ActivityScenario.launch(MainActivity::class.java).use {
             onView(withContentDescription("Account")).perform(click())
-            onView(withText(containsString("Every print shop."))).check(matches(isDisplayed()))
-            onView(withText(containsString("Continue as a guest"))).check(matches(isDisplayed()))
+            onView(withText("Guest access is ready")).check(matches(isDisplayed()))
             onView(withHint("Email address")).check(matches(isDisplayed()))
             onView(withHint("Password")).check(matches(isDisplayed()))
             onView(withText("Create account")).check(matches(isDisplayed()))
@@ -51,45 +69,105 @@ class MainActivityInstrumentedTest {
     }
 
     @Test
-    fun explainsTheShopQrConnectionBeforeStartingTheScanner() {
+    fun scanDestinationUsesFocusedQrEntry() {
         ActivityScenario.launch(MainActivity::class.java).use {
-            val navigationLabel = com.google.android.material.R.id.navigation_bar_item_small_label_view
-            onView(allOf(withId(navigationLabel), withText("Scan & Print"))).perform(click())
-            onView(withText("How it works")).check(matches(isDisplayed()))
-            onView(withText("Scan shop QR code")).check(matches(isDisplayed()))
-            onView(withText(containsString("displayed at the counter"))).check(matches(isDisplayed()))
+            val label = com.google.android.material.R.id.navigation_bar_item_small_label_view
+            onView(allOf(withId(label), withText("Print"))).perform(click())
+            onView(withText("Connect to a shop")).check(matches(isDisplayed()))
+            onView(withText("Scan QR code")).check(matches(isDisplayed()))
+            onView(withText("Open My Files")).check(matches(isDisplayed()))
         }
     }
 
     @Test
-    fun systemBackReturnsFromAccountToThePreviouslySelectedDestination() {
+    fun systemBackReturnsToPreviouslySelectedDestination() {
         val context = ApplicationProvider.getApplicationContext<Context>()
         CustomerAccountStore(context).clear()
         ActivityScenario.launch(MainActivity::class.java).use {
-            val navigationLabel = com.google.android.material.R.id.navigation_bar_item_small_label_view
-            onView(allOf(withId(navigationLabel), withText("Activity"))).perform(click())
+            val label = com.google.android.material.R.id.navigation_bar_item_small_label_view
+            onView(allOf(withId(label), withText("Activity"))).perform(click())
             onView(withContentDescription("Account")).perform(click())
-            onView(withText(containsString("Every print shop."))).check(matches(isDisplayed()))
+            onView(withText("Guest access is ready")).check(matches(isDisplayed()))
             androidx.test.espresso.Espresso.pressBack()
-            onView(withText("Your print history")).check(matches(isDisplayed()))
+            onView(withText("Print history")).check(matches(isDisplayed()))
+        }
+    }
+
+
+    @Test
+    fun systemBackFromPrintTabReturnsHome() {
+        ActivityScenario.launch(MainActivity::class.java).use {
+            val label = com.google.android.material.R.id.navigation_bar_item_small_label_view
+            onView(allOf(withId(label), withText("Print"))).perform(click())
+            onView(withText("Connect to a shop")).check(matches(isDisplayed()))
+            androidx.test.espresso.Espresso.pressBack()
+            onView(withText("Your space")).check(matches(isDisplayed()))
         }
     }
 
     @Test
-    fun createsFolderAndNavigatesIntoAndOutOfIt() {
+    fun foldersCanOpenAndExpandInline() {
+        val folderName = "CI School " + System.currentTimeMillis()
         ActivityScenario.launch(MainActivity::class.java).use {
-            val navigationLabel = com.google.android.material.R.id.navigation_bar_item_small_label_view
-            onView(allOf(withId(navigationLabel), withText("My Files"))).perform(click())
-            onView(withText(containsString("New folder"))).perform(click())
-            onView(withHint("Name"))
-                .perform(replaceText("CI School"), closeSoftKeyboard())
+            val label = com.google.android.material.R.id.navigation_bar_item_small_label_view
+            onView(allOf(withId(label), withText("Files"))).perform(click())
+            onView(withText("New folder")).perform(click())
+            onView(withHint("Name")).perform(replaceText(folderName), closeSoftKeyboard())
             onView(withText("Save")).perform(click())
 
-            onView(withText("CI School")).check(matches(isDisplayed()))
-            onView(withText("CI School")).perform(click())
-            onView(withText("Up")).check(matches(isDisplayed()))
-            onView(withText("Up")).perform(click())
-            onView(withText("Up")).check(doesNotExist())
+            onView(withText(folderName)).check(matches(isDisplayed()))
+            onView(withText(folderName)).perform(click())
+            onView(withText("New folder")).perform(click())
+            onView(withHint("Name")).perform(replaceText("Nested"), closeSoftKeyboard())
+            onView(withText("Save")).perform(click())
+            onView(withText("Nested")).check(matches(isDisplayed()))
+            onView(withText("Scan here")).check(matches(isDisplayed()))
+            it.recreate()
+            onView(withText("Scan here")).check(matches(isDisplayed()))
+            onView(withText("Back")).perform(click())
+            onView(withContentDescription("Expand $folderName")).perform(click())
+            onView(withText("Nested")).check(matches(isDisplayed()))
+            onView(withContentDescription("Collapse $folderName")).check(matches(isDisplayed()))
+        }
+    }
+
+    @Test
+    fun systemBackFromNestedFolderReturnsToItsParent() {
+        val folderName = "CI Back Folder " + System.currentTimeMillis()
+        ActivityScenario.launch(MainActivity::class.java).use {
+            val label = com.google.android.material.R.id.navigation_bar_item_small_label_view
+            onView(allOf(withId(label), withText("Files"))).perform(click())
+            onView(withText("New folder")).perform(click())
+            onView(withHint("Name")).perform(replaceText(folderName), closeSoftKeyboard())
+            onView(withText("Save")).perform(click())
+            onView(withText(folderName)).perform(click())
+            onView(withText("New folder")).perform(click())
+            onView(withHint("Name")).perform(replaceText("Nested"), closeSoftKeyboard())
+            onView(withText("Save")).perform(click())
+            onView(withText("Nested")).check(matches(isDisplayed()))
+
+            androidx.test.espresso.Espresso.pressBack()
+            onView(withText("Scan here")).check(matches(isDisplayed()))
+            onView(withText("Nested")).check(matches(isDisplayed()))
+            androidx.test.espresso.Espresso.pressBack()
+            onView(withText(folderName)).check(matches(isDisplayed()))
+            onView(withText("My Files")).check(matches(isDisplayed()))
+        }
+    }
+
+    @Test
+    fun fileContextActionsUseBottomSheet() {
+        val folderName = "CI Sheet Folder " + System.currentTimeMillis()
+        ActivityScenario.launch(MainActivity::class.java).use {
+            val label = com.google.android.material.R.id.navigation_bar_item_small_label_view
+            onView(allOf(withId(label), withText("Files"))).perform(click())
+            onView(withText("New folder")).perform(click())
+            onView(withHint("Name")).perform(replaceText(folderName), closeSoftKeyboard())
+            onView(withText("Save")).perform(click())
+            onView(withContentDescription("More options for " + folderName)).perform(click())
+            onView(withText("Folder actions")).check(matches(isDisplayed()))
+            onView(withText("Rename")).check(matches(isDisplayed()))
+            onView(withText("Delete")).check(matches(isDisplayed()))
         }
     }
 }
@@ -100,9 +178,9 @@ class QrScannerPermissionInstrumentedTest {
     fun explainsCameraPermissionBeforeStartingTheScanner() {
         ActivityScenario.launch(QrScannerActivity::class.java).use {
             onView(withText("Camera access needed")).check(matches(isDisplayed()))
-            onView(withText("Allow camera access to scan a shop QR code. Images are processed on this device and are not saved."))
+            onView(withText("Allow camera for QR scanning."))
                 .check(matches(isDisplayed()))
-            onView(withText("Enable camera")).check(matches(isDisplayed()))
+            onView(withText("Allow camera")).check(matches(isDisplayed()))
         }
     }
 }

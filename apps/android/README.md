@@ -2,6 +2,17 @@
 
 The customer-facing app is **SmartPrint by QuantaEdge**. QRtoPrint remains the repository and technical integration name. The Android app is a customer companion to the existing portal and API. It does not run its own pricing, payment or print-dispatch backend.
 
+## Native Android experience
+
+The visual treatment takes its reference from the Liquid Glass implementation in BajajDealership at apps/android-liquid-glass: soft warm/cool ambient lighting, translucent rounded cards, fine glass edges and real blur on the fixed top and bottom navigation. SmartPrint retains its own violet accent. The native app uses BlurView with a RenderEffect path on Android 12+ and a compatible fallback on older supported Android versions. Dense forms, prices, documents and actions remain high contrast.
+
+The top toolbar and bottom navigation are layered over a BlurTarget; only the navigation chrome is blurred. Cards, secondary actions, QR scanner controls and bottom sheets use translucent fills with clear borders and controlled elevation. The embedded customer print route uses matching light/dark glass tokens. Blur is decorative only; controls remain usable when the platform falls back to translucent surfaces.
+
+
+SmartPrint uses a compact, theme-aware native shell for Home, Files, Scan, Activity, Account, the QR scanner, PDF editing and file actions. Light and dark palettes share the same surfaces, typography, icon treatment and spacing. File and folder rows remain compact; folders expand inline with indentation and file-type icons. Rename, move, delete and confirmation actions use native bottom sheets.
+
+The shop print workflow reuses the existing customer portal and APIs inside the secure Android WebView bridge. The app identifies itself with the `SmartPrintAndroid/1` user-agent token so the customer print route switches to a full-width native presentation with compact copy and no website masthead or card frame. Ordinary browser visitors retain the standard web layout. QR station validation, secure origin pinning, encrypted per-station guest sessions, upload limits, shop review, payment verification, refunds and physical-output confirmation remain the same.
+
 ## Local document library
 
 - Documents are copied into app-private storage under `files/documents`.
@@ -10,7 +21,7 @@ The customer-facing app is **SmartPrint by QuantaEdge**. QRtoPrint remains the r
 - Create nested folders, import multiple files, or import a directory tree using Android's Storage Access Framework.
 - Export one file or an entire folder tree into a user-selected Android File Manager destination. Multiple selected files export together as a ZIP archive that preserves their original filenames.
 - Open/share files with other Android apps.
-- The customer portal's native file picker can select one saved PDF/JPG/JPEG/PNG or attach multiple original files together; multi-file selections can span this app's nested folders. The library includes a current-folder search, a folder picker for moving items, a document-storage summary and an import free-space reserve check.
+- The customer portal's native picker separates **Select files** and **Choose folders**. File selection shows printable documents while folders are only used for navigation; folder selection shows folder rows only, permits multiple folder selection, and includes supported files directly inside each selected folder (nested subfolders are intentionally not traversed). The picker preserves the current nested-folder location while making selections. Folder names are passed to the portal so each file remains in the correct batch group. The library includes current-folder search, a move destination picker, a document-storage summary and a free-space reserve check.
 
 ## Print batches and saved PDF editing
 
@@ -25,7 +36,7 @@ General library imports allow up to 100 MB per file. The print workflow uses the
 
 ## SmartPrint document capture
 
-The native document-capture action uses Google ML Kit Document Scanner in full mode and requests both PDF and JPEG outputs. The scanner supports multi-page capture and its on-device UI provides document-edge detection, crop/perspective correction, rotation, page ordering and image filters. Google Play services downloads the scanner UI/models when needed; the first launch can require a download, and devices below the scanner's 1.7 GB RAM requirement are not supported. If unavailable, customers can still import photos/PDFs through Android's file picker. Scanned PDF and JPEG pages are saved in a timestamped folder in My files.
+The native document-capture action uses Google ML Kit Document Scanner in full mode and requests a multi-page PDF. Its on-device UI provides document-edge detection, crop/perspective correction, rotation, page ordering and image filters. Google Play services downloads the scanner UI/models when needed; first launch can require a download, and devices below the scanner's 1.7 GB RAM requirement are not supported. If unavailable, customers can still import photos/PDFs through Android's file picker. **Scan document** on Home asks where to save the completed scan (My Files, an existing folder, or a new folder). **Scan here** inside My Files saves directly into the currently open folder. Captures remain local until the customer chooses to print.
 
 ## Global SmartPrint customer account
 

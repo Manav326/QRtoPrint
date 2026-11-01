@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { Fragment, useEffect, useRef, useState, type ReactNode } from "react";
 import {
   Activity, ArrowRight, Check, Clock3, Copy, CreditCard, FileText, FileUp, FolderOpen, LayoutDashboard,
   LifeBuoy, LogOut, Menu, Moon, Monitor, Plus, Printer, QrCode, Search, Settings,
@@ -15,7 +15,7 @@ import {
   ApiError, isPlatformAdminSession, acceptCustomerQuote, approveShopPrintJob, assignShopPrintJobPrinter, calculateCustomerQuote, getShopCustomerHistory, getShopCustomers, getShopReportSummary,
   confirmShopPrintOutput, dispatchShopPrintJob,
   createAgentEnrollmentCode, createCustomerSession, createPrinter, createStation,
-  downloadShopDocument, getCustomerJobStatus, getShopAgentDevices, getShopJobEvents, getShopPrinters, getShopPrintJobsPage, loadShopData,
+  downloadShopDocument, getCustomerJobStatus, getShopAgentDevices, getShopJobEvents, getShopPrinters, getShopPrintJobsPage, getShopPrintBatchJobs, loadShopData,
   logout, readStoredTokens, rejectShopPrintJob, rejectShopPayment, revokeAgentDevice,
   reportCustomerUpiPayment, renewCustomerPrintSession, getNativeCustomerPrintSession, saveNativeCustomerPrintSession, clearNativeCustomerPrintSession, resumeCustomerSession, rotateStationCode, startCustomerPayment, storeTokens,
   updatePrinterActive, updateShopPaymentSettings, updateShopPricing,
@@ -26,6 +26,7 @@ import {
   type UploadedPrintJob
 } from "./api";
 import { enrollLocalAgent, getLocalAgentStatus, isDesktopApp, type DesktopAgentStatus } from "./desktop-bridge";
+import { readDarkModePreference, readSidebarCollapsedPreference, saveDarkModePreference, saveSidebarCollapsedPreference } from "./ui-preferences";
 
 type Section = "Overview" | "Print Queue" | "Printers" | "QR Stations" | "Print Agent" | "Pricing" | "Subscription" | "Payments" | "Customers" | "Reports" | "Settings";
 type Modal = "printer" | "station" | null;
@@ -111,11 +112,10 @@ function ShopConsole({ tokens, onSignOut }: { tokens: AuthTokens; onSignOut: () 
     window.addEventListener("popstate", syncSectionFromPath);
     return () => window.removeEventListener("popstate", syncSectionFromPath);
   }, []);
-  const [dark, setDark] = useState(true);
+  const [dark, setDark] = useState(readDarkModePreference);
   const [sidebarOpen, setSidebarOpen] = useState(false);
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
-    try { return window.localStorage.getItem("qrtoprint.sidebar-collapsed") === "true"; } catch { return false; }
-  });
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(readSidebarCollapsedPreference);
+  useEffect(() => { saveDarkModePreference(dark); }, [dark]);
   const reloadInFlight = useRef(false);
   const desktopAgentSyncTimer = useRef<number | null>(null);
   const desktopAgentSyncInFlight = useRef(false);
@@ -158,13 +158,18 @@ function ShopConsole({ tokens, onSignOut }: { tokens: AuthTokens; onSignOut: () 
   const [modal, setModal] = useState<Modal>(null);
   const [busy, setBusy] = useState(false);
   const [toast, setToast] = useState("");
-  const [preview, setPreview] = useState<{ name: string; url: string; mediaType: string; job: ShopPrintJob } | null>(null);
+  const [preview, setPreview] = useState<{ name: string; url: string; mediaType: string; job: ShopPrintJob; readOnly: boolean } | null>(null);
   const [refundJob, setRefundJob] = useState<ShopPrintJob | null>(null);
   const [batchReviewJobs, setBatchReviewJobs] = useState<ShopPrintJob[] | null>(null);
+  const [batchReviewDecisions, setBatchReviewDecisions] = useState<Record<string, boolean>>({});
+  const [batchReviewRetry, setBatchReviewRetry] = useState(false);
+  const [batchReviewRetryIds, setBatchReviewRetryIds] = useState<string[]>([]);
+  const [batchReviewLoadingId, setBatchReviewLoadingId] = useState<string | null>(null);
   type ActionDialogState = { title: string; message: string; inputLabel?: string; confirmLabel: string; resolve: (value: string | null) => void };
   const [actionDialog, setActionDialog] = useState<ActionDialogState | null>(null);
   const [actionDialogValue, setActionDialogValue] = useState("");
   const [busyJobId, setBusyJobId] = useState<string | null>(null);
+  const [busyResourceId, setBusyResourceId] = useState<string | null>(null);
   const [eventHistory, setEventHistory] = useState<{ job: ShopPrintJob; events: ShopJobEvent[] } | null>(null);
 
   async function reload() {
@@ -338,7 +343,7 @@ function ShopConsole({ tokens, onSignOut }: { tokens: AuthTokens; onSignOut: () 
   function toggleSidebarCollapsed() {
     setSidebarCollapsed(current => {
       const next = !current;
-      try { window.localStorage.setItem("qrtoprint.sidebar-collapsed", String(next)); } catch { /* Storage is optional. */ }
+      saveSidebarCollapsedPreference(next);
       return next;
     });
   }
@@ -445,26 +450,49 @@ function ShopConsole({ tokens, onSignOut }: { tokens: AuthTokens; onSignOut: () 
   }
 
   async function togglePrinter(printer: PrinterDevice) {
+    if (busyResourceId) return;
+    if (printer.isActive && !(await confirmInApp(
+      `Disable ${printer.displayName}? New jobs can no longer be assigned to it. A Windows job already accepted by the spooler is not cancelled; an active job may prevent disabling until it is resolved.`,
+      "Disable this printer?", "Disable printer"
+    ))) return;
+    setBusyResourceId(printer.id);
+    setError("");
     try {
       await updatePrinterActive(tokens.accessToken, printer.id, !printer.isActive);
+      setToast(printer.isActive ? "Printer disabled. Existing Windows output is not cancelled." : "Printer enabled for new assignments.");
       await reload();
     } catch (exception) {
       setError(exception instanceof Error ? exception.message : "Could not update printer.");
+    } finally {
+      setBusyResourceId(null);
     }
   }
 
   async function toggleStation(station: QrStation) {
+    if (busyResourceId) return;
+    if (station.isEnabled && !(await confirmInApp(
+      `Disable the QR station “${station.displayName}”? Customers will not be able to start new sessions from this QR until you enable it again. Previously started customer sessions are not recalled.`,
+      "Disable this QR station?", "Disable station"
+    ))) return;
+    setBusyResourceId(station.id);
+    setError("");
     try {
       const updated = await updateStationEnabled(tokens.accessToken, station.id, !station.isEnabled);
       setStations(current => current.map(item => item.id === station.id ? { ...item, isEnabled: updated.isEnabled } : item));
+      setToast(updated.isEnabled ? "QR station enabled." : "QR station disabled. Existing customer sessions are unchanged.");
     } catch (exception) {
       setError(exception instanceof Error ? exception.message : "Could not update QR station.");
+    } finally {
+      setBusyResourceId(null);
     }
   }
 
   async function createFreshStationCode(station: QrStation) {
+    if (busyResourceId) return;
     const confirmed = await confirmInApp("Generating a replacement QR will invalidate every previously printed sign for this station. Continue only when you intend to replace them.", "Replace this station's QR?", "Replace QR");
     if (!confirmed) return;
+    setBusyResourceId(station.id);
+    setError("");
     try {
       const result = await rotateStationCode(tokens.accessToken, station.id);
       setStations(current => current.map(item => item.id === station.id
@@ -473,6 +501,8 @@ function ShopConsole({ tokens, onSignOut }: { tokens: AuthTokens; onSignOut: () 
       setToast("New QR code generated. The previous code is now invalid.");
     } catch (exception) {
       setError(exception instanceof Error ? exception.message : "Could not generate a QR code.");
+    } finally {
+      setBusyResourceId(null);
     }
   }
 
@@ -978,13 +1008,13 @@ function ShopConsole({ tokens, onSignOut }: { tokens: AuthTokens; onSignOut: () 
     }
   }
 
-  async function previewJob(job: ShopPrintJob) {
+  async function previewJob(job: ShopPrintJob, readOnly = false) {
     setBusyJobId(job.id);
     setError("");
     try {
       const blob = await downloadShopDocument(tokens.accessToken, job.id);
       const url = URL.createObjectURL(blob);
-      setPreview({ name: job.document.originalFileName, url, mediaType: blob.type || job.document.mediaType, job });
+      setPreview({ name: job.document.originalFileName, url, mediaType: blob.type || job.document.mediaType, job, readOnly });
     } catch (exception) {
       setError(exception instanceof Error ? exception.message : "Could not open the document.");
     } finally {
@@ -1040,35 +1070,86 @@ function ShopConsole({ tokens, onSignOut }: { tokens: AuthTokens; onSignOut: () 
   }
 
   async function applyBatchReview(batchJobs: ShopPrintJob[], acceptedJobIds: string[]) {
-    const accepted=new Set(acceptedJobIds);
-    const acceptJobs=batchJobs.filter(job=>accepted.has(job.id));
-    const rejectJobs=batchJobs.filter(job=>!accepted.has(job.id));
-    if(acceptJobs.length+rejectJobs.length===0)return;
-    if(!(await confirmInApp(`Accept ${acceptJobs.length} file(s) and reject ${rejectJobs.length} file(s)? Accepted files will move to payment. Rejected files will be excluded from printing.`,"Confirm batch review","Apply review")))return;
+    const accepted = new Set(acceptedJobIds);
+    const acceptJobs = batchJobs.filter(job => accepted.has(job.id));
+    const rejectJobs = batchJobs.filter(job => !accepted.has(job.id));
+    if (acceptJobs.length + rejectJobs.length === 0) return;
+    if (!(await confirmInApp(`Accept ${acceptJobs.length} file(s) and reject ${rejectJobs.length} file(s)? Accepted files will move to payment. Rejected files will be excluded from printing.`, "Confirm batch review", "Apply review"))) return;
+
     setBusyJobId("batch-review");
     setError("");
-    const failures:string[]=[];
-    for(const job of acceptJobs){
-      try{await approveShopPrintJob(tokens.accessToken,job.id);}
-      catch(exception){failures.push(`${job.document.originalFileName}: ${exception instanceof Error?exception.message:"Could not accept"}`);}
+    const failedIds = new Set<string>();
+    const failures: string[] = [];
+    for (const job of acceptJobs) {
+      try { await approveShopPrintJob(tokens.accessToken, job.id); }
+      catch (exception) {
+        failedIds.add(job.id);
+        failures.push(`${job.document.originalFileName}: ${exception instanceof Error ? exception.message : "Could not accept"}`);
+      }
     }
-    for(const job of rejectJobs){
-      try{await rejectShopPrintJob(tokens.accessToken,job.id);}
-      catch(exception){failures.push(`${job.document.originalFileName}: ${exception instanceof Error?exception.message:"Could not reject"}`);}
+    for (const job of rejectJobs) {
+      try { await rejectShopPrintJob(tokens.accessToken, job.id); }
+      catch (exception) {
+        failedIds.add(job.id);
+        failures.push(`${job.document.originalFileName}: ${exception instanceof Error ? exception.message : "Could not reject"}`);
+      }
     }
-    setBatchReviewJobs(null);
+
     await reload();
-    if(failures.length)setError(`Some files could not be updated: ${failures.join("; ")}`);
-    else setToast(`Batch review saved: ${acceptJobs.length} accepted and ${rejectJobs.length} rejected. You can review paid files separately to record refunds.`);
+    if (failedIds.size > 0) {
+      let retryJobs: ShopPrintJob[];
+      try {
+        const batchId = batchJobs.find(job => job.batchId)?.batchId;
+        if (!batchId) throw new Error("The batch identifier is unavailable. Refresh the queue and reopen the batch.");
+        const latestBatch = await getShopPrintBatchJobs(tokens.accessToken, batchId);
+        retryJobs = latestBatch.filter(job => failedIds.has(job.id) && job.status === "AWAITING_SHOP_APPROVAL");
+      } catch {
+        // A failed status refresh leaves the outcome unknown. Do not offer a
+        // blind retry that could repeat a decision whose first request landed.
+        setBatchReviewRetryIds(current => Array.from(new Set([...current, ...failedIds])));
+        setBatchReviewJobs(null);
+        setBatchReviewRetry(false);
+        setError(`Some review actions could not be confirmed. Refresh the queue and reopen this batch before making further changes; no uncertain action was retried. Details: ${failures.join("; ")}`);
+        setBusyJobId(null);
+        return;
+      }
+      const retryIds = new Set(retryJobs.map(job => job.id));
+      setBatchReviewDecisions(current => {
+        const next = { ...current };
+        for (const job of batchJobs) {
+          if (!retryIds.has(job.id)) delete next[job.id];
+          else next[job.id] = accepted.has(job.id);
+        }
+        return next;
+      });
+      setBatchReviewJobs(retryJobs.length > 0 ? retryJobs : null);
+      setBatchReviewRetry(retryJobs.length > 0);
+      setBatchReviewRetryIds(retryJobs.map(job => job.id));
+      if (retryJobs.length > 0) {
+        setError(`Some files could not be updated: ${failures.join("; ")}. Only files still awaiting review remain open. Their previous accept/reject choices have been kept; retry these files without changing the other decisions.`);
+      } else {
+        setError(`The review requests returned errors, but the refreshed queue shows no failed files still awaiting review. Check the updated statuses before trying another action. Details: ${failures.join("; ")}`);
+      }
+    } else {
+      setBatchReviewJobs(null);
+      setBatchReviewRetry(false);
+      setBatchReviewRetryIds(current => current.filter(id => !batchJobs.some(job => job.id === id)));
+      setBatchReviewDecisions(current => {
+        const next = { ...current };
+        for (const job of batchJobs) delete next[job.id];
+        return next;
+      });
+      setToast(`Batch review saved: ${acceptJobs.length} accepted and ${rejectJobs.length} rejected. You can review paid files separately to record refunds.`);
+    }
     setBusyJobId(null);
   }
 
-  async function recordFileRefund(job: ShopPrintJob, values: { refundMethod: "UPI" | "CASH"; refundReference: string | null; reason: string; rejectedPageNumbers: number[] }) {
+  async function recordFileRefund(job: ShopPrintJob, values: { refundMethod: "UPI" | "CASH"; refundReference: string | null; reason: string; rejectedPageNumbers: number[]; idempotencyKey: string }) {
     setBusyJobId(job.id);
     setError("");
     try {
       const result = await recordShopPrintRefund(tokens.accessToken, job.id, {
-        ...values, confirmedSent: true, idempotencyKey: crypto.randomUUID()
+        ...values, confirmedSent: true
       });
       setToast(`Refund of ${formatMoney(result.amountMinor, result.currency)} recorded for ${job.document.originalFileName}. The return was logged under the signed-in shopkeeper.`);
       setRefundJob(null);
@@ -1081,6 +1162,36 @@ function ShopConsole({ tokens, onSignOut }: { tokens: AuthTokens; onSignOut: () 
       setError(exception instanceof Error ? exception.message : "Could not record this refund.");
     } finally {
       setBusyJobId(null);
+    }
+  }
+
+  async function openBatchReview(batchId: string) {
+    setBatchReviewLoadingId(batchId);
+    setError("");
+    try {
+      // Always load the complete batch from the tenant-scoped API. The queue
+      // may currently be filtered or paginated, so its visible rows are not
+      // a safe source for per-file acceptance/rejection decisions.
+      const allBatchJobs = await getShopPrintBatchJobs(tokens.accessToken, batchId);
+      const waiting = allBatchJobs.filter(job => job.status === "AWAITING_SHOP_APPROVAL");
+      if (waiting.length === 0) {
+        setBatchReviewJobs(null);
+        setToast("This batch has no files left awaiting shop review.");
+        return;
+      }
+      setBatchReviewDecisions(current => {
+        const next = { ...current };
+        for (const job of waiting) {
+          if (next[job.id] === undefined) next[job.id] = true;
+        }
+        return next;
+      });
+      setBatchReviewRetry(waiting.some(job => batchReviewRetryIds.includes(job.id)));
+      setBatchReviewJobs(waiting);
+    } catch (exception) {
+      setError(exception instanceof Error ? exception.message : "Could not load every file in this batch. No review decisions were changed.");
+    } finally {
+      setBatchReviewLoadingId(current => current === batchId ? null : current);
     }
   }
 
@@ -1164,14 +1275,14 @@ function ShopConsole({ tokens, onSignOut }: { tokens: AuthTokens; onSignOut: () 
           {toast && <div className="inline-success" role="status"><Check size={15}/><span>{toast}</span><button onClick={() => setToast("")} aria-label="Dismiss message"><X size={15}/></button></div>}
 
           {active === "Overview" && <Overview profile={profile} printers={printers} stations={stations} printJobs={printJobs} pricing={pricing} agentDevices={agentDevices} paymentSettings={paymentSettings} onNavigate={navAction}/>}
-          {active === "Printers" && <PrintersPage printers={printers} onAdd={() => setModal("printer")} onToggle={togglePrinter}/>}
-          {active === "QR Stations" && <StationsPage stations={stations} profile={profile} onAdd={() => setModal("station")} onToggle={toggleStation} onGenerate={createFreshStationCode}/>}
+          {active === "Printers" && <PrintersPage printers={printers} busyResourceId={busyResourceId} onAdd={() => setModal("printer")} onToggle={togglePrinter}/>}
+          {active === "QR Stations" && <StationsPage stations={stations} profile={profile} busyResourceId={busyResourceId} onAdd={() => setModal("station")} onToggle={toggleStation} onGenerate={createFreshStationCode}/>}
           {active === "Print Agent" && <PrintAgentPage agents={agentDevices} enrollmentCode={enrollmentCode} busy={agentBusy} onGenerate={generateAgentCode} onRevoke={revokeAgent} desktop={isDesktopApp()} localAgentStatus={localAgentStatus} localAgentConflict={localAgentConflict} localAgentRevoked={localAgentRevoked} localAgentNeedsRepair={localAgentNeedsRepair} localAgentEnrollmentIssue={localAgentEnrollmentIssue} localAgentOwnershipChecking={localAgentOwnershipChecking} onConnect={()=>void connectLocalComputer()} onReconnectAfterRevocation={()=>void connectLocalComputer(false,agentDevices,true)}/>}
           {active === "Pricing" && pricing && <PricingPage pricing={pricing} onSave={savePricing} busy={busy}/>}
           {active === "Subscription" && subscription && <SubscriptionPage summary={subscription}/>}
           {active === "Payments" && paymentSettings && <PaymentsPage settings={paymentSettings} payments={payments} refunds={refunds} onSave={savePaymentSettings} onVerify={verifyPayment} onReject={rejectPayment} busy={busy} busyJobId={busyJobId}/>}
           {active === "Settings" && profile && <SettingsPage profile={profile} onSave={saveProfile} busy={busy}/>}
-          {active === "Print Queue" && <PrintQueuePage jobs={printJobs} printers={printers} agentDevices={agentDevices} searchQuery={queueSearch} onSearch={searchPrintQueue} onPreview={previewJob} onApprove={approveJob} onReject={rejectJob} onRefund={job=>setRefundJob(job)} onReviewBatch={batchId=>setBatchReviewJobs(printJobs.filter(job=>job.batchId===batchId&&job.status==="AWAITING_SHOP_APPROVAL"))} onHistory={viewJobHistory} onAssignPrinter={assignPrinter} onDispatch={dispatchPrintJob} onConfirmOutput={confirmPrintedOutput} onRetryPdfExport={retryPdfExport} onRefresh={refreshPrintQueue} onLoadOlder={loadOlderQueueJobs} hasMoreJobs={hasMoreQueueJobs} loadingOlderJobs={loadingOlderQueueJobs} busyJobId={busyJobId}/>} 
+          {active === "Print Queue" && <PrintQueuePage jobs={printJobs} printers={printers} agentDevices={agentDevices} searchQuery={queueSearch} loadingBatchId={batchReviewLoadingId} onSearch={searchPrintQueue} onPreview={previewJob} onApprove={approveJob} onReject={rejectJob} onRefund={job=>setRefundJob(job)} onReviewBatch={openBatchReview} onHistory={viewJobHistory} onAssignPrinter={assignPrinter} onDispatch={dispatchPrintJob} onConfirmOutput={confirmPrintedOutput} onRetryPdfExport={retryPdfExport} onRefresh={refreshPrintQueue} onLoadOlder={loadOlderQueueJobs} hasMoreJobs={hasMoreQueueJobs} loadingOlderJobs={loadingOlderQueueJobs} busyJobId={busyJobId}/>} 
           {active === "Customers" && <CustomersPage token={tokens.accessToken}/>}
           {active === "Reports" && <ReportsPage token={tokens.accessToken}/>} 
 
@@ -1181,8 +1292,8 @@ function ShopConsole({ tokens, onSignOut }: { tokens: AuthTokens; onSignOut: () 
 
       {modal === "printer" && <PrinterModal busy={busy} onClose={() => setModal(null)} onSubmit={submitPrinter}/>}
       {modal === "station" && <StationModal busy={busy} printers={printers.filter(printer => printer.isActive)} onClose={() => setModal(null)} onSubmit={submitStation}/>}
-            {batchReviewJobs && <BatchReviewModal jobs={batchReviewJobs} busy={busyJobId==="batch-review"} onClose={()=>setBatchReviewJobs(null)} onPreview={previewJob} onApply={acceptedIds=>void applyBatchReview(batchReviewJobs,acceptedIds)}/>}
-      {preview && <DocumentPreviewModal name={preview.name} url={preview.url} mediaType={preview.mediaType} job={preview.job} onApprove={()=>void approveJob(preview.job)} onReject={()=>void rejectJob(preview.job)} onRefund={()=>setRefundJob(preview.job)} onClose={() => { URL.revokeObjectURL(preview.url); setPreview(null); }}/>} 
+            {batchReviewJobs && <BatchReviewModal jobs={batchReviewJobs} busy={busyJobId==="batch-review"} decisions={batchReviewDecisions} retrying={batchReviewRetry} onDecision={(jobId,accepted)=>setBatchReviewDecisions(current=>({...current,[jobId]:accepted}))} onClose={()=>setBatchReviewJobs(null)} onPreview={job=>void previewJob(job,true)} onApply={acceptedIds=>void applyBatchReview(batchReviewJobs,acceptedIds)}/>} 
+      {preview && <DocumentPreviewModal name={preview.name} url={preview.url} mediaType={preview.mediaType} job={preview.job} readOnly={preview.readOnly} onApprove={()=>void approveJob(preview.job)} onReject={()=>void rejectJob(preview.job)} onRefund={()=>setRefundJob(preview.job)} onClose={() => { URL.revokeObjectURL(preview.url); setPreview(null); }}/>} 
       {eventHistory && <JobHistoryModal job={eventHistory.job} events={eventHistory.events} onClose={() => setEventHistory(null)}/>}
       {refundJob && <RefundModal job={refundJob} token={tokens.accessToken} busy={busyJobId===refundJob.id} onClose={()=>setRefundJob(null)} onSubmit={values=>void recordFileRefund(refundJob,values)}/>} 
       {actionDialog && <Modal title={actionDialog.title} subtitle="This action will be recorded against your shop account." onClose={closeActionDialog}>
@@ -1517,18 +1628,18 @@ function Overview({ profile, printers, stations, printJobs, pricing, agentDevice
   );
 }
 
-function PrintersPage({ printers, onAdd, onToggle }: { printers: PrinterDevice[]; onAdd:()=>void; onToggle:(printer:PrinterDevice)=>void }) {
+function PrintersPage({ printers, busyResourceId, onAdd, onToggle }: { printers: PrinterDevice[]; busyResourceId:string|null; onAdd:()=>void; onToggle:(printer:PrinterDevice)=>void }) {
   return (
     <section className="panel collection-panel">
       <div className="collection-header"><div><h2>Your printers</h2><p>Manage physical printers and local PDF export destinations. Disabling a printer blocks new assignments; it does not cancel a Windows spooler job already accepted.</p></div><button className="primary-button" onClick={onAdd}><Plus size={16}/> Add printer</button></div>
       {printers.length===0 ? <EmptyModule icon={<Printer size={24}/>} title="No printers registered yet" text="Add your first printer. It will appear here as awaiting local-agent discovery until the Windows Print Agent reports its capabilities and live status." actionLabel="Add your first printer" onAction={onAdd}/> :
-      <div className="printer-grid">{printers.map(printer=><article className="printer-card" key={printer.id}><div className="printer-card-top"><div className="printer-card-icon"><Printer size={20}/></div><Status label={printer.status} tone={printer.status.toLowerCase()==="ready"?"green":"slate"}/></div><h3>{printer.outputMode==="PDF_EXPORT"?"PDF export · "+printer.displayName:printer.displayName}</h3><p>{printer.outputMode==="PDF_EXPORT"?"Direct local PDF generation · no Windows Save As dialog":printer.manufacturer+" · "+printer.model}</p><div className="printer-meta"><span>{printer.outputMode==="PDF_EXPORT"?"PDF export destination":printer.connectionType}{printer.isDefault?(printer.outputMode==="PDF_EXPORT"?" · Default output destination":" · Default Windows queue"):""}</span><span>{printer.queueName || printer.connectionAddress || "Connection not verified"}</span></div><div className="printer-card-footer"><span className={printer.isActive?"enabled-label":"disabled-label"}>{printer.isActive?"Enabled":"Disabled"}</span><button className="subtle-button" onClick={()=>onToggle(printer)}>{printer.isActive?"Disable":"Enable"}</button></div></article>)}</div>}
+      <div className="printer-grid">{printers.map(printer=><article className="printer-card" key={printer.id}><div className="printer-card-top"><div className="printer-card-icon"><Printer size={20}/></div><Status label={printer.status} tone={printer.status.toLowerCase()==="ready"?"green":"slate"}/></div><h3>{printer.outputMode==="PDF_EXPORT"?"PDF export · "+printer.displayName:printer.displayName}</h3><p>{printer.outputMode==="PDF_EXPORT"?"Direct local PDF generation · no Windows Save As dialog":printer.manufacturer+" · "+printer.model}</p><div className="printer-meta"><span>{printer.outputMode==="PDF_EXPORT"?"PDF export destination":printer.connectionType}{printer.isDefault?(printer.outputMode==="PDF_EXPORT"?" · Default output destination":" · Default Windows queue"):""}</span><span>{printer.queueName || printer.connectionAddress || "Connection not verified"}</span></div><div className="printer-card-footer"><span className={printer.isActive?"enabled-label":"disabled-label"}>{printer.isActive?"Enabled":"Disabled"}</span><button className="subtle-button" disabled={!!busyResourceId} onClick={()=>onToggle(printer)}>{busyResourceId===printer.id?<span className="button-spinner"/>:printer.isActive?"Disable":"Enable"}</button></div></article>)}</div>}
     </section>
   );
 }
 
-function StationsPage({ stations, profile, onAdd, onToggle, onGenerate }: {
-  stations:QrStation[]; profile:ShopProfile|null; onAdd:()=>void; onToggle:(station:QrStation)=>void; onGenerate:(station:QrStation)=>void;
+function StationsPage({ stations, profile, busyResourceId, onAdd, onToggle, onGenerate }: {
+  stations:QrStation[]; profile:ShopProfile|null; busyResourceId:string|null; onAdd:()=>void; onToggle:(station:QrStation)=>void; onGenerate:(station:QrStation)=>void;
 }) {
   const [printingStationId,setPrintingStationId]=useState<string|null>(null);
   useEffect(()=>{
@@ -1571,8 +1682,8 @@ function StationsPage({ stations, profile, onAdd, onToggle, onGenerate }: {
           <span className="qr-scan-hint">Scan to upload documents and send them to this shop</span>
           <div className="qr-shop-station">{station.displayName}</div>
           <div className="qr-powered"><small>POWERED BY</small><div className="qr-powered-lockup" aria-label="QuantaEdge, Smarter Decisions. Greater Growth."><img className="qr-quantaedge-mark" src="/branding/quantaedge-mark.png" alt="" onError={event=>{event.currentTarget.hidden=true;const fallback=event.currentTarget.nextElementSibling;if(fallback instanceof HTMLElement)fallback.hidden=false;}}/><span className="qr-quantaedge-mark-fallback" hidden aria-hidden="true">Q</span><div className="qr-powered-wordmark"><strong>Quanta<span>Edge</span></strong><small>Smarter Decisions. Greater Growth.</small></div></div></div>
-        </div> : <div className="qr-missing"><QrCode size={34}/><strong>QR code not stored</strong><span>This older station needs a one-time QR replacement. Its existing printed code cannot be recovered from the old hash.</span><button className="secondary-button" onClick={()=>onGenerate(station)}>Reissue permanent QR</button></div>}</div>
-        <div className="station-foot"><span>Code ending ···{station.publicCodeHint}</span><button className="subtle-button" onClick={()=>onToggle(station)}>{station.isEnabled?"Disable station":"Enable station"}</button></div>
+        </div> : <div className="qr-missing"><QrCode size={34}/><strong>QR code not stored</strong><span>This older station needs a one-time QR replacement. Its existing printed code cannot be recovered from the old hash.</span><button className="secondary-button" disabled={!!busyResourceId} onClick={()=>onGenerate(station)}>{busyResourceId===station.id?<span className="button-spinner"/>:"Reissue permanent QR"}</button></div>}</div>
+        <div className="station-foot"><span>Code ending ···{station.publicCodeHint}</span><button className="subtle-button" disabled={!!busyResourceId} onClick={()=>onToggle(station)}>{busyResourceId===station.id?<span className="button-spinner"/>:station.isEnabled?"Disable station":"Enable station"}</button></div>
         {station.publicUrl && <div className="station-actions"><button className="secondary-button" onClick={()=>void copyText(station.publicUrl!)}> <Copy size={14}/> Copy link</button><button className="secondary-button" onClick={()=>setPrintingStationId(station.id)}>Print QR sign</button></div>}
       </article>)}</div>}
     </section>
@@ -1795,11 +1906,12 @@ function PaymentsPage({settings,payments,refunds,onSave,onVerify,onReject,busy,b
   </div>;
 }
 
-function PrintQueuePage({ jobs, printers, agentDevices, searchQuery, onSearch, onPreview, onApprove, onReject, onRefund, onReviewBatch, onHistory, onAssignPrinter, onDispatch, onConfirmOutput, onRetryPdfExport, onRefresh, onLoadOlder, hasMoreJobs, loadingOlderJobs, busyJobId }: {
+function PrintQueuePage({ jobs, printers, agentDevices, searchQuery, loadingBatchId, onSearch, onPreview, onApprove, onReject, onRefund, onReviewBatch, onHistory, onAssignPrinter, onDispatch, onConfirmOutput, onRetryPdfExport, onRefresh, onLoadOlder, hasMoreJobs, loadingOlderJobs, busyJobId }: {
   jobs: ShopPrintJob[];
   printers: PrinterDevice[];
   agentDevices: AgentDevice[];
   searchQuery: string;
+  loadingBatchId: string | null;
   onSearch: (query: string) => Promise<void>;
   onPreview: (job: ShopPrintJob) => void;
   onApprove: (job: ShopPrintJob) => void;
@@ -1820,6 +1932,7 @@ function PrintQueuePage({ jobs, printers, agentDevices, searchQuery, onSearch, o
   const [autoRefresh,setAutoRefresh]=useState(true);
   const [refreshSeconds,setRefreshSeconds]=useState(10);
   const [searchInput,setSearchInput]=useState(searchQuery);
+  const [expandedBatchKeys,setExpandedBatchKeys]=useState<Set<string>>(()=>new Set());
   useEffect(()=>setSearchInput(searchQuery),[searchQuery]);
   const refreshRunning=useRef(false);
   const refreshCallback=useRef(onRefresh);
@@ -1846,35 +1959,74 @@ function PrintQueuePage({ jobs, printers, agentDevices, searchQuery, onSearch, o
   const dispatchablePrinters = printers.filter(printer =>
     isPrinterAvailable(printer, onlineAgentIds)
   );
+  const batchMap=new Map<string,{key:string;batchId:string|null;jobs:ShopPrintJob[]}>();
+  for(const job of jobs) {
+    const key=job.batchId??`single:${job.id}`;
+    const group=batchMap.get(key)??{key,batchId:job.batchId??null,jobs:[]};
+    group.jobs.push(job);
+    batchMap.set(key,group);
+  }
+  const queueBatches=Array.from(batchMap.values());
 
   return <section className="panel queue-panel live-queue-panel">
-    <div className="collection-header"><div><h2>Customer print jobs</h2><p>Preview every file separately. Each file can be accepted or rejected without changing the rest of its upload batch. Refunds are available before handoff to the print computer.</p></div><div className="queue-header-actions"><span className="setup-count">{jobs.length} jobs shown</span><form className="queue-search-form" onSubmit={event=>{event.preventDefault();void onSearch(searchInput);}}><input aria-label="Search all print jobs" type="search" maxLength={120} placeholder="Job, file or printer" value={searchInput} onChange={event=>setSearchInput(event.target.value)}/><button className="secondary-button" type="submit"><Search size={13}/> Search</button></form><button className="secondary-button queue-refresh-button" onClick={()=>void refreshQueue()} disabled={refreshRunning.current}><Activity size={13}/> Refresh queue</button></div></div>
+    <div className="collection-header"><div><h2>Customer print jobs</h2><p>Preview every file separately. Each file can be accepted or rejected without changing the rest of its upload batch. Refunds are available before handoff to the print computer.</p></div><div className="queue-header-actions"><span className="setup-count">{queueBatches.length} batches shown</span><form className="queue-search-form" onSubmit={event=>{event.preventDefault();void onSearch(searchInput);}}><input aria-label="Search all print jobs" type="search" maxLength={120} placeholder="Job, file or printer" value={searchInput} onChange={event=>setSearchInput(event.target.value)}/><button className="secondary-button" type="submit"><Search size={13}/> Search</button></form><button className="secondary-button queue-refresh-button" onClick={()=>void refreshQueue()} disabled={refreshRunning.current}><Activity size={13}/> Refresh queue</button></div></div>
     <div className="queue-refresh-controls">
       <label className="queue-auto-toggle"><input type="checkbox" checked={autoRefresh} onChange={event=>setAutoRefresh(event.target.checked)}/><span className="queue-toggle-track"/><strong>Auto refresh</strong><small>{autoRefresh?"On":"Off"}</small></label>
       <label className="queue-refresh-interval">Refresh every <input type="number" min={5} max={3600} step={1} value={refreshSeconds} onChange={event=>setRefreshSeconds(Math.max(5,Math.min(3600,Number(event.target.value)||5)))}/> seconds</label>
       <span className="queue-refresh-note">{autoRefresh?"Queue refreshes automatically while this page is open.":"Automatic refresh is off. Use Refresh queue whenever needed."}</span>
     </div>
-    {reviewBatches.length>0&&<div className="batch-review-strip"><div><strong>{reviewBatches.length} batch(es) waiting for review</strong><span>All files start accepted. Uncheck only documents the shop should reject.</span></div>{reviewBatches.map(batchId=><button key={batchId} className="secondary-button" onClick={()=>onReviewBatch(batchId)}>Review batch · {jobs.filter(job=>job.batchId===batchId&&job.status==="AWAITING_SHOP_APPROVAL").length} files</button>)}</div>}
+    {reviewBatches.length>0&&<div className="batch-review-strip"><div><strong>{reviewBatches.length} batch(es) with files waiting for review</strong><span>Review loads every file in a batch, even when this queue is searched or paginated. All waiting files start accepted.</span></div>{reviewBatches.map(batchId=><button key={batchId} className="secondary-button" disabled={loadingBatchId===batchId||!!loadingBatchId} onClick={()=>onReviewBatch(batchId)}>{loadingBatchId===batchId?<><span className="button-spinner"/>Loading full batch…</>:<>Review batch · {jobs.filter(job=>job.batchId===batchId&&job.status==="AWAITING_SHOP_APPROVAL").length} shown</>}</button>)}</div>}
     {jobs.length===0 ? <EmptyModule icon={<FileText size={24}/>} title="Your queue is clear" text="When a customer uploads a document through one of your QR stations, the job and its current state will appear here."/> :
       <div className="table-scroll"><table><thead><tr><th>JOB</th><th>DOCUMENT</th><th>PRINT SETTINGS</th><th>QUOTE</th><th>PRINTER / LOCAL QUEUE</th><th>STATUS</th><th>CREATED</th><th>ACTIONS</th></tr></thead><tbody>
-        {jobs.map(job=><tr key={job.id}>
-          <td><strong className="job-id">{job.jobNumber}</strong></td>
-          <td><div className="customer-cell"><strong>{job.document.originalFileName}</strong><span>{formatBytes(job.document.sizeBytes)} · {job.document.mediaType}</span>{job.batchId&&<small className="batch-ref">Batch · {job.batchId.slice(0,8).toUpperCase()}</small>}</div></td>
-          <td><div className="detail-cell"><strong>{job.pageCount} pages × {job.copies}</strong><span>{job.colourMode} · {job.paperSize} · {job.isDuplex?"Duplex":"Single-sided"}</span></div></td>
-          <td className="amount-cell">{job.quotedAmountMinor>0?formatMoney(job.quotedAmountMinor,job.currency):"Not quoted"}</td>
-          <td><div className="queue-printer-cell">
-            {(job.status==="PAID_AUTHORISED"||job.status==="LOCAL_QUEUE_CLAIMED")&&<select aria-label={"Assign printer for "+job.jobNumber} value={job.printerDeviceId||""} disabled={busyJobId===job.id||dispatchablePrinters.length===0||!!job.localQueueReceivedUtc||(job.status==="LOCAL_QUEUE_CLAIMED"&&!!job.agentLeaseExpiresUtc&&new Date(job.agentLeaseExpiresUtc).getTime()>Date.now())} onChange={event=>onAssignPrinter(job,event.target.value)}>
-              <option value="">{dispatchablePrinters.length===0?"No live agent printer":job.status==="LOCAL_QUEUE_CLAIMED"?"Previous computer claim expired":"Select a live printer"}</option>
-              {dispatchablePrinters.map(printer=><option key={printer.id} value={printer.id}>{printer.outputMode==="PDF_EXPORT"?"Save PDF · ":""}{printer.displayName} · {printer.status}</option>)}
-            </select>}
-            {job.status!=="PAID_AUTHORISED"&&job.status!=="LOCAL_QUEUE_CLAIMED"&&<><strong>{job.outputType==="PDF_EXPORT"&&job.status==="COMPLETED"?"PDF saved":job.printerName||"Not assigned"}</strong><small>{job.outputType==="PDF_EXPORT"&&job.outputFilePath?job.outputFilePath:job.localQueueReceivedUtc?"Local copy secured "+new Date(job.localQueueReceivedUtc).toLocaleTimeString():(job.queueName||"Waiting for local queue handoff")}</small></>}
-            {job.status==="LOCAL_QUEUE_CLAIMED"&&<><strong>{job.printerName||"Agent claimed job"}</strong><small>{job.agentLeaseExpiresUtc?"Claim lease expires "+new Date(job.agentLeaseExpiresUtc).toLocaleTimeString():"Waiting for local agent acknowledgement"}</small></>}
-            {spoolerStatusWarning(job.spoolerStatus, job.printerStatus) && <small className="queue-device-warning" role="status">{spoolerStatusWarning(job.spoolerStatus, job.printerStatus)}</small>}
-          </div></td>
-          <td><Status label={job.outputType==="PDF_EXPORT"&&job.status==="COMPLETED"?"PDF saved":job.outputMode==="PDF_EXPORT"&&job.status==="PRINT_SUBMITTING"?"Creating PDF":prettyStatus(job.status)} tone={job.status==="AWAITING_CUSTOMER_APPROVAL"||job.status==="AWAITING_SHOP_APPROVAL"?"amber":job.status==="COMPLETED"||job.status==="LOCAL_QUEUE_READY"?"green":job.status==="OUTPUT_UNCONFIRMED"?"amber":job.status==="REFUNDED"?"green":"blue"}/></td>
-          <td className="time-cell">{new Date(job.createdUtc).toLocaleString()}</td>
-          <td><div className="queue-actions"><button className="subtle-button" disabled={busyJobId===job.id} onClick={()=>onPreview(job)}>Preview</button><button className="subtle-button" disabled={busyJobId===job.id} onClick={()=>onHistory(job)}>History</button>{job.status==="AWAITING_SHOP_APPROVAL"&&<><button className="subtle-button approve-action" disabled={busyJobId===job.id} onClick={()=>onApprove(job)}>Accept file</button><button className="subtle-button reject-action" disabled={busyJobId===job.id} onClick={()=>onReject(job)}>Reject file</button></>}{job.status==="PAID_AUTHORISED"&&(job.payment?.status==="VERIFIED"||job.payment?.status==="PARTIALLY_REFUNDED")&&!job.localQueueReceivedUtc&&!job.claimedByAgentDeviceId&&<button className="subtle-button reject-action" disabled={busyJobId===job.id} onClick={()=>onRefund(job)}>Review pages</button>}{job.status==="LOCAL_QUEUE_READY"&&<button className="subtle-button approve-action" disabled={busyJobId===job.id} onClick={()=>onDispatch(job)}>{job.outputMode==="PDF_EXPORT"?"Save PDF":"Start printing"}</button>}{job.status==="OUTPUT_UNCONFIRMED"&&job.outputMode==="PDF_EXPORT"&&<button className="subtle-button approve-action" disabled={busyJobId===job.id} onClick={()=>onRetryPdfExport(job)}>Save PDF again</button>}{(job.status==="SPOOLER_ACCEPTED"||job.status==="PRINTING"||(job.status==="OUTPUT_UNCONFIRMED"&&job.outputMode!=="PDF_EXPORT"))&&<button className="subtle-button approve-action" disabled={busyJobId===job.id||(job.status!=="OUTPUT_UNCONFIRMED"&&!!spoolerStatusWarning(job.spoolerStatus, job.printerStatus))} title={spoolerStatusWarning(job.spoolerStatus, job.printerStatus)||undefined} onClick={()=>onConfirmOutput(job)}>Confirm output</button>}</div></td>
-        </tr>)}
+        {queueBatches.map(batch=>{
+          const first=batch.jobs[0];
+          const waiting=batch.jobs.filter(job=>job.status==="AWAITING_SHOP_APPROVAL");
+          const folders=Array.from(new Set(batch.jobs.map(job=>job.batchGroupName??"Loose files")));
+          const statusLabels=Array.from(new Set(batch.jobs.map(job=>job.status)));
+          const settings=Array.from(new Set(batch.jobs.map(job=>`${job.colourMode} · ${job.isDuplex?"Double":"Single"}-sided`)));
+          const payableJobs=batch.jobs.filter(job=>job.status!=="REJECTED"&&job.status!=="REFUNDED");
+          const totalCopies=payableJobs.reduce((sum,job)=>sum+job.copies,0);
+          const totalAmount=payableJobs.reduce((sum,job)=>sum+Math.max(0,job.quotedAmountMinor),0);
+          const printersInBatch=Array.from(new Set(batch.jobs.map(job=>job.printerName||"Not assigned")));
+          const expanded=expandedBatchKeys.has(batch.key);
+          const label=statusLabels.length===1?prettyStatus(statusLabels[0]):`${statusLabels.length} states`;
+          const tone=statusLabels.every(status=>status==="COMPLETED"||status==="LOCAL_QUEUE_READY")?"green":statusLabels.some(status=>status==="AWAITING_SHOP_APPROVAL"||status==="AWAITING_CUSTOMER_APPROVAL"||status==="OUTPUT_UNCONFIRMED")?"amber":"blue";
+          return <Fragment key={batch.key}>
+            <tr className="queue-batch-summary-row">
+              <td><strong className="job-id">{batch.batchId?"Batch · "+first.jobNumber:first.jobNumber}</strong><small className="batch-summary-sub">{batch.jobs.length} file(s) shown</small></td>
+              <td><div className="customer-cell"><strong>{folders.length} folder group(s)</strong><span>{folders.slice(0,3).join(" · ")}{folders.length>3?" · +"+(folders.length-3):""}</span></div></td>
+              <td><div className="detail-cell"><strong>{totalCopies} copies</strong><span>{settings.length===1?settings[0]:"Mixed settings"}</span></div></td>
+              <td className="amount-cell">{totalAmount>0?formatMoney(totalAmount,first.currency):"Not quoted"}</td>
+              <td><div className="queue-printer-cell"><strong>{printersInBatch.length===1?printersInBatch[0]:"Multiple printers"}</strong><small>{waiting.length} awaiting review</small></div></td>
+              <td><Status label={label} tone={tone}/></td>
+              <td className="time-cell">{new Date(first.createdUtc).toLocaleString()}</td>
+              <td><div className="queue-actions">
+                {waiting.length>0&&batch.batchId&&<button className="subtle-button approve-action" disabled={busyJobId==="batch-review"||!!loadingBatchId} onClick={()=>onReviewBatch(batch.batchId!)}>{loadingBatchId===batch.batchId?"Loading…":"Preview & review"}</button>}
+                <button className="subtle-button" onClick={()=>setExpandedBatchKeys(current=>{const next=new Set(current);if(next.has(batch.key))next.delete(batch.key);else next.add(batch.key);return next;})}>{expanded?"Hide files":"Files"}</button>
+              </div></td>
+            </tr>
+            {expanded&&<tr className="queue-batch-detail-row"><td colSpan={8}><div className="queue-batch-files">{batch.jobs.map(job=><article className="queue-batch-file-card" key={job.id}>
+              <div className="queue-batch-file-main">
+                <div><strong>{job.document.originalFileName}</strong><small>{job.batchGroupName??"Loose files"} · {job.pageCount} pages × {job.copies} · {job.colourMode} · {job.isDuplex?"Double-sided":"Single-sided"}</small></div>
+                <Status label={prettyStatus(job.status)} tone={job.status==="REJECTED"?"red":job.status==="COMPLETED"||job.status==="LOCAL_QUEUE_READY"?"green":job.status==="AWAITING_SHOP_APPROVAL"?"amber":"blue"}/>
+                <strong className="amount-cell">{job.quotedAmountMinor>0?formatMoney(job.quotedAmountMinor,job.currency):"—"}</strong>
+              </div>
+              <div className="queue-batch-file-actions">
+                <button className="subtle-button" disabled={busyJobId===job.id} onClick={()=>onPreview(job)}>Preview</button>
+                <button className="subtle-button" disabled={busyJobId===job.id} onClick={()=>onHistory(job)}>History</button>
+                {job.status==="AWAITING_SHOP_APPROVAL"&&<><button className="subtle-button approve-action" disabled={busyJobId===job.id} onClick={()=>onApprove(job)}>Accept</button><button className="subtle-button reject-action" disabled={busyJobId===job.id} onClick={()=>onReject(job)}>Reject</button></>}
+                {job.status==="PAID_AUTHORISED"&&(job.payment?.status==="VERIFIED"||job.payment?.status==="PARTIALLY_REFUNDED")&&!job.localQueueReceivedUtc&&!job.claimedByAgentDeviceId&&<button className="subtle-button reject-action" disabled={busyJobId===job.id} onClick={()=>onRefund(job)}>Review pages / refund</button>}
+                {(job.status==="PAID_AUTHORISED"||job.status==="LOCAL_QUEUE_CLAIMED")&&<select aria-label={"Assign printer for "+job.jobNumber} value={job.printerDeviceId||""} disabled={busyJobId===job.id||dispatchablePrinters.length===0||!!job.localQueueReceivedUtc||(job.status==="LOCAL_QUEUE_CLAIMED"&&!!job.agentLeaseExpiresUtc&&new Date(job.agentLeaseExpiresUtc).getTime()>Date.now())} onChange={event=>onAssignPrinter(job,event.target.value)}>
+                  <option value="">{dispatchablePrinters.length===0?"No live agent printer":"Select printer"}</option>
+                  {dispatchablePrinters.map(printer=><option key={printer.id} value={printer.id}>{printer.outputMode==="PDF_EXPORT"?"Save PDF · ":""}{printer.displayName} · {printer.status}</option>)}
+                </select>}
+                {job.status==="LOCAL_QUEUE_READY"&&<button className="subtle-button approve-action" disabled={busyJobId===job.id} onClick={()=>onDispatch(job)}>{job.outputMode==="PDF_EXPORT"?"Save PDF":"Start printing"}</button>}
+                {job.status==="OUTPUT_UNCONFIRMED"&&job.outputMode==="PDF_EXPORT"&&<button className="subtle-button approve-action" disabled={busyJobId===job.id} onClick={()=>onRetryPdfExport(job)}>Save PDF again</button>}
+                {(job.status==="SPOOLER_ACCEPTED"||job.status==="PRINTING"||(job.status==="OUTPUT_UNCONFIRMED"&&job.outputMode!=="PDF_EXPORT"))&&<button className="subtle-button approve-action" disabled={busyJobId===job.id||(job.status!=="OUTPUT_UNCONFIRMED"&&!!spoolerStatusWarning(job.spoolerStatus,job.printerStatus))} onClick={()=>onConfirmOutput(job)}>Confirm output</button>}
+              </div>
+            </article>)}</div></td></tr>}
+          </Fragment>;
+        })}
       </tbody></table></div>}
     {hasMoreJobs && <div className="queue-load-older"><button className="secondary-button" type="button" onClick={() => void onLoadOlder()} disabled={loadingOlderJobs}>{loadingOlderJobs ? <span className="button-spinner"/> : <ArrowRight size={14}/>} Load older jobs</button></div>}
   </section>;
@@ -1882,29 +2034,36 @@ function PrintQueuePage({ jobs, printers, agentDevices, searchQuery, onSearch, o
 
 
 
-function BatchReviewModal({jobs,busy,onClose,onPreview,onApply}:{
+function BatchReviewModal({jobs,busy,decisions,retrying,onDecision,onClose,onPreview,onApply}:{
   jobs:ShopPrintJob[];
   busy:boolean;
+  decisions:Record<string,boolean>;
+  retrying:boolean;
+  onDecision:(jobId:string,accepted:boolean)=>void;
   onClose:()=>void;
   onPreview:(job:ShopPrintJob)=>void;
   onApply:(acceptedJobIds:string[])=>void;
 }) {
-  const [acceptedIds,setAcceptedIds]=useState<Set<string>>(()=>new Set(jobs.map(job=>job.id)));
-  useEffect(()=>setAcceptedIds(new Set(jobs.map(job=>job.id))),[jobs]);
-  const acceptedCount=jobs.filter(job=>acceptedIds.has(job.id)).length;
+  const acceptedIds=jobs.filter(job=>decisions[job.id]??true).map(job=>job.id);
+  const acceptedCount=acceptedIds.length;
   const rejectedCount=jobs.length-acceptedCount;
-  return <Modal title="Review upload batch" subtitle="Every file is accepted by default. Uncheck an individual file to reject it. Changes can be undone until you apply the review." onClose={onClose}>
-    <div className="batch-review-list">{jobs.map((job,index)=>{
-      const accepted=acceptedIds.has(job.id);
-      return <div className={accepted?"batch-review-row accepted":"batch-review-row rejected"} key={job.id}>
-        <label className="batch-review-checkbox"><input type="checkbox" checked={accepted} onChange={event=>setAcceptedIds(current=>{const next=new Set(current);if(event.target.checked)next.add(job.id);else next.delete(job.id);return next;})}/></label>
-        <span className="batch-review-index">{index+1}</span>
-        <div className="batch-review-file"><strong>{job.document.originalFileName}</strong><small>{formatBytes(job.document.sizeBytes)} · {job.pageCount} pages · {formatMoney(job.quotedAmountMinor,job.currency)}</small><Status label={accepted?"Accepted by default":"Marked for rejection"} tone={accepted?"green":"red"}/></div>
-        <button className="subtle-button" type="button" onClick={()=>onPreview(job)}>Preview</button>
-      </div>;
-    })}</div>
-    <div className="batch-review-summary"><span><strong>{acceptedCount}</strong> accepted</span><span><strong>{rejectedCount}</strong> rejected</span><small>Rejected files are excluded individually. Unpaid rejected files do not need a refund.</small></div>
-    <div className="modal-actions"><button className="secondary-button" onClick={onClose} disabled={busy}>Keep reviewing</button><button className="primary-button" disabled={busy||jobs.length===0} onClick={()=>onApply(Array.from(acceptedIds))}>{busy?<span className="button-spinner"/>:"Apply review"}</button></div>
+  const acceptedTotal=jobs.filter(job=>decisions[job.id]??true).reduce((sum,job)=>sum+Math.max(0,job.quotedAmountMinor),0);
+  const folders=Array.from(new Set(jobs.map(job=>job.batchGroupName??"Loose files")));
+  return <Modal title={retrying?"Retry batch review":"Review batch"} subtitle={retrying?"Some decisions did not save. Only the files still awaiting review are shown; each keeps its previous accept/reject choice.":"All files start accepted. Uncheck only files the shop cannot print; undo any change before applying."} onClose={onClose}>
+    <div className="batch-review-list">{folders.map(folderName=><section className="batch-review-folder" key={folderName}>
+      <div className="batch-review-folder-head"><FolderOpen size={15}/><strong>{folderName}</strong><small>{jobs.filter(job=>(job.batchGroupName??"Loose files")===folderName).length} files</small></div>
+      {jobs.filter(job=>(job.batchGroupName??"Loose files")===folderName).map((job,index)=>{
+        const accepted=decisions[job.id]??true;
+        return <div className={accepted?"batch-review-row accepted":"batch-review-row rejected"} key={job.id}>
+          <label className="batch-review-checkbox"><input type="checkbox" checked={accepted} disabled={busy} onChange={event=>onDecision(job.id,event.target.checked)}/></label>
+          <span className="batch-review-index">{index+1}</span>
+          <div className="batch-review-file"><strong>{job.document.originalFileName}</strong><small>{job.pageCount} pages × {job.copies} · {job.colourMode} · {job.isDuplex?"Double-sided":"Single-sided"} · {formatMoney(job.quotedAmountMinor,job.currency)}</small><Status label={accepted?"Accepted":"Marked for rejection"} tone={accepted?"green":"red"}/></div>
+          <button className="subtle-button" type="button" disabled={busy} onClick={()=>onPreview(job)}>Preview</button>
+        </div>;
+      })}
+    </section>)}</div>
+    <div className="batch-review-summary"><span><strong>{acceptedCount}</strong> accepted</span><span><strong>{rejectedCount}</strong> rejected</span><span><strong>{formatMoney(acceptedTotal,jobs[0]?.currency??"INR")}</strong> accepted value</span><small>Unpaid rejected files are excluded before payment. Decisions are kept if an individual update needs retrying.</small></div>
+    <div className="modal-actions"><button className="secondary-button" onClick={onClose} disabled={busy}>Keep reviewing</button><button className="primary-button" disabled={busy||jobs.length===0} onClick={()=>onApply(acceptedIds)}>{busy?<span className="button-spinner"/>:"Apply review"}</button></div>
   </Modal>;
 }
 
@@ -1915,18 +2074,18 @@ function JobHistoryModal({job,events,onClose}:{job:ShopPrintJob;events:ShopJobEv
   </Modal>;
 }
 
-function DocumentPreviewModal({name,url,mediaType,job,onClose,onApprove,onReject,onRefund}:{
-  name:string;url:string;mediaType:string;job:ShopPrintJob;onClose:()=>void;onApprove:()=>void;onReject:()=>void;onRefund:()=>void;
+function DocumentPreviewModal({name,url,mediaType,job,readOnly=false,onClose,onApprove,onReject,onRefund}:{
+  name:string;url:string;mediaType:string;job:ShopPrintJob;readOnly?:boolean;onClose:()=>void;onApprove:()=>void;onReject:()=>void;onRefund:()=>void;
 }) {
   const isPdf=mediaType==="application/pdf";
   const previewSummary = `${job.pageCount} page(s) · ${job.copies} copy/copies requested. Preview displays the uploaded original once.`;
-  return <Modal title={name} subtitle={job.batchId? `File review · Batch ${job.batchId.slice(0,8).toUpperCase()} · ${previewSummary}` : previewSummary} onClose={onClose}>
+  return <Modal title={name} subtitle={readOnly ? `Read-only preview · ${previewSummary}` : job.batchId ? `File review · Batch ${job.batchId.slice(0,8).toUpperCase()} · ${previewSummary}` : previewSummary} onClose={onClose}>
     <div className="shop-document-preview">{isPdf?<iframe src={url} title={name}/>:<img src={url} alt={name}/>}</div>
-    {job.status==="AWAITING_SHOP_APPROVAL"&&<div className="file-review-note"><Check size={16}/><span>Review this file independently. Accepting or rejecting it will not change any other file in the batch.</span></div>}
+    {job.status==="AWAITING_SHOP_APPROVAL"&&<div className="file-review-note"><Check size={16}/><span>{readOnly ? "This preview is part of the batch review. Keep or change this file's decision in the batch panel after closing the preview." : "Review this file independently. Accepting or rejecting it will not change any other file in the batch."}</span></div>}
     {job.status==="PAID_AUTHORISED"&&(job.payment?.status==="VERIFIED"||job.payment?.status==="PARTIALLY_REFUNDED")&&<div className="file-refund-note"><Wallet size={16}/><span>Paid amount: <strong>{formatMoney(job.payment.amountMinor,job.payment.currency)}</strong>. A refund can be recorded while this file has not yet been handed to the shop computer.</span></div>}
     <div className="modal-actions">
-      {job.status==="AWAITING_SHOP_APPROVAL"&&<><button className="secondary-button reject-action" onClick={onReject}><X size={15}/> Reject this file</button><button className="primary-button" onClick={onApprove}><Check size={15}/> Accept this file</button></>}
-      {job.status==="PAID_AUTHORISED"&&(job.payment?.status==="VERIFIED"||job.payment?.status==="PARTIALLY_REFUNDED")&&!job.localQueueReceivedUtc&&!job.claimedByAgentDeviceId&&<button className="secondary-button reject-action" onClick={onRefund}><RotateCcw size={15}/> Review pages & refund</button>}
+      {job.status==="AWAITING_SHOP_APPROVAL"&&!readOnly&&<><button className="secondary-button reject-action" onClick={onReject}><X size={15}/> Reject this file</button><button className="primary-button" onClick={onApprove}><Check size={15}/> Accept this file</button></>}
+      {!readOnly&&job.status==="PAID_AUTHORISED"&&(job.payment?.status==="VERIFIED"||job.payment?.status==="PARTIALLY_REFUNDED")&&!job.localQueueReceivedUtc&&!job.claimedByAgentDeviceId&&<button className="secondary-button reject-action" onClick={onRefund}><RotateCcw size={15}/> Review pages & refund</button>}
       <button className="secondary-button" onClick={onClose}>Close preview</button>
     </div>
   </Modal>;
@@ -1934,7 +2093,7 @@ function DocumentPreviewModal({name,url,mediaType,job,onClose,onApprove,onReject
 
 function RefundModal({job,token,busy,onClose,onSubmit}:{
   job:ShopPrintJob; token:string; busy:boolean; onClose:()=>void;
-  onSubmit:(values:{refundMethod:"UPI"|"CASH";refundReference:string|null;reason:string;rejectedPageNumbers:number[]})=>void;
+  onSubmit:(values:{refundMethod:"UPI"|"CASH";refundReference:string|null;reason:string;rejectedPageNumbers:number[];idempotencyKey:string})=>void;
 }) {
   const [rejectedPages,setRejectedPages]=useState<Set<number>>(()=>{
     try{return new Set<number>(JSON.parse(job.rejectedPageNumbersJson||"[]") as number[]);}catch{return new Set<number>();}
@@ -1946,6 +2105,7 @@ function RefundModal({job,token,busy,onClose,onSubmit}:{
   const [reference,setReference]=useState("");
   const [reason,setReason]=useState("Customer rejected selected pages after shop preview.");
   const [confirmed,setConfirmed]=useState(false);
+  const refundRequest=useRef<{signature:string;key:string}|null>(null);
   const selectedPages=Array.from(rejectedPages).sort((a,b)=>a-b);
   const selectionKey=selectedPages.join(",");
   const alreadyRejected=(()=>{try{return new Set<number>(JSON.parse(job.rejectedPageNumbersJson||"[]") as number[]);}catch{return new Set<number>();}})();
@@ -1987,7 +2147,14 @@ function RefundModal({job,token,busy,onClose,onSubmit}:{
        estimateError?<span className="inline-error">{estimateError}</span>:
        estimate?<><span>{estimate.acceptedPageCount} pages will remain in the print job.</span><strong>Return {formatMoney(additional,estimate.currency)}</strong><small>Cumulative returned: {formatMoney(estimate.cumulativeRefundAmountMinor,estimate.currency)} · remaining payment: {formatMoney(estimate.remainingPaidAmountMinor,estimate.currency)}</small></>:<span>Select page(s) to see the refund amount.</span>}
     </div>
-    {estimate&&additional>0&&<form className="refund-form" onSubmit={event=>{event.preventDefault();if(canSubmit)onSubmit({refundMethod:method,refundReference:method==="UPI"?reference.trim():null,reason:reason.trim(),rejectedPageNumbers:selectedPages});}}>
+    {estimate&&additional>0&&<form className="refund-form" onSubmit={event=>{
+      event.preventDefault();
+      if(!canSubmit)return;
+      const payload={refundMethod:method,refundReference:method==="UPI"?reference.trim():null,reason:reason.trim(),rejectedPageNumbers:selectedPages};
+      const signature=JSON.stringify(payload);
+      if(refundRequest.current?.signature!==signature)refundRequest.current={signature,key:crypto.randomUUID()};
+      onSubmit({...payload,idempotencyKey:refundRequest.current.key});
+    }}>
       <label>Refund returned by<select value={method} onChange={event=>setMethod(event.target.value as "UPI"|"CASH")}><option value="UPI">UPI transfer</option><option value="CASH">Cash returned at counter</option></select></label>
       {method==="UPI"&&<label>Refund transaction reference<input value={reference} onChange={event=>setReference(event.target.value)} maxLength={100} placeholder="Enter the refund UPI reference" required/></label>}
       <label>Reason for rejecting these pages<textarea rows={3} maxLength={300} value={reason} onChange={event=>setReason(event.target.value)} required/></label>
@@ -2120,8 +2287,8 @@ function StationModal({ busy, printers, onClose, onSubmit }: {
   return <Modal title="Create a QR station" subtitle="Give customers a clear entry point for this counter or printer." onClose={onClose}>
     <form className="modal-form" onSubmit={e=>{e.preventDefault();onSubmit({displayName,printerDeviceId:printerDeviceId||undefined});}}>
       <label>Station name<input value={displayName} onChange={e=>setDisplayName(e.target.value)} placeholder="e.g. Front counter" required maxLength={120}/></label>
-      <label>Default printer <span className="field-hint">Optional · can be changed before a job is printed</span><select value={printerDeviceId} onChange={e=>setPrinterDeviceId(e.target.value)}><option value="">No default printer</option>{printers.map(printer=><option key={printer.id} value={printer.id}>{printer.displayName} · {printer.manufacturer}</option>)}</select></label>
-      <div className="modal-note"><QrCode size={15}/> The QR contains a public station identifier, not a permanent print authorisation. Every scan creates an expiring customer session.</div>
+      <label>Default printer <span className="field-hint">Optional · can be changed before a job is printed</span><select value={printerDeviceId} onChange={e=>setPrinterDeviceId(e.target.value)}><option value="">No default printer</option>{printers.filter(printer=>printer.isActive).map(printer=><option key={printer.id} value={printer.id}>{printer.displayName} · {printer.manufacturer}</option>)}</select></label>
+      <div className="modal-note"><QrCode size={15}/> The QR contains a public station identifier, not a permanent print authorisation. Every scan creates an expiring customer session. Only enabled printers are offered as defaults; you can also assign a printer to each paid job in the queue.</div>
       <div className="modal-actions"><button type="button" className="secondary-button" onClick={onClose}>Cancel</button><button className="primary-button" disabled={busy||!displayName.trim()}>{busy?<span className="button-spinner"/>:"Create station"}</button></div>
     </form>
   </Modal>;
@@ -2350,14 +2517,15 @@ function CustomerEntry({publicCode}:{publicCode:string}) {
     };
   },[result?.sessionToken,result?.expiresUtc]);
 
-  return <div className="customer-entry"><div className="customer-entry-glow"/>
+  const nativeAppMode = navigator.userAgent.includes("SmartPrintAndroid/1");
+  return <div className={nativeAppMode ? "customer-entry smartprint-native" : "customer-entry"}><div className="customer-entry-glow"/>
     <header className="customer-entry-brand"><div className="brand-mark"><QrCode size={21}/></div><div><div className="brand-name">smart<span>print</span></div><div className="brand-caption">BY QUANTAEDGE</div></div></header>
     <main className="customer-entry-card">
-      {loading?<><div className="customer-entry-spinner"><span className="button-spinner"/></div><h1>Connecting to your print shop</h1><p>Creating a secure, time-limited session for this QR station.</p></>:
-      error?<><div className="entry-error-icon"><X size={23}/></div><div className="entry-eyebrow">STATION UNAVAILABLE</div><h1>This QR station can't be reached</h1><p>{error}</p><button className="primary-button" onClick={()=>window.location.reload()}>Try again</button></>:
-      result?<><div className="entry-success-icon"><Check size={23}/></div><div className="entry-eyebrow">SECURE SESSION CREATED</div><h1>Welcome to {result.shop.displayName}</h1><p>Your phone is connected to this shop's print station.</p>
-        <div className="entry-printer-card"><div className="entry-printer-icon"><Printer size={20}/></div><div><strong>{result.printer?.displayName||"Shop print counter"}</strong><span>{result.printer?result.printer.manufacturer+" · "+result.printer.model:"The shop will select a printer for your job."}</span></div><Status label={result.printer?.status||"Session ready"} tone="blue"/></div>
-        <div className="entry-session-note"><ShieldCheck size={16}/><span>This session expires at {new Date(result.expiresUtc).toLocaleTimeString([], {hour:"2-digit",minute:"2-digit"})}. Your document access stays limited to this shop session.</span></div>
+      {loading?<><div className="customer-entry-spinner"><span className="button-spinner"/></div><h1>{nativeAppMode?"Connecting…":"Connecting to your print shop"}</h1>{!nativeAppMode&&<p>Creating a secure, time-limited session for this QR station.</p>}</>:
+      error?<><div className="entry-error-icon"><X size={23}/></div><div className="entry-eyebrow">STATION UNAVAILABLE</div><h1>{nativeAppMode?"Shop unavailable":"This QR station can't be reached"}</h1>{!nativeAppMode&&<p>{error}</p>}<button className="primary-button" onClick={()=>window.location.reload()}>Try again</button></>:
+      result?<><div className="entry-success-icon"><Check size={23}/></div><div className="entry-eyebrow">SECURE SESSION CREATED</div><h1>{nativeAppMode?result.shop.displayName:"Welcome to "+result.shop.displayName}</h1><p>{nativeAppMode?"Shop connected.":"Your phone is connected to this shop's print station."}</p>
+        <div className="entry-printer-card"><div className="entry-printer-icon"><Printer size={20}/></div><div><strong>{result.printer?.displayName||"Shop print counter"}</strong><span>{nativeAppMode?(result.printer?.status||"Printer not selected"):result.printer?result.printer.manufacturer+" · "+result.printer.model:"The shop will select a printer for your job."}</span></div><Status label={result.printer?.status||"Session ready"} tone="blue"/></div>
+        <div className="entry-session-note"><ShieldCheck size={16}/><span>{nativeAppMode?"Secure session · Expires "+new Date(result.expiresUtc).toLocaleTimeString([], {hour:"2-digit",minute:"2-digit"}):"This session expires at "+new Date(result.expiresUtc).toLocaleTimeString([], {hour:"2-digit",minute:"2-digit"})+". Your document access stays limited to this shop session."}</span></div>
         <CustomerLocalConnection localAgent={result.localAgent} onReady={setLocalReady}/>
         <CustomerPrintFlow publicCode={publicCode} sessionToken={result.sessionToken} paymentOptions={result.paymentOptions} localAgent={result.localAgent} localReady={localReady}/>
       </>:null}
@@ -2402,6 +2570,7 @@ function buildSecureLocalPortalUrl():string|null {
 }
 
 function CustomerLocalConnection({localAgent,onReady}:{localAgent:CustomerLocalAgent|null;onReady:(ready:boolean)=>void}) {
+  const nativeAppMode = navigator.userAgent.includes("SmartPrintAndroid/1");
   const [permissionState,setPermissionState]=useState<PermissionState|"unknown">("unknown");
   const [checkStatus,setCheckStatus]=useState<LocalAgentCheckStatus>("idle");
   const [message,setMessage]=useState("");
@@ -2411,7 +2580,7 @@ function CustomerLocalConnection({localAgent,onReady}:{localAgent:CustomerLocalA
   function requireSecureContext() {
     setCheckStatus("insecure");
     onReady(false);
-    setMessage(securePortalUrl
+    setMessage(nativeAppMode ? "Secure HTTPS required." : securePortalUrl
       ? "This shop page is open over HTTP. Chrome blocks local-network requests from insecure pages without showing a permission prompt. Open the secure shop link below; the certificate must be trusted on this phone."
       : "This shop page is not a secure HTTPS context. Open the shop's HTTPS customer portal before checking local printing.");
   }
@@ -2424,7 +2593,7 @@ function CustomerLocalConnection({localAgent,onReady}:{localAgent:CustomerLocalA
     }
     setCheckStatus("checking");
     onReady(false);
-    setMessage("Checking the shop computer. No document is sent by this check.");
+    setMessage(nativeAppMode ? "Checking shop Wi-Fi." : "Checking the shop computer. No document is sent by this check.");
 
     let validEndpointCount=0;
     for(const value of localAgent.endpoints.slice(0,8)) {
@@ -2468,7 +2637,7 @@ function CustomerLocalConnection({localAgent,onReady}:{localAgent:CustomerLocalA
            status.status==="LOCAL_ENDPOINT_READY") {
           setCheckStatus("connected");
           onReady(true);
-          setMessage("This phone can reach the shop computer. Direct uploads use the shop's private Wi-Fi, but this local HTTP connection is not encrypted in transit. Choose cloud-assisted upload for HTTPS transfer.");
+          setMessage(nativeAppMode ? "Shop Wi-Fi ready · Local HTTP is not encrypted." : "This phone can reach the shop computer. Direct uploads use the shop's private Wi-Fi, but this local HTTP connection is not encrypted in transit. Choose cloud-assisted upload for HTTPS transfer.");
           return;
         }
       } catch {
@@ -2480,7 +2649,7 @@ function CustomerLocalConnection({localAgent,onReady}:{localAgent:CustomerLocalA
 
     setCheckStatus("unavailable");
     onReady(false);
-    setMessage(validEndpointCount===0
+    setMessage(nativeAppMode ? "Shop offline · Cloud upload available." : validEndpointCount===0
       ? "The shop Agent has not announced a usable local address. The regular cloud-assisted upload remains available."
       : "The shop Agent did not respond. Check that its Windows service is running, this network allows device-to-device traffic, and TCP 17842 is allowed on the laptop's Private firewall profile. The regular cloud-assisted upload remains available.");
   }
@@ -2509,10 +2678,10 @@ function CustomerLocalConnection({localAgent,onReady}:{localAgent:CustomerLocalA
       if(permissionStatus.state==="denied") {
         setCheckStatus("denied");
         onReady(false);
-        setMessage("Chrome has blocked Local network access for this public HTTPS site. On Android, open the site information icon beside the address bar → Permissions → Local network access → Allow, then reload this QR page.");
+        setMessage(nativeAppMode ? "Allow local network access." : "Chrome has blocked Local network access for this public HTTPS site. On Android, open the site information icon beside the address bar → Permissions → Local network access → Allow, then reload this QR page.");
       } else if(permissionStatus.state==="prompt") {
         setCheckStatus("idle");
-        setMessage("Tap Check shop Wi-Fi to request local-network access from Chrome.");
+        setMessage(nativeAppMode ? "Tap Check Wi-Fi." : "Tap Check shop Wi-Fi to request local-network access from Chrome.");
       }
     };
 
@@ -2535,8 +2704,8 @@ function CustomerLocalConnection({localAgent,onReady}:{localAgent:CustomerLocalA
   if(!localAgent?.endpoints.length)return null;
 
   const label=checkStatus==="checking"?"Checking…":
-    checkStatus==="connected"?"Shop computer reachable":
-    checkStatus==="denied"?"Browser permission blocked":
+    checkStatus==="connected"?(nativeAppMode?"Connected":"Shop computer reachable"):
+    checkStatus==="denied"?(nativeAppMode?"Access blocked":"Browser permission blocked"):
     checkStatus==="insecure"?"HTTPS required":
     checkStatus==="unavailable"?"Not reachable":"Not checked";
   const tone=checkStatus==="connected"?"green":
@@ -2544,24 +2713,35 @@ function CustomerLocalConnection({localAgent,onReady}:{localAgent:CustomerLocalA
 
   return <section className="entry-local-agent">
     <div className="entry-local-agent-head">
-      <div><strong>Shop Wi-Fi connection</strong><span>Optional local connection check</span></div>
+      <div><strong>{nativeAppMode?"Shop Wi-Fi":"Shop Wi-Fi connection"}</strong><span>Optional local connection check</span></div>
       <Status label={label} tone={tone}/>
     </div>
-    <p>Check whether this phone can reach the shop's local print computer. This check does not upload your document.</p>
+    {!nativeAppMode&&<p>Check whether this phone can reach the shop's local print computer. This check does not upload your document.</p>}
     {checkStatus==="insecure"
       ? <div className="entry-local-agent-message">
           <small>{message}</small>
-          {securePortalUrl&&<a className="customer-flow-button" href={securePortalUrl}>Open secure HTTPS shop page</a>}
+          {securePortalUrl&&<a className="customer-flow-button" href={securePortalUrl}>{nativeAppMode?"Open HTTPS":"Open secure HTTPS shop page"}</a>}
         </div>
       : permissionState==="denied"&&!localOriginDoesNotNeedLnaPermission
         ? <small className="entry-local-agent-message">{message}</small>
         : <button type="button" className="customer-flow-button" disabled={checkStatus==="checking"} onClick={()=>void checkConnection()}>
-            {checkStatus==="checking"?"Checking shop connection…":checkStatus==="connected"?"Check again":"Check shop Wi-Fi"}
+            {checkStatus==="checking"?"Checking…":checkStatus==="connected"?"Check again":nativeAppMode?"Check Wi-Fi":"Check shop Wi-Fi"}
           </button>}
     {message&&checkStatus!=="insecure"&&!(permissionState==="denied"&&!localOriginDoesNotNeedLnaPermission)&&<small className="entry-local-agent-message">{message}</small>}
   </section>;
 }
 
+
+type CustomerGroupSettings = { colourMode: "Mono" | "Colour"; isDuplex: boolean };
+type CustomerFileSettings = { copies: string; custom: boolean; colourMode: "Mono" | "Colour"; isDuplex: boolean };
+
+function consumeSmartPrintNativePickerGroups():string[]|undefined {
+  const target=window as Window & {__smartPrintNativePickerGroups?:string[]};
+  const groups=target.__smartPrintNativePickerGroups;
+  delete target.__smartPrintNativePickerGroups;
+  return Array.isArray(groups)?groups:undefined;
+}
+type CustomerSavedPrintSettings = { copies: number; colourMode: "Mono" | "Colour"; isDuplex: boolean };
 
 type StoredCustomerDraft = {
   sessionMarker: string;
@@ -2570,10 +2750,30 @@ type StoredCustomerDraft = {
   uploadedFileFingerprints?: string[];
   batchId?: string;
   quote: PrintQuoteResult | null;
+  fileGroupNames?: Record<string,string>;
+  groupSettings?: Record<string,CustomerGroupSettings>;
+  fileSettings?: Record<string,CustomerFileSettings>;
+  printSettingsByJobId?: Record<string,CustomerSavedPrintSettings>;
+  quotesByJobId?: Record<string,PrintQuoteResult>;
 };
 
 function customerFileFingerprint(file:File):string {
-  return `${file.name}\u0000${file.size}\u0000${file.lastModified}\u0000${file.type}`;
+  const relativePath=(file as File & {webkitRelativePath?:string}).webkitRelativePath??"";
+  const nativeGroup=(file as File & {__smartPrintBatchGroup?:string}).__smartPrintBatchGroup??"";
+  return `${relativePath||nativeGroup}\u0000${file.name}\u0000${file.size}\u0000${file.lastModified}\u0000${file.type}`;
+}
+
+function customerBatchGroupName(file:File):string {
+  const relativePath=(file as File & {webkitRelativePath?:string}).webkitRelativePath??"";
+  const pathParts=relativePath.split("/").filter(Boolean);
+  return pathParts.length>1?pathParts[0]:"Loose files";
+}
+
+function normalizeCustomerCopies(value:string):string {
+  const trimmed=value.trim();
+  if(!/^\d+$/.test(trimmed))return "1";
+  const copies=Number(trimmed);
+  return Number.isInteger(copies)&&copies>=1&&copies<=100?String(copies):"1";
 }
 
 function readStoredCustomerDraft(publicCode:string,sessionToken:string):StoredCustomerDraft|null {
@@ -2588,7 +2788,76 @@ function readStoredCustomerDraft(publicCode:string,sessionToken:string):StoredCu
   }
 }
 
+function smartPrintNativeHeadline(status:string):string {
+  switch(status) {
+    case "AWAITING_SHOP_APPROVAL": return "Awaiting shop review";
+    case "AWAITING_PAYMENT": return "Payment required";
+    case "AWAITING_CUSTOMER_PAYMENT": return "Complete UPI payment";
+    case "AWAITING_COUNTER_PAYMENT": return "Pay at counter";
+    case "PAYMENT_REPORTED": return "Verification pending";
+    case "PAYMENT_REJECTED": return "Payment not verified";
+    case "PAID_AUTHORISED": return "Payment verified";
+    case "LOCAL_QUEUE_CLAIMED": return "Transferring to shop";
+    case "LOCAL_QUEUE_READY": return "Queued at shop";
+    case "PRINT_AUTHORISED": return "Printing authorised";
+    case "PRINT_SUBMITTING": return "Sending to printer";
+    case "SPOOLER_ACCEPTED": return "Printer queue accepted";
+    case "PRINTING": return "Printing";
+    case "OUTPUT_UNCONFIRMED": return "Output check pending";
+    case "COMPLETED": return "Ready to collect";
+    case "REJECTED": return "Request declined";
+    case "QUOTE_EXPIRED": return "Quote expired";
+    default: return "Request in progress";
+  }
+}
+
+function smartPrintNativeStatus(status:string):string {
+  switch(status) {
+    case "AWAITING_SHOP_APPROVAL": return "Awaiting shop approval.";
+    case "AWAITING_PAYMENT": return "Shop approved · Pay now.";
+    case "AWAITING_CUSTOMER_PAYMENT": return "Pay shop · Submit UTR.";
+    case "AWAITING_COUNTER_PAYMENT": return "Pay at the counter.";
+    case "PAYMENT_REPORTED": return "UTR sent · Verify pending.";
+    case "PAYMENT_REJECTED": return "Payment not verified.";
+    case "PAID_AUTHORISED": return "Payment verified · Print pending.";
+    case "LOCAL_QUEUE_CLAIMED": return "Transferring to shop.";
+    case "LOCAL_QUEUE_READY": return "Queued · Operator pending.";
+    case "PRINT_AUTHORISED": return "Printing authorised.";
+    case "PRINT_SUBMITTING": return "Sending to printer.";
+    case "SPOOLER_ACCEPTED": return "Queue accepted · Paper unconfirmed.";
+    case "PRINTING": return "Printing in progress.";
+    case "OUTPUT_UNCONFIRMED": return "Shop checking printed pages.";
+    case "COMPLETED": return "Ready for collection.";
+    case "REJECTED": return "Shop rejected request.";
+    case "QUOTE_EXPIRED": return "Quote expired.";
+    default: return "Status updated.";
+  }
+}
+
+function smartPrintNativeBoundary(status:string|undefined,hasQuote:boolean):string {
+  switch(status) {
+    case "AWAITING_SHOP_APPROVAL": return "Shop review · No payment.";
+    case "AWAITING_PAYMENT": return "Pay shop · Verification required.";
+    case "AWAITING_COUNTER_PAYMENT": return "Counter payment · Await confirmation.";
+    case "AWAITING_CUSTOMER_PAYMENT": return "Submit UTR · Shop verifies.";
+    case "PAYMENT_REPORTED": return "UTR pending · Shop verifies.";
+    case "PAID_AUTHORISED": return "Payment verified · Printing not started.";
+    case "LOCAL_QUEUE_CLAIMED": return "Secure transfer · Not printing.";
+    case "LOCAL_QUEUE_READY": return "Queued · Operator approval needed.";
+    case "PRINT_AUTHORISED": return "Shop approved physical printing.";
+    case "PRINT_SUBMITTING": return "Sending to printer.";
+    case "SPOOLER_ACCEPTED": return "Queue accepted · Paper unconfirmed.";
+    case "PRINTING": return "Printing · Output unconfirmed.";
+    case "OUTPUT_UNCONFIRMED": return "Output unconfirmed · Shop checks pages.";
+    case "COMPLETED": return "Output confirmed · Collect print.";
+    case "QUOTE_EXPIRED": return "Quote expired · Request another.";
+    case "REJECTED": return "Request rejected · Ask shop.";
+    default: return hasQuote ? "Quote only · No payment." : "No payment yet.";
+  }
+}
+
 function CustomerPrintFlow({publicCode,sessionToken,paymentOptions,localAgent,localReady}:{publicCode:string;sessionToken:string;paymentOptions:{upiEnabled:boolean;upiId?:string|null;payeeName?:string|null;cashEnabled:boolean};localAgent:CustomerLocalAgent|null;localReady:boolean}) {
+  const nativeAppMode = navigator.userAgent.includes("SmartPrintAndroid/1");
   const initialDraft=readStoredCustomerDraft(publicCode,sessionToken);
   const [files,setFiles]=useState<File[]>([]);
   const [selectedFileIndex,setSelectedFileIndex]=useState(0);
@@ -2598,16 +2867,18 @@ function CustomerPrintFlow({publicCode,sessionToken,paymentOptions,localAgent,lo
   const [uploadedBatch,setUploadedBatch]=useState<UploadedPrintJob[]>(()=>initialDraft?.uploadedBatch??(initialDraft?.uploaded?[initialDraft.uploaded]:[]));
   const [uploadedFileFingerprints,setUploadedFileFingerprints]=useState<string[]>(()=>initialDraft?.uploadedFileFingerprints??[]);
   const [batchId,setBatchId]=useState(()=>initialDraft?.batchId??"");
-  const [uploadProgress,setUploadProgress]=useState<{completed:number;total:number}|null>(null);
+  const [fileGroupNames,setFileGroupNames]=useState<Record<string,string>>(()=>initialDraft?.fileGroupNames??{});
+  const [groupSettings,setGroupSettings]=useState<Record<string,CustomerGroupSettings>>(()=>initialDraft?.groupSettings??{});
+  const [fileSettings,setFileSettings]=useState<Record<string,CustomerFileSettings>>(()=>initialDraft?.fileSettings??{});
+  const [printSettingsByJobId,setPrintSettingsByJobId]=useState<Record<string,CustomerSavedPrintSettings>>(()=>initialDraft?.printSettingsByJobId??{});
+  const [quotesByJobId,setQuotesByJobId]=useState<Record<string,PrintQuoteResult>>(()=>initialDraft?.quotesByJobId??(initialDraft?.quote&&initialDraft?.uploaded?{[initialDraft.uploaded.job.id]:initialDraft.quote}:{}));
+  const [uploadProgress,setUploadProgress]=useState<{completed:number;total:number;currentFile:string|null}|null>(null);
   const [quote,setQuote]=useState<PrintQuoteResult|null>(()=>initialDraft?.quote??null);
   const [jobStatus,setJobStatus]=useState<CustomerJobStatus|null>(null);
   const [batchStatuses,setBatchStatuses]=useState<Record<string,CustomerJobStatus>>({});
   const [payment,setPayment]=useState<CustomerPayment|null>(null);
   const [paymentReference,setPaymentReference]=useState("");
   const [paymentMethod,setPaymentMethod]=useState<"UPI"|"CASH">(paymentOptions.upiEnabled?"UPI":"CASH");
-  const [colourMode,setColourMode]=useState<"Mono"|"Colour">("Mono");
-  const [isDuplex,setIsDuplex]=useState(false);
-  const [copies,setCopies]=useState(1);
   const [busy,setBusy]=useState(false);
   const [error,setError]=useState("");
   const [uploadMode,setUploadMode]=useState<"LOCAL"|"CLOUD">(localAgent?.endpoints.length?"LOCAL":"CLOUD");
@@ -2635,12 +2906,29 @@ function CustomerPrintFlow({publicCode,sessionToken,paymentOptions,localAgent,lo
       uploadedBatch,
       uploadedFileFingerprints,
       batchId,
-      quote
+      quote,
+      fileGroupNames,
+      groupSettings,
+      fileSettings,
+      printSettingsByJobId,
+      quotesByJobId
     } satisfies StoredCustomerDraft));
-  },[publicCode,sessionToken,uploaded,uploadedBatch,uploadedFileFingerprints,batchId,quote]);
+  },[publicCode,sessionToken,uploaded,uploadedBatch,uploadedFileFingerprints,batchId,quote,fileGroupNames,groupSettings,fileSettings,printSettingsByJobId,quotesByJobId]);
 
   const batchItemsForStatus=uploadedBatch.length?uploadedBatch:(uploaded?[uploaded]:[]);
   const batchStatusKey=batchItemsForStatus.map(item=>item.job.id).join("|");
+  const groupNameForFile=(candidate:File)=>fileGroupNames[customerFileFingerprint(candidate)]??customerBatchGroupName(candidate);
+  const defaultsForGroup=(name:string):CustomerGroupSettings=>groupSettings[name]??{colourMode:"Mono",isDuplex:false};
+  const settingsForFile=(candidate:File)=> {
+    const fingerprint=customerFileFingerprint(candidate);
+    const defaults=defaultsForGroup(groupNameForFile(candidate));
+    const own=fileSettings[fingerprint];
+    return {
+      colourMode:own?.custom?own.colourMode:defaults.colourMode,
+      isDuplex:own?.custom?own.isDuplex:defaults.isDuplex,
+      copies:Number(normalizeCustomerCopies(own?.copies??"1"))
+    } as CustomerSavedPrintSettings;
+  };
 
   useEffect(()=>{
     const items=uploadedBatch.length?uploadedBatch:(uploaded?[uploaded]:[]);
@@ -2710,33 +2998,42 @@ function CustomerPrintFlow({publicCode,sessionToken,paymentOptions,localAgent,lo
   async function upload() {
     if(files.length===0)return;
     if(uploadMode==="LOCAL"&&!localReady) {
-      setError("Check shop Wi-Fi access above before starting a direct local upload.");
+      setError(nativeAppMode ? "Check shop Wi-Fi." : "Check shop Wi-Fi access above before starting a direct local upload.");
       return;
     }
     const currentBatchId=batchId||crypto.randomUUID();
     setBatchId(currentBatchId);
     const completedFingerprints=new Set(uploadedFileFingerprints);
     const results=[...uploadedBatch];
+    const savedSettings={...printSettingsByJobId};
     const pending=files.filter(candidate=>!completedFingerprints.has(customerFileFingerprint(candidate)));
-    if(pending.length===0){setError("All selected files are already uploaded. Choose another document or folder.");return;}
-    setBusy(true);setError("");setQuote(null);setJobStatus(null);setUploadProgress({completed:0,total:pending.length});
+    if(pending.length===0){setError(nativeAppMode ? "Files already uploaded. Choose more." : "All selected files are already uploaded. Choose another document or folder.");return;}
+    setBusy(true);setError("");setQuote(null);setQuotesByJobId({});setJobStatus(null);setUploadProgress({completed:0,total:pending.length,currentFile:pending[0]?.name??null});
     try {
       for(let index=0;index<pending.length;index++){
         const candidate=pending[index];
+        setUploadProgress({completed:index,total:pending.length,currentFile:candidate.name});
+        const fingerprint=customerFileFingerprint(candidate);
+        const batchGroupName=groupNameForFile(candidate);
+        const settings=settingsForFile(candidate);
         const created=uploadMode==="LOCAL"&&localAgent
-          ? await uploadCustomerDocumentLocally(sessionToken,candidate,localAgent,currentBatchId)
-          : await uploadCustomerDocument(sessionToken,candidate,currentBatchId);
+          ? await uploadCustomerDocumentLocally(sessionToken,candidate,localAgent,currentBatchId,batchGroupName)
+          : await uploadCustomerDocument(sessionToken,candidate,currentBatchId,batchGroupName);
         if(!results.some(item=>item.job.id===created.job.id))results.push(created);
-        completedFingerprints.add(customerFileFingerprint(candidate));
+        savedSettings[created.job.id]=settings;
+        completedFingerprints.add(fingerprint);
         setUploadedBatch([...results]);
         setUploadedFileFingerprints([...completedFingerprints]);
-        setUploadProgress({completed:index+1,total:pending.length});
+        setUploadProgress({completed:index+1,total:pending.length,currentFile:pending[index+1]?.name??null});
       }
+      setPrintSettingsByJobId(savedSettings);
       setUploadedBatch(results);
       setUploaded(results[0]??null);
       setQuote(null);setJobStatus(null);setPayment(null);setPaymentReference("");
       setSelectedFileIndex(0);
+      setFiles([]);
     } catch(exception) {
+      setPrintSettingsByJobId(savedSettings);
       setUploadedBatch(results);
       setUploadedFileFingerprints([...completedFingerprints]);
       if(results.length>0)setUploaded(results[0]);
@@ -2745,31 +3042,75 @@ function CustomerPrintFlow({publicCode,sessionToken,paymentOptions,localAgent,lo
   }
 
   function selectUploadedFile(item:UploadedPrintJob) {
-    setUploaded(item);setQuote(null);setJobStatus(null);setPayment(null);setPaymentReference("");setError("");
+    setUploaded(item);setQuote(quotesByJobId[item.job.id]??null);setJobStatus(null);setPayment(null);setPaymentReference("");setError("");
   }
 
   async function getQuote() {
-    if(!uploaded)return;
+    const items=uploadedBatch.length?uploadedBatch:(uploaded?[uploaded]:[]);
+    if(items.length===0)return;
     setBusy(true);setError("");setJobStatus(null);
+    const nextQuotes={...quotesByJobId};
+    const failures:string[]=[];
     try {
-      const calculated=await calculateCustomerQuote(sessionToken,uploaded.job.id,{colourMode,paperSize:"A4",isDuplex,copies});
-      setQuote(calculated);
+      for(const item of items) {
+        const existingQuote=nextQuotes[item.job.id];
+        const status=batchStatuses[item.job.id]?.status??item.job.status;
+        if(existingQuote&&existingQuote.status!=="QUOTE_EXPIRED")continue;
+        if(!["AWAITING_CONFIGURATION","UPLOADED","Uploaded","QUOTE_EXPIRED"].includes(status))continue;
+        const settings=printSettingsByJobId[item.job.id]??{colourMode:"Mono" as const,isDuplex:false,copies:1};
+        try {
+          nextQuotes[item.job.id]=await calculateCustomerQuote(sessionToken,item.job.id,{
+            colourMode:settings.colourMode,paperSize:"A4",isDuplex:settings.isDuplex,copies:settings.copies
+          });
+        } catch(exception) {
+          failures.push(item.document.originalFileName);
+        }
+      }
+      setQuotesByJobId(nextQuotes);
+      const selectedQuote=uploaded?nextQuotes[uploaded.job.id]??null:null;
+      setQuote(selectedQuote??Object.values(nextQuotes)[0]??null);
+      if(failures.length) setError(`Could not quote: ${failures.join(", ")}. Retry the batch quote.`);
+      else if(!Object.keys(nextQuotes).length) setError("No files are waiting for a quote.");
     } catch(exception) {
-      setError(exception instanceof ApiError?exception.message:"The shop could not calculate a quote.");
+      setError(exception instanceof ApiError?exception.message:"The shop could not calculate the batch quote.");
     } finally {setBusy(false);}
   }
 
   async function acceptQuote() {
-    if(!uploaded||!quote)return;
+    const items=uploadedBatch.length?uploadedBatch:(uploaded?[uploaded]:[]);
+    const pending=items.filter(item=>quotesByJobId[item.job.id]?.status==="AWAITING_CUSTOMER_APPROVAL");
+    if(pending.length===0)return;
     setBusy(true);setError("");
+    const nextQuotes={...quotesByJobId};
+    const failures:string[]=[];
     try {
-      const accepted=await acceptCustomerQuote(sessionToken,uploaded.job.id);
-      const refreshed=await getCustomerJobStatus(sessionToken,uploaded.job.id);
-      setJobStatus(refreshed);
-      setPayment(refreshed.payment ?? null);
-      setQuote({...quote,status:accepted.status});
+      for(const item of pending) {
+        try {
+          const accepted=await acceptCustomerQuote(sessionToken,item.job.id);
+          const current=nextQuotes[item.job.id];
+          if(current)nextQuotes[item.job.id]={...current,status:accepted.status};
+        } catch {
+          const fresh=await getCustomerJobStatus(sessionToken,item.job.id).catch(()=>null);
+          if(fresh&&fresh.status!=="AWAITING_CUSTOMER_APPROVAL") {
+            setBatchStatuses(current=>({...current,[item.job.id]:fresh}));
+          } else failures.push(item.document.originalFileName);
+        }
+      }
+      setQuotesByJobId(nextQuotes);
+      if(uploaded) {
+        const refreshed=await getCustomerJobStatus(sessionToken,uploaded.job.id);
+        setJobStatus(refreshed);
+        setPayment(refreshed.payment??null);
+      }
+      const refreshedBatch=await Promise.all(items.map(async item=>{
+        try{return [item.job.id,await getCustomerJobStatus(sessionToken,item.job.id)] as const;}
+        catch{return null;}
+      }));
+      setBatchStatuses(current=>({...current,...Object.fromEntries(refreshedBatch.filter((entry):entry is NonNullable<typeof entry>=>entry!==null))}));
+      setQuote(uploaded?nextQuotes[uploaded.job.id]??null:null);
+      if(failures.length)setError(`Could not send: ${failures.join(", ")}. Refresh and retry.`);
     } catch(exception) {
-      setError(exception instanceof ApiError?exception.message:"The quote could not be accepted.");
+      setError(exception instanceof ApiError?exception.message:"The batch could not be sent to the shop.");
     } finally {setBusy(false);}
   }
 
@@ -2840,82 +3181,202 @@ function CustomerPrintFlow({publicCode,sessionToken,paymentOptions,localAgent,lo
     } finally {setBusy(false);}
   }
 
-  function chooseFiles(next:File[]) {
-    const unique=Array.from(new Map(next.map(candidate=>[customerFileFingerprint(candidate),candidate])).values());
-    if(unique.length>20){setError("Select no more than 20 documents in one upload batch.");return;}
-    const unsupported=unique.find(candidate=>! /\.(pdf|jpe?g|png)$/i.test(candidate.name));
-    if(unsupported){setError(`“${unsupported.name}” is not supported. Choose PDF, JPG or PNG files.`);return;}
-    const oversized=unique.find(candidate=>candidate.size<=0||candidate.size>20*1024*1024);
+  function chooseFiles(next:File[], nativeGroupNames?:string[]) {
+    let nestedSkipped=0;
+    const rootFiles=next.filter(candidate=>{
+      const relativePath=(candidate as File & {webkitRelativePath?:string}).webkitRelativePath??"";
+      const parts=relativePath.split("/").filter(Boolean);
+      if(relativePath&&parts.length>2){nestedSkipped++;return false;}
+      return true;
+    });
+    const supported=rootFiles.filter(candidate=>/\.(pdf|jpe?g|png)$/i.test(candidate.name));
+    for(const candidate of supported){
+      const nativeGroup=nativeGroupNames?.[next.indexOf(candidate)]?.trim().slice(0,80);
+      if(nativeGroup)(candidate as File & {__smartPrintBatchGroup?:string}).__smartPrintBatchGroup=nativeGroup;
+    }
+    const unsupportedSkipped=rootFiles.length-supported.length;
+    if(supported.length===0){setError("Choose printable PDF, JPG or PNG files.");return;}
+    const oversized=supported.find(candidate=>candidate.size<=0||candidate.size>20*1024*1024);
     if(oversized){setError(`“${oversized.name}” exceeds the 20 MB per-file limit.`);return;}
+    const merged=new Map(files.map(candidate=>[customerFileFingerprint(candidate),candidate]));
+    for(const candidate of supported)merged.set(customerFileFingerprint(candidate),candidate);
+    const selected=Array.from(merged.values());
     const alreadyUploaded=new Set(uploadedFileFingerprints);
-    const pending=unique.filter(candidate=>!alreadyUploaded.has(customerFileFingerprint(candidate)));
+    const pending=selected.filter(candidate=>!alreadyUploaded.has(customerFileFingerprint(candidate)));
     const totalBytes=uploadedBatch.reduce((sum,item)=>sum+item.document.sizeBytes,0)+pending.reduce((sum,candidate)=>sum+candidate.size,0);
     if(uploadedBatch.length+pending.length>20||totalBytes>50*1024*1024){
-      setError("This batch can contain up to 20 files and 50 MB in total. Remove some files before uploading.");
+      setError(nativeAppMode ? "20 files · 50 MB max." : "This batch can contain up to 20 files and 50 MB in total.");
       return;
     }
-    setFiles(unique);setSelectedFileIndex(0);setError("");
+    setFileGroupNames(current=>{
+      const updated={...current};
+      for(const candidate of supported){
+        const nativeGroup=nativeGroupNames?.[next.indexOf(candidate)]?.trim();
+        updated[customerFileFingerprint(candidate)]=nativeGroup||customerBatchGroupName(candidate);
+      }
+      return updated;
+    });
+    setGroupSettings(current=>{
+      const updated={...current};
+      for(const candidate of supported) {
+        const nativeGroup=nativeGroupNames?.[next.indexOf(candidate)]?.trim();
+        const group=nativeGroup||customerBatchGroupName(candidate);
+        if(!updated[group])updated[group]={colourMode:"Mono",isDuplex:false};
+      }
+      return updated;
+    });
+    setFileSettings(current=>{
+      const updated={...current};
+      for(const candidate of supported) {
+        const key=customerFileFingerprint(candidate);
+        if(!updated[key])updated[key]={copies:"1",custom:false,colourMode:"Mono",isDuplex:false};
+      }
+      return updated;
+    });
+    setFiles(selected);setSelectedFileIndex(0);
+    setError(nestedSkipped? "Nested folders are skipped; only files directly inside each selected folder are included.":unsupportedSkipped? "Unsupported file types were skipped.": "");
+  }
+
+  function removeSelectedFile(fingerprint: string) {
+    if (busy) return;
+    const index = files.findIndex(candidate => customerFileFingerprint(candidate) === fingerprint);
+    if (index < 0) return;
+    const nextFiles = files.filter(candidate => customerFileFingerprint(candidate) !== fingerprint);
+    setFiles(nextFiles);
+    setSelectedFileIndex(current => current === index
+      ? Math.min(index, Math.max(0, nextFiles.length - 1))
+      : current > index ? current - 1 : current);
+    setFileGroupNames(current => {
+      const next = { ...current };
+      delete next[fingerprint];
+      return next;
+    });
+    setFileSettings(current => {
+      const next = { ...current };
+      delete next[fingerprint];
+      return next;
+    });
+    setError("");
   }
 
   const pendingFilesCount=files.filter(candidate=>!uploadedFileFingerprints.includes(customerFileFingerprint(candidate))).length;
+  const uploadGroups=Array.from(new Set(files.map(candidate=>groupNameForFile(candidate)))).map(name=>({
+    name, files:files.filter(candidate=>groupNameForFile(candidate)===name)
+  }));
+  const quoteItems=uploadedBatch.length?uploadedBatch:(uploaded?[uploaded]:[]);
+  const quoteEntries=quoteItems.map(item=>({item,quote:quotesByJobId[item.job.id]})).filter(entry=>!!entry.quote);
+  const batchQuoteTotal=quoteEntries.reduce((total,entry)=>{
+    const status=batchStatuses[entry.item.job.id]?.status??entry.item.job.status;
+    return status==="REJECTED"||status==="REFUNDED"?total:total+(entry.quote?.quotedAmountMinor??0);
+  },0);
+  const canSendBatch=quoteItems.length>0&&quoteEntries.length===quoteItems.length&&quoteEntries.some(entry=>entry.quote?.status==="AWAITING_CUSTOMER_APPROVAL");
+  const canCalculateBatch=quoteItems.some(item=>{
+    const status=batchStatuses[item.job.id]?.status??item.job.status;
+    if(quotesByJobId[item.job.id]&&quotesByJobId[item.job.id].status!=="QUOTE_EXPIRED")return false;
+    return !quotesByJobId[item.job.id]||quotesByJobId[item.job.id].status==="QUOTE_EXPIRED"||
+      ["AWAITING_CONFIGURATION","UPLOADED","Uploaded","QUOTE_EXPIRED"].includes(status);
+  });
 
   return <section className="customer-print-flow">
-    <div className="customer-flow-heading"><div><span>STEP 1</span><h2>Add your documents</h2></div><span className="upload-limit">PDF, JPG or PNG · Up to 20 files / 50 MB per batch</span></div>
+    <div className="customer-flow-heading"><div><span>STEP 1</span><h2>{nativeAppMode?"Add files":"Add your documents"}</h2></div><span className="upload-limit">PDF, JPG or PNG · Up to 20 files / 50 MB per batch</span></div>
     {localAgent?.endpoints.length? <div className="customer-upload-modes">
       <button type="button" className={uploadMode==="LOCAL"?"customer-upload-mode selected":"customer-upload-mode"} onClick={()=>setUploadMode("LOCAL")}><strong>Shop Wi-Fi</strong><small>Document stays on the shop computer</small></button>
       <button type="button" className={uploadMode==="CLOUD"?"customer-upload-mode selected":"customer-upload-mode"} onClick={()=>setUploadMode("CLOUD")}><strong>Cloud-assisted</strong><small>Encrypted upload through the API</small></button>
     </div>:null}
     <div className="customer-upload-picker-grid">
       <label className="customer-upload-zone">
-        <input type="file" multiple accept=".pdf,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png" onChange={event=>{chooseFiles(Array.from(event.currentTarget.files||[]));event.currentTarget.value="";}}/>
+        <input type="file" multiple accept=".pdf,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png" onChange={event=>{chooseFiles(Array.from(event.currentTarget.files||[]),consumeSmartPrintNativePickerGroups());event.currentTarget.value="";}}/>
         <span className="customer-upload-icon"><FileUp size={21}/></span>
         <strong>Select multiple files</strong>
         <small>Choose up to 20 PDF, JPG or PNG documents at once</small>
       </label>
       <label className="customer-upload-zone folder-upload-zone">
-        <input type="file" multiple accept=".pdf,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png" {...({webkitdirectory:"true",directory:"true"} as any)} onChange={event=>{chooseFiles(Array.from(event.currentTarget.files||[]));event.currentTarget.value="";}}/>
+        <input type="file" multiple accept={nativeAppMode?"application/x-smartprint-folder-selection":".pdf,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png"} {...({webkitdirectory:"true",directory:"true"} as any)} onChange={event=>{chooseFiles(Array.from(event.currentTarget.files||[]),consumeSmartPrintNativePickerGroups());event.currentTarget.value="";}}/>
         <span className="customer-upload-icon"><FolderOpen size={21}/></span>
-        <strong>Choose a folder</strong>
-        <small>Upload supported documents from a folder</small>
+        <strong>{nativeAppMode?"Choose folders":"Add a folder"}</strong>
+        <small>{nativeAppMode?"Select multiple folders at once":"Choose one folder; select again to add another to this batch"}</small>
       </label>
     </div>
     {files.length>0&&<div className="customer-selected-files">
       <div className="customer-selected-files-head"><strong>{files.length} selected</strong><span>{formatBytes(files.reduce((total,item)=>total+item.size,0))} in this selection</span></div>
-      <div className="customer-selected-file-list">{files.map((selected,index)=><button type="button" key={customerFileFingerprint(selected)} className={selectedFileIndex===index?"selected":" "} onClick={()=>setSelectedFileIndex(index)}><FileText size={15}/><span><strong>{selected.name}</strong><small>{formatBytes(selected.size)}</small></span>{selectedFileIndex===index&&<Check size={15}/>}</button>)}</div>
+      <div className="customer-batch-groups">{uploadGroups.map(group=>{
+        const defaults=defaultsForGroup(group.name);
+        return <section className="customer-folder-group" key={group.name}>
+          <div className="customer-folder-group-head">
+            <div className="customer-folder-title"><FolderOpen size={16}/><span><strong>{group.name}</strong><small>{group.files.length} file(s)</small></span></div>
+            <div className="customer-folder-defaults">
+              <div><span>Colour</span><div className="customer-choice-row">
+                <button type="button" className={defaults.colourMode==="Mono"?"customer-choice selected":"customer-choice"} onClick={()=>setGroupSettings(current=>({...current,[group.name]:{...defaults,colourMode:"Mono"}}))}>B&W</button>
+                <button type="button" className={defaults.colourMode==="Colour"?"customer-choice selected":"customer-choice"} onClick={()=>setGroupSettings(current=>({...current,[group.name]:{...defaults,colourMode:"Colour"}}))}>Colour</button>
+              </div></div>
+              <div><span>Sides</span><div className="customer-choice-row">
+                <button type="button" className={!defaults.isDuplex?"customer-choice selected":"customer-choice"} onClick={()=>setGroupSettings(current=>({...current,[group.name]:{...defaults,isDuplex:false}}))}>Single</button>
+                <button type="button" className={defaults.isDuplex?"customer-choice selected":"customer-choice"} onClick={()=>setGroupSettings(current=>({...current,[group.name]:{...defaults,isDuplex:true}}))}>Double</button>
+              </div></div>
+            </div>
+          </div>
+          <div className="customer-folder-file-list">{group.files.map(selected=>{
+            const fingerprint=customerFileFingerprint(selected);
+            const own=fileSettings[fingerprint]??{copies:"1",custom:false,colourMode:defaults.colourMode,isDuplex:defaults.isDuplex};
+            const index=files.findIndex(candidate=>customerFileFingerprint(candidate)===fingerprint);
+            return <div className={selectedFileIndex===index?"customer-folder-file-row selected":"customer-folder-file-row"} key={fingerprint}>
+              <button type="button" className="customer-folder-file-name" onClick={()=>setSelectedFileIndex(index)}><FileText size={15}/><span><strong>{selected.name}</strong><small>{formatBytes(selected.size)}</small></span></button>
+              <label className="customer-folder-copies"><span>Copies</span><input type="number" min="1" max="100" step="1" value={own.copies} onChange={event=>setFileSettings(current=>({...current,[fingerprint]:{...(current[fingerprint]??own),copies:event.target.value}}))} onBlur={event=>setFileSettings(current=>({...current,[fingerprint]:{...(current[fingerprint]??own),copies:normalizeCustomerCopies(event.currentTarget.value)}}))}/></label>
+              <button type="button" className={own.custom?"customer-file-custom active":"customer-file-custom"} onClick={()=>setFileSettings(current=>({...current,[fingerprint]:{...(current[fingerprint]??own),custom:!own.custom,colourMode:own.custom?own.colourMode:defaults.colourMode,isDuplex:own.custom?own.isDuplex:defaults.isDuplex}}))}>{own.custom?"Custom":"Folder"}</button>
+              <button type="button" className="customer-file-remove" aria-label={`Remove ${selected.name} from this selection`} title="Remove from this selection" disabled={busy} onClick={()=>removeSelectedFile(fingerprint)}><X size={13}/><span>Remove</span></button>
+              {own.custom&&<div className="customer-file-overrides">
+                <div className="customer-choice-row">
+                  <button type="button" className={own.colourMode==="Mono"?"customer-choice selected":"customer-choice"} onClick={()=>setFileSettings(current=>({...current,[fingerprint]:{...own,custom:true,colourMode:"Mono"}}))}>B&W</button>
+                  <button type="button" className={own.colourMode==="Colour"?"customer-choice selected":"customer-choice"} onClick={()=>setFileSettings(current=>({...current,[fingerprint]:{...own,custom:true,colourMode:"Colour"}}))}>Colour</button>
+                </div>
+                <div className="customer-choice-row">
+                  <button type="button" className={!own.isDuplex?"customer-choice selected":"customer-choice"} onClick={()=>setFileSettings(current=>({...current,[fingerprint]:{...own,custom:true,isDuplex:false}}))}>Single</button>
+                  <button type="button" className={own.isDuplex?"customer-choice selected":"customer-choice"} onClick={()=>setFileSettings(current=>({...current,[fingerprint]:{...own,custom:true,isDuplex:true}}))}>Double</button>
+                </div>
+              </div>}
+            </div>;
+          })}</div>
+        </section>;
+      })}</div>
     </div>}
+    {files.length>0&&<small className="customer-upload-local-note">Folder defaults apply to every file. Set an individual file to Custom for an exception.</small>}
     {previewUrl&&file&&<div className="customer-file-preview"><div className="customer-file-label"><FileText size={15}/><span>Preview · {file.name}</span></div>{file.type==="application/pdf"||/\.pdf$/i.test(file.name)?<iframe src={previewUrl} title={file.name+" preview"}/>:<img src={previewUrl} alt={file.name+" preview"}/>}</div>}
     {files.length>0&&<button className="customer-flow-button" disabled={busy||pendingFilesCount===0||(uploadMode==="LOCAL"&&!localReady)} onClick={()=>void upload()}>{busy?<span className="button-spinner"/>:<><UploadIcon/>{uploadMode==="LOCAL"&&localAgent?"Upload "+pendingFilesCount+" file(s) to shop":"Upload "+pendingFilesCount+" file(s)"}</>}</button>}
-    {uploadProgress&&<div className="customer-upload-progress"><span>{uploadProgress.completed} of {uploadProgress.total} files uploaded</span><div><i style={{width:`${uploadProgress.total?uploadProgress.completed/uploadProgress.total*100:0}%`}}/></div></div>}
-    {files.length>0&&uploadMode==="LOCAL"&&localAgent&&<small className="customer-upload-local-note">{localReady?"Your files travel over shop Wi-Fi. The cloud receives only job, quote and payment metadata.":"Tap Check shop Wi-Fi above first to grant the browser permission."}</small>}
-    {files.length>0&&uploadMode==="CLOUD"&&localAgent&&<small className="customer-upload-local-note">Cloud-assisted fallback: files are uploaded encrypted to the API before being transferred to the shop computer.</small>}
+    {uploadProgress&&<div className="customer-upload-progress"><span>{uploadProgress.currentFile?`Uploading ${Math.min(uploadProgress.completed+1,uploadProgress.total)} of ${uploadProgress.total}: ${uploadProgress.currentFile}`:`${uploadProgress.completed} of ${uploadProgress.total} files uploaded`}</span><div><i style={{width:`${uploadProgress.total?uploadProgress.completed/uploadProgress.total*100:0}%`}}/>{uploadProgress.currentFile&&<b aria-hidden="true"/>}</div><small>The count advances when each document finishes uploading.</small></div>}
+    {files.length>0&&uploadMode==="LOCAL"&&localAgent&&<small className="customer-upload-local-note">{nativeAppMode?(localReady?"Cloud receives metadata only.":"Check shop Wi-Fi."):localReady?"Your files travel over shop Wi-Fi. The cloud receives only job, quote and payment metadata.":"Tap Check shop Wi-Fi above first to grant the browser permission."}</small>}
+    {files.length>0&&uploadMode==="CLOUD"&&localAgent&&<small className="customer-upload-local-note">{nativeAppMode?"Encrypted cloud transfer.":"Cloud-assisted fallback: files are uploaded encrypted to the API before being transferred to the shop computer."}</small>}
     {uploaded&&<>
-      {uploadedBatch.length>1&&<div className="customer-uploaded-batch">
-        <div className="customer-uploaded-batch-head"><strong>Batch review · {uploadedBatch.length} files</strong><span>Each file's shop status refreshes automatically.</span></div>
-        {uploadedBatch.map((item,index)=><button type="button" key={item.job.id} className={uploaded.job.id===item.job.id?"customer-uploaded-batch-item active":"customer-uploaded-batch-item"} onClick={()=>selectUploadedFile(item)}>
-          <span className="batch-file-index">{index+1}</span><span className="batch-file-copy"><strong>{item.document.originalFileName}</strong><small>{formatBytes(item.document.sizeBytes)} · {item.job.pageCount} {item.job.pageCount===1?"page":"pages"}</small></span>
-          <Status
-            label={prettyStatus(batchStatuses[item.job.id]?.status??item.job.status??"UPLOADED")}
-            tone={["REJECTED","PAYMENT_REJECTED"].includes((batchStatuses[item.job.id]?.status??item.job.status??"").toUpperCase())?"red":
-              ["COMPLETED","PAID_AUTHORISED","AWAITING_PAYMENT"].includes((batchStatuses[item.job.id]?.status??item.job.status??"").toUpperCase())?"green":"amber"}
-          />
-        </button>)}
+      {uploadedBatch.length>0&&<div className="customer-uploaded-batch">
+        <div className="customer-uploaded-batch-head"><strong>Batch · {uploadedBatch.length} files</strong><span>Select a file to view its status or payment.</span></div>
+        {Array.from(new Set(uploadedBatch.map(item=>item.job.batchGroupName??"Loose files"))).map(groupName=><section className="customer-uploaded-folder" key={groupName}>
+          <strong>{groupName}</strong>
+          {uploadedBatch.filter(item=>(item.job.batchGroupName??"Loose files")===groupName).map(item=><button type="button" key={item.job.id} className={uploaded.job.id===item.job.id?"customer-uploaded-batch-item active":"customer-uploaded-batch-item"} onClick={()=>selectUploadedFile(item)}>
+            <span className="batch-file-index"><FileText size={14}/></span><span className="batch-file-copy"><strong>{item.document.originalFileName}</strong><small>{item.job.pageCount} {item.job.pageCount===1?"page":"pages"} · {printSettingsByJobId[item.job.id]?.copies??item.job.copies} copies · {printSettingsByJobId[item.job.id]?.colourMode??"Mono"} · {(printSettingsByJobId[item.job.id]?.isDuplex??false)?"Double-sided":"Single-sided"} · {item.job.quotedAmountMinor>0?formatMoney(item.job.quotedAmountMinor,item.job.currency):"Awaiting quote"}</small></span>
+            <Status
+              label={prettyStatus(batchStatuses[item.job.id]?.status??item.job.status??"UPLOADED")}
+              tone={["REJECTED","PAYMENT_REJECTED"].includes((batchStatuses[item.job.id]?.status??item.job.status??"").toUpperCase())?"red":
+                ["COMPLETED","PAID_AUTHORISED","AWAITING_PAYMENT"].includes((batchStatuses[item.job.id]?.status??item.job.status??"").toUpperCase())?"green":"amber"}
+            />
+          </button>)}
+        </section>)}
       </div>}
       <div className="uploaded-document-card"><div className="uploaded-document-icon"><FileText size={18}/></div><div><strong>{uploaded.document.originalFileName}</strong><span>{uploaded.job.pageCount} {uploaded.job.pageCount===1?"page":"pages"} · {formatBytes(uploaded.document.sizeBytes)} · Validated</span></div><Status label={prettyStatus(batchStatuses[uploaded.job.id]?.status??jobStatus?.status??uploaded.job.status??"UPLOADED")} tone={["REJECTED","PAYMENT_REJECTED"].includes((batchStatuses[uploaded.job.id]?.status??jobStatus?.status??uploaded.job.status??"").toUpperCase())?"red":["COMPLETED","PAID_AUTHORISED","AWAITING_PAYMENT"].includes((batchStatuses[uploaded.job.id]?.status??jobStatus?.status??uploaded.job.status??"").toUpperCase())?"green":"amber"}/></div>
-      {!quote&&!jobStatus&&<>
-        <div className="customer-flow-heading customer-config-heading"><div><span>STEP 2</span><h2>Choose print settings</h2></div></div>
-        <div className="customer-option-group"><span>Colour mode</span><div className="customer-choice-row"><button className={colourMode==="Mono"?"customer-choice selected":"customer-choice"} onClick={()=>{setColourMode("Mono");setQuote(null);}}>Black & white</button><button className={colourMode==="Colour"?"customer-choice selected":"customer-choice"} onClick={()=>{setColourMode("Colour");setQuote(null);}}>Colour</button></div></div>
-        <div className="customer-option-grid"><label>Copies<input type="number" min="1" max="100" value={copies} onChange={event=>{setCopies(Math.max(1,Math.min(100,Number(event.target.value)||1)));setQuote(null);}}/></label><label className="customer-duplex-toggle"><input type="checkbox" checked={isDuplex} onChange={event=>{setIsDuplex(event.target.checked);setQuote(null);}}/><span><strong>Double-sided</strong><small>Print on both sides of each sheet</small></span></label></div>
-        <div className="customer-paper-note"><Check size={14}/> A4 paper · Page order preserved · {colourMode==="Mono"?"Black & white":"Colour"} printing</div>
-        <button className="customer-flow-button" disabled={busy||copies<1} onClick={()=>void getQuote()}>{busy?<span className="button-spinner"/>:"Calculate print price"}</button>
-      </>}
+      {canCalculateBatch&&<div className="customer-batch-quote-action">
+        <div className="customer-flow-heading customer-config-heading"><div><span>STEP 2</span><h2>Review batch settings</h2></div><small>{quoteItems.length} files</small></div>
+        <button className="customer-flow-button" disabled={busy} onClick={()=>void getQuote()}>{busy?<span className="button-spinner"/>:"Calculate batch quote"}</button>
+      </div>}
     </>}
     {error&&<div className="customer-flow-error" role="alert">{error}</div>}
-    {quote&&<div className="customer-quote-card"><div><span>YOUR PRINT QUOTE</span><strong>{formatMoney(quote.quotedAmountMinor,quote.currency)}</strong><small>{quote.pageCount} pages · {quote.copies} copies · {quote.colourMode} · {quote.isDuplex?"Duplex":"Single-sided"}</small></div><div className="quote-validity"><ShieldCheck size={15}/><span>Valid until {new Date(quote.quoteExpiresUtc).toLocaleTimeString([], {hour:"2-digit",minute:"2-digit"})}</span></div></div>}
-    {quote&&quote.status!=="AWAITING_SHOP_APPROVAL"&&(!jobStatus||jobStatus.status==="AWAITING_CUSTOMER_APPROVAL")&&<button className="customer-flow-button" disabled={busy} onClick={()=>void acceptQuote()}>{busy?<span className="button-spinner"/>:"Accept quote and send to shop"}</button>}
-      {jobStatus?.status==="QUOTE_EXPIRED"&&<button className="customer-flow-button" disabled={busy} onClick={()=>{setQuote(null);setJobStatus(null);setPayment(null);}}>Request a fresh quote</button>}
+    {quoteEntries.length>0&&<div className="customer-quote-card customer-batch-quote-card">
+      <div><span>BATCH QUOTE</span><strong>{formatMoney(batchQuoteTotal,quoteEntries[0].quote!.currency)}</strong><small>{quoteEntries.length} files · {quoteEntries.reduce((sum,entry)=>sum+entry.item.job.pageCount,0)} pages</small></div>
+      <div className="customer-batch-quote-lines">{quoteEntries.map(entry=><div key={entry.item.job.id}><span>{entry.item.document.originalFileName}{(batchStatuses[entry.item.job.id]?.status??entry.item.job.status)==="REJECTED"?" · Rejected":""}</span><strong>{(batchStatuses[entry.item.job.id]?.status??entry.item.job.status)==="REJECTED"?"Excluded":formatMoney(entry.quote!.quotedAmountMinor,entry.quote!.currency)}</strong></div>)}</div>
+      <p className="customer-payment-model-note">Each accepted file has its own payment step after shop approval. This batch total is the sum of file quotes, not one combined charge. Select each accepted file above to complete its payment.</p>
+    </div>}
+    {canSendBatch&&<button className="customer-flow-button" disabled={busy} onClick={()=>void acceptQuote()}>{busy?<span className="button-spinner"/>:"Send batch to shop"}</button>}
+      {jobStatus?.status==="QUOTE_EXPIRED"&&<button className="customer-flow-button" disabled={busy} onClick={()=>{setQuote(null);setQuotesByJobId(current=>{const next={...current};if(uploaded)delete next[uploaded.job.id];return next;});setJobStatus(null);setPayment(null);}}>Request a fresh quote</button>}
     {jobStatus&&<div className="customer-job-state"><div className="customer-job-state-top"><Status label={prettyStatus(jobStatus.status)} tone={jobStatus.status==="REJECTED"?"red":jobStatus.status==="AWAITING_PAYMENT"?"green":"amber"}/><button className="customer-refresh-status" disabled={busy} onClick={()=>void refreshJobStatus()}>{busy?<span className="button-spinner"/>:"Refresh status"}</button></div>
-      <strong>{jobStatus.status==="AWAITING_SHOP_APPROVAL"?"Your request is with the shop":jobStatus.status==="AWAITING_PAYMENT"?"The shop accepted your request":jobStatus.status==="LOCAL_QUEUE_CLAIMED"?"Your document is reaching the shop":jobStatus.status==="LOCAL_QUEUE_READY"?"Your document is secured at the shop":jobStatus.status==="PRINT_AUTHORISED"?"The shop started printing":jobStatus.status==="PRINT_SUBMITTING"?"Your document is being sent to the printer":jobStatus.status==="SPOOLER_ACCEPTED"?"The printer queue accepted your document":jobStatus.status==="PRINTING"?"Your document is printing":jobStatus.status==="OUTPUT_UNCONFIRMED"?"The shop is checking your print":jobStatus.status==="COMPLETED"?"Your print is ready":jobStatus.status==="PAID_AUTHORISED"?"Your payment is verified":jobStatus.status==="REJECTED"?"The shop could not accept this request":jobStatus.status==="QUOTE_EXPIRED"?"Your quote has expired":"Your request is being reviewed"}</strong>
-      <p>{jobStatus.status==="AWAITING_SHOP_APPROVAL"?"The shop will review your request next. No payment has been collected.":jobStatus.status==="AWAITING_PAYMENT"?"The shop approved your quote. Choose one of the payment methods enabled by the shop.":jobStatus.status==="LOCAL_QUEUE_CLAIMED"?"Your paid document is being transferred securely to the shop's Windows computer. It has not been sent to the printer.":jobStatus.status==="LOCAL_QUEUE_READY"?"The document is safely stored in the shop's local queue and is waiting for the print operator. Physical printing has not started.":jobStatus.status==="PRINT_AUTHORISED"?"The shop has authorised printing. The Windows agent will submit the document once.":jobStatus.status==="PRINT_SUBMITTING"?"The Windows agent is submitting your document to the printer.":jobStatus.status==="SPOOLER_ACCEPTED"?"Windows accepted the job into the printer queue. This does not yet confirm paper output.":jobStatus.status==="PRINTING"?"The printer driver reports that the job is printing. The shop will confirm the pages before marking it complete.":jobStatus.status==="OUTPUT_UNCONFIRMED"?"The printer queue could not confirm the final output. The shop operator is checking the pages before any retry.":jobStatus.status==="COMPLETED"?"The shop has checked the physical pages and marked your print ready for collection.":jobStatus.status==="AWAITING_COUNTER_PAYMENT"?"Please pay the shop at the counter. The job is not authorised until the shop confirms receipt.":jobStatus.status==="AWAITING_CUSTOMER_PAYMENT"?"Complete the UPI payment and submit its transaction reference. The shop must independently verify it.":jobStatus.status==="PAYMENT_REPORTED"?"Your UPI reference was sent to the shop. It is not marked paid until the shop verifies the transaction.":jobStatus.status==="PAID_AUTHORISED"?"The shop has verified your payment. The print queue is being prepared; physical printing has not yet started.":jobStatus.status==="PAYMENT_REJECTED"?"The shop could not verify that payment. Check with the shop before trying another method.":jobStatus.status==="REJECTED"?"Please speak with the shop operator if you need help with this request.":jobStatus.status==="QUOTE_EXPIRED"?"This quote is no longer valid. Please ask the shop for a fresh quote.":"Check back for the latest request status."}</p>
+      <strong>{nativeAppMode?smartPrintNativeHeadline(jobStatus.status):jobStatus.status==="AWAITING_SHOP_APPROVAL"?"Your request is with the shop":jobStatus.status==="AWAITING_PAYMENT"?"The shop accepted your request":jobStatus.status==="LOCAL_QUEUE_CLAIMED"?"Your document is reaching the shop":jobStatus.status==="LOCAL_QUEUE_READY"?"Your document is secured at the shop":jobStatus.status==="PRINT_AUTHORISED"?"The shop started printing":jobStatus.status==="PRINT_SUBMITTING"?"Your document is being sent to the printer":jobStatus.status==="SPOOLER_ACCEPTED"?"The printer queue accepted your document":jobStatus.status==="PRINTING"?"Your document is printing":jobStatus.status==="OUTPUT_UNCONFIRMED"?"The shop is checking your print":jobStatus.status==="COMPLETED"?"Your print is ready":jobStatus.status==="PAID_AUTHORISED"?"Your payment is verified":jobStatus.status==="REJECTED"?"The shop could not accept this request":jobStatus.status==="QUOTE_EXPIRED"?"Your quote has expired":"Your request is being reviewed"}</strong>
+      <p>{nativeAppMode ? smartPrintNativeStatus(jobStatus.status) : jobStatus.status==="AWAITING_SHOP_APPROVAL"?"The shop will review your request next. No payment has been collected.":jobStatus.status==="AWAITING_PAYMENT"?"The shop approved your quote. Choose one of the payment methods enabled by the shop.":jobStatus.status==="LOCAL_QUEUE_CLAIMED"?"Your paid document is being transferred securely to the shop's Windows computer. It has not been sent to the printer.":jobStatus.status==="LOCAL_QUEUE_READY"?"The document is safely stored in the shop's local queue and is waiting for the print operator. Physical printing has not started.":jobStatus.status==="PRINT_AUTHORISED"?"The shop has authorised printing. The Windows agent will submit the document once.":jobStatus.status==="PRINT_SUBMITTING"?"The Windows agent is submitting your document to the printer.":jobStatus.status==="SPOOLER_ACCEPTED"?"Windows accepted the job into the printer queue. This does not yet confirm paper output.":jobStatus.status==="PRINTING"?"The printer driver reports that the job is printing. The shop will confirm the pages before marking it complete.":jobStatus.status==="OUTPUT_UNCONFIRMED"?"The printer queue could not confirm the final output. The shop operator is checking the pages before any retry.":jobStatus.status==="COMPLETED"?"The shop has checked the physical pages and marked your print ready for collection.":jobStatus.status==="AWAITING_COUNTER_PAYMENT"?"Please pay the shop at the counter. The job is not authorised until the shop confirms receipt.":jobStatus.status==="AWAITING_CUSTOMER_PAYMENT"?"Complete the UPI payment and submit its transaction reference. The shop must independently verify it.":jobStatus.status==="PAYMENT_REPORTED"?"Your UPI reference was sent to the shop. It is not marked paid until the shop verifies the transaction.":jobStatus.status==="PAID_AUTHORISED"?"The shop has verified your payment. The print queue is being prepared; physical printing has not yet started.":jobStatus.status==="PAYMENT_REJECTED"?"The shop could not verify that payment. Check with the shop before trying another method.":jobStatus.status==="REJECTED"?"Please speak with the shop operator if you need help with this request.":jobStatus.status==="QUOTE_EXPIRED"?"This quote is no longer valid. Please ask the shop for a fresh quote.":"Check back for the latest request status."}</p>
       {payment&&!!payment.refundedAmountMinor&&payment.refundedAmountMinor>0&&<div className="customer-refund-note"><Wallet size={16}/><span><strong>{formatMoney(payment.refundedAmountMinor,payment.currency)} returned</strong> for rejected pages ({rejectedPageList(jobStatus.rejectedPageNumbersJson)}). {formatMoney(Math.max(0,payment.amountMinor-payment.refundedAmountMinor),payment.currency)} remains paid; only accepted pages proceed to printing.</span></div>}
       {!!jobStatus.timeline?.length&&<div className="customer-state-timeline">{jobStatus.timeline.map((event,index)=><div key={index}><i/><span><strong>{prettyStatus(event.newStatus)}</strong><small>{event.actorType==="ShopUser"?"Shop team":event.actorType==="Customer"?"You":"System"} · {new Date(event.createdUtc).toLocaleString()}</small></span></div>)}</div>}
 
@@ -2923,8 +3384,8 @@ function CustomerPrintFlow({publicCode,sessionToken,paymentOptions,localAgent,lo
         <div className="customer-pay-heading"><span>PAY THE SHOP</span><strong>{formatMoney(jobStatus.quotedAmountMinor,jobStatus.currency)}</strong></div>
         {paymentOptions.upiEnabled&&<button className={paymentMethod==="UPI"?"customer-choice selected":"customer-choice"} onClick={()=>setPaymentMethod("UPI")}>UPI payment</button>}
         {paymentOptions.cashEnabled&&<button className={paymentMethod==="CASH"?"customer-choice selected":"customer-choice"} onClick={()=>setPaymentMethod("CASH")}>Cash at counter</button>}
-        <button className="customer-flow-button" disabled={busy||(!paymentOptions.upiEnabled&&!paymentOptions.cashEnabled)} onClick={()=>void beginPayment(paymentMethod)}>{busy?<span className="button-spinner"/>:"Continue with "+(paymentMethod==="UPI"?"UPI":"cash at counter")}</button>
-        {!paymentOptions.upiEnabled&&!paymentOptions.cashEnabled&&<p className="customer-flow-error">The shop has not configured a payment method yet. Please speak to the shop operator.</p>}
+        <button className="customer-flow-button" disabled={busy||(!paymentOptions.upiEnabled&&!paymentOptions.cashEnabled)} onClick={()=>void beginPayment(paymentMethod)}>{busy?<span className="button-spinner"/>:nativeAppMode?"Continue":"Continue with "+(paymentMethod==="UPI"?"UPI":"cash at counter")}</button>
+        {!paymentOptions.upiEnabled&&!paymentOptions.cashEnabled&&<p className="customer-flow-error">{nativeAppMode?"No payment method. Ask shop.":"The shop has not configured a payment method yet. Please speak to the shop operator."}</p>}
       </div>}
       {payment&&payment.status!=="REJECTED"&&<div className="customer-pay-panel">
         <div className="customer-pay-heading"><span>{payment.method==="UPI"?"UPI PAYMENT":"CASH AT COUNTER"}</span><strong>{formatMoney(Math.max(0,payment.amountMinor-(payment.refundedAmountMinor??0)),payment.currency)}</strong></div>
@@ -2933,17 +3394,17 @@ function CustomerPrintFlow({publicCode,sessionToken,paymentOptions,localAgent,lo
           <strong>{payment.payeeNameSnapshot||paymentOptions.payeeName||"Shop"}</strong>
           <span>{payment.upiIdSnapshot||paymentOptions.upiId}</span>
           <a href={payment.upiUri||"#"} className="customer-flow-button customer-upi-open">Open UPI app</a>
-          <label className="customer-reference-field">UPI transaction reference / UTR<input value={paymentReference} maxLength={100} onChange={event=>setPaymentReference(event.target.value)} placeholder="Enter UTR after paying"/></label>
-          <button className="customer-flow-button" disabled={busy||paymentReference.trim().length<4} onClick={()=>void submitPaymentReference()}>{busy?<span className="button-spinner"/>:"Submit payment reference"}</button>
-          <small className="customer-payment-warning">Submitting a UTR is not proof of payment. The shop verifies it in its own UPI/bank app.</small>
+          <label className="customer-reference-field">{nativeAppMode?"UTR":"UPI transaction reference / UTR"}<input value={paymentReference} maxLength={100} onChange={event=>setPaymentReference(event.target.value)} placeholder={nativeAppMode?"Enter UTR":"Enter UTR after paying"}/></label>
+          <button className="customer-flow-button" disabled={busy||paymentReference.trim().length<4} onClick={()=>void submitPaymentReference()}>{busy?<span className="button-spinner"/>:nativeAppMode?"Submit UTR":"Submit payment reference"}</button>
+          <small className="customer-payment-warning">{nativeAppMode?"UTR isn't proof. Shop verifies.":"Submitting a UTR is not proof of payment. The shop verifies it in its own UPI/bank app."}</small>
         </div>}
-        {payment.method==="CASH"&&payment.status==="CASH_AWAITING_PAYMENT"&&<p>Pay at the shop counter. The shop will confirm receipt before authorising the job.</p>}
-        {payment.status==="CUSTOMER_REPORTED"&&<p>Your payment reference was received. The shop still needs to verify the transaction.</p>}
-        {payment.status==="VERIFIED"&&<p>Payment verified by the shop. The print job is authorised, but not yet physically printed.</p>}
-        {payment.status==="PARTIALLY_REFUNDED"&&<p>A partial return has been recorded. The remaining paid amount is for the pages the shop accepted.</p>}
+        {payment.method==="CASH"&&payment.status==="CASH_AWAITING_PAYMENT"&&<p>{nativeAppMode?"Pay at counter · Await confirmation.":"Pay at the shop counter. The shop will confirm receipt before authorising the job."}</p>}
+        {payment.status==="CUSTOMER_REPORTED"&&<p>{nativeAppMode?"Reference received · Verification pending.":"Your payment reference was received. The shop still needs to verify the transaction."}</p>}
+        {payment.status==="VERIFIED"&&<p>{nativeAppMode?"Payment verified · Printing pending.":"Payment verified by the shop. The print job is authorised, but not yet physically printed."}</p>}
+        {payment.status==="PARTIALLY_REFUNDED"&&<p>{nativeAppMode?"Partial refund · Accepted pages only.":"A partial return has been recorded. The remaining paid amount is for the pages the shop accepted."}</p>}
       </div>}
     </div>}
-    <div className="customer-payment-boundary"><ShieldCheck size={15}/><span>{jobStatus?.status==="PAID_AUTHORISED"?"The shop has verified your payment. It still needs to assign and start the local printer.":jobStatus?.status==="PRINT_AUTHORISED"?"The shop has authorised physical printing.":jobStatus?.status==="PRINT_SUBMITTING"?"Your document is being sent to the Windows printer queue.":jobStatus?.status==="SPOOLER_ACCEPTED"?"Windows accepted the job. This is not proof that paper has come out.":jobStatus?.status==="PRINTING"?"The Windows driver reports that printing is in progress.":jobStatus?.status==="OUTPUT_UNCONFIRMED"?"The shop is checking the printer and actual pages before any retry.":jobStatus?.status==="COMPLETED"?"The shop confirmed the requested pages are printed and ready for collection.":jobStatus?.status==="LOCAL_QUEUE_CLAIMED"?"The shop's paired Windows computer is receiving the encrypted document. It is not being printed yet.":jobStatus?.status==="LOCAL_QUEUE_READY"?"The encrypted local copy is verified on the shop computer. Physical printing still requires the print operator.":jobStatus?.status==="AWAITING_PAYMENT"?"The shop approved this quote. Payment is collected by the shop directly and must be verified before the job is authorised.":jobStatus?.status==="PAYMENT_REPORTED"?"Your UPI reference is awaiting the shop's independent bank verification; submitting a reference does not confirm payment.":quote?"This quote is calculated by the shop's saved rate card. Accepting it sends a request to the shop; it does not collect payment or start printing.":"Your document is validated before pricing. You will see the shop's calculated price before any payment or print approval."}</span></div>
+    <div className="customer-payment-boundary"><ShieldCheck size={15}/><span>{nativeAppMode ? smartPrintNativeBoundary(jobStatus?.status,Boolean(quote)) : jobStatus?.status==="PAID_AUTHORISED"?"The shop has verified your payment. It still needs to assign and start the local printer.":jobStatus?.status==="PRINT_AUTHORISED"?"The shop has authorised physical printing.":jobStatus?.status==="PRINT_SUBMITTING"?"Your document is being sent to the Windows printer queue.":jobStatus?.status==="SPOOLER_ACCEPTED"?"Windows accepted the job. This is not proof that paper has come out.":jobStatus?.status==="PRINTING"?"The Windows driver reports that printing is in progress.":jobStatus?.status==="OUTPUT_UNCONFIRMED"?"The shop is checking the printer and actual pages before any retry.":jobStatus?.status==="COMPLETED"?"The shop confirmed the requested pages are printed and ready for collection.":jobStatus?.status==="LOCAL_QUEUE_CLAIMED"?"The shop's paired Windows computer is receiving the encrypted document. It is not being printed yet.":jobStatus?.status==="LOCAL_QUEUE_READY"?"The encrypted local copy is verified on the shop computer. Physical printing still requires the print operator.":jobStatus?.status==="AWAITING_PAYMENT"?"The shop approved this quote. Payment is collected by the shop directly and must be verified before the job is authorised.":jobStatus?.status==="PAYMENT_REPORTED"?"Your UPI reference is awaiting the shop's independent bank verification; submitting a reference does not confirm payment.":quote?"This quote is calculated by the shop's saved rate card. Accepting it sends a request to the shop; it does not collect payment or start printing.":"Your document is validated before pricing. You will see the shop's calculated price before any payment or print approval."}</span></div>
   </section>;
 }
 

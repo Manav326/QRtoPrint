@@ -1,7 +1,7 @@
 import { useEffect, useState, type ReactNode } from "react";
 import {
   Activity, Building2, CheckCircle2, ChevronLeft, ChevronRight,
-  Clock3, CreditCard, Layers3, LogOut, Menu, Moon, Monitor, PauseCircle, PlayCircle, Printer, RefreshCw, Search, Settings2, ShieldCheck,
+  Clock3, CreditCard, Layers3, LogOut, Menu, Moon, Monitor, PauseCircle, PanelLeftClose, PanelLeftOpen, PlayCircle, Printer, RefreshCw, Search, Settings2, ShieldCheck,
   Sun
 } from "lucide-react";
 import PlatformPlansSection from "./PlatformPlansSection";
@@ -12,6 +12,7 @@ import {
   getPlatformOverview, getPlatformTenants, getPlatformTenantStatusHistory, updatePlatformTenantStatus, logout,
   type AuthTokens, type PlatformOverview, type PlatformTenantsPage, type PlatformTenant
 } from "./api";
+import { readDarkModePreference, readSidebarCollapsedPreference, saveDarkModePreference, saveSidebarCollapsedPreference } from "./ui-preferences";
 
 type Section = "Overview" | "Tenants" | "Plans" | "Subscriptions" | "Operations";
 
@@ -29,8 +30,11 @@ export default function PlatformAdminConsole({
     window.addEventListener("popstate", syncSectionFromPath);
     return () => window.removeEventListener("popstate", syncSectionFromPath);
   }, []);
-  const [dark, setDark] = useState(true);
+  const [dark, setDark] = useState(readDarkModePreference);
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(readSidebarCollapsedPreference);
+  useEffect(() => { saveDarkModePreference(dark); }, [dark]);
+  useEffect(() => { saveSidebarCollapsedPreference(sidebarCollapsed); }, [sidebarCollapsed]);
   const [overview, setOverview] = useState<PlatformOverview | null>(null);
   const [overviewLoading, setOverviewLoading] = useState(true);
   const [overviewError, setOverviewError] = useState("");
@@ -116,6 +120,8 @@ export default function PlatformAdminConsole({
     }
   }
 
+  function toggleSidebarCollapsed() { setSidebarCollapsed(value => !value); }
+
   function navigate(next: Section) {
     const nextPath = adminPathForSection(next);
     if (window.location.pathname !== nextPath) {
@@ -135,9 +141,9 @@ export default function PlatformAdminConsole({
       : "Configure platform-wide print quotas, retention, cleanup schedules and suspended-shop recovery policy.";
 
   return (
-    <div className={`app-shell platform-admin-shell${dark ? "" : " light"}`}>
+    <div className={`app-shell platform-admin-shell${dark ? "" : " light"}${sidebarCollapsed ? " sidebar-collapsed" : ""}`}>
       {sidebarOpen && <button className="mobile-scrim" aria-label="Close navigation" onClick={() => setSidebarOpen(false)}/>}
-      <aside className={`sidebar platform-sidebar${sidebarOpen ? " sidebar-open" : ""}`}>
+      <aside id="platform-navigation" className={`sidebar platform-sidebar${sidebarOpen ? " sidebar-open" : ""}`}>
         <div className="brand-lockup">
           <div className="brand-mark"><Printer size={21}/></div>
           <div><div className="brand-name">smart<span>print</span></div><div className="brand-caption">BY QRtoPrint</div></div>
@@ -149,22 +155,11 @@ export default function PlatformAdminConsole({
         </div>
         <div className="nav-label">ADMINISTRATION</div>
         <nav className="primary-nav" aria-label="Platform administration">
-          <button className={section === "Overview" ? "nav-item active" : "nav-item"} onClick={() => navigate("Overview")}>
-            <Activity size={17}/> Overview
-          </button>
-          <button className={section === "Tenants" ? "nav-item active" : "nav-item"} onClick={() => navigate("Tenants")}>
-            <Building2 size={17}/> Shop tenants
-            {overview && <span className="nav-count">{overview.tenantCount}</span>}
-          </button>
-          <button className={section === "Plans" ? "nav-item active" : "nav-item"} onClick={() => navigate("Plans")}>
-            <Layers3 size={17}/> Plans & entitlements
-          </button>
-          <button className={section === "Subscriptions" ? "nav-item active" : "nav-item"} onClick={() => navigate("Subscriptions")}>
-            <CreditCard size={17}/> Shop subscriptions
-          </button>
-          <button className={section === "Operations" ? "nav-item active" : "nav-item"} onClick={() => navigate("Operations")}>
-            <Settings2 size={17}/> Operations & retention
-          </button>
+          <button title="Overview" aria-current={section === "Overview" ? "page" : undefined} className={section === "Overview" ? "nav-item active" : "nav-item"} onClick={() => navigate("Overview")}><Activity size={17}/><span>Overview</span></button>
+          <button title="Shop tenants" aria-current={section === "Tenants" ? "page" : undefined} className={section === "Tenants" ? "nav-item active" : "nav-item"} onClick={() => navigate("Tenants")}><Building2 size={17}/><span>Shop tenants</span>{overview && <span className="nav-count">{overview.tenantCount}</span>}</button>
+          <button title="Plans & entitlements" aria-current={section === "Plans" ? "page" : undefined} className={section === "Plans" ? "nav-item active" : "nav-item"} onClick={() => navigate("Plans")}><Layers3 size={17}/><span>Plans & entitlements</span></button>
+          <button title="Shop subscriptions" aria-current={section === "Subscriptions" ? "page" : undefined} className={section === "Subscriptions" ? "nav-item active" : "nav-item"} onClick={() => navigate("Subscriptions")}><CreditCard size={17}/><span>Shop subscriptions</span></button>
+          <button title="Operations & retention" aria-current={section === "Operations" ? "page" : undefined} className={section === "Operations" ? "nav-item active" : "nav-item"} onClick={() => navigate("Operations")}><Settings2 size={17}/><span>Operations & retention</span></button>
         </nav>
         <div className="sidebar-bottom">
           <div className="platform-security-note"><ShieldCheck size={15}/><span>Platform scope is separate from shop accounts and tenant data.</span></div>
@@ -180,7 +175,11 @@ export default function PlatformAdminConsole({
 
       <main className="main-panel">
         <header className="topbar">
-          <div className="topbar-left"><button className="icon-button mobile-menu" onClick={() => setSidebarOpen(true)} aria-label="Open navigation"><Menu size={19}/></button><div className="breadcrumb"><span>Smart Print</span><span className="crumb-slash">/</span><strong>{title}</strong></div></div>
+          <div className="topbar-left">
+            <button className="icon-button sidebar-toggle" aria-label={sidebarCollapsed ? "Expand navigation" : "Collapse navigation"} aria-controls="platform-navigation" aria-expanded={!sidebarCollapsed} title={sidebarCollapsed ? "Expand navigation" : "Collapse navigation"} onClick={toggleSidebarCollapsed}>{sidebarCollapsed ? <PanelLeftOpen size={18}/> : <PanelLeftClose size={18}/>}</button>
+            <button className="icon-button mobile-menu" onClick={() => setSidebarOpen(true)} aria-label="Open navigation" aria-controls="platform-navigation"><Menu size={19}/></button>
+            <div className="breadcrumb"><span>Smart Print</span><span className="crumb-slash">/</span><strong>{title}</strong></div>
+          </div>
           <div className="topbar-actions">
             <span className="platform-session-pill"><i/> Platform session secured</span>
             <span className="topbar-divider"/>

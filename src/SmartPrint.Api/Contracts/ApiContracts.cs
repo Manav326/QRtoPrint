@@ -91,7 +91,8 @@ public sealed record CreateLocalPrintUploadTicketRequest(
     long SizeBytes,
     string Sha256,
     string GrantToken,
-    Guid? BatchId = null);
+    Guid? BatchId = null,
+    string? BatchGroupName = null);
 
 public sealed record RecordPrintRefundRequest(
     string RefundMethod,
