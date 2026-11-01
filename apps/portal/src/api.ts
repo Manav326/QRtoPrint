@@ -415,6 +415,7 @@ export interface ShopPaymentSettings {
   upiId?: string | null;
   payeeName?: string | null;
   cashEnabled: boolean;
+  instantPaymentEnabled: boolean;
   updatedUtc: string;
 }
 
@@ -779,7 +780,7 @@ export async function createCustomerSession(publicCode: string) {
     sessionToken: string;
     shop: { displayName: string; logoUrl?: string | null; accentColor: string; currency: string };
     printer: { displayName: string; manufacturer: string; model: string; status: string; capabilitiesJson: string } | null;
-    paymentOptions: { upiEnabled: boolean; upiId?: string | null; payeeName?: string | null; cashEnabled: boolean };
+    paymentOptions: { upiEnabled: boolean; upiId?: string | null; payeeName?: string | null; cashEnabled: boolean; instantPaymentEnabled: boolean };
     localAgent: { agentDeviceId: string; endpoints: string[] } | null;
   }>(`/api/v1/public/stations/${encodeURIComponent(publicCode)}/sessions`, {
     method: "POST",
@@ -1330,6 +1331,7 @@ export function updateShopPaymentSettings(token: string, values: {
   upiId: string | null;
   payeeName: string | null;
   cashEnabled: boolean;
+  instantPaymentEnabled: boolean;
 }) {
   return apiRequest<ShopPaymentSettings>("/api/v1/shop/payment-settings", {
     method: "PUT",
