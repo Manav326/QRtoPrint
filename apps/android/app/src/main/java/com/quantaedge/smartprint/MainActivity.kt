@@ -2359,7 +2359,7 @@ class MainActivity : AppCompatActivity() {
         profileVisible = false
         toolbar.title = ""
         toolbar.setNavigationIcon(android.R.drawable.ic_media_previous)
-        toolbar.navigationContentDescription = "Back to My Files"
+        toolbar.navigationContentDescription = "Back to ${file.parentFile?.name ?: "My Files"}"
         toolbar.setNavigationOnClickListener { closeDocumentViewer() }
         toolbar.menu.findItem(SWITCH_SHOP)?.isVisible = false
         toolbar.menu.findItem(OPEN_WITH)?.isVisible = true
