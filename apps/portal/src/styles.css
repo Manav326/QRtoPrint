@@ -1436,3 +1436,16 @@
 .customer-batch-checkout-lines>div strong{flex:none;color:#24324a;font-weight:800}
 .customer-entry.smartprint-native .customer-batch-checkout-lines>div{color:var(--native-muted)}
 .customer-entry.smartprint-native .customer-batch-checkout-lines>div strong{color:var(--native-text)}
+
+/* Shop-controlled instant checkout and printed-page breakdowns. */
+.instant-payment-setting{border-color:var(--border)}
+.instant-payment-setting-note{margin:0 14px 13px 54px;color:var(--muted);font-size:10px;line-height:1.5}
+.customer-batch-print-breakdown{display:grid;gap:6px;margin-top:10px;padding-top:10px;border-top:1px solid #e5e2f2}
+.customer-batch-print-breakdown>div{display:flex;align-items:center;justify-content:space-between;gap:12px;font-size:10px;line-height:1.45;color:#617089}
+.customer-batch-print-breakdown>div strong{flex:none;color:#24324a;font-weight:800}
+.customer-batch-print-breakdown .customer-batch-print-total{padding-top:6px;border-top:1px solid #e5e2f2;color:#24324a;font-weight:800}
+.customer-batch-print-breakdown .customer-batch-print-total strong{color:#24324a;font-size:12px}
+.customer-entry.smartprint-native .customer-batch-print-breakdown{border-color:var(--native-border)}
+.customer-entry.smartprint-native .customer-batch-print-breakdown>div{color:var(--native-muted)}
+.customer-entry.smartprint-native .customer-batch-print-breakdown>div strong{color:var(--native-text)}
+.customer-entry.smartprint-native .customer-batch-print-breakdown .customer-batch-print-total{border-color:var(--native-border);color:var(--native-text)}
