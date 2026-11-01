@@ -22,6 +22,7 @@ import {
   type QrStation, type ShopCustomer, type ShopCustomerHistory, type ShopCustomerPage, type ShopPricingProfile, type ShopPrintJob, type ShopProfile, type ShopReportSummary, type ShopSubscriptionSummary,
   type UploadedPrintJob
 } from "./api";
+import { enrollLocalAgent, getLocalAgentStatus, isDesktopApp, type DesktopAgentStatus } from "./desktop-bridge";
 
 type Section = "Overview" | "Print Queue" | "Printers" | "QR Stations" | "Print Agent" | "Pricing" | "Subscription" | "Payments" | "Customers" | "Reports" | "Settings";
 type Modal = "printer" | "station" | null;
@@ -70,6 +71,9 @@ function ShopConsole({ tokens, onSignOut }: { tokens: AuthTokens; onSignOut: () 
     try { return window.localStorage.getItem("qrtoprint.sidebar-collapsed") === "true"; } catch { return false; }
   });
   const reloadInFlight = useRef(false);
+  const desktopEnrollmentAttempted = useRef(false);
+  const [localAgentStatus, setLocalAgentStatus] = useState<DesktopAgentStatus | null>(null);
+  const [localAgentConflict, setLocalAgentConflict] = useState(false);
   const [profile, setProfile] = useState<ShopProfile | null>(null);
   const [printers, setPrinters] = useState<PrinterDevice[]>([]);
   const [stations, setStations] = useState<QrStation[]>([]);
@@ -113,6 +117,10 @@ function ShopConsole({ tokens, onSignOut }: { tokens: AuthTokens; onSignOut: () 
       setPayments(snapshot.payments);
       setRefunds(snapshot.refunds);
       setSubscription(snapshot.subscription);
+      if (isDesktopApp() && !desktopEnrollmentAttempted.current) {
+        desktopEnrollmentAttempted.current = true;
+        await connectLocalComputer(true, snapshot.agentDevices);
+      }
     } catch (exception) {
       if (exception instanceof ApiError && exception.status === 401) {
         storeTokens(null);
@@ -249,6 +257,53 @@ function ShopConsole({ tokens, onSignOut }: { tokens: AuthTokens; onSignOut: () 
       setError(exception instanceof Error ? exception.message : "Could not generate an agent pairing code.");
     } finally {
       setAgentBusy(false);
+    }
+  }
+
+  async function connectLocalComputer(silent = false, knownAgents: AgentDevice[] = agentDevices) {
+    if (!silent) {
+      setAgentBusy(true);
+      setError("");
+    }
+    try {
+      const status = await getLocalAgentStatus();
+      setLocalAgentStatus(status);
+      setLocalAgentConflict(false);
+
+      if (!status.serviceReachable) {
+        if (!silent) setError("The SmartPrint background service is not responding. Restart Windows or repair SmartPrint, then retry.");
+        return;
+      }
+
+      if (status.paired) {
+        const currentShopDevice = knownAgents.find(agent =>
+          !agent.revokedUtc && agent.id === status.agentDeviceId
+        );
+        if (!currentShopDevice) {
+          setLocalAgentConflict(true);
+          if (!silent) setError("This computer is already connected to a different shop. Revoke it from the previous shop's Print Agent page before moving it. SmartPrint will not transfer it automatically.");
+          return;
+        }
+        setToast("This computer is already connected to your shop.");
+        return;
+      }
+
+      const authorization = await createAgentEnrollmentCode(tokens.accessToken);
+      const enrolled = await enrollLocalAgent(authorization.code);
+      setLocalAgentStatus({
+        serviceReachable: true,
+        paired: true,
+        agentDeviceId: enrolled.agentDeviceId,
+        status: "CONNECTED"
+      });
+      setLocalAgentConflict(false);
+      setToast("This computer is securely connected. SmartPrint is discovering its printers.");
+      if (!silent) await reload();
+    } catch (exception) {
+      const message = exception instanceof Error ? exception.message : "Could not connect this computer to the shop.";
+      setError(message);
+    } finally {
+      if (!silent) setAgentBusy(false);
     }
   }
 
@@ -596,7 +651,7 @@ function ShopConsole({ tokens, onSignOut }: { tokens: AuthTokens; onSignOut: () 
           {active === "Overview" && <Overview profile={profile} printers={printers} stations={stations} printJobs={printJobs} pricing={pricing} onNavigate={navAction}/>}
           {active === "Printers" && <PrintersPage printers={printers} onAdd={() => setModal("printer")} onToggle={togglePrinter}/>}
           {active === "QR Stations" && <StationsPage stations={stations} profile={profile} onAdd={() => setModal("station")} onToggle={toggleStation} onGenerate={createFreshStationCode}/>}
-          {active === "Print Agent" && <PrintAgentPage agents={agentDevices} enrollmentCode={enrollmentCode} busy={agentBusy} onGenerate={generateAgentCode} onRevoke={revokeAgent}/>}
+          {active === "Print Agent" && <PrintAgentPage agents={agentDevices} enrollmentCode={enrollmentCode} busy={agentBusy} onGenerate={generateAgentCode} onRevoke={revokeAgent} desktop={isDesktopApp()} localAgentStatus={localAgentStatus} localAgentConflict={localAgentConflict} onConnect={()=>void connectLocalComputer()}/>}
           {active === "Pricing" && pricing && <PricingPage pricing={pricing} onSave={savePricing} busy={busy}/>}
           {active === "Subscription" && subscription && <SubscriptionPage summary={subscription}/>}
           {active === "Payments" && paymentSettings && <PaymentsPage settings={paymentSettings} payments={payments} refunds={refunds} onSave={savePaymentSettings} onVerify={verifyPayment} onReject={rejectPayment} busy={busy} busyJobId={busyJobId}/>}
@@ -974,15 +1029,40 @@ function StationsPage({ stations, profile, onAdd, onToggle, onGenerate }: {
 
 
 
-function PrintAgentPage({agents,enrollmentCode,busy,onGenerate,onRevoke}:{
+function PrintAgentPage({agents,enrollmentCode,busy,onGenerate,onRevoke,desktop,localAgentStatus,localAgentConflict,onConnect}:{
   agents:AgentDevice[];
   enrollmentCode:{code:string;expiresUtc:string}|null;
   busy:boolean;
   onGenerate:()=>void;
   onRevoke:(agent:AgentDevice)=>void;
+  desktop:boolean;
+  localAgentStatus:DesktopAgentStatus|null;
+  localAgentConflict:boolean;
+  onConnect:()=>void;
 }) {
+  const connected = Boolean(localAgentStatus?.paired && agents.some(agent =>
+    !agent.revokedUtc && agent.id === localAgentStatus.agentDeviceId
+  ));
   return <div className="agent-page">
     <section className="panel agent-pairing-panel">
+      {desktop ? <div className="desktop-agent-connect">
+        <div className="agent-intro">
+          <div className="agent-hero-icon"><Monitor size={22}/></div>
+          <div><div className="eyebrow"><span className="eyebrow-line"/>THIS COMPUTER</div><h2>Your print computer</h2><p>SmartPrint connects this computer to your shop automatically. The background print service stays active even when you close this window.</p></div>
+        </div>
+        <div className="desktop-agent-status">
+          <span className={connected ? "desktop-agent-indicator connected" : localAgentConflict ? "desktop-agent-indicator conflict" : "desktop-agent-indicator"} />
+          <div><strong>{connected ? "Connected to this shop" : localAgentConflict ? "Connected to another shop" : localAgentStatus?.serviceReachable ? "Ready to connect" : "Print service not responding"}</strong>
+            <small>{connected ? "Printer discovery and job hand-off are managed by the SmartPrint service." : localAgentConflict ? "For security, this computer cannot be moved until its previous shop owner revokes it." : localAgentStatus?.serviceReachable ? "Your owner session will authorize a one-time connection. No pairing code is shown." : "Restart Windows or repair SmartPrint to start the background service, then retry."}</small>
+          </div>
+        </div>
+        <div className="desktop-agent-actions">
+          <button className="primary-button" disabled={busy || connected || localAgentConflict || Boolean(localAgentStatus?.paired)} onClick={onConnect}>
+            {busy ? <span className="button-spinner"/> : <><Monitor size={15}/>{localAgentStatus?.serviceReachable ? "Connect this computer" : "Retry connection"}</>}
+          </button>
+          <span>Your shop data remains protected by your account and this computer's Windows security.</span>
+        </div>
+      </div> : <>
       <div className="agent-intro">
         <div className="agent-hero-icon"><Monitor size={22}/></div>
         <div><div className="eyebrow"><span className="eyebrow-line"/>LOCAL PRINT CONNECTIVITY</div><h2>Connect your shop computer</h2><p>Pair the Windows computer where your printers are installed. The agent reports printer inventory and health without exposing the agent secret in the browser.</p></div>
@@ -1006,6 +1086,7 @@ function PrintAgentPage({agents,enrollmentCode,busy,onGenerate,onRevoke}:{
       </div>
       <div className="agent-security-note"><ShieldCheck size={16}/><span>The pairing code expires after 10 minutes. The agent secret is returned only once and stored on the Windows machine using DPAPI LocalMachine encryption. Revoke a computer here if it is replaced or lost.</span></div>
       <div className="agent-generate-row"><span>Pairing codes are single use. Generating a new one does not revoke already paired computers.</span><button className="primary-button" disabled={busy} onClick={onGenerate}>{busy?<span className="button-spinner"/>:<><Plus size={15}/> Generate pairing code</>}</button></div>
+      </>}
     </section>
     <section className="panel agent-device-panel">
       <div className="collection-header"><div><h2>Paired Windows computers</h2><p>Agent connection history and the number of discovered printer queues.</p></div><span className="setup-count">{agents.filter(agent=>!agent.revokedUtc).length} active</span></div>
