@@ -1872,3 +1872,11 @@ html[data-theme="light"] .customer-entry :where(.customer-entry-card>p,.entry-pr
   color: #5f6b80;
 }
 html[data-theme="light"] .customer-entry .customer-entry-footer { color: #626f84; }
+
+
+/* Contrast guard: tiny secondary labels were too dim on dark workspace surfaces.
+   Shared by the shop and platform-admin shells so every nested route inherits it. */
+html[data-theme="dark"] .app-shell:not(.light) {
+  --muted: #aab6ca;
+  --faint: #8996aa;
+}
