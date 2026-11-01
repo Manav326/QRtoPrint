@@ -1699,6 +1699,7 @@ shop.MapGet("/customers/{customerId:guid}/jobs", async (
 shop.MapGet("/print-jobs", async (
     ClaimsPrincipal principal,
     SmartPrintDbContext db,
+    string? search,
     int? offset,
     int? take,
     CancellationToken ct) =>
@@ -1710,11 +1711,19 @@ shop.MapGet("/print-jobs", async (
 
     var boundedOffset = Math.Clamp(offset ?? 0, 0, 1_000_000);
     var boundedTake = Math.Clamp(take ?? 100, 1, 100);
+    var normalizedSearch = search?.Trim().ToLowerInvariant();
     var jobs = await (
         from job in db.PrintJobs.AsNoTracking()
         join document in db.PrintDocuments.AsNoTracking()
             on new { job.TenantId, PrintJobId = job.Id } equals new { document.TenantId, document.PrintJobId }
-        where job.TenantId == tenantId
+        where job.TenantId == tenantId &&
+              (string.IsNullOrEmpty(normalizedSearch) ||
+               job.JobNumber.ToLower().Contains(normalizedSearch) ||
+               job.Status.ToLower().Contains(normalizedSearch) ||
+               document.OriginalFileName.ToLower().Contains(normalizedSearch) ||
+               db.PrinterDevices.Any(printer =>
+                   printer.TenantId == tenantId && printer.Id == job.PrinterDeviceId &&
+                   printer.DisplayName.ToLower().Contains(normalizedSearch)))
         orderby job.CreatedUtc descending, job.Id descending
         select new
         {
