@@ -287,8 +287,8 @@ class MainActivityInstrumentedTest {
     @Test
     fun systemBackFromPrintTabReturnsHome() {
         ActivityScenario.launch(MainActivity::class.java).use {
-            val label = com.google.android.material.R.id.navigation_bar_item_small_label_view
-            onView(allOf(withId(label), withText("Print"))).perform(click())
+            onView(withContentDescription("Print at a shop")).perform(click())
+            onView(withContentDescription("Print at a shop")).check(matches(isSelected()))
             onView(withText("Connect to a shop")).check(matches(isDisplayed()))
             androidx.test.espresso.Espresso.pressBack()
             onView(withText("Your space")).check(matches(isDisplayed()))
