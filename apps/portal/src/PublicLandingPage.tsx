@@ -1,6 +1,6 @@
 import {
-  ArrowRight, ArrowUpRight, Check, ChevronRight, Cloud, FileCheck2, FileText,
-  LockKeyhole, Monitor, Printer, QrCode, ShieldCheck, Smartphone, Store, Wifi, Zap
+  ArrowRight, ArrowUpRight, Check, ChevronRight, Cloud, Download, FileCheck2, FileText,
+  LockKeyhole, Monitor, Printer, QrCode, ShieldCheck, Smartphone, Store, Wifi
 } from "lucide-react";
 import "./public-landing.css";
 
@@ -168,5 +168,5 @@ export default function PublicLandingPage() {
 }
 
 function ArrowDownIcon() {
-  return <ArrowUpRight size={16}/>;
+  return <Download size={16}/>;
 }
