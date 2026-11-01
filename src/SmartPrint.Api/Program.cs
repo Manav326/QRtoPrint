@@ -368,34 +368,8 @@ platform.MapPatch("/tenants/{tenantId:guid}/status", async (
             code = "tenant_status_transition_not_allowed",
             message = tenant.Status == "Inactive"
                 ? "A permanently inactive tenant cannot be reactivated."
-                : "Suspend an active tenant first. Permanent deactivation is available only after suspension."
+                : "The requested tenant status transition is not allowed."
         });
-    }
-
-    if (nextStatus == "Inactive")
-    {
-        var unresolvedJobs = await db.PrintJobs.LongCountAsync(job =>
-            job.TenantId == tenant.Id &&
-            job.Status != "COMPLETED" &&
-            job.Status != "REJECTED" &&
-            job.Status != "PAYMENT_REJECTED" &&
-            job.Status != "QUOTE_EXPIRED", ct);
-        var pendingPayments = await db.PrintPayments.LongCountAsync(payment =>
-            payment.TenantId == tenant.Id &&
-            (payment.Status == "AWAITING_CUSTOMER_PAYMENT" ||
-             payment.Status == "CUSTOMER_REPORTED" ||
-             payment.Status == "CASH_AWAITING_PAYMENT"), ct);
-        if (unresolvedJobs > 0 || pendingPayments > 0)
-        {
-            await transaction.RollbackAsync(ct);
-            return Results.Conflict(new
-            {
-                code = "tenant_has_unresolved_print_work",
-                message = "Resolve all open print jobs, pending customer payments and output-unconfirmed work before permanent deactivation.",
-                unresolvedJobs,
-                pendingPayments
-            });
-        }
     }
 
     var now = DateTimeOffset.UtcNow;
@@ -424,23 +398,10 @@ platform.MapGet("/tenants/{tenantId:guid}/status-history", async (
     if (!await db.Tenants.AsNoTracking().AnyAsync(item => item.Id == tenantId, ct))
         return Results.NotFound();
 
-    var history = await (
-        from audit in db.TenantStatusAudits.AsNoTracking()
-        where audit.TenantId == tenantId
-        join actor in db.Users.AsNoTracking()
-            on audit.ActorUserId equals actor.Id into actors
-        from actor in actors.DefaultIfEmpty()
-        orderby audit.CreatedUtc descending
-        select new
-        {
-            audit.Id,
-            audit.PreviousStatus,
-            audit.NewStatus,
-            audit.Reason,
-            audit.ActorUserId,
-            ActorName = actor == null ? null : actor.DisplayName,
-            audit.CreatedUtc
-        })
+    var history = await db.TenantStatusAudits.AsNoTracking()
+        .Where(item => item.TenantId == tenantId)
+        .OrderByDescending(item => item.CreatedUtc)
+        .Select(item => new { item.Id, item.PreviousStatus, item.NewStatus, item.Reason, item.ActorUserId, item.CreatedUtc })
         .Take(100)
         .ToListAsync(ct);
     return Results.Ok(history);
@@ -2776,9 +2737,6 @@ agentApi.MapPost("/jobs/claim", async (
         return Results.Unauthorized();
     }
 
-    var claimAccess = await GetAgentClaimAccessAsync(device.TenantId, db, ct);
-    if (!claimAccess.Allowed) return Results.Forbid();
-    var suspendedAtUtc = claimAccess.SuspendedAtUtc;
     var now = DateTimeOffset.UtcNow;
     var onlineAfter = now.AddMinutes(-2);
     var availablePrinterIds = await db.PrinterDevices.AsNoTracking()
@@ -2810,12 +2768,10 @@ agentApi.MapPost("/jobs/claim", async (
             on new { job.TenantId, PrinterId = job.PrinterDeviceId!.Value }
             equals new { printer.TenantId, PrinterId = printer.Id }
         where job.TenantId == device.TenantId &&
-              (!suspendedAtUtc.HasValue || job.CreatedUtc < suspendedAtUtc.Value) &&
               db.PrintPayments.Any(payment =>
                   payment.TenantId == job.TenantId &&
                   payment.PrintJobId == job.Id &&
-                  (payment.Status == "VERIFIED" || payment.Status == "PARTIALLY_REFUNDED") &&
-                  (!suspendedAtUtc.HasValue || (payment.VerifiedUtc != null && payment.VerifiedUtc <= suspendedAtUtc.Value))) &&
+                  (payment.Status == "VERIFIED" || payment.Status == "PARTIALLY_REFUNDED")) &&
               availablePrinterIds.Contains(printer.Id) &&
               (job.Status == "PAID_AUTHORISED" ||
                (job.Status == "LOCAL_QUEUE_CLAIMED" &&
@@ -2853,7 +2809,6 @@ agentApi.MapPost("/jobs/claim", async (
         var updated = await db.PrintJobs
             .Where(job => job.Id == candidate.Id &&
                           job.TenantId == device.TenantId &&
-              (!suspendedAtUtc.HasValue || job.CreatedUtc < suspendedAtUtc.Value) &&
                           job.PrinterDeviceId == candidate.PrinterDeviceId &&
                           db.PrinterDevices.Any(printer =>
                               printer.Id == job.PrinterDeviceId &&
@@ -2871,8 +2826,7 @@ agentApi.MapPost("/jobs/claim", async (
                           db.PrintPayments.Any(payment =>
                               payment.TenantId == job.TenantId &&
                               payment.PrintJobId == job.Id &&
-                              (payment.Status == "VERIFIED" || payment.Status == "PARTIALLY_REFUNDED") &&
-                  (!suspendedAtUtc.HasValue || (payment.VerifiedUtc != null && payment.VerifiedUtc <= suspendedAtUtc.Value))) &&
+                              (payment.Status == "VERIFIED" || payment.Status == "PARTIALLY_REFUNDED")) &&
                           (job.Status == "PAID_AUTHORISED" ||
                            (job.Status == "LOCAL_QUEUE_CLAIMED" &&
                             (job.AgentLeaseExpiresUtc == null || job.AgentLeaseExpiresUtc <= now))))
@@ -2952,7 +2906,6 @@ agentApi.MapGet("/jobs/{jobId:guid}/document", async (
             equals new { printDocument.TenantId, printDocument.PrintJobId }
         where job.Id == jobId &&
               job.TenantId == device.TenantId &&
-              (!suspendedAtUtc.HasValue || job.CreatedUtc < suspendedAtUtc.Value) &&
               job.Status == "LOCAL_QUEUE_CLAIMED" &&
               job.ClaimedByAgentDeviceId == device.Id &&
               job.AgentLeaseExpiresUtc != null &&
@@ -3481,42 +3434,10 @@ agentApi.MapGet("/local-uploads/{jobId:guid}/status", async (
         item.StorageMode == "LOCAL_AGENT" &&
         item.AgentDeviceId == device.Id, ct);
 
-    var safeToDelete = false;
-    DateTimeOffset? deleteAfterUtc = null;
-    if (ticket.CompletedUtc != null && documentExists)
-    {
-        var job = await db.PrintJobs.AsNoTracking()
-            .Where(item => item.TenantId == device.TenantId && item.Id == jobId)
-            .Select(item => new { item.Status, item.UpdatedUtc, item.OutputConfirmedUtc })
-            .SingleOrDefaultAsync(ct);
-        if (job is not null && (job.Status is "REJECTED" or "PAYMENT_REJECTED" or "QUOTE_EXPIRED") &&
-            job.OutputConfirmedUtc == null)
-        {
-            var hasFinancialHold = await db.PrintPayments.AsNoTracking().AnyAsync(payment =>
-                payment.TenantId == device.TenantId && payment.PrintJobId == jobId &&
-                (payment.Status == "AWAITING_CUSTOMER_PAYMENT" ||
-                 payment.Status == "CUSTOMER_REPORTED" ||
-                 payment.Status == "CASH_AWAITING_PAYMENT" ||
-                 ((payment.Status == "VERIFIED" || payment.Status == "PARTIALLY_REFUNDED") &&
-                  payment.RefundedAmountMinor < payment.AmountMinor)), ct);
-            if (!hasFinancialHold)
-            {
-                var retentionDays = await db.PlatformOperationalSettings.AsNoTracking()
-                    .Where(item => item.Id == PlatformOperationalSettings.SingletonIdValue)
-                    .Select(item => (int?)item.PendingLocalUploadRetentionDays)
-                    .SingleOrDefaultAsync(ct) ?? 30;
-                safeToDelete = true;
-                deleteAfterUtc = job.UpdatedUtc.AddDays(retentionDays);
-            }
-        }
-    }
-
     return Results.Ok(new
     {
         Completed = ticket.CompletedUtc != null && documentExists,
-        ticket.ExpiresUtc,
-        SafeToDelete = safeToDelete,
-        DeleteAfterUtc = deleteAfterUtc
+        ticket.ExpiresUtc
     });
 });
 
@@ -3524,9 +3445,6 @@ agentApi.MapPost("/jobs/print-claim", async (AgentPrintClaimRequest request, Htt
 {
     var device = await AuthenticateAgentAsync(context, db, ct);
     if (device is null) return Results.Unauthorized();
-    var claimAccess = await GetAgentClaimAccessAsync(device.TenantId, db, ct);
-    if (!claimAccess.Allowed) return Results.Forbid();
-    var suspendedAtUtc = claimAccess.SuspendedAtUtc;
     if (request.LocalJobs is null || request.LocalJobs.Count is < 1 or > 100)
         return Results.ValidationProblem(new Dictionary<string, string[]> { ["localJobs"] = ["Provide between 1 and 100 local queue proofs."] });
     var proofs = request.LocalJobs
@@ -3548,8 +3466,7 @@ agentApi.MapPost("/jobs/print-claim", async (AgentPrintClaimRequest request, Htt
                 on new { job.TenantId, PrintJobId = job.Id } equals new { document.TenantId, document.PrintJobId }
             join printer in db.PrinterDevices.AsNoTracking()
                 on new { job.TenantId, PrinterId = job.PrinterDeviceId!.Value } equals new { printer.TenantId, PrinterId = printer.Id }
-            where job.Id == proof.JobId && job.TenantId == device.TenantId &&
-                   (!suspendedAtUtc.HasValue || job.CreatedUtc < suspendedAtUtc.Value) && (job.Status == "PRINT_AUTHORISED" ||
+            where job.Id == proof.JobId && job.TenantId == device.TenantId && (job.Status == "PRINT_AUTHORISED" ||
                    (job.Status == "PRINT_SUBMITTING" &&
                     job.PrintDispatchLeaseExpiresUtc != null &&
                     job.PrintDispatchLeaseExpiresUtc <= now)) &&
@@ -3563,8 +3480,7 @@ agentApi.MapPost("/jobs/print-claim", async (AgentPrintClaimRequest request, Htt
                   db.AgentDevices.Any(a => a.Id == device.Id && a.TenantId == device.TenantId &&
                       a.RevokedUtc == null && a.Status != "Revoked" &&
                       a.LastSeenUtc != null && a.LastSeenUtc >= onlineAfter) &&
-                  db.PrintPayments.Any(pay => pay.TenantId == job.TenantId && pay.PrintJobId == job.Id && (pay.Status == "VERIFIED" || pay.Status == "PARTIALLY_REFUNDED") &&
-                       (!suspendedAtUtc.HasValue || (pay.VerifiedUtc != null && pay.VerifiedUtc <= suspendedAtUtc.Value)))
+                  db.PrintPayments.Any(pay => pay.TenantId == job.TenantId && pay.PrintJobId == job.Id && (pay.Status == "VERIFIED" || pay.Status == "PARTIALLY_REFUNDED"))
             select new { job.Id, job.JobNumber, job.Status, job.SpoolerJobName, job.RejectedPageNumbersJson, QueueName = printer.QueueName, OutputMode = printer.OutputMode }
         ).SingleOrDefaultAsync(ct);
         if (candidate is null || string.IsNullOrWhiteSpace(candidate.SpoolerJobName)) continue;
@@ -3572,7 +3488,6 @@ agentApi.MapPost("/jobs/print-claim", async (AgentPrintClaimRequest request, Htt
         var lease = now.AddMinutes(5);
         var updated = await db.PrintJobs.Where(job =>
             job.Id == candidate.Id && job.TenantId == device.TenantId &&
-             (!suspendedAtUtc.HasValue || job.CreatedUtc < suspendedAtUtc.Value) &&
             (job.Status == "PRINT_AUTHORISED" ||
                            (job.Status == "PRINT_SUBMITTING" && job.PrintDispatchLeaseExpiresUtc != null && job.PrintDispatchLeaseExpiresUtc <= now)) &&
                           job.ClaimedByAgentDeviceId == device.Id &&
@@ -3585,8 +3500,7 @@ agentApi.MapPost("/jobs/print-claim", async (AgentPrintClaimRequest request, Htt
             db.AgentDevices.Any(agent => agent.Id == device.Id && agent.TenantId == device.TenantId &&
                 agent.RevokedUtc == null && agent.Status != "Revoked" &&
                 agent.LastSeenUtc != null && agent.LastSeenUtc >= onlineAfter) &&
-            db.PrintPayments.Any(pay => pay.TenantId == job.TenantId && pay.PrintJobId == job.Id && (pay.Status == "VERIFIED" || pay.Status == "PARTIALLY_REFUNDED") &&
-                       (!suspendedAtUtc.HasValue || (pay.VerifiedUtc != null && pay.VerifiedUtc <= suspendedAtUtc.Value))))
+            db.PrintPayments.Any(pay => pay.TenantId == job.TenantId && pay.PrintJobId == job.Id && (pay.Status == "VERIFIED" || pay.Status == "PARTIALLY_REFUNDED")))
             .ExecuteUpdateAsync(u => u
                 .SetProperty(job => job.Status, "PRINT_SUBMITTING")
                 .SetProperty(job => job.PrintDispatchLeaseExpiresUtc, lease)
@@ -3864,8 +3778,6 @@ agentApi.MapPost("/heartbeat", async (
     device.LastSeenUtc = now;
     await db.SaveChangesAsync(ct);
     var publicBaseUrl = (configuration["PublicPortal:BaseUrl"] ?? string.Empty).TrimEnd('/');
-    var operationalSettings = await db.PlatformOperationalSettings.AsNoTracking()
-        .SingleAsync(item => item.Id == PlatformOperationalSettings.SingletonIdValue, ct);
     return Results.Ok(new
     {
         device.Id,
@@ -3874,9 +3786,7 @@ agentApi.MapPost("/heartbeat", async (
         AgentVersion = request.Version,
         LocalEndpoints = localEndpoints,
         PublicBaseUrl = publicBaseUrl,
-        AllowedPortalOrigins = corsOrigins,
-        AgentCompletedDocumentRetentionDays = operationalSettings.AgentCompletedDocumentRetentionDays,
-        AgentRetentionSweepHours = operationalSettings.AgentRetentionSweepHours
+        AllowedPortalOrigins = corsOrigins
     });
 });
 
@@ -5677,46 +5587,12 @@ static string GetSessionRateLimitPartitionKey(HttpContext context) =>
 static string GetAgentRateLimitPartitionKey(HttpContext context) =>
     GetRateLimitPartitionKey(context);
 
-static async Task<(bool Allowed, DateTimeOffset? SuspendedAtUtc)> GetAgentClaimAccessAsync(
-    Guid tenantId,
-    SmartPrintDbContext db,
-    CancellationToken ct)
-{
-    var status = await db.Tenants.AsNoTracking()
-        .Where(item => item.Id == tenantId)
-        .Select(item => item.Status)
-        .SingleOrDefaultAsync(ct);
-    if (status == "Active") return (true, null);
-    if (status != "Suspended") return (false, null);
-
-    var allowClaims = await db.PlatformOperationalSettings.AsNoTracking()
-        .Where(item => item.Id == PlatformOperationalSettings.SingletonIdValue)
-        .Select(item => (bool?)item.AllowPaidJobClaimsWhenSuspended)
-        .SingleOrDefaultAsync(ct) ?? true;
-    if (!allowClaims) return (false, null);
-
-    var suspendedAt = await db.TenantStatusAudits.AsNoTracking()
-        .Where(item => item.TenantId == tenantId && item.NewStatus == "Suspended")
-        .OrderByDescending(item => item.CreatedUtc)
-        .Select(item => (DateTimeOffset?)item.CreatedUtc)
-        .FirstOrDefaultAsync(ct);
-    return (suspendedAt is not null, suspendedAt);
-}
-
-static bool IsTenantRecoveryOperation(
-    HttpContext context,
-    bool shopOperations,
-    bool allowPaidJobClaimsWhileSuspended = false)
+static bool IsTenantRecoveryOperation(HttpContext context, bool shopOperations)
 {
     if (HttpMethods.IsGet(context.Request.Method) || HttpMethods.IsHead(context.Request.Method))
         return true;
 
     var path = context.Request.Path.Value ?? string.Empty;
-    if (!shopOperations && allowPaidJobClaimsWhileSuspended &&
-        HttpMethods.IsPost(context.Request.Method) &&
-        (path.EndsWith("/jobs/claim", StringComparison.OrdinalIgnoreCase) ||
-         path.EndsWith("/jobs/print-claim", StringComparison.OrdinalIgnoreCase)))
-        return true;
     if (shopOperations)
     {
         return HttpMethods.IsPost(context.Request.Method) &&
@@ -5789,13 +5665,7 @@ static async ValueTask<object?> EnforceTenantActiveAsync(
         .Where(item => item.Id == resolvedTenantId)
         .Select(item => item.Status)
         .SingleOrDefaultAsync(http.RequestAborted);
-    var allowPaidJobClaimsWhileSuspended = status == "Suspended" &&
-        (await db.PlatformOperationalSettings.AsNoTracking()
-            .Where(item => item.Id == PlatformOperationalSettings.SingletonIdValue)
-            .Select(item => (bool?)item.AllowPaidJobClaimsWhenSuspended)
-            .SingleOrDefaultAsync(http.RequestAborted) ?? true);
-    if (!TenantAccessRules.IsActive(status) &&
-        !IsTenantRecoveryOperation(http, allowSubscriptionRead, allowPaidJobClaimsWhileSuspended))
+    if (!TenantAccessRules.IsActive(status) && !IsTenantRecoveryOperation(http, allowSubscriptionRead))
         return Results.Problem(statusCode: StatusCodes.Status403Forbidden,
             title: "This shop is suspended or inactive. New print work is blocked; existing jobs and financial recovery remain accessible.");
 
