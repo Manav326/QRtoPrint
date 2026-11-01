@@ -34,14 +34,14 @@ class SavedPdfEditorInstrumentedTest {
         try {
             ActivityScenario.launch(MainActivity::class.java).use {
                 val navigationLabel = com.google.android.material.R.id.navigation_bar_item_small_label_view
-                onView(allOf(withId(navigationLabel), withText("My Files"))).perform(click())
+                onView(allOf(withId(navigationLabel), withText("Files"))).perform(click())
                 onView(withContentDescription("More options for CI-editor-document.pdf")).perform(scrollTo(), click())
-                onView(withText("Edit PDF pages")).perform(click())
+                onView(withText("Edit PDF")).perform(click())
 
-                onView(withText("Edit PDF pages")).check(matches(isDisplayed()))
+                onView(withText("Edit PDF")).check(matches(isDisplayed()))
                 onView(withText("Page 1")).check(matches(isDisplayed()))
                 onView(withContentDescription("Rotate page 1")).perform(click())
-                onView(withText("Rotated 90°")).check(matches(isDisplayed()))
+                onView(withText("90°")).check(matches(isDisplayed()))
                 onView(withContentDescription("Move page 2 up")).check(matches(isDisplayed()))
                 onView(withContentDescription("Remove page 1")).check(matches(isDisplayed()))
                 onView(withContentDescription("Preview page 1")).perform(click())
