@@ -58,9 +58,6 @@ jobs:
   windows-setup:
     needs: validate-release-config
     runs-on: windows-latest
-    env:
-      WINDOWS_SIGNING_CERT_BASE64: ${{ secrets.WINDOWS_SIGNING_CERT_BASE64 }}
-      WINDOWS_SIGNING_CERT_PASSWORD: ${{ secrets.WINDOWS_SIGNING_CERT_PASSWORD }}
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-dotnet@v6
@@ -80,32 +77,15 @@ jobs:
           $iscc = "C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
           & $iscc "/DSmartPrintPublicUrl=$env:SMARTPRINT_PUBLIC_BASE_URL" "/DSmartPrintVersion=$env:GITHUB_REF_NAME" scripts/build-windows-installer.iss
           if ($LASTEXITCODE -ne 0) { throw "SmartPrint Windows installer compilation failed." }
-      - name: Sign and verify Windows installer
+      - name: Confirm Windows installer is intentionally unsigned for the beta channel
         shell: pwsh
         run: |
-          if ([string]::IsNullOrWhiteSpace($env:WINDOWS_SIGNING_CERT_BASE64) -or [string]::IsNullOrWhiteSpace($env:WINDOWS_SIGNING_CERT_PASSWORD)) {
-            throw "Configure WINDOWS_SIGNING_CERT_BASE64 and WINDOWS_SIGNING_CERT_PASSWORD before publishing a public Windows installer."
+          $installer = "artifacts/agent-installer/SmartPrint-Windows-Setup.exe"
+          $signature = Get-AuthenticodeSignature -LiteralPath $installer
+          if ($signature.Status -ne [System.Management.Automation.SignatureStatus]::NotSigned) {
+            throw "The interim Windows beta package must not contain an unexpected or invalid Authenticode signature."
           }
-          $certificatePath = Join-Path $env:RUNNER_TEMP "smartprint-code-signing.pfx"
-          try {
-            [System.IO.File]::WriteAllBytes($certificatePath, [Convert]::FromBase64String($env:WINDOWS_SIGNING_CERT_BASE64))
-            $windowsKits = Join-Path ([Environment]::GetFolderPath("ProgramFilesX86")) "Windows Kits\10\bin"
-            $signTool = Get-ChildItem $windowsKits -Filter signtool.exe -Recurse -ErrorAction Stop |
-              Where-Object { $_.Directory.Name -eq "x64" } |
-              Sort-Object { [version]$_.Directory.Parent.Name } -Descending |
-              Select-Object -First 1
-            if (-not $signTool) { throw "Windows SDK SignTool was not found." }
-            $installer = "artifacts/agent-installer/SmartPrint-Windows-Setup.exe"
-            & $signTool.FullName sign /v /fd SHA256 /f $certificatePath /p $env:WINDOWS_SIGNING_CERT_PASSWORD /tr http://timestamp.digicert.com /td SHA256 $installer
-            if ($LASTEXITCODE -ne 0) { throw "Windows installer signing failed." }
-            & $signTool.FullName verify /pa /v $installer
-            if ($LASTEXITCODE -ne 0) { throw "Windows installer signature verification failed." }
-          }
-          finally {
-            if (Test-Path -LiteralPath $certificatePath) {
-              Remove-Item -LiteralPath $certificatePath -Force
-            }
-          }
+          Write-Host "Verified: Windows beta installer is intentionally unsigned. SHA-256 will be published with the release."
       - name: Upload Windows installer
         uses: actions/upload-artifact@v7
         with:
@@ -122,31 +102,60 @@ jobs:
       ANDROID_SIGNING_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_SIGNING_KEYSTORE_PASSWORD }}
       ANDROID_SIGNING_KEY_ALIAS: ${{ secrets.ANDROID_SIGNING_KEY_ALIAS }}
       ANDROID_SIGNING_KEY_PASSWORD: ${{ secrets.ANDROID_SIGNING_KEY_PASSWORD }}
+    outputs:
+      available: ${{ steps.check-signing.outputs.available }}
     steps:
-      - uses: actions/checkout@v7
-      - name: Validate Android release signing secrets
+      - id: check-signing
+        name: Check Android release signing credentials
         shell: bash
         run: |
           set -euo pipefail
-          for name in ANDROID_SIGNING_KEYSTORE_BASE64 ANDROID_SIGNING_KEYSTORE_PASSWORD ANDROID_SIGNING_KEY_ALIAS ANDROID_SIGNING_KEY_PASSWORD; do
-            if [ -z "${!name}" ]; then
-              echo "::error::Missing GitHub Actions secret: $name. Configure the SmartPrint Android release keystore before creating a release tag."
-              exit 1
+          names=(
+            ANDROID_SIGNING_KEYSTORE_BASE64
+            ANDROID_SIGNING_KEYSTORE_PASSWORD
+            ANDROID_SIGNING_KEY_ALIAS
+            ANDROID_SIGNING_KEY_PASSWORD
+          )
+          present=0
+          missing=0
+          for name in "${names[@]}"; do
+            if [[ -n "${!name:-}" ]]; then
+              ((present+=1))
+            else
+              ((missing+=1))
             fi
           done
+          if (( present == 0 )); then
+            echo "available=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::Android release skipped. Configure the four Android signing secrets when the production keystore is ready."
+            exit 0
+          fi
+          if (( missing > 0 )); then
+            echo "::error::Android signing is only partially configured. Add all four Android signing secrets together."
+            exit 1
+          fi
+          echo "available=true" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/checkout@v7
+        if: steps.check-signing.outputs.available == 'true'
       - uses: actions/setup-java@v6
+        if: steps.check-signing.outputs.available == 'true'
         with:
           distribution: temurin
           java-version: "17"
       - uses: gradle/actions/setup-gradle@v6
+        if: steps.check-signing.outputs.available == 'true'
         with:
           gradle-version: "8.13"
       - uses: android-actions/setup-android@v4
+        if: steps.check-signing.outputs.available == 'true'
         with:
           packages: "platform-tools"
       - name: Install Android SDK build tools
+        if: steps.check-signing.outputs.available == 'true'
         run: sdkmanager "platforms;android-36" "build-tools;36.0.0"
       - name: Prepare release keystore
+        if: steps.check-signing.outputs.available == 'true'
         shell: bash
         run: |
           set -euo pipefail
@@ -155,6 +164,7 @@ jobs:
           test -s "$key_file"
           echo "ANDROID_SIGNING_KEYSTORE_FILE=$key_file" >> "$GITHUB_ENV"
       - name: Build signed Android release APK
+        if: steps.check-signing.outputs.available == 'true'
         shell: bash
         run: |
           set -euo pipefail
@@ -169,6 +179,7 @@ jobs:
           test -n "$apksigner_path"
           "$apksigner_path" verify --verbose artifacts/android/SmartPrint-Android.apk
       - name: Upload Android release APK
+        if: steps.check-signing.outputs.available == 'true'
         uses: actions/upload-artifact@v7
         with:
           name: smartprint-android-release
@@ -183,6 +194,8 @@ jobs:
     needs:
       - windows-setup
       - android-release
+    env:
+      ANDROID_RELEASE_AVAILABLE: ${{ needs.android-release.outputs.available }}
     steps:
       - name: Download Windows installer
         uses: actions/download-artifact@v8
@@ -190,6 +203,7 @@ jobs:
           name: smartprint-windows-release
           path: artifacts
       - name: Download Android APK
+        if: needs.android-release.outputs.available == 'true'
         uses: actions/download-artifact@v8
         with:
           name: smartprint-android-release
@@ -199,7 +213,11 @@ jobs:
         run: |
           set -euo pipefail
           cd artifacts
-          sha256sum SmartPrint-Windows-Setup.exe SmartPrint-Android.apk > SHA256SUMS.txt
+          files=(SmartPrint-Windows-Setup.exe)
+          if [[ "$ANDROID_RELEASE_AVAILABLE" == "true" ]]; then
+            files+=(SmartPrint-Android.apk)
+          fi
+          sha256sum "${files[@]}" > SHA256SUMS.txt
           sha256sum --check SHA256SUMS.txt
       - name: Prepare versioned release draft
         env:
@@ -267,10 +285,7 @@ jobs:
           generate_release_notes: true
           overwrite_files: false
           fail_on_unmatched_files: true
-          files: |
-            artifacts/SmartPrint-Windows-Setup.exe
-            artifacts/SmartPrint-Android.apk
-            artifacts/SHA256SUMS.txt
+          files: artifacts/*
       - name: Verify uploaded assets and publish the stable release
         env:
           GH_TOKEN: ${{ github.token }}
@@ -290,11 +305,10 @@ jobs:
           tag = os.environ["RELEASE_TAG"]
           token = os.environ["GH_TOKEN"]
           artifact_dir = Path("artifacts")
-          expected = {
-              "SmartPrint-Windows-Setup.exe",
-              "SmartPrint-Android.apk",
-              "SHA256SUMS.txt",
-          }
+          binaries = {"SmartPrint-Windows-Setup.exe"}
+          if os.environ.get("ANDROID_RELEASE_AVAILABLE") == "true":
+              binaries.add("SmartPrint-Android.apk")
+          expected = binaries | {"SHA256SUMS.txt"}
           headers = {
               "Accept": "application/vnd.github+json",
               "Authorization": f"Bearer {token}",
@@ -304,8 +318,11 @@ jobs:
           for line in (artifact_dir / "SHA256SUMS.txt").read_text(encoding="utf-8").splitlines():
               digest, filename = line.split(maxsplit=1)
               checksums[filename.lstrip("*")] = digest
-          if set(checksums) != expected - {"SHA256SUMS.txt"}:
-              raise SystemExit("SHA256SUMS.txt does not contain exactly the Windows and Android packages.")
+          if set(checksums) != binaries:
+              raise SystemExit(
+                  "SHA256SUMS.txt does not match the packages enabled for this release. "
+                  f"Expected {sorted(binaries)}, found {sorted(checksums)}."
+              )
           for filename, expected_digest in checksums.items():
               actual_digest = hashlib.sha256((artifact_dir / filename).read_bytes()).hexdigest()
               if actual_digest != expected_digest:
@@ -347,5 +364,10 @@ jobs:
               published = json.loads(response.read())
           if published.get("draft") or published.get("tag_name") != tag:
               raise SystemExit("GitHub did not confirm publication of the verified stable release.")
-          print(f"Published {tag} with {len(expected)} verified assets. Older releases are not modified or deleted.")
+          print(
+              f"Published {tag} with the unsigned Windows beta installer"
+              + (" and signed Android APK." if "SmartPrint-Android.apk" in binaries else
+                 ". Android remains unpublished until its signing credentials are configured.")
+              + " Older releases are not modified or deleted."
+          )
           PY
