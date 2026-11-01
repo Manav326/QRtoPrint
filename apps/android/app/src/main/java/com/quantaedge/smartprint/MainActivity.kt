@@ -260,7 +260,8 @@ class MainActivity : AppCompatActivity() {
                 ZipOutputStream(output.buffered()).use { zip ->
                     files.forEach { source ->
                         require(source.isFile && source.exists()) { "${source.name} is no longer available." }
-                        zip.putNextEntry(ZipEntry(source.name))
+                        val relativePath = store.pathOf(source).replace("\\", "/")
+                        zip.putNextEntry(ZipEntry(relativePath))
                         FileInputStream(source).use { it.copyTo(zip) }
                         zip.closeEntry()
                     }
