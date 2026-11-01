@@ -5321,7 +5321,7 @@ publicApi.MapPost("/sessions/current/jobs", async (
             return Results.Ok(new { Job = racedJob, Document = racedDocument, DuplicateRequest = true });
         }
 
-        var lockedBatchJobs = await db.PrintJobs.FromSqlInterpolated(
+        _ = await db.PrintJobs.FromSqlInterpolated(
             $"SELECT * FROM \"PrintJobs\" WHERE \"TenantId\" = {session.TenantId} AND \"CustomerSessionId\" = {session.Id} AND \"BatchId\" = {batchId} FOR UPDATE")
             .ToListAsync(ct);
         var checkoutStartedAfterUpload = await db.PrintBatchPayments.AsNoTracking().AnyAsync(item =>
@@ -5600,7 +5600,7 @@ publicApi.MapPost("/sessions/current/local-upload-tickets", async (
     await using var transaction = await db.Database.BeginTransactionAsync(ct);
     await entitlements.AcquireQuotaLockAsync(session.TenantId, TenantQuotaResource.MonthlyPrintJob, ct);
 
-    var lockedBatchJobs = await db.PrintJobs.FromSqlInterpolated(
+    _ = await db.PrintJobs.FromSqlInterpolated(
         $"SELECT * FROM \"PrintJobs\" WHERE \"TenantId\" = {session.TenantId} AND \"CustomerSessionId\" = {session.Id} AND \"BatchId\" = {batchId} FOR UPDATE")
         .ToListAsync(ct);
 
