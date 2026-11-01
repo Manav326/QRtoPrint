@@ -224,6 +224,22 @@ async function assertRouteContrast(page, route) {
     );
   }
 }
+async function exerciseWorkspaceSections(page, route, viewport, themeLabel) {
+  if (!route.auth) return;
+  const sections = route.auth === "shop"
+    ? ["Overview", "Print Queue", "Printers", "QR Stations", "Print Agent", "Pricing", "Subscription", "Payments", "Customers", "Reports", "Settings"]
+    : ["Overview", "Shop tenants", "Plans & entitlements", "Shop subscriptions", "Operations & retention"];
+  for (const section of sections) {
+    if (viewport.width <= 850) await page.getByRole("button", { name: "Open navigation" }).click();
+    const destination = page.locator(".sidebar").getByRole("button", { name: section, exact: true });
+    await destination.click();
+    await page.locator(".breadcrumb strong").waitFor({ state: "visible" });
+    await assertNoHorizontalOverflow(page, route, viewport);
+    await assertRouteContrast(page, route);
+    results.push({ check: `${route.label} / ${section} / ${themeLabel} / ${viewport.width}px`, passed: true });
+  }
+}
+
 async function assertThemeToggle(page) {
   const darkToggle = page.getByRole("button", { name: "Switch to dark theme" });
   const lightToggle = page.getByRole("button", { name: "Switch to light theme" });
@@ -281,25 +297,14 @@ try {
 
       const lightLayout = await assertNoHorizontalOverflow(page, route, viewport);
       await assertRouteContrast(page, route);
+      await exerciseWorkspaceSections(page, route, viewport, "light");
       const lightScreenshot = `${route.label}-${viewport.label}-light.png`;
       await page.screenshot({ path: join(artifactDirectory, lightScreenshot), fullPage: true, animations: "disabled" });
       const theme = await assertThemeToggle(page);
       const darkLayout = await assertNoHorizontalOverflow(page, route, viewport);
       await assertRouteContrast(page, route);
 
-      if (route.auth) {
-        const sections = route.auth === "shop"
-          ? ["Overview", "Print Queue", "Printers", "QR Stations", "Print Agent", "Pricing", "Subscription", "Payments", "Customers", "Reports", "Settings"]
-          : ["Overview", "Shop tenants", "Plans & entitlements", "Shop subscriptions", "Operations & retention"];
-        for (const section of sections) {
-          if (viewport.width <= 850) await page.getByRole("button", { name: "Open navigation" }).click();
-          const destination = page.locator(".sidebar").getByRole("button", { name: section, exact: true });
-          await destination.click();
-          await page.locator(".breadcrumb strong").waitFor({ state: "visible" });
-          await assertNoHorizontalOverflow(page, route, viewport);
-          await assertRouteContrast(page, route);
-        }
-      }
+      await exerciseWorkspaceSections(page, route, viewport, "dark");
 
       const darkScreenshot = `${route.label}-${viewport.label}-dark.png`;
       await page.screenshot({ path: join(artifactDirectory, darkScreenshot), fullPage: true, animations: "disabled" });
@@ -325,10 +330,10 @@ try {
       contentType: "application/json",
       body: JSON.stringify({ message: "Visual QA uses isolated API fixtures." })
     }));
-    await page.addInitScript(() => {
+    await page.addInitScript(({ shopSession }) => {
       window.__TAURI_INTERNALS__ = {
         invoke: async command => {
-          if (command === "read_secure_session") return null;
+          if (command === "read_secure_session") return JSON.stringify(shopSession);
           if (command === "write_secure_session") return null;
           if (command === "get_local_agent_status") {
             return { serviceReachable: false, localApiReachable: false, paired: false, agentDeviceId: null, status: "Not paired", apiBaseUrl: null };
@@ -336,18 +341,30 @@ try {
           return null;
         }
       };
+    }, {
+      shopSession: {
+        tokenType: "Bearer",
+        accessToken: shopToken,
+        refreshToken: "visual-qa-refresh-token",
+        accessTokenExpiresUtc: "2099-01-01T00:00:00.000Z"
+      }
     });
     await page.goto(desktopUrl, { waitUntil: "domcontentloaded" });
-    await waitForRoute(page, ".auth-screen");
+    await waitForRoute(page, ".app-shell");
     assert.equal(await page.locator("body").getAttribute("data-app-shell"), "desktop");
-    const lightDesktop = await assertNoHorizontalOverflow(page, { label: "windows-desktop" }, { width: 1000, height: 680 });
-    await assertRouteContrast(page, { label: "windows-desktop" });
+    const desktopRoute = { label: "windows-desktop", auth: "shop" };
+    const desktopViewport = { width: 1000, height: 680 };
+    const lightDesktop = await assertNoHorizontalOverflow(page, desktopRoute, desktopViewport);
+    await assertRouteContrast(page, desktopRoute);
+    await exerciseWorkspaceSections(page, desktopRoute, desktopViewport, "light");
     await page.getByRole("button", { name: "Switch to dark theme" }).click();
     await page.waitForFunction(() => document.documentElement.dataset.theme === "dark");
+    const darkDesktop = await assertNoHorizontalOverflow(page, desktopRoute, desktopViewport);
+    await assertRouteContrast(page, desktopRoute);
+    await exerciseWorkspaceSections(page, desktopRoute, desktopViewport, "dark");
     await page.reload({ waitUntil: "domcontentloaded" });
-    await waitForRoute(page, ".auth-screen");
+    await waitForRoute(page, ".app-shell");
     assert.equal(await page.locator("html").getAttribute("data-theme"), "dark");
-    const darkDesktop = await assertNoHorizontalOverflow(page, { label: "windows-desktop" }, { width: 1000, height: 680 });
     await page.screenshot({ path: join(artifactDirectory, "windows-desktop-minimum-dark.png"), fullPage: true, animations: "disabled" });
     results.push({ check: "Windows desktop minimum 1000x680 light and dark", passed: true, lightWidth: lightDesktop.rootWidth, darkWidth: darkDesktop.rootWidth });
     await context.close();
