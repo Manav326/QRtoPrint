@@ -428,9 +428,8 @@ public sealed class WindowsPrintExecutor
         if (!File.Exists(outputPath))
             throw new FileNotFoundException("The expected PDF export does not exist.", outputPath);
         using var stream = new FileStream(outputPath, FileMode.Open, FileAccess.Read, FileShare.Read);
-        Span<byte> header = stackalloc byte[5];
-        if (stream.Read(header) != 5 || !header.SequenceEqual("%PDF-"u8))
-            throw new PrintExecutionBlockedException("PDF_EXPORT_FILE_INVALID", "An existing file at the PDF export path is not a valid PDF.");
+        if (!IsCompletePdfFile(outputPath))
+            throw new PrintExecutionBlockedException("PDF_EXPORT_FILE_INVALID", "An existing file at the PDF export path is not a complete PDF.");
         stream.Position = 0;
         var size = stream.Length;
         var hash = SHA256.HashData(stream);

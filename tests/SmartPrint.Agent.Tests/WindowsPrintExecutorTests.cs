@@ -167,7 +167,6 @@ public sealed class WindowsPrintToPdfFallbackTests
         using var encoded = image.Encode(SkiaSharp.SKEncodedImageFormat.Png, 100);
         var bytes = encoded.ToArray();
         var directory = Path.Combine(Path.GetTempPath(), "smartprint-pdf-fallback-" + Guid.NewGuid().ToString("N"));
-        var outputPath = Path.Combine(directory, "fallback-output.pdf");
         var entry = new AgentLocalQueueEntry(
             Guid.NewGuid(), "SP-TEST-PDF-FALLBACK", Guid.NewGuid(), "Microsoft Print to PDF",
             "SmartPrint Missing Test Queue", "fallback.png", "image/png",
@@ -175,10 +174,12 @@ public sealed class WindowsPrintToPdfFallbackTests
             1, 1, "Mono", "A4", false, "INR", 100, "unused", "ACKNOWLEDGED",
             DateTimeOffset.UtcNow, DateTimeOffset.UtcNow.AddMinutes(3),
             OutputMode: PrinterOutputModeRules.PdfExport);
+        var executor = new WindowsPrintExecutor();
+        var outputPath = executor.GetPdfExportPath(entry, directory);
 
         try
         {
-            var result = await new WindowsPrintExecutor().ExportPdfUsingWindowsPrinterOrFallbackAsync(
+            var result = await executor.ExportPdfUsingWindowsPrinterOrFallbackAsync(
                 entry, bytes, outputPath, directory, CancellationToken.None);
 
             Assert.True(result.UsedFallback);
