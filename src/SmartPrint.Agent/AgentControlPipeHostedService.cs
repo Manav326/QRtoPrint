@@ -48,6 +48,7 @@ public sealed class AgentControlPipeHostedService(
             catch (IOException exception)
             {
                 logger.LogWarning(exception, "The SmartPrint desktop control pipe connection ended unexpectedly.");
+                await Task.Delay(TimeSpan.FromMilliseconds(250), stoppingToken);
             }
             catch (Exception exception)
             {
@@ -61,6 +62,7 @@ public sealed class AgentControlPipeHostedService(
     private const uint PipeFirstInstance = 0x00080000;
     private const uint FileFlagOverlapped = 0x40000000;
     private const uint PipeRejectRemoteClients = 0x00000008;
+    private static int firstPipeInstance = 1;
 
     [StructLayout(LayoutKind.Sequential)]
     private struct NativeSecurityAttributes
@@ -113,9 +115,12 @@ public sealed class AgentControlPipeHostedService(
                 InheritHandle = 0
             };
 
+            var isFirstPipeInstance = Volatile.Read(ref firstPipeInstance) == 1;
+            var openMode = PipeAccessDuplex | FileFlagOverlapped |
+                (isFirstPipeInstance ? PipeFirstInstance : 0u);
             var handle = CreateNamedPipeNative(
                 PipePath,
-                PipeAccessDuplex | PipeFirstInstance | FileFlagOverlapped,
+                openMode,
                 PipeRejectRemoteClients,
                 maxInstances: 1,
                 outBufferSize: 4096,
@@ -128,6 +133,11 @@ public sealed class AgentControlPipeHostedService(
                 var error = Marshal.GetLastWin32Error();
                 handle.Dispose();
                 throw new Win32Exception(error, "Could not create the local SmartPrint control pipe.");
+            }
+
+            if (isFirstPipeInstance)
+            {
+                Interlocked.Exchange(ref firstPipeInstance, 0);
             }
 
             return new NamedPipeServerStream(
