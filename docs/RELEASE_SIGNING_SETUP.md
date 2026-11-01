@@ -1,10 +1,25 @@
-# SmartPrint Release Signing Setup
+# SmartPrint Release and Distribution Setup
 
-The public release workflow intentionally refuses to publish unsigned customer installers. Configure these credentials once in the GitHub repository before creating the first release tag.
+SmartPrint currently uses a direct-download Windows beta installer. The Windows installer is intentionally unsigned while the project validates the shop-owner installation experience. The website labels the download as available and keeps the Windows security prompt note small but visible.
 
-## 1. Android release keystore
+## 1. Windows beta distribution
 
-The Android package ID is `com.thinkwithsujeet.qrtoprint`. Its release signing key must remain stable for all future updates to install over the existing app.
+No Windows code-signing secrets are required for the interim beta release.
+
+The release workflow:
+- Builds the existing self-contained x64 Windows Agent and guided Inno Setup installer.
+- Verifies that the generated installer is intentionally unsigned.
+- Publishes the installer as `SmartPrint-Windows-Setup.exe`.
+- Publishes a `SHA256SUMS.txt` file covering every binary included in that version.
+- Keeps each published stable version permanently; a new version moves the GitHub `latest` pointer without replacing older versions.
+
+Customers should download the installer only from the official SmartPrint website or its linked GitHub Release. Windows may show an Unknown Publisher or SmartScreen prompt. Some Windows 11 devices with Smart App Control or managed security policy may block unsigned installers entirely. Do not ask customers to turn off Defender, SmartScreen, Smart App Control, or other security protections.
+
+The website uses a compact **Available** label and a brief first-run security note. Do not present the installer as signed or imply that Windows will always permit it to run.
+
+## 2. Android release keystore
+
+The Android package ID is `com.thinkwithsujeet.qrtoprint`. Its production signing key must remain stable for all future updates to install over the existing app.
 
 Generate a dedicated release keystore on a secure machine with JDK 17 or later:
 
@@ -17,7 +32,7 @@ Use a unique, strong keystore password and key password. Store the keystore and 
 Convert the keystore to one-line Base64 for the GitHub secret. In PowerShell:
 
 ```powershell
-[Convert]::ToBase64String([IO.File]::ReadAllBytes(".\smartprint-release.jks")) | Set-Clipboard
+[Convert]::ToBase64String([IO.File]::ReadAllBytes(".\\smartprint-release.jks")) | Set-Clipboard
 ```
 
 In GitHub, open **Settings → Secrets and variables → Actions → New repository secret** and add:
@@ -29,24 +44,7 @@ In GitHub, open **Settings → Secrets and variables → Actions → New reposit
 
 Keep a separate secure backup of the original `.jks` file. If it is lost, future Android updates cannot be signed with the same identity.
 
-## 2. Windows installer code-signing certificate
-
-Obtain a trusted Windows code-signing certificate for the legal publisher identity that should be shown to shop owners. Export the certificate with its private key as a password-protected PFX file.
-
-The Inno Setup script currently declares `AppPublisher=QuantaEdge`. Confirm that this matches the publisher identity represented by the certificate, or update the installer metadata to the certificate's actual legal publisher before releasing.
-
-Convert the PFX to Base64 on a secure Windows machine:
-
-```powershell
-[Convert]::ToBase64String([IO.File]::ReadAllBytes(".\smartprint-code-signing.pfx")) | Set-Clipboard
-```
-
-Add these GitHub Actions repository secrets:
-
-- `WINDOWS_SIGNING_CERT_BASE64`: copied Base64 PFX
-- `WINDOWS_SIGNING_CERT_PASSWORD`: PFX password
-
-The release workflow signs the final Setup.exe with SHA-256 and a trusted timestamp, then verifies its Authenticode signature before publication. Do not use a self-signed certificate for a public customer release.
+The release workflow checks all four Android secrets together. If none are configured, the Android release is skipped while the Windows beta release can still publish. If only some are configured, the workflow fails rather than producing a broken Android release. Once all four secrets are available, the same versioned release workflow builds and verifies the signed APK and includes it alongside the Windows installer.
 
 ## 3. Public service URL
 
@@ -57,9 +55,9 @@ Add or update the repository Actions variable:
 
 The Windows setup and Android APK are both built against this origin. The deployment's `PUBLIC_BASE_URL` must agree with it.
 
-## 4. First signed release
+## 4. First Windows beta release
 
-After all secrets and the URL variable are configured, wait for the main-branch CI build and installer validation to pass. Then create and push a version tag from the intended main commit, for example:
+After the current main-branch CI run passes and the intended staging origin is confirmed, create and push a stable version tag from the intended main commit:
 
 ```powershell
 git checkout main
@@ -68,29 +66,31 @@ git tag v0.1.0
 git push origin v0.1.0
 ```
 
-The Release SmartPrint workflow builds and signs both apps, verifies the Android APK signature, calculates SHA-256 checksums and publishes these assets:
+The Release SmartPrint workflow can publish the Windows installer without Windows signing secrets. Android is included only when all four Android signing secrets are configured. The release contains:
 
 - `SmartPrint-Windows-Setup.exe`
-- `SmartPrint-Android.apk`
 - `SHA256SUMS.txt`
+- `SmartPrint-Android.apk` (only when the production Android signing credentials are present)
 
-The landing page's permanent download URLs then resolve to the latest published release.
+Do not distribute the unsigned installer as a signed or verified-publisher build. The official page links to the release and gives customers a concise notice about possible Windows security prompts.
 
-Do not create the first tag until the release signing secrets are configured and the current main build has passed. The workflow is designed to fail closed if either signing identity is missing.
+## 5. Future Microsoft Store distribution
 
+The future Microsoft Store channel will use a separate MSIX package. Microsoft re-signs accepted MSIX/AppX packages during Store publication; it does not re-sign the current EXE installer. The existing Agent currently installs a Windows Service and a Private-profile firewall rule. Before Store submission, validate the applicable MSIX service/capability rules and design an approved package/install approach that preserves printer discovery, secure job dispatch, restart recovery and local-network operation. Do not assume the current EXE can simply be uploaded as an MSIX.
 
-## 5. Version retention and latest downloads
+## 6. Version retention and latest downloads
 
 Every public stable release is a separate GitHub Release with a semantic-version tag such as `v0.1.0`. **Retain every published stable version indefinitely.** Do not delete older releases and do not replace the binaries attached to a published tag. A new build must receive a new version tag.
 
 The website's `releases/latest/download/...` URLs are a moving pointer to the latest stable release. Publishing a newer version moves that pointer; it does not remove or replace the older versioned release. Older releases remain available from their individual release pages and tag-specific asset URLs.
 
-The release workflow now:
+The release workflow:
 1. Accepts stable `vMAJOR.MINOR.PATCH` tags only.
 2. Creates or refreshes an unpublished draft for that tag; a retry may refresh a draft only.
-3. Verifies both local package checksums and the uploaded release asset names and sizes.
+3. Verifies local package checksums and uploaded release asset names and sizes.
 4. Publishes the release and marks it latest only after verification.
 5. Refuses to run against an already-published release tag and never overwrites a published asset.
+6. Publishes Windows independently; Android remains optional until all signing secrets are configured.
 
 The five-day retention on GitHub Actions artifacts applies only to temporary build-transfer artifacts. It does not apply to files attached to published GitHub Releases.
 
