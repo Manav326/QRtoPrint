@@ -76,6 +76,8 @@ class SmartPrintDocumentViewer(
         gravity = Gravity.CENTER
         textSize = 12f
         setTextColor(getColor(R.color.qp_text))
+        background = SmartPrintGlass.surface(context, 14, R.color.qp_glass_card)
+        setPadding(dp(10), dp(7), dp(10), dp(7))
         includeFontPadding = false
     }
     private val previousPage = readerControl("‹", "Previous page")
@@ -106,7 +108,7 @@ class SmartPrintDocumentViewer(
 
     init {
         orientation = LinearLayout.VERTICAL
-        setBackgroundColor(getColor(R.color.qp_surface))
+        background = SmartPrintGlass.backdrop(context)
         clipToPadding = false
 
         if (isPdf) {
@@ -553,7 +555,8 @@ class SmartPrintDocumentViewer(
             minHeight = dp(40)
             contentDescription = description
             setTextColor(getColor(R.color.qp_text))
-            if (ripple != 0) setBackgroundResource(ripple)
+            background = SmartPrintGlass.surface(context, 14, R.color.qp_glass_card)
+            elevation = dp(3).toFloat()
             isClickable = true
             isFocusable = true
         }

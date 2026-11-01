@@ -115,7 +115,7 @@ class QrScannerActivity : AppCompatActivity() {
     private fun buildScannerUi() {
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setBackgroundColor(getColor(R.color.qp_surface))
+            background = SmartPrintGlass.backdrop(this@QrScannerActivity)
             setPadding(dp(18), 0, dp(18), 0)
         }
 
@@ -141,7 +141,7 @@ class QrScannerActivity : AppCompatActivity() {
         ))
 
         previewHost = FrameLayout(this).apply {
-            setBackgroundColor(getColor(R.color.qp_card))
+            background = SmartPrintGlass.surface(this@QrScannerActivity, 22)
             clipToOutline = true
         }
         previewView = PreviewView(this).apply {
@@ -159,7 +159,8 @@ class QrScannerActivity : AppCompatActivity() {
             13, getColor(R.color.qp_muted), false
         ).apply {
             gravity = Gravity.CENTER
-            setPadding(dp(12), dp(8), dp(12), dp(12))
+            background = SmartPrintGlass.surface(this@QrScannerActivity, 15, R.color.qp_glass_inset)
+            setPadding(dp(12), dp(10), dp(12), dp(12))
         }
         root.addView(statusText, LinearLayout.LayoutParams(
             ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
@@ -173,10 +174,10 @@ class QrScannerActivity : AppCompatActivity() {
         torchButton = MaterialButton(this).apply {
             text = "Flashlight"
             isAllCaps = false
-            cornerRadius = dp(12)
+            cornerRadius = dp(16)
             setTextColor(getColor(R.color.qp_text))
-            backgroundTintList = ColorStateList.valueOf(getColor(R.color.qp_card))
-            strokeColor = ColorStateList.valueOf(getColor(R.color.qp_outline))
+            backgroundTintList = ColorStateList.valueOf(getColor(R.color.qp_glass_inset))
+            strokeColor = ColorStateList.valueOf(getColor(R.color.qp_glass_border))
             strokeWidth = dp(1)
             isEnabled = false
             setOnClickListener { toggleTorch() }

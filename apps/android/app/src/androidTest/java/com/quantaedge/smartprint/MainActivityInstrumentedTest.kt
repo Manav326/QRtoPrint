@@ -17,6 +17,10 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import org.hamcrest.Matchers.allOf
 import org.junit.Test
 import org.junit.runner.RunWith
+import eightbitlab.com.blurview.BlurView
+import android.view.View
+import android.view.ViewGroup
+import org.junit.Assert.assertEquals
 
 @RunWith(AndroidJUnit4::class)
 class MainActivityInstrumentedTest {
@@ -31,6 +35,23 @@ class MainActivityInstrumentedTest {
             onView(allOf(withId(label), withText("Files"))).check(matches(isDisplayed()))
             onView(allOf(withId(label), withText("Print"))).check(matches(isDisplayed()))
             onView(allOf(withId(label), withText("Activity"))).check(matches(isDisplayed()))
+        }
+    }
+
+    @Test
+    fun nativeShellUsesTwoRealBlurOverlaysForItsNavigationChrome() {
+        ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+            scenario.onActivity { activity ->
+                val content = activity.findViewById<ViewGroup>(android.R.id.content)
+                fun countBlurViews(view: View): Int {
+                    if (view is BlurView) return 1
+                    if (view !is ViewGroup) return 0
+                    var count = 0
+                    for (index in 0 until view.childCount) count += countBlurViews(view.getChildAt(index))
+                    return count
+                }
+                assertEquals(2, countBlurViews(content))
+            }
         }
     }
 
