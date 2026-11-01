@@ -509,16 +509,6 @@ public sealed class LocalAgentApiHostedService(
         }
     }
 
-    public async Task StopAsync(CancellationToken cancellationToken)
-    {
-        state.IsRunning = false;
-        if (application is null) return;
-
-        await application.StopAsync(cancellationToken);
-        await application.DisposeAsync();
-        application = null;
-    }
-
 
     private static void AddAgentHeaders(HttpRequestMessage request, AgentCredentials credentials, string uploadGrant)
     {
