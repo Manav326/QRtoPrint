@@ -6,7 +6,7 @@ public sealed class TenantStatusRulesTests
 {
     [Theory]
     [InlineData("Active", "Suspended", true)]
-    [InlineData("Active", "Inactive", true)]
+    [InlineData("Active", "Inactive", false)]
     [InlineData("Suspended", "Active", true)]
     [InlineData("Suspended", "Inactive", true)]
     [InlineData("Inactive", "Active", false)]

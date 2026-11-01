@@ -57,7 +57,7 @@ public sealed class DocumentRetentionWorker(
                 join job in db.PrintJobs
                     on new { document.TenantId, PrintJobId = document.PrintJobId }
                     equals new { job.TenantId, PrintJobId = job.Id }
-                let completedUtc = job.OutputConfirmedUtc ?? job.OutputCompletedUtc
+                let completedUtc = job.OutputType == "PDF_EXPORT" ? job.OutputCompletedUtc : job.OutputConfirmedUtc
                 let hasFinancialHold = db.PrintPayments.Any(payment =>
                     payment.TenantId == job.TenantId && payment.PrintJobId == job.Id &&
                     (payment.Status == "AWAITING_CUSTOMER_PAYMENT" ||

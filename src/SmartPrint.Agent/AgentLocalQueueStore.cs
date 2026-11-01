@@ -116,6 +116,9 @@ public sealed class AgentLocalQueueStore
     public IReadOnlyList<AgentLocalQueueEntry> GetStagedLocalUploads() =>
         ReadEntries().Where(entry => entry.State == "LOCAL_UPLOAD_STAGED").ToArray();
 
+    public IReadOnlyList<AgentLocalQueueEntry> GetPendingPaymentLocalUploads() =>
+        ReadEntries().Where(entry => entry.State == "LOCAL_UPLOAD_PENDING_PAYMENT").ToArray();
+
     public IReadOnlyList<AgentLocalQueueEntry> GetPendingAcknowledgements()
     {
         var entries = new List<AgentLocalQueueEntry>();
@@ -295,6 +298,34 @@ public sealed class AgentLocalQueueStore
         var manifestPath = GetManifestPath(jobId);
         if (File.Exists(manifestPath)) File.Delete(manifestPath);
         if (File.Exists(entry.DocumentPath)) File.Delete(entry.DocumentPath);
+        await Task.CompletedTask;
+    }
+
+    public async Task DeleteExpiredPendingPaymentUploadAsync(
+        Guid jobId,
+        DateTimeOffset deleteAfterUtc,
+        DateTimeOffset now,
+        CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        if (deleteAfterUtc > now)
+            throw new InvalidOperationException("The platform retention deadline has not been reached.");
+
+        var entry = Find(jobId);
+        if (entry is null) return;
+        if (entry.State != "LOCAL_UPLOAD_PENDING_PAYMENT")
+            throw new InvalidOperationException("Only a server-approved pending-payment local upload can be removed.");
+
+        var queueRootFull = Path.GetFullPath(queueRoot);
+        var queuePrefix = queueRootFull.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + Path.DirectorySeparatorChar;
+        var comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
+        var documentPath = Path.GetFullPath(entry.DocumentPath);
+        if (!documentPath.StartsWith(queuePrefix, comparison))
+            throw new InvalidDataException("The local upload document path is outside the protected queue.");
+
+        var manifestPath = GetManifestPath(jobId);
+        if (File.Exists(documentPath)) File.Delete(documentPath);
+        if (File.Exists(manifestPath)) File.Delete(manifestPath);
         await Task.CompletedTask;
     }
 
