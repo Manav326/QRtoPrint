@@ -23,9 +23,14 @@ jobs:
 
           value = os.environ["SMARTPRINT_PUBLIC_BASE_URL"].strip()
           parsed = urlsplit(value)
+          try:
+              parsed_port = parsed.port
+          except ValueError as error:
+              raise SystemExit("SMARTPRINT_PUBLIC_BASE_URL contains an invalid port.") from error
           if (
               parsed.scheme != "https"
               or not parsed.hostname
+              or parsed_port == 0
               or parsed.username
               or parsed.password
               or parsed.path not in ("", "/")
