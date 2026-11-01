@@ -477,11 +477,17 @@ public sealed class WindowsPrintExecutor
 
     private static WindowsSpoolerJob ConvertJob(JobInfo1W item)
     {
-        var status = (item.Status & 0x00000010) != 0 ? "PRINTING"
-            : (item.Status & 0x00000008) != 0 ? "SPOOLING"
-            : (item.Status & 0x00000020) != 0 ? "OFFLINE"
+        // Fault flags take precedence over PRINTING/SPOOLING so the portal
+        // does not hide an offline or paper-out condition behind queue activity.
+        var status = (item.Status & 0x00000020) != 0 ? "OFFLINE"
             : (item.Status & 0x00000040) != 0 ? "PAPEROUT"
-            : (item.Status & 0x00000001) != 0 ? "PAUSED" : "QUEUED";
+            : (item.Status & 0x00000001) != 0 ? "PAUSED"
+            : (item.Status & 0x00000002) != 0 ? "ERROR"
+            : (item.Status & 0x00000400) != 0 ? "USERINTERVENTION"
+            : (item.Status & 0x00000010) != 0 ? "PRINTING"
+            : (item.Status & 0x00000008) != 0 ? "SPOOLING"
+            : (item.Status & 0x00000080) != 0 ? "PRINTED"
+            : "QUEUED";
         return new WindowsSpoolerJob(checked((int)item.JobId), Marshal.PtrToStringUni(item.DocumentName) ?? string.Empty,
             status, item.Status, checked((int)item.PagesPrinted), checked((int)item.TotalPages));
     }
