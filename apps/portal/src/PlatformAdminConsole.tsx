@@ -25,7 +25,7 @@ export default function PlatformAdminConsole({
   const [section, setSection] = useState<Section>(() => adminSectionFromPath(window.location.pathname));
 
   useEffect(() => {
-    const syncSectionFromPath = () => setSection(sectionFromPath(window.location.pathname));
+    const syncSectionFromPath = () => setSection(adminSectionFromPath(window.location.pathname));
     window.addEventListener("popstate", syncSectionFromPath);
     return () => window.removeEventListener("popstate", syncSectionFromPath);
   }, []);
