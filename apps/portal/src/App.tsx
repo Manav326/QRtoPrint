@@ -54,6 +54,14 @@ export default function App() {
     saveDarkModePreference(dark);
     applyThemePreference(dark);
   }, [dark]);
+  useEffect(() => {
+    const syncNativeTheme = (event: Event) => {
+      const selected = (event as CustomEvent<string>).detail;
+      if (selected === "light" || selected === "dark") setDark(selected === "dark");
+    };
+    window.addEventListener("smartprint-theme-change", syncNativeTheme);
+    return () => window.removeEventListener("smartprint-theme-change", syncNativeTheme);
+  }, []);
   const [tokens, setTokens] = useState<AuthTokens | null>(() =>
     route.kind === "admin" ? readStoredTokens("admin")
       : route.kind === "shop" ? readStoredTokens("shop")
