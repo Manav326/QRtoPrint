@@ -264,6 +264,40 @@ function ShopConsole({ tokens, onSignOut }: { tokens: AuthTokens; onSignOut: () 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tokens.accessToken]);
 
+  useEffect(() => {
+    if (active === "Print Queue") return;
+    let mounted = true;
+    let inFlight = false;
+    const refreshDevices = async () => {
+      if (inFlight) return;
+      inFlight = true;
+      try {
+        const [latestPrinters, latestAgents] = await Promise.all([
+          getShopPrinters(tokens.accessToken),
+          getShopAgentDevices(tokens.accessToken)
+        ]);
+        if (mounted) {
+          setPrinters(latestPrinters);
+          setAgentDevices(latestAgents);
+          setApiConnectionState("connected");
+        }
+      } catch (exception) {
+        if (mounted) {
+          const status = exception instanceof ApiError ? exception.status : 0;
+          setApiConnectionState(status === 0 ? "offline" : status >= 500 ? "degraded" : "connected");
+        }
+      } finally {
+        inFlight = false;
+      }
+    };
+    void refreshDevices();
+    const timer = window.setInterval(() => void refreshDevices(), 15_000);
+    return () => {
+      mounted = false;
+      window.clearInterval(timer);
+    };
+  }, [active, tokens.accessToken]);
+
   const onlineAgentCount = agentDevices.filter(agent =>
     !agent.revokedUtc && agent.status === "Online" && !!agent.lastSeenUtc &&
     Date.parse(agent.lastSeenUtc) > Date.now() - 2 * 60 * 1000
