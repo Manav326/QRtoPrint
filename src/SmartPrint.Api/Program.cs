@@ -6072,19 +6072,18 @@ publicApi.MapPost("/batches/{batchId:guid}/payments", async (
         });
 
     var payableJobIds = payableJobs.Select(job => job.Id).ToArray();
-    var activeIndividualPayment = await db.PrintPayments.AsNoTracking().AnyAsync(
+    var batchJobIds = jobs.Select(job => job.Id).ToArray();
+    var unresolvedIndividualPayment = await db.PrintPayments.AsNoTracking().AnyAsync(
         item => item.TenantId == session.TenantId &&
                 item.BatchPaymentId == null &&
-                payableJobIds.Contains(item.PrintJobId) &&
-                (item.Status == "AWAITING_CUSTOMER_PAYMENT" ||
-                 item.Status == "CUSTOMER_REPORTED" ||
-                 item.Status == "CASH_AWAITING_PAYMENT"),
+                batchJobIds.Contains(item.PrintJobId) &&
+                item.Status is not ("REJECTED" or "REFUNDED"),
         ct);
-    if (activeIndividualPayment)
+    if (unresolvedIndividualPayment)
         return Results.Conflict(new
         {
-            code = "individual_payment_already_active",
-            message = "A file in this batch already has an individual payment attempt. Ask the shop to resolve that attempt before using batch checkout."
+            code = "batch_contains_individual_payment",
+            message = "At least one file in this batch already has an individual payment record. Finish or resolve that payment before starting consolidated checkout; SmartPrint will not create a second collection path for the same batch."
         });
 
     var settings = await db.ShopPaymentProfiles.AsNoTracking()
@@ -6254,10 +6253,21 @@ publicApi.MapPost("/jobs/{jobId:guid}/payments", async (
     var activePayment = await db.PrintPayments.SingleOrDefaultAsync(
         item => item.TenantId == session.TenantId &&
                 item.PrintJobId == job.Id &&
+                item.BatchPaymentId == null &&
                 (item.Status == "AWAITING_CUSTOMER_PAYMENT" ||
                  item.Status == "CUSTOMER_REPORTED" ||
                  item.Status == "CASH_AWAITING_PAYMENT"),
         ct);
+    if (job.BatchId is not null && activePayment is null)
+    {
+        await transaction.RollbackAsync(ct);
+        return Results.Conflict(new
+        {
+            code = "batch_checkout_required",
+            message = "This file belongs to a batch. Start payment from the batch checkout so the customer pays once for all accepted files."
+        });
+    }
+
     if (activePayment is not null)
     {
         await transaction.RollbackAsync(ct);
