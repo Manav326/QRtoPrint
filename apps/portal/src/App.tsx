@@ -2228,10 +2228,11 @@ function CustomerEntry({publicCode}:{publicCode:string}) {
       const value=existing??await createCustomerSession(publicCode);
       // Wait for native encrypted persistence before presenting the connected session.
       // In a regular browser the bridge is absent and this safely becomes a no-op.
-      await saveNativeCustomerPrintSession(publicCode,value.sessionToken);
+      const storedNatively=await saveNativeCustomerPrintSession(publicCode,value.sessionToken);
       if(!mounted)return;
       setResult(value);
-      sessionStorage.setItem(stationKey,value.sessionToken);
+      if(storedNatively)sessionStorage.removeItem(stationKey);
+      else sessionStorage.setItem(stationKey,value.sessionToken);
       sessionStorage.removeItem("qrtoprint.customer-session");
     };
     void restore().catch(exception=>{
@@ -2601,7 +2602,7 @@ function CustomerPrintFlow({publicCode,sessionToken,paymentOptions,localAgent,lo
     void refreshAll();
     const timer=window.setInterval(()=>void refreshAll(),30000);
     return ()=>{active=false;window.clearInterval(timer);};
-  },[sessionToken,batchStatusKey]);
+  },[sessionToken,batchStatusKey,uploaded?.job.id]);
 
   useEffect(()=>{
     if(!uploaded)return;
