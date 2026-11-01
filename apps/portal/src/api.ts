@@ -60,6 +60,25 @@ export interface PlatformTenantsPage {
   items: PlatformTenant[];
 }
 
+export function updatePlatformTenantStatus(token: string, tenantId: string, status: "Active" | "Suspended" | "Inactive", reason: string) {
+  return apiRequest<{ id: string; status: string; updatedUtc: string; duplicateRequest: boolean }>(
+    `/api/v1/platform/tenants/${tenantId}/status`,
+    { method: "PATCH", body: JSON.stringify({ status, reason }) },
+    token
+  );
+}
+
+export function getPlatformTenantStatusHistory(token: string, tenantId: string) {
+  return apiRequest<Array<{
+    id: string;
+    previousStatus: string;
+    newStatus: string;
+    reason: string;
+    actorUserId: string | null;
+    createdUtc: string;
+  }>>(`/api/v1/platform/tenants/${tenantId}/status-history`, {}, token);
+}
+
 export function getPlatformOverview(token: string) {
   return apiRequest<PlatformOverview>("/api/v1/platform/overview", {}, token);
 }
