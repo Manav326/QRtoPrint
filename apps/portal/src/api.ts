@@ -1224,6 +1224,25 @@ export function rejectShopPrintJob(token: string, jobId: string) {
   );
 }
 
+export function applyShopPrintBatchReview(
+  token: string,
+  batchId: string,
+  reviewedJobIds: string[],
+  acceptedJobIds: string[]
+) {
+  return apiRequest<{
+    batchId: string;
+    reviewedCount: number;
+    acceptedCount: number;
+    rejectedCount: number;
+    updatedUtc: string;
+    nextStep: string;
+  }>(`/api/v1/shop/print-batches/${batchId}/review`, {
+    method: "POST",
+    body: JSON.stringify({ reviewedJobIds, acceptedJobIds })
+  }, token);
+}
+
 function isPrivateLocalPreviewEndpoint(value: string): URL | null {
   try {
     const endpoint = new URL(value);
