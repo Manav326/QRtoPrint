@@ -677,7 +677,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun showScanPrint() {
         pickerMode = false
-        if (portalUrl != null) { showConnectedShop(); return }
+        if (portalUrl != null) { showPrint(); return }
         resetToolbar("Scan")
         navigation.menu.findItem(SCAN_PRINT).isChecked = true
         content.removeAllViews()
