@@ -1,6 +1,7 @@
 using System.Net.Http.Json;
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.Json;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Win32;
 
@@ -71,6 +72,84 @@ public static class AgentPairing
         Console.WriteLine($"Agent ID: {enrolled.AgentDeviceId}");
         Console.WriteLine("The agent secret has been stored using Windows DPAPI (LocalMachine scope).");
         Console.WriteLine("Do not copy or share the secret. Start the QRtoPrint Smart Print Agent service next.");
+    }
+
+    public static async Task<int> CheckExistingAsync()
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            Console.Error.WriteLine("The SmartPrint Agent can only be checked on Windows.");
+            return 1;
+        }
+
+        AgentCredentials? credentials;
+        try
+        {
+            credentials = new AgentCredentialStore().Load();
+        }
+        catch (Exception exception) when (
+            exception is CryptographicException or IOException or JsonException)
+        {
+            Console.Error.WriteLine($"The saved SmartPrint pairing could not be read: {exception.Message}");
+            return 2;
+        }
+
+        if (credentials is null)
+        {
+            Console.Error.WriteLine("This computer does not have a saved SmartPrint pairing.");
+            return 2;
+        }
+
+        if (!Uri.TryCreate(credentials.ApiBaseUrl, UriKind.Absolute, out var apiUri) ||
+            apiUri.Scheme is not ("https" or "http"))
+        {
+            Console.Error.WriteLine("The saved SmartPrint API address is invalid.");
+            return 2;
+        }
+
+        try
+        {
+            using var client = new HttpClient
+            {
+                BaseAddress = new Uri(apiUri.ToString().TrimEnd('/') + "/"),
+                Timeout = TimeSpan.FromSeconds(15)
+            };
+            using var request = new HttpRequestMessage(HttpMethod.Post, "api/v1/agent/heartbeat")
+            {
+                Content = JsonContent.Create(new
+                {
+                    version = typeof(AgentPairing).Assembly.GetName().Version?.ToString() ?? "1.0.0",
+                    operatingSystem = Environment.OSVersion.VersionString,
+                    localEndpoints = Array.Empty<string>()
+                })
+            };
+            request.Headers.Add("X-Print-Agent-Id", credentials.AgentDeviceId.ToString());
+            request.Headers.Add("X-Print-Agent-Secret", credentials.AgentSecret);
+
+            using var response = await client.SendAsync(request);
+            if (response.IsSuccessStatusCode)
+            {
+                Console.WriteLine("The existing SmartPrint pairing is active.");
+                return 0;
+            }
+
+            if (response.StatusCode is System.Net.HttpStatusCode.Unauthorized or System.Net.HttpStatusCode.Forbidden)
+            {
+                Console.Error.WriteLine("The saved SmartPrint pairing is no longer active.");
+                return 2;
+            }
+
+            var detail = await response.Content.ReadAsStringAsync();
+            Console.Error.WriteLine(
+                $"The existing SmartPrint pairing could not be verified ({(int)response.StatusCode}): {detail}");
+            return 1;
+        }
+        catch (Exception exception) when (
+            exception is HttpRequestException or TaskCanceledException or UriFormatException)
+        {
+            Console.Error.WriteLine($"Could not contact the SmartPrint service to verify this pairing: {exception.Message}");
+            return 1;
+        }
     }
 
     private static string GetMachineFingerprint()
