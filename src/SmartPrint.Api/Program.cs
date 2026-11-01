@@ -2516,6 +2516,16 @@ shop.MapPost("/print-batches/{batchId:guid}/review", async (
     var lockedJobs = await db.PrintJobs.FromSqlInterpolated(
         $"SELECT * FROM \"PrintJobs\" WHERE \"TenantId\" = {tenantId} AND \"BatchId\" = {batchId} AND \"Status\" IN ('AWAITING_SHOP_APPROVAL','AWAITING_PAYMENT','PAYMENT_REJECTED','REJECTED') FOR UPDATE")
         .ToListAsync(ct);
+    if (lockedJobs.Select(job => job.CustomerSessionId).Distinct().Count() > 1)
+    {
+        await transaction.RollbackAsync(ct);
+        return Results.Conflict(new
+        {
+            code = "batch_customer_session_mismatch",
+            message = "This batch contains files from more than one customer session. No file decisions were changed; refresh the queue and contact support."
+        });
+    }
+
     var lockedJobIds = lockedJobs.Select(job => job.Id).ToHashSet();
     if (lockedJobs.Count != reviewedIds.Length || reviewedIds.Any(id => !lockedJobIds.Contains(id)))
     {
