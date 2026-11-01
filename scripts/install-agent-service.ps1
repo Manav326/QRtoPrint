@@ -26,7 +26,7 @@ if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administra
 $resolvedExe = (Resolve-Path -LiteralPath $AgentExePath).Path
 $portalUri = $null
 if (-not [Uri]::TryCreate($CustomerPortalOrigin.TrimEnd('/'), [UriKind]::Absolute, [ref]$portalUri)) {
-    throw "Provide the HTTPS customer portal origin, e.g. https://print.thinkwithsujeet.in."
+    throw "Provide the canonical HTTPS customer portal origin without a path, query string, fragment, or credentials."
 }
 $isLocalhostHttp = $portalUri.Scheme -eq "http" -and $portalUri.Host -in @("localhost", "127.0.0.1")
 $isPrivateLanHttp = $false
