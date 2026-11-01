@@ -1538,19 +1538,12 @@ function StationsPage({ stations, profile, onAdd, onToggle, onGenerate }: {
     const printSelectedStation=async()=>{
       const card=document.getElementById(`qr-station-${printingStationId}`);
       const images=Array.from(card?.querySelectorAll("img")??[]);
-      const revealQuantaEdgeFallback=(image:HTMLImageElement)=>{
-        if(!image.classList.contains("qr-quantaedge-logo"))return;
-        image.hidden=true;
-        const fallback=image.nextElementSibling;
-        if(fallback instanceof HTMLElement)fallback.hidden=false;
-      };
       await Promise.all(images.map(async image=>{
         try {
           if(!image.complete) await image.decode();
         } catch {
-          revealQuantaEdgeFallback(image);
+          // The QR sign has a text-only QuantaEdge wordmark fallback if its mark cannot load.
         }
-        if(image.naturalWidth===0)revealQuantaEdgeFallback(image);
       }));
       await document.fonts.ready.catch(()=>undefined);
       await new Promise<void>(resolve=>{
@@ -1577,7 +1570,7 @@ function StationsPage({ stations, profile, onAdd, onToggle, onGenerate }: {
           <span className="qr-scan-label">SCAN TO PRINT</span>
           <span className="qr-scan-hint">Scan to upload documents and send them to this shop</span>
           <div className="qr-shop-station">{station.displayName}</div>
-          <div className="qr-powered"><small>POWERED BY</small><div className="qr-powered-lockup"><img className="qr-quantaedge-logo" src="/branding/quantaedge-logo.svg" alt="QuantaEdge" onError={event=>{const image=event.currentTarget;image.hidden=true;image.nextElementSibling?.removeAttribute("hidden");}}/><div className="qr-powered-fallback" hidden aria-label="QuantaEdge, Smarter Decisions. Greater Growth."><strong>Quanta<span>Edge</span></strong><small>Smarter Decisions. Greater Growth.</small></div></div></div>
+          <div className="qr-powered"><small>POWERED BY</small><div className="qr-powered-lockup" aria-label="QuantaEdge, Smarter Decisions. Greater Growth."><img className="qr-quantaedge-mark" src="/branding/quantaedge-mark.png" alt="" onError={event=>{event.currentTarget.hidden=true;const fallback=event.currentTarget.nextElementSibling;if(fallback instanceof HTMLElement)fallback.hidden=false;}}/><span className="qr-quantaedge-mark-fallback" hidden aria-hidden="true">Q</span><div className="qr-powered-wordmark"><strong>Quanta<span>Edge</span></strong><small>Smarter Decisions. Greater Growth.</small></div></div></div>
         </div> : <div className="qr-missing"><QrCode size={34}/><strong>QR code not stored</strong><span>This older station needs a one-time QR replacement. Its existing printed code cannot be recovered from the old hash.</span><button className="secondary-button" onClick={()=>onGenerate(station)}>Reissue permanent QR</button></div>}</div>
         <div className="station-foot"><span>Code ending ···{station.publicCodeHint}</span><button className="subtle-button" onClick={()=>onToggle(station)}>{station.isEnabled?"Disable station":"Enable station"}</button></div>
         {station.publicUrl && <div className="station-actions"><button className="secondary-button" onClick={()=>void copyText(station.publicUrl!)}> <Copy size={14}/> Copy link</button><button className="secondary-button" onClick={()=>setPrintingStationId(station.id)}>Print QR sign</button></div>}
