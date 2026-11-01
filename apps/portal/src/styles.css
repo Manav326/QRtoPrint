@@ -782,6 +782,17 @@
     text-align:left!important;
   }
   .station-card.print-active .qr-shop-station{
+    grid-area:hint!important;
+    display:block!important;
+    justify-self:start!important;align-self:center!important;
+    max-width:100%!important;
+    margin:0!important;padding:0!important;
+    border:0!important;border-radius:0!important;
+    background:transparent!important;
+    color:#253650!important;font-size:7pt!important;
+    font-weight:800!important;overflow-wrap:anywhere!important;
+  }
+  .station-card.print-active .qr-scan-hint{
     display:none!important;
   }
   .station-card.print-active .qr-powered{
