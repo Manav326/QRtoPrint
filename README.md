@@ -160,6 +160,7 @@ Inspect the deployment with docker compose --env-file .env -f compose.yml ps and
 - [Security and operations](docs/SECURITY_AND_OPERATIONS.md)
 - [Delivery roadmap and acceptance criteria](docs/ROADMAP.md)
 - [Public website and download launch checklist](docs/PUBLIC_LAUNCH_CHECKLIST.md)
+- [Release signing setup](docs/RELEASE_SIGNING_SETUP.md)
 
 ## Delivery principles
 
