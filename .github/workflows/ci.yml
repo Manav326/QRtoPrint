@@ -94,6 +94,32 @@ jobs:
           if-no-files-found: error
           retention-days: 30
 
+  postgres-integration:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: qrtoprint
+          POSTGRES_PASSWORD: qrtoprint_test_password
+          POSTGRES_DB: qrtoprint_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U qrtoprint -d qrtoprint_test"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      SMARTPRINT_TEST_POSTGRES: Host=localhost;Port=5432;Database=qrtoprint_test;Username=qrtoprint;Password=qrtoprint_test_password
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: 10.0.x
+      - name: Upgrade a historical PostgreSQL schema and verify operational defaults
+        run: dotnet test tests/SmartPrint.Api.Tests/SmartPrint.Api.Tests.csproj --configuration Release
+
   android:
     runs-on: ubuntu-latest
     permissions:
