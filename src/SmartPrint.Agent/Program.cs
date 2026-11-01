@@ -2,6 +2,12 @@ using SmartPrint.Agent;
 
 var builder = Host.CreateApplicationBuilder(args);
 
+if (args.Any(argument => argument.Equals("--check-pairing", StringComparison.OrdinalIgnoreCase)))
+{
+    Environment.ExitCode = await AgentPairing.CheckExistingAsync();
+    return;
+}
+
 if (args.Any(argument => argument.Equals("--pair", StringComparison.OrdinalIgnoreCase)))
 {
     await AgentPairing.RunAsync(builder.Configuration);
