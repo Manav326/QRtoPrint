@@ -2062,15 +2062,22 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun confirmShop(link: StationQrLink) {
-        portalHost = link.host
-        portalUrl = link.url
-        getSharedPreferences("smartprint.customer.last-shop", MODE_PRIVATE).edit()
-            .putString("portalUrl", link.url)
-            .putString("portalHost", link.host)
-            .apply()
-        toolbar.menu.findItem(SWITCH_SHOP)?.isVisible = true
-        ensureWebView().loadUrl(link.url)
-        showPrint()
+        val detail = if (link.url.startsWith("http://")) {
+            "LOCAL TEST · Trusted shop Wi-Fi only"
+        } else {
+            "Secure shop session"
+        }
+        showConfirmSheet("Connect to shop?", detail, "Connect") {
+            portalHost = link.host
+            portalUrl = link.url
+            getSharedPreferences("smartprint.customer.last-shop", MODE_PRIVATE).edit()
+                .putString("portalUrl", link.url)
+                .putString("portalHost", link.host)
+                .apply()
+            toolbar.menu.findItem(SWITCH_SHOP)?.isVisible = true
+            ensureWebView().loadUrl(link.url)
+            showPrint()
+        }
     }
 
     private fun selectedChooserFiles(): List<File> = chooserSelectedFilePaths.mapNotNull { path ->
