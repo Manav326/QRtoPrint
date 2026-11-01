@@ -26,6 +26,7 @@ import {
   type UploadedPrintJob
 } from "./api";
 import { enrollLocalAgent, getLocalAgentStatus, isDesktopApp, type DesktopAgentStatus } from "./desktop-bridge";
+import { readDarkModePreference, readSidebarCollapsedPreference, saveDarkModePreference, saveSidebarCollapsedPreference } from "./ui-preferences";
 
 type Section = "Overview" | "Print Queue" | "Printers" | "QR Stations" | "Print Agent" | "Pricing" | "Subscription" | "Payments" | "Customers" | "Reports" | "Settings";
 type Modal = "printer" | "station" | null;
@@ -111,11 +112,10 @@ function ShopConsole({ tokens, onSignOut }: { tokens: AuthTokens; onSignOut: () 
     window.addEventListener("popstate", syncSectionFromPath);
     return () => window.removeEventListener("popstate", syncSectionFromPath);
   }, []);
-  const [dark, setDark] = useState(true);
+  const [dark, setDark] = useState(readDarkModePreference);
   const [sidebarOpen, setSidebarOpen] = useState(false);
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
-    try { return window.localStorage.getItem("qrtoprint.sidebar-collapsed") === "true"; } catch { return false; }
-  });
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(readSidebarCollapsedPreference);
+  useEffect(() => { saveDarkModePreference(dark); }, [dark]);
   const reloadInFlight = useRef(false);
   const desktopAgentSyncTimer = useRef<number | null>(null);
   const desktopAgentSyncInFlight = useRef(false);
@@ -342,7 +342,7 @@ function ShopConsole({ tokens, onSignOut }: { tokens: AuthTokens; onSignOut: () 
   function toggleSidebarCollapsed() {
     setSidebarCollapsed(current => {
       const next = !current;
-      try { window.localStorage.setItem("qrtoprint.sidebar-collapsed", String(next)); } catch { /* Storage is optional. */ }
+      saveSidebarCollapsedPreference(next);
       return next;
     });
   }

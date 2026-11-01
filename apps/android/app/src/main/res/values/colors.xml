@@ -1,17 +1,17 @@
 <resources>
     <color name="qp_icon_background">#071C5A</color>
-    <color name="qp_primary">#6557D2</color>
-    <color name="qp_primary_dark">#4F43B4</color>
+    <color name="qp_primary">#7258E8</color>
+    <color name="qp_primary_dark">#6247D6</color>
     <color name="qp_primary_content">#FFFFFF</color>
     <color name="qp_danger_content">#FFFFFF</color>
-    <color name="qp_soft">#F0EEFF</color>
-    <color name="qp_surface">#F7F7FA</color>
+    <color name="qp_soft">#F0EDFF</color>
+    <color name="qp_surface">#F4F6FA</color>
     <color name="qp_card">#FFFFFF</color>
-    <color name="qp_hero">#24243A</color>
+    <color name="qp_hero">#141A25</color>
     <color name="qp_hero_text">#FFFFFF</color>
-    <color name="qp_hero_muted">#D7D6E8</color>
-    <color name="qp_text">#191B2A</color>
-    <color name="qp_muted">#686D7D</color>
-    <color name="qp_outline">#E5E6EC</color>
-    <color name="qp_danger">#C84C5A</color>
+    <color name="qp_hero_muted">#A5B2C8</color>
+    <color name="qp_text">#202638</color>
+    <color name="qp_muted">#69758A</color>
+    <color name="qp_outline">#E5E9F0</color>
+    <color name="qp_danger">#CB4D5B</color>
 </resources>

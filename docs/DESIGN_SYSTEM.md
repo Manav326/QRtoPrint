@@ -59,3 +59,28 @@ Compact, legible status surface with agent connection, backend sync, printers, a
 ## 6. Quality gates
 
 Every major screen must be reviewed in both themes and at representative viewport sizes. Review loading, empty, error, offline, permission-denied and success states—not only the happy path. No placeholder controls that look actionable but do nothing. No unstyled browser-default forms in production flows. Capture visual regression baselines once the app shell exists.
+
+
+## 7. Navigation and native application shell
+
+- Shop and platform-admin web workspaces use the same collapsible desktop navigation rail. The selected state, icon labels, spacing, header and footer follow one shell contract.
+- Navigation has three vertical zones: a fixed brand/workspace header, a scrollable navigation list, and a fixed account/support footer. Only the middle list scrolls when the available height is short.
+- The page header stays pinned while the page content scrolls. Mobile uses the same navigation content in an accessible drawer; the desktop collapse control is replaced by the mobile menu control.
+- The collapse preference and light/dark preference are shared across shop web, platform-admin web and SmartPrint Desktop on the same Windows user profile.
+- SmartPrint Desktop is the full shop-owner workspace in a native Tauri window. Keep the native Windows title bar and window controls; do not present the shop portal as a tiny tray popup. The shop navigation remains collapsible and its page content scrolls independently from the shell.
+- The Windows Print Agent remains a separate background service. It is not the desktop workspace and should not duplicate its full navigation.
+- Android remains a native customer application with its native bottom navigation, toolbar, native file library and scanner. It shares SmartPrint semantic light/dark color roles and icon treatment, but does not inherit a desktop sidebar.
+
+## 8. Shared semantic palette
+
+The web, desktop and Android surfaces map to the same roles:
+
+| Role | Light | Dark |
+| --- | --- | --- |
+| Canvas | #F4F6FA | #0C0F16 |
+| Navigation / elevated surface | #FFFFFF | #10141D |
+| Card surface | #FFFFFF | #141A25 |
+| Primary text | #202638 | #F0F3FA |
+| Secondary text | #69758A | #8B96A9 |
+| Accent | #7258E8 | #9B8CFF |
+| Border | #E5E9F0 | #252E3D |

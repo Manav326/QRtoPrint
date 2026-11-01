@@ -1364,3 +1364,47 @@
 .customer-entry.smartprint-native .customer-payment-model-note,
 .customer-entry.smartprint-native .customer-upload-progress>small{color:var(--native-muted)}
 @media(prefers-reduced-motion:reduce){.customer-upload-progress>div b{animation:none;left:38%;}}
+
+
+/* Shared shell behavior across shop and platform administration. */
+.app-shell .sidebar { position: sticky; top: 0; height: 100vh; min-height: 0; overflow: hidden; }
+.app-shell .brand-lockup,
+.app-shell .workspace-switcher,
+.app-shell .nav-label,
+.app-shell .sidebar-bottom { flex: 0 0 auto; }
+.app-shell .primary-nav {
+  flex: 1 1 auto; min-height: 0; overflow-x: hidden; overflow-y: auto;
+  overscroll-behavior: contain; scrollbar-width: thin;
+  scrollbar-color: var(--border) transparent; padding-bottom: 8px;
+}
+.app-shell .sidebar-bottom { margin-top: auto; background: var(--sidebar); }
+.app-shell .main-panel { min-width: 0; min-height: 100vh; }
+.app-shell .topbar { position: sticky; top: 0; z-index: 30; }
+@media (min-width: 851px) {
+  .app-shell.sidebar-collapsed .sidebar { width: 78px; flex-basis: 78px; padding: 24px 10px 16px; }
+  .app-shell.sidebar-collapsed .brand-lockup { justify-content: center; gap: 0; padding: 0 0 25px; }
+  .app-shell.sidebar-collapsed .brand-lockup > div:not(.brand-mark),
+  .app-shell.sidebar-collapsed .workspace-copy,
+  .app-shell.sidebar-collapsed .tenant-status-dot,
+  .app-shell.sidebar-collapsed .platform-online-dot,
+  .app-shell.sidebar-collapsed .nav-label,
+  .app-shell.sidebar-collapsed .primary-nav .nav-item > span,
+  .app-shell.sidebar-collapsed .platform-security-note,
+  .app-shell.sidebar-collapsed .plan-card > div:nth-child(2),
+  .app-shell.sidebar-collapsed .plan-card > svg,
+  .app-shell.sidebar-collapsed .profile-copy { display: none !important; }
+  .app-shell.sidebar-collapsed .workspace-switcher { justify-content: center; padding: 10px 5px; margin-bottom: 22px; }
+  .app-shell.sidebar-collapsed .nav-item { justify-content: center; gap: 0; width: 48px; min-width: 48px; margin-inline: auto; padding: 0; }
+  .app-shell.sidebar-collapsed .plan-card { justify-content: center; padding: 9px; margin-bottom: 10px; }
+  .app-shell.sidebar-collapsed .plan-icon { flex: 0 0 32px; }
+  .app-shell.sidebar-collapsed .sidebar-bottom { padding-inline: 0; }
+  .app-shell.sidebar-collapsed .profile-row { justify-content: center; gap: 5px; padding-inline: 0; }
+  .app-shell.sidebar-collapsed .signout-button { width: 27px; }
+}
+@media (max-width: 850px) {
+  .app-shell .sidebar { position: fixed; top: 0; bottom: 0; height: 100dvh; min-height: 0; overflow: hidden; }
+  .app-shell.sidebar-collapsed .sidebar { width: 255px; flex-basis: 255px; padding: 25px 16px 16px; }
+  .app-shell .primary-nav { min-height: 0; }
+  .app-shell .main-panel { min-height: 100vh; }
+  .app-shell .topbar { position: sticky; top: 0; }
+}
