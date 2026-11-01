@@ -693,6 +693,7 @@ export interface ShopPrintJob {
   printerDeviceId?: string | null;
   printerName?: string | null;
   queueName?: string | null;
+  printerStatus?: string | null;
   claimedByAgentDeviceId?: string | null;
   agentLeaseExpiresUtc?: string | null;
   localQueueReceivedUtc?: string | null;
