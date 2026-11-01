@@ -3223,6 +3223,7 @@ function CustomerPrintFlow({publicCode,sessionToken,paymentOptions,localAgent,lo
         setPayment(refreshed.payment??null);
       }
     } catch(exception) {
+      if(batchId)await refreshBatchStatuses();
       setError(exception instanceof ApiError?exception.message:"Could not start this payment method.");
     } finally {setBusy(false);}
   }
