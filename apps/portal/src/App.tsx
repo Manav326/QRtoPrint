@@ -2126,6 +2126,10 @@ function RefundModal({job,token,busy,onClose,onSubmit}:{
       <div><span>FILE</span><strong>{job.document.originalFileName}</strong></div>
       <div><span>VERIFIED PAYMENT</span><strong>{formatMoney(job.payment?.amountMinor||job.quotedAmountMinor,job.payment?.currency||job.currency)}</strong></div>
     </div>
+    <div className="refund-selection-actions">
+      <span>Reject specific pages or the entire file.</span>
+      <button type="button" className="secondary-button reject-action" disabled={busy} onClick={()=>setRejectedPages(new Set(Array.from({length:job.pageCount},(_,index)=>index+1)))}>Reject entire file · refund all pages</button>
+    </div>
     <div className="page-refund-grid" role="group" aria-label="Pages to reject">
       {Array.from({length:job.pageCount},(_,index)=>index+1).map(page=>{
         const rejected=rejectedPages.has(page), locked=alreadyRejected.has(page);
