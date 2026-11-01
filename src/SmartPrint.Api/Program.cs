@@ -6816,6 +6816,7 @@ publicApi.MapGet("/jobs/{jobId:guid}/status", async (
             item.PaymentReference,
             item.RejectionReason,
             item.CreatedUtc,
+            item.UpdatedUtc,
             item.VerifiedUtc
         })
         .FirstOrDefaultAsync(ct);
@@ -6844,6 +6845,7 @@ publicApi.MapGet("/jobs/{jobId:guid}/status", async (
         payment.PaymentReference,
         payment.RejectionReason,
         payment.CreatedUtc,
+        payment.UpdatedUtc,
         payment.VerifiedUtc,
         UpiUri = batchPayment is null
             ? BuildUpiUri(payment.Id, payment.Method, payment.UpiIdSnapshot,
@@ -6863,6 +6865,7 @@ publicApi.MapGet("/jobs/{jobId:guid}/status", async (
             batchPayment.PaymentReference,
             batchPayment.RejectionReason,
             batchPayment.CreatedUtc,
+            batchPayment.UpdatedUtc,
             batchPayment.VerifiedUtc,
             UpiUri = BuildUpiUri(batchPayment.Id, batchPayment.Method, batchPayment.UpiIdSnapshot,
                 batchPayment.PayeeNameSnapshot, batchPayment.AmountMinor, batchPayment.Currency,
@@ -7291,6 +7294,9 @@ static object BuildPaymentResponse(PrintPayment payment, PrintJob job) =>
         payment.AmountMinor,
         payment.RefundedAmountMinor,
         payment.Currency,
+        payment.CreatedUtc,
+        payment.UpdatedUtc,
+        payment.VerifiedUtc,
         payment.UpiIdSnapshot,
         payment.PayeeNameSnapshot,
         payment.PaymentReference,
@@ -7314,6 +7320,7 @@ static object BuildBatchPaymentResponse(PrintBatchPayment payment, int fileCount
         payment.PaymentReference,
         payment.RejectionReason,
         payment.CreatedUtc,
+        payment.UpdatedUtc,
         payment.VerifiedUtc,
         BatchId = payment.BatchId,
         FileCount = fileCount,
