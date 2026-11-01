@@ -105,6 +105,7 @@ var
   ExitCode: Integer;
 begin
   Result := '';
+  NeedsRestart := False;
   ExtractTemporaryFile('agent-service-lifecycle.ps1');
   PowerShellPath := ExpandConstant('{sys}\WindowsPowerShell\v1.0\powershell.exe');
   Parameters :=
