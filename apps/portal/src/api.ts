@@ -446,7 +446,7 @@ export async function loadShopData(token: string, queueSearch = "") {
     apiRequest<QrStation[]>("/api/v1/shop/qr-stations", {}, token),
     apiRequest<ShopPricingProfile>("/api/v1/shop/pricing", {}, token),
     getShopPrintJobsPage(token, 0, 100, queueSearch),
-    apiRequest<AgentDevice[]>("/api/v1/shop/agent-devices", {}, token),
+    getShopAgentDevices(token),
     apiRequest<ShopPaymentSettings>("/api/v1/shop/payment-settings", {}, token),
     apiRequest<ShopPayment[]>("/api/v1/shop/payments", {}, token),
     apiRequest<ShopRefund[]>("/api/v1/shop/refunds", {}, token),
@@ -1026,6 +1026,10 @@ export function confirmShopPrintOutput(token: string, jobId: string) {
 
 export function getShopPrinters(token: string) {
   return apiRequest<PrinterDevice[]>("/api/v1/shop/printers", {}, token);
+}
+
+export function getShopAgentDevices(token: string) {
+  return apiRequest<AgentDevice[]>("/api/v1/shop/agent-devices", {}, token);
 }
 
 export function getShopJobEvents(token: string, jobId: string) {
