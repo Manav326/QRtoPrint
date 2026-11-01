@@ -305,8 +305,7 @@ function ShopConsole({ tokens, onSignOut }: { tokens: AuthTokens; onSignOut: () 
   const onlineAgentCount = onlineAgentIds.size;
   const usablePrinterCount = printers.filter(printer => isPrinterAvailable(printer, onlineAgentIds)).length;
   const offlinePrinterCount = printers.filter(printer =>
-    printer.isActive && (!printer.agentDeviceId || !onlineAgentIds.has(printer.agentDeviceId) ||
-      printer.status === "Offline" || printer.status === "Paused")
+    printer.isActive && !isPrinterAvailable(printer, onlineAgentIds)
   ).length;
   const today = new Intl.DateTimeFormat("en-IN", { weekday: "long", day: "numeric", month: "long" }).format(new Date());
 
