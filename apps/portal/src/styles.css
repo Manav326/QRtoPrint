@@ -1845,3 +1845,19 @@ html[data-theme="dark"] .customer-entry .customer-folder-title small,
 html[data-theme="dark"] .customer-entry .customer-folder-file-name small {
   color: #aab6ca;
 }
+
+
+/* Customer upload metadata and batch quote labels use explicit dark contrast. */
+html[data-theme="dark"] .customer-entry :where(.upload-limit,.batch-file-copy small,.uploaded-document-card span,.customer-batch-quote-action small,.customer-batch-quote-lines>div) {
+  color: #aab6ca;
+}
+html[data-theme="dark"] .customer-entry .batch-file-index {
+  background: #28374d;
+  color: #dce6f5;
+}
+html[data-theme="dark"] .customer-entry .batch-file-copy strong {
+  color: #eef2fb;
+}
+html[data-theme="dark"] .customer-entry .quote-validity {
+  color: #8fe1bd;
+}
