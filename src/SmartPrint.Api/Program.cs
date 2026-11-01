@@ -5802,7 +5802,7 @@ static async ValueTask<object?> EnforceTenantActiveAsync(
         (await db.PlatformOperationalSettings.AsNoTracking()
             .Where(item => item.Id == PlatformOperationalSettings.SingletonIdValue)
             .Select(item => (bool?)item.AllowPaidJobClaimsWhenSuspended)
-            .SingleOrDefaultAsync(http.RequestAborted) ?? true);
+            .SingleOrDefaultAsync(http.RequestAborted) ?? false);
     if (!TenantAccessRules.IsActive(status) &&
         !IsTenantRecoveryOperation(http, allowSubscriptionRead, allowPaidJobClaimsWhileSuspended))
         return Results.Problem(statusCode: StatusCodes.Status403Forbidden,
