@@ -439,13 +439,13 @@ export function getShopSubscription(token: string) {
   return apiRequest<ShopSubscriptionSummary>("/api/v1/shop/subscription", {}, token);
 }
 
-export async function loadShopData(token: string) {
+export async function loadShopData(token: string, queueSearch = "") {
   const [profile, printers, stations, pricing, printJobs, agentDevices, paymentSettings, payments, refunds, subscription] = await Promise.all([
     apiRequest<ShopProfile>("/api/v1/shop/profile", {}, token),
     apiRequest<PrinterDevice[]>("/api/v1/shop/printers", {}, token),
     apiRequest<QrStation[]>("/api/v1/shop/qr-stations", {}, token),
     apiRequest<ShopPricingProfile>("/api/v1/shop/pricing", {}, token),
-    apiRequest<ShopPrintJob[]>("/api/v1/shop/print-jobs", {}, token),
+    getShopPrintJobsPage(token, 0, 100, queueSearch),
     apiRequest<AgentDevice[]>("/api/v1/shop/agent-devices", {}, token),
     apiRequest<ShopPaymentSettings>("/api/v1/shop/payment-settings", {}, token),
     apiRequest<ShopPayment[]>("/api/v1/shop/payments", {}, token),
