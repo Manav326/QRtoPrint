@@ -3232,7 +3232,7 @@ function CustomerPrintFlow({publicCode,sessionToken,paymentOptions,localAgent,lo
     if(!uploaded)return;
     setBusy(true);setError("");
     try {
-      if(batchId&&!(payment&&!payment.batchPayment)){
+      if(batchId&&!hasLegacyIndividualPayment){
         const attempt=await startCustomerBatchPayment(sessionToken,batchId,method);
         setBatchPayment(attempt);
         setPaymentMethod(method);
@@ -3378,8 +3378,9 @@ function CustomerPrintFlow({publicCode,sessionToken,paymentOptions,localAgent,lo
   const batchCheckoutVisible=Boolean(batchId)&&batchCheckoutReady&&
     (batchPayableItems.length>0||(batchPayment!==null&&batchPayment.status!=="REJECTED"));
   const batchCheckoutUsesPayment=batchPayment!==null&&batchPayment.status!=="REJECTED";
-  const legacyIndividualPayment=!batchId||(payment!==null&&!payment.batchPayment&&
-    ["AWAITING_CUSTOMER_PAYMENT","CUSTOMER_REPORTED","CASH_AWAITING_PAYMENT","VERIFIED","PARTIALLY_REFUNDED"].includes(payment.status));
+  const hasLegacyIndividualPayment=payment!==null&&!payment.batchPayment&&
+    ["AWAITING_CUSTOMER_PAYMENT","CUSTOMER_REPORTED","CASH_AWAITING_PAYMENT","VERIFIED","PARTIALLY_REFUNDED"].includes(payment.status);
+  const legacyIndividualPayment=!batchId||hasLegacyIndividualPayment;
   const batchCheckoutAmount=batchCheckoutUsesPayment?batchPayment!.amountMinor:batchPayableTotal;
   const batchCheckoutFileCount=batchCheckoutUsesPayment?batchPayment!.fileCount:batchPayableItems.length;
   const batchCheckoutCurrency=batchCheckoutUsesPayment?batchPayment!.currency:(batchPayableItems[0]?.job.currency??"INR");
