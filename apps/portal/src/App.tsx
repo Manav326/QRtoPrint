@@ -312,6 +312,7 @@ function ShopConsole({ tokens, onSignOut }: { tokens: AuthTokens; onSignOut: () 
     };
   }, [active, tokens.accessToken]);
 
+  const activeAgentCount = agentDevices.filter(agent => !agent.revokedUtc).length;
   const onlineAgentIds = new Set(agentDevices.filter(agent =>
     !agent.revokedUtc && agent.status === "Online" && !!agent.lastSeenUtc &&
     Date.parse(agent.lastSeenUtc) > Date.now() - 2 * 60 * 1000
@@ -734,7 +735,7 @@ function ShopConsole({ tokens, onSignOut }: { tokens: AuthTokens; onSignOut: () 
             <button className="icon-button theme-button" aria-label={dark ? "Switch to light theme" : "Switch to dark theme"} onClick={() => setDark(!dark)}>{dark ? <Sun size={18}/> : <Moon size={18}/>}</button>
             <div className="service-status-row" aria-label="Live shop system status">
               <span className={"service-status "+apiConnectionState} title="API connection"><i/>API {apiConnectionState === "connected" ? "Connected" : apiConnectionState === "degraded" ? "Degraded" : apiConnectionState === "offline" ? "Offline" : "Checking"}</span>
-              <span className={"service-status "+(onlineAgentCount > 0 ? "connected" : "offline")} title="Windows Agent heartbeat"><i/>Agent {onlineAgentCount > 0 ? onlineAgentCount+" online" : agentDevices.length > 0 ? "Offline" : "Not paired"}</span>
+              <span className={"service-status "+(onlineAgentCount > 0 ? "connected" : activeAgentCount > 0 ? "offline" : "checking")} title="Windows Agent heartbeat"><i/>Agent {onlineAgentCount > 0 ? onlineAgentCount+" online" : activeAgentCount > 0 ? "Offline" : "Not paired"}</span>
               <span className={"service-status "+(usablePrinterCount > 0 ? "connected" : offlinePrinterCount > 0 ? "offline" : "checking")} title="Active printer availability"><i/>Printers {usablePrinterCount > 0 ? usablePrinterCount+" available" : offlinePrinterCount > 0 ? offlinePrinterCount+" unavailable" : "Unavailable"}</span>
             </div>
             <div className="topbar-divider"/>
