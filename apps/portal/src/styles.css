@@ -1569,3 +1569,5 @@
 .refund-selection-actions{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;margin:10px 0;color:var(--muted);font-size:11px}
 .refund-selection-actions .secondary-button{min-height:34px;padding:7px 10px;font-size:11px}
 @media(max-width:560px){.refund-selection-actions{align-items:flex-start}.refund-selection-actions .secondary-button{width:100%}}
+
+.payment-record-amount-wrap{display:grid;justify-items:end;gap:3px;min-width:0}.payment-record-refund-summary{max-width:190px;text-align:right;font-size:8px;line-height:1.4;color:var(--muted);white-space:normal}
