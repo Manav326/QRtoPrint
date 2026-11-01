@@ -333,3 +333,8 @@ html[data-theme="dark"] .sp-public .sp-theme-toggle:hover {
   border-color: #8b78ec;
 }
 .sp-public { overflow-x: clip; overflow-y: visible; }
+
+
+html[data-theme="light"] .sp-public :where(.sp-public-nav a,.sp-proof-strip small,.sp-section-heading p,.sp-step-card p,.sp-audience-card>p,.sp-audience-card li,.sp-art-document small,.sp-art-shop-head small,.sp-art-printer small,.sp-customer-mini-phone small,.sp-download-platform,.sp-download-note,.sp-download-card p,.sp-download-footnote,.sp-public-footer>span) {
+  color: #5f6b80;
+}
