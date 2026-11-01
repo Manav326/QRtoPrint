@@ -5936,6 +5936,7 @@ publicApi.MapPost("/batches/{batchId:guid}/payments", async (
     StartPrintPaymentRequest request,
     HttpContext context,
     SmartPrintDbContext db,
+    TenantEntitlementService entitlements,
     CancellationToken ct) =>
 {
     var rawToken = context.Request.Headers["X-Print-Session"].FirstOrDefault();
@@ -5956,7 +5957,7 @@ publicApi.MapPost("/batches/{batchId:guid}/payments", async (
     if (session is null) return Results.Unauthorized();
 
     await using var transaction = await db.Database.BeginTransactionAsync(ct);
-    await new TenantEntitlementService(db).AcquireQuotaLockAsync(
+    await entitlements.AcquireQuotaLockAsync(
         session.TenantId, TenantQuotaResource.MonthlyPrintJob, ct);
     var jobs = (await db.PrintJobs.FromSqlInterpolated(
         $"SELECT * FROM \"PrintJobs\" WHERE \"TenantId\" = {session.TenantId} AND \"CustomerSessionId\" = {session.Id} AND \"BatchId\" = {batchId} FOR UPDATE")
