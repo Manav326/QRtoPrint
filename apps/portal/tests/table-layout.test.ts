@@ -16,7 +16,7 @@ test("generic portal tables allow long values to wrap inside their own cells", (
 
 test("print queue columns stay constrained and scroll inside their own viewport", () => {
   assert.match(app, /className="table-scroll queue-table-scroll"><table className="queue-jobs-table">/);
-  assert.match(styles, /\.queue-jobs-table\{[^}]*min-width:\s*1100px[^}]*table-layout:\s*fixed/s);
+  assert.match(styles, /\.queue-jobs-table\s*\{[^}]*min-width:\s*1100px[^}]*table-layout:\s*fixed/s);
   assert.match(styles, /\.queue-table-scroll\s*\{[^}]*overflow-x:\s*auto/s);
   assert.match(styles, /\.queue-jobs-table \.queue-actions\s*\{[^}]*flex-wrap:\s*wrap/s);
 });
