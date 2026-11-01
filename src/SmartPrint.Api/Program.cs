@@ -2513,10 +2513,10 @@ shop.MapPost("/print-batches/{batchId:guid}/review", async (
         });
 
     await using var transaction = await db.Database.BeginTransactionAsync(ct);
-    var lockedJobs = await db.PrintJobs.FromSqlInterpolated(
-        $"SELECT * FROM \"PrintJobs\" WHERE \"TenantId\" = {tenantId} AND \"BatchId\" = {batchId} AND \"Status\" IN ('AWAITING_SHOP_APPROVAL','AWAITING_PAYMENT','PAYMENT_REJECTED','REJECTED') FOR UPDATE")
+    var allBatchJobs = await db.PrintJobs.FromSqlInterpolated(
+        $"SELECT * FROM \"PrintJobs\" WHERE \"TenantId\" = {tenantId} AND \"BatchId\" = {batchId} FOR UPDATE")
         .ToListAsync(ct);
-    if (lockedJobs.Select(job => job.CustomerSessionId).Distinct().Count() > 1)
+    if (allBatchJobs.Select(job => job.CustomerSessionId).Distinct().Count() > 1)
     {
         await transaction.RollbackAsync(ct);
         return Results.Conflict(new
@@ -2526,6 +2526,9 @@ shop.MapPost("/print-batches/{batchId:guid}/review", async (
         });
     }
 
+    var lockedJobs = allBatchJobs
+        .Where(job => job.Status is "AWAITING_SHOP_APPROVAL" or "AWAITING_PAYMENT" or "PAYMENT_REJECTED" or "REJECTED")
+        .ToList();
     var lockedJobIds = lockedJobs.Select(job => job.Id).ToHashSet();
     if (lockedJobs.Count != reviewedIds.Length || reviewedIds.Any(id => !lockedJobIds.Contains(id)))
     {
