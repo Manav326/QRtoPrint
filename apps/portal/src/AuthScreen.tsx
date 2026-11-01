@@ -1,6 +1,7 @@
 import { useState, type FormEvent } from "react";
 import { ArrowLeft, ArrowRight, Eye, EyeOff, LockKeyhole, Mail, Printer, ShieldCheck, Sparkles, Store, UserRound } from "lucide-react";
 import { ApiError, registerShop, signIn, storeTokens, type AuthTokens } from "./api";
+import { isDesktopApp, writeDesktopSession } from "./desktop-bridge";
 
 export default function AuthScreen({ onAuthenticated }: { onAuthenticated: (tokens: AuthTokens) => void }) {
   const initialMode = window.location.pathname === "/signup" || new URLSearchParams(window.location.search).get("mode") === "register" ? "register" : "signin";
@@ -26,10 +27,15 @@ export default function AuthScreen({ onAuthenticated }: { onAuthenticated: (toke
       const tokens = mode === "register"
         ? await registerShop({ businessName, ownerName, email, password })
         : await signIn(email, password);
+      if (isDesktopApp()) {
+        // Do not enter the workspace unless the rotating session has been saved
+        // to Windows Credential Manager successfully.
+        await writeDesktopSession(JSON.stringify(tokens));
+      }
       storeTokens(tokens);
       onAuthenticated(tokens);
     } catch (exception) {
-      setError(exception instanceof ApiError ? exception.message : "Something went wrong. Please try again.");
+      setError(exception instanceof Error ? exception.message : "Something went wrong. Please try again.");
     } finally {
       setBusy(false);
     }
