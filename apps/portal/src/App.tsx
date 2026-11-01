@@ -14,7 +14,7 @@ import {
   createAgentEnrollmentCode, createCustomerSession, createPrinter, createStation,
   downloadShopDocument, getCustomerJobStatus, getShopAgentDevices, getShopJobEvents, getShopPrinters, getShopPrintJobsPage, loadShopData,
   logout, readStoredTokens, rejectShopPrintJob, rejectShopPayment, revokeAgentDevice,
-  reportCustomerUpiPayment, renewCustomerPrintSession, resumeCustomerSession, rotateStationCode, startCustomerPayment, storeTokens,
+  reportCustomerUpiPayment, renewCustomerPrintSession, resumeCustomerPrintSession, saveNativeCustomerPrintSession, clearNativeCustomerPrintSession, resumeCustomerSession, rotateStationCode, startCustomerPayment, storeTokens,
   updatePrinterActive, updateShopPaymentSettings, updateShopPricing,
   updateShopProfile, updateStationEnabled, uploadCustomerDocument, uploadCustomerDocumentLocally,
   verifyShopPayment, retryShopPdfExport, recordShopPrintRefund, previewShopPrintRefund, type CustomerPayment, type ShopPayment, type ShopPaymentSettings, type ShopRefund,
@@ -2209,23 +2209,33 @@ function CustomerEntry({publicCode}:{publicCode:string}) {
   useEffect(()=>{setLocalReady(false);},[result?.localAgent?.agentDeviceId]);
   useEffect(()=>{
     let mounted=true;
-    const storedToken=sessionStorage.getItem("qrtoprint.customer-session");
-    const resume=storedToken
-      ? resumeCustomerSession(storedToken,publicCode).catch(exception=>{
-          if (exception instanceof ApiError && exception.status === 401) {
+    const stationKey=`qrtoprint.customer-session:${publicCode}`;
+    const restore=async()=>{
+      const storedToken=sessionStorage.getItem(stationKey) ||
+        sessionStorage.getItem("qrtoprint.customer-session") ||
+        await getNativeCustomerPrintSession(publicCode);
+      let existing:Awaited<ReturnType<typeof createCustomerSession>>|null=null;
+      if(storedToken){
+        try {
+          existing=await resumeCustomerSession(storedToken,publicCode);
+        } catch(exception) {
+          if(exception instanceof ApiError&&exception.status===401){
+            sessionStorage.removeItem(stationKey);
             sessionStorage.removeItem("qrtoprint.customer-session");
-            return null;
-          }
-          throw exception;
-        })
-      : Promise.resolve(null);
-
-    void resume.then(existing=>existing??createCustomerSession(publicCode)).then(value=>{
-      if(mounted){
-        setResult(value);
-        sessionStorage.setItem("qrtoprint.customer-session",value.sessionToken);
+            await clearNativeCustomerPrintSession(publicCode);
+          } else throw exception;
+        }
       }
-    }).catch(exception=>{
+      const value=existing??await createCustomerSession(publicCode);
+      if(!mounted)return;
+      setResult(value);
+      sessionStorage.setItem(stationKey,value.sessionToken);
+      sessionStorage.removeItem("qrtoprint.customer-session");
+      // The native app encrypts this capability with Android Keystore. In a browser
+      // the call is a no-op and the normal browser session remains supported.
+      void saveNativeCustomerPrintSession(publicCode,value.sessionToken);
+    };
+    void restore().catch(exception=>{
       if(mounted)setError(exception instanceof Error?exception.message:"This QR station is unavailable.");
     }).finally(()=>{if(mounted)setLoading(false);});
     return ()=>{mounted=false;};
@@ -2274,7 +2284,7 @@ function CustomerEntry({publicCode}:{publicCode:string}) {
         <div className="entry-printer-card"><div className="entry-printer-icon"><Printer size={20}/></div><div><strong>{result.printer?.displayName||"Shop print counter"}</strong><span>{result.printer?result.printer.manufacturer+" · "+result.printer.model:"The shop will select a printer for your job."}</span></div><Status label={result.printer?.status||"Session ready"} tone="blue"/></div>
         <div className="entry-session-note"><ShieldCheck size={16}/><span>This session expires at {new Date(result.expiresUtc).toLocaleTimeString([], {hour:"2-digit",minute:"2-digit"})}. Your document access stays limited to this shop session.</span></div>
         <CustomerLocalConnection localAgent={result.localAgent} onReady={setLocalReady}/>
-        <CustomerPrintFlow sessionToken={result.sessionToken} paymentOptions={result.paymentOptions} localAgent={result.localAgent} localReady={localReady}/>
+        <CustomerPrintFlow publicCode={publicCode} sessionToken={result.sessionToken} paymentOptions={result.paymentOptions} localAgent={result.localAgent} localReady={localReady}/>
       </>:null}
     </main>
     <footer className="customer-entry-footer">© 2026 SmartPrint by QuantaEdge · Secure customer printing</footer>
@@ -2479,7 +2489,7 @@ function CustomerLocalConnection({localAgent,onReady}:{localAgent:CustomerLocalA
 
 
 type StoredCustomerDraft = {
-  sessionToken: string;
+  sessionMarker: string;
   uploaded: UploadedPrintJob;
   uploadedBatch?: UploadedPrintJob[];
   uploadedFileFingerprints?: string[];
@@ -2491,19 +2501,20 @@ function customerFileFingerprint(file:File):string {
   return `${file.name}\u0000${file.size}\u0000${file.lastModified}\u0000${file.type}`;
 }
 
-function readStoredCustomerDraft(sessionToken:string):StoredCustomerDraft|null {
+function readStoredCustomerDraft(publicCode:string,sessionToken:string):StoredCustomerDraft|null {
   try {
-    const raw=sessionStorage.getItem("qrtoprint.customer-active-job");
+    const raw=localStorage.getItem(`qrtoprint.customer-active-job:${publicCode}`);
     if(!raw)return null;
     const draft=JSON.parse(raw) as StoredCustomerDraft;
-    return draft.sessionToken===sessionToken&&(draft.uploaded?.job?.id||draft.uploadedBatch?.length)?draft:null;
+    return draft.sessionMarker===sessionToken.slice(-16)&&
+      (draft.uploaded?.job?.id||draft.uploadedBatch?.length)?draft:null;
   } catch {
     return null;
   }
 }
 
-function CustomerPrintFlow({sessionToken,paymentOptions,localAgent,localReady}:{sessionToken:string;paymentOptions:{upiEnabled:boolean;upiId?:string|null;payeeName?:string|null;cashEnabled:boolean};localAgent:CustomerLocalAgent|null;localReady:boolean}) {
-  const initialDraft=readStoredCustomerDraft(sessionToken);
+function CustomerPrintFlow({publicCode,sessionToken,paymentOptions,localAgent,localReady}:{publicCode:string;sessionToken:string;paymentOptions:{upiEnabled:boolean;upiId?:string|null;payeeName?:string|null;cashEnabled:boolean};localAgent:CustomerLocalAgent|null;localReady:boolean}) {
+  const initialDraft=readStoredCustomerDraft(publicCode,sessionToken);
   const [files,setFiles]=useState<File[]>([]);
   const [selectedFileIndex,setSelectedFileIndex]=useState(0);
   const file=files[selectedFileIndex]??null;
@@ -2515,6 +2526,7 @@ function CustomerPrintFlow({sessionToken,paymentOptions,localAgent,localReady}:{
   const [uploadProgress,setUploadProgress]=useState<{completed:number;total:number}|null>(null);
   const [quote,setQuote]=useState<PrintQuoteResult|null>(()=>initialDraft?.quote??null);
   const [jobStatus,setJobStatus]=useState<CustomerJobStatus|null>(null);
+  const [batchStatuses,setBatchStatuses]=useState<Record<string,CustomerJobStatus>>({});
   const [payment,setPayment]=useState<CustomerPayment|null>(null);
   const [paymentReference,setPaymentReference]=useState("");
   const [paymentMethod,setPaymentMethod]=useState<"UPI"|"CASH">(paymentOptions.upiEnabled?"UPI":"CASH");
@@ -2536,19 +2548,57 @@ function CustomerPrintFlow({sessionToken,paymentOptions,localAgent,localReady}:{
   },[paymentOptions.upiEnabled,paymentOptions.cashEnabled]);
 
   useEffect(()=>{
+    const storageKey=`qrtoprint.customer-active-job:${publicCode}`;
     if(!uploaded&&uploadedBatch.length===0){
-      sessionStorage.removeItem("qrtoprint.customer-active-job");
+      localStorage.removeItem(storageKey);
       return;
     }
-    sessionStorage.setItem("qrtoprint.customer-active-job",JSON.stringify({
-      sessionToken,
+    // Store only job metadata, never the bearer session capability.
+    localStorage.setItem(storageKey,JSON.stringify({
+      sessionMarker:sessionToken.slice(-16),
       uploaded: uploaded??uploadedBatch[0],
       uploadedBatch,
       uploadedFileFingerprints,
       batchId,
       quote
     } satisfies StoredCustomerDraft));
-  },[sessionToken,uploaded,uploadedBatch,uploadedFileFingerprints,batchId,quote]);
+  },[publicCode,sessionToken,uploaded,uploadedBatch,uploadedFileFingerprints,batchId,quote]);
+
+  const batchStatusKey=(uploadedBatch.length?uploadedBatch:[uploaded].filter(Boolean) as UploadedPrintJob[]).map(item=>item.job.id).join("|");
+
+  useEffect(()=>{
+    const items=uploadedBatch.length?uploadedBatch:(uploaded?[uploaded]:[]);
+    if(items.length===0)return;
+    let active=true;
+    let refreshing=false;
+    const refreshAll=async()=>{
+      if(refreshing)return;
+      refreshing=true;
+      try{
+        const results=await Promise.all(items.map(async item=>{
+          try{return [item.job.id,await getCustomerJobStatus(sessionToken,item.job.id)] as const;}
+          catch{return null;}
+        }));
+        if(!active)return;
+        const fresh=Object.fromEntries(results.filter((item):item is readonly [string,CustomerJobStatus]=>item!==null));
+        setBatchStatuses(current=>({...current,...fresh}));
+        const selectedId=uploaded?.job.id;
+        if(selectedId&&fresh[selectedId]){
+          const selected=fresh[selectedId];
+          if(selected.status==="Uploaded"||selected.status==="UPLOADED"||selected.status==="AWAITING_CONFIGURATION"){
+            setJobStatus(null);
+            setPayment(null);
+          } else {
+            setJobStatus(selected);
+            setPayment(selected.payment??null);
+          }
+        }
+      } finally {refreshing=false;}
+    };
+    void refreshAll();
+    const timer=window.setInterval(()=>void refreshAll(),30000);
+    return ()=>{active=false;window.clearInterval(timer);};
+  },[sessionToken,batchStatusKey]);
 
   useEffect(()=>{
     if(!uploaded)return;
@@ -2761,10 +2811,14 @@ function CustomerPrintFlow({sessionToken,paymentOptions,localAgent,localReady}:{
     {files.length>0&&uploadMode==="CLOUD"&&localAgent&&<small className="customer-upload-local-note">Cloud-assisted fallback: files are uploaded encrypted to the API before being transferred to the shop computer.</small>}
     {uploaded&&<>
       {uploadedBatch.length>1&&<div className="customer-uploaded-batch">
-        <div className="customer-uploaded-batch-head"><strong>Batch review · {uploadedBatch.length} files</strong><span>Each document is quoted, paid and managed independently.</span></div>
+        <div className="customer-uploaded-batch-head"><strong>Batch review · {uploadedBatch.length} files</strong><span>Each file's shop status refreshes automatically.</span></div>
         {uploadedBatch.map((item,index)=><button type="button" key={item.job.id} className={uploaded.job.id===item.job.id?"customer-uploaded-batch-item active":"customer-uploaded-batch-item"} onClick={()=>selectUploadedFile(item)}>
           <span className="batch-file-index">{index+1}</span><span className="batch-file-copy"><strong>{item.document.originalFileName}</strong><small>{formatBytes(item.document.sizeBytes)} · {item.job.pageCount} {item.job.pageCount===1?"page":"pages"}</small></span>
-          <Status label={item.job.id===uploaded.job.id?"Selected":"Uploaded"} tone={item.job.id===uploaded.job.id?"blue":"green"}/>
+          <Status
+            label={prettyStatus(batchStatuses[item.job.id]?.status??item.job.status??"UPLOADED")}
+            tone={["REJECTED","PAYMENT_REJECTED"].includes((batchStatuses[item.job.id]?.status??item.job.status??"").toUpperCase())?"red":
+              ["COMPLETED","PAID_AUTHORISED","AWAITING_PAYMENT"].includes((batchStatuses[item.job.id]?.status??item.job.status??"").toUpperCase())?"green":"amber"}
+          />
         </button>)}
       </div>}
       <div className="uploaded-document-card"><div className="uploaded-document-icon"><FileText size={18}/></div><div><strong>{uploaded.document.originalFileName}</strong><span>{uploaded.job.pageCount} {uploaded.job.pageCount===1?"page":"pages"} · {formatBytes(uploaded.document.sizeBytes)} · Validated</span></div><Status label="Uploaded" tone="green"/></div>
