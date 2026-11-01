@@ -63,6 +63,8 @@ class MainActivityInstrumentedTest {
 
     @Test
     fun systemBackReturnsFromAccountToThePreviouslySelectedDestination() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        CustomerAccountStore(context).clear()
         ActivityScenario.launch(MainActivity::class.java).use {
             val navigationLabel = com.google.android.material.R.id.navigation_bar_item_small_label_view
             onView(allOf(withId(navigationLabel), withText("Activity"))).perform(click())
