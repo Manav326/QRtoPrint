@@ -89,7 +89,7 @@ class DocumentViewerInstrumentedTest {
                 onView(withText("Photo 1 of 2")).check(matches(isDisplayed()))
                 onView(withContentDescription("Image preview")).perform(swipeLeft())
                 onView(withText("Photo 2 of 2")).check(matches(isDisplayed()))
-                onView(withContentDescription("Back to My Files")).perform(click())
+                onView(withContentDescription("Back to ${directory.name}")).perform(click())
                 onView(withText(selected.name)).check(matches(isDisplayed()))
             }
         } finally {
