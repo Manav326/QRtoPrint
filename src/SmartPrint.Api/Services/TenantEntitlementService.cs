@@ -173,13 +173,13 @@ public sealed class TenantEntitlementService(SmartPrintDbContext db)
                     item.CreatedUtc >= periodStart &&
                     item.CreatedUtc < periodEnd,
             cancellationToken);
-        var activeLocalReservations = await db.LocalPrintUploadTickets.AsNoTracking().LongCountAsync(
+        var unmaterializedLocalReservations = await db.LocalPrintUploadTickets.AsNoTracking().LongCountAsync(
             item => item.TenantId == tenantId &&
-                    item.CompletedUtc == null &&
-                    item.ExpiresUtc > now &&
                     item.CreatedUtc >= periodStart &&
-                    item.CreatedUtc < periodEnd,
+                    item.CreatedUtc < periodEnd &&
+                    (item.CompletedUtc != null || item.ExpiresUtc > now) &&
+                    !db.PrintJobs.Any(job => job.TenantId == item.TenantId && job.Id == item.PrintJobId),
             cancellationToken);
-        return checked(createdJobs + activeLocalReservations);
+        return checked(createdJobs + unmaterializedLocalReservations);
     }
 }
