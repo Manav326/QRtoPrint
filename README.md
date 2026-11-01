@@ -37,8 +37,8 @@ CI builds the Android debug APK and runs JVM unit tests. A real-device matrix (Q
 
 The public landing page links to the latest SmartPrint release:
 
-- Windows shop installer: `https://github.com/Manav326/QRtoPrint/releases/latest/download/SmartPrint-Windows-Setup.exe`
-- Android customer APK (once production signing is configured): `https://github.com/Manav326/QRtoPrint/releases/latest/download/SmartPrint-Android.apk`
+- Windows shop installer: resolved from the latest published stable release metadata.
+- Android customer APK: resolved from the latest published stable release metadata when that release contains the verified signed APK.
 
 The Windows installer is intentionally unsigned for the interim beta channel. The website marks it **Available** with a compact status tag and a short note that Windows may show a first-run security prompt. Some managed Windows 11 devices may block unsigned installers. Do not advise customers to disable Windows security protections. The Android card stays **Coming soon** until the production signing keystore is configured.
 
@@ -59,7 +59,7 @@ Keep the Android keystore and its passwords backed up securely. Every Android up
 
 The future Microsoft Store channel will be a separate MSIX package, not the current EXE installer. Microsoft Store submissions of accepted MSIX packages are re-signed by Microsoft. Before Store submission, the current Windows Service and firewall installation architecture must be validated against MSIX packaging and restricted capabilities.
 
-The release workflow builds the Android app against the repository variable `SMARTPRINT_PUBLIC_BASE_URL`. It defaults to `https://qr-test.paintpulp.com`; set that GitHub Actions variable to the current canonical public HTTPS origin before building a release for a different deployment.
+The release and CI workflows require the repository Actions variable `SMARTPRINT_PUBLIC_BASE_URL`. No production host fallback is embedded in the Gradle build or installer scripts; a missing or invalid value fails validation before packaging.
 
 The guided **SmartPrint Desktop** installer does not ask the shop owner for a pairing code, API URL, or PowerShell command. After sign-in, the desktop requests a short-lived, single-use enrollment authorization from the authenticated shop API and sends it directly to the local Windows Agent over its ACL-protected, remote-client-rejecting named pipe. The Agent stores its device secret with DPAPI LocalMachine protection. For an existing pairing, startup checks the saved identity; an owner-revoked computer is not silently re-enrolled and requires one explicit **Reconnect this computer** action after the server confirms revocation. A computer paired to another active shop cannot be transferred until that shop revokes it. The separate **Agent-only/manual deployment** workflow below still uses a one-time code from **Shop workspace → Print Agent → Generate pairing code**; that code expires after 10 minutes. The guided installer stages Agent files in a version/build-specific folder, switches the Windows service only after the new files are present, and restores the previous executable path and running state if the new service cannot be started. Superseded Agent files are removed only after the replacement service and firewall rule are confirmed healthy.
 
