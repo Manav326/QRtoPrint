@@ -394,6 +394,40 @@ public sealed class AgentLocalQueueStoreTests
         finally { Directory.Delete(root, recursive: true); }
     }
 
+    [Fact]
+    public async Task PendingPaymentUploadIsRemovedOnlyAfterPlatformDeadlineAuthorisesIt()
+    {
+        var root = CreateTemporaryDirectory();
+        try
+        {
+            var store = new AgentLocalQueueStore(root);
+            await store.InitializeAsync(CancellationToken.None);
+            var bytes = "Pending payment source remains protected"u8.ToArray();
+            var job = CreateJob(bytes);
+            var entry = await store.EnqueueLocalUploadAsync(job, bytes, CancellationToken.None);
+            await store.MarkLocalUploadFinalizedAsync(job.Id, CancellationToken.None);
+
+            Assert.Contains(store.GetPendingPaymentLocalUploads(), item => item.JobId == job.Id);
+            Assert.Equal(0, await store.PruneRetainedEntriesAsync(
+                DateTimeOffset.UtcNow.AddDays(365), TimeSpan.FromDays(1), root, CancellationToken.None));
+            Assert.True(File.Exists(entry.DocumentPath));
+
+            var deleteAfter = DateTimeOffset.UtcNow.AddDays(-1);
+            await Assert.ThrowsAsync<InvalidOperationException>(() =>
+                store.DeleteExpiredPendingPaymentUploadAsync(
+                    job.Id, deleteAfter, deleteAfter.AddDays(-1), CancellationToken.None));
+
+            await store.DeleteExpiredPendingPaymentUploadAsync(
+                job.Id, deleteAfter, DateTimeOffset.UtcNow, CancellationToken.None);
+            Assert.Null(store.Find(job.Id));
+            Assert.False(File.Exists(entry.DocumentPath));
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
     private static AgentClaimedJob CreateJob(byte[] content)
     {
         var hash = Convert.ToHexString(SHA256.HashData(content)).ToLowerInvariant();
