@@ -281,7 +281,7 @@ jobs:
             const tag = process.env.RELEASE_TAG;
             const includeAndroid = process.env.ANDROID_RELEASE_AVAILABLE === "true";
 
-            if (!/^v\\d+\\.\\d+\\.\\d+$/.test(tag)) {
+            if (!/^v\d+\.\d+\.\d+$/.test(tag)) {
               core.setFailed("Refusing to publish a non-stable SmartPrint release tag: " + tag);
               return;
             }
@@ -292,8 +292,8 @@ jobs:
             const artifactsDir = path.join(process.env.GITHUB_WORKSPACE, "artifacts");
             const checksumsText = fs.readFileSync(path.join(artifactsDir, "SHA256SUMS.txt"), "utf8");
             const checksums = new Map();
-            for (const line of checksumsText.trim().split(/\\r?\\n/)) {
-              const match = line.match(/^([a-f0-9]{64})\\s+\\*?(.+)$/i);
+            for (const line of checksumsText.trim().split(/\r?\n/)) {
+              const match = line.match(/^([a-f0-9]{64})\s+\*?(.+)$/i);
               if (!match) throw new Error("Invalid SHA256SUMS.txt entry: " + line);
               checksums.set(match[2], match[1].toLowerCase());
             }
