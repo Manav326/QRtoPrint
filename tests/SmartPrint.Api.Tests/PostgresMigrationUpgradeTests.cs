@@ -25,11 +25,15 @@ public sealed class PostgresMigrationUpgradeTests
         await using var db = new SmartPrintDbContext(options);
         await db.Database.EnsureDeletedAsync();
 
-        var discoveredMigrations = db.Database.GetMigrations().ToArray();
-        Assert.Contains("202610310010_CustomerPrintAccounts", discoveredMigrations);
+        var discoveredMigrations = db.GetService<IMigrationsAssembly>();
+        Assert.Equal(
+            "202610310010_CustomerPrintAccounts",
+            discoveredMigrations.FindMigrationId(nameof(CustomerPrintAccounts)));
 
         var migrator = db.GetService<IMigrator>();
-        await migrator.MigrateAsync("202610310010_CustomerPrintAccounts");
+        // Existing migration IDs use a legacy 12-digit prefix, so resolve this historical
+        // migration by its stable name rather than having EF treat the prefix as a full ID.
+        await migrator.MigrateAsync(nameof(CustomerPrintAccounts));
         await migrator.MigrateAsync();
 
         var settings = await db.PlatformOperationalSettings.SingleAsync(
