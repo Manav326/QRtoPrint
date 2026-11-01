@@ -112,7 +112,24 @@ async function assertNoHorizontalOverflow(page, route, viewport) {
           right: Math.round(rect.right)
         };
       });
-    return { viewport: width, rootWidth, bodyWidth, offenders };
+    const topbar = document.querySelector(".topbar");
+    const topbarLeft = topbar?.querySelector(".topbar-left");
+    const topbarActions = topbar?.querySelector(".topbar-actions");
+    const routeTitle = topbar?.querySelector(".breadcrumb strong");
+    const leftRect = topbarLeft?.getBoundingClientRect();
+    const actionsRect = topbarActions?.getBoundingClientRect();
+    const titleRect = routeTitle?.getBoundingClientRect();
+    return {
+      viewport: width,
+      rootWidth,
+      bodyWidth,
+      offenders,
+      header: topbar && topbarLeft && topbarActions ? {
+        overlap: leftRect.right > actionsRect.left + 1,
+        routeTitleHeight: titleRect?.height ?? 0,
+        routeTitleWhiteSpace: routeTitle ? getComputedStyle(routeTitle).whiteSpace : "missing"
+      } : null
+    };
   });
   assert.ok(
     measurement.rootWidth <= viewport.width + 1 && measurement.bodyWidth <= viewport.width + 1,
@@ -123,6 +140,11 @@ async function assertNoHorizontalOverflow(page, route, viewport) {
     0,
     `${route.label} has interactive controls clipped at ${viewport.width}px: ${JSON.stringify(measurement.offenders)}`
   );
+  if (measurement.header) {
+    assert.equal(measurement.header.overlap, false, `${route.label} top-bar columns overlap at ${viewport.width}px.`);
+    assert.equal(measurement.header.routeTitleWhiteSpace, "nowrap", `${route.label} route title must stay on one line.`);
+    assert.ok(measurement.header.routeTitleHeight <= 28, `${route.label} route title wrapped at ${viewport.width}px.`);
+  }
   return measurement;
 }
 
@@ -399,7 +421,7 @@ try {
     assert.equal(await page.evaluate(() => localStorage.getItem("qrtoprint.theme")), "dark");
 
     await page.getByLabel("Email address").fill("theme-qa@example.invalid");
-    await page.getByLabel("Password").fill("ThemeQa-Password-2026!");
+    await page.locator('input[autocomplete="current-password"]').fill("ThemeQa-Password-2026!");
     const signInLabel = route.auth === "admin" ? "Sign in to administration" : "Sign in to workspace";
     await page.getByRole("button", { name: signInLabel }).click();
     await waitForRoute(page, ".app-shell");
