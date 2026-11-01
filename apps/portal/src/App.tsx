@@ -3195,15 +3195,24 @@ function CustomerPrintFlow({publicCode,sessionToken,paymentOptions,localAgent,lo
   }
 
   async function beginPayment(method:"UPI"|"CASH") {
-    if(!uploaded||!batchId)return;
+    if(!uploaded)return;
     setBusy(true);setError("");
     try {
-      const attempt=await startCustomerBatchPayment(sessionToken,batchId,method);
-      setBatchPayment(attempt);
-      setPaymentMethod(method);
-      await refreshBatchStatuses();
+      if(batchId&&!(payment&&!payment.batchPayment)){
+        const attempt=await startCustomerBatchPayment(sessionToken,batchId,method);
+        setBatchPayment(attempt);
+        setPaymentMethod(method);
+        await refreshBatchStatuses();
+      } else {
+        const attempt=await startCustomerPayment(sessionToken,uploaded.job.id,method);
+        setPayment(attempt);
+        setPaymentMethod(method);
+        const refreshed=await getCustomerJobStatus(sessionToken,uploaded.job.id);
+        setJobStatus(refreshed);
+        setPayment(refreshed.payment??null);
+      }
     } catch(exception) {
-      setError(exception instanceof ApiError?exception.message:"Could not start this batch payment.");
+      setError(exception instanceof ApiError?exception.message:"Could not start this payment method.");
     } finally {setBusy(false);}
   }
 
