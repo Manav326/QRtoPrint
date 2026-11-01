@@ -40,7 +40,7 @@ The public landing page reads the latest stable GitHub release metadata and rend
 - Windows shop installer: resolved from the latest published stable release metadata.
 - Android customer APK: resolved from the latest published stable release metadata when that release contains the verified signed APK.
 
-The Windows installer is intentionally unsigned for the interim beta channel. The website marks it **Available** with a compact status tag and a short note that Windows may show a first-run security prompt. Some managed Windows 11 devices may block unsigned installers. Do not advise customers to disable Windows security protections. The Android card stays **Coming soon** until the production signing keystore is configured.
+The Windows installer is intentionally unsigned for the interim beta channel. The website marks it **Available** only when the latest stable release actually contains the installer, and shows a short note that Windows may display a first-run security prompt. Some managed Windows 11 devices may block unsigned installers. Do not advise customers to disable Windows security protections. The Android card stays **Coming soon** until the production signing keystore is configured.
 
 Every stable release is retained indefinitely as its own versioned GitHub Release; publishing a newer version updates the `latest` pointer but does not delete or replace older versions. The release workflow requires all four Android signing secrets, uploads both installers to an unpublished draft, verifies the APK signature, asset names, sizes and SHA-256 manifest, and refuses to publish a release that does not contain the signed Android APK. It never creates a Windows-only partial release.
 
