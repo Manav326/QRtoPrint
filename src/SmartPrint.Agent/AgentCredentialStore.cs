@@ -10,6 +10,7 @@ public sealed class AgentCredentialStore
 {
     private static readonly byte[] Entropy = Encoding.UTF8.GetBytes("QRtoPrint.Agent.Identity.v1");
     private readonly string identityPath;
+    private readonly string revocationMarkerPath;
     private readonly object sync = new();
 
     public AgentCredentialStore(string? identityPath = null)
@@ -20,6 +21,8 @@ public sealed class AgentCredentialStore
                 "QRtoPrint",
                 "agent.identity")
             : Path.GetFullPath(identityPath);
+
+        revocationMarkerPath = this.identityPath + ".revoked";
     }
 
     public AgentCredentials? Load()
@@ -27,6 +30,14 @@ public sealed class AgentCredentialStore
         lock (sync)
         {
             return LoadCore();
+        }
+    }
+
+    public bool IsRevoked()
+    {
+        lock (sync)
+        {
+            return !File.Exists(identityPath) && File.Exists(revocationMarkerPath);
         }
     }
 
@@ -55,6 +66,7 @@ public sealed class AgentCredentialStore
         lock (sync)
         {
             DeleteCore();
+            DeleteRevocationMarkerCore();
         }
     }
 
@@ -73,6 +85,7 @@ public sealed class AgentCredentialStore
             }
 
             DeleteCore();
+            WriteRevocationMarker();
             return true;
         }
     }
@@ -89,6 +102,23 @@ public sealed class AgentCredentialStore
         {
             File.Delete(temporaryPath);
         }
+    }
+
+    private void DeleteRevocationMarkerCore()
+    {
+        if (File.Exists(revocationMarkerPath))
+        {
+            File.Delete(revocationMarkerPath);
+        }
+    }
+
+    private void WriteRevocationMarker()
+    {
+        var directory = Path.GetDirectoryName(identityPath)
+            ?? throw new InvalidOperationException("Could not determine the agent identity directory.");
+        Directory.CreateDirectory(directory);
+        SecurePermissions(directory);
+        File.WriteAllText(revocationMarkerPath, DateTimeOffset.UtcNow.ToString("O"), Encoding.UTF8);
     }
 
     private static bool SecretsMatch(string currentSecret, string expectedSecret)
@@ -133,6 +163,9 @@ public sealed class AgentCredentialStore
                     {
                         File.Move(tempPath, identityPath);
                     }
+
+                    // A fresh, explicit enrollment clears a previous server revocation.
+                    DeleteRevocationMarkerCore();
                 }
                 finally
                 {

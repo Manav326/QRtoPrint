@@ -126,6 +126,30 @@ public sealed class AgentControlPipeIntegrationTests
             var preservedCredentials = credentialStore.Load();
             Assert.NotNull(preservedCredentials);
             Assert.Equal(agentSecret, preservedCredentials!.AgentSecret);
+            Assert.False(credentialStore.IsRevoked());
+
+            // A real rejection of the current identity must remain visible after
+            // the secret is cleared, so desktop startup does not silently re-enroll.
+            Assert.True(credentialStore.DeleteIfMatches(preservedCredentials));
+            Assert.True(credentialStore.IsRevoked());
+            Assert.Null(credentialStore.Load());
+            using (var revokedStatus = await SendPipeRequestAsync("status", null, timeout.Token))
+            {
+                Assert.True(revokedStatus.RootElement.GetProperty("success").GetBoolean());
+                Assert.True(revokedStatus.RootElement.GetProperty("serviceReachable").GetBoolean());
+                Assert.False(revokedStatus.RootElement.GetProperty("paired").GetBoolean());
+                Assert.Equal("REVOKED", revokedStatus.RootElement.GetProperty("status").GetString());
+            }
+
+            var renewedCredentials = preservedCredentials with
+            {
+                AgentDeviceId = Guid.NewGuid(),
+                AgentSecret = "fresh-agent-secret",
+                PairedUtc = DateTimeOffset.UtcNow
+            };
+            credentialStore.Save(renewedCredentials);
+            Assert.False(credentialStore.IsRevoked());
+            Assert.Equal(renewedCredentials.AgentDeviceId, credentialStore.Load()!.AgentDeviceId);
         }
         finally
         {

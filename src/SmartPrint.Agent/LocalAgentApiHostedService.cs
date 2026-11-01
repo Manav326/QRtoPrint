@@ -220,7 +220,9 @@ public sealed class LocalAgentApiHostedService(
                     {
                         return Results.Problem(
                             statusCode: StatusCodes.Status503ServiceUnavailable,
-                            title: "This computer is not paired with a print shop.");
+                            title: credentialStore.IsRevoked()
+                                ? "This computer's SmartPrint pairing was revoked by its shop owner."
+                                : "This computer is not paired with a print shop.");
                     }
 
                     return Results.Ok(new

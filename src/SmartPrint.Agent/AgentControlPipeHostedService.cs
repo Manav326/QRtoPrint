@@ -142,8 +142,9 @@ public sealed class AgentControlPipeHostedService(
             {
                 var credentials = credentialStore.Load();
                 var paired = credentials is not null;
+                var status = paired ? "CONNECTED" : credentialStore.IsRevoked() ? "REVOKED" : "UNPAIRED";
                 await writer.WriteLineAsync(JsonSerializer.Serialize(
-                    new PipeResponse(true, credentials?.AgentDeviceId, null, true, paired, paired ? "CONNECTED" : "UNPAIRED", localAgentApiState.IsRunning),
+                    new PipeResponse(true, credentials?.AgentDeviceId, null, true, paired, status, localAgentApiState.IsRunning),
                     PipeJsonOptions));
             }
             catch (Exception exception) when (exception is CryptographicException or IOException or JsonException or UnauthorizedAccessException)
