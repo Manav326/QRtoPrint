@@ -10,7 +10,7 @@ import PublicLandingPage from "./PublicLandingPage";
 import { getReleaseAssetUrl, usePublicRelease } from "./release-metadata";
 import PlatformAdminConsole from "./PlatformAdminConsole";
 import PlatformAdminAuthScreen from "./PlatformAdminAuthScreen";
-import { resolvePortalRoute } from "./portal-routing";
+import { resolvePortalRoute, shopPathForSection, shopSectionFromPath } from "./portal-routing";
 import {
   ApiError, isPlatformAdminSession, acceptCustomerQuote, approveShopPrintJob, assignShopPrintJobPrinter, calculateCustomerQuote, getShopCustomerHistory, getShopCustomers, getShopReportSummary,
   confirmShopPrintOutput, dispatchShopPrintJob,
@@ -104,7 +104,13 @@ function ScopeAccessDenied({ scope, onSignOut }: { scope: string; onSignOut: () 
 }
 
 function ShopConsole({ tokens, onSignOut }: { tokens: AuthTokens; onSignOut: () => Promise<void> }) {
-  const [active, setActive] = useState<Section>("Overview");
+  const [active, setActive] = useState<Section>(() => shopSectionFromPath(window.location.pathname));
+
+  useEffect(() => {
+    const syncSectionFromPath = () => setActive(shopSectionFromPath(window.location.pathname));
+    window.addEventListener("popstate", syncSectionFromPath);
+    return () => window.removeEventListener("popstate", syncSectionFromPath);
+  }, []);
   const [dark, setDark] = useState(true);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
@@ -1078,7 +1084,15 @@ function ShopConsole({ tokens, onSignOut }: { tokens: AuthTokens; onSignOut: () 
     }
   }
 
-  const navAction = (section: Section) => { setActive(section); setSidebarOpen(false); setError(""); };
+  const navAction = (section: Section) => {
+    const nextPath = shopPathForSection(section);
+    if (window.location.pathname !== nextPath) {
+      window.history.pushState({}, "", nextPath);
+    }
+    setActive(section);
+    setSidebarOpen(false);
+    setError("");
+  };
 
   if (loading && !profile) {
     return <div className={dark ? "app-shell dark boot-screen" : "app-shell light boot-screen"}><div className="boot-card"><div className="brand-mark"><QrCode size={22}/></div><div className="boot-title">Preparing your workspace</div><div className="boot-subtitle">Connecting securely to your shop…</div><div className="button-spinner boot-spinner"/></div></div>;
