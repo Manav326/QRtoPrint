@@ -6299,6 +6299,11 @@ publicApi.MapGet("/jobs/{jobId:guid}/status", async (
         batchPayment = await db.PrintBatchPayments.AsNoTracking()
             .SingleOrDefaultAsync(item => item.Id == batchPaymentId && item.TenantId == session.TenantId, ct);
     }
+    var batchFileCount = batchPayment is null
+        ? 0
+        : await db.PrintPayments.AsNoTracking()
+            .CountAsync(item => item.TenantId == session.TenantId &&
+                                item.BatchPaymentId == batchPayment.Id, ct);
     var paymentStatus = payment is null ? null : new
     {
         payment.Id,
@@ -6324,6 +6329,8 @@ publicApi.MapGet("/jobs/{jobId:guid}/status", async (
             batchPayment.Status,
             batchPayment.AmountMinor,
             batchPayment.Currency,
+            batchPayment.BatchId,
+            FileCount = batchFileCount,
             batchPayment.UpiIdSnapshot,
             batchPayment.PayeeNameSnapshot,
             batchPayment.PaymentReference,
