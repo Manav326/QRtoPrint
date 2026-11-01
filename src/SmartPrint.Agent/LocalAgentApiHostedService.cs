@@ -235,8 +235,10 @@ public sealed class LocalAgentApiHostedService(
                         apiBaseUrl = credentials.ApiBaseUrl
                     });
                 }
-                catch (CryptographicException)
+                catch (Exception exception) when (
+                    exception is CryptographicException or IOException or JsonException or UnauthorizedAccessException)
                 {
+                    logger.LogWarning("SmartPrint local identity status is unavailable ({FailureType}).", exception.GetType().Name);
                     return Results.Json(new
                     {
                         title = "The local agent identity is unavailable.",
