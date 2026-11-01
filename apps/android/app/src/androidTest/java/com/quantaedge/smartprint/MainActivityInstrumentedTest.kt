@@ -28,7 +28,7 @@ class MainActivityInstrumentedTest {
             onView(withText("Import")).check(matches(isDisplayed()))
             val label = com.google.android.material.R.id.navigation_bar_item_small_label_view
             onView(allOf(withId(label), withText("Files"))).check(matches(isDisplayed()))
-            onView(allOf(withId(label), withText("Scan"))).check(matches(isDisplayed()))
+            onView(allOf(withId(label), withText("Print"))).check(matches(isDisplayed()))
             onView(allOf(withId(label), withText("Activity"))).check(matches(isDisplayed()))
         }
     }
@@ -50,7 +50,7 @@ class MainActivityInstrumentedTest {
     fun scanDestinationUsesFocusedQrEntry() {
         ActivityScenario.launch(MainActivity::class.java).use {
             val label = com.google.android.material.R.id.navigation_bar_item_small_label_view
-            onView(allOf(withId(label), withText("Scan"))).perform(click())
+            onView(allOf(withId(label), withText("Print"))).perform(click())
             onView(withText("Connect to a shop")).check(matches(isDisplayed()))
             onView(withText("Scan QR code")).check(matches(isDisplayed()))
             onView(withText("Open My Files")).check(matches(isDisplayed()))
