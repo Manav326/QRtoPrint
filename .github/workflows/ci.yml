@@ -54,6 +54,24 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "SmartPrint desktop frontend build failed." }
           cargo check --manifest-path apps/desktop/src-tauri/Cargo.toml --target x86_64-pc-windows-msvc
           if ($LASTEXITCODE -ne 0) { throw "SmartPrint native desktop host compilation failed." }
+      - name: Generate reproducible frontend and Rust dependency locks
+        shell: pwsh
+        run: |
+          pnpm install --lockfile-only --no-frozen-lockfile
+          if ($LASTEXITCODE -ne 0) { throw "pnpm lockfile generation failed." }
+          cargo generate-lockfile --manifest-path apps/desktop/src-tauri/Cargo.toml
+          if ($LASTEXITCODE -ne 0) { throw "Cargo.lock generation failed." }
+          if (-not (Test-Path -LiteralPath "pnpm-lock.yaml")) { throw "pnpm-lock.yaml was not generated." }
+          if (-not (Test-Path -LiteralPath "apps/desktop/src-tauri/Cargo.lock")) { throw "Cargo.lock was not generated." }
+      - name: Upload generated dependency lockfiles for the PR
+        uses: actions/upload-artifact@v7
+        with:
+          name: qrtoprint-desktop-dependency-locks
+          path: |
+            pnpm-lock.yaml
+            apps/desktop/src-tauri/Cargo.lock
+          if-no-files-found: error
+          retention-days: 7
       - name: Build native Windows desktop executable
         shell: pwsh
         run: |

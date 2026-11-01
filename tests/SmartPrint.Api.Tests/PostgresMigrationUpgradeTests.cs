@@ -130,6 +130,32 @@ public sealed class PostgresMigrationUpgradeTests
         db.AddRange(tenant, agent, revokedAgent, printer, station, session, subscription, ticket);
         await db.SaveChangesAsync();
 
+        // Rollback must remain safe when revoked and replacement records share a fingerprint.
+        var indexBeforeRollback = await db.Database.SqlQueryRaw<string>(
+            """SELECT indexdef AS "Value" FROM pg_indexes
+               WHERE schemaname = current_schema()
+                 AND indexname = 'IX_AgentDevices_TenantId_FingerprintHash'""")
+            .SingleAsync();
+        Assert.Contains("WHERE", indexBeforeRollback, StringComparison.OrdinalIgnoreCase);
+
+        await migrator.MigrateAsync("202611010003_AddPlatformOperationalSettings");
+        var indexAfterRollback = await db.Database.SqlQueryRaw<string>(
+            """SELECT indexdef AS "Value" FROM pg_indexes
+               WHERE schemaname = current_schema()
+                 AND indexname = 'IX_AgentDevices_TenantId_FingerprintHash'""")
+            .SingleAsync();
+        Assert.Contains("RevokedUtc", indexAfterRollback, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("IS NULL", indexAfterRollback, StringComparison.OrdinalIgnoreCase);
+
+        await migrator.MigrateAsync();
+        var indexAfterReapply = await db.Database.SqlQueryRaw<string>(
+            """SELECT indexdef AS "Value" FROM pg_indexes
+               WHERE schemaname = current_schema()
+                 AND indexname = 'IX_AgentDevices_TenantId_FingerprintHash'""")
+            .SingleAsync();
+        Assert.Contains("RevokedUtc", indexAfterReapply, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("IS NULL", indexAfterReapply, StringComparison.OrdinalIgnoreCase);
+
         var entitlements = new TenantEntitlementService(db);
         Assert.Equal(1L, await entitlements.GetMonthlyPrintJobUsageAsync(
             tenant.Id, CancellationToken.None));

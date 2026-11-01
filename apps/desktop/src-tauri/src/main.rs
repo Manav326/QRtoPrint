@@ -5,7 +5,11 @@ use std::io::{BufRead, BufReader, Write};
 use std::time::Duration;
 
 const AGENT_STATUS_URL: &str = "http://127.0.0.1:17842/api/v1/local/status";
-const AGENT_PIPE: &str = r"\\.\pipe\QRtoPrint.SmartPrint.Agent.Control";
+const AGENT_PIPE_NAME: &str = "QRtoPrint.SmartPrint.Agent.Control";
+
+fn agent_pipe_path() -> String {
+    format!(r"\\.\pipe\{AGENT_PIPE_NAME}")
+}
 const SESSION_TARGET: &str = "QRtoPrint.SmartPrint.Session";
 
 #[derive(Debug, Serialize)]
@@ -87,7 +91,7 @@ fn enroll_local_agent(enrollment_code: String) -> Result<AgentPipeResponse, Stri
         let mut pipe = OpenOptions::new()
             .read(true)
             .write(true)
-            .open(AGENT_PIPE)
+            .open(agent_pipe_path())
             .map_err(|_| "The SmartPrint background service is not ready. Repair or reinstall SmartPrint, then retry.".to_string())?;
 
         let request = serde_json::to_vec(&AgentPipeRequest { operation: "enroll", enrollment_code: &enrollment_code })
@@ -202,6 +206,16 @@ mod credential_store {
             }
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::agent_pipe_path;
+
+    #[test]
+    fn agent_pipe_uses_the_canonical_windows_named_pipe_namespace() {
+        assert_eq!(agent_pipe_path(), r"\\.\pipe\QRtoPrint.SmartPrint.Agent.Control");
     }
 }
 

@@ -9,10 +9,17 @@ namespace SmartPrint.Agent;
 public sealed class AgentCredentialStore
 {
     private static readonly byte[] Entropy = Encoding.UTF8.GetBytes("QRtoPrint.Agent.Identity.v1");
-    private readonly string identityPath = Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
-        "QRtoPrint",
-        "agent.identity");
+    private readonly string identityPath;
+
+    public AgentCredentialStore(string? identityPath = null)
+    {
+        this.identityPath = string.IsNullOrWhiteSpace(identityPath)
+            ? Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
+                "QRtoPrint",
+                "agent.identity")
+            : Path.GetFullPath(identityPath);
+    }
 
     public AgentCredentials? Load()
     {

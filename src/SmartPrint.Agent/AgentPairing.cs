@@ -41,7 +41,11 @@ public static class AgentPairing
         Console.WriteLine("Do not copy or share the secret. Start the QRtoPrint Smart Print Agent service next.");
     }
 
-    public static async Task<AgentCredentials> EnrollAsync(string apiBaseUrl, string enrollmentCode, CancellationToken cancellationToken)
+    public static async Task<AgentCredentials> EnrollAsync(
+        string apiBaseUrl,
+        string enrollmentCode,
+        CancellationToken cancellationToken,
+        AgentCredentialStore? credentialStore = null)
     {
         if (!OperatingSystem.IsWindows())
             throw new PlatformNotSupportedException("The Smart Print Agent can only be paired on Windows.");
@@ -88,7 +92,7 @@ public static class AgentPairing
             ?? throw new InvalidOperationException("The server returned an empty pairing response.");
 
         var credentials = new AgentCredentials(apiUri.ToString().TrimEnd('/'), enrolled.AgentDeviceId, enrolled.AgentSecret, DateTimeOffset.UtcNow);
-        new AgentCredentialStore().Save(credentials);
+        (credentialStore ?? new AgentCredentialStore()).Save(credentials);
         return credentials;
     }
 

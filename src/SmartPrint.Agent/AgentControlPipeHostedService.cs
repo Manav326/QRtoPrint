@@ -9,9 +9,11 @@ namespace SmartPrint.Agent;
 
 public sealed class AgentControlPipeHostedService(
     IConfiguration configuration,
-    ILogger<AgentControlPipeHostedService> logger) : BackgroundService
+    ILogger<AgentControlPipeHostedService> logger,
+    IAgentEnrollmentHandler enrollmentHandler) : BackgroundService
 {
     public const string PipeName = "QRtoPrint.SmartPrint.Agent.Control";
+    public const string PipePath = @"\\.\pipe\" + PipeName;
     private const int MaximumRequestBytes = 4096;
     private static readonly JsonSerializerOptions PipeJsonOptions = new(JsonSerializerDefaults.Web);
 
@@ -142,7 +144,7 @@ public sealed class AgentControlPipeHostedService(
 
         try
         {
-            var credentials = await AgentPairing.EnrollAsync(apiBaseUrl, request.EnrollmentCode, ct);
+            var credentials = await enrollmentHandler.EnrollAsync(apiBaseUrl, request.EnrollmentCode, ct);
             logger.LogInformation("SmartPrint Agent enrollment completed for device {AgentDeviceId}.", credentials.AgentDeviceId);
             await writer.WriteLineAsync(JsonSerializer.Serialize(new PipeResponse(true, credentials.AgentDeviceId, null), PipeJsonOptions));
         }

@@ -24,6 +24,7 @@ builder.Services.AddHttpClient("cloud", client =>
     client.Timeout = TimeSpan.FromSeconds(20);
 });
 builder.Services.AddSingleton<AgentCredentialStore>();
+builder.Services.AddSingleton<IAgentEnrollmentHandler, AgentEnrollmentHandler>();
 builder.Services.AddSingleton<WindowsPrinterDiscovery>();
 builder.Services.AddSingleton<AgentLocalQueueStore>();
 builder.Services.AddSingleton<WindowsPrintExecutor>();

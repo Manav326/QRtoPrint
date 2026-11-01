@@ -23,10 +23,9 @@ public sealed class ActiveAgentFingerprints : Migration
 
     protected override void Down(MigrationBuilder migrationBuilder)
     {
-        migrationBuilder.Sql("""
-            DROP INDEX IF EXISTS "IX_AgentDevices_TenantId_FingerprintHash";
-            CREATE UNIQUE INDEX "IX_AgentDevices_TenantId_FingerprintHash"
-                ON "AgentDevices" ("TenantId", "FingerprintHash");
-            """);
+        // Intentionally retain the filtered index on rollback. Re-enrollment creates
+        // a new active row while preserving revoked history; restoring the former
+        // unfiltered unique index would fail or require deleting legitimate records.
+        // The filtered index is also the invariant represented by the current EF model.
     }
 }
