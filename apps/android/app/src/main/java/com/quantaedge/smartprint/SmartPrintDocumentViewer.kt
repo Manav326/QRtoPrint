@@ -130,7 +130,7 @@ class SmartPrintDocumentViewer(
         clipToPadding = false
 
         updateBreadcrumbs()
-        breadcrumbScroller.addView(breadcrumbRow, HorizontalScrollView.LayoutParams(-2, -1))
+        breadcrumbScroller.addView(breadcrumbRow, FrameLayout.LayoutParams(-2, -1))
         addView(breadcrumbScroller, LinearLayout.LayoutParams(-1, dp(35)))
 
         stage.setBackgroundColor(Color.rgb(24, 26, 36))
