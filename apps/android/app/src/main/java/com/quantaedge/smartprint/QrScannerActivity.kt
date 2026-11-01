@@ -304,6 +304,11 @@ class QrScannerActivity : AppCompatActivity() {
             text = if (permanentlyDenied) "Open settings" else "Allow camera"
             isAllCaps = false
             cornerRadius = dp(12)
+            minHeight = dp(46)
+            insetTop = 0
+            insetBottom = 0
+            backgroundTintList = ColorStateList.valueOf(getColor(R.color.qp_primary))
+            setTextColor(getColor(R.color.qp_primary_content))
             setOnClickListener {
                 if (permanentlyDenied) {
                     startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:" + packageName)))
@@ -327,6 +332,14 @@ class QrScannerActivity : AppCompatActivity() {
         val retry = MaterialButton(this).apply {
             text = "Try again"
             isAllCaps = false
+            minHeight = dp(44)
+            insetTop = 0
+            insetBottom = 0
+            cornerRadius = dp(12)
+            backgroundTintList = ColorStateList.valueOf(getColor(R.color.qp_card))
+            strokeColor = ColorStateList.valueOf(getColor(R.color.qp_outline))
+            strokeWidth = dp(1)
+            setTextColor(getColor(R.color.qp_text))
             setOnClickListener {
                 camera = null
                 bindCamera()
