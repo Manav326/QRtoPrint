@@ -3088,8 +3088,11 @@ function CustomerPrintFlow({publicCode,sessionToken,paymentOptions,localAgent,lo
         const status=uploaded?.job.id===item.job.id&&jobStatus?.status
           ?jobStatus.status
           :batchStatuses[item.job.id]?.status??item.job.status;
-        if(status!=="QUOTE_EXPIRED"&&existingQuote&&existingQuote.status!=="QUOTE_EXPIRED")continue;
-        if(!["AWAITING_CONFIGURATION","UPLOADED","Uploaded","QUOTE_EXPIRED"].includes(status))continue;
+        const quoteExpired=quoteExpiredForBatchItem(item);
+        if(!quoteExpired&&existingQuote&&existingQuote.status!=="QUOTE_EXPIRED")continue;
+        if(quoteExpired
+          ? !["QUOTE_EXPIRED","AWAITING_CUSTOMER_APPROVAL","AWAITING_SHOP_APPROVAL","AWAITING_PAYMENT","PAYMENT_REJECTED"].includes(status)
+          : !["AWAITING_CONFIGURATION","UPLOADED","Uploaded"].includes(status))continue;
         const settings=printSettingsByJobId[item.job.id]??{colourMode:"Mono" as const,isDuplex:false,copies:1};
         try {
           nextQuotes[item.job.id]=await calculateCustomerQuote(sessionToken,item.job.id,{
@@ -3365,6 +3368,14 @@ function CustomerPrintFlow({publicCode,sessionToken,paymentOptions,localAgent,lo
     uploaded?.job.id===item.job.id&&jobStatus?.status
       ? jobStatus.status
       : batchStatuses[item.job.id]?.status??item.job.status;
+  const quoteExpiredForBatchItem=(item:UploadedPrintJob)=>{
+    const status=statusForBatchItem(item);
+    if(status==="QUOTE_EXPIRED")return true;
+    const expiry=batchStatuses[item.job.id]?.quoteExpiresUtc??quotesByJobId[item.job.id]?.quoteExpiresUtc;
+    if(!expiry)return ["AWAITING_CUSTOMER_APPROVAL","AWAITING_SHOP_APPROVAL","AWAITING_PAYMENT","PAYMENT_REJECTED"].includes(status);
+    const expiresAt=Date.parse(expiry);
+    return !Number.isFinite(expiresAt)||expiresAt<=Date.now();
+  };
   const batchCheckoutStatuses=new Set([
     "REJECTED","REFUNDED","AWAITING_PAYMENT","PAYMENT_REJECTED",
     "AWAITING_CUSTOMER_PAYMENT","PAYMENT_REPORTED","AWAITING_COUNTER_PAYMENT",
@@ -3384,7 +3395,9 @@ function CustomerPrintFlow({publicCode,sessionToken,paymentOptions,localAgent,lo
   });
   const hasSelectedLegacyIndividualPayment=payment!==null&&!payment.batchPayment&&
     ["AWAITING_CUSTOMER_PAYMENT","CUSTOMER_REPORTED","CASH_AWAITING_PAYMENT","VERIFIED","PARTIALLY_REFUNDED"].includes(payment.status);
-  const batchCheckoutVisible=Boolean(batchId)&&!hasLegacyIndividualPayment&&batchCheckoutReady&&
+  const acceptedQuoteExpired=quoteItems.some(item=>
+    !["REJECTED","REFUNDED"].includes(statusForBatchItem(item))&&quoteExpiredForBatchItem(item));
+  const batchCheckoutVisible=Boolean(batchId)&&!hasLegacyIndividualPayment&&!acceptedQuoteExpired&&batchCheckoutReady&&
     (batchPayableItems.length>0||(batchPayment!==null&&batchPayment.status!=="REJECTED"));
   const batchCheckoutUsesPayment=batchPayment!==null&&batchPayment.status!=="REJECTED";
   const legacyIndividualPayment=!batchId||hasSelectedLegacyIndividualPayment;
@@ -3413,7 +3426,7 @@ function CustomerPrintFlow({publicCode,sessionToken,paymentOptions,localAgent,lo
       :"PAYMENT FOR ACCEPTED FILES"
     :"PAY FOR ACCEPTED FILES";
   const quoteEntries=quoteItems.map(item=>({item,quote:quotesByJobId[item.job.id]}))
-    .filter(entry=>!!entry.quote&&statusForBatchItem(entry.item)!=="QUOTE_EXPIRED");
+    .filter(entry=>!!entry.quote&&!quoteExpiredForBatchItem(entry.item));
   const acceptedQuoteEntries=quoteEntries.filter(entry=>
     !["REJECTED","REFUNDED"].includes(statusForBatchItem(entry.item))
   );
@@ -3435,10 +3448,8 @@ function CustomerPrintFlow({publicCode,sessionToken,paymentOptions,localAgent,lo
     acceptedQuoteEntries.length===quoteEligibleItems.length&&
     acceptedQuoteEntries.some(entry=>entry.quote?.status==="AWAITING_CUSTOMER_APPROVAL");
   const canCalculateBatch=quoteItems.some(item=>{
-    const status=uploaded?.job.id===item.job.id&&jobStatus?.status
-      ?jobStatus.status
-      :batchStatuses[item.job.id]?.status??item.job.status;
-    if(status==="QUOTE_EXPIRED")return true;
+    const status=statusForBatchItem(item);
+    if(quoteExpiredForBatchItem(item))return true;
     if(quotesByJobId[item.job.id]&&quotesByJobId[item.job.id].status!=="QUOTE_EXPIRED")return false;
     return !quotesByJobId[item.job.id]||quotesByJobId[item.job.id].status==="QUOTE_EXPIRED"||
       ["AWAITING_CONFIGURATION","UPLOADED","Uploaded"].includes(status);
@@ -3521,8 +3532,9 @@ function CustomerPrintFlow({publicCode,sessionToken,paymentOptions,localAgent,lo
           {uploadedBatch.filter(item=>(item.job.batchGroupName??"Loose files")===groupName).map(item=><button type="button" key={item.job.id} className={uploaded.job.id===item.job.id?"customer-uploaded-batch-item active":"customer-uploaded-batch-item"} onClick={()=>selectUploadedFile(item)}>
             <span className="batch-file-index"><FileText size={14}/></span><span className="batch-file-copy"><strong>{item.document.originalFileName}</strong><small>{item.job.pageCount} source pages × {printSettingsByJobId[item.job.id]?.copies??item.job.copies} = {item.job.pageCount*(printSettingsByJobId[item.job.id]?.copies??item.job.copies)} printed · {printSettingsByJobId[item.job.id]?.colourMode??"Mono"} · {(printSettingsByJobId[item.job.id]?.isDuplex??false)?"Double-sided":"Single-sided"} · {item.job.quotedAmountMinor>0?formatMoney(item.job.quotedAmountMinor,item.job.currency):"Awaiting quote"}</small></span>
             <Status
-              label={prettyStatus(batchStatuses[item.job.id]?.status??item.job.status??"UPLOADED")}
-              tone={["REJECTED","PAYMENT_REJECTED"].includes((batchStatuses[item.job.id]?.status??item.job.status??"").toUpperCase())?"red":
+              label={quoteExpiredForBatchItem(item)&&!["REJECTED","REFUNDED"].includes(statusForBatchItem(item))?"Quote expired":prettyStatus(batchStatuses[item.job.id]?.status??item.job.status??"UPLOADED")}
+              tone={quoteExpiredForBatchItem(item)&&!["REJECTED","REFUNDED"].includes(statusForBatchItem(item))?"amber":
+                ["REJECTED","PAYMENT_REJECTED"].includes((batchStatuses[item.job.id]?.status??item.job.status??"").toUpperCase())?"red":
                 ["COMPLETED","PAID_AUTHORISED","AWAITING_PAYMENT"].includes((batchStatuses[item.job.id]?.status??item.job.status??"").toUpperCase())?"green":"amber"}
             />
           </button>)}
