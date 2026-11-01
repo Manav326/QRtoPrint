@@ -10,12 +10,17 @@ if (!moduleDirectory) {
 }
 const { chromium } = await import(pathToFileURL(join(moduleDirectory, "index.mjs")).href);
 const baseUrl = process.env.SMARTPRINT_E2E_BASE_URL ?? "http://127.0.0.1:4173";
+const desktopUrl = process.env.SMARTPRINT_DESKTOP_E2E_URL ?? "http://127.0.0.1:1420";
 const artifactDirectory = process.env.RESPONSIVE_ARTIFACT_DIR ?? "artifacts/theme-responsive";
 mkdirSync(artifactDirectory, { recursive: true });
 
 const server = spawn("pnpm", [
   "--filter", "@qrtoprint/portal", "dev",
   "--host", "127.0.0.1", "--port", "4173", "--strictPort"
+], { stdio: "inherit", env: process.env });
+const desktopServer = spawn("pnpm", [
+  "--filter", "@qrtoprint/desktop", "dev",
+  "--host", "127.0.0.1", "--port", "1420", "--strictPort"
 ], { stdio: "inherit", env: process.env });
 
 let browser;
@@ -42,16 +47,16 @@ const routes = [
   { label: "admin-workspace", path: "/admin", auth: "admin", ready: ".app-shell" }
 ];
 
-async function waitForServer() {
+async function waitForServer(child, url, label) {
   for (let attempt = 0; attempt < 90; attempt += 1) {
-    if (server.exitCode !== null) throw new Error(`Portal dev server exited with code ${server.exitCode}.`);
+    if (child.exitCode !== null) throw new Error(`${label} server exited with code ${child.exitCode}.`);
     try {
-      const response = await fetch(baseUrl);
+      const response = await fetch(url);
       if (response.ok) return;
     } catch {}
     await new Promise(resolve => setTimeout(resolve, 1000));
   }
-  throw new Error("Portal dev server did not become ready within 90 seconds.");
+  throw new Error(`${label} server did not become ready within 90 seconds.`);
 }
 
 async function preparePage(context, route) {
@@ -125,11 +130,18 @@ async function assertNoHorizontalOverflow(page, route, viewport) {
 async function assertRouteContrast(page, route) {
   const result = await page.evaluate(() => {
     const parse = value => {
-      const match = value.trim().match(/^#([0-9a-f]{6})$/i);
-      if (!match) return null;
-      const hex = match[1];
-      return [0, 2, 4].map(offset => parseInt(hex.slice(offset, offset + 2), 16) / 255)
-        .map(channel => channel <= 0.04045 ? channel / 12.92 : ((channel + 0.055) / 1.055) ** 2.4);
+      const normalized = value.trim();
+      const match = normalized.match(/^#([0-9a-f]{6})$/i);
+      let channels;
+      if (match) {
+        const hex = match[1];
+        channels = [0, 2, 4].map(offset => parseInt(hex.slice(offset, offset + 2), 16) / 255);
+      } else {
+        const rgb = normalized.match(/^rgba?\\(\\s*(\\d+)\\s*,\\s*(\\d+)\\s*,\\s*(\\d+)/i);
+        if (!rgb) return null;
+        channels = [Number(rgb[1]), Number(rgb[2]), Number(rgb[3])].map(value => value / 255);
+      }
+      return channels.map(channel => channel <= 0.04045 ? channel / 12.92 : ((channel + 0.055) / 1.055) ** 2.4);
     };
     const luminance = channels => channels[0] * 0.2126 + channels[1] * 0.7152 + channels[2] * 0.0722;
     const contrast = (foreground, background) => {
@@ -165,6 +177,28 @@ async function assertRouteContrast(page, route) {
             ratio: contrast(style.getPropertyValue(foreground), style.getPropertyValue(background))
           });
         }
+      }
+    }
+    const customer = document.querySelector(".customer-entry");
+    if (customer) {
+      const pageStyle = getComputedStyle(customer);
+      const card = customer.querySelector(".customer-entry-card");
+      const cardStyle = card ? getComputedStyle(card) : null;
+      const samples = [
+        [".customer-entry-brand .brand-caption", pageStyle.getPropertyValue("--entry-bg")],
+        [".customer-entry-footer", pageStyle.getPropertyValue("--entry-bg")],
+        [".customer-entry-card h1", cardStyle?.backgroundColor],
+        [".customer-entry-card>p", cardStyle?.backgroundColor]
+      ];
+      for (const [selector, background] of samples) {
+        const element = customer.querySelector(selector);
+        if (!element || !background) continue;
+        checks.push({
+          scope: "customer QR",
+          foreground: selector,
+          background: selector.includes("customer-entry-card") ? "customer card" : "customer page",
+          ratio: contrast(getComputedStyle(element).color, background)
+        });
       }
     }
     const auth = document.querySelector(".auth-screen");
@@ -203,7 +237,10 @@ async function assertThemeToggle(page) {
 }
 
 try {
-  await waitForServer();
+  await Promise.all([
+    waitForServer(server, baseUrl, "Portal"),
+    waitForServer(desktopServer, desktopUrl, "Windows desktop frontend")
+  ]);
   browser = await chromium.launch({ headless: true, args: ["--no-sandbox"] });
 
   // First-run theme, route continuity, refresh, and an auth-storage sign-out.
@@ -214,6 +251,7 @@ try {
     await waitForRoute(page, ".sp-public");
     assert.equal(await page.locator("html").getAttribute("data-theme"), "light", "Fresh web visits must start in Light.");
     await page.getByRole("button", { name: "Switch to dark theme" }).click();
+    await page.waitForFunction(() => document.documentElement.dataset.theme === "dark");
     assert.equal(await page.locator("html").getAttribute("data-theme"), "dark");
     await page.reload({ waitUntil: "domcontentloaded" });
     assert.equal(await page.locator("html").getAttribute("data-theme"), "dark", "Dark preference must survive refresh.");
@@ -248,15 +286,23 @@ try {
       const theme = await assertThemeToggle(page);
       const darkLayout = await assertNoHorizontalOverflow(page, route, viewport);
       await assertRouteContrast(page, route);
+
+      if (route.auth) {
+        const sections = route.auth === "shop"
+          ? ["Overview", "Print Queue", "Printers", "QR Stations", "Print Agent", "Pricing", "Subscription", "Payments", "Customers", "Reports", "Settings"]
+          : ["Overview", "Shop tenants", "Plans & entitlements", "Shop subscriptions", "Operations & retention"];
+        for (const section of sections) {
+          if (viewport.width <= 850) await page.getByRole("button", { name: "Open navigation" }).click();
+          const destination = page.locator(".sidebar").getByRole("button", { name: section, exact: true });
+          await destination.click();
+          await page.locator(".breadcrumb strong").waitFor({ state: "visible" });
+          await assertNoHorizontalOverflow(page, route, viewport);
+          await assertRouteContrast(page, route);
+        }
+      }
+
       const darkScreenshot = `${route.label}-${viewport.label}-dark.png`;
       await page.screenshot({ path: join(artifactDirectory, darkScreenshot), fullPage: true, animations: "disabled" });
-
-      if (route.auth && viewport.width <= 850) {
-        await page.getByRole("button", { name: "Open navigation" }).click();
-        await page.locator(".sidebar.sidebar-open").waitFor({ state: "visible" });
-        await page.getByRole("button", { name: /Close navigation/ }).click();
-        await page.locator(".sidebar.sidebar-open").waitFor({ state: "hidden" });
-      }
 
       results.push({
         route: route.label,
@@ -268,6 +314,43 @@ try {
       });
       await context.close();
     }
+  }
+
+  // Exercise the Windows desktop webview at its declared minimum window size.
+  {
+    const context = await browser.newContext({ viewport: { width: 1000, height: 680 } });
+    const page = await context.newPage();
+    await page.route("**/api/**", request => request.fulfill({
+      status: 503,
+      contentType: "application/json",
+      body: JSON.stringify({ message: "Visual QA uses isolated API fixtures." })
+    }));
+    await page.addInitScript(() => {
+      window.__TAURI_INTERNALS__ = {
+        invoke: async command => {
+          if (command === "read_secure_session") return null;
+          if (command === "write_secure_session") return null;
+          if (command === "get_local_agent_status") {
+            return { serviceReachable: false, localApiReachable: false, paired: false, agentDeviceId: null, status: "Not paired", apiBaseUrl: null };
+          }
+          return null;
+        }
+      };
+    });
+    await page.goto(desktopUrl, { waitUntil: "domcontentloaded" });
+    await waitForRoute(page, ".auth-screen");
+    assert.equal(await page.locator("body").getAttribute("data-app-shell"), "desktop");
+    const lightDesktop = await assertNoHorizontalOverflow(page, { label: "windows-desktop" }, { width: 1000, height: 680 });
+    await assertRouteContrast(page, { label: "windows-desktop" });
+    await page.getByRole("button", { name: "Switch to dark theme" }).click();
+    await page.waitForFunction(() => document.documentElement.dataset.theme === "dark");
+    await page.reload({ waitUntil: "domcontentloaded" });
+    await waitForRoute(page, ".auth-screen");
+    assert.equal(await page.locator("html").getAttribute("data-theme"), "dark");
+    const darkDesktop = await assertNoHorizontalOverflow(page, { label: "windows-desktop" }, { width: 1000, height: 680 });
+    await page.screenshot({ path: join(artifactDirectory, "windows-desktop-minimum-dark.png"), fullPage: true, animations: "disabled" });
+    results.push({ check: "Windows desktop minimum 1000x680 light and dark", passed: true, lightWidth: lightDesktop.rootWidth, darkWidth: darkDesktop.rootWidth });
+    await context.close();
   }
 
   // Exercise the actual shop and admin sign-out controls after changing theme.
@@ -294,4 +377,5 @@ try {
 } finally {
   if (browser) await browser.close();
   server.kill("SIGTERM");
+  desktopServer.kill("SIGTERM");
 }
