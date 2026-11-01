@@ -3118,7 +3118,9 @@ function CustomerPrintFlow({publicCode,sessionToken,paymentOptions,localAgent,lo
 
   async function acceptQuote() {
     const items=uploadedBatch.length?uploadedBatch:(uploaded?[uploaded]:[]);
-    const pending=items.filter(item=>quotesByJobId[item.job.id]?.status==="AWAITING_CUSTOMER_APPROVAL");
+    const pending=items.filter(item=>
+      !["REJECTED","REFUNDED"].includes(statusForBatchItem(item))&&
+      quotesByJobId[item.job.id]?.status==="AWAITING_CUSTOMER_APPROVAL");
     if(pending.length===0)return;
     setBusy(true);setError("");
     const nextQuotes={...quotesByJobId};
@@ -3412,7 +3414,10 @@ function CustomerPrintFlow({publicCode,sessionToken,paymentOptions,localAgent,lo
     total+(entry.quote?.colourMode==="Mono"?(entry.quote!.quotedAmountMinor??0):0),0);
   const batchColourAmount=acceptedQuoteEntries.reduce((total,entry)=>
     total+(entry.quote?.colourMode==="Colour"?(entry.quote!.quotedAmountMinor??0):0),0);
-  const canSendBatch=quoteItems.length>0&&quoteEntries.length===quoteItems.length&&quoteEntries.some(entry=>entry.quote?.status==="AWAITING_CUSTOMER_APPROVAL");
+  const quoteEligibleItems=quoteItems.filter(item=>!["REJECTED","REFUNDED"].includes(statusForBatchItem(item)));
+  const canSendBatch=quoteEligibleItems.length>0&&
+    acceptedQuoteEntries.length===quoteEligibleItems.length&&
+    acceptedQuoteEntries.some(entry=>entry.quote?.status==="AWAITING_CUSTOMER_APPROVAL");
   const canCalculateBatch=quoteItems.some(item=>{
     const status=uploaded?.job.id===item.job.id&&jobStatus?.status
       ?jobStatus.status
