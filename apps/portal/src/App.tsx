@@ -303,10 +303,7 @@ function ShopConsole({ tokens, onSignOut }: { tokens: AuthTokens; onSignOut: () 
     Date.parse(agent.lastSeenUtc) > Date.now() - 2 * 60 * 1000
   ).map(agent => agent.id));
   const onlineAgentCount = onlineAgentIds.size;
-  const usablePrinterCount = printers.filter(printer =>
-    printer.isActive && !!printer.agentDeviceId && onlineAgentIds.has(printer.agentDeviceId) &&
-    (printer.status === "Ready" || printer.status === "Busy" || printer.outputMode === "PDF_EXPORT")
-  ).length;
+  const usablePrinterCount = printers.filter(printer => isPrinterAvailable(printer, onlineAgentIds)).length;
   const offlinePrinterCount = printers.filter(printer =>
     printer.isActive && (!printer.agentDeviceId || !onlineAgentIds.has(printer.agentDeviceId) ||
       printer.status === "Offline" || printer.status === "Paused")
@@ -749,7 +746,7 @@ function ShopConsole({ tokens, onSignOut }: { tokens: AuthTokens; onSignOut: () 
           {active === "Subscription" && subscription && <SubscriptionPage summary={subscription}/>}
           {active === "Payments" && paymentSettings && <PaymentsPage settings={paymentSettings} payments={payments} refunds={refunds} onSave={savePaymentSettings} onVerify={verifyPayment} onReject={rejectPayment} busy={busy} busyJobId={busyJobId}/>}
           {active === "Settings" && profile && <SettingsPage profile={profile} onSave={saveProfile} busy={busy}/>}
-          {active === "Print Queue" && <PrintQueuePage jobs={printJobs} printers={printers} searchQuery={queueSearch} onSearch={searchPrintQueue} onPreview={previewJob} onApprove={approveJob} onReject={rejectJob} onRefund={job=>setRefundJob(job)} onReviewBatch={batchId=>setBatchReviewJobs(printJobs.filter(job=>job.batchId===batchId&&job.status==="AWAITING_SHOP_APPROVAL"))} onHistory={viewJobHistory} onAssignPrinter={assignPrinter} onDispatch={dispatchPrintJob} onConfirmOutput={confirmPrintedOutput} onRetryPdfExport={retryPdfExport} onRefresh={refreshPrintQueue} onLoadOlder={loadOlderQueueJobs} hasMoreJobs={hasMoreQueueJobs} loadingOlderJobs={loadingOlderQueueJobs} busyJobId={busyJobId}/>} 
+          {active === "Print Queue" && <PrintQueuePage jobs={printJobs} printers={printers} agentDevices={agentDevices} searchQuery={queueSearch} onSearch={searchPrintQueue} onPreview={previewJob} onApprove={approveJob} onReject={rejectJob} onRefund={job=>setRefundJob(job)} onReviewBatch={batchId=>setBatchReviewJobs(printJobs.filter(job=>job.batchId===batchId&&job.status==="AWAITING_SHOP_APPROVAL"))} onHistory={viewJobHistory} onAssignPrinter={assignPrinter} onDispatch={dispatchPrintJob} onConfirmOutput={confirmPrintedOutput} onRetryPdfExport={retryPdfExport} onRefresh={refreshPrintQueue} onLoadOlder={loadOlderQueueJobs} hasMoreJobs={hasMoreQueueJobs} loadingOlderJobs={loadingOlderQueueJobs} busyJobId={busyJobId}/>} 
           {active === "Customers" && <CustomersPage token={tokens.accessToken}/>}
           {active === "Reports" && <ReportsPage token={tokens.accessToken}/>} 
 
@@ -1048,10 +1045,7 @@ function Overview({ profile, printers, stations, printJobs, pricing, agentDevice
       !!agent.lastSeenUtc && Date.parse(agent.lastSeenUtc) > Date.now() - 2 * 60 * 1000)
     .map(agent => agent.id));
   const hasOnlineAgent = onlineAgentIds.size > 0;
-  const hasReachablePrinter = printers.some(printer =>
-    printer.isActive && !!printer.agentDeviceId && onlineAgentIds.has(printer.agentDeviceId) &&
-    (printer.outputMode === "PDF_EXPORT" || printer.status === "Ready" || printer.status === "Busy")
-  );
+  const hasReachablePrinter = printers.some(printer => isPrinterAvailable(printer, onlineAgentIds));
   const hasPaymentMethod = paymentSettings?.cashEnabled === true ||
     (paymentSettings?.upiEnabled === true &&
       !!paymentSettings.upiId?.trim() && !!paymentSettings.payeeName?.trim());
@@ -1305,9 +1299,10 @@ function PaymentsPage({settings,payments,refunds,onSave,onVerify,onReject,busy,b
   </div>;
 }
 
-function PrintQueuePage({ jobs, printers, searchQuery, onSearch, onPreview, onApprove, onReject, onRefund, onReviewBatch, onHistory, onAssignPrinter, onDispatch, onConfirmOutput, onRetryPdfExport, onRefresh, onLoadOlder, hasMoreJobs, loadingOlderJobs, busyJobId }: {
+function PrintQueuePage({ jobs, printers, agentDevices, searchQuery, onSearch, onPreview, onApprove, onReject, onRefund, onReviewBatch, onHistory, onAssignPrinter, onDispatch, onConfirmOutput, onRetryPdfExport, onRefresh, onLoadOlder, hasMoreJobs, loadingOlderJobs, busyJobId }: {
   jobs: ShopPrintJob[];
   printers: PrinterDevice[];
+  agentDevices: AgentDevice[];
   searchQuery: string;
   onSearch: (query: string) => Promise<void>;
   onPreview: (job: ShopPrintJob) => void;
@@ -1348,11 +1343,12 @@ function PrintQueuePage({ jobs, printers, searchQuery, onSearch, onPreview, onAp
   },[autoRefresh,refreshSeconds]);
 
   const reviewBatches=Array.from(new Map(jobs.filter(job=>job.batchId&&job.status==="AWAITING_SHOP_APPROVAL").map(job=>[job.batchId!,job])).keys());
+  const onlineAgentIds = new Set(agentDevices.filter(agent =>
+    !agent.revokedUtc && agent.status === "Online" && !!agent.lastSeenUtc &&
+    Date.parse(agent.lastSeenUtc) > Date.now() - 2 * 60 * 1000
+  ).map(agent => agent.id));
   const dispatchablePrinters = printers.filter(printer =>
-    printer.isActive &&
-    !!printer.agentDeviceId &&
-    (printer.status === "Ready" || printer.status === "Busy" ||
-      (printer.outputMode === "PDF_EXPORT" && printer.status === "Unknown"))
+    isPrinterAvailable(printer, onlineAgentIds)
   );
 
   return <section className="panel queue-panel live-queue-panel">
@@ -1566,6 +1562,14 @@ function prettyStatus(status:string) {
   };
   return names[status] || status.replaceAll("_"," ").toLowerCase().replace(/\\b\\w/g,letter=>letter.toUpperCase());
 }
+function isPrinterAvailable(printer: PrinterDevice, onlineAgentIds: ReadonlySet<string>, now = Date.now()) {
+  if (!printer.isActive || !printer.agentDeviceId || !onlineAgentIds.has(printer.agentDeviceId)) return false;
+  if (printer.outputMode === "PDF_EXPORT") return true;
+  const lastSeen = printer.lastSeenUtc ? Date.parse(printer.lastSeenUtc) : Number.NaN;
+  return Number.isFinite(lastSeen) && lastSeen > now - 2 * 60 * 1000 &&
+    (printer.status === "Ready" || printer.status === "Busy");
+}
+
 function formatMoney(minor:number,currency:string) {
   return new Intl.NumberFormat("en-IN",{style:"currency",currency,minimumFractionDigits:2}).format(minor/100);
 }
