@@ -786,7 +786,7 @@ class MainActivity : AppCompatActivity() {
     private fun loadCustomerHistory(container: LinearLayout) {
         Thread {
             try {
-                var auth = customerAccountStore.read() ?: error("Sign in to view print history.")
+                var auth = customerAccountStore.read() ?: error("Sign in to view history.")
                 val jobs = try {
                     if (CustomerAccountClient.accessTokenIsExpired(auth)) {
                         auth = CustomerAccountClient.refresh(accountServiceUrl(), auth)
@@ -803,67 +803,58 @@ class MainActivity : AppCompatActivity() {
                     if (navigation.selectedItemId != ACTIVITY || isFinishing) return@runOnUiThread
                     container.removeAllViews()
                     if (jobs.isEmpty()) {
-                        container.addView(text(
-                            "No account-linked print jobs yet. Your new shop sessions will appear here when you start them while signed in.",
-                            13, R.color.qp_muted, false
-                        ).apply { setPadding(0, dp(12), 0, dp(12)) })
+                        container.addView(text("No jobs yet", 13, R.color.qp_muted, false)
+                            .apply { setPadding(0, dp(14), 0, dp(14)) })
                     } else {
                         jobs.forEach { job ->
                             val item = card()
                             val body = LinearLayout(this).apply {
                                 orientation = LinearLayout.VERTICAL
-                                setPadding(dp(15), dp(14), dp(15), dp(14))
+                                setPadding(dp(12), dp(11), dp(12), dp(11))
                             }
                             val top = LinearLayout(this).apply {
                                 orientation = LinearLayout.HORIZONTAL
                                 gravity = Gravity.CENTER_VERTICAL
                             }
-                            top.addView(text(job.jobNumber, 15, R.color.qp_text, true),
+                            top.addView(text(job.jobNumber, 13, R.color.qp_text, true),
                                 LinearLayout.LayoutParams(0, -2, 1f))
-                            top.addView(text(job.status.replace('_', ' '), 11, R.color.qp_primary, true))
+                            top.addView(text(job.status.replace('_', ' '), 10, R.color.qp_primary, true))
                             body.addView(top)
-                            body.addView(text(job.shopName, 12, R.color.qp_muted, false).apply {
-                                setPadding(0, dp(5), 0, 0)
-                            })
                             val createdLabel = runCatching {
                                 Instant.parse(job.createdUtc)
                                     .atZone(ZoneId.systemDefault())
-                                    .format(DateTimeFormatter.ofPattern("dd MMM yyyy, hh:mm a", Locale.ROOT))
+                                    .format(DateTimeFormatter.ofPattern("dd MMM yyyy · hh:mm a", Locale.ROOT))
                             }.getOrDefault("Date unavailable")
-                            body.addView(text(createdLabel, 12, R.color.qp_muted, false).apply {
-                                setPadding(0, dp(3), 0, 0)
-                            })
+                            body.addView(text(job.shopName + " · " + createdLabel, 10, R.color.qp_muted, false)
+                                .apply { setPadding(0, dp(3), 0, 0) })
+                            body.addView(text(job.originalFileName, 12, R.color.qp_text, true)
+                                .apply { setPadding(0, dp(7), 0, 0) })
+                            val quote = "%.2f".format(Locale.ROOT, job.quotedAmountMinor / 100.0)
                             body.addView(text(
-                                job.originalFileName,
-                                13, R.color.qp_text, true
-                            ).apply { setPadding(0, dp(7), 0, 0) })
+                                job.pageCount.toString() + " pages · " + job.copies + " copies · Quote " + job.currency + " " + quote,
+                                10, R.color.qp_muted, false
+                            ).apply { setPadding(0, dp(3), 0, 0) })
+                            val paid = "%.2f".format(Locale.ROOT, job.paidAmountMinor / 100.0)
+                            val returned = "%.2f".format(Locale.ROOT, job.refundedAmountMinor / 100.0)
+                            val net = "%.2f".format(Locale.ROOT, maxOf(0L, job.paidAmountMinor - job.refundedAmountMinor) / 100.0)
                             body.addView(text(
-                                "${job.pageCount} page(s) · ${job.copies} copy/copies · Quote ${job.currency} ${"%.2f".format(Locale.ROOT, job.quotedAmountMinor / 100.0)}",
-                                12, R.color.qp_muted, false
-                            ).apply { setPadding(0, dp(4), 0, 0) })
-                            body.addView(text(
-                                "${job.paymentMethod.ifBlank { "Payment" }} · ${job.paymentStatus.ifBlank { "Not recorded" }} · Paid ${job.currency} ${"%.2f".format(Locale.ROOT, job.paidAmountMinor / 100.0)} · Refunded ${job.currency} ${"%.2f".format(Locale.ROOT, job.refundedAmountMinor / 100.0)} · Net ${job.currency} ${"%.2f".format(Locale.ROOT, maxOf(0L, job.paidAmountMinor - job.refundedAmountMinor) / 100.0)}",
-                                12, R.color.qp_muted, false
-                            ).apply { setPadding(0, dp(4), 0, 0) })
+                                "Paid " + paid + " · Returned " + returned + " · Net " + net + " " + job.currency,
+                                10, R.color.qp_muted, false
+                            ).apply { setPadding(0, dp(3), 0, 0) })
                             if (job.rejectedPageNumbersJson != "[]" && job.rejectedPageNumbersJson.isNotBlank()) {
-                                body.addView(text(
-                                    "Rejected pages: ${job.rejectedPageNumbersJson}",
-                                    12, R.color.qp_muted, false
-                                ).apply { setPadding(0, dp(4), 0, 0) })
+                                body.addView(text("Rejected: " + job.rejectedPageNumbersJson, 10, R.color.qp_muted, false)
+                                    .apply { setPadding(0, dp(3), 0, 0) })
                             }
-                            if (job.outputCompletedUtc != null) {
-                                val outputConfirmedLabel = runCatching {
-                                    Instant.parse(job.outputCompletedUtc)
-                                        .atZone(ZoneId.systemDefault())
-                                        .format(DateTimeFormatter.ofPattern("dd MMM yyyy, hh:mm a", Locale.ROOT))
-                                }.getOrDefault(job.outputCompletedUtc)
-                                body.addView(text(
-                                    "Output confirmed: $outputConfirmedLabel",
-                                    12, R.color.qp_muted, false
-                                ).apply { setPadding(0, dp(4), 0, 0) })
+                            job.outputCompletedUtc?.let { outputUtc ->
+                                val outputLabel = runCatching {
+                                    Instant.parse(outputUtc).atZone(ZoneId.systemDefault())
+                                        .format(DateTimeFormatter.ofPattern("dd MMM · hh:mm a", Locale.ROOT))
+                                }.getOrDefault(outputUtc)
+                                body.addView(text("Output confirmed · " + outputLabel, 10, R.color.qp_muted, false)
+                                    .apply { setPadding(0, dp(3), 0, 0) })
                             }
                             item.addView(body)
-                            container.addView(item, linearParams().apply { bottomMargin = dp(9) })
+                            container.addView(item, linearParams().apply { bottomMargin = dp(6) })
                         }
                     }
                 }
@@ -871,10 +862,7 @@ class MainActivity : AppCompatActivity() {
                 runOnUiThread {
                     if (navigation.selectedItemId != ACTIVITY || isFinishing) return@runOnUiThread
                     container.removeAllViews()
-                    container.addView(text(
-                        "Couldn't load your print history. Check your connection and try again. ${message(e)}",
-                        13, R.color.qp_muted, false
-                    ))
+                    container.addView(text("History unavailable.", 13, R.color.qp_muted, false))
                     container.addView(button("Retry", false).apply {
                         setOnClickListener { showActivity() }
                     }, linearParams().apply { topMargin = dp(8) })
