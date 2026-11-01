@@ -2635,23 +2635,23 @@ function smartPrintNativeStatus(status:string):string {
 
 function smartPrintNativeBoundary(status:string|undefined,hasQuote:boolean):string {
   switch(status) {
-    case "AWAITING_SHOP_APPROVAL": return "Await shop approval · No payment collected.";
-    case "AWAITING_PAYMENT": return "Pay the shop directly · Verification required.";
-    case "AWAITING_COUNTER_PAYMENT": return "Pay at counter · Await confirmation.";
-    case "AWAITING_CUSTOMER_PAYMENT": return "Submit UTR · Shop verifies independently.";
-    case "PAYMENT_REPORTED": return "UTR pending · Shop verifies independently.";
+    case "AWAITING_SHOP_APPROVAL": return "Shop review · No payment.";
+    case "AWAITING_PAYMENT": return "Pay shop · Verification required.";
+    case "AWAITING_COUNTER_PAYMENT": return "Counter payment · Await confirmation.";
+    case "AWAITING_CUSTOMER_PAYMENT": return "Submit UTR · Shop verifies.";
+    case "PAYMENT_REPORTED": return "UTR pending · Shop verifies.";
     case "PAID_AUTHORISED": return "Payment verified · Printing not started.";
-    case "LOCAL_QUEUE_CLAIMED": return "Secure transfer to shop · Not printing yet.";
-    case "LOCAL_QUEUE_READY": return "Local copy ready · Operator starts printing.";
-    case "PRINT_AUTHORISED": return "Shop authorised physical printing.";
-    case "PRINT_SUBMITTING": return "Document is being sent to printer.";
-    case "SPOOLER_ACCEPTED": return "Queue accepted · Not proof of paper output.";
-    case "PRINTING": return "Printing in progress · Shop confirms output.";
-    case "OUTPUT_UNCONFIRMED": return "Output unconfirmed · Shop checks before retry.";
-    case "COMPLETED": return "Shop confirmed output · Ready to collect.";
+    case "LOCAL_QUEUE_CLAIMED": return "Secure transfer · Not printing.";
+    case "LOCAL_QUEUE_READY": return "Queued · Operator approval needed.";
+    case "PRINT_AUTHORISED": return "Shop approved physical printing.";
+    case "PRINT_SUBMITTING": return "Sending to printer.";
+    case "SPOOLER_ACCEPTED": return "Queue accepted · Paper unconfirmed.";
+    case "PRINTING": return "Printing · Output unconfirmed.";
+    case "OUTPUT_UNCONFIRMED": return "Output unconfirmed · Shop checks pages.";
+    case "COMPLETED": return "Output confirmed · Collect print.";
     case "QUOTE_EXPIRED": return "Quote expired · Request another.";
-    case "REJECTED": return "Ask the shop about this request.";
-    default: return hasQuote ? "Quote only · No payment or printing." : "No payment or printing yet.";
+    case "REJECTED": return "Request rejected · Ask shop.";
+    default: return hasQuote ? "Quote only · No payment." : "No payment yet.";
   }
 }
 
@@ -2778,7 +2778,7 @@ function CustomerPrintFlow({publicCode,sessionToken,paymentOptions,localAgent,lo
   async function upload() {
     if(files.length===0)return;
     if(uploadMode==="LOCAL"&&!localReady) {
-      setError("Check shop Wi-Fi access above before starting a direct local upload.");
+      setError(nativeAppMode ? "Check shop Wi-Fi." : "Check shop Wi-Fi access above before starting a direct local upload.");
       return;
     }
     const currentBatchId=batchId||crypto.randomUUID();
@@ -2786,7 +2786,7 @@ function CustomerPrintFlow({publicCode,sessionToken,paymentOptions,localAgent,lo
     const completedFingerprints=new Set(uploadedFileFingerprints);
     const results=[...uploadedBatch];
     const pending=files.filter(candidate=>!completedFingerprints.has(customerFileFingerprint(candidate)));
-    if(pending.length===0){setError("All selected files are already uploaded. Choose another document or folder.");return;}
+    if(pending.length===0){setError(nativeAppMode ? "Files already uploaded. Choose more." : "All selected files are already uploaded. Choose another document or folder.");return;}
     setBusy(true);setError("");setQuote(null);setJobStatus(null);setUploadProgress({completed:0,total:pending.length});
     try {
       for(let index=0;index<pending.length;index++){
@@ -2919,7 +2919,7 @@ function CustomerPrintFlow({publicCode,sessionToken,paymentOptions,localAgent,lo
     const pending=unique.filter(candidate=>!alreadyUploaded.has(customerFileFingerprint(candidate)));
     const totalBytes=uploadedBatch.reduce((sum,item)=>sum+item.document.sizeBytes,0)+pending.reduce((sum,candidate)=>sum+candidate.size,0);
     if(uploadedBatch.length+pending.length>20||totalBytes>50*1024*1024){
-      setError("This batch can contain up to 20 files and 50 MB in total. Remove some files before uploading.");
+      setError(nativeAppMode ? "20 files · 50 MB max." : "This batch can contain up to 20 files and 50 MB in total. Remove some files before uploading.");
       return;
     }
     setFiles(unique);setSelectedFileIndex(0);setError("");
@@ -2954,8 +2954,8 @@ function CustomerPrintFlow({publicCode,sessionToken,paymentOptions,localAgent,lo
     {previewUrl&&file&&<div className="customer-file-preview"><div className="customer-file-label"><FileText size={15}/><span>Preview · {file.name}</span></div>{file.type==="application/pdf"||/\.pdf$/i.test(file.name)?<iframe src={previewUrl} title={file.name+" preview"}/>:<img src={previewUrl} alt={file.name+" preview"}/>}</div>}
     {files.length>0&&<button className="customer-flow-button" disabled={busy||pendingFilesCount===0||(uploadMode==="LOCAL"&&!localReady)} onClick={()=>void upload()}>{busy?<span className="button-spinner"/>:<><UploadIcon/>{uploadMode==="LOCAL"&&localAgent?"Upload "+pendingFilesCount+" file(s) to shop":"Upload "+pendingFilesCount+" file(s)"}</>}</button>}
     {uploadProgress&&<div className="customer-upload-progress"><span>{uploadProgress.completed} of {uploadProgress.total} files uploaded</span><div><i style={{width:`${uploadProgress.total?uploadProgress.completed/uploadProgress.total*100:0}%`}}/></div></div>}
-    {files.length>0&&uploadMode==="LOCAL"&&localAgent&&<small className="customer-upload-local-note">{localReady?"Your files travel over shop Wi-Fi. The cloud receives only job, quote and payment metadata.":"Tap Check shop Wi-Fi above first to grant the browser permission."}</small>}
-    {files.length>0&&uploadMode==="CLOUD"&&localAgent&&<small className="customer-upload-local-note">Cloud-assisted fallback: files are uploaded encrypted to the API before being transferred to the shop computer.</small>}
+    {files.length>0&&uploadMode==="LOCAL"&&localAgent&&<small className="customer-upload-local-note">{nativeAppMode?(localReady?"Cloud receives metadata only.":"Check shop Wi-Fi."):localReady?"Your files travel over shop Wi-Fi. The cloud receives only job, quote and payment metadata.":"Tap Check shop Wi-Fi above first to grant the browser permission."}</small>}
+    {files.length>0&&uploadMode==="CLOUD"&&localAgent&&<small className="customer-upload-local-note">{nativeAppMode?"Encrypted cloud transfer.":"Cloud-assisted fallback: files are uploaded encrypted to the API before being transferred to the shop computer."}</small>}
     {uploaded&&<>
       {uploadedBatch.length>1&&<div className="customer-uploaded-batch">
         <div className="customer-uploaded-batch-head"><strong>Batch review · {uploadedBatch.length} files</strong><span>Each file's shop status refreshes automatically.</span></div>
@@ -2973,7 +2973,7 @@ function CustomerPrintFlow({publicCode,sessionToken,paymentOptions,localAgent,lo
         <div className="customer-flow-heading customer-config-heading"><div><span>STEP 2</span><h2>{nativeAppMode?"Print settings":"Choose print settings"}</h2></div></div>
         <div className="customer-option-group"><span>Colour mode</span><div className="customer-choice-row"><button className={colourMode==="Mono"?"customer-choice selected":"customer-choice"} onClick={()=>{setColourMode("Mono");setQuote(null);}}>Black & white</button><button className={colourMode==="Colour"?"customer-choice selected":"customer-choice"} onClick={()=>{setColourMode("Colour");setQuote(null);}}>Colour</button></div></div>
         <div className="customer-option-grid"><label>Copies<input type="number" min="1" max="100" value={copies} onChange={event=>{setCopies(Math.max(1,Math.min(100,Number(event.target.value)||1)));setQuote(null);}}/></label><label className="customer-duplex-toggle"><input type="checkbox" checked={isDuplex} onChange={event=>{setIsDuplex(event.target.checked);setQuote(null);}}/><span><strong>Double-sided</strong><small>Print on both sides of each sheet</small></span></label></div>
-        <div className="customer-paper-note"><Check size={14}/> A4 paper · Page order preserved · {colourMode==="Mono"?"Black & white":"Colour"} printing</div>
+        <div className="customer-paper-note"><Check size={14}/>{nativeAppMode?"A4 · Page order preserved":" A4 paper · Page order preserved · "+(colourMode==="Mono"?"Black & white":"Colour")+" printing"}</div>
         <button className="customer-flow-button" disabled={busy||copies<1} onClick={()=>void getQuote()}>{busy?<span className="button-spinner"/>:nativeAppMode?"Get quote":"Calculate print price"}</button>
       </>}
     </>}
@@ -2992,7 +2992,7 @@ function CustomerPrintFlow({publicCode,sessionToken,paymentOptions,localAgent,lo
         {paymentOptions.upiEnabled&&<button className={paymentMethod==="UPI"?"customer-choice selected":"customer-choice"} onClick={()=>setPaymentMethod("UPI")}>UPI payment</button>}
         {paymentOptions.cashEnabled&&<button className={paymentMethod==="CASH"?"customer-choice selected":"customer-choice"} onClick={()=>setPaymentMethod("CASH")}>Cash at counter</button>}
         <button className="customer-flow-button" disabled={busy||(!paymentOptions.upiEnabled&&!paymentOptions.cashEnabled)} onClick={()=>void beginPayment(paymentMethod)}>{busy?<span className="button-spinner"/>:nativeAppMode?"Continue":"Continue with "+(paymentMethod==="UPI"?"UPI":"cash at counter")}</button>
-        {!paymentOptions.upiEnabled&&!paymentOptions.cashEnabled&&<p className="customer-flow-error">The shop has not configured a payment method yet. Please speak to the shop operator.</p>}
+        {!paymentOptions.upiEnabled&&!paymentOptions.cashEnabled&&<p className="customer-flow-error">{nativeAppMode?"No payment method. Ask shop.":"The shop has not configured a payment method yet. Please speak to the shop operator."}</p>}
       </div>}
       {payment&&payment.status!=="REJECTED"&&<div className="customer-pay-panel">
         <div className="customer-pay-heading"><span>{payment.method==="UPI"?"UPI PAYMENT":"CASH AT COUNTER"}</span><strong>{formatMoney(Math.max(0,payment.amountMinor-(payment.refundedAmountMinor??0)),payment.currency)}</strong></div>
@@ -3003,7 +3003,7 @@ function CustomerPrintFlow({publicCode,sessionToken,paymentOptions,localAgent,lo
           <a href={payment.upiUri||"#"} className="customer-flow-button customer-upi-open">Open UPI app</a>
           <label className="customer-reference-field">{nativeAppMode?"UTR":"UPI transaction reference / UTR"}<input value={paymentReference} maxLength={100} onChange={event=>setPaymentReference(event.target.value)} placeholder={nativeAppMode?"Enter UTR":"Enter UTR after paying"}/></label>
           <button className="customer-flow-button" disabled={busy||paymentReference.trim().length<4} onClick={()=>void submitPaymentReference()}>{busy?<span className="button-spinner"/>:nativeAppMode?"Submit UTR":"Submit payment reference"}</button>
-          <small className="customer-payment-warning">{nativeAppMode?"UTR is not payment proof. Shop verifies.":"Submitting a UTR is not proof of payment. The shop verifies it in its own UPI/bank app."}</small>
+          <small className="customer-payment-warning">{nativeAppMode?"UTR isn't proof. Shop verifies.":"Submitting a UTR is not proof of payment. The shop verifies it in its own UPI/bank app."}</small>
         </div>}
         {payment.method==="CASH"&&payment.status==="CASH_AWAITING_PAYMENT"&&<p>{nativeAppMode?"Pay at counter · Await confirmation.":"Pay at the shop counter. The shop will confirm receipt before authorising the job."}</p>}
         {payment.status==="CUSTOMER_REPORTED"&&<p>{nativeAppMode?"Reference received · Verification pending.":"Your payment reference was received. The shop still needs to verify the transaction."}</p>}
