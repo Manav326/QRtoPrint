@@ -8,8 +8,10 @@ if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administra
     throw "Run this script from PowerShell as Administrator."
 }
 
-$firewallRuleName = "QRtoPrint Smart Print Agent Local API"
-Get-NetFirewallRule -DisplayName $firewallRuleName -ErrorAction SilentlyContinue | Remove-NetFirewallRule
+$firewallRulePrefix = "QRtoPrint Smart Print Agent Local API"
+Get-NetFirewallRule -ErrorAction SilentlyContinue |
+    Where-Object { $_.DisplayName -like "$firewallRulePrefix*" } |
+    Remove-NetFirewallRule -ErrorAction SilentlyContinue
 
 $serviceName = "QRtoPrintSmartPrintAgent"
 $service = Get-Service -Name $serviceName -ErrorAction SilentlyContinue
@@ -20,7 +22,7 @@ if (-not $service) {
 
 if ($service.Status -ne "Stopped") {
     Stop-Service -Name $serviceName -Force
-    $service.WaitForStatus("Stopped", [TimeSpan]::FromSeconds(30))
+    (Get-Service -Name $serviceName).WaitForStatus("Stopped", [TimeSpan]::FromSeconds(30))
 }
 
 & sc.exe delete $serviceName | Out-Null
