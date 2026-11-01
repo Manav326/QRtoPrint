@@ -142,12 +142,14 @@ export default function PublicLandingPage() {
               <h3>SmartPrint for Windows</h3><p>Install the shop Agent on the computer connected to your printers. The guided setup will help connect it to your shop workspace.</p>
               <a className="sp-button-primary sp-download-button" href={WINDOWS_DOWNLOAD}>Download Windows setup <ArrowDownIcon/></a>
               <small className="sp-download-note">Windows x64 · Guided installation</small>
+              <a className="sp-release-link" href="https://github.com/Manav326/QRtoPrint/releases/latest" target="_blank" rel="noreferrer">View latest version &amp; release notes <ArrowUpRight size={12}/></a>
             </article>
             <article className="sp-download-card">
               <div className="sp-download-icon sp-android-icon"><Smartphone size={25}/></div><div className="sp-download-platform">FOR CUSTOMERS · ANDROID</div>
               <h3>SmartPrint for Android</h3><p>Scan shop QR codes, organise documents in your library and send files through the connected SmartPrint customer journey.</p>
               <a className="sp-button-secondary sp-download-button" href={ANDROID_DOWNLOAD}>Download Android APK <ArrowDownIcon/></a>
               <small className="sp-download-note">Android 8.0 or later · APK installation</small>
+              <a className="sp-release-link" href="https://github.com/Manav326/QRtoPrint/releases/latest" target="_blank" rel="noreferrer">View latest version &amp; release notes <ArrowUpRight size={12}/></a>
             </article>
           </div>
           <p className="sp-download-footnote"><ShieldCheck size={14}/> Download links are served from SmartPrint's official release channel.</p>
