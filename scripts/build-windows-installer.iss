@@ -51,9 +51,9 @@ begin
   PairingPage := CreateInputQueryPage(
     wpSelectDir,
     'Connect this computer to your shop',
-    'Use a one-time code from your SmartPrint shop workspace.',
-    'In the shop workspace, open Print Agent, choose Add computer and generate a pairing code. The code expires after 10 minutes.');
-  PairingPage.Add('One-time pairing code', True);
+    'Enter a code for first-time setup, or reuse an existing active pairing.',
+    'In the shop workspace, open Print Agent → Add computer to generate a 10-minute code. Leave this blank when updating or repairing a computer that is already paired and active. To pair with a different shop, revoke the old computer in its previous shop workspace before entering a new code.');
+  PairingPage.Add('One-time pairing code (first-time or replacement only)', True);
 end;
 
 function IsValidPairingCode(const Value: string): Boolean;
@@ -86,9 +86,10 @@ begin
   Result := True;
   if CurPageID = PairingPage.ID then
   begin
-    if not IsValidPairingCode(PairingPage.Values[0]) then
+    if (Trim(PairingPage.Values[0]) <> '') and
+       (not IsValidPairingCode(PairingPage.Values[0])) then
     begin
-      MsgBox('Enter the complete 32-character pairing code from your SmartPrint shop workspace.', mbInformation, MB_OK);
+      MsgBox('Enter the complete 32-character pairing code from your SmartPrint shop workspace, or leave it blank to reuse an existing active pairing.', mbInformation, MB_OK);
       Result := False;
     end;
   end;
@@ -108,20 +109,28 @@ begin
     Exit;
 
   AgentPath := ExpandConstant('{app}\SmartPrint.Agent.exe');
-  if not SetEnvironmentVariableW('Agent__ApiBaseUrl', '{#SmartPrintPublicUrl}') then
-    RaiseException('Could not prepare the SmartPrint service address.');
-
-  if not SetEnvironmentVariableW('Agent__EnrollmentCode', Trim(PairingPage.Values[0])) then
-    RaiseException('Could not prepare the one-time pairing code.');
-
-  if not Exec(AgentPath, '--pair', ExpandConstant('{app}'), SW_HIDE, ewWaitUntilTerminated, PairExitCode) then
-    RaiseException('SmartPrint could not start its secure pairing step. Restart setup and try again.');
-
-  SetEnvironmentVariableW('Agent__EnrollmentCode', '');
-  if PairExitCode <> 0 then
+  if Trim(PairingPage.Values[0]) = '' then
   begin
+    if not Exec(AgentPath, '--check-pairing', ExpandConstant('{app}'), SW_HIDE, ewWaitUntilTerminated, PairExitCode) then
+      RaiseException('SmartPrint could not check the saved pairing for this computer.');
+    if PairExitCode <> 0 then
+      RaiseException('No active pairing could be verified. Enter a new 10-minute code from Shop workspace → Print Agent → Add computer. If this computer was paired before, revoke the previous entry in that shop workspace before pairing it again.');
+  end
+  else
+  begin
+    if not SetEnvironmentVariableW('Agent__ApiBaseUrl', '{#SmartPrintPublicUrl}') then
+      RaiseException('Could not prepare the SmartPrint service address.');
+
+    if not SetEnvironmentVariableW('Agent__EnrollmentCode', Trim(PairingPage.Values[0])) then
+      RaiseException('Could not prepare the one-time pairing code.');
+
+    if not Exec(AgentPath, '--pair', ExpandConstant('{app}'), SW_HIDE, ewWaitUntilTerminated, PairExitCode) then
+      RaiseException('SmartPrint could not start its secure pairing step. Restart setup and try again.');
+
+    SetEnvironmentVariableW('Agent__EnrollmentCode', '');
     SetEnvironmentVariableW('Agent__ApiBaseUrl', '');
-    RaiseException('SmartPrint could not pair this computer. Check that the code is current and belongs to this shop, then generate a new code and run setup again.');
+    if PairExitCode <> 0 then
+      RaiseException('SmartPrint could not pair this computer. Check that the code is current and belongs to this shop. If this computer is already paired to this shop, revoke its previous entry in Print Agent before pairing it again.');
   end;
 
   PowerShellPath := ExpandConstant('{sys}\WindowsPowerShell\v1.0\powershell.exe');
