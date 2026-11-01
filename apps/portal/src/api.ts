@@ -1,3 +1,4 @@
+import { isDesktopApp, writeDesktopSession } from "./desktop-bridge";
 export interface AuthTokens {
   tokenType: string;
   accessToken: string;
@@ -259,6 +260,14 @@ export function readStoredTokens(): AuthTokens | null {
 export function storeTokens(tokens: AuthTokens | null): void {
   if (tokens) sessionStorage.setItem("qrtoprint.auth", JSON.stringify(tokens));
   else sessionStorage.removeItem("qrtoprint.auth");
+
+  // Keep the native session in Windows Credential Manager; sessionStorage is only
+  // the current WebView's in-memory compatibility layer.
+  if (isDesktopApp()) {
+    void writeDesktopSession(tokens ? JSON.stringify(tokens) : null).catch(() => {
+      // The desktop sign-in and activation flows surface storage errors explicitly.
+    });
+  }
 }
 
 export const signIn = (email: string, password: string) =>

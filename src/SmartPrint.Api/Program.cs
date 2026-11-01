@@ -115,7 +115,7 @@ var configuredCorsOrigins = builder.Configuration.GetSection("Cors:AllowedOrigin
     .Where(origin => !string.IsNullOrWhiteSpace(origin))
     .Distinct(StringComparer.OrdinalIgnoreCase)
     .ToArray();
-var corsOrigins = configuredCorsOrigins is { Length: > 0 }
+var corsOrigins = (configuredCorsOrigins is { Length: > 0 }
     ? configuredCorsOrigins
     : new[]
     {
@@ -124,7 +124,10 @@ var corsOrigins = configuredCorsOrigins is { Length: > 0 }
         "https://admin.thinkwithsujeet.in",
         "http://localhost:3000",
         "http://localhost:3001"
-    };
+    })
+    .Append("http://tauri.localhost")
+    .Distinct(StringComparer.OrdinalIgnoreCase)
+    .ToArray();
 builder.Services.AddCors(options => options.AddPolicy("web", policy => policy
     .WithOrigins(corsOrigins)
     .AllowAnyHeader()
