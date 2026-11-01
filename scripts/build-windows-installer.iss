@@ -1,5 +1,5 @@
 #ifndef SmartPrintPublicUrl
-  #define SmartPrintPublicUrl "https://qr-test.paintpulp.com"
+  #error SmartPrintPublicUrl must be supplied from SMARTPRINT_PUBLIC_BASE_URL by the build.
 #endif
 #ifndef SmartPrintVersion
   #define SmartPrintVersion "0.1.0"
