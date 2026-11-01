@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { Fragment, useEffect, useRef, useState, type ReactNode } from "react";
 import {
   Activity, ArrowRight, Check, Clock3, Copy, CreditCard, FileText, FileUp, FolderOpen, LayoutDashboard,
   LifeBuoy, LogOut, Menu, Moon, Monitor, Plus, Printer, QrCode, Search, Settings,
@@ -1876,7 +1876,7 @@ function PrintQueuePage({ jobs, printers, agentDevices, searchQuery, onSearch, o
           const expanded=expandedBatchKeys.has(batch.key);
           const label=statusLabels.length===1?prettyStatus(statusLabels[0]):`${statusLabels.length} states`;
           const tone=statusLabels.every(status=>status==="COMPLETED"||status==="LOCAL_QUEUE_READY")?"green":statusLabels.some(status=>status==="AWAITING_SHOP_APPROVAL"||status==="AWAITING_CUSTOMER_APPROVAL"||status==="OUTPUT_UNCONFIRMED")?"amber":"blue";
-          return <React.Fragment key={batch.key}>
+          return <Fragment key={batch.key}>
             <tr className="queue-batch-summary-row">
               <td><strong className="job-id">{batch.batchId?"Batch · "+first.jobNumber:first.jobNumber}</strong><small className="batch-summary-sub">{batch.jobs.length} file(s)</small></td>
               <td><div className="customer-cell"><strong>{folders.length} folder group(s)</strong><span>{folders.slice(0,3).join(" · ")}{folders.length>3?" · +"+(folders.length-3):""}</span></div></td>
@@ -1910,7 +1910,7 @@ function PrintQueuePage({ jobs, printers, agentDevices, searchQuery, onSearch, o
                 {(job.status==="SPOOLER_ACCEPTED"||job.status==="PRINTING"||(job.status==="OUTPUT_UNCONFIRMED"&&job.outputMode!=="PDF_EXPORT"))&&<button className="subtle-button approve-action" disabled={busyJobId===job.id||(job.status!=="OUTPUT_UNCONFIRMED"&&!!spoolerStatusWarning(job.spoolerStatus,job.printerStatus))} onClick={()=>onConfirmOutput(job)}>Confirm output</button>}
               </div>
             </article>)}</div></td></tr>}
-          </React.Fragment>;
+          </Fragment>;
         })}
       </tbody></table></div>}
     {hasMoreJobs && <div className="queue-load-older"><button className="secondary-button" type="button" onClick={() => void onLoadOlder()} disabled={loadingOlderJobs}>{loadingOlderJobs ? <span className="button-spinner"/> : <ArrowRight size={14}/>} Load older jobs</button></div>}
@@ -2632,12 +2632,13 @@ function customerFileFingerprint(file:File):string {
 
 function customerBatchGroupName(file:File):string {
   const relativePath=(file as File & {webkitRelativePath?:string}).webkitRelativePath??"";
-  return relativePath.split("/").filter(Boolean)[0]??"Loose files";
+  const pathParts=relativePath.split("/").filter(Boolean);
+  return pathParts.length>1?pathParts[0]:"Loose files";
 }
 
 function normalizeCustomerCopies(value:string):string {
   const trimmed=value.trim();
-  if(!/^\\d+$/.test(trimmed))return "1";
+  if(!/^\d+$/.test(trimmed))return "1";
   const copies=Number(trimmed);
   return Number.isInteger(copies)&&copies>=1&&copies<=100?String(copies):"1";
 }
