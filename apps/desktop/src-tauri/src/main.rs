@@ -17,7 +17,7 @@ struct LocalAgentStatus {
     status: String,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct AgentPipeResponse {
     success: bool,
@@ -182,11 +182,11 @@ mod credential_store {
                 Some(value) => {
                     if value.len() > 2_400 { return Err("The saved session exceeds the secure storage limit.".into()); }
                     let mut bytes = value.into_bytes();
-                    let mut target = target();
+                    let mut target_name = target();
                     let mut user_name: Vec<u16> = "SmartPrint".encode_utf16().chain(std::iter::once(0)).collect();
                     let mut credential: CREDENTIALW = std::mem::zeroed();
                     credential.Type = CRED_TYPE_GENERIC;
-                    credential.TargetName = target.as_mut_ptr();
+                    credential.TargetName = target_name.as_mut_ptr();
                     credential.CredentialBlobSize = bytes.len() as u32;
                     credential.CredentialBlob = bytes.as_mut_ptr();
                     credential.Persist = CRED_PERSIST_LOCAL_MACHINE;

@@ -160,6 +160,7 @@ export class ApiError extends Error {
 const apiBase = (import.meta.env.VITE_API_BASE_URL || "").replace(/\/$/, "");
 
 let refreshInFlight: Promise<AuthTokens | null> | null = null;
+let desktopSessionWrite: Promise<void> = Promise.resolve();
 
 async function refreshStoredSession(expectedAccessToken: string): Promise<AuthTokens | null> {
   const stored = readStoredTokens();
@@ -180,18 +181,18 @@ async function refreshStoredSession(expectedAccessToken: string): Promise<AuthTo
     refreshInFlight = apiRequest<AuthTokens>("/api/v1/auth/refresh", {
       method: "POST",
       body: JSON.stringify({ refreshToken: source.refreshToken })
-    }).then(tokens => {
+    }).then(async tokens => {
       const latest = readStoredTokens();
       if (!latest) return null;
       if (latest.refreshToken === source.refreshToken) {
-        storeTokens(tokens);
+        await storeTokens(tokens);
         return tokens;
       }
       return latest;
-    }).catch(error => {
+    }).catch(async error => {
       if (error instanceof ApiError && error.status === 401) {
         const latest = readStoredTokens();
-        if (latest?.refreshToken === source.refreshToken) storeTokens(null);
+        if (latest?.refreshToken === source.refreshToken) await storeTokens(null);
         return null;
       }
       throw error;
@@ -257,17 +258,20 @@ export function readStoredTokens(): AuthTokens | null {
   }
 }
 
-export function storeTokens(tokens: AuthTokens | null): void {
+export function storeTokens(tokens: AuthTokens | null): Promise<void> {
   if (tokens) sessionStorage.setItem("qrtoprint.auth", JSON.stringify(tokens));
   else sessionStorage.removeItem("qrtoprint.auth");
 
-  // Keep the native session in Windows Credential Manager; sessionStorage is only
-  // the current WebView's in-memory compatibility layer.
-  if (isDesktopApp()) {
-    void writeDesktopSession(tokens ? JSON.stringify(tokens) : null).catch(() => {
-      // The desktop sign-in and activation flows surface storage errors explicitly.
-    });
-  }
+  if (!isDesktopApp()) return Promise.resolve();
+
+  // Serialize native writes so a late token-rotation write cannot overwrite a
+  // newer sign-out or a newer session. Callers that rotate credentials can await
+  // the write before allowing the next authenticated request.
+  const serialized = tokens ? JSON.stringify(tokens) : null;
+  desktopSessionWrite = desktopSessionWrite
+    .catch(() => undefined)
+    .then(() => writeDesktopSession(serialized));
+  return desktopSessionWrite;
 }
 
 export const signIn = (email: string, password: string) =>

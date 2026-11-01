@@ -18,12 +18,12 @@ async function start() {
     if (saved) {
       const parsed = JSON.parse(saved);
       if (parsed && typeof parsed.accessToken === "string" && typeof parsed.refreshToken === "string") {
-        storeTokens(parsed);
+        await storeTokens(parsed);
       }
     }
   } catch {
     // A missing or invalid secure session simply returns the owner to sign-in.
-    storeTokens(null);
+    await storeTokens(null);
   }
 
   if (window.location.pathname !== "/shop") {

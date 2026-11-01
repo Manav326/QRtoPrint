@@ -640,7 +640,7 @@ function ShopConsole({ tokens, onSignOut }: { tokens: AuthTokens; onSignOut: () 
         <nav className="primary-nav" aria-label="Shop navigation">
           {sections.map(({ label, icon: Icon }) => (
             <button key={label} title={label} aria-label={label} className={active === label ? "nav-item active" : "nav-item"} onClick={() => navAction(label)}>
-              <Icon size={18} strokeWidth={1.8}/><span>{label}</span>{label === "Print Queue" && <span className="nav-soon">SOON</span>}
+              <Icon size={18} strokeWidth={1.8}/><span>{label}</span>
             </button>
           ))}
         </nav>
