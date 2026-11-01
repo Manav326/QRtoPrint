@@ -921,274 +921,286 @@ class MainActivity : AppCompatActivity() {
     private fun refreshLibrary() { if (pickerMode) showPicker() else showFiles() }
 
     private fun libraryView(isPicker: Boolean): View {
-        val scroll = ScrollView(this).apply { isFillViewport = true }
+        val scroll = ScrollView(this).apply { isFillViewport = true; clipToPadding = false }
         val column = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(dp(18), dp(16), dp(18), dp(26))
+            setPadding(dp(16), dp(12), dp(16), dp(22))
         }
         scroll.addView(column)
-        val hero = card()
-        val heroText = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(dp(18), dp(18), dp(18), dp(18))
+        val path = if (isPicker) pickerPath else folderPath
+        val rootFolder = try { store.folder(path) } catch (_: Exception) { store.root }
+        val allEntries = store.list(rootFolder)
+        val visibleEntries = allEntries.filter {
+            isPicker || librarySearchQuery.isBlank() || it.name.contains(librarySearchQuery, ignoreCase = true)
         }
-        heroText.addView(text(
-            if (isPicker) "Choose something ready to print" else "Keep everything ready",
-            21, R.color.qp_text, true
-        ))
-        heroText.addView(text(
-            if (isPicker) "Saved documents stay on this phone until you send one to the shop."
-            else "Prepare documents before visiting the shop. Organise files in folders, then send them from this library.",
-            14, R.color.qp_muted, false
-        ).apply { setPadding(0, dp(7), 0, 0) })
-        hero.addView(heroText)
-        column.addView(hero, linearParams())
+        val heading = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
+        val copy = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        copy.addView(text(if (isPicker) "Select files" else "My Files", 21, R.color.qp_text, true))
+        copy.addView(text(
+            if (isPicker) "${visibleEntries.count { !it.isDirectory }} available"
+            else "${allEntries.count { it.isDirectory }} folders · ${allEntries.count { !it.isDirectory }} files",
+            11, R.color.qp_muted, false
+        ).apply { setPadding(0, dp(2), 0, 0) })
+        heading.addView(copy, LinearLayout.LayoutParams(0, -2, 1f))
+        if (!isPicker) heading.addView(button("＋ Folder", false).apply {
+            minHeight = dp(36)
+            setOnClickListener {
+                nameDialog("New folder", "") { name ->
+                    try { store.createFolder(folderPath, name); showFiles() }
+                    catch (e: Exception) { toast("Folder not created: ${message(e)}") }
+                }
+            }
+        })
+        column.addView(heading, linearParams().apply { bottomMargin = dp(12) })
 
         if (!isPicker) {
-            val usedBytes = store.storageUsageBytes()
-            val freeBytes = filesDir.usableSpace
-            val storage = card()
-            val storageContent = LinearLayout(this).apply {
-                orientation = LinearLayout.VERTICAL
-                setPadding(dp(14), dp(11), dp(14), dp(11))
-            }
-            storageContent.addView(text(
-                "On-device storage · ${android.text.format.Formatter.formatFileSize(this, usedBytes)} used",
-                13, R.color.qp_text, true
-            ))
-            storageContent.addView(text(
-                "${android.text.format.Formatter.formatFileSize(this, freeBytes)} free on this device. Documents remain in private app storage until you export or delete them.",
-                11, R.color.qp_muted, false
-            ).apply { setPadding(0, dp(4), 0, 0) })
-            storage.addView(storageContent)
-            column.addView(storage, linearParams().apply { topMargin = dp(10) })
-
-            val searchRow = LinearLayout(this).apply {
-                orientation = LinearLayout.HORIZONTAL
-                gravity = Gravity.CENTER_VERTICAL
-            }
+            val searchRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
             val search = EditText(this).apply {
-                hint = "Search this folder"
+                hint = "Search"
                 maxLines = 1
                 setSingleLine(true)
+                textSize = 14f
+                setTextColor(getColor(R.color.qp_text))
+                setHintTextColor(getColor(R.color.qp_muted))
+                background = roundedDrawable(getColor(R.color.qp_card), dp(11), getColor(R.color.qp_outline))
+                setPadding(dp(12), 0, dp(12), 0)
                 setText(librarySearchQuery)
             }
-            searchRow.addView(search, LinearLayout.LayoutParams(0, dp(48), 1f))
-            searchRow.addView(button("Search", false).apply {
-                setOnClickListener {
-                    librarySearchQuery = search.text.toString().trim()
-                    showFiles()
-                }
-            }, LinearLayout.LayoutParams(-2, dp(48)).apply { marginStart = dp(8) })
-            searchRow.addView(button("Clear", false).apply {
-                setOnClickListener { librarySearchQuery = ""; showFiles() }
-            }, LinearLayout.LayoutParams(-2, dp(48)).apply { marginStart = dp(6) })
-            column.addView(searchRow, linearParams().apply { topMargin = dp(12) })
+            searchRow.addView(search, LinearLayout.LayoutParams(0, dp(42), 1f))
+            searchRow.addView(button("Go", false).apply {
+                minHeight = dp(40)
+                setOnClickListener { librarySearchQuery = search.text.toString().trim(); showFiles() }
+            }, LinearLayout.LayoutParams(dp(54), dp(40)).apply { marginStart = dp(8) })
+            column.addView(searchRow, linearParams().apply { bottomMargin = dp(10) })
         }
 
-        val actions = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
-        val importButton = button("Import files", false)
-        val folderButton = button("Import folder", false)
-        actions.addView(importButton, LinearLayout.LayoutParams(0, dp(48), 1f))
-        actions.addView(folderButton, LinearLayout.LayoutParams(0, dp(48), 1f).apply { marginStart = dp(8) })
-        column.addView(actions, linearParams().apply { topMargin = dp(14) })
-        importButton.setOnClickListener { importFiles.launch(arrayOf("*/*")) }
-        folderButton.setOnClickListener { importTree.launch(null) }
-
-        if (!isPicker) {
-            val create = button("＋  New folder", true)
-            column.addView(create, linearParams().apply { topMargin = dp(8) })
-            create.setOnClickListener {
-                nameDialog("Create folder", "") { name ->
-                    try { store.createFolder(folderPath, name); showFiles() }
-                    catch (e: Exception) { toast("Could not create folder: ${message(e)}") }
-                }
-            }
-        }
-
-        val path = if (isPicker) pickerPath else folderPath
         val crumb = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(2), dp(3), dp(2), dp(8))
         }
-        crumb.addView(text(
-            "My files" + if (path.isBlank()) "" else "  /  " + path.replace("/", "  /  "),
-            13, R.color.qp_muted, true
-        ), LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+        val breadcrumbText = if (path.isBlank()) "My Files" else "My Files  ›  " + path.replace("/", "  ›  ")
+        crumb.addView(text(breadcrumbText, 12, R.color.qp_muted, true),
+            LinearLayout.LayoutParams(0, -2, 1f))
         if (path.isNotEmpty()) {
-            val up = button("Up", false)
-            crumb.addView(up, LinearLayout.LayoutParams(-2, dp(48)))
+            val up = button("Back", false).apply { minHeight = dp(34) }
+            crumb.addView(up)
             up.setOnClickListener {
                 if (isPicker) pickerPath = parent(pickerPath) else folderPath = parent(folderPath)
                 refreshLibrary()
             }
         }
-        column.addView(crumb, linearParams().apply { topMargin = dp(20); bottomMargin = dp(5) })
-        if (!isPicker) {
-            column.addView(text(
-                "Long-press and drag files or folders to arrange their order. Use ⋮ to rename or move items.",
-                11, R.color.qp_muted, false
-            ).apply { setPadding(dp(2), 0, 0, dp(9)) })
-        }
+        column.addView(crumb, linearParams())
 
-        val folder = try { store.folder(path) } catch (_: Exception) { store.root }
-        val entries = store.list(folder).filter {
-            isPicker || librarySearchQuery.isBlank() || it.name.contains(librarySearchQuery, ignoreCase = true)
+        val actions = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
         }
-        val selectedHere = entries.filter { !it.isDirectory && selectedFilePaths.contains(it.canonicalPath) }
+        actions.addView(button("Import", false).apply {
+            minHeight = dp(38)
+            setOnClickListener { importFiles.launch(arrayOf("*/*")) }
+        }, LinearLayout.LayoutParams(0, dp(38), 1f))
+        actions.addView(button("Folder import", false).apply {
+            minHeight = dp(38)
+            setOnClickListener { importTree.launch(null) }
+        }, LinearLayout.LayoutParams(0, dp(38), 1f).apply { marginStart = dp(7) })
+        column.addView(actions, linearParams().apply { bottomMargin = dp(12) })
+
+        val selectedHere = visibleEntries.filter { !it.isDirectory && selectedFilePaths.contains(it.canonicalPath) }
         val chooserSelection = if (isPicker && fileChooserAllowsMultiple) selectedChooserFiles() else emptyList()
         if (isPicker && fileChooserAllowsMultiple) {
-            val selectionCard = card()
-            val selectionContent = LinearLayout(this).apply {
-                orientation = LinearLayout.VERTICAL
-                setPadding(dp(14), dp(12), dp(14), dp(12))
+            val selectionRow = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                setPadding(dp(12), dp(8), dp(12), dp(8))
+                background = roundedDrawable(getColor(R.color.qp_soft), dp(12))
             }
-            selectionContent.addView(text(chooserSelection.size.toString() + " selected", 14, R.color.qp_text, true))
-            val selectionActions = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
-            val validSelection = PrintBatchSelectionPolicy.validationError(chooserSelection) == null
-            selectionActions.addView(button("Attach selected files", true).apply {
-                isEnabled = validSelection
-                alpha = if (validSelection) 1f else 0.45f
-                setOnClickListener { chooseFiles(chooserSelection) }
-            }, LinearLayout.LayoutParams(0, dp(48), 1f))
-            selectionActions.addView(button("Clear", false).apply {
+            selectionRow.addView(text("${chooserSelection.size} selected", 12, R.color.qp_text, true),
+                LinearLayout.LayoutParams(0, -2, 1f))
+            selectionRow.addView(button("Clear", false).apply {
+                minHeight = dp(34)
                 isEnabled = chooserSelection.isNotEmpty()
                 setOnClickListener { chooserSelectedFilePaths.clear(); refreshLibrary() }
-            }, LinearLayout.LayoutParams(0, dp(44), 0.38f).apply { marginStart = dp(8) })
-            selectionContent.addView(selectionActions, linearParams().apply { topMargin = dp(8) })
-            selectionContent.addView(text(
-                if (chooserSelection.isEmpty()) "Select files from this folder or browse into subfolders; your selection is kept as you browse."
-                else "Original files stay separate and upload as one print batch for individual shop review.",
-                11, R.color.qp_muted, false
-            ).apply { setPadding(0, dp(7), 0, 0) })
-            selectionCard.addView(selectionContent)
-            column.addView(selectionCard, linearParams().apply { bottomMargin = dp(12) })
+            })
+            selectionRow.addView(button("Attach", true).apply {
+                minHeight = dp(34)
+                isEnabled = chooserSelection.isNotEmpty() &&
+                    PrintBatchSelectionPolicy.validationError(chooserSelection) == null
+                setOnClickListener { chooseFiles(chooserSelection) }
+            }, LinearLayout.LayoutParams(-2, dp(34)).apply { marginStart = dp(6) })
+            column.addView(selectionRow, linearParams().apply { bottomMargin = dp(10) })
         }
         if (!isPicker && selectedHere.isNotEmpty()) {
-            val selectionCard = card()
-            val selectionContent = LinearLayout(this).apply {
-                orientation = LinearLayout.VERTICAL
-                setPadding(dp(14), dp(12), dp(14), dp(12))
+            val selectionRow = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                setPadding(dp(12), dp(8), dp(12), dp(8))
+                background = roundedDrawable(getColor(R.color.qp_soft), dp(12))
             }
-            selectionContent.addView(text("${selectedHere.size} selected", 14, R.color.qp_text, true))
-            val selectionActions = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
-            selectionActions.addView(button("Export ZIP", false).apply {
+            selectionRow.addView(text("${selectedHere.size} selected", 12, R.color.qp_text, true),
+                LinearLayout.LayoutParams(0, -2, 1f))
+            selectionRow.addView(button("ZIP", false).apply {
+                minHeight = dp(34)
                 setOnClickListener { exportSelected(selectedHere) }
-            }, LinearLayout.LayoutParams(0, dp(44), 1f))
+            })
             val supportedBatch = selectedHere.size in 2..20 &&
                 selectedHere.all {
                     it.extension.lowercase(Locale.ROOT) in setOf("pdf", "jpg", "jpeg", "png") &&
                         it.length() in 1..(20L * 1024L * 1024L)
-                } &&
-                selectedHere.sumOf { it.length() } <= DocumentBatchComposer.MAX_SOURCE_BYTES
-            selectionActions.addView(button("Combine into one PDF", true).apply {
+                } && selectedHere.sumOf { it.length() } <= DocumentBatchComposer.MAX_SOURCE_BYTES
+            selectionRow.addView(button("PDF", true).apply {
+                minHeight = dp(34)
                 isEnabled = supportedBatch
                 alpha = if (supportedBatch) 1f else 0.45f
                 setOnClickListener { preparePrintBatch(selectedHere) }
-            }, LinearLayout.LayoutParams(0, dp(44), 1f).apply { marginStart = dp(8) })
-            selectionContent.addView(selectionActions, linearParams().apply { topMargin = dp(8) })
-            selectionContent.addView(text(
-                if (supportedBatch) "Creates one image-based PDF. Searchable text and vector quality may be lost. For separately reviewable print files, use Select multiple files after scanning a shop QR code."
-                else "Select 2–20 PDF/JPG/PNG files, each up to 20 MB and 100 MB total, to combine them into one PDF.",
-                11, R.color.qp_muted, false
-            ).apply { setPadding(0, dp(7), 0, 0) })
-            selectionCard.addView(selectionContent)
-            column.addView(selectionCard, linearParams().apply { bottomMargin = dp(12) })
+            }, LinearLayout.LayoutParams(-2, dp(34)).apply { marginStart = dp(6) })
+            column.addView(selectionRow, linearParams().apply { bottomMargin = dp(10) })
+            column.addView(text("PDF merge rasterizes pages.", 10, R.color.qp_muted, false)
+                .apply { setPadding(dp(2), 0, 0, dp(6)) })
         }
-        if (entries.isEmpty()) {
-            val empty = card()
-            empty.addView(text(
-                if (isPicker) "No printable files here. Import a document or open another folder."
-                else if (librarySearchQuery.isNotBlank()) "No files or folders match “$librarySearchQuery” in this folder."
-                else "No documents here yet. Scan paper pages, import files or create a folder to get started.",
-                14, R.color.qp_muted, false
-            ).apply { setPadding(dp(18), dp(22), dp(18), dp(22)) })
-            column.addView(empty, linearParams())
+
+        if (visibleEntries.isEmpty()) {
+            column.addView(text(
+                if (librarySearchQuery.isNotBlank() && !isPicker) "No matches"
+                else if (isPicker) "No printable files"
+                else "This folder is empty",
+                13, R.color.qp_muted, false
+            ).apply { setPadding(dp(4), dp(24), dp(4), dp(24)) })
         } else {
-            entries.forEach { entry ->
-                if (!isPicker || entry.isDirectory || DocumentNamePolicy.isPrintable(entry.name, entry.length())) {
-                    column.addView(entryView(entry, isPicker), linearParams().apply { bottomMargin = dp(8) })
-                }
-            }
+            addLibraryEntries(column, visibleEntries, isPicker, 0)
+        }
+        if (!isPicker) {
+            val used = android.text.format.Formatter.formatShortFileSize(this, store.storageUsageBytes())
+            column.addView(text("$used used on this device", 10, R.color.qp_muted, false)
+                .apply { setPadding(dp(2), dp(12), 0, 0) })
         }
         return scroll
     }
 
-    private fun entryView(file: File, isPicker: Boolean): View {
-        val outer = card()
+    private fun addLibraryEntries(parentView: LinearLayout, entries: List<File>, isPicker: Boolean, depth: Int) {
+        entries.forEach { entry ->
+            if (!isPicker || entry.isDirectory || DocumentNamePolicy.isPrintable(entry.name, entry.length())) {
+                parentView.addView(entryView(entry, isPicker, depth), linearParams().apply { bottomMargin = dp(4) })
+                if (entry.isDirectory && expandedFolderPaths.contains(entry.canonicalPath) && depth < MAX_TREE_DEPTH) {
+                    val children = runCatching { store.list(entry).toList() }.getOrDefault(emptyList())
+                    if (children.isNotEmpty()) addLibraryEntries(parentView, children, isPicker, depth + 1)
+                }
+            }
+        }
+    }
+
+    private fun entryView(file: File, isPicker: Boolean, depth: Int = 0): View {
         val row = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            setPadding(dp(12), dp(10), dp(8), dp(10))
+            setPadding(dp(8 + depth * 15), dp(7), dp(5), dp(7))
+            minimumHeight = dp(54)
+            background = roundedDrawable(
+                if (file.isDirectory) getColor(R.color.qp_surface) else getColor(R.color.qp_card),
+                dp(11), getColor(R.color.qp_outline)
+            )
         }
-        row.addView(text(
-            if (file.isDirectory) "▰" else file.extension.uppercase(Locale.ROOT).ifBlank { "FILE" },
-            13, R.color.qp_primary, true
-        ).apply { gravity = Gravity.CENTER }, LinearLayout.LayoutParams(dp(44), dp(44)))
-        val details = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-        details.addView(text(file.name, 14, R.color.qp_text, true).apply { maxLines = 2 })
-        val info = if (file.isDirectory) "Folder" else
-            "${android.text.format.Formatter.formatShortFileSize(this@MainActivity, file.length())}" +
-                if (DocumentNamePolicy.isPrintable(file.name, file.length())) " · Ready to print" else " · Stored locally"
-        details.addView(text(info, 12, R.color.qp_muted, false).apply { setPadding(0, dp(3), 0, 0) })
-        row.addView(details, LinearLayout.LayoutParams(0, -2, 1f).apply { marginStart = dp(12) })
+        val icon = ImageView(this).apply {
+            setImageResource(fileIconResource(file))
+            imageTintList = ColorStateList.valueOf(
+                getColor(if (file.isDirectory) R.color.qp_primary else R.color.qp_muted)
+            )
+            scaleType = ImageView.ScaleType.CENTER_INSIDE
+            setPadding(dp(7), dp(7), dp(7), dp(7))
+            background = roundedDrawable(
+                getColor(if (file.isDirectory) R.color.qp_soft else R.color.qp_surface), dp(10)
+            )
+        }
+        row.addView(icon, LinearLayout.LayoutParams(dp(38), dp(38)))
+        val details = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(10), 0, dp(4), 0)
+        }
+        details.addView(text(file.name, 13, R.color.qp_text, true).apply {
+            maxLines = 1
+            ellipsize = android.text.TextUtils.TruncateAt.END
+        })
+        val info = if (file.isDirectory) {
+            val count = runCatching { store.list(file).size }.getOrDefault(0)
+            "$count items"
+        } else android.text.format.Formatter.formatShortFileSize(this@MainActivity, file.length())
+        details.addView(text(info, 10, R.color.qp_muted, false).apply { setPadding(0, dp(2), 0, 0) })
+        row.addView(details, LinearLayout.LayoutParams(0, -2, 1f))
 
-        if (isPicker && fileChooserAllowsMultiple && !file.isDirectory) {
+        if (file.isDirectory) {
+            val expanded = expandedFolderPaths.contains(file.canonicalPath)
+            val chevron = ImageView(this).apply {
+                setImageResource(R.drawable.ic_chevron_right)
+                imageTintList = ColorStateList.valueOf(getColor(R.color.qp_muted))
+                rotation = if (expanded) 90f else 0f
+                contentDescription = if (expanded) "Collapse ${file.name}" else "Expand ${file.name}"
+                setPadding(dp(7), dp(7), dp(7), dp(7))
+                isClickable = true
+                isFocusable = true
+                setOnClickListener {
+                    if (!expandedFolderPaths.add(file.canonicalPath)) expandedFolderPaths.remove(file.canonicalPath)
+                    refreshLibrary()
+                }
+            }
+            row.addView(chevron, LinearLayout.LayoutParams(dp(38), dp(40)))
+        } else if (isPicker && fileChooserAllowsMultiple) {
             val selected = CheckBox(this).apply {
                 isChecked = chooserSelectedFilePaths.contains(file.canonicalPath)
                 contentDescription = "Select " + file.name
                 setOnCheckedChangeListener { _, checked -> setChooserFileSelected(file, checked) }
             }
-            row.addView(selected, LinearLayout.LayoutParams(dp(48), dp(44)))
-        } else if (isPicker && !file.isDirectory) {
-            row.addView(button("Select", true).apply {
-                minWidth = dp(72)
-                setOnClickListener { chooseFile(file) }
-            })
-        } else if (!isPicker && !file.isDirectory) {
+            row.addView(selected, LinearLayout.LayoutParams(dp(40), dp(40)))
+        } else if (!isPicker) {
             val selected = CheckBox(this).apply {
                 isChecked = selectedFilePaths.contains(file.canonicalPath)
-                contentDescription = "Select ${file.name}"
+                contentDescription = "Select " + file.name
+                buttonTintList = ColorStateList.valueOf(getColor(R.color.qp_primary))
                 setOnCheckedChangeListener { _, checked ->
-                    if (checked) selectedFilePaths.add(file.canonicalPath)
-                    else selectedFilePaths.remove(file.canonicalPath)
+                    if (checked) selectedFilePaths.add(file.canonicalPath) else selectedFilePaths.remove(file.canonicalPath)
                     refreshLibrary()
                 }
             }
-            row.addView(selected, LinearLayout.LayoutParams(dp(42), dp(44)))
-            val more = text("⋮", 24, R.color.qp_muted, false).apply {
-                gravity = Gravity.CENTER
-                contentDescription = "More options for ${file.name}"
-            }
-            row.addView(more, LinearLayout.LayoutParams(dp(36), dp(44)))
-            more.setOnClickListener { showEntryMenu(more, file) }
-        } else if (!isPicker) {
-            val more = text("⋮", 24, R.color.qp_muted, false).apply {
-                gravity = Gravity.CENTER
-                contentDescription = "More options for ${file.name}"
-            }
-            row.addView(more, LinearLayout.LayoutParams(dp(42), dp(44)))
-            more.setOnClickListener { showEntryMenu(more, file) }
+            row.addView(selected, LinearLayout.LayoutParams(dp(38), dp(40)))
         }
-        outer.addView(row)
-        outer.setOnClickListener {
-            if (file.isDirectory) {
-                if (isPicker) pickerPath = store.pathOf(file) else folderPath = store.pathOf(file)
-                refreshLibrary()
-            } else if (isPicker && fileChooserAllowsMultiple) setChooserFileSelected(file, !chooserSelectedFilePaths.contains(file.canonicalPath))
-            else if (isPicker) chooseFile(file) else openDocument(file)
-        }
+
         if (!isPicker) {
-            outer.setOnLongClickListener {
-                val clip = ClipData.newPlainText("SmartPrint item order", file.name)
-                outer.startDragAndDrop(clip, View.DragShadowBuilder(outer), file.canonicalPath, 0)
+            val more = ImageView(this).apply {
+                setImageResource(android.R.drawable.ic_menu_more)
+                imageTintList = ColorStateList.valueOf(getColor(R.color.qp_muted))
+                contentDescription = "More options for " + file.name
+                setPadding(dp(8), dp(8), dp(8), dp(8))
+                isClickable = true
+                isFocusable = true
+                setOnClickListener { showEntryMenu(this, file) }
             }
-            outer.setOnDragListener { _, event ->
+            row.addView(more, LinearLayout.LayoutParams(dp(36), dp(40)))
+        }
+        row.setOnClickListener {
+            when {
+                file.isDirectory -> {
+                    if (isPicker) pickerPath = store.pathOf(file) else folderPath = store.pathOf(file)
+                    refreshLibrary()
+                }
+                isPicker && fileChooserAllowsMultiple -> setChooserFileSelected(
+                    file, !chooserSelectedFilePaths.contains(file.canonicalPath)
+                )
+                isPicker -> chooseFile(file)
+                else -> openDocument(file)
+            }
+        }
+        if (!isPicker && file.isDirectory) {
+            row.setOnLongClickListener { showEntryMenu(row, file); true }
+        } else if (!isPicker) {
+            row.setOnLongClickListener {
+                val clip = ClipData.newPlainText("SmartPrint item order", file.name)
+                row.startDragAndDrop(clip, View.DragShadowBuilder(row), file.canonicalPath, 0)
+            }
+            row.setOnDragListener { _, event ->
                 when (event.action) {
                     android.view.DragEvent.ACTION_DRAG_STARTED ->
                         event.clipDescription?.hasMimeType(ClipDescription.MIMETYPE_TEXT_PLAIN) == true
-                    android.view.DragEvent.ACTION_DRAG_ENTERED -> { outer.alpha = 0.65f; true }
-                    android.view.DragEvent.ACTION_DRAG_EXITED -> { outer.alpha = 1f; true }
+                    android.view.DragEvent.ACTION_DRAG_ENTERED -> { row.alpha = 0.65f; true }
+                    android.view.DragEvent.ACTION_DRAG_EXITED -> { row.alpha = 1f; true }
                     android.view.DragEvent.ACTION_DROP -> {
                         val sourcePath = event.localState as? String
                         val source = sourcePath?.let(::File)
@@ -1198,18 +1210,25 @@ class MainActivity : AppCompatActivity() {
                                     selectedFilePaths.remove(source.canonicalPath)
                                     showFiles()
                                 }
-                            } catch (e: Exception) {
-                                toast("Could not reorder items: ${message(e)}")
-                            }
+                            } catch (e: Exception) { toast("Could not reorder: " + message(e)) }
                         }
                         true
                     }
-                    android.view.DragEvent.ACTION_DRAG_ENDED -> { outer.alpha = 1f; true }
+                    android.view.DragEvent.ACTION_DRAG_ENDED -> { row.alpha = 1f; true }
                     else -> true
                 }
             }
         }
-        return outer
+        return row
+    }
+
+    private fun fileIconResource(file: File): Int {
+        if (file.isDirectory) return R.drawable.ic_folder
+        return when (file.extension.lowercase(Locale.ROOT)) {
+            "pdf" -> R.drawable.ic_file_pdf
+            "jpg", "jpeg", "png", "webp", "bmp", "gif" -> R.drawable.ic_file_image
+            else -> R.drawable.ic_file
+        }
     }
 
     private fun showEntryMenu(anchor: View, file: File) {
