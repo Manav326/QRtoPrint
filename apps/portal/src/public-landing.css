@@ -203,3 +203,108 @@
 @keyframes spDownloadIndeterminate{0%{transform:translateX(-110%)}100%{transform:translateX(330%)}}
 @keyframes spDownloadPulse{50%{opacity:.45;box-shadow:0 0 0 6px #735cdd12}}
 @media(prefers-reduced-motion:reduce){.sp-download-live-dot,.sp-download-progress-indeterminate{animation:none}.sp-download-progress-indeterminate{width:100%;opacity:.55}}
+
+
+/* Global theme selection also applies to the public landing route. */
+html[data-theme="dark"] .sp-public {
+  --sp-ink: #edf1fa;
+  --sp-muted: #a5b0c3;
+  --sp-violet: #a99aff;
+  --sp-violet-dark: #c0b4ff;
+  --sp-line: #2b3548;
+  --sp-bg: #0c111b;
+  --sp-panel: #151e2d;
+  background: #0c111b;
+  color: var(--sp-ink);
+}
+html[data-theme="dark"] .sp-public-header { background: #0c111b; }
+html[data-theme="dark"] .sp-public-brand-copy strong { color: #f1f3fa; }
+html[data-theme="dark"] .sp-public-brand-copy small,
+html[data-theme="dark"] .sp-public-nav a,
+html[data-theme="dark"] .sp-public-footer>span,
+html[data-theme="dark"] .sp-download-platform,
+html[data-theme="dark"] .sp-download-note,
+html[data-theme="dark"] .sp-download-footnote { color: #9aa7bc; }
+html[data-theme="dark"] .sp-shop-entry {
+  border-color: #39445a;
+  background: #192334;
+  color: #e4e9f5 !important;
+  box-shadow: none;
+}
+html[data-theme="dark"] .sp-shop-entry-icon svg:last-child { background: #192334; }
+html[data-theme="dark"] .sp-hero h1,
+html[data-theme="dark"] .sp-section-heading h2,
+html[data-theme="dark"] .sp-connection-copy h2,
+html[data-theme="dark"] .sp-audience-card h2 { color: #f0f3fa; }
+html[data-theme="dark"] .sp-hero-lede,
+html[data-theme="dark"] .sp-section-heading p,
+html[data-theme="dark"] .sp-audience-card>p,
+html[data-theme="dark"] .sp-audience-card li { color: #aab5c8; }
+html[data-theme="dark"] .sp-hero-art {
+  background: radial-gradient(ellipse at 48% 52%, #272849 0, #1c2238 45%, #141b2a 100%);
+}
+html[data-theme="dark"] .sp-art-orbit { border-color: #5c5794; }
+html[data-theme="dark"] .sp-art-customer,
+html[data-theme="dark"] .sp-art-shop,
+html[data-theme="dark"] .sp-customer-mini-phone,
+html[data-theme="dark"] .sp-shop-mini-window {
+  border-color: #3a455a;
+  background: #192334;
+  color: #eef2fb;
+}
+html[data-theme="dark"] .sp-art-phone-brand,
+html[data-theme="dark"] .sp-art-shop-head b,
+html[data-theme="dark"] .sp-art-printer b,
+html[data-theme="dark"] .sp-art-document b,
+html[data-theme="dark"] .sp-customer-mini-phone b,
+html[data-theme="dark"] .sp-step-card h3,
+html[data-theme="dark"] .sp-proof-strip b { color: #edf1fa; }
+html[data-theme="dark"] .sp-art-document,
+html[data-theme="dark"] .sp-art-shop-foot,
+html[data-theme="dark"] .sp-art-printer,
+html[data-theme="dark"] .sp-proof-strip,
+html[data-theme="dark"] .sp-step-card,
+html[data-theme="dark"] .sp-download-card,
+html[data-theme="dark"] .sp-customer-mini-phone>span {
+  background: #1a2434;
+  border-color: #364258;
+}
+html[data-theme="dark"] .sp-art-document small,
+html[data-theme="dark"] .sp-art-shop-head small,
+html[data-theme="dark"] .sp-art-printer small,
+html[data-theme="dark"] .sp-proof-strip small,
+html[data-theme="dark"] .sp-step-card p,
+html[data-theme="dark"] .sp-customer-mini-phone small,
+html[data-theme="dark"] .sp-download-card p { color: #a5b0c3; }
+html[data-theme="dark"] .sp-art-floating {
+  background: #26334a;
+  color: #d3caff;
+  box-shadow: 0 12px 26px rgba(0,0,0,.35);
+}
+html[data-theme="dark"] .sp-proof-strip { border-color: #2c374b; }
+html[data-theme="dark"] .sp-step-tag { background: #302d52; color: #d1c8ff; }
+html[data-theme="dark"] .sp-audience-card { border-color: #354156; }
+html[data-theme="dark"] .sp-customer-card { background: #17263a; }
+html[data-theme="dark"] .sp-shop-card { background: #211f3b; }
+html[data-theme="dark"] .sp-text-link { color: #b5a9ff; }
+html[data-theme="dark"] .sp-connection-section { background: #171d30; }
+html[data-theme="dark"] .sp-download-card { border-color: #354156; }
+html[data-theme="dark"] .sp-download-tag,
+html[data-theme="dark"] .sp-download-unavailable {
+  background: #253147;
+  border-color: #39475f;
+  color: #c0cadb;
+}
+html[data-theme="dark"] .sp-download-tag-available { background: #183c35; color: #8ee1bd; border-color: #2e6154; }
+html[data-theme="dark"] .sp-download-tag-coming { background: #293244; color: #b5bfd0; }
+html[data-theme="dark"] .sp-windows-icon { background: #302e58; color: #c1b8ff; }
+html[data-theme="dark"] .sp-android-icon { background: #1d4239; color: #90e3bd; }
+html[data-theme="dark"] .sp-public-footer { border-color: #2b3548; }
+html[data-theme="dark"] .sp-public-footer>div a { color: #a5b0c3; }
+@media (max-width: 760px) {
+  .sp-public-header { height: auto; min-height: 68px; padding: 12px 16px; flex-wrap: wrap; gap: 12px; }
+  .sp-public-nav { order: 3; width: 100%; overflow-x: auto; gap: 18px; padding: 4px 0 7px; }
+  .sp-public-nav a { white-space: nowrap; }
+  .sp-theme-toggle { margin-left: auto; }
+  .sp-shop-entry { min-height: 38px; }
+}
