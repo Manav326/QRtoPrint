@@ -74,7 +74,6 @@ export function useFileDownload(fileName: string): {
     const controller = new AbortController();
     controllerRef.current = controller;
     let writable: WritableDownloadFile | null = null;
-    let completed = false;
 
     setDownload({
       status: "downloading",
@@ -169,7 +168,6 @@ export function useFileDownload(fileName: string): {
         saveBlob(blob, fileName);
       }
 
-      completed = true;
       setDownload({
         status: "complete",
         bytesReceived,
@@ -196,9 +194,6 @@ export function useFileDownload(fileName: string): {
       }
     } finally {
       if (controllerRef.current === controller) controllerRef.current = null;
-      if (!completed) {
-        // The partial file is discarded on cancellation or error.
-      }
     }
   }, [fileName]);
 
