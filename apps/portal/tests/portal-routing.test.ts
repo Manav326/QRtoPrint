@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { authStorageKey, resolvePortalRoute, shopPathForSection, shopSectionFromPath } from "../src/portal-routing.ts";
+import { adminPathForSection, adminSectionFromPath, authStorageKey, resolvePortalRoute, shopPathForSection, shopSectionFromPath } from "../src/portal-routing.ts";
 
 test("public root stays public even when a user has a stored session", () => {
   assert.deepEqual(resolvePortalRoute("/"), { kind: "public" });
@@ -61,4 +61,17 @@ test("shop workspace sections have stable deep links and restore correctly", () 
   assert.equal(shopSectionFromPath("/shop/settings/"), "Settings");
   assert.equal(shopSectionFromPath("/shop/queue/jobs/42"), "Print Queue");
   assert.equal(shopSectionFromPath("/shop/unknown"), "Overview");
+});
+
+
+test("admin workspace sections have stable deep links and restore nested views", () => {
+  const sections = ["Overview", "Tenants", "Plans", "Subscriptions", "Operations"] as const;
+  for (const section of sections) {
+    const path = adminPathForSection(section);
+    assert.ok(path === "/admin" || path.startsWith("/admin/"));
+    assert.equal(adminSectionFromPath(path), section);
+  }
+  assert.equal(adminSectionFromPath("/admin/tenants/42"), "Tenants");
+  assert.equal(adminSectionFromPath("/admin/plans/version/3"), "Plans");
+  assert.equal(adminSectionFromPath("/admin/unknown"), "Overview");
 });
