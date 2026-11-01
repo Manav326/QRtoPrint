@@ -841,7 +841,7 @@ class MainActivity : AppCompatActivity() {
                                 12, R.color.qp_muted, false
                             ).apply { setPadding(0, dp(4), 0, 0) })
                             body.addView(text(
-                                "Payment: ${job.paymentStatus.ifBlank { "Not recorded" }} · Paid ${job.currency} ${"%.2f".format(Locale.ROOT, job.paidAmountMinor / 100.0)} · Refunded ${job.currency} ${"%.2f".format(Locale.ROOT, job.refundedAmountMinor / 100.0)} · Net ${job.currency} ${"%.2f".format(Locale.ROOT, maxOf(0L, job.paidAmountMinor - job.refundedAmountMinor) / 100.0)}",
+                                "${job.paymentMethod.ifBlank { "Payment" }} · ${job.paymentStatus.ifBlank { "Not recorded" }} · Paid ${job.currency} ${"%.2f".format(Locale.ROOT, job.paidAmountMinor / 100.0)} · Refunded ${job.currency} ${"%.2f".format(Locale.ROOT, job.refundedAmountMinor / 100.0)} · Net ${job.currency} ${"%.2f".format(Locale.ROOT, maxOf(0L, job.paidAmountMinor - job.refundedAmountMinor) / 100.0)}",
                                 12, R.color.qp_muted, false
                             ).apply { setPadding(0, dp(4), 0, 0) })
                             if (job.rejectedPageNumbersJson != "[]" && job.rejectedPageNumbersJson.isNotBlank()) {
@@ -851,8 +851,13 @@ class MainActivity : AppCompatActivity() {
                                 ).apply { setPadding(0, dp(4), 0, 0) })
                             }
                             if (job.outputCompletedUtc != null) {
+                                val outputConfirmedLabel = runCatching {
+                                    Instant.parse(job.outputCompletedUtc)
+                                        .atZone(ZoneId.systemDefault())
+                                        .format(DateTimeFormatter.ofPattern("dd MMM yyyy, hh:mm a", Locale.ROOT))
+                                }.getOrDefault(job.outputCompletedUtc)
                                 body.addView(text(
-                                    "Output confirmed: ${job.outputCompletedUtc}",
+                                    "Output confirmed: $outputConfirmedLabel",
                                     12, R.color.qp_muted, false
                                 ).apply { setPadding(0, dp(4), 0, 0) })
                             }
