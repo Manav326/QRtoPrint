@@ -96,13 +96,14 @@ class MainActivityInstrumentedTest {
 
     @Test
     fun fileContextActionsUseBottomSheet() {
+        val folderName = "CI Sheet Folder " + System.currentTimeMillis()
         ActivityScenario.launch(MainActivity::class.java).use {
             val label = com.google.android.material.R.id.navigation_bar_item_small_label_view
             onView(allOf(withId(label), withText("Files"))).perform(click())
             onView(withText("New folder")).perform(click())
-            onView(withHint("Name")).perform(replaceText("CI Sheet Folder"), closeSoftKeyboard())
+            onView(withHint("Name")).perform(replaceText(folderName), closeSoftKeyboard())
             onView(withText("Save")).perform(click())
-            onView(withContentDescription("More options for CI Sheet Folder")).perform(click())
+            onView(withContentDescription("More options for " + folderName)).perform(click())
             onView(withText("Folder actions")).check(matches(isDisplayed()))
             onView(withText("Rename")).check(matches(isDisplayed()))
             onView(withText("Delete")).check(matches(isDisplayed()))
