@@ -4262,6 +4262,7 @@ shop.MapGet("/payment-settings", async (
         settings.UpiId,
         settings.PayeeName,
         settings.CashEnabled,
+        settings.InstantPaymentEnabled,
         settings.UpdatedUtc
     });
 });
@@ -4315,6 +4316,7 @@ shop.MapPut("/payment-settings", async (
     settings.UpiId = request.UpiEnabled ? upiId : null;
     settings.PayeeName = request.UpiEnabled ? payeeName : null;
     settings.CashEnabled = request.CashEnabled;
+    settings.InstantPaymentEnabled = request.InstantPaymentEnabled;
     settings.UpdatedUtc = DateTimeOffset.UtcNow;
     await db.SaveChangesAsync(ct);
 
@@ -4324,6 +4326,7 @@ shop.MapPut("/payment-settings", async (
         settings.UpiId,
         settings.PayeeName,
         settings.CashEnabled,
+        settings.InstantPaymentEnabled,
         settings.UpdatedUtc
     });
 });
@@ -5452,6 +5455,10 @@ publicApi.MapPost("/jobs/{jobId:guid}/quote", async (
         });
     }
 
+    var paymentPreferences = await db.ShopPaymentProfiles.AsNoTracking()
+        .Where(item => item.TenantId == session.TenantId)
+        .Select(item => new { item.InstantPaymentEnabled })
+        .SingleOrDefaultAsync(ct);
     var pricing = await db.ShopPricingProfiles.AsNoTracking()
         .SingleOrDefaultAsync(item => item.TenantId == session.TenantId && item.IsConfigured, ct);
     if (pricing is null)
@@ -5484,7 +5491,9 @@ publicApi.MapPost("/jobs/{jobId:guid}/quote", async (
         job.PricingVersion = pricing.Version;
         job.QuoteExpiresUtc = now.AddMinutes(10);
         var previousStatus = job.Status;
-        job.Status = "AWAITING_CUSTOMER_APPROVAL";
+        job.Status = paymentPreferences?.InstantPaymentEnabled == true
+            ? "AWAITING_PAYMENT"
+            : "AWAITING_CUSTOMER_APPROVAL";
         job.UpdatedUtc = now;
         db.PrintJobEvents.Add(new PrintJobEvent
         {
@@ -5493,7 +5502,9 @@ publicApi.MapPost("/jobs/{jobId:guid}/quote", async (
             PreviousStatus = previousStatus,
             NewStatus = job.Status,
             ActorType = "Customer",
-            ReasonCode = "QUOTE_CREATED",
+            ReasonCode = paymentPreferences?.InstantPaymentEnabled == true
+                ? "INSTANT_CHECKOUT_QUOTE_CREATED"
+                : "QUOTE_CREATED",
             CreatedUtc = now
         });
         await db.SaveChangesAsync(ct);
@@ -6499,7 +6510,8 @@ publicApi.MapPost("/stations/{publicCode}/sessions", async (
                 profile.UpiEnabled,
                 profile.UpiId,
                 profile.PayeeName,
-                profile.CashEnabled
+                profile.CashEnabled,
+                profile.InstantPaymentEnabled
             })
             .SingleAsync(ct),
         LocalAgent = await GetLocalAgentInfoAsync(db, station.TenantId, station.PrinterDeviceId, now, ct),
