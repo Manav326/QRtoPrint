@@ -2027,11 +2027,14 @@ class MainActivity : AppCompatActivity() {
                 fileChooserAllowsMultiple = false
                 fileChooserSelectFolders = false
                 showPrint()
-                callback.onReceiveValue(uris)
+                val activeWebView = webView
+                if (activeWebView != null) {
+                    activeWebView.evaluateJavascript(metadataScript) { callback.onReceiveValue(uris) }
+                } else {
+                    callback.onReceiveValue(uris)
+                }
             }
-            val activeWebView = webView
-            if (activeWebView != null) activeWebView.evaluateJavascript(metadataScript) { deliverSelection() }
-            else deliverSelection()
+            deliverSelection()
         } catch (e: Exception) {
             cancelPicker()
             toast("Could not attach the selected documents: " + message(e))

@@ -16,7 +16,7 @@ The shop print workflow reuses the existing customer portal and APIs inside the 
 - Create nested folders, import multiple files, or import a directory tree using Android's Storage Access Framework.
 - Export one file or an entire folder tree into a user-selected Android File Manager destination. Multiple selected files export together as a ZIP archive that preserves their original filenames.
 - Open/share files with other Android apps.
-- The customer portal's native file picker can select one saved PDF/JPG/JPEG/PNG or attach multiple original files together; multi-file selections can span this app's nested folders. The library includes a current-folder search, a folder picker for moving items, a document-storage summary and an import free-space reserve check.
+- The customer portal's native picker separates **Select files** and **Choose folders**. File selection shows printable documents while folders are only used for navigation; folder selection shows folder rows only, permits multiple folder selection, and includes supported files directly inside each selected folder (nested subfolders are intentionally not traversed). The picker preserves the current nested-folder location while making selections. Folder names are passed to the portal so each file remains in the correct batch group. The library includes current-folder search, a move destination picker, a document-storage summary and a free-space reserve check.
 
 ## Print batches and saved PDF editing
 
@@ -31,7 +31,7 @@ General library imports allow up to 100 MB per file. The print workflow uses the
 
 ## SmartPrint document capture
 
-The native document-capture action uses Google ML Kit Document Scanner in full mode and requests both PDF and JPEG outputs. The scanner supports multi-page capture and its on-device UI provides document-edge detection, crop/perspective correction, rotation, page ordering and image filters. Google Play services downloads the scanner UI/models when needed; the first launch can require a download, and devices below the scanner's 1.7 GB RAM requirement are not supported. If unavailable, customers can still import photos/PDFs through Android's file picker. Scanned PDF and JPEG pages are saved in a timestamped folder in My files.
+The native document-capture action uses Google ML Kit Document Scanner in full mode and requests a multi-page PDF. Its on-device UI provides document-edge detection, crop/perspective correction, rotation, page ordering and image filters. Google Play services downloads the scanner UI/models when needed; first launch can require a download, and devices below the scanner's 1.7 GB RAM requirement are not supported. If unavailable, customers can still import photos/PDFs through Android's file picker. **Scan document** on Home asks where to save the completed scan (My Files, an existing folder, or a new folder). **Scan here** inside My Files saves directly into the currently open folder. Captures remain local until the customer chooses to print.
 
 ## Global SmartPrint customer account
 
