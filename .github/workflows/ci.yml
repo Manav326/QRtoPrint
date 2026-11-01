@@ -40,6 +40,7 @@ jobs:
       - name: Validate production Compose configuration
         env:
           PUBLIC_BASE_URL: https://example.invalid
+          IMAGE_NAMESPACE: ghcr.io/compose-validation
         run: docker compose --env-file .env.example -f compose.yml config --quiet
       - name: Validate local development Compose configuration
         env:
@@ -360,6 +361,7 @@ jobs:
       - name: Validate Docker Compose configuration
         env:
           PUBLIC_BASE_URL: https://example.invalid
+          IMAGE_NAMESPACE: ghcr.io/compose-validation
         run: docker compose --env-file .env.example -f compose.yml config --quiet
       - name: Validate local-only Docker Compose configuration
         env:
