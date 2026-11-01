@@ -56,7 +56,7 @@ public sealed class WindowsPrintExecutor
     /// <summary>
     /// Submits a real Windows GDI print job to the selected printer queue, directing
     /// file-capable printer drivers to the supplied output path through DOCINFO.lpszOutput.
-    /// This is used by spooler integration tests; normal production printing uses Print().
+    /// SmartPrint uses this for its Microsoft Print to PDF primary route and Windows spooler QA.
     /// </summary>
     public SpoolerPrintReceipt PrintToFile(
         AgentLocalQueueEntry entry,
@@ -275,11 +275,47 @@ public sealed class WindowsPrintExecutor
             await Task.Delay(TimeSpan.FromMilliseconds(250), cancellationToken);
         }
 
-        // StartDoc/EndDoc already succeeded. Do not produce a second document
-        // until the owner can reconcile the first Windows spooler submission.
+        // StartDoc/EndDoc succeeded, but no complete PDF appeared. A job still
+        // present in the queue may yet produce output, so never duplicate it.
+        WindowsSpoolerJob? remainingJob;
+        try
+        {
+            remainingJob = FindJobByDocumentName(
+                entry.QueueName ?? throw new InvalidOperationException("The Microsoft PDF queue name is missing."),
+                spoolerReceipt.DocumentName);
+        }
+        catch (Exception exception) when (exception is Win32Exception or UnauthorizedAccessException)
+        {
+            throw new PrintSubmissionUncertainException(
+                "MICROSOFT_PDF_SPOOLER_STATUS_UNAVAILABLE",
+                "The Microsoft PDF spooler accepted the job, but its completion could not be confirmed. Automatic fallback is disabled to avoid duplicate output.",
+                exception);
+        }
+
+        if (remainingJob is null && !File.Exists(fullOutputPath))
+        {
+            // The Windows queue has removed the completed job without creating the
+            // requested file. This is a confirmed driver-output failure, so fallback
+            // is safe: there is no queued job and no PDF at the destination.
+            var fallbackReceipt = ExportPdf(
+                entry with { OutputMode = PrinterOutputModeRules.PdfExport },
+                bytes,
+                exportDirectory,
+                cancellationToken);
+            return new PdfExportExecutionResult(
+                fallbackReceipt,
+                true,
+                "SMARTPRINT_FALLBACK:MICROSOFT_DRIVER_PRODUCED_NO_FILE",
+                spoolerReceipt.JobId);
+        }
+
+        // The original job is still queued or an incomplete file exists. The owner
+        // must reconcile it before any second output is generated.
         throw new PrintSubmissionUncertainException(
             "MICROSOFT_PDF_OUTPUT_TIMEOUT",
-            $"Windows accepted spooler job {spoolerReceipt.JobId}, but its PDF output did not become verifiably complete within 45 seconds.");
+            remainingJob is null
+                ? $"Windows accepted spooler job {spoolerReceipt.JobId}, but an incomplete PDF exists at the output path."
+                : $"Windows accepted spooler job {spoolerReceipt.JobId}, which remains in state {remainingJob.Status}; automatic fallback is disabled.");
     }
 
     private static bool IsCompletePdfFile(string path)
