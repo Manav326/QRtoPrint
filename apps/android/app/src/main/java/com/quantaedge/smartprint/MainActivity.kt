@@ -551,10 +551,10 @@ class MainActivity : AppCompatActivity() {
             orientation = LinearLayout.HORIZONTAL
         }
         themeChoices.addView(button("Light theme", currentTheme == SmartPrintTheme.LIGHT).apply {
-            setOnClickListener { SmartPrintThemePreference.save(this@MainActivity, SmartPrintTheme.LIGHT) }
+            setOnClickListener { chooseTheme(SmartPrintTheme.LIGHT) }
         }, LinearLayout.LayoutParams(0, dp(42), 1f))
         themeChoices.addView(button("Dark theme", currentTheme == SmartPrintTheme.DARK).apply {
-            setOnClickListener { SmartPrintThemePreference.save(this@MainActivity, SmartPrintTheme.DARK) }
+            setOnClickListener { chooseTheme(SmartPrintTheme.DARK) }
         }, LinearLayout.LayoutParams(0, dp(42), 1f).apply { marginStart = dp(8) })
         appearanceContent.addView(themeChoices)
         appearanceCard.addView(appearanceContent)
@@ -672,6 +672,24 @@ class MainActivity : AppCompatActivity() {
                 .apply { setPadding(dp(3), dp(9), dp(3), 0) })
         }
         return scroll
+    }
+
+    private fun chooseTheme(theme: SmartPrintTheme) {
+        // Keep an embedded customer WebView in sync without navigating away from
+        // an in-progress upload or print review.
+        val value = theme.storedValue
+        webView?.evaluateJavascript(
+            """
+                (() => {
+                  try { localStorage.setItem('qrtoprint.theme', '$value'); } catch {}
+                  document.documentElement.dataset.theme = '$value';
+                  document.documentElement.style.colorScheme = '$value';
+                  window.dispatchEvent(new CustomEvent('smartprint-theme-change', { detail: '$value' }));
+                })();
+            """.trimIndent(),
+            null
+        )
+        SmartPrintThemePreference.save(this, theme)
     }
 
     private fun accountServiceUrl(): String = BuildConfig.SERVICE_BASE_URL
@@ -1889,6 +1907,12 @@ class MainActivity : AppCompatActivity() {
                                 parts.size == 2 && parts[0] == "clearCustomerPrintSession" && isActiveStationCode(parts[1]) -> {
                                     customerPrintSessionStore.clear(parts[1]); "OK"
                                 }
+                                parts.size == 2 && parts[0] == "setTheme" &&
+                                    parts[1] in setOf("light", "dark") -> {
+                                    val selected = if (parts[1] == "dark") SmartPrintTheme.DARK else SmartPrintTheme.LIGHT
+                                    runOnUiThread { SmartPrintThemePreference.save(this@MainActivity, selected) }
+                                    "OK"
+                                }
                                 else -> ""
                             }
                         } catch (_: Exception) { "" }
@@ -1933,6 +1957,30 @@ class MainActivity : AppCompatActivity() {
                     )
                 }
                 return super.shouldInterceptRequest(view, request)
+            }
+            override fun onPageFinished(view: WebView, url: String) {
+                super.onPageFinished(view, url)
+                val loadedUrl = runCatching { Uri.parse(url) }.getOrNull() ?: return
+                if (!loadedUrl.scheme.equals(trustedPage.scheme, true) ||
+                    !loadedUrl.host.equals(trustedPage.host, true) ||
+                    loadedUrl.port != trustedPage.port) return
+
+                val selectedTheme = SmartPrintThemePreference.read(this@MainActivity).storedValue
+                val script = """
+                    (() => {
+                      const selected = '$selectedTheme';
+                      try {
+                        if (localStorage.getItem('qrtoprint.theme') !== selected) {
+                          localStorage.setItem('qrtoprint.theme', selected);
+                          window.location.reload();
+                          return;
+                        }
+                      } catch {}
+                      document.documentElement.dataset.theme = selected;
+                      document.documentElement.style.colorScheme = selected;
+                    })();
+                """.trimIndent()
+                view.evaluateJavascript(script, null)
             }
             override fun onReceivedSslError(view: WebView, handler: SslErrorHandler, error: android.net.http.SslError) {
                 handler.cancel()
