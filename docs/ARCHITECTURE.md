@@ -10,7 +10,7 @@ Use a modular monolith for the cloud control plane and a local edge runtime for 
 - Windows shop-management desktop app: Tauri 2 native window hosting the compiled React shop workspace. It is a first-class desktop application, not a browser tab or tray-only shell (1360 × 900 default; 1000 × 680 minimum).
 - Cloud API: ASP.NET Core on .NET 10, modular application layers and versioned REST endpoints.
 - Cloud database: PostgreSQL with tenant-scoped data access and migrations.
-- Local Windows Agent/edge runtime: separate .NET 10 Worker Service with the existing local document/upload API and printer execution. The native desktop UI uses an ACL-protected Windows named pipe for first-run owner-authorized enrollment; closing the desktop window never stops the service.
+- Local Windows Agent/edge runtime: separate .NET 10 Worker Service with the existing local document/upload API and printer execution. The native desktop UI uses an ACL-protected Windows named pipe for first-run owner-authorized enrollment. The pipe rejects remote clients and claims the first instance name; closing the desktop window never stops the service.
 - Local durable state (current implementation): DPAPI LocalMachine-encrypted document files and JSON manifests under an ACL-protected ProgramData directory. SQLite remains a future option for richer queue/event history; it is not used by the current Agent queue.
 - Contracts: versioned OpenAPI plus shared, generated TypeScript client types where practical.
 - CI: build, lint, typecheck, unit tests, API integration tests, dependency/security checks and packaging validation.

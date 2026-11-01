@@ -61,7 +61,7 @@ The future Microsoft Store channel will be a separate MSIX package, not the curr
 
 The release workflow builds the Android app against the repository variable `SMARTPRINT_PUBLIC_BASE_URL`. It defaults to `https://qr-test.paintpulp.com`; set that GitHub Actions variable to the current canonical public HTTPS origin before building a release for a different deployment.
 
-On first setup or when connecting this computer to a replacement shop, the wizard asks for a one-time 32-character pairing code generated from **Shop workspace → Print Agent → Add computer**; the code expires after 10 minutes. For a repair or reinstall on an already paired computer, leave the code blank: setup verifies the saved DPAPI identity with an authenticated cloud heartbeat before reusing it. The installer stops a previously running Agent service before replacing its files and attempts to restore it if setup exits before service reinstallation succeeds. It installs the Agent as a Windows Service, configures the Private-profile firewall rule and checks that the local Agent endpoint is responding. The owner must then return to the shop workspace to confirm the actual cloud heartbeat and discovered printer inventory. To move a computer to another shop, revoke its old pairing in the previous shop workspace before entering the new shop's code.
+The guided **SmartPrint Desktop** installer does not ask the shop owner for a pairing code, API URL, or PowerShell command. After sign-in, the desktop requests a short-lived, single-use enrollment authorization from the authenticated shop API and sends it directly to the local Windows Agent over its ACL-protected, remote-client-rejecting named pipe. The Agent stores its device secret with DPAPI LocalMachine protection. For an existing pairing, startup checks the saved identity; an owner-revoked computer is not silently re-enrolled and requires one explicit **Reconnect this computer** action after the server confirms revocation. A computer paired to another active shop cannot be transferred until that shop revokes it. The separate **Agent-only/manual deployment** workflow below still uses a one-time code from **Shop workspace → Print Agent → Generate pairing code**; that code expires after 10 minutes. The guided installer stages Agent files in a version/build-specific folder, switches the Windows service only after the new files are present, and restores the previous executable path and running state if the new service cannot be started. Superseded Agent files are removed only after the replacement service and firewall rule are confirmed healthy.
 
 ## Download and install the Android debug APK
 
@@ -92,9 +92,9 @@ This is the recommended local end-to-end test path. The phone opens the same pub
 
 The phone opens that Cloudflare HTTPS URL. When the customer taps Check shop Wi-Fi, Chrome may request Local Network Access permission for the shop computer. No certificate installation is required. Cloud-assisted upload remains available when local access is unavailable.
 
-### Windows Agent pairing
+### Standalone Agent-only pairing (manual deployment)
 
-Pair the Agent against the same public URL and configure its browser origin with the same value:
+Use this only when deploying the Agent without the guided SmartPrint Desktop installer. Pair it against the same public URL and configure its browser origin with the same value:
 
     $agentDir = Join-Path $env:USERPROFILE "Downloads\QRtoPrintAgent"
     $agentExe = Join-Path $agentDir "SmartPrint.Agent.exe"
