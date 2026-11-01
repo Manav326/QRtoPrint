@@ -1402,18 +1402,7 @@ class MainActivity : AppCompatActivity() {
                 setOnClickListener {
                     try {
                         val bitmap = DocumentBatchComposer.renderPagePreview(file, page)
-                        val preview = ImageView(this@MainActivity).apply {
-                            setImageBitmap(bitmap)
-                            adjustViewBounds = true
-                            scaleType = ImageView.ScaleType.FIT_CENTER
-                            setPadding(dp(12), dp(12), dp(12), dp(12))
-                        }
-                        MaterialAlertDialogBuilder(this@MainActivity)
-                            .setTitle("Page ${position + 1}")
-                            .setView(preview)
-                            .setPositiveButton("Close") { _, _ -> bitmap.recycle() }
-                            .setOnDismissListener { if (!bitmap.isRecycled) bitmap.recycle() }
-                            .show()
+                        showImageSheet("Page ${position + 1}", bitmap)
                     } catch (e: Exception) {
                         toast("Page preview failed: ${message(e)}")
                     }
@@ -1626,7 +1615,13 @@ class MainActivity : AppCompatActivity() {
 
     private fun ensureWebView(): WebView {
         webView?.let { return it }
-        val view = WebView(this)
+        val view = WebView(this).apply {
+            setBackgroundColor(getColor(R.color.qp_surface))
+            isVerticalScrollBarEnabled = false
+            isHorizontalScrollBarEnabled = false
+            overScrollMode = View.OVER_SCROLL_NEVER
+        }
+        view.settings.userAgentString = "${view.settings.userAgentString} SmartPrintAndroid/1"
         // Never trust the QR-selected route as a credential-sharing origin.
         // The bridge is pinned to the configured service origin for this build.
         val trustedPage = Uri.parse(BuildConfig.SERVICE_BASE_URL)
@@ -1748,12 +1743,11 @@ class MainActivity : AppCompatActivity() {
 
     private fun switchShop() {
         if (portalUrl == null) { scanQr(); return }
-        MaterialAlertDialogBuilder(this)
-            .setTitle("Switch print shop?")
-            .setMessage("Your current shop session and uploaded jobs will be kept. Scan the next shop's official QR code to connect to it.")
-            .setNegativeButton("Stay here", null)
-            .setPositiveButton("Scan another shop") { _, _ -> scanQr() }
-            .show()
+        showConfirmSheet(
+            "Switch shop?",
+            "Current orders stay saved.",
+            "Scan new shop"
+        ) { scanQr() }
     }
 
     private fun scanQr() {
@@ -1800,25 +1794,22 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun confirmShop(link: StationQrLink) {
-        MaterialAlertDialogBuilder(this)
-            .setTitle("Connect to this print shop?")
-            .setMessage(
-                "Open the SmartPrint customer portal at:\n\n${link.host}\n\n" +
-                    (if (link.url.startsWith("http://")) "LOCAL DEVELOPMENT ONLY — use a trusted private Wi-Fi network.\n\n" else "") +
-                    "The shop's existing quote, payment and print-status workflow will be used."
-            )
-            .setNegativeButton("Cancel", null)
-            .setPositiveButton("Continue") { _, _ ->
-                portalHost = link.host
-                portalUrl = link.url
-                getSharedPreferences("smartprint.customer.last-shop", MODE_PRIVATE).edit()
-                    .putString("portalUrl", link.url)
-                    .putString("portalHost", link.host)
-                    .apply()
-                toolbar.menu.findItem(SWITCH_SHOP)?.isVisible = true
-                ensureWebView().loadUrl(link.url)
-                showPrint()
-            }.show()
+        val detail = if (link.url.startsWith("http://")) {
+            "LOCAL TEST · Trusted shop Wi-Fi only"
+        } else {
+            "Secure shop session"
+        }
+        showConfirmSheet("Connect to shop?", detail, "Connect") {
+            portalHost = link.host
+            portalUrl = link.url
+            getSharedPreferences("smartprint.customer.last-shop", MODE_PRIVATE).edit()
+                .putString("portalUrl", link.url)
+                .putString("portalHost", link.host)
+                .apply()
+            toolbar.menu.findItem(SWITCH_SHOP)?.isVisible = true
+            ensureWebView().loadUrl(link.url)
+            showPrint()
+        }
     }
 
     private fun selectedChooserFiles(): List<File> = chooserSelectedFilePaths.mapNotNull { path ->
