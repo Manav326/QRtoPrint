@@ -1,0 +1,208 @@
+name: Publish SmartPrint after green main CI
+
+on:
+  workflow_run:
+    workflows: ["CI"]
+    types: [completed]
+    branches: [main]
+
+concurrency:
+  group: smartprint-auto-release-${{ github.repository }}
+  cancel-in-progress: false
+
+permissions:
+  actions: write
+  contents: write
+
+jobs:
+  release-after-ci:
+    if: ${{ github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push' && github.event.workflow_run.head_branch == 'main' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Create the next patch tag and dispatch the release builder
+        uses: actions/github-script@v7
+        env:
+          SMARTPRINT_PUBLIC_BASE_URL: ${{ vars.SMARTPRINT_PUBLIC_BASE_URL }}
+          ANDROID_SIGNING_KEYSTORE_BASE64: ${{ secrets.ANDROID_SIGNING_KEYSTORE_BASE64 || vars.ANDROID_SIGNING_KEYSTORE_BASE64 }}
+          ANDROID_SIGNING_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_SIGNING_KEYSTORE_PASSWORD || vars.ANDROID_SIGNING_KEYSTORE_PASSWORD }}
+          ANDROID_SIGNING_KEY_ALIAS: ${{ secrets.ANDROID_SIGNING_KEY_ALIAS || vars.ANDROID_SIGNING_KEY_ALIAS }}
+          ANDROID_SIGNING_KEY_PASSWORD: ${{ secrets.ANDROID_SIGNING_KEY_PASSWORD || vars.ANDROID_SIGNING_KEY_PASSWORD }}
+        with:
+          script: |
+            const { owner, repo } = context.repo;
+            const run = context.payload.workflow_run;
+            const headSha = run.head_sha;
+
+            if (
+              run.event !== "push" ||
+              run.head_branch !== "main" ||
+              run.repository?.full_name !== `${owner}/${repo}`
+            ) {
+              core.notice("Ignoring a CI run that was not a push to this repository's main branch.");
+              return;
+            }
+
+            if (!/^[0-9a-f]{40}$/i.test(headSha ?? "")) {
+              core.setFailed("The completed CI run did not provide a valid commit SHA.");
+              return;
+            }
+
+            // Do not allocate a public version for an older main commit when a newer
+            // commit has already reached the branch tip.
+            const { data: branch } = await github.rest.repos.getBranch({
+              owner,
+              repo,
+              branch: "main",
+            });
+            if (branch.commit.sha !== headSha) {
+              core.notice(
+                `Skipping ${headSha}: main has advanced to ${branch.commit.sha}; that newer commit will be considered after its own CI run.`
+              );
+              return;
+            }
+
+            // Preflight the exact inputs required by the existing stable-release
+            // workflow. Do not leave a version tag behind when signing/config is absent.
+            const originValue = (process.env.SMARTPRINT_PUBLIC_BASE_URL ?? "").trim();
+            let origin;
+            try {
+              origin = new URL(originValue);
+            } catch {
+              core.setFailed("Configure SMARTPRINT_PUBLIC_BASE_URL as the canonical public HTTPS origin before automatic releases are enabled.");
+              return;
+            }
+            if (
+              origin.protocol !== "https:" ||
+              !origin.hostname ||
+              origin.username ||
+              origin.password ||
+              origin.pathname !== "/" ||
+              origin.search ||
+              origin.hash
+            ) {
+              core.setFailed("SMARTPRINT_PUBLIC_BASE_URL must be a canonical HTTPS origin without a path, query, or fragment.");
+              return;
+            }
+
+            const signingInputs = [
+              "ANDROID_SIGNING_KEYSTORE_BASE64",
+              "ANDROID_SIGNING_KEYSTORE_PASSWORD",
+              "ANDROID_SIGNING_KEY_ALIAS",
+              "ANDROID_SIGNING_KEY_PASSWORD",
+            ];
+            const missingSigningInputs = signingInputs.filter(
+              (name) => !(process.env[name] ?? "").trim()
+            );
+            if (missingSigningInputs.length > 0) {
+              core.setFailed(
+                `Automatic release was not started because required Android signing inputs are missing: ${missingSigningInputs.join(", ")}.`
+              );
+              return;
+            }
+
+            const parseVersion = (name) => {
+              const match = /^v(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)$/.exec(name);
+              return match
+                ? { name, major: Number(match[1]), minor: Number(match[2]), patch: Number(match[3]) }
+                : null;
+            };
+            const compareVersions = (left, right) =>
+              left.major - right.major ||
+              left.minor - right.minor ||
+              left.patch - right.patch;
+
+            const tags = await github.paginate(github.rest.repos.listTags, {
+              owner,
+              repo,
+              per_page: 100,
+            });
+            const stableTags = tags
+              .map((tag) => ({ ...parseVersion(tag.name), commitSha: tag.commit?.sha }))
+              .filter((tag) => tag.name)
+              .sort((left, right) => compareVersions(right, left));
+
+            // A successful rerun for the same commit must not publish a second
+            // version. Reuse an existing tag for that commit only when it is not
+            // already published (for example, a prior release attempt was interrupted).
+            const existingForCommit = stableTags.find((tag) => tag.commitSha === headSha);
+            let releaseTag;
+
+            if (existingForCommit) {
+              releaseTag = existingForCommit.name;
+              try {
+                const { data: release } = await github.rest.repos.getReleaseByTag({
+                  owner,
+                  repo,
+                  tag: releaseTag,
+                });
+                if (!release.draft) {
+                  core.notice(`Release ${releaseTag} is already published for ${headSha}; no duplicate release will be created.`);
+                  return;
+                }
+                core.notice(`Found unpublished draft ${releaseTag}; dispatching a clean release retry.`);
+              } catch (error) {
+                if (error.status !== 404) throw error;
+                core.notice(`Found existing tag ${releaseTag} without a release; dispatching its release build.`);
+              }
+            } else if (stableTags.length > 0) {
+              const latest = stableTags[0];
+              releaseTag = `v${latest.major}.${latest.minor}.${latest.patch + 1}`;
+            } else {
+              // Bootstrap safely from the app's configured version if the repo has
+              // no stable version tags yet.
+              const { data: sourceFile } = await github.rest.repos.getContent({
+                owner,
+                repo,
+                path: "apps/android/app/build.gradle.kts",
+                ref: headSha,
+              });
+              if (Array.isArray(sourceFile) || sourceFile.type !== "file") {
+                core.setFailed("Could not read the Android app version while bootstrapping the first stable release.");
+                return;
+              }
+              const source = Buffer.from(sourceFile.content, sourceFile.encoding).toString("utf8");
+              const match = /val smartPrintVersionName = providers\\.gradleProperty\\("smartPrintVersionName"\\)\\.orElse\\("([0-9]+\\.[0-9]+\\.[0-9]+)"\\)\\.get\\(\\)/.exec(source);
+              if (!match) {
+                core.setFailed("Could not derive a stable X.Y.Z version from smartPrintVersionName in apps/android/app/build.gradle.kts.");
+                return;
+              }
+              releaseTag = `v${match[1]}`;
+            }
+
+            if (!existingForCommit) {
+              try {
+                await github.rest.git.createRef({
+                  owner,
+                  repo,
+                  ref: `refs/tags/${releaseTag}`,
+                  sha: headSha,
+                });
+                core.notice(`Created ${releaseTag} at tested main commit ${headSha}.`);
+              } catch (error) {
+                if (error.status !== 422) throw error;
+                const { data: existingRef } = await github.rest.git.getRef({
+                  owner,
+                  repo,
+                  ref: `tags/${releaseTag}`,
+                });
+                if (existingRef.object.sha !== headSha) {
+                  core.setFailed(
+                    `Tag ${releaseTag} already exists at ${existingRef.object.sha}, not the tested commit ${headSha}; refusing to move or overwrite it.`
+                  );
+                  return;
+                }
+                core.notice(`Tag ${releaseTag} already points to the tested commit; leaving it unchanged.`);
+              }
+            }
+
+            // GITHUB_TOKEN-created tags do not start another workflow by themselves.
+            // Dispatch explicitly against the tag so the release builds precisely the
+            // source commit that passed CI, even if main advances afterwards.
+            await github.rest.actions.createWorkflowDispatch({
+              owner,
+              repo,
+              workflow_id: "release.yml",
+              ref: releaseTag,
+              inputs: { release_tag: releaseTag },
+            });
+            core.notice(`Dispatched the signed Windows/Android release workflow for ${releaseTag} (${headSha}).`);
