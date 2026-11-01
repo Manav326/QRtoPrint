@@ -331,9 +331,9 @@ class MainActivity : AppCompatActivity() {
                 setIcon(R.drawable.ic_nav_files)
                 setContentDescription("My Files")
             }
-            menu.add(Menu.NONE, SCAN_PRINT, 2, "Scan").apply {
+            menu.add(Menu.NONE, SCAN_PRINT, 2, "Print").apply {
                 setIcon(R.drawable.ic_nav_scan_print)
-                setContentDescription("Scan and Print")
+                setContentDescription("Print at a shop")
             }
             menu.add(Menu.NONE, ACTIVITY, 3, "Activity").apply {
                 setIcon(R.drawable.ic_nav_activity)
@@ -598,7 +598,7 @@ class MainActivity : AppCompatActivity() {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
         }
-        quickActions.addView(button("Scan", true).apply {
+        quickActions.addView(button("Scan document", true).apply {
             icon = getDrawable(R.drawable.ic_document_scan)
             iconTint = ColorStateList.valueOf(getColor(android.R.color.white))
             iconPadding = dp(8)
@@ -669,7 +669,7 @@ class MainActivity : AppCompatActivity() {
             })
         } else {
             recent.forEach { file ->
-                column.addView(entryView(file, false), linearParams().apply { bottomMargin = dp(4) })
+                column.addView(entryView(file, false, showActions = false), linearParams().apply { bottomMargin = dp(4) })
             }
         }
         return scroll
@@ -678,7 +678,7 @@ class MainActivity : AppCompatActivity() {
     private fun showScanPrint() {
         pickerMode = false
         if (portalUrl != null) { showPrint(); return }
-        resetToolbar("Scan")
+        resetToolbar("Print")
         navigation.menu.findItem(SCAN_PRINT).isChecked = true
         content.removeAllViews()
         content.addView(scanPrintView(), frameParams())
@@ -783,6 +783,26 @@ class MainActivity : AppCompatActivity() {
         content.addView(scroll, frameParams())
     }
 
+    private fun activityStatusLabel(status: String): String = when (status.uppercase(Locale.ROOT)) {
+        "AWAITING_SHOP_APPROVAL" -> "Shop review"
+        "AWAITING_PAYMENT", "AWAITING_CUSTOMER_PAYMENT" -> "Payment due"
+        "AWAITING_COUNTER_PAYMENT" -> "Pay at counter"
+        "PAYMENT_REPORTED" -> "Verify pending"
+        "PAYMENT_REJECTED" -> "Payment declined"
+        "PAID_AUTHORISED" -> "Paid"
+        "LOCAL_QUEUE_CLAIMED" -> "Transferring"
+        "LOCAL_QUEUE_READY" -> "Queued"
+        "PRINT_AUTHORISED" -> "Print approved"
+        "PRINT_SUBMITTING" -> "Sending"
+        "SPOOLER_ACCEPTED" -> "Queue accepted"
+        "PRINTING" -> "Printing"
+        "OUTPUT_UNCONFIRMED" -> "Output check"
+        "COMPLETED" -> "Completed"
+        "REJECTED" -> "Rejected"
+        "QUOTE_EXPIRED" -> "Quote expired"
+        else -> "In progress"
+    }
+
     private fun loadCustomerHistory(container: LinearLayout) {
         Thread {
             try {
@@ -818,7 +838,7 @@ class MainActivity : AppCompatActivity() {
                             }
                             top.addView(text(job.jobNumber, 13, R.color.qp_text, true),
                                 LinearLayout.LayoutParams(0, -2, 1f))
-                            top.addView(text(job.status.replace('_', ' '), 10, R.color.qp_primary, true))
+                            top.addView(text(activityStatusLabel(job.status), 10, R.color.qp_primary, true))
                             body.addView(top)
                             val createdLabel = runCatching {
                                 Instant.parse(job.createdUtc)
@@ -1077,7 +1097,7 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun entryView(file: File, isPicker: Boolean, depth: Int = 0): View {
+    private fun entryView(file: File, isPicker: Boolean, depth: Int = 0, showActions: Boolean = true): View {
         val row = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
@@ -1138,7 +1158,7 @@ class MainActivity : AppCompatActivity() {
                 setOnCheckedChangeListener { _, checked -> setChooserFileSelected(file, checked) }
             }
             row.addView(selected, LinearLayout.LayoutParams(dp(40), dp(40)))
-        } else if (!isPicker) {
+        } else if (!isPicker && showActions) {
             val selected = CheckBox(this).apply {
                 isChecked = selectedFilePaths.contains(file.canonicalPath)
                 contentDescription = "Select " + file.name
@@ -1151,7 +1171,7 @@ class MainActivity : AppCompatActivity() {
             row.addView(selected, LinearLayout.LayoutParams(dp(38), dp(40)))
         }
 
-        if (!isPicker) {
+        if (!isPicker && showActions) {
             val more = ImageView(this).apply {
                 setImageResource(android.R.drawable.ic_menu_more)
                 imageTintList = ColorStateList.valueOf(getColor(R.color.qp_muted))
@@ -1176,9 +1196,9 @@ class MainActivity : AppCompatActivity() {
                 else -> openDocument(file)
             }
         }
-        if (!isPicker && file.isDirectory) {
+        if (!isPicker && showActions && file.isDirectory) {
             row.setOnLongClickListener { showEntryMenu(row, file); true }
-        } else if (!isPicker) {
+        } else if (!isPicker && showActions) {
             row.setOnLongClickListener {
                 val clip = ClipData.newPlainText("SmartPrint item order", file.name)
                 row.startDragAndDrop(clip, View.DragShadowBuilder(row), file.canonicalPath, 0)
