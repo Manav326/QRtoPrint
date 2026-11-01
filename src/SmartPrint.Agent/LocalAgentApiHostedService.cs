@@ -122,7 +122,8 @@ public sealed class LocalAgentApiHostedService(
             // Retain loopback-only static origins for local development. The production
             // HTTPS origin is supplied dynamically by the authenticated API heartbeat.
             state.SetConfiguredOrigins(allowedOrigins.Where(origin =>
-                Uri.TryCreate(origin, UriKind.Absolute, out var configuredUri) && configuredUri.IsLoopback));
+                Uri.TryCreate(origin, UriKind.Absolute, out var configuredUri) &&
+                (configuredUri.IsLoopback || string.Equals(configuredUri.Host, "tauri.localhost", StringComparison.OrdinalIgnoreCase))));
             builder.Services.AddCors(options => options.AddPolicy("CustomerPortal", policy =>
             {
                 policy.SetIsOriginAllowed(state.IsOriginAllowed)

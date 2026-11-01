@@ -29,6 +29,7 @@ builder.Services.AddSingleton<AgentLocalQueueStore>();
 builder.Services.AddSingleton<WindowsPrintExecutor>();
 builder.Services.AddSingleton<LocalAgentApiState>();
 builder.Services.AddHostedService<LocalAgentApiHostedService>();
+builder.Services.AddHostedService<AgentControlPipeHostedService>();
 builder.Services.AddHostedService<Worker>();
 
 await builder.Build().RunAsync();
