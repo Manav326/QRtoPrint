@@ -803,7 +803,7 @@ export function resumeCustomerSession(sessionToken: string, publicCode: string) 
     expiresUtc: string;
     sessionToken: string;
     shop: { displayName: string; logoUrl?: string | null; accentColor: string; currency: string };
-    paymentOptions: { upiEnabled: boolean; upiId?: string | null; payeeName?: string | null; cashEnabled: boolean };
+    paymentOptions: { upiEnabled: boolean; upiId?: string | null; payeeName?: string | null; cashEnabled: boolean; instantPaymentEnabled: boolean };
     printer: { displayName: string; manufacturer: string; model: string; status: string; capabilitiesJson: string } | null;
     localAgent: { agentDeviceId: string; endpoints: string[] } | null;
   }>("/api/v1/public/sessions/current/resume", {
