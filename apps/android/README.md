@@ -52,10 +52,11 @@ gradle --no-daemon -p apps/android :app:testDebugUnitTest :app:assembleDebug
 Build the Android app with the service origin configured in one place:
 
 ```bash
-gradle --no-daemon -p apps/android -PsmartPrintServiceUrl=https://print.thinkwithsujeet.in :app:testDebugUnitTest :app:assembleDebug
+$env:SMARTPRINT_PUBLIC_BASE_URL = "<the canonical HTTPS origin configured for this deployment>"
+gradle --no-daemon -p apps/android -PsmartPrintServiceUrl="$env:SMARTPRINT_PUBLIC_BASE_URL" :app:testDebugUnitTest :app:assembleDebug
 ```
 
-The Gradle property defaults to the canonical SmartPrint service origin and can be changed for other deployment environments. The CI workflow uploads the debug APK as `qrtoprint-android-debug`. Download it with `scripts\\download-android-apk.ps1`; add `-Install` to install it on one connected, ADB-authorised Android device. Debug builds are for development only. Release signing, physical Android/Wi-Fi validation, Play Store listing and distribution are not yet complete.
+The build requires an explicit `smartPrintServiceUrl` Gradle property or `SMARTPRINT_PUBLIC_BASE_URL` environment variable. It intentionally has no baked-in service-host default, preventing test and production APKs from silently targeting the wrong deployment. The CI workflow uploads the debug APK as `qrtoprint-android-debug`. Download it with `scripts\\download-android-apk.ps1`; add `-Install` to install it on one connected, ADB-authorised Android device. Debug builds are for development only. Release signing, physical Android/Wi-Fi validation, Play Store listing and distribution are not yet complete.
 
 The native Activity screen shows account-linked job dates, original filenames, quoted amounts, payment method/status, paid/refunded/net amounts, rejected pages and output-confirmation time. The API returns these fields through tenant-scoped document/payment queries; account history remains limited to the latest 100 jobs.
 
