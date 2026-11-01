@@ -11,7 +11,36 @@ env:
   SMARTPRINT_PUBLIC_BASE_URL: ${{ vars.SMARTPRINT_PUBLIC_BASE_URL || 'https://qr-test.paintpulp.com' }}
 
 jobs:
+  validate-release-config:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require a canonical HTTPS origin
+        shell: bash
+        run: |
+          python - <<'PY'
+          import os
+          from urllib.parse import urlsplit
+
+          value = os.environ["SMARTPRINT_PUBLIC_BASE_URL"].strip()
+          parsed = urlsplit(value)
+          if (
+              parsed.scheme != "https"
+              or not parsed.hostname
+              or parsed.username
+              or parsed.password
+              or parsed.path not in ("", "/")
+              or parsed.query
+              or parsed.fragment
+          ):
+              raise SystemExit(
+                  "SMARTPRINT_PUBLIC_BASE_URL must be a canonical HTTPS origin, "
+                  "for example https://qr-test.paintpulp.com"
+              )
+          print(f"Release origin validated: {parsed.scheme}://{parsed.netloc}")
+          PY
+
   windows-setup:
+    needs: validate-release-config
     runs-on: windows-latest
     env:
       WINDOWS_SIGNING_CERT_BASE64: ${{ secrets.WINDOWS_SIGNING_CERT_BASE64 }}
@@ -64,6 +93,7 @@ jobs:
           retention-days: 5
 
   android-release:
+    needs: validate-release-config
     runs-on: ubuntu-latest
     env:
       ANDROID_SIGNING_KEYSTORE_BASE64: ${{ secrets.ANDROID_SIGNING_KEYSTORE_BASE64 }}
@@ -153,6 +183,7 @@ jobs:
           generate_release_notes: true
           make_latest: true
           overwrite_files: true
+          fail_on_unmatched_files: true
           files: |
             artifacts/SmartPrint-Windows-Setup.exe
             artifacts/SmartPrint-Android.apk
