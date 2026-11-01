@@ -3,7 +3,7 @@ import {
   LockKeyhole, Monitor, Printer, QrCode, ShieldCheck, Smartphone, Store, Wifi
 } from "lucide-react";
 import { getPublicDownloadPath, usePublicRelease } from "./release-metadata";
-import { useFileDownload, type FileDownloadState } from "./download-manager";
+import { useFileDownload } from "./download-manager";
 import "./public-landing.css";
 
 export default function PublicLandingPage() {
