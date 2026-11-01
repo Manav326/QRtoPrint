@@ -1,6 +1,7 @@
 package com.quantaedge.smartprint
 
 import android.Manifest
+import android.content.res.ColorStateList
 import android.animation.ValueAnimator
 import android.content.Intent
 import android.content.pm.PackageManager
@@ -76,7 +77,7 @@ class QrScannerActivity : AppCompatActivity() {
         window.statusBarColor = getColor(R.color.qp_surface)
         window.navigationBarColor = getColor(R.color.qp_surface)
         WindowInsetsControllerCompat(window, window.decorView).isAppearanceLightStatusBars =
-            resources.configuration.uiMode and android.content.res.Configuration.UI_MODE_NIGHT_MASK != android.content.res.Configuration.UI_MODE_NIGHT_NO
+            (resources.configuration.uiMode and android.content.res.Configuration.UI_MODE_NIGHT_MASK) == android.content.res.Configuration.UI_MODE_NIGHT_NO
 
         permissionLauncher = registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
             if (granted) bindCamera() else showPermissionPanel()
