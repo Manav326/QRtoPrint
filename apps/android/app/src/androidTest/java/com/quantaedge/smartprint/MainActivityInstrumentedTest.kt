@@ -124,10 +124,14 @@ class MainActivityInstrumentedTest {
             onView(withText("Scan here")).check(matches(isDisplayed()))
             it.recreate()
             onView(withText("Scan here")).check(matches(isDisplayed()))
-            onView(withText("Back")).perform(click())
-            onView(withContentDescription("Expand $folderName")).perform(click())
+            onView(withContentDescription("Open folder $folderName")).perform(click())
             onView(withText("Nested")).check(matches(isDisplayed()))
-            onView(withContentDescription("Collapse $folderName")).check(matches(isDisplayed()))
+            onView(withContentDescription("Open folder My Files")).perform(click())
+            onView(withContentDescription("More options for $folderName")).perform(click())
+            onView(withText("Expand in list")).perform(click())
+            onView(withText("Nested")).check(matches(isDisplayed()))
+            onView(withContentDescription("More options for $folderName")).perform(click())
+            onView(withText("Collapse in list")).check(matches(isDisplayed()))
         }
     }
 
