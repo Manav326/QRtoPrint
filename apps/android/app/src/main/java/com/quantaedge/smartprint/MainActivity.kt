@@ -1491,18 +1491,138 @@ class MainActivity : AppCompatActivity() {
         }.start()
     }
 
+    private fun sheetRoot(title: String, subtitle: String? = null): Pair<BottomSheetDialog, LinearLayout> {
+        val dialog = BottomSheetDialog(this)
+        val root = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(20), dp(10), dp(20), dp(22))
+            background = roundedDrawable(getColor(R.color.qp_card), dp(22))
+        }
+        val handle = View(this).apply {
+            background = roundedDrawable(getColor(R.color.qp_outline), dp(2))
+        }
+        root.addView(handle, LinearLayout.LayoutParams(dp(36), dp(4)).apply {
+            gravity = Gravity.CENTER_HORIZONTAL
+            bottomMargin = dp(15)
+        })
+        root.addView(text(title, 18, R.color.qp_text, true))
+        subtitle?.takeIf { it.isNotBlank() }?.let {
+            root.addView(text(it, 12, R.color.qp_muted, false).apply {
+                setPadding(0, dp(5), 0, dp(12))
+            })
+        } ?: run { root.addView(View(this), LinearLayout.LayoutParams(1, dp(10))) }
+        dialog.setContentView(root)
+        return dialog to root
+    }
+
+    private fun showOptionSheet(title: String, actions: List<Pair<String, () -> Unit>>) {
+        val (dialog, root) = sheetRoot(title)
+        val scroll = ScrollView(this).apply { isFillViewport = false }
+        val list = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+        }
+        actions.forEach { (label, action) ->
+            val item = button(label, false).apply {
+                minHeight = dp(46)
+                gravity = Gravity.CENTER_VERTICAL
+                setOnClickListener { dialog.dismiss(); action() }
+            }
+            list.addView(item, linearParams().apply { bottomMargin = dp(6) })
+        }
+        scroll.addView(list)
+        root.addView(scroll, LinearLayout.LayoutParams(-1, -2))
+        root.addView(button("Cancel", false).apply {
+            minHeight = dp(42)
+            setOnClickListener { dialog.dismiss() }
+        }, linearParams().apply { topMargin = dp(6) })
+        dialog.show()
+    }
+
+    private fun showConfirmSheet(
+        title: String,
+        detail: String,
+        confirmLabel: String,
+        destructive: Boolean = false,
+        onConfirm: () -> Unit
+    ) {
+        val (dialog, root) = sheetRoot(title, detail)
+        val actions = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+        }
+        actions.addView(button("Cancel", false).apply {
+            minHeight = dp(44)
+            setOnClickListener { dialog.dismiss() }
+        }, LinearLayout.LayoutParams(0, dp(44), 1f))
+        actions.addView(button(confirmLabel, true).apply {
+            minHeight = dp(44)
+            if (destructive) {
+                backgroundTintList = ColorStateList.valueOf(getColor(R.color.qp_danger))
+            }
+            setOnClickListener { dialog.dismiss(); onConfirm() }
+        }, LinearLayout.LayoutParams(0, dp(44), 1f).apply { marginStart = dp(8) })
+        root.addView(actions, linearParams().apply { topMargin = dp(12) })
+        dialog.show()
+    }
+
+    private fun showImageSheet(title: String, bitmap: android.graphics.Bitmap) {
+        val (dialog, root) = sheetRoot(title)
+        val preview = ImageView(this).apply {
+            setImageBitmap(bitmap)
+            adjustViewBounds = true
+            scaleType = ImageView.ScaleType.FIT_CENTER
+            setPadding(dp(4), dp(6), dp(4), dp(6))
+        }
+        root.addView(preview, LinearLayout.LayoutParams(-1, -2))
+        root.addView(button("Close", false).apply {
+            minHeight = dp(42)
+            setOnClickListener { dialog.dismiss() }
+        }, linearParams().apply { topMargin = dp(8) })
+        dialog.setOnDismissListener { if (!bitmap.isRecycled) bitmap.recycle() }
+        dialog.show()
+    }
+
     private fun nameDialog(title: String, initial: String, onSave: (String) -> Unit) {
+        val (dialog, root) = sheetRoot(title)
         val input = EditText(this).apply {
             setSingleLine(true)
             setText(initial)
             setSelection(text.length)
             hint = "Name"
+            textSize = 14f
+            setTextColor(getColor(R.color.qp_text))
+            setHintTextColor(getColor(R.color.qp_muted))
+            background = roundedDrawable(getColor(R.color.qp_surface), dp(11), getColor(R.color.qp_outline))
+            setPadding(dp(12), dp(11), dp(12), dp(11))
         }
-        MaterialAlertDialogBuilder(this).setTitle(title).setView(input)
-            .setNegativeButton("Cancel", null)
-            .setPositiveButton("Save") { _, _ -> onSave(input.text.toString()) }
-            .show()
+        root.addView(input, linearParams())
+        val actions = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        actions.addView(button("Cancel", false).apply {
+            minHeight = dp(44)
+            setOnClickListener { dialog.dismiss() }
+        }, LinearLayout.LayoutParams(0, dp(44), 1f))
+        actions.addView(button("Save", true).apply {
+            minHeight = dp(44)
+            setOnClickListener {
+                val value = input.text.toString().trim()
+                if (value.isBlank()) {
+                    input.error = "Enter a name"
+                    return@setOnClickListener
+                }
+                dialog.dismiss()
+                onSave(value)
+            }
+        }, LinearLayout.LayoutParams(0, dp(44), 1f).apply { marginStart = dp(8) })
+        root.addView(actions, linearParams().apply { topMargin = dp(12) })
+        dialog.show()
     }
+
+    private fun roundedDrawable(fillColor: Int, radiusDp: Int, strokeColor: Int? = null): android.graphics.drawable.GradientDrawable =
+        android.graphics.drawable.GradientDrawable().apply {
+            setColor(fillColor)
+            cornerRadius = dp(radiusDp).toFloat()
+            strokeColor?.let { setStroke(dp(1), it) }
+        }
 
     private fun ensureWebView(): WebView {
         webView?.let { return it }
