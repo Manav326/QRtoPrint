@@ -39,7 +39,7 @@ class SmartPrintDocumentViewer(
     context: Context,
     startFile: File,
     private val imageSiblings: List<File>,
-    startPosition: Int = 0,
+    startPosition: Int? = null,
     private val onNavigateImage: (File) -> Unit
 ) : LinearLayout(context) {
     companion object {
@@ -94,11 +94,11 @@ class SmartPrintDocumentViewer(
     }
 
     private var currentFile = startFile
-    private var currentPage = startPosition.coerceAtLeast(0)
+    private var currentPage = startPosition?.coerceAtLeast(0) ?: 0
     private var pageCount = 0
     private var rotationDegrees = 0
     private var renderVersion = 0
-    private var currentImageIndex = startPosition.takeIf { it in imageSiblings.indices }
+    private var currentImageIndex = startPosition?.takeIf { it in imageSiblings.indices }
         ?: imageSiblings.indexOfFirst { sameFile(it, startFile) }.coerceAtLeast(0)
     private val displayedBitmaps = mutableListOf<Bitmap>()
     private val isPdf = startFile.extension.equals("pdf", ignoreCase = true)
