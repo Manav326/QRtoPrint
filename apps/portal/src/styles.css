@@ -1565,3 +1565,7 @@
 .customer-entry.smartprint-native .customer-batch-print-breakdown>div{color:var(--native-muted)}
 .customer-entry.smartprint-native .customer-batch-print-breakdown>div strong{color:var(--native-text)}
 .customer-entry.smartprint-native .customer-batch-print-breakdown .customer-batch-print-total{border-color:var(--native-border);color:var(--native-text)}
+
+.refund-selection-actions{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;margin:10px 0;color:var(--muted);font-size:11px}
+.refund-selection-actions .secondary-button{min-height:34px;padding:7px 10px;font-size:11px}
+@media(max-width:560px){.refund-selection-actions{align-items:flex-start}.refund-selection-actions .secondary-button{width:100%}}
