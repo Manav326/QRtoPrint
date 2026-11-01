@@ -2,6 +2,12 @@
 
 The customer-facing app is **SmartPrint by QuantaEdge**. QRtoPrint remains the repository and technical integration name. The Android app is a customer companion to the existing portal and API. It does not run its own pricing, payment or print-dispatch backend.
 
+## Native Android experience
+
+SmartPrint uses a compact, theme-aware native shell for Home, Files, Scan, Activity, Account, the QR scanner, PDF editing and file actions. Light and dark palettes share the same surfaces, typography, icon treatment and spacing. File and folder rows remain compact; folders expand inline with indentation and file-type icons. Rename, move, delete and confirmation actions use native bottom sheets.
+
+The shop print workflow reuses the existing customer portal and APIs inside the secure Android WebView bridge. The app identifies itself with the `SmartPrintAndroid/1` user-agent token so the customer print route switches to a full-width native presentation with compact copy and no website masthead or card frame. Ordinary browser visitors retain the standard web layout. QR station validation, secure origin pinning, encrypted per-station guest sessions, upload limits, shop review, payment verification, refunds and physical-output confirmation remain the same.
+
 ## Local document library
 
 - Documents are copied into app-private storage under `files/documents`.
