@@ -38,7 +38,7 @@ export default function PublicLandingPage() {
             <h1>From their phone<br/>to <span>your printer.</span><br/>Without the back-and-forth.</h1>
             <p className="sp-hero-lede">SmartPrint brings local print shops and their customers together. A quick QR scan starts a clear, secure journey from document to print.</p>
             <div className="sp-hero-actions">
-              <a className="sp-button-primary" href="/shop">Bring your shop online <ArrowRight size={17}/></a>
+              <a className="sp-button-primary" href="/shop?mode=register">Bring your shop online <ArrowRight size={17}/></a>
               <a className="sp-button-quiet" href="#how-it-works">See how it works <ChevronRight size={17}/></a>
             </div>
             <div className="sp-hero-trust"><span><ShieldCheck size={15}/> Shop-controlled print approval</span><span><LockKeyhole size={14}/> Secure job handoff</span></div>
@@ -155,7 +155,7 @@ export default function PublicLandingPage() {
 
         <section className="sp-final-cta">
           <div><div className="sp-eyebrow">READY TO CONNECT YOUR SHOP?</div><h2>Give every print job<br/>a clearer way forward.</h2><p>Set up your shop workspace and bring your customers into the flow.</p></div>
-          <a className="sp-button-light" href="/shop">Create your shop account <ArrowRight size={17}/></a>
+          <a className="sp-button-light" href="/shop?mode=register">Create your shop account <ArrowRight size={17}/></a>
         </section>
       </main>
       <footer className="sp-public-footer">
