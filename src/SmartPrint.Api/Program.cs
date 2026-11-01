@@ -6077,7 +6077,8 @@ publicApi.MapPost("/batches/{batchId:guid}/payments", async (
         item => item.TenantId == session.TenantId &&
                 item.BatchPaymentId == null &&
                 batchJobIds.Contains(item.PrintJobId) &&
-                item.Status is not ("REJECTED" or "REFUNDED"),
+                item.Status != "REJECTED" &&
+                item.Status != "REFUNDED",
         ct);
     if (unresolvedIndividualPayment)
         return Results.Conflict(new
