@@ -437,6 +437,8 @@ export interface ShopPayment {
   printJobId: string;
   jobNumber: string;
   documentName: string;
+  batchPaymentId?: string | null;
+  batchFileCount?: number | null;
   method: "UPI" | "CASH";
   status: string;
   amountMinor: number;
@@ -1351,6 +1353,23 @@ export function rejectShopPayment(token: string, paymentId: string, reason: stri
   );
 }
 
+export interface CustomerBatchPayment {
+  id: string;
+  method: "UPI" | "CASH";
+  status: string;
+  amountMinor: number;
+  currency: string;
+  upiIdSnapshot?: string | null;
+  payeeNameSnapshot?: string | null;
+  paymentReference?: string | null;
+  rejectionReason?: string | null;
+  upiUri?: string | null;
+  batchId: string;
+  fileCount: number;
+  createdUtc: string;
+  verifiedUtc?: string | null;
+}
+
 export interface CustomerPayment {
   id: string;
   method: "UPI" | "CASH";
@@ -1362,8 +1381,33 @@ export interface CustomerPayment {
   payeeNameSnapshot?: string | null;
   paymentReference?: string | null;
   upiUri?: string | null;
+  batchPayment?: CustomerBatchPayment | null;
   jobNumber?: string;
   jobStatus?: string;
+}
+
+export function startCustomerBatchPayment(sessionToken: string, batchId: string, method: "UPI" | "CASH") {
+  return apiRequest<CustomerBatchPayment>(`/api/v1/public/batches/${batchId}/payments`, {
+    method: "POST",
+    headers: { "X-Print-Session": sessionToken },
+    body: JSON.stringify({ method })
+  });
+}
+
+export function reportCustomerBatchPayment(sessionToken: string, paymentId: string, referenceNumber: string) {
+  return apiRequest<{
+    id: string;
+    status: string;
+    amountMinor: number;
+    currency: string;
+    paymentReference: string;
+    fileCount: number;
+    message: string;
+  }>(`/api/v1/public/batch-payments/${paymentId}/report`, {
+    method: "POST",
+    headers: { "X-Print-Session": sessionToken },
+    body: JSON.stringify({ referenceNumber })
+  });
 }
 
 export function startCustomerPayment(sessionToken: string, jobId: string, method: "UPI" | "CASH") {
