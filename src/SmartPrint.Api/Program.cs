@@ -1822,7 +1822,7 @@ shop.MapGet("/print-jobs", async (
     var boundedOffset = Math.Clamp(offset ?? 0, 0, 1_000_000);
     var boundedTake = Math.Clamp(take ?? 100, 1, 100);
     var searchTerm = search?.Trim();
-    if (searchTerm?.Length > 120) searchTerm = searchTerm[..120];
+    if (searchTerm is { Length: > 120 }) searchTerm = searchTerm[..120];
 
     var query =
         from job in db.PrintJobs.AsNoTracking()
