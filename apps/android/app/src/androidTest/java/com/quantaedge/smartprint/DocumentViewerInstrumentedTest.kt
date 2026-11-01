@@ -29,14 +29,17 @@ class DocumentViewerInstrumentedTest {
     @Test
     fun opensPdfInsideSmartPrintAndNavigatesBetweenPages() {
         val context = ApplicationProvider.getApplicationContext<Context>()
-        val source = File(context.filesDir, "documents/CI-in-app-reader-${System.currentTimeMillis()}.pdf")
-        source.parentFile?.mkdirs()
+        val folderName = "CI-reader-folder-${System.currentTimeMillis()}"
+        val directory = File(context.filesDir, "documents/$folderName")
+        val source = File(directory, "CI-in-app-reader.pdf")
+        directory.mkdirs()
         createPdf(source)
 
         try {
             ActivityScenario.launch(MainActivity::class.java).use {
                 val filesTab = com.google.android.material.R.id.navigation_bar_item_small_label_view
                 onView(org.hamcrest.Matchers.allOf(withText("Files"), withId(filesTab))).perform(click())
+                onView(withText(folderName)).perform(scrollTo(), click())
                 onView(withText(source.name)).perform(scrollTo(), click())
 
                 onView(withText("Page 1 of 2")).check(matches(isDisplayed()))
@@ -46,11 +49,15 @@ class DocumentViewerInstrumentedTest {
                 onView(withText("Page 2 of 2")).check(matches(isDisplayed()))
                 onView(withContentDescription("Previous page")).perform(click())
                 onView(withText("Page 1 of 2")).check(matches(isDisplayed()))
-                onView(withContentDescription("Back to My Files")).perform(click())
+                onView(withContentDescription("Open folder $folderName")).perform(click())
+                onView(withText(source.name)).check(matches(isDisplayed()))
+                onView(withText(source.name)).perform(scrollTo(), click())
+                onView(withText("Page 1 of 2")).check(matches(isDisplayed()))
+                onView(withContentDescription("Back to $folderName")).perform(click())
                 onView(withText(source.name)).check(matches(isDisplayed()))
             }
         } finally {
-            source.delete()
+            directory.deleteRecursively()
         }
     }
 
