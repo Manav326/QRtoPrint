@@ -226,9 +226,9 @@ try {
             throw ("ADB installation failed for device '{0}'. The downloaded APK remains at {1}." -f $DeviceSerial, $finalApk)
         }
 
-        $installedPath = @(& adb -s $DeviceSerial shell pm path com.thinkwithsujeet.qrtoprint 2>&1)
+        $installedPath = @(& adb -s $DeviceSerial shell pm path com.quantaedge.smartprint 2>&1)
         if ($LASTEXITCODE -ne 0 -or ($installedPath -join ' ') -notmatch 'package:') {
-            throw ("ADB reported installation success, but package 'com.thinkwithsujeet.qrtoprint' could not be verified on device '{0}'." -f $DeviceSerial)
+            throw ("ADB reported installation success, but package 'com.quantaedge.smartprint' could not be verified on device '{0}'." -f $DeviceSerial)
         }
         Write-Host ("Installed and verified on Android device {0}." -f $DeviceSerial) -ForegroundColor Green
     }
