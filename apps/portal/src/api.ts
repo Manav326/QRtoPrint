@@ -442,7 +442,7 @@ export function getShopSubscription(token: string) {
 export async function loadShopData(token: string, queueSearch = "") {
   const [profile, printers, stations, pricing, printJobs, agentDevices, paymentSettings, payments, refunds, subscription] = await Promise.all([
     apiRequest<ShopProfile>("/api/v1/shop/profile", {}, token),
-    apiRequest<PrinterDevice[]>("/api/v1/shop/printers", {}, token),
+    getShopPrinters(token),
     apiRequest<QrStation[]>("/api/v1/shop/qr-stations", {}, token),
     apiRequest<ShopPricingProfile>("/api/v1/shop/pricing", {}, token),
     getShopPrintJobsPage(token, 0, 100, queueSearch),
@@ -1021,6 +1021,10 @@ export function retryShopPdfExport(token: string, jobId: string) {
 export function confirmShopPrintOutput(token: string, jobId: string) {
   return apiRequest<{ id: string; status: string; outputConfirmedUtc: string }>(
     `/api/v1/shop/print-jobs/${jobId}/confirm-output`, { method: "POST" }, token);
+}
+
+export function getShopPrinters(token: string) {
+  return apiRequest<PrinterDevice[]>("/api/v1/shop/printers", {}, token);
 }
 
 export function getShopJobEvents(token: string, jobId: string) {
