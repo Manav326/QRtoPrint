@@ -134,7 +134,7 @@ fn write_secure_session(session: Option<String>) -> Result<(), String> {
 #[cfg(windows)]
 mod credential_store {
     use super::SESSION_TARGET;
-    use std::ptr::{null, null_mut};
+    use std::ptr::null_mut;
     use windows_sys::Win32::Foundation::{GetLastError, ERROR_NOT_FOUND};
     use windows_sys::Win32::Security::Credentials::{
         CredDeleteW, CredFree, CredReadW, CredWriteW, CREDENTIALW,
@@ -180,7 +180,7 @@ mod credential_store {
                     }
                 }
                 Some(value) => {
-                    if value.len() > 16_000 { return Err("The saved session exceeds the secure storage limit.".into()); }
+                    if value.len() > 2_400 { return Err("The saved session exceeds the secure storage limit.".into()); }
                     let mut bytes = value.into_bytes();
                     let mut target = target();
                     let mut user_name: Vec<u16> = "SmartPrint".encode_utf16().chain(std::iter::once(0)).collect();

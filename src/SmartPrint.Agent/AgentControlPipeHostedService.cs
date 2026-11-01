@@ -13,6 +13,7 @@ public sealed class AgentControlPipeHostedService(
 {
     public const string PipeName = "QRtoPrint.SmartPrint.Agent.Control";
     private const int MaximumRequestBytes = 4096;
+    private static readonly JsonSerializerOptions PipeJsonOptions = new(JsonSerializerDefaults.Web);
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
@@ -86,14 +87,14 @@ public sealed class AgentControlPipeHostedService(
         var requestLine = await reader.ReadLineAsync(ct);
         if (string.IsNullOrWhiteSpace(requestLine) || Encoding.UTF8.GetByteCount(requestLine) > MaximumRequestBytes)
         {
-            await writer.WriteLineAsync(JsonSerializer.Serialize(new PipeResponse(false, null, "Invalid desktop enrollment request.")));
+            await writer.WriteLineAsync(JsonSerializer.Serialize(new PipeResponse(false, null, "Invalid desktop enrollment request."), PipeJsonOptions));
             return;
         }
 
         PipeRequest? request;
         try
         {
-            request = JsonSerializer.Deserialize<PipeRequest>(requestLine);
+            request = JsonSerializer.Deserialize<PipeRequest>(requestLine, PipeJsonOptions);
         }
         catch (JsonException)
         {
@@ -106,14 +107,14 @@ public sealed class AgentControlPipeHostedService(
             request.EnrollmentCode.Length != 32 ||
             !request.EnrollmentCode.All(IsBase64UrlCharacter))
         {
-            await writer.WriteLineAsync(JsonSerializer.Serialize(new PipeResponse(false, null, "The one-time enrollment authorization is invalid.")));
+            await writer.WriteLineAsync(JsonSerializer.Serialize(new PipeResponse(false, null, "The one-time enrollment authorization is invalid."), PipeJsonOptions));
             return;
         }
 
         var apiBaseUrl = configuration["Agent:ApiBaseUrl"];
         if (string.IsNullOrWhiteSpace(apiBaseUrl))
         {
-            await writer.WriteLineAsync(JsonSerializer.Serialize(new PipeResponse(false, null, "The SmartPrint service is not configured. Repair or reinstall SmartPrint.")));
+            await writer.WriteLineAsync(JsonSerializer.Serialize(new PipeResponse(false, null, "The SmartPrint service is not configured. Repair or reinstall SmartPrint."), PipeJsonOptions));
             return;
         }
 
@@ -121,12 +122,12 @@ public sealed class AgentControlPipeHostedService(
         {
             var credentials = await AgentPairing.EnrollAsync(apiBaseUrl, request.EnrollmentCode, ct);
             logger.LogInformation("SmartPrint Agent enrollment completed for device {AgentDeviceId}.", credentials.AgentDeviceId);
-            await writer.WriteLineAsync(JsonSerializer.Serialize(new PipeResponse(true, credentials.AgentDeviceId, null)));
+            await writer.WriteLineAsync(JsonSerializer.Serialize(new PipeResponse(true, credentials.AgentDeviceId, null), PipeJsonOptions));
         }
         catch (Exception exception) when (exception is HttpRequestException or InvalidOperationException or TaskCanceledException)
         {
             logger.LogWarning("SmartPrint Agent enrollment was declined or unavailable: {Reason}", exception.Message);
-            await writer.WriteLineAsync(JsonSerializer.Serialize(new PipeResponse(false, null, "The computer could not be connected. Check the internet connection and try again.")));
+            await writer.WriteLineAsync(JsonSerializer.Serialize(new PipeResponse(false, null, "The computer could not be connected. Check the internet connection and try again."), PipeJsonOptions));
         }
     }
 
