@@ -126,6 +126,8 @@ class MainActivity : AppCompatActivity() {
         pendingScanNeedsDestination = savedInstanceState?.getBoolean("pendingScanNeedsDestination") ?: false
         pendingScanDestinationPath = savedInstanceState?.getString("pendingScanDestinationPath").orEmpty()
         folderPath = savedInstanceState?.getString("folderPath").orEmpty()
+        folderPath = runCatching { store.pathOf(store.folder(folderPath)) }.getOrDefault("")
+        pendingImportDestinationPath = savedInstanceState?.getString("pendingImportDestinationPath").orEmpty()
         librarySearchQuery = savedInstanceState?.getString("librarySearchQuery").orEmpty()
         registerFileActions()
         buildLayout()
@@ -177,6 +179,7 @@ class MainActivity : AppCompatActivity() {
         outState.putBoolean("pendingScanNeedsDestination", pendingScanNeedsDestination)
         outState.putString("pendingScanDestinationPath", pendingScanDestinationPath)
         outState.putString("folderPath", folderPath)
+        outState.putString("pendingImportDestinationPath", pendingImportDestinationPath)
         outState.putString("librarySearchQuery", librarySearchQuery)
         outState.putInt("selectedNavigation", if (::navigation.isInitialized) navigation.selectedItemId else HOME)
         outState.putBoolean("profileVisible", profileVisible)
@@ -203,7 +206,7 @@ class MainActivity : AppCompatActivity() {
     override fun onBackPressed() {
         when {
             profileVisible -> returnFromProfile()
-            pickerMode && pickerPath.isNotBlank() -> { pickerPath = parent(pickerPath); refreshLibrary() }
+            pickerMode && pickerPath.isNotBlank() -> { pickerPath = parent(pickerPath); refreshLibrary(preserveScroll = false) }
             pickerMode -> cancelPicker()
             documentViewer != null -> closeDocumentViewer()
             editingPdf != null -> showFiles()
@@ -970,7 +973,15 @@ class MainActivity : AppCompatActivity() {
         content.addView(view, frameParams())
     }
 
-    private fun refreshLibrary() { if (pickerMode) showPicker(resetPath = false) else showFiles() }
+    private fun refreshLibrary(preserveScroll: Boolean = true) {
+        val previousScroll = if (preserveScroll) (content.getChildAt(0) as? ScrollView)?.scrollY ?: 0 else 0
+        if (pickerMode) showPicker(resetPath = false) else showFiles()
+        if (preserveScroll) {
+            content.post {
+                (content.getChildAt(0) as? ScrollView)?.scrollTo(0, previousScroll)
+            }
+        }
+    }
 
     private fun libraryView(isPicker: Boolean): View {
         val scroll = ScrollView(this).apply { isFillViewport = true; clipToPadding = false }
@@ -1030,7 +1041,7 @@ class MainActivity : AppCompatActivity() {
         if (!isPicker) {
             val searchRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
             val search = EditText(this).apply {
-                hint = "Search"
+                hint = "Search this folder"
                 maxLines = 1
                 setSingleLine(true)
                 textSize = 14f
@@ -1061,7 +1072,7 @@ class MainActivity : AppCompatActivity() {
             crumb.addView(up)
             up.setOnClickListener {
                 if (isPicker) pickerPath = parent(pickerPath) else folderPath = parent(folderPath)
-                refreshLibrary()
+                refreshLibrary(preserveScroll = false)
             }
         }
         column.addView(crumb, linearParams())
@@ -1294,7 +1305,7 @@ class MainActivity : AppCompatActivity() {
                     setChooserFolderSelected(file, !chooserSelectedFolderPaths.contains(file.canonicalPath))
                 file.isDirectory -> {
                     if (isPicker) pickerPath = store.pathOf(file) else folderPath = store.pathOf(file)
-                    refreshLibrary()
+                    refreshLibrary(preserveScroll = false)
                 }
                 isPicker && fileChooserAllowsMultiple -> setChooserFileSelected(
                     file, !chooserSelectedFilePaths.contains(file.canonicalPath)
