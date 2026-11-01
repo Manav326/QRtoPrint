@@ -23,7 +23,13 @@ async function start() {
     }
   } catch {
     // A missing or invalid secure session simply returns the owner to sign-in.
-    await storeTokens(null);
+    // Credential Manager itself can be unavailable; that must not strand the
+    // owner on a blank window before React has a chance to show the sign-in UI.
+    try {
+      await storeTokens(null);
+    } catch {
+      // The next sign-in attempt will surface a secure-session write failure.
+    }
   }
 
   if (window.location.pathname !== "/shop") {
