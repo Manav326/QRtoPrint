@@ -35,7 +35,7 @@ Customer identity is separate from shop staff identity and uses dedicated `/api/
 
 ## QR and print flow
 
-The QR station code format is matched to the API's current generator: 24 random bytes encoded as a 32-character Base64URL path segment. The app validates the host against the configured smartPrintServiceUrl HTTPS origin, as well as the route, port, query and fragment. Production QR codes from any other host are rejected. Debug builds may additionally accept private IPv4 HTTP test portals on port 3000; that development exception never changes the WebView credential-bridge origin.
+The QR station code format is matched to the API's current generator: 24 random bytes encoded as a 32-character Base64URL path segment. The app validates the host against the configured smartPrintServiceUrl HTTPS origin, as well as the route, port, query and fragment. Production QR codes from any other host are rejected. A debug build may be configured with a private IPv4 HTTP service origin on port 3000; the scanned station URL must still match that exact configured origin, and the WebView credential bridge remains pinned to it.
 
 The CameraX preview feeds frames to bundled ML Kit Barcode Scanning locally. No camera frame is uploaded or retained. Only a decoded QR payload leaves the scanner, and it is accepted only when it matches the HTTPS `/s/{publicCode}` station route.
 
