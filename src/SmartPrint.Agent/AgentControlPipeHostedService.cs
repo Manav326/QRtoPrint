@@ -1,0 +1,138 @@
+using System.IO.Pipes;
+using System.Security.AccessControl;
+using System.Security.Principal;
+using System.Text;
+using System.Text.Json;
+using Microsoft.Extensions.Hosting;
+
+namespace SmartPrint.Agent;
+
+public sealed class AgentControlPipeHostedService(
+    IConfiguration configuration,
+    ILogger<AgentControlPipeHostedService> logger) : BackgroundService
+{
+    public const string PipeName = "QRtoPrint.SmartPrint.Agent.Control";
+    private const int MaximumRequestBytes = 4096;
+
+    protected override async Task ExecuteAsync(CancellationToken stoppingToken)
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            logger.LogInformation("The local desktop control pipe is available only on Windows.");
+            return;
+        }
+
+        while (!stoppingToken.IsCancellationRequested)
+        {
+            try
+            {
+                await using var pipe = CreatePipe();
+                await pipe.WaitForConnectionAsync(stoppingToken);
+                await HandleConnectionAsync(pipe, stoppingToken);
+            }
+            catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+            {
+                break;
+            }
+            catch (IOException exception)
+            {
+                logger.LogWarning(exception, "The SmartPrint desktop control pipe connection ended unexpectedly.");
+            }
+            catch (Exception exception)
+            {
+                logger.LogError(exception, "The SmartPrint desktop control pipe could not process a request.");
+                await Task.Delay(TimeSpan.FromSeconds(1), stoppingToken);
+            }
+        }
+    }
+
+    private static NamedPipeServerStream CreatePipe()
+    {
+        var security = new PipeSecurity();
+        security.SetAccessRuleProtection(isProtected: true, preserveInheritance: false);
+        security.AddAccessRule(new PipeAccessRule(
+            new SecurityIdentifier(WellKnownSidType.AuthenticatedUserSid, null),
+            PipeAccessRights.ReadWrite,
+            AccessControlType.Allow));
+        security.AddAccessRule(new PipeAccessRule(
+            new SecurityIdentifier(WellKnownSidType.LocalSystemSid, null),
+            PipeAccessRights.FullControl,
+            AccessControlType.Allow));
+        security.AddAccessRule(new PipeAccessRule(
+            new SecurityIdentifier(WellKnownSidType.BuiltinAdministratorsSid, null),
+            PipeAccessRights.FullControl,
+            AccessControlType.Allow));
+
+        return NamedPipeServerStreamAcl.Create(
+            PipeName,
+            PipeDirection.InOut,
+            maxNumberOfServerInstances: 1,
+            PipeTransmissionMode.Byte,
+            PipeOptions.Asynchronous,
+            inBufferSize: 4096,
+            outBufferSize: 4096,
+            security);
+    }
+
+    private async Task HandleConnectionAsync(NamedPipeServerStream pipe, CancellationToken ct)
+    {
+        using var reader = new StreamReader(pipe, Encoding.UTF8, false, 1024, leaveOpen: true);
+        await using var writer = new StreamWriter(pipe, new UTF8Encoding(false), 1024, leaveOpen: true)
+        {
+            AutoFlush = true,
+            NewLine = "\n"
+        };
+
+        var requestLine = await reader.ReadLineAsync(ct);
+        if (string.IsNullOrWhiteSpace(requestLine) || Encoding.UTF8.GetByteCount(requestLine) > MaximumRequestBytes)
+        {
+            await writer.WriteLineAsync(JsonSerializer.Serialize(new PipeResponse(false, null, "Invalid desktop enrollment request.")));
+            return;
+        }
+
+        PipeRequest? request;
+        try
+        {
+            request = JsonSerializer.Deserialize<PipeRequest>(requestLine);
+        }
+        catch (JsonException)
+        {
+            request = null;
+        }
+
+        if (request is null ||
+            !string.Equals(request.Operation, "enroll", StringComparison.Ordinal) ||
+            string.IsNullOrWhiteSpace(request.EnrollmentCode) ||
+            request.EnrollmentCode.Length != 32 ||
+            !request.EnrollmentCode.All(IsBase64UrlCharacter))
+        {
+            await writer.WriteLineAsync(JsonSerializer.Serialize(new PipeResponse(false, null, "The one-time enrollment authorization is invalid.")));
+            return;
+        }
+
+        var apiBaseUrl = configuration["Agent:ApiBaseUrl"];
+        if (string.IsNullOrWhiteSpace(apiBaseUrl))
+        {
+            await writer.WriteLineAsync(JsonSerializer.Serialize(new PipeResponse(false, null, "The SmartPrint service is not configured. Repair or reinstall SmartPrint.")));
+            return;
+        }
+
+        try
+        {
+            var credentials = await AgentPairing.EnrollAsync(apiBaseUrl, request.EnrollmentCode, ct);
+            logger.LogInformation("SmartPrint Agent enrollment completed for device {AgentDeviceId}.", credentials.AgentDeviceId);
+            await writer.WriteLineAsync(JsonSerializer.Serialize(new PipeResponse(true, credentials.AgentDeviceId, null)));
+        }
+        catch (Exception exception) when (exception is HttpRequestException or InvalidOperationException or TaskCanceledException)
+        {
+            logger.LogWarning("SmartPrint Agent enrollment was declined or unavailable: {Reason}", exception.Message);
+            await writer.WriteLineAsync(JsonSerializer.Serialize(new PipeResponse(false, null, "The computer could not be connected. Check the internet connection and try again.")));
+        }
+    }
+
+    private static bool IsBase64UrlCharacter(char value) =>
+        value is >= 'a' and <= 'z' or >= 'A' and <= 'Z' or >= '0' and <= '9' or '-' or '_';
+
+    private sealed record PipeRequest(string Operation, string EnrollmentCode);
+    private sealed record PipeResponse(bool Success, Guid? AgentDeviceId, string? Message);
+}

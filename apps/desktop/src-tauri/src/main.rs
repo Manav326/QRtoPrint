@@ -1,0 +1,217 @@
+#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+
+use serde::{Deserialize, Serialize};
+use std::io::{BufRead, BufReader, Write};
+use std::time::Duration;
+
+const AGENT_STATUS_URL: &str = "http://127.0.0.1:17842/api/v1/local/status";
+const AGENT_PIPE: &str = r"\\.\pipe\QRtoPrint.SmartPrint.Agent.Control";
+const SESSION_TARGET: &str = "QRtoPrint.SmartPrint.Session";
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct LocalAgentStatus {
+    service_reachable: bool,
+    paired: bool,
+    agent_device_id: Option<String>,
+    status: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct AgentPipeResponse {
+    success: bool,
+    agent_device_id: Option<String>,
+    message: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct AgentPipeRequest<'a> {
+    operation: &'static str,
+    enrollment_code: &'a str,
+}
+
+#[tauri::command]
+async fn get_local_agent_status() -> LocalAgentStatus {
+    let client = match reqwest::Client::builder().timeout(Duration::from_secs(2)).build() {
+        Ok(client) => client,
+        Err(_) => return unavailable_status(),
+    };
+
+    match client.get(AGENT_STATUS_URL).send().await {
+        Ok(response) if response.status().as_u16() == 503 => LocalAgentStatus {
+            service_reachable: true,
+            paired: false,
+            agent_device_id: None,
+            status: "UNPAIRED".into(),
+        },
+        Ok(response) if response.status().is_success() => {
+            let payload = response.json::<serde_json::Value>().await.ok();
+            let id = payload.as_ref()
+                .and_then(|value| value.get("agentDeviceId"))
+                .and_then(serde_json::Value::as_str)
+                .map(str::to_owned);
+            LocalAgentStatus {
+                service_reachable: true,
+                paired: id.is_some(),
+                agent_device_id: id,
+                status: payload
+                    .and_then(|value| value.get("status").and_then(serde_json::Value::as_str).map(str::to_owned))
+                    .unwrap_or_else(|| "CONNECTED".into()),
+            }
+        }
+        Ok(_) | Err(_) => unavailable_status(),
+    }
+}
+
+fn unavailable_status() -> LocalAgentStatus {
+    LocalAgentStatus {
+        service_reachable: false,
+        paired: false,
+        agent_device_id: None,
+        status: "SERVICE_UNAVAILABLE".into(),
+    }
+}
+
+#[tauri::command]
+fn enroll_local_agent(enrollment_code: String) -> Result<AgentPipeResponse, String> {
+    if enrollment_code.len() != 32 ||
+        !enrollment_code.bytes().all(|byte| byte.is_ascii_alphanumeric() || byte == b'-' || byte == b'_') {
+        return Err("The service returned an invalid one-time enrollment authorization.".into());
+    }
+
+    #[cfg(windows)]
+    {
+        use std::fs::OpenOptions;
+        let mut pipe = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(AGENT_PIPE)
+            .map_err(|_| "The SmartPrint background service is not ready. Repair or reinstall SmartPrint, then retry.".to_string())?;
+
+        let request = serde_json::to_vec(&AgentPipeRequest { operation: "enroll", enrollment_code: &enrollment_code })
+            .map_err(|_| "Could not prepare secure computer enrollment.".to_string())?;
+        pipe.write_all(&request).map_err(|_| "Could not send enrollment to the SmartPrint service.".to_string())?;
+        pipe.write_all(b"\n").map_err(|_| "Could not finish the enrollment request.".to_string())?;
+        pipe.flush().map_err(|_| "Could not finish the enrollment request.".to_string())?;
+
+        let mut response_line = String::new();
+        BufReader::new(pipe)
+            .read_line(&mut response_line)
+            .map_err(|_| "The SmartPrint service did not return an enrollment result.".to_string())?;
+        let response: AgentPipeResponse = serde_json::from_str(&response_line)
+            .map_err(|_| "The SmartPrint service returned an invalid enrollment result.".to_string())?;
+        if !response.success {
+            return Err(response.message.clone().unwrap_or_else(|| "This computer could not be connected to the shop.".into()));
+        }
+        Ok(response)
+    }
+
+    #[cfg(not(windows))]
+    {
+        let _ = enrollment_code;
+        Err("SmartPrint desktop enrollment is supported on Windows only.".into())
+    }
+}
+
+#[tauri::command]
+fn read_secure_session() -> Result<Option<String>, String> {
+    #[cfg(windows)]
+    { credential_store::read() }
+    #[cfg(not(windows))]
+    { Ok(None) }
+}
+
+#[tauri::command]
+fn write_secure_session(session: Option<String>) -> Result<(), String> {
+    #[cfg(windows)]
+    { credential_store::write(session) }
+    #[cfg(not(windows))]
+    { let _ = session; Ok(()) }
+}
+
+#[cfg(windows)]
+mod credential_store {
+    use super::SESSION_TARGET;
+    use std::ptr::{null, null_mut};
+    use windows_sys::Win32::Foundation::{GetLastError, ERROR_NOT_FOUND};
+    use windows_sys::Win32::Security::Credentials::{
+        CredDeleteW, CredFree, CredReadW, CredWriteW, CREDENTIALW,
+        CRED_PERSIST_LOCAL_MACHINE, CRED_TYPE_GENERIC,
+    };
+
+    fn target() -> Vec<u16> {
+        SESSION_TARGET.encode_utf16().chain(std::iter::once(0)).collect()
+    }
+
+    pub fn read() -> Result<Option<String>, String> {
+        unsafe {
+            let target = target();
+            let mut credential: *mut CREDENTIALW = null_mut();
+            if CredReadW(target.as_ptr(), CRED_TYPE_GENERIC, 0, &mut credential) == 0 {
+                let error = GetLastError();
+                if error == ERROR_NOT_FOUND { return Ok(None); }
+                return Err(format!("Windows secure storage could not be read ({error})."));
+            }
+            let item = &*credential;
+            let bytes = if item.CredentialBlobSize == 0 {
+                Vec::new()
+            } else {
+                std::slice::from_raw_parts(item.CredentialBlob, item.CredentialBlobSize as usize).to_vec()
+            };
+            CredFree(credential.cast());
+            String::from_utf8(bytes)
+                .map(Some)
+                .map_err(|_| "The saved desktop session is invalid. Please sign in again.".into())
+        }
+    }
+
+    pub fn write(session: Option<String>) -> Result<(), String> {
+        unsafe {
+            let target = target();
+            match session {
+                None => {
+                    if CredDeleteW(target.as_ptr(), CRED_TYPE_GENERIC, 0) == 0 {
+                        let error = GetLastError();
+                        if error != ERROR_NOT_FOUND {
+                            return Err(format!("Windows secure storage could not clear the session ({error})."));
+                        }
+                    }
+                }
+                Some(value) => {
+                    if value.len() > 16_000 { return Err("The saved session exceeds the secure storage limit.".into()); }
+                    let mut bytes = value.into_bytes();
+                    let mut target = target();
+                    let mut user_name: Vec<u16> = "SmartPrint".encode_utf16().chain(std::iter::once(0)).collect();
+                    let mut credential: CREDENTIALW = std::mem::zeroed();
+                    credential.Type = CRED_TYPE_GENERIC;
+                    credential.TargetName = target.as_mut_ptr();
+                    credential.CredentialBlobSize = bytes.len() as u32;
+                    credential.CredentialBlob = bytes.as_mut_ptr();
+                    credential.Persist = CRED_PERSIST_LOCAL_MACHINE;
+                    credential.UserName = user_name.as_mut_ptr();
+                    if CredWriteW(&credential, 0) == 0 {
+                        let error = GetLastError();
+                        bytes.fill(0);
+                        return Err(format!("Windows secure storage could not save the session ({error})."));
+                    }
+                    bytes.fill(0);
+                }
+            }
+        }
+        Ok(())
+    }
+}
+
+fn main() {
+    tauri::Builder::default()
+        .invoke_handler(tauri::generate_handler![
+            get_local_agent_status,
+            enroll_local_agent,
+            read_secure_session,
+            write_secure_session
+        ])
+        .run(tauri::generate_context!())
+        .expect("error while running SmartPrint desktop");
+}
