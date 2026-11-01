@@ -13,6 +13,9 @@ on:
 permissions:
   contents: read
 
+env:
+  SMARTPRINT_PUBLIC_BASE_URL: ${{ vars.SMARTPRINT_PUBLIC_BASE_URL }}
+
 jobs:
   portal:
     runs-on: ubuntu-latest
