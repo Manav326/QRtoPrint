@@ -98,8 +98,9 @@ class SmartPrintDocumentViewer(
     private var pageCount = 0
     private var rotationDegrees = 0
     private var renderVersion = 0
-    private var currentImageIndex = startPosition?.takeIf { it in imageSiblings.indices }
-        ?: imageSiblings.indexOfFirst { sameFile(it, startFile) }.coerceAtLeast(0)
+    // The current file path is authoritative for images; list positions can change if
+    // another photo is imported, renamed or removed while the viewer is closed.
+    private var currentImageIndex = imageSiblings.indexOfFirst { sameFile(it, startFile) }.coerceAtLeast(0)
     private val displayedBitmaps = mutableListOf<Bitmap>()
     private val isPdf = startFile.extension.equals("pdf", ignoreCase = true)
 
