@@ -162,8 +162,8 @@ let apiBase = defaultApiBase;
 let desktopApiBaseRefresh: Promise<void> | null = null;
 let lastDesktopApiBaseRefreshUtc = 0;
 
-export function configureApiBaseUrl(value: string | null | undefined): void {
-  if (!value) return;
+export function configureApiBaseUrl(value: string | null | undefined): boolean {
+  if (!value) return false;
   try {
     const parsed = new URL(value);
     if (
@@ -175,25 +175,33 @@ export function configureApiBaseUrl(value: string | null | undefined): void {
       parsed.pathname !== "/" ||
       parsed.search ||
       parsed.hash
-    ) return;
+    ) return false;
 
     apiBase = parsed.origin;
+    return true;
   } catch {
     // Keep the previously validated base URL if the local service returns invalid data.
+    return false;
   }
 }
 
-async function refreshDesktopApiBaseUrl(): Promise<void> {
+async function refreshDesktopApiBaseUrl(force = false): Promise<void> {
   if (!isDesktopApp()) return;
   if (desktopApiBaseRefresh) return desktopApiBaseRefresh;
-  if (Date.now() - lastDesktopApiBaseRefreshUtc < 30_000) return;
+  if (!force && Date.now() - lastDesktopApiBaseRefreshUtc < 30_000) return;
 
   desktopApiBaseRefresh = getAgentApiBaseUrl()
     .then(value => {
-      configureApiBaseUrl(value);
-      lastDesktopApiBaseRefreshUtc = Date.now();
+      if (configureApiBaseUrl(value)) {
+        lastDesktopApiBaseRefreshUtc = Date.now();
+      } else {
+        // Retry shortly when the Windows service is still starting or not installed.
+        lastDesktopApiBaseRefreshUtc = Date.now() - 25_000;
+      }
     })
-    .catch(() => undefined)
+    .catch(() => {
+      lastDesktopApiBaseRefreshUtc = Date.now() - 25_000;
+    })
     .finally(() => {
       desktopApiBaseRefresh = null;
     });
@@ -264,7 +272,18 @@ export async function apiRequest<T>(
     try {
       return await fetch(`${apiBase}${path}`, { ...options, headers });
     } catch {
-      throw new ApiError(`Unable to reach Smart Print API at ${apiBase}. Check that the API is running and the network is available.`, 0);
+      if (isDesktopApp()) {
+        const previousApiBase = apiBase;
+        await refreshDesktopApiBaseUrl(true);
+        if (apiBase !== previousApiBase) {
+          try {
+            return await fetch(`${apiBase}${path}`, { ...options, headers });
+          } catch {
+            // Report the latest destination below, after its one safe retry.
+          }
+        }
+      }
+      throw new ApiError(`Unable to reach Smart Print API at ${apiBase}. Check that the network is available.`, 0);
     }
   };
 
