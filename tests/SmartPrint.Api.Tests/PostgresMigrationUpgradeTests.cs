@@ -3,7 +3,6 @@ using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Migrations;
 using SmartPrint.Api.Data;
 using SmartPrint.Api.Domain;
-using SmartPrint.Api.Data;
 using SmartPrint.Api.Migrations;
 using SmartPrint.Api.Services;
 
