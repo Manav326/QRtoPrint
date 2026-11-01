@@ -237,8 +237,14 @@ class SmartPrintDocumentViewer(
                 require(renderer.pageCount > 0) { "This PDF has no pages to display." }
                 val index = requestedPage.coerceIn(0, renderer.pageCount - 1)
                 val pageBitmap = renderer.openPageBitmap(index, MAX_PAGE_EDGE)
-                val displayBitmap = rotateBitmap(pageBitmap, rotation)
-                if (displayBitmap !== pageBitmap) pageBitmap.recycle()
+                val displayBitmap = try {
+                    rotateBitmap(pageBitmap, rotation).also {
+                        if (it !== pageBitmap) pageBitmap.recycle()
+                    }
+                } catch (error: Exception) {
+                    if (!pageBitmap.isRecycled) pageBitmap.recycle()
+                    throw error
+                }
 
                 val thumbnails = mutableListOf<Thumbnail>()
                 try {
@@ -246,8 +252,14 @@ class SmartPrintDocumentViewer(
                     val last = min(renderer.pageCount - 1, index + THUMBNAIL_WINDOW)
                     for (pageIndex in first..last) {
                         val raw = renderer.openPageBitmap(pageIndex, THUMBNAIL_EDGE)
-                        val thumb = if (pageIndex == index) rotateBitmap(raw, rotation) else raw
-                        if (thumb !== raw) raw.recycle()
+                        val thumb = try {
+                            rotateBitmap(raw, if (pageIndex == index) rotation else 0).also {
+                                if (it !== raw) raw.recycle()
+                            }
+                        } catch (error: Exception) {
+                            if (!raw.isRecycled) raw.recycle()
+                            throw error
+                        }
                         thumbnails.add(Thumbnail(pageIndex, thumb))
                     }
                     RenderedDocument(renderer.pageCount, index, displayBitmap, thumbnails)
@@ -466,6 +478,10 @@ class SmartPrintDocumentViewer(
     }
 
     private fun showLoading(message: String) {
+        feedback.setOnClickListener(null)
+        feedback.isClickable = false
+        feedback.isFocusable = false
+        feedback.contentDescription = null
         feedback.text = message
         feedback.visibility = View.VISIBLE
     }
@@ -474,13 +490,29 @@ class SmartPrintDocumentViewer(
         host.runOnUiThread {
             if (disposed.get() || request != renderVersion) return@runOnUiThread
             clearDisplayedBitmaps()
-            feedback.text = error.message?.takeIf { it.isNotBlank() } ?: "Could not open this document."
+            feedback.text = "Could not open this document. Tap to try again."
+            feedback.contentDescription = "Retry opening document"
+            feedback.setOnClickListener {
+                if (isPdf) {
+                    if (pageCount <= 0) loadPdfPageCount() else renderCurrentPdfPage()
+                } else {
+                    loadImage(currentImageIndex)
+                }
+            }
+            feedback.isClickable = true
+            feedback.isFocusable = true
             feedback.visibility = View.VISIBLE
         }
     }
 
     private fun showFeedback(visible: Boolean) {
         feedback.visibility = if (visible) View.VISIBLE else View.GONE
+        if (!visible) {
+            feedback.setOnClickListener(null)
+            feedback.isClickable = false
+            feedback.isFocusable = false
+            feedback.contentDescription = null
+        }
     }
 
     private fun clearDisplayedBitmaps() {
