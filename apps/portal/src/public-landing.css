@@ -338,3 +338,57 @@ html[data-theme="dark"] .sp-public .sp-theme-toggle:hover {
 html[data-theme="light"] .sp-public :where(.sp-public-nav a,.sp-proof-strip small,.sp-section-heading p,.sp-step-card p,.sp-audience-card>p,.sp-audience-card li,.sp-art-document small,.sp-art-shop-head small,.sp-art-printer small,.sp-customer-mini-phone small,.sp-download-platform,.sp-download-note,.sp-download-card p,.sp-download-footnote,.sp-public-footer>span) {
   color: #5f6b80;
 }
+
+
+/* Dark variants for decorative cards and download feedback states. */
+html[data-theme="dark"] .sp-art-upload,
+html[data-theme="dark"] .sp-art-shop-icon,
+html[data-theme="dark"] .sp-art-printer>span,
+html[data-theme="dark"] .sp-step-icon,
+html[data-theme="dark"] .sp-mini-stat-row span,
+html[data-theme="dark"] .sp-mini-job span {
+  background: #2a3450;
+  color: #d1c7ff;
+}
+html[data-theme="dark"] .sp-art-printer em,
+html[data-theme="dark"] .sp-mini-stat-row span:nth-child(2) {
+  background: #1d443a;
+  color: #92e4bf;
+}
+html[data-theme="dark"] .sp-mini-stat-row span:nth-child(3) {
+  background: #25364b;
+  color: #b8cfff;
+}
+html[data-theme="dark"] .sp-customer-mini-phone:before,
+html[data-theme="dark"] .sp-window-dots i,
+html[data-theme="dark"] .sp-mini-job span {
+  background: #344158;
+}
+html[data-theme="dark"] .sp-button-secondary {
+  background: #2b2a4a;
+  color: #d5cdff !important;
+}
+html[data-theme="dark"] .sp-button-secondary:hover {
+  background: #38345d;
+}
+html[data-theme="dark"] .sp-download-progress,
+html[data-theme="dark"] .sp-download-result {
+  background: #1a2537;
+  border-color: #36445b;
+  color: #e9eef8;
+}
+html[data-theme="dark"] .sp-download-progress-track {
+  background: #2a364b;
+}
+html[data-theme="dark"] .sp-download-result-success {
+  background: #183c34;
+  border-color: #326252;
+}
+html[data-theme="dark"] .sp-download-result-error {
+  background: #41242d;
+  border-color: #70404b;
+}
+html[data-theme="dark"] .sp-download-progress :where(small,span,p),
+html[data-theme="dark"] .sp-download-result :where(small,span,p) {
+  color: #bac5d7;
+}
