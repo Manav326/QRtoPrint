@@ -6,6 +6,7 @@ import {
 } from "lucide-react";
 import QRCode from "react-qr-code";
 import AuthScreen from "./AuthScreen";
+import PublicLandingPage from "./PublicLandingPage";
 import PlatformAdminConsole from "./PlatformAdminConsole";
 import {
   ApiError, isPlatformAdminSession, acceptCustomerQuote, approveShopPrintJob, assignShopPrintJobPrinter, calculateCustomerQuote, getShopCustomerHistory, getShopCustomers, getShopReportSummary,
@@ -41,15 +42,18 @@ const sections: { label: Section; icon: typeof LayoutDashboard }[] = [
 
 export default function App() {
   const [tokens, setTokens] = useState<AuthTokens | null>(() => readStoredTokens());
-  const path = window.location.pathname;
-  const stationRoute = path.match(/^\/s\/([A-Za-z0-9_-]+)\/?$/);
+  const path = window.location.pathname.replace(/\\/+$/, "") || "/";
+  const stationRoute = path.match(/^\\/s\\/([A-Za-z0-9_-]+)$/);
+  const shopAuthRoute = path === "/shop" || path === "/login" || path === "/signup";
 
   if (stationRoute) {
     return <CustomerEntry publicCode={stationRoute[1]} />;
   }
 
   if (!tokens) {
-    return <AuthScreen onAuthenticated={setTokens} />;
+    return shopAuthRoute
+      ? <AuthScreen onAuthenticated={setTokens} />
+      : <PublicLandingPage />;
   }
 
   const onSignOut = () => { storeTokens(null); setTokens(null); };
