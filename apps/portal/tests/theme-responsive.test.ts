@@ -83,3 +83,13 @@ test("workspace secondary text palettes meet WCAG AA for normal-size labels", ()
   assert.ok(contrast("#8996aa", "#141a25") >= 4.5, "Dark secondary labels need 4.5:1 contrast.");
   assert.ok(contrast("#626f84", "#f4f6fa") >= 4.5, "Light secondary labels need 4.5:1 contrast.");
 });
+
+test("workspace styles retain one authoritative appearance palette", () => {
+  const css = read("../src/styles.css");
+  const desktop = read("../../desktop/src/desktop.css");
+  assert.ok(!css.includes("--accent:#ff9a52"));
+  assert.ok(!css.includes("--accent:#e96f23"));
+  assert.match(css, /\\.app-shell\\.light\\s*\\{[^}]*--accent:\\s*#7258e8/s);
+  assert.match(desktop, /--faint:\\s*#626f84/);
+  assert.match(desktop, /--faint:\\s*#8996aa/);
+});
