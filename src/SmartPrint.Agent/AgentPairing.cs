@@ -28,10 +28,14 @@ public static class AgentPairing
             throw new InvalidOperationException("Provide a valid Smart Print API URL using HTTPS, or HTTP only for trusted local development.");
         }
 
-        Console.WriteLine();
-        Console.WriteLine("Enter the one-time pairing code generated in your shop workspace.");
-        Console.Write("Pairing code: ");
-        var code = Console.ReadLine()?.Trim();
+        var code = configuration["Agent:EnrollmentCode"]?.Trim();
+        if (string.IsNullOrWhiteSpace(code))
+        {
+            Console.WriteLine();
+            Console.WriteLine("Enter the one-time pairing code generated in your shop workspace.");
+            Console.Write("Pairing code: ");
+            code = Console.ReadLine()?.Trim();
+        }
         if (string.IsNullOrWhiteSpace(code))
         {
             throw new InvalidOperationException("A pairing code is required.");
@@ -43,7 +47,8 @@ public static class AgentPairing
             BaseAddress = new Uri(apiUri.ToString().TrimEnd('/') + "/"),
             Timeout = TimeSpan.FromSeconds(20)
         };
-        var request = new AgentEnrollmentRequest(code, fingerprint, Environment.MachineName);
+        var deviceName = configuration["Agent:DeviceName"]?.Trim();
+        var request = new AgentEnrollmentRequest(code, fingerprint, string.IsNullOrWhiteSpace(deviceName) ? Environment.MachineName : deviceName);
         using var response = await client.PostAsJsonAsync("api/v1/agent/enroll", request);
         if (!response.IsSuccessStatusCode)
         {
