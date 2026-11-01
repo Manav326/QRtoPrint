@@ -1315,11 +1315,11 @@ function PrintQueuePage({ jobs, printers, searchQuery, onSearch, onPreview, onAp
             </select>}
             {job.status!=="PAID_AUTHORISED"&&job.status!=="LOCAL_QUEUE_CLAIMED"&&<><strong>{job.outputType==="PDF_EXPORT"&&job.status==="COMPLETED"?"PDF saved":job.printerName||"Not assigned"}</strong><small>{job.outputType==="PDF_EXPORT"&&job.outputFilePath?job.outputFilePath:job.localQueueReceivedUtc?"Local copy secured "+new Date(job.localQueueReceivedUtc).toLocaleTimeString():(job.queueName||"Waiting for local queue handoff")}</small></>}
             {job.status==="LOCAL_QUEUE_CLAIMED"&&<><strong>{job.printerName||"Agent claimed job"}</strong><small>{job.agentLeaseExpiresUtc?"Claim lease expires "+new Date(job.agentLeaseExpiresUtc).toLocaleTimeString():"Waiting for local agent acknowledgement"}</small></>}
-            {spoolerStatusWarning(job.spoolerStatus) && <small className="queue-device-warning" role="status">{spoolerStatusWarning(job.spoolerStatus)}</small>}
+            {spoolerStatusWarning(job.spoolerStatus, job.printerStatus) && <small className="queue-device-warning" role="status">{spoolerStatusWarning(job.spoolerStatus, job.printerStatus)}</small>}
           </div></td>
           <td><Status label={job.outputType==="PDF_EXPORT"&&job.status==="COMPLETED"?"PDF saved":job.outputMode==="PDF_EXPORT"&&job.status==="PRINT_SUBMITTING"?"Creating PDF":prettyStatus(job.status)} tone={job.status==="AWAITING_CUSTOMER_APPROVAL"||job.status==="AWAITING_SHOP_APPROVAL"?"amber":job.status==="COMPLETED"||job.status==="LOCAL_QUEUE_READY"?"green":job.status==="OUTPUT_UNCONFIRMED"?"amber":job.status==="REFUNDED"?"green":"blue"}/></td>
           <td className="time-cell">{new Date(job.createdUtc).toLocaleString()}</td>
-          <td><div className="queue-actions"><button className="subtle-button" disabled={busyJobId===job.id} onClick={()=>onPreview(job)}>Preview</button><button className="subtle-button" disabled={busyJobId===job.id} onClick={()=>onHistory(job)}>History</button>{job.status==="AWAITING_SHOP_APPROVAL"&&<><button className="subtle-button approve-action" disabled={busyJobId===job.id} onClick={()=>onApprove(job)}>Accept file</button><button className="subtle-button reject-action" disabled={busyJobId===job.id} onClick={()=>onReject(job)}>Reject file</button></>}{job.status==="PAID_AUTHORISED"&&(job.payment?.status==="VERIFIED"||job.payment?.status==="PARTIALLY_REFUNDED")&&!job.localQueueReceivedUtc&&!job.claimedByAgentDeviceId&&<button className="subtle-button reject-action" disabled={busyJobId===job.id} onClick={()=>onRefund(job)}>Review pages</button>}{job.status==="LOCAL_QUEUE_READY"&&<button className="subtle-button approve-action" disabled={busyJobId===job.id} onClick={()=>onDispatch(job)}>{job.outputMode==="PDF_EXPORT"?"Save PDF":"Start printing"}</button>}{job.status==="OUTPUT_UNCONFIRMED"&&job.outputMode==="PDF_EXPORT"&&<button className="subtle-button approve-action" disabled={busyJobId===job.id} onClick={()=>onRetryPdfExport(job)}>Save PDF again</button>}{(job.status==="SPOOLER_ACCEPTED"||job.status==="PRINTING"||(job.status==="OUTPUT_UNCONFIRMED"&&job.outputMode!=="PDF_EXPORT"))&&<button className="subtle-button approve-action" disabled={busyJobId===job.id||(job.status!=="OUTPUT_UNCONFIRMED"&&!!spoolerStatusWarning(job.spoolerStatus))} title={spoolerStatusWarning(job.spoolerStatus)||undefined} onClick={()=>onConfirmOutput(job)}>Confirm output</button>}</div></td>
+          <td><div className="queue-actions"><button className="subtle-button" disabled={busyJobId===job.id} onClick={()=>onPreview(job)}>Preview</button><button className="subtle-button" disabled={busyJobId===job.id} onClick={()=>onHistory(job)}>History</button>{job.status==="AWAITING_SHOP_APPROVAL"&&<><button className="subtle-button approve-action" disabled={busyJobId===job.id} onClick={()=>onApprove(job)}>Accept file</button><button className="subtle-button reject-action" disabled={busyJobId===job.id} onClick={()=>onReject(job)}>Reject file</button></>}{job.status==="PAID_AUTHORISED"&&(job.payment?.status==="VERIFIED"||job.payment?.status==="PARTIALLY_REFUNDED")&&!job.localQueueReceivedUtc&&!job.claimedByAgentDeviceId&&<button className="subtle-button reject-action" disabled={busyJobId===job.id} onClick={()=>onRefund(job)}>Review pages</button>}{job.status==="LOCAL_QUEUE_READY"&&<button className="subtle-button approve-action" disabled={busyJobId===job.id} onClick={()=>onDispatch(job)}>{job.outputMode==="PDF_EXPORT"?"Save PDF":"Start printing"}</button>}{job.status==="OUTPUT_UNCONFIRMED"&&job.outputMode==="PDF_EXPORT"&&<button className="subtle-button approve-action" disabled={busyJobId===job.id} onClick={()=>onRetryPdfExport(job)}>Save PDF again</button>}{(job.status==="SPOOLER_ACCEPTED"||job.status==="PRINTING"||(job.status==="OUTPUT_UNCONFIRMED"&&job.outputMode!=="PDF_EXPORT"))&&<button className="subtle-button approve-action" disabled={busyJobId===job.id||(job.status!=="OUTPUT_UNCONFIRMED"&&!!spoolerStatusWarning(job.spoolerStatus, job.printerStatus))} title={spoolerStatusWarning(job.spoolerStatus, job.printerStatus)||undefined} onClick={()=>onConfirmOutput(job)}>Confirm output</button>}</div></td>
         </tr>)}
       </tbody></table></div>}
     {hasMoreJobs && <div className="queue-load-older"><button className="secondary-button" type="button" onClick={() => void onLoadOlder()} disabled={loadingOlderJobs}>{loadingOlderJobs ? <span className="button-spinner"/> : <ArrowRight size={14}/>} Load older jobs</button></div>}
@@ -1453,16 +1453,22 @@ function rejectedPageList(json?:string) {
   }
 }
 
-function spoolerStatusWarning(status?: string | null) {
-  switch ((status || "").toUpperCase()) {
-    case "OFFLINE": return "Printer went offline during this job. Reconnect it; Windows may resume this same queued job. Do not start a duplicate.";
-    case "PAPEROUT": return "The printer reports no paper. Refill it and check the same Windows queue before continuing.";
-    case "PAUSED": return "The Windows print queue is paused. Resume the existing job in Windows; do not submit another copy.";
-    case "PRINTER_UNAVAILABLE": return "The Agent cannot currently open this printer queue. Reconnect or restore the queue, then refresh this job.";
-    case "ERROR": return "Windows reports a printer error. Resolve it in the printer queue and inspect any pages already produced.";
-    case "USERINTERVENTION": return "The printer requires attention. Resolve the prompt at the device before checking the same queued job.";
-    default: return "";
-  }
+function spoolerStatusWarning(status?: string | null, printerStatus?: string | null) {
+  const spooler = (status || "").toUpperCase();
+  const printer = (printerStatus || "").toUpperCase();
+  if (spooler === "OFFLINE" || printer === "OFFLINE")
+    return "Printer is offline. Reconnect it; Windows may resume this same queued job. Do not start a duplicate.";
+  if (spooler === "PAPEROUT")
+    return "The printer reports no paper. Refill it and check the same Windows queue before continuing.";
+  if (spooler === "PAUSED" || printer === "PAUSED")
+    return "The printer or Windows print queue is paused. Resume the existing job in Windows; do not submit another copy.";
+  if (spooler === "PRINTER_UNAVAILABLE")
+    return "The Agent cannot currently open this printer queue. Reconnect or restore the queue, then refresh this job.";
+  if (spooler === "ERROR")
+    return "Windows reports a printer error. Resolve it in the printer queue and inspect any pages already produced.";
+  if (spooler === "USERINTERVENTION")
+    return "The printer requires attention. Resolve the prompt at the device before checking the same queued job.";
+  return "";
 }
 function prettyStatus(status:string) {
   const names:Record<string,string>={
