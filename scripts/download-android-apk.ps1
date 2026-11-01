@@ -31,7 +31,10 @@ try {
 } catch {
     throw ("GitHub CLI returned invalid repository metadata: {0}" -f ($repositoryOutput -join ' '))
 }
-if ($repository -notmatch '^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+
+$repositoryParts = $repository.Split('/')
+if ($repositoryParts.Count -ne 2 -or $repositoryParts[0].Length -eq 0 -or $repositoryParts[1].Length -eq 0) {
+    throw 'GitHub CLI returned an invalid repository name.'
+}
 if ($Install -and -not (Get-Command adb -ErrorAction SilentlyContinue)) {
     throw 'ADB was not found. Install Android platform-tools and add adb to PATH.'
 }
