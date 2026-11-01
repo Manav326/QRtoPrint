@@ -345,7 +345,7 @@ public sealed class SmartPrintDbContext(DbContextOptions<SmartPrintDbContext> op
         {
             entity.ToTable("PrintBatchPayments", table =>
             {
-                table.HasCheckConstraint("CK_PrintBatchPayments_AmountMinor", "\\"AmountMinor\\" > 0");
+                table.HasCheckConstraint("CK_PrintBatchPayments_AmountMinor", "\"AmountMinor\" > 0");
             });
             entity.HasKey(x => x.Id);
             entity.Property(x => x.Method).HasMaxLength(16).IsRequired();
@@ -360,7 +360,7 @@ public sealed class SmartPrintDbContext(DbContextOptions<SmartPrintDbContext> op
             entity.HasIndex(x => new { x.TenantId, x.BatchId, x.CreatedUtc });
             entity.HasIndex(x => new { x.TenantId, x.BatchId })
                 .IsUnique()
-                .HasFilter("\\"Status\\" IN ('AWAITING_CUSTOMER_PAYMENT','CUSTOMER_REPORTED','CASH_AWAITING_PAYMENT')");
+                .HasFilter("\"Status\" IN ('AWAITING_CUSTOMER_PAYMENT','CUSTOMER_REPORTED','CASH_AWAITING_PAYMENT')");
             entity.HasOne<Tenant>().WithMany()
                 .HasForeignKey(x => x.TenantId)
                 .OnDelete(DeleteBehavior.Cascade);
