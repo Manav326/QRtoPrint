@@ -12,14 +12,15 @@ This checklist tracks the public website, non-technical Windows setup, Android r
 - [x] Allow direct shop registration at `/shop?mode=register`.
 - [x] Add a return-to-website link to the existing authentication screen.
 - [x] Explain the customer QR journey, shop review/approval, Agent and printer connection.
-- [x] Add Windows and Android download cards wired to stable GitHub Release asset URLs.
+- [x] Add separate Windows and Android download cards; keep their CTAs disabled until signed release assets actually exist.
 - [x] Add public metadata, social preview metadata and a SmartPrint favicon.
 - [x] Preserve the existing `/s/{publicCode}` customer QR route ahead of public landing-page routing.
 - [x] Run portal type-check/build on the current main commit and resolve any failures (CI run 344 passed).
 - [ ] Deploy the updated portal and verify `https://qr-test.paintpulp.com/` on desktop and mobile.
 - [ ] Complete keyboard, contrast, screen-reader and responsive browser checks.
 - [ ] Publish and link the actual Terms of Service and Privacy Policy pages.
-- [ ] Confirm each latest-release download URL serves a file anonymously over HTTPS.
+- [x] Do not expose broken `releases/latest/download` links before a release exists; display explicit signing/release-pending states instead.
+- [ ] After the first signed release is published, enable the stable download URLs and confirm each asset serves anonymously over HTTPS.
 
 ## B. Windows Agent installer for shop owners
 
@@ -61,7 +62,7 @@ This checklist tracks the public website, non-technical Windows setup, Android r
 - [x] Add a tag-triggered release workflow for version tags matching `v*`.
 - [x] Publish intended stable asset names: `SmartPrint-Windows-Setup.exe` and `SmartPrint-Android.apk`.
 - [x] Generate a `SHA256SUMS.txt` file for both public downloads.
-- [x] Wire the landing page to the stable GitHub `releases/latest/download` URLs.
+- [x] Document stable GitHub Release asset names and keep download controls unavailable until those assets are published.
 - [x] Add a version/release-notes link from each download card.
 - [x] Default release builds to `https://qr-test.paintpulp.com` through the `SMARTPRINT_PUBLIC_BASE_URL` repository variable, with an explicit default.
 - [x] Validate the configured release origin as a canonical HTTPS origin before building either installer.
@@ -85,10 +86,12 @@ This checklist tracks the public website, non-technical Windows setup, Android r
 
 ## Current verified CI evidence
 
+- The green CI baseline is run 352 at commit `a2ebb4772052c4a9001424f50a6b7074f02dbac0`. Landing-page download-gating changes were committed afterward and require their own CI result before being marked verified.
+
 - Latest verified code commit: `f42a112b98912b13a4a192d28ad6cda03cb1c8fb`.
 - CI run 351: [GitHub Actions run](https://github.com/Manav326/QRtoPrint/actions/runs/41261715735) — portal, .NET API/Agent, API and Agent tests, the Windows non-interactive pairing-status smoke test, Inno Setup compilation, Android JVM/emulator tests, GHCR image publication and container smoke tests all completed successfully.
 - Earlier CI run 344 also passed the first full installer and container validation.
-- GitHub Releases currently has no published release. The Windows validation artifact is unsigned and the Android artifact is a debug build; neither is a public customer download.
+- GitHub Releases currently has no published release. The Windows validation artifact is unsigned and the Android artifact is a debug build; neither is a public customer download. The public landing page now shows non-clickable release-pending states instead of broken latest-download URLs.
 
 ## Guardrails
 
