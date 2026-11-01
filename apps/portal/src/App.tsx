@@ -3067,8 +3067,9 @@ function CustomerPrintFlow({publicCode,sessionToken,paymentOptions,localAgent,lo
     try {
       for(const item of items) {
         const existingQuote=nextQuotes[item.job.id];
-        const status=batchStatuses[item.job.id]?.status??
-          (uploaded?.job.id===item.job.id?jobStatus?.status:null)??item.job.status;
+        const status=uploaded?.job.id===item.job.id&&jobStatus?.status
+          ?jobStatus.status
+          :batchStatuses[item.job.id]?.status??item.job.status;
         if(status!=="QUOTE_EXPIRED"&&existingQuote&&existingQuote.status!=="QUOTE_EXPIRED")continue;
         if(!["AWAITING_CONFIGURATION","UPLOADED","Uploaded","QUOTE_EXPIRED"].includes(status))continue;
         const settings=printSettingsByJobId[item.job.id]??{colourMode:"Mono" as const,isDuplex:false,copies:1};
@@ -3399,8 +3400,9 @@ function CustomerPrintFlow({publicCode,sessionToken,paymentOptions,localAgent,lo
     total+(entry.quote?.colourMode==="Colour"?(entry.quote!.quotedAmountMinor??0):0),0);
   const canSendBatch=quoteItems.length>0&&quoteEntries.length===quoteItems.length&&quoteEntries.some(entry=>entry.quote?.status==="AWAITING_CUSTOMER_APPROVAL");
   const canCalculateBatch=quoteItems.some(item=>{
-    const status=batchStatuses[item.job.id]?.status??
-      (uploaded?.job.id===item.job.id?jobStatus?.status:null)??item.job.status;
+    const status=uploaded?.job.id===item.job.id&&jobStatus?.status
+      ?jobStatus.status
+      :batchStatuses[item.job.id]?.status??item.job.status;
     if(status==="QUOTE_EXPIRED")return true;
     if(quotesByJobId[item.job.id]&&quotesByJobId[item.job.id].status!=="QUOTE_EXPIRED")return false;
     return !quotesByJobId[item.job.id]||quotesByJobId[item.job.id].status==="QUOTE_EXPIRED"||
