@@ -1003,7 +1003,7 @@ class MainActivity : AppCompatActivity() {
 
         val folder = try { store.folder(path) } catch (_: Exception) { store.root }
         val entries = store.list(folder).filter {
-            librarySearchQuery.isBlank() || it.name.contains(librarySearchQuery, ignoreCase = true)
+            isPicker || librarySearchQuery.isBlank() || it.name.contains(librarySearchQuery, ignoreCase = true)
         }
         val selectedHere = entries.filter { !it.isDirectory && selectedFilePaths.contains(it.canonicalPath) }
         val chooserSelection = if (isPicker && fileChooserAllowsMultiple) selectedChooserFiles() else emptyList()
