@@ -434,7 +434,7 @@ class MainActivity : AppCompatActivity() {
                 textSize = 19f
                 setTypeface(typeface, android.graphics.Typeface.BOLD)
                 gravity = Gravity.CENTER
-                setTextColor(getColor(android.R.color.white))
+                setTextColor(getColor(R.color.qp_primary_content))
                 background = roundedDrawable(getColor(R.color.qp_primary), dp(18))
             }
             profile.addView(avatar, LinearLayout.LayoutParams(dp(48), dp(48)))
@@ -1544,6 +1544,7 @@ class MainActivity : AppCompatActivity() {
             minHeight = dp(44)
             if (destructive) {
                 backgroundTintList = ColorStateList.valueOf(getColor(R.color.qp_danger))
+                setTextColor(getColor(R.color.qp_danger_content))
             }
             setOnClickListener { dialog.dismiss(); onConfirm() }
         }, LinearLayout.LayoutParams(0, dp(44), 1f).apply { marginStart = dp(8) })
@@ -2038,7 +2039,7 @@ class MainActivity : AppCompatActivity() {
         textSize = 13f
         if (primary) {
             backgroundTintList = ColorStateList.valueOf(getColor(R.color.qp_primary))
-            setTextColor(getColor(android.R.color.white))
+            setTextColor(getColor(R.color.qp_primary_content))
         } else {
             strokeWidth = dp(1)
             strokeColor = ColorStateList.valueOf(getColor(R.color.qp_outline))
