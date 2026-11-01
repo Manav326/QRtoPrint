@@ -140,8 +140,8 @@ fn pipe_agent_status() -> Result<LocalAgentStatus, String> {
         operation: "status",
         enrollment_code: None,
     })?;
-    if !response.success || response.service_reachable != Some(true) {
-        return Err(response.message.unwrap_or_else(|| "The local Agent identity could not be read.".into()));
+    if response.service_reachable != Some(true) {
+        return Err(response.message.unwrap_or_else(|| "The SmartPrint background service is not responding.".into()));
     }
 
     let paired = response.paired.unwrap_or(false);

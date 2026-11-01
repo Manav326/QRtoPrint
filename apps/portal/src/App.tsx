@@ -82,6 +82,7 @@ function ShopConsole({ tokens, onSignOut }: { tokens: AuthTokens; onSignOut: () 
   const [localAgentStatus, setLocalAgentStatus] = useState<DesktopAgentStatus | null>(null);
   const [localAgentConflict, setLocalAgentConflict] = useState(false);
   const [localAgentRevoked, setLocalAgentRevoked] = useState(false);
+  const [localAgentNeedsRepair, setLocalAgentNeedsRepair] = useState(false);
   const [localAgentOwnershipChecking, setLocalAgentOwnershipChecking] = useState(false);
   const [cloudStatus, setCloudStatus] = useState<"checking" | "connected" | "unavailable">("checking");
   const [profile, setProfile] = useState<ShopProfile | null>(null);
@@ -301,6 +302,7 @@ function ShopConsole({ tokens, onSignOut }: { tokens: AuthTokens; onSignOut: () 
       setLocalAgentConflict(false);
       setLocalAgentOwnershipChecking(false);
       setLocalAgentRevoked(status.status === "REVOKED");
+      setLocalAgentNeedsRepair(status.status === "IDENTITY_UNAVAILABLE");
 
       if (!status.serviceReachable) {
         if (!silent) setError("The SmartPrint background service is not responding. Restart Windows or repair SmartPrint, then retry.");
@@ -361,6 +363,7 @@ function ShopConsole({ tokens, onSignOut }: { tokens: AuthTokens; onSignOut: () 
       });
       setLocalAgentConflict(false);
       setLocalAgentRevoked(false);
+      setLocalAgentNeedsRepair(false);
       setLocalAgentOwnershipChecking(false);
 
       // Enrollment creates the AgentDevice in the cloud immediately. Refresh its
@@ -427,12 +430,25 @@ function ShopConsole({ tokens, onSignOut }: { tokens: AuthTokens; onSignOut: () 
       // The shop owner can reconnect it with one explicit click, without typing a code.
       if (status.status === "REVOKED") {
         setLocalAgentRevoked(true);
+        setLocalAgentNeedsRepair(false);
         setLocalAgentConflict(false);
         setLocalAgentOwnershipChecking(false);
         scheduleDesktopAgentSync(60_000);
         return;
       }
 
+      if (status.status === "IDENTITY_UNAVAILABLE") {
+        // Don't create endless one-time enrollment codes while the old cloud
+        // device may still be active. Let the owner review/revoke it first.
+        setLocalAgentNeedsRepair(true);
+        setLocalAgentRevoked(false);
+        setLocalAgentConflict(false);
+        setLocalAgentOwnershipChecking(false);
+        scheduleDesktopAgentSync(60_000);
+        return;
+      }
+
+      setLocalAgentNeedsRepair(false);
       if (status.paired && status.agentDeviceId) {
         let deviceRecord = agentDevicesRef.current.find(agent =>
           agent.id === status.agentDeviceId
@@ -504,6 +520,7 @@ function ShopConsole({ tokens, onSignOut }: { tokens: AuthTokens; onSignOut: () 
 
       if (verifiedStatus.status === "REVOKED") {
         setLocalAgentRevoked(true);
+        setLocalAgentNeedsRepair(false);
         setLocalAgentConflict(false);
         setLocalAgentOwnershipChecking(false);
         scheduleDesktopAgentSync(60_000);
@@ -902,7 +919,7 @@ function ShopConsole({ tokens, onSignOut }: { tokens: AuthTokens; onSignOut: () 
           {active === "Overview" && <Overview profile={profile} printers={printers} stations={stations} printJobs={printJobs} pricing={pricing} onNavigate={navAction}/>}
           {active === "Printers" && <PrintersPage printers={printers} onAdd={() => setModal("printer")} onToggle={togglePrinter}/>}
           {active === "QR Stations" && <StationsPage stations={stations} profile={profile} onAdd={() => setModal("station")} onToggle={toggleStation} onGenerate={createFreshStationCode}/>}
-          {active === "Print Agent" && <PrintAgentPage agents={agentDevices} enrollmentCode={enrollmentCode} busy={agentBusy} onGenerate={generateAgentCode} onRevoke={revokeAgent} desktop={isDesktopApp()} localAgentStatus={localAgentStatus} localAgentConflict={localAgentConflict} localAgentRevoked={localAgentRevoked} localAgentOwnershipChecking={localAgentOwnershipChecking} onConnect={()=>void connectLocalComputer()} onReconnectAfterRevocation={()=>void connectLocalComputer(false,agentDevices,true)}/>}
+          {active === "Print Agent" && <PrintAgentPage agents={agentDevices} enrollmentCode={enrollmentCode} busy={agentBusy} onGenerate={generateAgentCode} onRevoke={revokeAgent} desktop={isDesktopApp()} localAgentStatus={localAgentStatus} localAgentConflict={localAgentConflict} localAgentRevoked={localAgentRevoked} localAgentNeedsRepair={localAgentNeedsRepair} localAgentOwnershipChecking={localAgentOwnershipChecking} onConnect={()=>void connectLocalComputer()} onReconnectAfterRevocation={()=>void connectLocalComputer(false,agentDevices,true)}/>}
           {active === "Pricing" && pricing && <PricingPage pricing={pricing} onSave={savePricing} busy={busy}/>}
           {active === "Subscription" && subscription && <SubscriptionPage summary={subscription}/>}
           {active === "Payments" && paymentSettings && <PaymentsPage settings={paymentSettings} payments={payments} refunds={refunds} onSave={savePaymentSettings} onVerify={verifyPayment} onReject={rejectPayment} busy={busy} busyJobId={busyJobId}/>}
@@ -1280,7 +1297,7 @@ function StationsPage({ stations, profile, onAdd, onToggle, onGenerate }: {
 
 
 
-function PrintAgentPage({agents,enrollmentCode,busy,onGenerate,onRevoke,desktop,localAgentStatus,localAgentConflict,localAgentRevoked,localAgentOwnershipChecking,onConnect,onReconnectAfterRevocation}:{
+function PrintAgentPage({agents,enrollmentCode,busy,onGenerate,onRevoke,desktop,localAgentStatus,localAgentConflict,localAgentRevoked,localAgentNeedsRepair,localAgentOwnershipChecking,onConnect,onReconnectAfterRevocation}:{
   agents:AgentDevice[];
   enrollmentCode:{code:string;expiresUtc:string}|null;
   busy:boolean;
@@ -1290,6 +1307,7 @@ function PrintAgentPage({agents,enrollmentCode,busy,onGenerate,onRevoke,desktop,
   localAgentStatus:DesktopAgentStatus|null;
   localAgentConflict:boolean;
   localAgentRevoked:boolean;
+  localAgentNeedsRepair:boolean;
   localAgentOwnershipChecking:boolean;
   onConnect:()=>void;
   onReconnectAfterRevocation:()=>void;
@@ -1306,8 +1324,8 @@ function PrintAgentPage({agents,enrollmentCode,busy,onGenerate,onRevoke,desktop,
         </div>
         <div className="desktop-agent-status">
           <span className={connected ? "desktop-agent-indicator connected" : localAgentConflict ? "desktop-agent-indicator conflict" : "desktop-agent-indicator"} />
-          <div><strong>{connected ? "Connected to this shop" : localAgentRevoked ? "Disconnected by the shop owner" : localAgentConflict ? "Connected to another shop" : localAgentOwnershipChecking ? "Checking shop registration" : localAgentStatus?.serviceReachable ? "Ready to connect" : "Print service not responding"}</strong>
-            <small>{connected ? (localAgentStatus?.localApiReachable === false ? "Connected to your shop. Cloud printing remains available; local-network uploads are reconnecting automatically." : "Printer discovery and job hand-off are managed by the SmartPrint service.") : localAgentRevoked ? "This computer was revoked and will not reconnect automatically. Select Reconnect this computer when your shop is ready; no pairing code is needed." : localAgentConflict ? "For security, this computer cannot be moved until its previous shop owner revokes it." : localAgentOwnershipChecking ? "SmartPrint is verifying this computer's saved registration with your shop. It will not transfer or re-enroll it while ownership is uncertain." : localAgentStatus?.serviceReachable ? "Your owner session will authorize a one-time connection. No pairing code is shown." : "SmartPrint is starting or reconnecting its background service. It will retry automatically."}</small>
+          <div><strong>{connected ? "Connected to this shop" : localAgentRevoked ? "Disconnected by the shop owner" : localAgentNeedsRepair ? "Connection needs repair" : localAgentConflict ? "Connected to another shop" : localAgentOwnershipChecking ? "Checking shop registration" : localAgentStatus?.serviceReachable ? "Ready to connect" : "Print service not responding"}</strong>
+            <small>{connected ? (localAgentStatus?.localApiReachable === false ? "Connected to your shop. Cloud printing remains available; local-network uploads are reconnecting automatically." : "Printer discovery and job hand-off are managed by the SmartPrint service.") : localAgentRevoked ? "This computer was revoked and will not reconnect automatically. Select Reconnect this computer when your shop is ready; no pairing code is needed." : localAgentNeedsRepair ? "Windows could not read this computer's saved pairing. Check the paired-computer list below; revoke its old entry if it is still active, then select Repair connection. No code entry is needed." : localAgentConflict ? "For security, this computer cannot be moved until its previous shop owner revokes it." : localAgentOwnershipChecking ? "SmartPrint is verifying this computer's saved registration with your shop. It will not transfer or re-enroll it while ownership is uncertain." : localAgentStatus?.serviceReachable ? "Your owner session will authorize a one-time connection. No pairing code is shown." : "SmartPrint is starting or reconnecting its background service. It will retry automatically."}</small>
           </div>
         </div>
         <div className="desktop-agent-actions">
@@ -1320,6 +1338,10 @@ function PrintAgentPage({agents,enrollmentCode,busy,onGenerate,onRevoke,desktop,
           ) : localAgentRevoked ? (
             <button className="primary-button" disabled={busy} onClick={onConnect}>
               {busy ? <span className="button-spinner"/> : <><RotateCcw size={15}/> Reconnect this computer</>}
+            </button>
+          ) : localAgentNeedsRepair ? (
+            <button className="primary-button" disabled={busy} onClick={onConnect}>
+              {busy ? <span className="button-spinner"/> : <><RotateCcw size={15}/> Repair connection</>}
             </button>
           ) : (
             <button className="primary-button" disabled={busy || connected || Boolean(localAgentStatus?.paired)} onClick={onConnect}>

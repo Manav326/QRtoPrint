@@ -157,6 +157,17 @@ public sealed class AgentControlPipeIntegrationTests
                 Assert.Equal(renewedCredentials.AgentDeviceId, renewedStatus.RootElement.GetProperty("agentDeviceId").GetGuid());
                 Assert.Equal("CONNECTED", renewedStatus.RootElement.GetProperty("status").GetString());
             }
+
+            // Corrupt the protected identity to ensure the pipe still reports
+            // that the service is reachable, rather than falsely reporting it offline.
+            File.WriteAllBytes(identityPath, [0x00, 0x01, 0x02, 0x03]);
+            using (var unreadableStatus = await SendPipeRequestAsync("status", null, timeout.Token))
+            {
+                Assert.False(unreadableStatus.RootElement.GetProperty("success").GetBoolean());
+                Assert.True(unreadableStatus.RootElement.GetProperty("serviceReachable").GetBoolean());
+                Assert.False(unreadableStatus.RootElement.GetProperty("paired").GetBoolean());
+                Assert.Equal("IDENTITY_UNAVAILABLE", unreadableStatus.RootElement.GetProperty("status").GetString());
+            }
         }
         finally
         {
