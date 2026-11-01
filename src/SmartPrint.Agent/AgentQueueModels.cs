@@ -105,14 +105,16 @@ public static class AgentLocalQueueBatchSelector
         }
 
         var startIndex = ((nextIndex % items.Count) + items.Count) % items.Count;
-        var count = Math.Min(items.Count, maximumItems);
+        var count = Math.Min(maximumItems, items.Count - startIndex);
         var selected = new T[count];
         for (var index = 0; index < count; index++)
         {
-            selected[index] = items[(startIndex + index) % items.Count];
+            selected[index] = items[startIndex + index];
         }
 
-        nextIndex = (startIndex + count) % items.Count;
+        nextIndex = startIndex + count;
+        if (nextIndex >= items.Count)
+            nextIndex = 0;
         return selected;
     }
 }
