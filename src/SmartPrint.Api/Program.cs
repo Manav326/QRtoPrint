@@ -46,6 +46,15 @@ var issuer = builder.Configuration["Authentication:Issuer"] ?? "QRtoPrint";
 var audience = builder.Configuration["Authentication:Audience"] ?? "QRtoPrint.Clients";
 
 builder.Services.AddProblemDetails();
+builder.Services.AddMemoryCache();
+builder.Services.AddHttpClient<PublicDownloadService>(client =>
+{
+    client.Timeout = Timeout.InfiniteTimeSpan;
+    client.DefaultRequestHeaders.UserAgent.ParseAdd("SmartPrint-Download-Proxy");
+}).ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler
+{
+    AllowAutoRedirect = false
+});
 builder.Services.AddDbContext<SmartPrintDbContext>(options => options.UseNpgsql(connectionString)
     .ReplaceService<IMigrationsIdGenerator, LegacyCompatibleMigrationsIdGenerator>());
 builder.Services
@@ -150,6 +159,59 @@ app.UseCors("web");
 app.UseRateLimiter();
 app.UseAuthentication();
 app.UseAuthorization();
+
+// Public downloads are proxied by the API and exposed only through the portal's
+// same-origin /downloads routes. No upstream Location header reaches the browser.
+app.MapGet("/downloads/status", async (
+    PublicDownloadService downloads,
+    HttpContext context,
+    CancellationToken cancellationToken) =>
+{
+    context.Response.Headers["Cache-Control"] = "no-store";
+    try
+    {
+        return Results.Ok(await downloads.GetStatusAsync(cancellationToken));
+    }
+    catch (Exception exception) when (
+        exception is HttpRequestException or JsonException or InvalidOperationException)
+    {
+        app.Logger.LogWarning(exception, "Public release availability could not be loaded.");
+        return Results.Problem(
+            statusCode: StatusCodes.Status503ServiceUnavailable,
+            title: "Download availability is temporarily unavailable.");
+    }
+}).RequireRateLimiting("public-api");
+
+app.MapGet("/downloads/{platform}", async (
+    string platform,
+    PublicDownloadService downloads,
+    HttpContext context,
+    CancellationToken cancellationToken) =>
+{
+    try
+    {
+        await downloads.StreamDownloadAsync(platform, context, cancellationToken);
+    }
+    catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+    {
+        // The browser closed or cancelled the download.
+    }
+    catch (Exception exception) when (
+        exception is HttpRequestException or JsonException or InvalidOperationException)
+    {
+        app.Logger.LogWarning(exception, "Public download for platform {Platform} failed.", platform);
+        if (!context.Response.HasStarted)
+        {
+            context.Response.Clear();
+            context.Response.StatusCode = StatusCodes.Status503ServiceUnavailable;
+            context.Response.Headers["Cache-Control"] = "no-store";
+        }
+        else
+        {
+            context.Abort();
+        }
+    }
+}).RequireRateLimiting("public-api");
 
 app.MapGet("/health/live", () => Results.Ok(new
 {

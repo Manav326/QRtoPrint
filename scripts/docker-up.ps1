@@ -39,13 +39,13 @@ function Set-EnvValue([string[]]$Lines, [string]$Name, [string]$Value) {
     if (-not $found) { $result += "$prefix$Value" }
     return ,([string[]]$result)
 }
-function Get-RepositoryImageNamespace {
+function Get-RepositoryFullName {
     if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
-        throw "Set IMAGE_NAMESPACE in .env or install Git so the repository GHCR namespace can be derived."
+        throw "Install Git or set GITHUB_REPOSITORY in .env so the release repository can be resolved."
     }
     $remoteOutput = @(& git -C $repoRoot remote get-url origin 2>$null)
     if ($LASTEXITCODE -ne 0 -or $remoteOutput.Count -eq 0) {
-        throw "Set IMAGE_NAMESPACE in .env or configure the repository origin remote."
+        throw "Configure the repository origin remote so the release repository can be resolved."
     }
     $remoteUrl = [string]$remoteOutput[0]
     $marker = "github.com/"
@@ -55,14 +55,24 @@ function Get-RepositoryImageNamespace {
         $markerIndex = $remoteUrl.IndexOf($marker, [StringComparison]::OrdinalIgnoreCase)
     }
     if ($markerIndex -lt 0) {
-        throw "Set IMAGE_NAMESPACE in .env; the repository origin must identify a GitHub owner."
+        throw "The repository origin must identify a GitHub owner and repository."
     }
     $repositoryPath = $remoteUrl.Substring($markerIndex + $marker.Length).TrimEnd("/")
-    $segments = $repositoryPath.Split("/")
-    if ($segments.Length -lt 2 -or [string]::IsNullOrWhiteSpace($segments[0])) {
-        throw "Set IMAGE_NAMESPACE in .env; the repository origin must include an owner and repository."
+    if ($repositoryPath.EndsWith(".git", [StringComparison]::OrdinalIgnoreCase)) {
+        $repositoryPath = $repositoryPath.Substring(0, $repositoryPath.Length - 4)
     }
-    return ("ghcr.io/" + $segments[0].ToLowerInvariant())
+    $segments = $repositoryPath.Split("/")
+    if ($segments.Length -ne 2 -or
+        [string]::IsNullOrWhiteSpace($segments[0]) -or
+        [string]::IsNullOrWhiteSpace($segments[1])) {
+        throw "The repository origin must include exactly an owner and repository."
+    }
+    return "$($segments[0])/$($segments[1])"
+}
+function Get-RepositoryImageNamespace {
+    $repository = Get-RepositoryFullName
+    $owner = $repository.Split("/")[0]
+    return ("ghcr.io/" + $owner.ToLowerInvariant())
 }
 function Get-CloudflareToken {
     $secure = Read-Host "Paste the Cloudflare Tunnel token (hidden input)" -AsSecureString
@@ -102,9 +112,10 @@ if (-not (Test-Path -LiteralPath $envPath)) {
         "DOCUMENTS_ENCRYPTION_KEY=$(New-RandomBase64 32)",
         "PUBLIC_BASE_URL=$defaultBaseUrl",
         "IMAGE_NAMESPACE=$imageNamespace",
+        "GITHUB_REPOSITORY=$(Get-RepositoryFullName)",
         "IMAGE_TAG=latest"
     )
-    Write-Host "Created .env with fresh production secrets and repository-derived GHCR namespace." -ForegroundColor Green
+    Write-Host "Created .env with fresh production secrets and repository-derived GHCR and release configuration." -ForegroundColor Green
 } else {
     $lines = @(Get-Content -LiteralPath $envPath)
     if (($lines -join "`n") -match "CHANGE_ME") { throw "The existing .env contains example secrets. Replace them before deployment." }
@@ -129,6 +140,13 @@ if ([string]::IsNullOrWhiteSpace($imageNamespace) -or $imageNamespace -match 'yo
     $imageNamespace = Get-RepositoryImageNamespace
 }
 $lines = Set-EnvValue $lines "IMAGE_NAMESPACE" $imageNamespace
+$repositoryFullName = Get-RepositoryFullName
+$configuredRepository = Get-EnvValue $lines "GITHUB_REPOSITORY"
+if (-not [string]::IsNullOrWhiteSpace($configuredRepository) -and
+    -not $configuredRepository.Equals($repositoryFullName, [StringComparison]::OrdinalIgnoreCase)) {
+    throw "GITHUB_REPOSITORY in .env must match the checked-out repository origin ($repositoryFullName)."
+}
+$lines = Set-EnvValue $lines "GITHUB_REPOSITORY" $repositoryFullName
 $uri = $null
 if (-not [Uri]::TryCreate($currentBaseUrl, [UriKind]::Absolute, [ref]$uri) -or
     $uri.Scheme -ne "https" -or $uri.AbsolutePath -ne "/" -or

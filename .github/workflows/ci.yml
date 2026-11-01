@@ -41,6 +41,7 @@ jobs:
         env:
           PUBLIC_BASE_URL: https://example.invalid
           IMAGE_NAMESPACE: ghcr.io/compose-validation
+          GITHUB_REPOSITORY: ${{ github.repository }}
         run: docker compose --env-file .env.example -f compose.yml config --quiet
       - name: Validate local development Compose configuration
         env:
@@ -408,8 +409,6 @@ jobs:
           push: true
           build-args: |
             SOURCE_REPOSITORY=${{ github.server_url }}/${{ github.repository }}
-            VITE_SMARTPRINT_RELEASES_API_URL=${{ github.api_url }}/repos/${{ github.repository }}/releases/latest
-            VITE_SMARTPRINT_RELEASES_URL=${{ github.server_url }}/${{ github.repository }}/releases
           tags: |
             ${{ steps.image_namespace.outputs.value }}/qrtoprint-portal:latest
             ${{ steps.image_namespace.outputs.value }}/qrtoprint-portal:sha-${{ github.sha }}
