@@ -1,4 +1,4 @@
-package com.thinkwithsujeet.qrtoprint
+package com.quantaedge.smartprint
 
 import android.content.Context
 import androidx.test.core.app.ApplicationProvider

@@ -1,4 +1,4 @@
-package com.thinkwithsujeet.qrtoprint
+package com.quantaedge.smartprint
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertThrows

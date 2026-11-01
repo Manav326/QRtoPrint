@@ -1,4 +1,4 @@
-package com.thinkwithsujeet.qrtoprint
+package com.quantaedge.smartprint
 
 /**
  * Cleartext is permitted only for the paired shop Agent's private IPv4 upload endpoint.

@@ -1,4 +1,4 @@
-package com.thinkwithsujeet.qrtoprint
+package com.quantaedge.smartprint
 
 import android.Manifest
 import android.animation.ValueAnimator

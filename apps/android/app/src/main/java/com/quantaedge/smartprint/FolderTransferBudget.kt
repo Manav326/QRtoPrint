@@ -1,4 +1,4 @@
-package com.thinkwithsujeet.qrtoprint
+package com.quantaedge.smartprint
 
 /**
  * Bounds recursive folder import/export by item count and nesting depth.

@@ -16,7 +16,7 @@ val hasReleaseSigning = listOf(releaseKeystorePath, releaseKeystorePassword, rel
 
 android {
     buildFeatures { buildConfig = true }
-    namespace = "com.thinkwithsujeet.qrtoprint"
+    namespace = "com.quantaedge.smartprint"
     compileSdk = 36
     defaultConfig {
         applicationId = "com.quantaedge.smartprint"
