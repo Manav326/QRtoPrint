@@ -16,6 +16,7 @@ import androidx.test.espresso.matcher.ViewMatchers.withId
 import androidx.test.espresso.matcher.ViewMatchers.withText
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import org.hamcrest.Matchers.allOf
+import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -30,6 +31,7 @@ class SavedPdfEditorInstrumentedTest {
         val source = File(context.filesDir, "documents/CI-editor-document.pdf")
         source.parentFile?.mkdirs()
         createPdf(source, 2)
+        val originalSha256 = sha256(source)
 
         try {
             ActivityScenario.launch(MainActivity::class.java).use {
@@ -48,12 +50,20 @@ class SavedPdfEditorInstrumentedTest {
                 onView(withText("Close")).check(matches(isDisplayed()))
                 onView(withText("Close")).perform(click())
             }
-            assertTrue("The original imported PDF must remain untouched.", source.isFile)
+            assertTrue("The original imported PDF must remain present.", source.isFile)
             assertTrue("The original PDF must remain non-empty.", source.length() > 0)
+            assertArrayEquals(
+                "Rotating, reordering or previewing pages must never modify the imported PDF.",
+                originalSha256,
+                sha256(source)
+            )
         } finally {
             source.delete()
         }
     }
+
+    private fun sha256(file: File): ByteArray =
+        java.security.MessageDigest.getInstance("SHA-256").digest(file.readBytes())
 
     private fun createPdf(file: File, pages: Int) {
         val document = PdfDocument()
