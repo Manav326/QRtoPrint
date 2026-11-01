@@ -125,6 +125,8 @@ class MainActivity : AppCompatActivity() {
         customerPrintSessionStore = CustomerPrintSessionStore(this)
         pendingScanNeedsDestination = savedInstanceState?.getBoolean("pendingScanNeedsDestination") ?: false
         pendingScanDestinationPath = savedInstanceState?.getString("pendingScanDestinationPath").orEmpty()
+        folderPath = savedInstanceState?.getString("folderPath").orEmpty()
+        librarySearchQuery = savedInstanceState?.getString("librarySearchQuery").orEmpty()
         registerFileActions()
         buildLayout()
         showHome()
@@ -139,7 +141,34 @@ class MainActivity : AppCompatActivity() {
             val webState = savedInstanceState?.getBundle("webViewState")
             val restored = webState?.let { view.restoreState(it) != null } ?: false
             if (!restored) view.loadUrl(url)
-            showPrint()
+        }
+
+        val restoredNavigation = savedInstanceState?.getInt("selectedNavigation", HOME) ?: HOME
+        when (restoredNavigation) {
+            FILES -> showFiles()
+            SCAN_PRINT -> showScanPrint()
+            ACTIVITY -> showActivity()
+            else -> if (savedInstanceState == null && portalUrl != null) showPrint() else showHome()
+        }
+        val restoredDocumentPath = savedInstanceState?.getString("viewingDocumentPath")
+        if (!restoredDocumentPath.isNullOrBlank()) {
+            val restoredDocument = runCatching {
+                File(restoredDocumentPath).canonicalFile.also { store.pathOf(it) }
+            }.getOrNull()?.takeIf { it.isFile }
+            if (restoredDocument != null) {
+                folderPath = restoredDocument.parentFile?.let { store.pathOf(it) }.orEmpty()
+                showFiles()
+                showDocumentViewer(
+                    restoredDocument,
+                    savedInstanceState?.getInt("viewerPosition", 0) ?: 0
+                )
+            }
+        } else if (savedInstanceState?.getBoolean("profileVisible") == true) {
+            profileReturnDestination = savedInstanceState.getInt(
+                "profileReturnDestination",
+                navigation.selectedItemId
+            )
+            showProfile()
         }
         handleShareIntent(intent)
     }
@@ -147,6 +176,13 @@ class MainActivity : AppCompatActivity() {
     override fun onSaveInstanceState(outState: Bundle) {
         outState.putBoolean("pendingScanNeedsDestination", pendingScanNeedsDestination)
         outState.putString("pendingScanDestinationPath", pendingScanDestinationPath)
+        outState.putString("folderPath", folderPath)
+        outState.putString("librarySearchQuery", librarySearchQuery)
+        outState.putInt("selectedNavigation", if (::navigation.isInitialized) navigation.selectedItemId else HOME)
+        outState.putBoolean("profileVisible", profileVisible)
+        outState.putInt("profileReturnDestination", profileReturnDestination)
+        outState.putString("viewingDocumentPath", viewingDocument?.absolutePath)
+        outState.putInt("viewerPosition", documentViewer?.currentPosition() ?: 0)
         outState.putString("portalUrl", portalUrl)
         outState.putString("portalHost", portalHost)
         webView?.let { view ->
@@ -172,7 +208,7 @@ class MainActivity : AppCompatActivity() {
             documentViewer != null -> closeDocumentViewer()
             editingPdf != null -> showFiles()
             navigation.selectedItemId == SCAN_PRINT && webView?.canGoBack() == true -> webView?.goBack()
-            navigation.selectedItemId == SCAN_PRINT -> showScanPrint()
+            navigation.selectedItemId == SCAN_PRINT -> showHome()
             navigation.selectedItemId != HOME -> showHome()
             folderPath.isNotEmpty() -> { folderPath = parent(folderPath); showFiles() }
             else -> super.onBackPressed()
@@ -432,6 +468,7 @@ class MainActivity : AppCompatActivity() {
         toolbar.title = "Account"
         toolbar.setNavigationIcon(android.R.drawable.ic_media_previous)
         toolbar.setNavigationOnClickListener { returnFromProfile() }
+        accountAction.visibility = View.GONE
         navigation.visibility = View.GONE
         content.removeAllViews()
         content.addView(accountView(), frameParams())
@@ -2192,7 +2229,7 @@ class MainActivity : AppCompatActivity() {
         )
     }
 
-    private fun showDocumentViewer(file: File) {
+    private fun showDocumentViewer(file: File, startPosition: Int = 0) {
         if (!supportsInAppViewer(file)) {
             openDocumentExternally(file)
             return
@@ -2229,7 +2266,7 @@ class MainActivity : AppCompatActivity() {
             }.orEmpty()
             (if (siblings.any { sameDocument(it, file) }) siblings else siblings + file)
         }
-        val reader = SmartPrintDocumentViewer(this, file, images) { current ->
+        val reader = SmartPrintDocumentViewer(this, file, images, startPosition) { current ->
             viewingDocument = current
             toolbar.title = current.name
         }
