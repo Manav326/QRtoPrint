@@ -295,9 +295,16 @@ public sealed class AgentLocalQueueStore
             throw new InvalidOperationException("Only an expired, unfinalised local upload can be removed.");
         }
 
+        var queueRootFull = Path.GetFullPath(queueRoot);
+        var queuePrefix = queueRootFull.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + Path.DirectorySeparatorChar;
+        var comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
+        var documentPath = Path.GetFullPath(entry.DocumentPath);
+        if (!documentPath.StartsWith(queuePrefix, comparison))
+            throw new InvalidDataException("The staged local upload document path is outside the protected queue.");
+
         var manifestPath = GetManifestPath(jobId);
         if (File.Exists(manifestPath)) File.Delete(manifestPath);
-        if (File.Exists(entry.DocumentPath)) File.Delete(entry.DocumentPath);
+        if (File.Exists(documentPath)) File.Delete(documentPath);
         await Task.CompletedTask;
     }
 
