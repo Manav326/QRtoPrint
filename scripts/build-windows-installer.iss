@@ -1,11 +1,14 @@
 #ifndef SmartPrintPublicUrl
   #define SmartPrintPublicUrl "https://qr-test.paintpulp.com"
 #endif
+#ifndef SmartPrintVersion
+  #define SmartPrintVersion "0.1.0"
+#endif
 
 [Setup]
 AppId={{A7F2E9CA-2C3A-4E58-AE63-26E6B7B0DDF1}
 AppName=SmartPrint by QuantaEdge
-AppVersion=1.0.0
+AppVersion={#SmartPrintVersion}
 AppPublisher=QuantaEdge
 DefaultDirName={autopf}\SmartPrint
 DefaultGroupName=SmartPrint
