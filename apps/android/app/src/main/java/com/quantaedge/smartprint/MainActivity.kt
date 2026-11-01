@@ -2477,10 +2477,11 @@ class MainActivity : AppCompatActivity() {
             }.orEmpty()
             (if (siblings.any { sameDocument(it, file) }) siblings else siblings + file)
         }
-        val folderPath = file.parentFile?.let { store.pathOf(it) }.orEmpty()
+        val documentFolderPath = file.parentFile?.let { store.pathOf(it) }.orEmpty()
+        this@MainActivity.folderPath = documentFolderPath
         val breadcrumbs = mutableListOf("My Files" to "")
         var breadcrumbPath = ""
-        folderPath.split('/').filter { it.isNotBlank() }.forEach { segment ->
+        documentFolderPath.split('/').filter { it.isNotBlank() }.forEach { segment ->
             breadcrumbPath = if (breadcrumbPath.isBlank()) segment else "$breadcrumbPath/$segment"
             breadcrumbs += segment to breadcrumbPath
         }
