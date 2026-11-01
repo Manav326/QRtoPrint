@@ -6606,7 +6606,8 @@ publicApi.MapPost("/sessions/current/resume", async (
             profile.UpiEnabled,
             profile.UpiId,
             profile.PayeeName,
-            profile.CashEnabled
+            profile.CashEnabled,
+            profile.InstantPaymentEnabled
         })
         .SingleAsync(ct);
     var printer = station.PrinterDeviceId is Guid printerId
