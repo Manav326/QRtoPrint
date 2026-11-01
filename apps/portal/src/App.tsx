@@ -15,7 +15,7 @@ import {
   ApiError, isPlatformAdminSession, acceptCustomerQuote, approveShopPrintJob, assignShopPrintJobPrinter, calculateCustomerQuote, getShopCustomerHistory, getShopCustomers, getShopReportSummary,
   confirmShopPrintOutput, dispatchShopPrintJob,
   createAgentEnrollmentCode, createCustomerSession, createPrinter, createStation,
-  downloadShopDocument, getCustomerJobStatus, getShopAgentDevices, getShopJobEvents, getShopPrinters, getShopPrintJobsPage, loadShopData,
+  downloadShopDocument, getCustomerJobStatus, getShopAgentDevices, getShopJobEvents, getShopPrinters, getShopPrintJobsPage, getShopPrintBatchJobs, loadShopData,
   logout, readStoredTokens, rejectShopPrintJob, rejectShopPayment, revokeAgentDevice,
   reportCustomerUpiPayment, renewCustomerPrintSession, getNativeCustomerPrintSession, saveNativeCustomerPrintSession, clearNativeCustomerPrintSession, resumeCustomerSession, rotateStationCode, startCustomerPayment, storeTokens,
   updatePrinterActive, updateShopPaymentSettings, updateShopPricing,
@@ -164,6 +164,7 @@ function ShopConsole({ tokens, onSignOut }: { tokens: AuthTokens; onSignOut: () 
   const [batchReviewDecisions, setBatchReviewDecisions] = useState<Record<string, boolean>>({});
   const [batchReviewRetry, setBatchReviewRetry] = useState(false);
   const [batchReviewRetryIds, setBatchReviewRetryIds] = useState<string[]>([]);
+  const [batchReviewLoadingId, setBatchReviewLoadingId] = useState<string | null>(null);
   type ActionDialogState = { title: string; message: string; inputLabel?: string; confirmLabel: string; resolve: (value: string | null) => void };
   const [actionDialog, setActionDialog] = useState<ActionDialogState | null>(null);
   const [actionDialogValue, setActionDialogValue] = useState("");
@@ -1129,6 +1130,40 @@ function ShopConsole({ tokens, onSignOut }: { tokens: AuthTokens; onSignOut: () 
     }
   }
 
+  async function openBatchReview(batchId: string) {
+    setBatchReviewLoadingId(batchId);
+    setError("");
+    try {
+      // Always load the complete batch from the tenant-scoped API. The queue
+      // may currently be filtered or paginated, so its visible rows are not
+      // a safe source for per-file acceptance/rejection decisions.
+      const allBatchJobs = await getShopPrintBatchJobs(tokens.accessToken, batchId);
+      const waiting = allBatchJobs.filter(job => job.status === "AWAITING_SHOP_APPROVAL");
+      if (waiting.length === 0) {
+        setBatchReviewJobs(null);
+        setToast("This batch has no files left awaiting shop review.");
+        return;
+      }
+      const waitingIds = new Set(waiting.map(job => job.id));
+      setBatchReviewDecisions(current => {
+        const next = { ...current };
+        for (const job of waiting) {
+          if (next[job.id] === undefined) next[job.id] = true;
+        }
+        for (const id of Object.keys(next)) {
+          if (batchReviewRetryIds.includes(id) && !waitingIds.has(id)) delete next[id];
+        }
+        return next;
+      });
+      setBatchReviewRetry(waiting.some(job => batchReviewRetryIds.includes(job.id)));
+      setBatchReviewJobs(waiting);
+    } catch (exception) {
+      setError(exception instanceof Error ? exception.message : "Could not load every file in this batch. No review decisions were changed.");
+    } finally {
+      setBatchReviewLoadingId(current => current === batchId ? null : current);
+    }
+  }
+
   const navAction = (section: Section) => {
     const nextPath = shopPathForSection(section);
     if (window.location.pathname !== nextPath) {
@@ -1216,7 +1251,7 @@ function ShopConsole({ tokens, onSignOut }: { tokens: AuthTokens; onSignOut: () 
           {active === "Subscription" && subscription && <SubscriptionPage summary={subscription}/>}
           {active === "Payments" && paymentSettings && <PaymentsPage settings={paymentSettings} payments={payments} refunds={refunds} onSave={savePaymentSettings} onVerify={verifyPayment} onReject={rejectPayment} busy={busy} busyJobId={busyJobId}/>}
           {active === "Settings" && profile && <SettingsPage profile={profile} onSave={saveProfile} busy={busy}/>}
-          {active === "Print Queue" && <PrintQueuePage jobs={printJobs} printers={printers} agentDevices={agentDevices} searchQuery={queueSearch} onSearch={searchPrintQueue} onPreview={previewJob} onApprove={approveJob} onReject={rejectJob} onRefund={job=>setRefundJob(job)} onReviewBatch={batchId=>{const waiting=printJobs.filter(job=>job.batchId===batchId&&job.status==="AWAITING_SHOP_APPROVAL");setBatchReviewRetry(waiting.some(job=>batchReviewRetryIds.includes(job.id)));setBatchReviewJobs(waiting);}} onHistory={viewJobHistory} onAssignPrinter={assignPrinter} onDispatch={dispatchPrintJob} onConfirmOutput={confirmPrintedOutput} onRetryPdfExport={retryPdfExport} onRefresh={refreshPrintQueue} onLoadOlder={loadOlderQueueJobs} hasMoreJobs={hasMoreQueueJobs} loadingOlderJobs={loadingOlderQueueJobs} busyJobId={busyJobId}/>} 
+          {active === "Print Queue" && <PrintQueuePage jobs={printJobs} printers={printers} agentDevices={agentDevices} searchQuery={queueSearch} loadingBatchId={batchReviewLoadingId} onSearch={searchPrintQueue} onPreview={previewJob} onApprove={approveJob} onReject={rejectJob} onRefund={job=>setRefundJob(job)} onReviewBatch={openBatchReview} onHistory={viewJobHistory} onAssignPrinter={assignPrinter} onDispatch={dispatchPrintJob} onConfirmOutput={confirmPrintedOutput} onRetryPdfExport={retryPdfExport} onRefresh={refreshPrintQueue} onLoadOlder={loadOlderQueueJobs} hasMoreJobs={hasMoreQueueJobs} loadingOlderJobs={loadingOlderQueueJobs} busyJobId={busyJobId}/>} 
           {active === "Customers" && <CustomersPage token={tokens.accessToken}/>}
           {active === "Reports" && <ReportsPage token={tokens.accessToken}/>} 
 
@@ -1837,11 +1872,12 @@ function PaymentsPage({settings,payments,refunds,onSave,onVerify,onReject,busy,b
   </div>;
 }
 
-function PrintQueuePage({ jobs, printers, agentDevices, searchQuery, onSearch, onPreview, onApprove, onReject, onRefund, onReviewBatch, onHistory, onAssignPrinter, onDispatch, onConfirmOutput, onRetryPdfExport, onRefresh, onLoadOlder, hasMoreJobs, loadingOlderJobs, busyJobId }: {
+function PrintQueuePage({ jobs, printers, agentDevices, searchQuery, loadingBatchId, onSearch, onPreview, onApprove, onReject, onRefund, onReviewBatch, onHistory, onAssignPrinter, onDispatch, onConfirmOutput, onRetryPdfExport, onRefresh, onLoadOlder, hasMoreJobs, loadingOlderJobs, busyJobId }: {
   jobs: ShopPrintJob[];
   printers: PrinterDevice[];
   agentDevices: AgentDevice[];
   searchQuery: string;
+  loadingBatchId: string | null;
   onSearch: (query: string) => Promise<void>;
   onPreview: (job: ShopPrintJob) => void;
   onApprove: (job: ShopPrintJob) => void;
@@ -1905,7 +1941,7 @@ function PrintQueuePage({ jobs, printers, agentDevices, searchQuery, onSearch, o
       <label className="queue-refresh-interval">Refresh every <input type="number" min={5} max={3600} step={1} value={refreshSeconds} onChange={event=>setRefreshSeconds(Math.max(5,Math.min(3600,Number(event.target.value)||5)))}/> seconds</label>
       <span className="queue-refresh-note">{autoRefresh?"Queue refreshes automatically while this page is open.":"Automatic refresh is off. Use Refresh queue whenever needed."}</span>
     </div>
-    {reviewBatches.length>0&&<div className="batch-review-strip"><div><strong>{reviewBatches.length} batch(es) waiting for review</strong><span>All files start accepted. Uncheck only documents the shop should reject.</span></div>{reviewBatches.map(batchId=><button key={batchId} className="secondary-button" onClick={()=>onReviewBatch(batchId)}>Review batch · {jobs.filter(job=>job.batchId===batchId&&job.status==="AWAITING_SHOP_APPROVAL").length} files</button>)}</div>}
+    {reviewBatches.length>0&&<div className="batch-review-strip"><div><strong>{reviewBatches.length} batch(es) waiting for review</strong><span>All files start accepted. Uncheck only documents the shop should reject.</span></div>{reviewBatches.map(batchId=><button key={batchId} className="secondary-button" disabled={loadingBatchId===batchId||!!loadingBatchId} onClick={()=>onReviewBatch(batchId)}>{loadingBatchId===batchId?<><span className="button-spinner"/>Loading full batch…</>:<>Review batch · {jobs.filter(job=>job.batchId===batchId&&job.status==="AWAITING_SHOP_APPROVAL").length} shown</>}</button>)}</div>}
     {jobs.length===0 ? <EmptyModule icon={<FileText size={24}/>} title="Your queue is clear" text="When a customer uploads a document through one of your QR stations, the job and its current state will appear here."/> :
       <div className="table-scroll"><table><thead><tr><th>JOB</th><th>DOCUMENT</th><th>PRINT SETTINGS</th><th>QUOTE</th><th>PRINTER / LOCAL QUEUE</th><th>STATUS</th><th>CREATED</th><th>ACTIONS</th></tr></thead><tbody>
         {queueBatches.map(batch=>{
@@ -1931,7 +1967,7 @@ function PrintQueuePage({ jobs, printers, agentDevices, searchQuery, onSearch, o
               <td><Status label={label} tone={tone}/></td>
               <td className="time-cell">{new Date(first.createdUtc).toLocaleString()}</td>
               <td><div className="queue-actions">
-                {waiting.length>0&&batch.batchId&&<button className="subtle-button approve-action" disabled={busyJobId==="batch-review"} onClick={()=>onReviewBatch(batch.batchId!)}>Preview & review</button>}
+                {waiting.length>0&&batch.batchId&&<button className="subtle-button approve-action" disabled={busyJobId==="batch-review"||!!loadingBatchId} onClick={()=>onReviewBatch(batch.batchId!)}>{loadingBatchId===batch.batchId?"Loading…":"Preview & review"}</button>}
                 <button className="subtle-button" onClick={()=>setExpandedBatchKeys(current=>{const next=new Set(current);if(next.has(batch.key))next.delete(batch.key);else next.add(batch.key);return next;})}>{expanded?"Hide files":"Files"}</button>
               </div></td>
             </tr>
