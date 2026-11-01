@@ -2891,11 +2891,43 @@ function CustomerPrintFlow({publicCode,sessionToken,paymentOptions,localAgent,lo
   const [payment,setPayment]=useState<CustomerPayment|null>(null);
   const [batchPayment,setBatchPayment]=useState<CustomerBatchPayment|null>(null);
 
+  function paymentTimestamp(payment: { updatedUtc?: string | null; createdUtc?: string | null }): number {
+    const timestamp=Date.parse(payment.updatedUtc??payment.createdUtc??"");
+    return Number.isFinite(timestamp)?timestamp:0;
+  }
+
   function rememberBatchPayment(candidate?:CustomerBatchPayment|null) {
     if(!candidate)return;
     setBatchPayment(current=>
-      !current||Date.parse(candidate.createdUtc)>=Date.parse(current.createdUtc)
+      !current||paymentTimestamp(candidate)>=paymentTimestamp(current)
         ?candidate:current);
+  }
+
+  function rememberCustomerPayment(candidate?:CustomerPayment|null) {
+    if(!candidate)return;
+    setPayment(current=>
+      !current||current.id!==candidate.id||paymentTimestamp(candidate)>=paymentTimestamp(current)
+        ?candidate:current);
+  }
+
+  function rememberBatchStatuses(candidates:Record<string,CustomerJobStatus>) {
+    setBatchStatuses(current=>{
+      const next={...current};
+      for(const [id,candidate] of Object.entries(candidates)){
+        const existing=current[id];
+        if(!existing||Date.parse(candidate.updatedUtc)>=Date.parse(existing.updatedUtc))next[id]=candidate;
+      }
+      return next;
+    });
+  }
+
+  function rememberCustomerStatus(candidate:CustomerJobStatus) {
+    rememberBatchStatuses({[candidate.id]:candidate});
+    setJobStatus(current=>
+      !current||current.id!==candidate.id||Date.parse(candidate.updatedUtc)>=Date.parse(current.updatedUtc)
+        ?candidate:current);
+    rememberCustomerPayment(candidate.payment);
+    rememberBatchPayment(candidate.payment?.batchPayment);
   }
   const [paymentReference,setPaymentReference]=useState("");
   const [paymentMethod,setPaymentMethod]=useState<"UPI"|"CASH">(paymentOptions.upiEnabled?"UPI":"CASH");
@@ -2968,11 +3000,11 @@ function CustomerPrintFlow({publicCode,sessionToken,paymentOptions,localAgent,lo
           if(item)map[item[0]]=item[1];
           return map;
         },{});
-        setBatchStatuses(current=>({...current,...fresh}));
+        rememberBatchStatuses(fresh);
         const latestBatchPayment=results
           .map(item=>item?.[1].payment?.batchPayment??null)
           .filter((item):item is CustomerBatchPayment=>item!==null)
-          .sort((left,right)=>Date.parse(right.createdUtc)-Date.parse(left.createdUtc))[0];
+          .sort((left,right)=>paymentTimestamp(right)-paymentTimestamp(left))[0];
         rememberBatchPayment(latestBatchPayment);
         const selectedId=uploaded?.job.id;
         if(selectedId&&fresh[selectedId]){
@@ -3006,9 +3038,7 @@ function CustomerPrintFlow({publicCode,sessionToken,paymentOptions,localAgent,lo
         setPayment(null);
         return;
       }
-      setJobStatus(refreshed);
-      setPayment(refreshed.payment??null);
-      rememberBatchPayment(refreshed.payment?.batchPayment);
+      rememberCustomerStatus(refreshed);
     }).catch(exception=>{
       if(active)setError(exception instanceof ApiError?exception.message:"Could not restore this print request.");
     });
@@ -3112,12 +3142,10 @@ function CustomerPrintFlow({publicCode,sessionToken,paymentOptions,localAgent,lo
         if(item)map[item[0]]=item[1];
         return map;
       },{});
-      setBatchStatuses(current=>({...current,...freshStatuses}));
+      rememberBatchStatuses(freshStatuses);
       if(uploaded&&freshStatuses[uploaded.job.id]){
         const selected=freshStatuses[uploaded.job.id];
-        setJobStatus(selected);
-        setPayment(selected.payment??null);
-        rememberBatchPayment(selected.payment?.batchPayment);
+        rememberCustomerStatus(selected);
       }
       const selectedQuote=uploaded?nextQuotes[uploaded.job.id]??null:null;
       setQuote(selectedQuote??Object.values(nextQuotes)[0]??null);
@@ -3146,21 +3174,20 @@ function CustomerPrintFlow({publicCode,sessionToken,paymentOptions,localAgent,lo
         } catch {
           const fresh=await getCustomerJobStatus(sessionToken,item.job.id).catch(()=>null);
           if(fresh&&fresh.status!=="AWAITING_CUSTOMER_APPROVAL") {
-            setBatchStatuses(current=>({...current,[item.job.id]:fresh}));
+            rememberBatchStatuses({[item.job.id]:fresh});
           } else failures.push(item.document.originalFileName);
         }
       }
       setQuotesByJobId(nextQuotes);
       if(uploaded) {
         const refreshed=await getCustomerJobStatus(sessionToken,uploaded.job.id);
-        setJobStatus(refreshed);
-        setPayment(refreshed.payment??null);
+        rememberCustomerStatus(refreshed);
       }
       const refreshedBatch=await Promise.all(items.map(async item=>{
         try{return [item.job.id,await getCustomerJobStatus(sessionToken,item.job.id)] as const;}
         catch{return null;}
       }));
-      setBatchStatuses(current=>({...current,...Object.fromEntries(refreshedBatch.filter((entry):entry is NonNullable<typeof entry>=>entry!==null))}));
+      rememberBatchStatuses(Object.fromEntries(refreshedBatch.filter((entry):entry is NonNullable<typeof entry>=>entry!==null)));
       setQuote(uploaded?nextQuotes[uploaded.job.id]??null:null);
       if(failures.length)setError(`Could not send: ${failures.join(", ")}. Refresh and retry.`);
     } catch(exception) {
@@ -3173,8 +3200,7 @@ function CustomerPrintFlow({publicCode,sessionToken,paymentOptions,localAgent,lo
     setBusy(true);setError("");
     try {
       const refreshed=await getCustomerJobStatus(sessionToken,uploaded.job.id);
-      setJobStatus(refreshed);
-      setPayment(refreshed.payment ?? null);
+      rememberCustomerStatus(refreshed);
     }
     catch(exception){setError(exception instanceof ApiError?exception.message:"Could not refresh job status.");}
     finally {setBusy(false);}
@@ -3197,8 +3223,7 @@ function CustomerPrintFlow({publicCode,sessionToken,paymentOptions,localAgent,lo
     const timer=window.setInterval(()=>{
       void getCustomerJobStatus(sessionToken,uploaded.job.id).then(refreshed=>{
         if(!active)return;
-        setJobStatus(refreshed);
-        setPayment(refreshed.payment??null);
+        rememberCustomerStatus(refreshed);
         rememberBatchPayment(refreshed.payment?.batchPayment);
       }).catch(()=>{/* Retry on the next interval without interrupting the flow. */});
     },8000);
@@ -3218,17 +3243,15 @@ function CustomerPrintFlow({publicCode,sessionToken,paymentOptions,localAgent,lo
       if(item)map[item[0]]=item[1];
       return map;
     },{});
-    setBatchStatuses(current=>({...current,...fresh}));
+    rememberBatchStatuses(fresh);
     const latestBatchPayment=results
       .map(item=>item?.[1].payment?.batchPayment??null)
       .filter((item):item is CustomerBatchPayment=>item!==null)
-      .sort((left,right)=>Date.parse(right.createdUtc)-Date.parse(left.createdUtc))[0];
+      .sort((left,right)=>paymentTimestamp(right)-paymentTimestamp(left))[0];
     rememberBatchPayment(latestBatchPayment);
     const selected=uploaded?fresh[uploaded.job.id]:null;
     if(selected){
-      setJobStatus(selected);
-      setPayment(selected.payment??null);
-      rememberBatchPayment(selected.payment?.batchPayment);
+      rememberCustomerStatus(selected);
     }
   }
 
@@ -3243,11 +3266,10 @@ function CustomerPrintFlow({publicCode,sessionToken,paymentOptions,localAgent,lo
         await refreshBatchStatuses();
       } else {
         const attempt=await startCustomerPayment(sessionToken,uploaded.job.id,method);
-        setPayment(attempt);
+        rememberCustomerPayment(attempt);
         setPaymentMethod(method);
         const refreshed=await getCustomerJobStatus(sessionToken,uploaded.job.id);
-        setJobStatus(refreshed);
-        setPayment(refreshed.payment??null);
+        rememberCustomerStatus(refreshed);
       }
     } catch(exception) {
       if(batchId)await refreshBatchStatuses();
@@ -3267,8 +3289,7 @@ function CustomerPrintFlow({publicCode,sessionToken,paymentOptions,localAgent,lo
         await reportCustomerUpiPayment(sessionToken,payment.id,paymentReference.trim());
         setPaymentReference("");
         const refreshed=await getCustomerJobStatus(sessionToken,uploaded.job.id);
-        setJobStatus(refreshed);
-        setPayment(refreshed.payment??null);
+        rememberCustomerStatus(refreshed);
         rememberBatchPayment(refreshed.payment?.batchPayment);
       }
     } catch(exception) {
