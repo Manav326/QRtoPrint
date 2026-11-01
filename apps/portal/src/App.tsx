@@ -77,6 +77,7 @@ function ShopConsole({ tokens, onSignOut }: { tokens: AuthTokens; onSignOut: () 
   const [printJobs, setPrintJobs] = useState<ShopPrintJob[]>([]);
   const [hasMoreQueueJobs, setHasMoreQueueJobs] = useState(false);
   const [loadingOlderQueueJobs, setLoadingOlderQueueJobs] = useState(false);
+  const loadingOlderQueueJobsRef = useRef(false);
   const [queueApiOffset, setQueueApiOffset] = useState(0);
   const [queueSearch, setQueueSearch] = useState("");
   const queueSearchGeneration = useRef(0);
@@ -186,7 +187,8 @@ function ShopConsole({ tokens, onSignOut }: { tokens: AuthTokens; onSignOut: () 
   }
 
   async function loadOlderQueueJobs() {
-    if (loadingOlderQueueJobs || !hasMoreQueueJobs) return;
+    if (loadingOlderQueueJobsRef.current || !hasMoreQueueJobs) return;
+    loadingOlderQueueJobsRef.current = true;
     const generation = queuePageGeneration.current;
     const offset = queueApiOffset;
     setLoadingOlderQueueJobs(true);
@@ -205,6 +207,7 @@ function ShopConsole({ tokens, onSignOut }: { tokens: AuthTokens; onSignOut: () 
     } catch (exception) {
       handleShopApiError(exception, "Could not load older print jobs.");
     } finally {
+      loadingOlderQueueJobsRef.current = false;
       setLoadingOlderQueueJobs(false);
     }
   }
