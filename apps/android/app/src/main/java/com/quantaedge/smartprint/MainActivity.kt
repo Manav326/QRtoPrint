@@ -27,7 +27,6 @@ import android.widget.CheckBox
 import android.widget.FrameLayout
 import android.widget.ImageView
 import android.widget.LinearLayout
-import android.widget.PopupMenu
 import android.widget.ScrollView
 import android.widget.TextView
 import android.widget.Toast
@@ -46,7 +45,7 @@ import com.google.android.material.appbar.MaterialToolbar
 import com.google.android.material.bottomnavigation.BottomNavigationView
 import com.google.android.material.button.MaterialButton
 import com.google.android.material.card.MaterialCardView
-import com.google.android.material.dialog.MaterialAlertDialogBuilder
+import com.google.android.material.bottomsheet.BottomSheetDialog
 import com.google.mlkit.vision.documentscanner.GmsDocumentScannerOptions
 import com.google.mlkit.vision.documentscanner.GmsDocumentScanning
 import com.google.mlkit.vision.documentscanner.GmsDocumentScanningResult
@@ -93,6 +92,7 @@ class MainActivity : AppCompatActivity() {
     private var editingPdf: File? = null
     private val selectedFilePaths = linkedSetOf<String>()
     private val chooserSelectedFilePaths = linkedSetOf<String>()
+    private val expandedFolderPaths = linkedSetOf<String>()
     private var fileChooserAllowsMultiple = false
     private var profileVisible = false
     private var profileReturnDestination = HOME
@@ -271,15 +271,18 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun buildLayout() {
+        window.statusBarColor = getColor(R.color.qp_surface)
+        window.navigationBarColor = getColor(R.color.qp_surface)
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
+            clipToPadding = false
             setBackgroundColor(getColor(R.color.qp_surface))
         }
         toolbar = MaterialToolbar(this).apply {
-            title = "SmartPrint"
+            title = "Home"
             setTitleTextColor(getColor(R.color.qp_text))
             setBackgroundColor(getColor(R.color.qp_surface))
-            elevation = dp(1).toFloat()
+            elevation = 0f
             menu.add(Menu.NONE, SWITCH_SHOP, Menu.NONE, "Switch shop").apply {
                 setIcon(android.R.drawable.ic_menu_camera)
                 setContentDescription("Switch print shop")
@@ -300,9 +303,7 @@ class MainActivity : AppCompatActivity() {
                         selectableBackground,
                         true
                     )
-                ) {
-                    setBackgroundResource(selectableBackground.resourceId)
-                }
+                ) setBackgroundResource(selectableBackground.resourceId)
                 isClickable = true
                 isFocusable = true
                 setOnClickListener { showProfile() }
@@ -310,25 +311,26 @@ class MainActivity : AppCompatActivity() {
             addView(
                 accountAction,
                 androidx.appcompat.widget.Toolbar.LayoutParams(
-                    dp(48),
-                    dp(48),
-                    Gravity.END or Gravity.CENTER_VERTICAL
+                    dp(44), dp(44), Gravity.END or Gravity.CENTER_VERTICAL
                 )
             )
         }
-        root.addView(toolbar, LinearLayout.LayoutParams(-1, dp(62)))
-        content = FrameLayout(this)
+        root.addView(toolbar, LinearLayout.LayoutParams(-1, dp(56)))
+        content = FrameLayout(this).apply {
+            clipToPadding = false
+            setBackgroundColor(getColor(R.color.qp_surface))
+        }
         root.addView(content, LinearLayout.LayoutParams(-1, 0, 1f))
         navigation = BottomNavigationView(this).apply {
             menu.add(Menu.NONE, HOME, 0, "Home").apply {
                 setIcon(R.drawable.ic_nav_home)
                 setContentDescription("Home")
             }
-            menu.add(Menu.NONE, FILES, 1, "My Files").apply {
+            menu.add(Menu.NONE, FILES, 1, "Files").apply {
                 setIcon(R.drawable.ic_nav_files)
                 setContentDescription("My Files")
             }
-            menu.add(Menu.NONE, SCAN_PRINT, 2, "Scan & Print").apply {
+            menu.add(Menu.NONE, SCAN_PRINT, 2, "Scan").apply {
                 setIcon(R.drawable.ic_nav_scan_print)
                 setContentDescription("Scan and Print")
             }
@@ -337,6 +339,11 @@ class MainActivity : AppCompatActivity() {
                 setContentDescription("Activity")
             }
             labelVisibilityMode = BottomNavigationView.LABEL_VISIBILITY_LABELED
+            setItemHorizontalTranslationEnabled(false)
+            itemIconSize = dp(21)
+            setItemPaddingTop(dp(4))
+            setItemPaddingBottom(dp(4))
+            minimumHeight = dp(64)
             backgroundTintList = ColorStateList.valueOf(getColor(R.color.qp_card))
             itemIconTintList = ColorStateList(
                 arrayOf(intArrayOf(android.R.attr.state_checked), intArrayOf()),
@@ -344,7 +351,7 @@ class MainActivity : AppCompatActivity() {
             )
             itemTextColor = itemIconTintList
             itemRippleColor = ColorStateList.valueOf(getColor(R.color.qp_soft))
-            elevation = dp(12).toFloat()
+            elevation = dp(8).toFloat()
             setOnItemSelectedListener { item ->
                 when (item.itemId) {
                     HOME -> { showHome(); true }
@@ -355,7 +362,7 @@ class MainActivity : AppCompatActivity() {
                 }
             }
         }
-        root.addView(navigation, LinearLayout.LayoutParams(-1, dp(70)))
+        root.addView(navigation, LinearLayout.LayoutParams(-1, dp(66)))
         ViewCompat.setOnApplyWindowInsetsListener(root) { view, insets ->
             val bars = insets.getInsets(WindowInsetsCompat.Type.systemBars())
             view.setPadding(bars.left, bars.top, bars.right, bars.bottom)
@@ -378,7 +385,7 @@ class MainActivity : AppCompatActivity() {
         pickerMode = false
         if (!profileVisible) profileReturnDestination = navigation.selectedItemId
         profileVisible = true
-        toolbar.title = "Your account"
+        toolbar.title = "Account"
         toolbar.setNavigationIcon(android.R.drawable.ic_media_previous)
         toolbar.setNavigationOnClickListener { returnFromProfile() }
         navigation.visibility = View.GONE
@@ -545,209 +552,183 @@ class MainActivity : AppCompatActivity() {
 
     private fun showHome() {
         pickerMode = false
-        resetToolbar("SmartPrint")
+        resetToolbar("Home")
         navigation.menu.findItem(HOME).isChecked = true
         content.removeAllViews()
         content.addView(homeView(), frameParams())
     }
 
     private fun homeView(): View {
-        val scroll = ScrollView(this).apply { isFillViewport = true }
+        val scroll = ScrollView(this).apply {
+            isFillViewport = true
+            clipToPadding = false
+        }
         val column = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(dp(20), dp(18), dp(20), dp(28))
+            setPadding(dp(18), dp(15), dp(18), dp(24))
         }
         scroll.addView(column)
-        val brand = LinearLayout(this).apply {
+
+        val recentFiles = store.root.walkTopDown().filter { it.isFile }.toList()
+        val used = android.text.format.Formatter.formatShortFileSize(this, store.storageUsageBytes())
+        val heading = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+        }
+        heading.addView(text("Your space", 23, R.color.qp_text, true))
+        heading.addView(text("\${recentFiles.size} files · $used used", 12, R.color.qp_muted, false).apply {
+            setPadding(0, dp(3), 0, 0)
+        })
+        column.addView(heading, linearParams().apply { bottomMargin = dp(16) })
+
+        val quickActions = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
         }
-        val brandMark = TextView(this).apply {
-            text = "S"
-            textSize = 25f
-            gravity = Gravity.CENTER
-            setTypeface(typeface, android.graphics.Typeface.BOLD)
-            setTextColor(getColor(android.R.color.white))
-            background = android.graphics.drawable.GradientDrawable().apply {
-                setColor(getColor(R.color.qp_primary))
-                cornerRadius = dp(15).toFloat()
+        quickActions.addView(button("Scan", true).apply {
+            icon = getDrawable(R.drawable.ic_document_scan)
+            iconTint = ColorStateList.valueOf(getColor(android.R.color.white))
+            iconPadding = dp(8)
+            iconGravity = MaterialButton.ICON_GRAVITY_TEXT_START
+            setOnClickListener { startDocumentScan() }
+        }, LinearLayout.LayoutParams(0, dp(48), 1f))
+        quickActions.addView(button("Import", false).apply {
+            icon = getDrawable(R.drawable.ic_file)
+            iconTint = ColorStateList.valueOf(getColor(R.color.qp_primary))
+            iconPadding = dp(8)
+            iconGravity = MaterialButton.ICON_GRAVITY_TEXT_START
+            setOnClickListener {
+                importFiles.launch(arrayOf("*/*"))
+                navigation.selectedItemId = FILES
+            }
+        }, LinearLayout.LayoutParams(0, dp(48), 1f).apply { marginStart = dp(9) })
+        column.addView(quickActions, linearParams())
+
+        val shopCard = card().apply {
+            strokeWidth = dp(1)
+            setOnClickListener { if (portalUrl != null) showPrint() else showScanPrint() }
+        }
+        val shopRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(13), dp(12), dp(13), dp(12))
+        }
+        val shopGlyph = ImageView(this).apply {
+            setImageResource(R.drawable.ic_nav_scan_print)
+            imageTintList = ColorStateList.valueOf(getColor(R.color.qp_primary))
+            setPadding(dp(10), dp(10), dp(10), dp(10))
+            background = roundedDrawable(getColor(R.color.qp_soft), dp(13))
+        }
+        shopRow.addView(shopGlyph, LinearLayout.LayoutParams(dp(42), dp(42)))
+        val shopCopy = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(11), 0, 0, 0)
+        }
+        shopCopy.addView(text(
+            if (portalUrl == null) "Print at a shop" else "Shop connected",
+            14, R.color.qp_text, true
+        ))
+        shopCopy.addView(text(
+            if (portalUrl == null) "Scan a shop QR" else (portalHost ?: "Print session"),
+            12, R.color.qp_muted, false
+        ).apply { setPadding(0, dp(2), 0, 0) })
+        shopRow.addView(shopCopy, LinearLayout.LayoutParams(0, -2, 1f))
+        shopRow.addView(text("›", 25, R.color.qp_muted, false))
+        shopCard.addView(shopRow)
+        column.addView(shopCard, linearParams().apply { topMargin = dp(12); bottomMargin = dp(20) })
+
+        val recentHeader = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+        }
+        recentHeader.addView(text("Recent", 17, R.color.qp_text, true),
+            LinearLayout.LayoutParams(0, -2, 1f))
+        recentHeader.addView(text("See all", 12, R.color.qp_primary, true).apply {
+            setOnClickListener { showFiles() }
+            isClickable = true
+        })
+        column.addView(recentHeader, linearParams().apply { bottomMargin = dp(8) })
+
+        val recent = recentFiles.sortedByDescending { it.lastModified() }.take(6)
+        if (recent.isEmpty()) {
+            column.addView(text("No files yet", 13, R.color.qp_muted, false).apply {
+                setPadding(dp(2), dp(16), 0, dp(16))
+            })
+        } else {
+            recent.forEach { file ->
+                column.addView(entryView(file, false), linearParams().apply { bottomMargin = dp(4) })
             }
         }
-        brand.addView(brandMark, LinearLayout.LayoutParams(dp(48), dp(48)))
-        val wordmark = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(dp(12), 0, 0, 0)
-        }
-        wordmark.addView(text("SmartPrint", 19, R.color.qp_text, true))
-        wordmark.addView(text("by QuantaEdge", 12, R.color.qp_muted, false).apply { setPadding(0, dp(2), 0, 0) })
-        brand.addView(wordmark)
-        column.addView(brand, linearParams().apply { bottomMargin = dp(18) })
-
-        val hero = card().apply {
-            radius = dp(24).toFloat()
-            setCardBackgroundColor(getColor(R.color.qp_hero))
-            strokeWidth = 0
-        }
-        val heroContent = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(dp(21), dp(22), dp(21), dp(22))
-        }
-        heroContent.addView(text("Your documents.\nReady when you are.", 27, R.color.qp_hero_text, true))
-        heroContent.addView(text(
-            "Scan, organise and prepare everything before you reach the print shop.",
-            14, R.color.qp_hero_muted, false
-        ).apply { setPadding(0, dp(10), 0, dp(18)) })
-        val scanButton = button("Scan a document", true).apply { setOnClickListener { startDocumentScan() } }
-        heroContent.addView(scanButton, linearParams())
-        hero.addView(heroContent)
-        column.addView(hero, linearParams())
-
-        val actions = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
-        actions.addView(button("Import files", false).apply {
-            setOnClickListener { importFiles.launch(arrayOf("*/*")); navigation.menu.findItem(FILES).isChecked = true }
-        }, LinearLayout.LayoutParams(0, dp(50), 1f))
-        actions.addView(button("My files", false).apply { setOnClickListener { showFiles() } },
-            LinearLayout.LayoutParams(0, dp(50), 1f).apply { marginStart = dp(10) })
-        column.addView(actions, linearParams().apply { topMargin = dp(12) })
-
-        val journey = card()
-        val journeyContent = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(dp(18), dp(17), dp(18), dp(17))
-        }
-        journeyContent.addView(text("From phone to print shop", 17, R.color.qp_text, true))
-        journeyContent.addView(text(
-            "Build your collection here. Scan the shop's SmartPrint QR code when you arrive, then review the quote and follow the shop's print progress.",
-            13, R.color.qp_muted, false
-        ).apply { setPadding(0, dp(6), 0, 0) })
-        journey.addView(journeyContent)
-        column.addView(journey, linearParams().apply { topMargin = dp(18) })
-        column.addView(button("Scan & Print  →", true).apply { setOnClickListener { showScanPrint() } },
-            linearParams().apply { topMargin = dp(12) })
         return scroll
     }
 
     private fun showScanPrint() {
         pickerMode = false
         if (portalUrl != null) { showConnectedShop(); return }
-        resetToolbar("Scan & Print")
+        resetToolbar("Scan")
         navigation.menu.findItem(SCAN_PRINT).isChecked = true
         content.removeAllViews()
         content.addView(scanPrintView(), frameParams())
     }
 
     private fun showConnectedShop() {
-        resetToolbar("Your print shop")
+        resetToolbar("Print")
         navigation.menu.findItem(SCAN_PRINT).isChecked = true
         content.removeAllViews()
         val column = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(dp(20), dp(22), dp(20), dp(28))
+            gravity = Gravity.CENTER_HORIZONTAL
+            setPadding(dp(24), dp(28), dp(24), dp(24))
         }
-        val connected = card()
-        val body = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
+        val icon = ImageView(this).apply {
+            setImageResource(R.drawable.ic_nav_scan_print)
+            imageTintList = ColorStateList.valueOf(getColor(R.color.qp_primary))
             setPadding(dp(18), dp(18), dp(18), dp(18))
+            background = roundedDrawable(getColor(R.color.qp_soft), dp(22))
         }
-        body.addView(text("Shop session saved", 20, R.color.qp_text, true))
-        body.addView(text(
-            "You are connected to ${portalHost ?: "your selected SmartPrint shop"}. Your existing uploaded jobs remain associated with that shop session.",
-            13, R.color.qp_muted, false
-        ).apply { setPadding(0, dp(7), 0, dp(14)) })
-        body.addView(button("Open current shop session", true).apply { setOnClickListener { showPrint() } }, linearParams())
-        connected.addView(body)
-        column.addView(connected, linearParams())
-        column.addView(button("Scan another shop", false).apply { setOnClickListener { switchShop() } },
-            linearParams().apply { topMargin = dp(12) })
-        column.addView(text(
-            "Switching shops does not cancel or delete an existing order. Re-scan the previous shop QR code to return to its session.",
-            12, R.color.qp_muted, false
-        ).apply { setPadding(dp(3), dp(12), dp(3), 0) })
+        column.addView(icon, LinearLayout.LayoutParams(dp(76), dp(76)))
+        column.addView(text("Shop connected", 21, R.color.qp_text, true).apply {
+            setPadding(0, dp(15), 0, dp(4))
+        })
+        column.addView(text(portalHost ?: "Ready to print", 13, R.color.qp_muted, false))
+        column.addView(button("Open print flow", true).apply {
+            setOnClickListener { showPrint() }
+        }, linearParams().apply { topMargin = dp(20) })
+        column.addView(button("Switch shop", false).apply {
+            setOnClickListener { switchShop() }
+        }, linearParams().apply { topMargin = dp(8) })
         content.addView(column, frameParams())
     }
 
     private fun scanPrintView(): View {
-        val scroll = ScrollView(this).apply { isFillViewport = true }
         val column = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(dp(20), dp(18), dp(20), dp(28))
+            gravity = Gravity.CENTER_HORIZONTAL
+            setPadding(dp(24), dp(34), dp(24), dp(28))
         }
-        scroll.addView(column)
-        val hero = card().apply {
-            radius = dp(22).toFloat()
-            setCardBackgroundColor(getColor(R.color.qp_hero))
-            strokeWidth = 0
+        val icon = ImageView(this).apply {
+            setImageResource(R.drawable.ic_nav_scan_print)
+            imageTintList = ColorStateList.valueOf(getColor(R.color.qp_primary))
+            setPadding(dp(20), dp(20), dp(20), dp(20))
+            background = roundedDrawable(getColor(R.color.qp_soft), dp(24))
         }
-        val body = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(dp(20), dp(22), dp(20), dp(20))
-        }
-        body.addView(text("Print nearby.\nWithout the back-and-forth.", 25, R.color.qp_hero_text, true))
-        body.addView(text(
-            "Prepare your files first. At a participating shop, scan the SmartPrint QR code displayed at the counter to connect securely.",
-            14, R.color.qp_hero_muted, false
-        ).apply { setPadding(0, dp(9), 0, dp(18)) })
-        body.addView(button("Scan shop QR code", true).apply { setOnClickListener { scanQr() } }, linearParams())
-        hero.addView(body)
-        column.addView(hero, linearParams())
-        column.addView(text("How it works", 18, R.color.qp_text, true).apply {
-            setPadding(dp(2), dp(22), 0, dp(10))
+        column.addView(icon, LinearLayout.LayoutParams(dp(88), dp(88)))
+        column.addView(text("Connect to a shop", 22, R.color.qp_text, true).apply {
+            gravity = Gravity.CENTER
+            setPadding(0, dp(18), 0, dp(6))
         })
-        data class JourneyStep(
-            val number: String,
-            val icon: Int,
-            val title: String,
-            val description: String
-        )
-        val steps = listOf(
-            JourneyStep(
-                "01", R.drawable.ic_document_scan, "Prepare",
-                "Scan paper pages or import PDFs and photos. Arrange your collection before you visit."
-            ),
-            JourneyStep(
-                "02", R.drawable.ic_nav_scan_print, "Connect",
-                "Scan the QR code shown by the print shop. SmartPrint opens that shop's secure print session."
-            ),
-            JourneyStep(
-                "03", R.drawable.ic_print, "Review & collect",
-                "Choose available print settings, review the server-calculated quote, pay and follow job progress."
-            )
-        )
-        steps.forEach { item ->
-            val step = card()
-            val row = LinearLayout(this).apply {
-                orientation = LinearLayout.HORIZONTAL
-                gravity = Gravity.CENTER_VERTICAL
-                setPadding(dp(15), dp(15), dp(15), dp(15))
-            }
-            row.addView(journeyIcon(item.icon), LinearLayout.LayoutParams(dp(48), dp(48)).apply {
-                marginEnd = dp(14)
-            })
-            val copy = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-            val heading = LinearLayout(this).apply {
-                orientation = LinearLayout.HORIZONTAL
-                gravity = Gravity.CENTER_VERTICAL
-            }
-            heading.addView(text(item.number, 11, R.color.qp_primary, true))
-            heading.addView(text(item.title, 15, R.color.qp_text, true).apply {
-                setPadding(dp(9), 0, 0, 0)
-            })
-            copy.addView(heading)
-            copy.addView(text(item.description, 13, R.color.qp_muted, false).apply {
-                setPadding(0, dp(5), 0, 0)
-            })
-            row.addView(copy, LinearLayout.LayoutParams(0, -2, 1f))
-            step.addView(row)
-            column.addView(step, linearParams().apply { bottomMargin = dp(9) })
-        }
-        column.addView(text(
-            "Your files stay on this phone until you choose to send them. Shop connection and printing require an internet connection.",
-            12, R.color.qp_muted, false
-        ).apply { setPadding(dp(3), dp(8), dp(3), 0) })
-        column.addView(button("Prepare documents first", false).apply { setOnClickListener { showFiles() } },
-            linearParams().apply { topMargin = dp(13) })
-        return scroll
+        column.addView(text("Scan the counter QR code.", 13, R.color.qp_muted, false).apply {
+            gravity = Gravity.CENTER
+        })
+        column.addView(button("Scan QR code", true).apply {
+            setOnClickListener { scanQr() }
+        }, LinearLayout.LayoutParams(-1, dp(48)).apply { topMargin = dp(22) })
+        column.addView(button("Open My Files", false).apply {
+            setOnClickListener { showFiles() }
+        }, LinearLayout.LayoutParams(-1, dp(44)).apply { topMargin = dp(8) })
+        return column
     }
+
+    private fun journeyIcon(resourceId: Int): ImageView = ImageView(this).apply {
 
     private fun journeyIcon(resourceId: Int): ImageView = ImageView(this).apply {
         setImageResource(resourceId)
@@ -901,7 +882,7 @@ class MainActivity : AppCompatActivity() {
     private fun showFiles() {
         pickerMode = false
         editingPdf = null
-        resetToolbar("My files")
+        resetToolbar("Files")
         navigation.menu.findItem(FILES).isChecked = true
         content.removeAllViews()
         content.addView(libraryView(false), frameParams())
@@ -910,7 +891,7 @@ class MainActivity : AppCompatActivity() {
     private fun showPicker() {
         pickerMode = true
         pickerPath = ""
-        toolbar.title = if (fileChooserAllowsMultiple) "Choose documents" else "Choose a document"
+        toolbar.title = if (fileChooserAllowsMultiple) "Select files" else "Select file"
         toolbar.setNavigationIcon(android.R.drawable.ic_media_previous)
         toolbar.setNavigationOnClickListener { cancelPicker() }
         navigation.visibility = View.GONE
@@ -922,7 +903,7 @@ class MainActivity : AppCompatActivity() {
         pickerMode = false
         profileVisible = false
         toolbar.menu.findItem(SWITCH_SHOP)?.isVisible = portalUrl != null
-        toolbar.title = portalHost?.let { "SmartPrint · $it" } ?: "SmartPrint at a shop"
+        toolbar.title = "Print"
         toolbar.setNavigationIcon(android.R.drawable.ic_media_previous)
         toolbar.setNavigationOnClickListener { showFiles() }
         navigation.visibility = View.VISIBLE
