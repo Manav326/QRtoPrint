@@ -384,6 +384,7 @@ public sealed class SmartPrintDbContext(DbContextOptions<SmartPrintDbContext> op
                 .HasFilter("\"AgentDeviceId\" IS NOT NULL");
             entity.HasIndex(x => new { x.TenantId, x.PrintJobId }).IsUnique();
             entity.HasIndex(x => new { x.TenantId, x.Sha256 });
+            entity.HasIndex(x => new { x.StorageMode, x.PurgedUtc });
             entity.HasOne<PrintJob>().WithOne().HasForeignKey<PrintDocument>(x => new { x.TenantId, x.PrintJobId })
                 .HasPrincipalKey<PrintJob>(x => new { x.TenantId, x.Id }).OnDelete(DeleteBehavior.Cascade);
 

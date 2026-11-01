@@ -89,6 +89,7 @@ builder.Services.AddAuthorization(options =>
 builder.Services.AddScoped<TokenIssuer>();
 builder.Services.AddScoped<TenantEntitlementService>();
 builder.Services.AddSingleton<DocumentStorage>();
+builder.Services.AddHostedService<DocumentRetentionWorker>();
 builder.Services.AddRateLimiter(options =>
 {
     options.AddPolicy("authentication", context =>
@@ -2142,7 +2143,7 @@ shop.MapGet("/print-jobs/{jobId:guid}/document", async (
 
     var document = await db.PrintDocuments.AsNoTracking()
         .Where(item => item.TenantId == tenantId && item.PrintJobId == jobId)
-        .Select(item => new { item.StorageKey, item.StorageMode, item.MediaType })
+        .Select(item => new { item.StorageKey, item.StorageMode, item.MediaType, item.PurgedUtc })
         .SingleOrDefaultAsync(ct);
     if (document is null)
     {
@@ -2152,6 +2153,10 @@ shop.MapGet("/print-jobs/{jobId:guid}/document", async (
     if (document.StorageMode == "LOCAL_AGENT")
     {
         return Results.Conflict(new { code = "document_stored_on_local_agent", message = "This document is stored only on the shop's Windows Print Agent; cloud preview is not available." });
+    }
+    if (document.PurgedUtc is not null)
+    {
+        return Results.StatusCode(StatusCodes.Status410Gone);
     }
 
     MemoryStream content;

@@ -239,6 +239,7 @@ public sealed class PrintDocument
     public Guid? AgentDeviceId { get; set; }
     public string PageSizesJson { get; set; } = "[]";
     public DateTimeOffset CreatedUtc { get; set; } = DateTimeOffset.UtcNow;
+    public DateTimeOffset? PurgedUtc { get; set; }
 }
 
 public sealed class LocalPrintUploadTicket
