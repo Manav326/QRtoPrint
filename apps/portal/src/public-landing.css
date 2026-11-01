@@ -392,3 +392,9 @@ html[data-theme="dark"] .sp-download-progress :where(small,span,p),
 html[data-theme="dark"] .sp-download-result :where(small,span,p) {
   color: #bac5d7;
 }
+
+
+html[data-theme="light"] .sp-public {
+  --sp-ink: #202638;
+  --sp-muted: #5f6b80;
+}
