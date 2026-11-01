@@ -2772,9 +2772,6 @@ agentApi.MapPost("/jobs/claim", async (
         return Results.Unauthorized();
     }
 
-    var claimAccess = await GetAgentClaimAccessAsync(device.TenantId, db, ct);
-    if (!claimAccess.Allowed) return Results.Forbid();
-    var suspendedAtUtc = claimAccess.SuspendedAtUtc;
     var now = DateTimeOffset.UtcNow;
     var onlineAfter = now.AddMinutes(-2);
     var availablePrinterIds = await db.PrinterDevices.AsNoTracking()
@@ -2797,6 +2794,13 @@ agentApi.MapPost("/jobs/claim", async (
     }
 
     await using var transaction = await db.Database.BeginTransactionAsync(ct);
+    var claimAccess = await GetAgentClaimAccessAsync(device.TenantId, db, ct);
+    if (!claimAccess.Allowed)
+    {
+        await transaction.RollbackAsync(ct);
+        return Results.Forbid();
+    }
+    var suspendedAtUtc = claimAccess.SuspendedAtUtc;
     var candidates = await (
         from job in db.PrintJobs.AsNoTracking()
         join document in db.PrintDocuments.AsNoTracking()
@@ -3520,9 +3524,6 @@ agentApi.MapPost("/jobs/print-claim", async (AgentPrintClaimRequest request, Htt
 {
     var device = await AuthenticateAgentAsync(context, db, ct);
     if (device is null) return Results.Unauthorized();
-    var claimAccess = await GetAgentClaimAccessAsync(device.TenantId, db, ct);
-    if (!claimAccess.Allowed) return Results.Forbid();
-    var suspendedAtUtc = claimAccess.SuspendedAtUtc;
     if (request.LocalJobs is null || request.LocalJobs.Count is < 1 or > 100)
         return Results.ValidationProblem(new Dictionary<string, string[]> { ["localJobs"] = ["Provide between 1 and 100 local queue proofs."] });
     var proofs = request.LocalJobs
@@ -3536,6 +3537,13 @@ agentApi.MapPost("/jobs/print-claim", async (AgentPrintClaimRequest request, Htt
     var onlineAfter = now.AddMinutes(-2);
     var claimed = new List<object>();
     await using var tx = await db.Database.BeginTransactionAsync(ct);
+    var claimAccess = await GetAgentClaimAccessAsync(device.TenantId, db, ct);
+    if (!claimAccess.Allowed)
+    {
+        await tx.RollbackAsync(ct);
+        return Results.Forbid();
+    }
+    var suspendedAtUtc = claimAccess.SuspendedAtUtc;
     foreach (var proof in proofs)
     {
         var candidate = await (
@@ -5679,18 +5687,22 @@ static async Task<(bool Allowed, DateTimeOffset? SuspendedAtUtc)> GetAgentClaimA
     SmartPrintDbContext db,
     CancellationToken ct)
 {
-    var status = await db.Tenants.AsNoTracking()
-        .Where(item => item.Id == tenantId)
-        .Select(item => item.Status)
-        .SingleOrDefaultAsync(ct);
-    if (status == "Active") return (true, null);
-    if (status != "Suspended") return (false, null);
+    if (db.Database.CurrentTransaction is null)
+        throw new InvalidOperationException("A transaction is required for a suspended-tenant claim check.");
 
-    var allowClaims = await db.PlatformOperationalSettings.AsNoTracking()
-        .Where(item => item.Id == PlatformOperationalSettings.SingletonIdValue)
-        .Select(item => (bool?)item.AllowPaidJobClaimsWhenSuspended)
-        .SingleOrDefaultAsync(ct) ?? true;
-    if (!allowClaims) return (false, null);
+    // Hold shared locks until commit. Tenant suspension/deactivation and platform recovery-policy
+    // updates take update locks on these same rows, preventing a time-of-check/time-of-use race.
+    var tenant = await db.Tenants.FromSqlInterpolated(
+        $"""SELECT * FROM "Tenants" WHERE "Id" = {tenantId} FOR SHARE""")
+        .SingleOrDefaultAsync(ct);
+    if (tenant is null) return (false, null);
+    if (tenant.Status == "Active") return (true, null);
+    if (tenant.Status != "Suspended") return (false, null);
+
+    var settings = await db.PlatformOperationalSettings.FromSqlRaw(
+        """SELECT * FROM "PlatformOperationalSettings" WHERE "Id" = 1 FOR SHARE""")
+        .SingleOrDefaultAsync(ct);
+    if (settings?.AllowPaidJobClaimsWhenSuspended != true) return (false, null);
 
     var suspendedAt = await db.TenantStatusAudits.AsNoTracking()
         .Where(item => item.TenantId == tenantId && item.NewStatus == "Suspended")
