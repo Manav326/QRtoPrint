@@ -2787,7 +2787,7 @@ function normalizeCustomerCopies(value:string):string {
   if(!/^\d+$/.test(trimmed))return "1";
   const copies=Number(trimmed);
   if(!Number.isFinite(copies))return "100";
-  return String(Math.min(100,Math.max(1,Math.trunc(copies)));
+  return String(Math.min(100,Math.max(1,Math.trunc(copies))));
 }
 
 function readStoredCustomerDraft(publicCode:string,sessionToken:string):StoredCustomerDraft|null {
