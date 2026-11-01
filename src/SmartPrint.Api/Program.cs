@@ -5819,12 +5819,15 @@ publicApi.MapPost("/jobs/{jobId:guid}/quote", async (
         return Results.NotFound();
     }
 
-    if (!PrintJobQuoteRules.CanCreateQuote(job.Status))
+    var savedQuoteExpired = job.QuoteExpiresUtc is null || job.QuoteExpiresUtc <= now;
+    var canRefreshExpiredQuote = savedQuoteExpired &&
+        job.Status is "AWAITING_CUSTOMER_APPROVAL" or "AWAITING_SHOP_APPROVAL" or "AWAITING_PAYMENT" or "PAYMENT_REJECTED";
+    if (!PrintJobQuoteRules.CanCreateQuote(job.Status) && !canRefreshExpiredQuote)
     {
         return Results.Conflict(new
         {
             code = "job_not_ready_for_quote",
-            message = "A new quote can only be created for a newly uploaded job or an expired quote."
+            message = "A new quote can only be created for a newly uploaded job or a genuinely expired quote with no active payment."
         });
     }
 
