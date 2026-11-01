@@ -1711,7 +1711,10 @@ shop.MapGet("/print-jobs", async (
 
     var boundedOffset = Math.Clamp(offset ?? 0, 0, 1_000_000);
     var boundedTake = Math.Clamp(take ?? 100, 1, 100);
-    var normalizedSearch = search?.Trim().ToLowerInvariant();
+    var trimmedSearch = search?.Trim();
+    var normalizedSearch = string.IsNullOrEmpty(trimmedSearch)
+        ? null
+        : trimmedSearch[..Math.Min(trimmedSearch.Length, 120)].ToLowerInvariant();
     var jobs = await (
         from job in db.PrintJobs.AsNoTracking()
         join document in db.PrintDocuments.AsNoTracking()
