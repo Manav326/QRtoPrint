@@ -38,6 +38,7 @@ import androidx.core.content.FileProvider
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.WindowInsetsControllerCompat
 import androidx.documentfile.provider.DocumentFile
 import androidx.webkit.WebViewCompat
 import androidx.webkit.WebViewFeature
@@ -120,6 +121,14 @@ class MainActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         WindowCompat.setDecorFitsSystemWindows(window, false)
+        val lightSystemBars = (resources.configuration.uiMode and android.content.res.Configuration.UI_MODE_NIGHT_MASK) ==
+            android.content.res.Configuration.UI_MODE_NIGHT_NO
+        window.statusBarColor = getColor(R.color.qp_surface)
+        window.navigationBarColor = getColor(R.color.qp_surface)
+        WindowInsetsControllerCompat(window, window.decorView).apply {
+            isAppearanceLightStatusBars = lightSystemBars
+            isAppearanceLightNavigationBars = lightSystemBars
+        }
         store = LocalDocumentStore(filesDir)
         customerAccountStore = CustomerAccountStore(this)
         customerPrintSessionStore = CustomerPrintSessionStore(this)
