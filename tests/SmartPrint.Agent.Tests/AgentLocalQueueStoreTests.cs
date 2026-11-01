@@ -496,3 +496,32 @@ public sealed class AgentLocalQueueStoreTests
         return path;
     }
 }
+
+public sealed class WindowsPrintExecutorTests
+{
+    [Theory]
+    [InlineData(0x00000020u, "OFFLINE")]
+    [InlineData(0x00000040u, "PAPEROUT")]
+    [InlineData(0x00000001u, "PAUSED")]
+    [InlineData(0x00000002u, "ERROR")]
+    [InlineData(0x00000400u, "USERINTERVENTION")]
+    [InlineData(0x00000010u, "PRINTING")]
+    [InlineData(0x00000008u, "SPOOLING")]
+    [InlineData(0x00000080u, "PRINTED")]
+    [InlineData(0u, "QUEUED")]
+    public void ResolvesWindowsSpoolerStatusFlags(uint flags, string expected)
+    {
+        Assert.Equal(expected, WindowsPrintExecutor.ResolveSpoolerStatus(flags));
+    }
+
+    [Theory]
+    [InlineData(0x00000020u | 0x00000010u, "OFFLINE")]
+    [InlineData(0x00000040u | 0x00000010u, "PAPEROUT")]
+    [InlineData(0x00000001u | 0x00000008u, "PAUSED")]
+    [InlineData(0x00000400u | 0x00000010u, "USERINTERVENTION")]
+    public void PrinterFaultsTakePriorityOverActiveQueueFlags(uint flags, string expected)
+    {
+        Assert.Equal(expected, WindowsPrintExecutor.ResolveSpoolerStatus(flags));
+    }
+}
+
