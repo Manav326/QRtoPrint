@@ -691,7 +691,7 @@ export function logout(token: string) {
   }, token);
 }
 
-async function nativeCustomerAuthorizationHeaders(): Promise<Record<string, string>> {
+async function nativeCustomerBridgeRequest(message: string): Promise<string> {
   try {
     const bridge = (window as Window & {
       SmartPrintNative?: {
@@ -700,8 +700,8 @@ async function nativeCustomerAuthorizationHeaders(): Promise<Record<string, stri
         removeEventListener: (type: string, listener: (event: MessageEvent) => void) => void;
       };
     }).SmartPrintNative;
-    if (!bridge?.postMessage || !bridge.addEventListener || !bridge.removeEventListener) return {};
-    const token = await new Promise<string>((resolve) => {
+    if (!bridge?.postMessage || !bridge.addEventListener || !bridge.removeEventListener) return "";
+    return await new Promise<string>((resolve) => {
       let settled = false;
       const finish = (value: string) => {
         if (settled) return;
@@ -715,12 +715,28 @@ async function nativeCustomerAuthorizationHeaders(): Promise<Record<string, stri
       );
       const timeout = window.setTimeout(() => finish(""), 10000);
       bridge.addEventListener("message", onMessage);
-      bridge.postMessage("getCustomerAccessToken");
+      bridge.postMessage(message);
     });
-    return token ? { Authorization: `Bearer ${token}` } : {};
   } catch {
-    return {};
+    return "";
   }
+}
+
+async function nativeCustomerAuthorizationHeaders(): Promise<Record<string, string>> {
+  const token = await nativeCustomerBridgeRequest("getCustomerAccessToken");
+  return token ? { Authorization: `Bearer ${token}` } : {};
+}
+
+export function getNativeCustomerPrintSession(publicCode: string): Promise<string> {
+  return nativeCustomerBridgeRequest(`getCustomerPrintSession|${publicCode}`);
+}
+
+export async function saveNativeCustomerPrintSession(publicCode: string, token: string): Promise<void> {
+  await nativeCustomerBridgeRequest(`saveCustomerPrintSession|${publicCode}|${token}`);
+}
+
+export async function clearNativeCustomerPrintSession(publicCode: string): Promise<void> {
+  await nativeCustomerBridgeRequest(`clearCustomerPrintSession|${publicCode}`);
 }
 
 export async function createCustomerSession(publicCode: string) {
