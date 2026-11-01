@@ -17,10 +17,10 @@ import {
   createAgentEnrollmentCode, createCustomerSession, createPrinter, createStation,
   downloadShopDocument, getCustomerJobStatus, getShopAgentDevices, getShopJobEvents, getShopPrinters, getShopPrintJobsPage, getShopPrintBatchJobs, loadShopData,
   logout, readStoredTokens, rejectShopPrintJob, rejectShopPayment, revokeAgentDevice,
-  reportCustomerUpiPayment, renewCustomerPrintSession, getNativeCustomerPrintSession, saveNativeCustomerPrintSession, clearNativeCustomerPrintSession, resumeCustomerSession, rotateStationCode, startCustomerPayment, storeTokens,
+  reportCustomerBatchPayment, reportCustomerUpiPayment, renewCustomerPrintSession, getNativeCustomerPrintSession, saveNativeCustomerPrintSession, clearNativeCustomerPrintSession, resumeCustomerSession, rotateStationCode, startCustomerBatchPayment, startCustomerPayment, storeTokens,
   updatePrinterActive, updateShopPaymentSettings, updateShopPricing,
   updateShopProfile, updateStationEnabled, uploadCustomerDocument, uploadCustomerDocumentLocally,
-  verifyShopPayment, retryShopPdfExport, recordShopPrintRefund, previewShopPrintRefund, type CustomerPayment, type ShopPayment, type ShopPaymentSettings, type ShopRefund,
+  verifyShopPayment, retryShopPdfExport, recordShopPrintRefund, previewShopPrintRefund, type CustomerBatchPayment, type CustomerPayment, type ShopPayment, type ShopPaymentSettings, type ShopRefund,
   type AgentDevice, type AuthTokens, type CustomerJobStatus, type PrinterDevice, type PrintQuoteResult, type ShopJobEvent,
   type QrStation, type ShopCustomer, type ShopCustomerHistory, type ShopCustomerPage, type ShopPricingProfile, type ShopPrintJob, type ShopProfile, type ShopReportSummary, type ShopSubscriptionSummary,
   type UploadedPrintJob
@@ -2771,9 +2771,10 @@ function customerBatchGroupName(file:File):string {
 
 function normalizeCustomerCopies(value:string):string {
   const trimmed=value.trim();
-  if(!/^\d+$/.test(trimmed))return "1";
+  if(!/^\\d+$/.test(trimmed))return "1";
   const copies=Number(trimmed);
-  return Number.isInteger(copies)&&copies>=1&&copies<=100?String(copies):"1";
+  if(!Number.isFinite(copies))return "100";
+  return String(Math.min(100,Math.max(1,Math.trunc(copies))));
 }
 
 function readStoredCustomerDraft(publicCode:string,sessionToken:string):StoredCustomerDraft|null {
@@ -2877,6 +2878,7 @@ function CustomerPrintFlow({publicCode,sessionToken,paymentOptions,localAgent,lo
   const [jobStatus,setJobStatus]=useState<CustomerJobStatus|null>(null);
   const [batchStatuses,setBatchStatuses]=useState<Record<string,CustomerJobStatus>>({});
   const [payment,setPayment]=useState<CustomerPayment|null>(null);
+  const [batchPayment,setBatchPayment]=useState<CustomerBatchPayment|null>(null);
   const [paymentReference,setPaymentReference]=useState("");
   const [paymentMethod,setPaymentMethod]=useState<"UPI"|"CASH">(paymentOptions.upiEnabled?"UPI":"CASH");
   const [busy,setBusy]=useState(false);
@@ -2949,6 +2951,8 @@ function CustomerPrintFlow({publicCode,sessionToken,paymentOptions,localAgent,lo
           return map;
         },{});
         setBatchStatuses(current=>({...current,...fresh}));
+        const latestBatchPayment=results.find(item=>item?.[1].payment?.batchPayment)?.[1].payment?.batchPayment;
+        if(latestBatchPayment)setBatchPayment(latestBatchPayment);
         const selectedId=uploaded?.job.id;
         if(selectedId&&fresh[selectedId]){
           const selected=fresh[selectedId];
@@ -2958,6 +2962,7 @@ function CustomerPrintFlow({publicCode,sessionToken,paymentOptions,localAgent,lo
           } else {
             setJobStatus(selected);
             setPayment(selected.payment??null);
+            if(selected.payment?.batchPayment)setBatchPayment(selected.payment.batchPayment);
           }
         }
       } finally {refreshing=false;}
@@ -2982,6 +2987,7 @@ function CustomerPrintFlow({publicCode,sessionToken,paymentOptions,localAgent,lo
       }
       setJobStatus(refreshed);
       setPayment(refreshed.payment??null);
+      if(refreshed.payment?.batchPayment)setBatchPayment(refreshed.payment.batchPayment);
     }).catch(exception=>{
       if(active)setError(exception instanceof ApiError?exception.message:"Could not restore this print request.");
     });
@@ -3145,6 +3151,7 @@ function CustomerPrintFlow({publicCode,sessionToken,paymentOptions,localAgent,lo
         if(!active)return;
         setJobStatus(refreshed);
         setPayment(refreshed.payment??null);
+        if(refreshed.payment?.batchPayment)setBatchPayment(refreshed.payment.batchPayment);
       }).catch(()=>{/* Retry on the next interval without interrupting the flow. */});
     },8000);
     return ()=>{
@@ -3153,29 +3160,56 @@ function CustomerPrintFlow({publicCode,sessionToken,paymentOptions,localAgent,lo
     };
   },[sessionToken,uploaded?.job.id,jobStatus?.status]);
 
+  async function refreshBatchStatuses() {
+    const items=uploadedBatch.length?uploadedBatch:(uploaded?[uploaded]:[]);
+    const results=await Promise.all(items.map(async item=>{
+      try{return [item.job.id,await getCustomerJobStatus(sessionToken,item.job.id)] as const;}
+      catch{return null;}
+    }));
+    const fresh=results.reduce<Record<string,CustomerJobStatus>>((map,item)=>{
+      if(item)map[item[0]]=item[1];
+      return map;
+    },{});
+    setBatchStatuses(current=>({...current,...fresh}));
+    const latestBatchPayment=results.find(item=>item?.[1].payment?.batchPayment)?.[1].payment?.batchPayment;
+    if(latestBatchPayment)setBatchPayment(latestBatchPayment);
+    const selected=uploaded?fresh[uploaded.job.id]:null;
+    if(selected){
+      setJobStatus(selected);
+      setPayment(selected.payment??null);
+      if(selected.payment?.batchPayment)setBatchPayment(selected.payment.batchPayment);
+    }
+  }
+
   async function beginPayment(method:"UPI"|"CASH") {
-    if(!uploaded)return;
+    if(!uploaded||!batchId)return;
     setBusy(true);setError("");
     try {
-      const attempt=await startCustomerPayment(sessionToken,uploaded.job.id,method);
-      setPayment(attempt);
+      const attempt=await startCustomerBatchPayment(sessionToken,batchId,method);
+      setBatchPayment(attempt);
       setPaymentMethod(method);
-      const refreshed=await getCustomerJobStatus(sessionToken,uploaded.job.id);
-      setJobStatus(refreshed);
+      await refreshBatchStatuses();
     } catch(exception) {
-      setError(exception instanceof ApiError?exception.message:"Could not start this payment method.");
+      setError(exception instanceof ApiError?exception.message:"Could not start this batch payment.");
     } finally {setBusy(false);}
   }
 
   async function submitPaymentReference() {
-    if(!payment)return;
     setBusy(true);setError("");
     try {
-      await reportCustomerUpiPayment(sessionToken,payment.id,paymentReference.trim());
-      setPaymentReference("");
-      const refreshed=await getCustomerJobStatus(sessionToken,uploaded!.job.id);
-      setJobStatus(refreshed);
-      setPayment(refreshed.payment??null);
+      if(batchPayment&&batchPayment.status==="AWAITING_CUSTOMER_PAYMENT"){
+        await reportCustomerBatchPayment(sessionToken,batchPayment.id,paymentReference.trim());
+        setPaymentReference("");
+        await refreshBatchStatuses();
+      } else {
+        if(!payment||!uploaded)return;
+        await reportCustomerUpiPayment(sessionToken,payment.id,paymentReference.trim());
+        setPaymentReference("");
+        const refreshed=await getCustomerJobStatus(sessionToken,uploaded.job.id);
+        setJobStatus(refreshed);
+        setPayment(refreshed.payment??null);
+        if(refreshed.payment?.batchPayment)setBatchPayment(refreshed.payment.batchPayment);
+      }
     } catch(exception) {
       setError(exception instanceof ApiError?exception.message:"The payment reference could not be submitted.");
     } finally {setBusy(false);}
@@ -3264,6 +3298,29 @@ function CustomerPrintFlow({publicCode,sessionToken,paymentOptions,localAgent,lo
     name, files:files.filter(candidate=>groupNameForFile(candidate)===name)
   }));
   const quoteItems=uploadedBatch.length?uploadedBatch:(uploaded?[uploaded]:[]);
+  const statusForBatchItem=(item:UploadedPrintJob)=>
+    uploaded?.job.id===item.job.id&&jobStatus?.status
+      ? jobStatus.status
+      : batchStatuses[item.job.id]?.status??item.job.status;
+  const batchCheckoutStatuses=new Set([
+    "REJECTED","REFUNDED","AWAITING_PAYMENT","PAYMENT_REJECTED",
+    "AWAITING_CUSTOMER_PAYMENT","PAYMENT_REPORTED","AWAITING_COUNTER_PAYMENT",
+    "PAID_AUTHORISED","LOCAL_QUEUE_CLAIMED","LOCAL_QUEUE_READY","PRINT_AUTHORISED",
+    "PRINT_SUBMITTING","SPOOLER_ACCEPTED","PRINTING","OUTPUT_UNCONFIRMED","COMPLETED"
+  ]);
+  const batchCheckoutReady=quoteItems.length>0&&quoteItems.every(item=>batchCheckoutStatuses.has(statusForBatchItem(item)));
+  const batchAcceptedItems=quoteItems.filter(item=>!["REJECTED","REFUNDED"].includes(statusForBatchItem(item)));
+  const batchPayableItems=quoteItems.filter(item=>["AWAITING_PAYMENT","PAYMENT_REJECTED"].includes(statusForBatchItem(item)));
+  const batchPayableTotal=batchPayableItems.reduce((total,item)=>
+    total+(batchStatuses[item.job.id]?.quotedAmountMinor??quotesByJobId[item.job.id]?.quotedAmountMinor??item.job.quotedAmountMinor??0),0);
+  const batchCheckoutVisible=Boolean(batchId)&&batchCheckoutReady&&
+    (batchPayableItems.length>0||(batchPayment!==null&&batchPayment.status!=="REJECTED"));
+  const batchCheckoutUsesPayment=batchPayment!==null&&batchPayment.status!=="REJECTED";
+  const legacyIndividualPayment=!batchId||(payment!==null&&!payment.batchPayment&&
+    ["AWAITING_CUSTOMER_PAYMENT","CUSTOMER_REPORTED","CASH_AWAITING_PAYMENT","VERIFIED","PARTIALLY_REFUNDED"].includes(payment.status));
+  const batchCheckoutAmount=batchCheckoutUsesPayment?batchPayment!.amountMinor:batchPayableTotal;
+  const batchCheckoutFileCount=batchCheckoutUsesPayment?batchPayment!.fileCount:batchPayableItems.length;
+  const batchCheckoutCurrency=batchCheckoutUsesPayment?batchPayment!.currency:(batchPayableItems[0]?.job.currency??"INR");
   const quoteEntries=quoteItems.map(item=>({item,quote:quotesByJobId[item.job.id]})).filter(entry=>!!entry.quote);
   const batchQuoteTotal=quoteEntries.reduce((total,entry)=>{
     const status=batchStatuses[entry.item.job.id]?.status??entry.item.job.status;
@@ -3321,7 +3378,7 @@ function CustomerPrintFlow({publicCode,sessionToken,paymentOptions,localAgent,lo
             const index=files.findIndex(candidate=>customerFileFingerprint(candidate)===fingerprint);
             return <div className={selectedFileIndex===index?"customer-folder-file-row selected":"customer-folder-file-row"} key={fingerprint}>
               <button type="button" className="customer-folder-file-name" onClick={()=>setSelectedFileIndex(index)}><FileText size={15}/><span><strong>{selected.name}</strong><small>{formatBytes(selected.size)}</small></span></button>
-              <label className="customer-folder-copies"><span>Copies</span><input type="number" min="1" max="100" step="1" value={own.copies} onChange={event=>setFileSettings(current=>({...current,[fingerprint]:{...(current[fingerprint]??own),copies:event.target.value}}))} onBlur={event=>setFileSettings(current=>({...current,[fingerprint]:{...(current[fingerprint]??own),copies:normalizeCustomerCopies(event.currentTarget.value)}}))}/></label>
+              <label className="customer-folder-copies"><span>Copies</span><input type="text" inputMode="numeric" pattern="[0-9]*" maxLength={3} value={own.copies} onChange={event=>setFileSettings(current=>({...current,[fingerprint]:{...(current[fingerprint]??own),copies:event.currentTarget.value.replace(/\\D/g,"").slice(0,3)}}))} onBlur={event=>setFileSettings(current=>({...current,[fingerprint]:{...(current[fingerprint]??own),copies:normalizeCustomerCopies(event.currentTarget.value)}}))}/></label>
               <button type="button" className={own.custom?"customer-file-custom active":"customer-file-custom"} onClick={()=>setFileSettings(current=>({...current,[fingerprint]:{...(current[fingerprint]??own),custom:!own.custom,colourMode:own.custom?own.colourMode:defaults.colourMode,isDuplex:own.custom?own.isDuplex:defaults.isDuplex}}))}>{own.custom?"Custom":"Folder"}</button>
               <button type="button" className="customer-file-remove" aria-label={`Remove ${selected.name} from this selection`} title="Remove from this selection" disabled={busy} onClick={()=>removeSelectedFile(fingerprint)}><X size={13}/><span>Remove</span></button>
               {own.custom&&<div className="customer-file-overrides">
@@ -3347,7 +3404,7 @@ function CustomerPrintFlow({publicCode,sessionToken,paymentOptions,localAgent,lo
     {files.length>0&&uploadMode==="CLOUD"&&localAgent&&<small className="customer-upload-local-note">{nativeAppMode?"Encrypted cloud transfer.":"Cloud-assisted fallback: files are uploaded encrypted to the API before being transferred to the shop computer."}</small>}
     {uploaded&&<>
       {uploadedBatch.length>0&&<div className="customer-uploaded-batch">
-        <div className="customer-uploaded-batch-head"><strong>Batch · {uploadedBatch.length} files</strong><span>Select a file to view its status or payment.</span></div>
+        <div className="customer-uploaded-batch-head"><strong>Batch · {uploadedBatch.length} files</strong><span>Select a file to view its status. Pay once for all accepted files.</span></div>
         {Array.from(new Set(uploadedBatch.map(item=>item.job.batchGroupName??"Loose files"))).map(groupName=><section className="customer-uploaded-folder" key={groupName}>
           <strong>{groupName}</strong>
           {uploadedBatch.filter(item=>(item.job.batchGroupName??"Loose files")===groupName).map(item=><button type="button" key={item.job.id} className={uploaded.job.id===item.job.id?"customer-uploaded-batch-item active":"customer-uploaded-batch-item"} onClick={()=>selectUploadedFile(item)}>
@@ -3370,7 +3427,7 @@ function CustomerPrintFlow({publicCode,sessionToken,paymentOptions,localAgent,lo
     {quoteEntries.length>0&&<div className="customer-quote-card customer-batch-quote-card">
       <div><span>BATCH QUOTE</span><strong>{formatMoney(batchQuoteTotal,quoteEntries[0].quote!.currency)}</strong><small>{quoteEntries.length} files · {quoteEntries.reduce((sum,entry)=>sum+entry.item.job.pageCount,0)} pages</small></div>
       <div className="customer-batch-quote-lines">{quoteEntries.map(entry=><div key={entry.item.job.id}><span>{entry.item.document.originalFileName}{(batchStatuses[entry.item.job.id]?.status??entry.item.job.status)==="REJECTED"?" · Rejected":""}</span><strong>{(batchStatuses[entry.item.job.id]?.status??entry.item.job.status)==="REJECTED"?"Excluded":formatMoney(entry.quote!.quotedAmountMinor,entry.quote!.currency)}</strong></div>)}</div>
-      <p className="customer-payment-model-note">Each accepted file has its own payment step after shop approval. This batch total is the sum of file quotes, not one combined charge. Select each accepted file above to complete its payment.</p>
+      <p className="customer-payment-model-note">After the shop reviews the batch, pay once for all accepted files. Files the shop rejects are excluded from checkout.</p>
     </div>}
     {canSendBatch&&<button className="customer-flow-button" disabled={busy} onClick={()=>void acceptQuote()}>{busy?<span className="button-spinner"/>:"Send batch to shop"}</button>}
       {jobStatus?.status==="QUOTE_EXPIRED"&&<button className="customer-flow-button" disabled={busy} onClick={()=>{setQuote(null);setQuotesByJobId(current=>{const next={...current};if(uploaded)delete next[uploaded.job.id];return next;});setJobStatus(null);setPayment(null);}}>Request a fresh quote</button>}
@@ -3380,14 +3437,14 @@ function CustomerPrintFlow({publicCode,sessionToken,paymentOptions,localAgent,lo
       {payment&&!!payment.refundedAmountMinor&&payment.refundedAmountMinor>0&&<div className="customer-refund-note"><Wallet size={16}/><span><strong>{formatMoney(payment.refundedAmountMinor,payment.currency)} returned</strong> for rejected pages ({rejectedPageList(jobStatus.rejectedPageNumbersJson)}). {formatMoney(Math.max(0,payment.amountMinor-payment.refundedAmountMinor),payment.currency)} remains paid; only accepted pages proceed to printing.</span></div>}
       {!!jobStatus.timeline?.length&&<div className="customer-state-timeline">{jobStatus.timeline.map((event,index)=><div key={index}><i/><span><strong>{prettyStatus(event.newStatus)}</strong><small>{event.actorType==="ShopUser"?"Shop team":event.actorType==="Customer"?"You":"System"} · {new Date(event.createdUtc).toLocaleString()}</small></span></div>)}</div>}
 
-      {(jobStatus.status==="AWAITING_PAYMENT"||jobStatus.status==="PAYMENT_REJECTED")&&<div className="customer-pay-panel">
+      {legacyIndividualPayment&&(jobStatus.status==="AWAITING_PAYMENT"||jobStatus.status==="PAYMENT_REJECTED")&&<div className="customer-pay-panel">
         <div className="customer-pay-heading"><span>PAY THE SHOP</span><strong>{formatMoney(jobStatus.quotedAmountMinor,jobStatus.currency)}</strong></div>
         {paymentOptions.upiEnabled&&<button className={paymentMethod==="UPI"?"customer-choice selected":"customer-choice"} onClick={()=>setPaymentMethod("UPI")}>UPI payment</button>}
         {paymentOptions.cashEnabled&&<button className={paymentMethod==="CASH"?"customer-choice selected":"customer-choice"} onClick={()=>setPaymentMethod("CASH")}>Cash at counter</button>}
         <button className="customer-flow-button" disabled={busy||(!paymentOptions.upiEnabled&&!paymentOptions.cashEnabled)} onClick={()=>void beginPayment(paymentMethod)}>{busy?<span className="button-spinner"/>:nativeAppMode?"Continue":"Continue with "+(paymentMethod==="UPI"?"UPI":"cash at counter")}</button>
         {!paymentOptions.upiEnabled&&!paymentOptions.cashEnabled&&<p className="customer-flow-error">{nativeAppMode?"No payment method. Ask shop.":"The shop has not configured a payment method yet. Please speak to the shop operator."}</p>}
       </div>}
-      {payment&&payment.status!=="REJECTED"&&<div className="customer-pay-panel">
+      {legacyIndividualPayment&&payment&&payment.status!=="REJECTED"&&<div className="customer-pay-panel">
         <div className="customer-pay-heading"><span>{payment.method==="UPI"?"UPI PAYMENT":"CASH AT COUNTER"}</span><strong>{formatMoney(Math.max(0,payment.amountMinor-(payment.refundedAmountMinor??0)),payment.currency)}</strong></div>
         {payment.method==="UPI"&&payment.status==="AWAITING_CUSTOMER_PAYMENT"&&<div className="customer-upi-details">
           <div className="customer-upi-qr"><QRCode value={payment.upiUri||"upi://pay?pa="+encodeURIComponent(payment.upiIdSnapshot||"")} size={158}/></div>
@@ -3404,6 +3461,39 @@ function CustomerPrintFlow({publicCode,sessionToken,paymentOptions,localAgent,lo
         {payment.status==="PARTIALLY_REFUNDED"&&<p>{nativeAppMode?"Partial refund · Accepted pages only.":"A partial return has been recorded. The remaining paid amount is for the pages the shop accepted."}</p>}
       </div>}
     </div>}
+    {batchCheckoutVisible&&<section className="customer-pay-panel customer-batch-checkout-panel">
+      <div className="customer-pay-heading">
+        <span>PAY FOR ACCEPTED FILES · {batchCheckoutFileCount} FILE(S)</span>
+        <strong>{formatMoney(batchCheckoutAmount,batchCheckoutCurrency)}</strong>
+      </div>
+      <div className="customer-batch-checkout-lines">
+        {batchAcceptedItems.map(item=>{
+          const amount=batchStatuses[item.job.id]?.quotedAmountMinor??quotesByJobId[item.job.id]?.quotedAmountMinor??item.job.quotedAmountMinor??0;
+          return <div key={item.job.id}><span>{item.document.originalFileName}</span><strong>{formatMoney(amount,item.job.currency)}</strong></div>;
+        })}
+      </div>
+      {!batchCheckoutUsesPayment&&<>
+        {batchPayment?.status==="REJECTED"&&<p className="customer-flow-error">The previous batch payment was rejected. {batchPayment.rejectionReason||"Check with the shop before trying again."}</p>}
+        {paymentOptions.upiEnabled&&<button className={paymentMethod==="UPI"?"customer-choice selected":"customer-choice"} onClick={()=>setPaymentMethod("UPI")}>UPI payment</button>}
+        {paymentOptions.cashEnabled&&<button className={paymentMethod==="CASH"?"customer-choice selected":"customer-choice"} onClick={()=>setPaymentMethod("CASH")}>Cash at counter</button>}
+        <button className="customer-flow-button" disabled={busy||(!paymentOptions.upiEnabled&&!paymentOptions.cashEnabled)||batchPayableItems.length===0} onClick={()=>void beginPayment(paymentMethod)}>
+          {busy?<span className="button-spinner"/>:nativeAppMode?"Pay accepted files":"Pay accepted files · "+formatMoney(batchPayableTotal,batchCheckoutCurrency)}
+        </button>
+        {!paymentOptions.upiEnabled&&!paymentOptions.cashEnabled&&<p className="customer-flow-error">{nativeAppMode?"No payment method. Ask shop.":"The shop has not configured a payment method yet. Please speak to the shop operator."}</p>}
+      </>}
+      {batchCheckoutUsesPayment&&batchPayment?.method==="UPI"&&batchPayment.status==="AWAITING_CUSTOMER_PAYMENT"&&<div className="customer-upi-details">
+        <div className="customer-upi-qr"><QRCode value={batchPayment.upiUri||"upi://pay?pa="+encodeURIComponent(batchPayment.upiIdSnapshot||"")} size={158}/></div>
+        <strong>{batchPayment.payeeNameSnapshot||paymentOptions.payeeName||"Shop"}</strong>
+        <span>{batchPayment.upiIdSnapshot||paymentOptions.upiId}</span>
+        <a href={batchPayment.upiUri||"#"} className="customer-flow-button customer-upi-open">Open UPI app</a>
+        <label className="customer-reference-field">{nativeAppMode?"UTR":"UPI transaction reference / UTR"}<input value={paymentReference} maxLength={100} onChange={event=>setPaymentReference(event.target.value)} placeholder={nativeAppMode?"Enter UTR":"Enter UTR after paying"}/></label>
+        <button className="customer-flow-button" disabled={busy||paymentReference.trim().length<4} onClick={()=>void submitPaymentReference()}>{busy?<span className="button-spinner"/>:nativeAppMode?"Submit UTR":"Submit batch payment reference"}</button>
+        <small className="customer-payment-warning">{nativeAppMode?"UTR isn't proof. Shop verifies.":"Submitting a UTR is not proof of payment. The shop verifies the full batch amount in its own UPI/bank app."}</small>
+      </div>}
+      {batchCheckoutUsesPayment&&batchPayment?.method==="CASH"&&batchPayment.status==="CASH_AWAITING_PAYMENT"&&<p>Pay the displayed batch total at the shop counter. The shop will confirm receipt before authorising the accepted files.</p>}
+      {batchCheckoutUsesPayment&&batchPayment?.status==="CUSTOMER_REPORTED"&&<p>Your batch payment reference was received. The shop must verify the full amount before any accepted file is authorised.</p>}
+      {batchCheckoutUsesPayment&&batchPayment?.status==="VERIFIED"&&<div className="payment-verified-note"><Check size={14}/> Batch payment verified. Accepted files are authorised for the shop's print queue.</div>}
+    </section>}
     <div className="customer-payment-boundary"><ShieldCheck size={15}/><span>{nativeAppMode ? smartPrintNativeBoundary(jobStatus?.status,Boolean(quote)) : jobStatus?.status==="PAID_AUTHORISED"?"The shop has verified your payment. It still needs to assign and start the local printer.":jobStatus?.status==="PRINT_AUTHORISED"?"The shop has authorised physical printing.":jobStatus?.status==="PRINT_SUBMITTING"?"Your document is being sent to the Windows printer queue.":jobStatus?.status==="SPOOLER_ACCEPTED"?"Windows accepted the job. This is not proof that paper has come out.":jobStatus?.status==="PRINTING"?"The Windows driver reports that printing is in progress.":jobStatus?.status==="OUTPUT_UNCONFIRMED"?"The shop is checking the printer and actual pages before any retry.":jobStatus?.status==="COMPLETED"?"The shop confirmed the requested pages are printed and ready for collection.":jobStatus?.status==="LOCAL_QUEUE_CLAIMED"?"The shop's paired Windows computer is receiving the encrypted document. It is not being printed yet.":jobStatus?.status==="LOCAL_QUEUE_READY"?"The encrypted local copy is verified on the shop computer. Physical printing still requires the print operator.":jobStatus?.status==="AWAITING_PAYMENT"?"The shop approved this quote. Payment is collected by the shop directly and must be verified before the job is authorised.":jobStatus?.status==="PAYMENT_REPORTED"?"Your UPI reference is awaiting the shop's independent bank verification; submitting a reference does not confirm payment.":quote?"This quote is calculated by the shop's saved rate card. Accepting it sends a request to the shop; it does not collect payment or start printing.":"Your document is validated before pricing. You will see the shop's calculated price before any payment or print approval."}</span></div>
   </section>;
 }
