@@ -13,6 +13,9 @@ env:
 jobs:
   windows-setup:
     runs-on: windows-latest
+    env:
+      WINDOWS_SIGNING_CERT_BASE64: ${{ secrets.WINDOWS_SIGNING_CERT_BASE64 }}
+      WINDOWS_SIGNING_CERT_PASSWORD: ${{ secrets.WINDOWS_SIGNING_CERT_PASSWORD }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-dotnet@v4
@@ -32,6 +35,24 @@ jobs:
           $iscc = "C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
           & $iscc "/DSmartPrintPublicUrl=$env:SMARTPRINT_PUBLIC_BASE_URL" "/DSmartPrintVersion=$env:GITHUB_REF_NAME" scripts/build-windows-installer.iss
           if ($LASTEXITCODE -ne 0) { throw "SmartPrint Windows installer compilation failed." }
+      - name: Sign and verify Windows installer
+        shell: pwsh
+        run: |
+          if ([string]::IsNullOrWhiteSpace($env:WINDOWS_SIGNING_CERT_BASE64) -or [string]::IsNullOrWhiteSpace($env:WINDOWS_SIGNING_CERT_PASSWORD)) {
+            throw "Configure WINDOWS_SIGNING_CERT_BASE64 and WINDOWS_SIGNING_CERT_PASSWORD before publishing a public Windows installer."
+          }
+          $certificatePath = Join-Path $env:RUNNER_TEMP "smartprint-code-signing.pfx"
+          [System.IO.File]::WriteAllBytes($certificatePath, [Convert]::FromBase64String($env:WINDOWS_SIGNING_CERT_BASE64))
+          $signTool = Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\bin" -Filter signtool.exe -Recurse -ErrorAction Stop |
+            Where-Object { $_.FullName -match "\\x64\\signtool\.exe$" } |
+            Sort-Object FullName -Descending | Select-Object -First 1
+          if (-not $signTool) { throw "Windows SDK SignTool was not found." }
+          $installer = "artifacts/agent-installer/SmartPrint-Windows-Setup.exe"
+          & $signTool.FullName sign /v /fd SHA256 /f $certificatePath /p $env:WINDOWS_SIGNING_CERT_PASSWORD /tr http://timestamp.digicert.com /td SHA256 $installer
+          if ($LASTEXITCODE -ne 0) { throw "Windows installer signing failed." }
+          & $signTool.FullName verify /pa /v $installer
+          if ($LASTEXITCODE -ne 0) { throw "Windows installer signature verification failed." }
+          Remove-Item -LiteralPath $certificatePath -Force
       - name: Upload Windows installer
         uses: actions/upload-artifact@v4
         with:
