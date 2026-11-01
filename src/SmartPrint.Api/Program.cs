@@ -4297,12 +4297,9 @@ shop.MapGet("/payments", async (
     SmartPrintDbContext db,
     CancellationToken ct) =>
 {
-    if (!TryGetTenantId(principal, out var tenantId))
-    {
-        return Results.Forbid();
-    }
+    if (!TryGetTenantId(principal, out var tenantId)) return Results.Forbid();
 
-    var payments = await (
+    var individualPayments = await (
         from payment in db.PrintPayments.AsNoTracking()
         join job in db.PrintJobs.AsNoTracking()
             on new { payment.TenantId, PrintJobId = payment.PrintJobId }
@@ -4310,7 +4307,7 @@ shop.MapGet("/payments", async (
         join document in db.PrintDocuments.AsNoTracking()
             on new { payment.TenantId, payment.PrintJobId }
             equals new { document.TenantId, document.PrintJobId }
-        where payment.TenantId == tenantId
+        where payment.TenantId == tenantId && payment.BatchPaymentId == null
         orderby payment.CreatedUtc descending
         select new
         {
@@ -4318,6 +4315,8 @@ shop.MapGet("/payments", async (
             payment.PrintJobId,
             job.JobNumber,
             DocumentName = document.OriginalFileName,
+            BatchPaymentId = (Guid?)null,
+            BatchFileCount = (int?)null,
             payment.Method,
             payment.Status,
             payment.AmountMinor,
@@ -4333,7 +4332,79 @@ shop.MapGet("/payments", async (
         .Take(100)
         .ToListAsync(ct);
 
-    return Results.Ok(payments);
+    var batchPaymentRows = await (
+        from batchPayment in db.PrintBatchPayments.AsNoTracking()
+        join payment in db.PrintPayments.AsNoTracking()
+            on new { batchPayment.TenantId, BatchPaymentId = (Guid?)batchPayment.Id }
+            equals new { payment.TenantId, payment.BatchPaymentId }
+        join job in db.PrintJobs.AsNoTracking()
+            on new { payment.TenantId, PrintJobId = payment.PrintJobId }
+            equals new { job.TenantId, PrintJobId = job.Id }
+        join document in db.PrintDocuments.AsNoTracking()
+            on new { payment.TenantId, payment.PrintJobId }
+            equals new { document.TenantId, document.PrintJobId }
+        where batchPayment.TenantId == tenantId
+        select new
+        {
+            batchPayment.Id,
+            payment.PrintJobId,
+            job.JobNumber,
+            DocumentName = document.OriginalFileName,
+            BatchPaymentId = (Guid?)batchPayment.Id,
+            BatchFileCount = (int?)null,
+            batchPayment.Method,
+            batchPayment.Status,
+            batchPayment.AmountMinor,
+            batchPayment.Currency,
+            batchPayment.PaymentReference,
+            batchPayment.UpiIdSnapshot,
+            batchPayment.PayeeNameSnapshot,
+            batchPayment.RejectionReason,
+            batchPayment.CreatedUtc,
+            batchPayment.UpdatedUtc,
+            batchPayment.VerifiedUtc
+        })
+        .ToListAsync(ct);
+
+    var groupedBatchPayments = batchPaymentRows
+        .GroupBy(item => item.Id)
+        .Select(group =>
+        {
+            var first = group.First();
+            var names = group.Select(item => item.DocumentName).Distinct().ToArray();
+            var documentSummary = names.Length <= 3
+                ? string.Join(", ", names)
+                : string.Join(", ", names.Take(3)) + $" +{names.Length - 3} more";
+            return new
+            {
+                first.Id,
+                first.PrintJobId,
+                JobNumber = "Batch · " + first.JobNumber,
+                DocumentName = documentSummary,
+                first.BatchPaymentId,
+                BatchFileCount = (int?)group.Count(),
+                first.Method,
+                first.Status,
+                first.AmountMinor,
+                first.Currency,
+                first.PaymentReference,
+                first.UpiIdSnapshot,
+                first.PayeeNameSnapshot,
+                first.RejectionReason,
+                first.CreatedUtc,
+                first.UpdatedUtc,
+                first.VerifiedUtc
+            };
+        });
+
+    var result = individualPayments.Select(item => (item.CreatedUtc, (object)item))
+        .Concat(groupedBatchPayments.Select(item => (item.CreatedUtc, (object)item)))
+        .OrderByDescending(item => item.CreatedUtc)
+        .Take(100)
+        .Select(item => item.Item2)
+        .ToArray();
+
+    return Results.Ok(result);
 });
 
 shop.MapGet("/refunds", async (
@@ -4391,6 +4462,109 @@ shop.MapPost("/payments/{paymentId:guid}/verify", async (
     }
 
     await using var transaction = await db.Database.BeginTransactionAsync(ct);
+    var lockedBatchPayments = await db.PrintBatchPayments.FromSqlInterpolated(
+        $"SELECT * FROM \"PrintBatchPayments\" WHERE \"Id\" = {paymentId} AND \"TenantId\" = {tenantId} FOR UPDATE")
+        .ToListAsync(ct);
+    var batchPayment = lockedBatchPayments.SingleOrDefault();
+    if (batchPayment is not null)
+    {
+        if (batchPayment.Status == "VERIFIED")
+        {
+            await transaction.RollbackAsync(ct);
+            return Results.Ok(new { batchPayment.Id, batchPayment.Status, batchPayment.VerifiedUtc, DuplicateRequest = true });
+        }
+
+        var batchCanVerify = batchPayment.Method == "UPI"
+            ? batchPayment.Status is "AWAITING_CUSTOMER_PAYMENT" or "CUSTOMER_REPORTED"
+            : batchPayment.Method == "CASH" && batchPayment.Status == "CASH_AWAITING_PAYMENT";
+        if (!batchCanVerify)
+        {
+            await transaction.RollbackAsync(ct);
+            return Results.Conflict(new
+            {
+                code = "batch_payment_not_ready_for_manual_verification",
+                message = batchPayment.Method == "UPI"
+                    ? "Only an active UPI batch payment can be verified. Check the full batch amount in your bank/UPI app first."
+                    : "Cash batch payment can be marked received only after the full amount has been physically received."
+            });
+        }
+
+        var batchFilePayments = await db.PrintPayments
+            .Where(item => item.TenantId == tenantId && item.BatchPaymentId == batchPayment.Id)
+            .ToListAsync(ct);
+        var batchJobIds = batchFilePayments.Select(item => item.PrintJobId).ToArray();
+        var batchJobs = await db.PrintJobs
+            .Where(item => item.TenantId == tenantId && batchJobIds.Contains(item.Id))
+            .ToListAsync(ct);
+        if (batchFilePayments.Count == 0 || batchJobs.Count != batchFilePayments.Count)
+        {
+            await transaction.RollbackAsync(ct);
+            return Results.Conflict(new
+            {
+                code = "batch_payment_allocations_missing",
+                message = "The batch payment allocations could not be verified. Refresh the payment list before continuing."
+            });
+        }
+
+        var actorId = GetActorId(principal);
+        var now = DateTimeOffset.UtcNow;
+        batchPayment.Status = "VERIFIED";
+        batchPayment.VerifiedByUserId = actorId;
+        batchPayment.VerifiedUtc = now;
+        batchPayment.UpdatedUtc = now;
+        var jobsById = batchJobs.ToDictionary(item => item.Id);
+        foreach (var filePayment in batchFilePayments)
+        {
+            filePayment.Status = "VERIFIED";
+            filePayment.VerifiedByUserId = actorId;
+            filePayment.VerifiedUtc = now;
+            filePayment.UpdatedUtc = now;
+            var job = jobsById[filePayment.PrintJobId];
+            var previousStatus = job.Status;
+            job.Status = "PAID_AUTHORISED";
+            job.UpdatedUtc = now;
+            db.PrintJobEvents.Add(new PrintJobEvent
+            {
+                TenantId = tenantId,
+                PrintJobId = job.Id,
+                PreviousStatus = previousStatus,
+                NewStatus = job.Status,
+                ActorType = "ShopUser",
+                ActorId = actorId,
+                ReasonCode = batchPayment.Method == "UPI"
+                    ? "BATCH_UPI_PAYMENT_MANUALLY_VERIFIED"
+                    : "BATCH_CASH_RECEIVED_AT_COUNTER",
+                CreatedUtc = now
+            });
+        }
+
+        try
+        {
+            await db.SaveChangesAsync(ct);
+        }
+        catch (DbUpdateConcurrencyException)
+        {
+            await transaction.RollbackAsync(ct);
+            return Results.Conflict(new
+            {
+                code = "batch_payment_changed_concurrently",
+                message = "Another shop action changed this batch payment. Refresh the payment list before trying again."
+            });
+        }
+
+        await transaction.CommitAsync(ct);
+        return Results.Ok(new
+        {
+            batchPayment.Id,
+            batchPayment.Status,
+            batchPayment.VerifiedUtc,
+            batchPayment.AmountMinor,
+            batchPayment.Currency,
+            FileCount = batchFilePayments.Count,
+            NextStep = "The batch payment is verified. Each accepted file is now authorised and can be assigned to a live printer."
+        });
+    }
+
     var payment = await db.PrintPayments.SingleOrDefaultAsync(
         item => item.Id == paymentId && item.TenantId == tenantId, ct);
     if (payment is null)
@@ -4499,6 +4673,98 @@ shop.MapPost("/payments/{paymentId:guid}/reject", async (
     }
 
     await using var transaction = await db.Database.BeginTransactionAsync(ct);
+    var lockedBatchPayments = await db.PrintBatchPayments.FromSqlInterpolated(
+        $"SELECT * FROM \"PrintBatchPayments\" WHERE \"Id\" = {paymentId} AND \"TenantId\" = {tenantId} FOR UPDATE")
+        .ToListAsync(ct);
+    var batchPayment = lockedBatchPayments.SingleOrDefault();
+    if (batchPayment is not null)
+    {
+        if (batchPayment.Status == "REJECTED")
+        {
+            await transaction.RollbackAsync(ct);
+            return Results.Ok(new { batchPayment.Id, batchPayment.Status, batchPayment.RejectionReason, DuplicateRequest = true });
+        }
+
+        if (batchPayment.Status is not ("AWAITING_CUSTOMER_PAYMENT" or "CUSTOMER_REPORTED" or "CASH_AWAITING_PAYMENT"))
+        {
+            await transaction.RollbackAsync(ct);
+            return Results.Conflict(new
+            {
+                code = "batch_payment_not_rejectable",
+                message = "Only a batch payment that is still awaiting payment or verification can be rejected."
+            });
+        }
+
+        var batchFilePayments = await db.PrintPayments
+            .Where(item => item.TenantId == tenantId && item.BatchPaymentId == batchPayment.Id)
+            .ToListAsync(ct);
+        var batchJobIds = batchFilePayments.Select(item => item.PrintJobId).ToArray();
+        var batchJobs = await db.PrintJobs
+            .Where(item => item.TenantId == tenantId && batchJobIds.Contains(item.Id))
+            .ToListAsync(ct);
+        if (batchFilePayments.Count == 0 || batchJobs.Count != batchFilePayments.Count)
+        {
+            await transaction.RollbackAsync(ct);
+            return Results.Conflict(new
+            {
+                code = "batch_payment_allocations_missing",
+                message = "The batch payment allocations could not be verified. Refresh the payment list before continuing."
+            });
+        }
+
+        var actorId = GetActorId(principal);
+        var now = DateTimeOffset.UtcNow;
+        batchPayment.Status = "REJECTED";
+        batchPayment.RejectionReason = reason;
+        batchPayment.UpdatedUtc = now;
+        var jobsById = batchJobs.ToDictionary(item => item.Id);
+        foreach (var filePayment in batchFilePayments)
+        {
+            filePayment.Status = "REJECTED";
+            filePayment.RejectionReason = reason;
+            filePayment.UpdatedUtc = now;
+            var job = jobsById[filePayment.PrintJobId];
+            var previousStatus = job.Status;
+            job.Status = "PAYMENT_REJECTED";
+            job.UpdatedUtc = now;
+            db.PrintJobEvents.Add(new PrintJobEvent
+            {
+                TenantId = tenantId,
+                PrintJobId = job.Id,
+                PreviousStatus = previousStatus,
+                NewStatus = job.Status,
+                ActorType = "ShopUser",
+                ActorId = actorId,
+                ReasonCode = "SHOP_REJECTED_BATCH_PAYMENT_REPORT",
+                CreatedUtc = now
+            });
+        }
+
+        try
+        {
+            await db.SaveChangesAsync(ct);
+        }
+        catch (DbUpdateConcurrencyException)
+        {
+            await transaction.RollbackAsync(ct);
+            return Results.Conflict(new
+            {
+                code = "batch_payment_changed_concurrently",
+                message = "Another shop action changed this batch payment. Refresh the payment list before trying again."
+            });
+        }
+
+        await transaction.CommitAsync(ct);
+        return Results.Ok(new
+        {
+            batchPayment.Id,
+            batchPayment.Status,
+            batchPayment.RejectionReason,
+            batchPayment.UpdatedUtc,
+            FileCount = batchFilePayments.Count
+        });
+    }
+
     var payment = await db.PrintPayments.SingleOrDefaultAsync(
         item => item.Id == paymentId && item.TenantId == tenantId, ct);
     if (payment is null)
@@ -5237,6 +5503,205 @@ publicApi.MapPost("/jobs/{jobId:guid}/quote", async (
 
 
 
+publicApi.MapPost("/batches/{batchId:guid}/payments", async (
+    Guid batchId,
+    StartPrintPaymentRequest request,
+    HttpContext context,
+    SmartPrintDbContext db,
+    CancellationToken ct) =>
+{
+    var rawToken = context.Request.Headers["X-Print-Session"].FirstOrDefault();
+    if (string.IsNullOrWhiteSpace(rawToken)) return Results.Unauthorized();
+    if (request.Method is not ("UPI" or "CASH"))
+        return Results.ValidationProblem(new Dictionary<string, string[]>
+        {
+            ["method"] = ["Choose UPI or cash at counter."]
+        });
+
+    var now = DateTimeOffset.UtcNow;
+    var tokenHash = HashOpaqueToken(rawToken);
+    var session = await db.CustomerPrintSessions.AsNoTracking()
+        .Where(item => item.TokenHash == tokenHash && item.Status == "Active" &&
+                       item.RevokedUtc == null && item.ExpiresUtc > now)
+        .Select(item => new { item.Id, item.TenantId })
+        .SingleOrDefaultAsync(ct);
+    if (session is null) return Results.Unauthorized();
+
+    var jobs = await db.PrintJobs
+        .Where(item => item.TenantId == session.TenantId &&
+                       item.CustomerSessionId == session.Id &&
+                       item.BatchId == batchId)
+        .OrderBy(item => item.CreatedUtc)
+        .ToListAsync(ct);
+    if (jobs.Count == 0) return Results.NotFound();
+
+    var activeBatchPayment = await db.PrintBatchPayments.SingleOrDefaultAsync(
+        item => item.TenantId == session.TenantId &&
+                item.CustomerSessionId == session.Id &&
+                item.BatchId == batchId &&
+                (item.Status == "AWAITING_CUSTOMER_PAYMENT" ||
+                 item.Status == "CUSTOMER_REPORTED" ||
+                 item.Status == "CASH_AWAITING_PAYMENT"),
+        ct);
+    if (activeBatchPayment is not null)
+    {
+        if (activeBatchPayment.Method != request.Method)
+            return Results.Conflict(new
+            {
+                code = "batch_payment_attempt_already_active",
+                message = "A payment attempt is already active for this batch. Complete or ask the shop to reject it before selecting another method."
+            });
+        return Results.Ok(BuildBatchPaymentResponse(
+            activeBatchPayment,
+            jobs.Count(item => item.Status is not ("REJECTED" or "REFUNDED"))));
+    }
+
+    var settledOrApprovedStates = new HashSet<string>(StringComparer.Ordinal)
+    {
+        "REJECTED", "REFUNDED", "AWAITING_PAYMENT", "PAYMENT_REJECTED",
+        "AWAITING_CUSTOMER_PAYMENT", "PAYMENT_REPORTED", "AWAITING_COUNTER_PAYMENT",
+        "PAID_AUTHORISED", "LOCAL_QUEUE_CLAIMED", "LOCAL_QUEUE_READY",
+        "PRINT_AUTHORISED", "PRINT_SUBMITTING", "SPOOLER_ACCEPTED", "PRINTING",
+        "OUTPUT_UNCONFIRMED", "COMPLETED"
+    };
+    var pendingReview = jobs.FirstOrDefault(job => !settledOrApprovedStates.Contains(job.Status));
+    if (pendingReview is not null)
+        return Results.Conflict(new
+        {
+            code = "batch_review_not_complete",
+            message = "The shop must finish reviewing every file in this batch before checkout can start."
+        });
+
+    var payableJobs = jobs
+        .Where(job => job.Status is "AWAITING_PAYMENT" or "PAYMENT_REJECTED")
+        .ToList();
+    if (payableJobs.Count == 0)
+        return Results.Conflict(new
+        {
+            code = "batch_has_no_payable_files",
+            message = "There are no accepted files awaiting payment in this batch."
+        });
+
+    if (payableJobs.Any(job => job.QuotedAmountMinor <= 0 || job.Currency != "INR"))
+        return Results.Conflict(new
+        {
+            code = "batch_quote_invalid",
+            message = "Every accepted file must have a valid INR quote before batch checkout."
+        });
+
+    var payableJobIds = payableJobs.Select(job => job.Id).ToArray();
+    var activeIndividualPayment = await db.PrintPayments.AsNoTracking().AnyAsync(
+        item => item.TenantId == session.TenantId &&
+                item.BatchPaymentId == null &&
+                payableJobIds.Contains(item.PrintJobId) &&
+                (item.Status == "AWAITING_CUSTOMER_PAYMENT" ||
+                 item.Status == "CUSTOMER_REPORTED" ||
+                 item.Status == "CASH_AWAITING_PAYMENT"),
+        ct);
+    if (activeIndividualPayment)
+        return Results.Conflict(new
+        {
+            code = "individual_payment_already_active",
+            message = "A file in this batch already has an individual payment attempt. Ask the shop to resolve that attempt before using batch checkout."
+        });
+
+    var settings = await db.ShopPaymentProfiles.AsNoTracking()
+        .SingleOrDefaultAsync(item => item.TenantId == session.TenantId, ct);
+    if (settings is null ||
+        (request.Method == "UPI" && (!settings.UpiEnabled ||
+                                     string.IsNullOrWhiteSpace(settings.UpiId) ||
+                                     string.IsNullOrWhiteSpace(settings.PayeeName))) ||
+        (request.Method == "CASH" && !settings.CashEnabled))
+        return Results.Conflict(new
+        {
+            code = "payment_method_unavailable",
+            message = "The shop has not enabled the selected payment method."
+        });
+
+    long totalAmountMinor;
+    try
+    {
+        totalAmountMinor = payableJobs.Aggregate(0L, (total, job) => checked(total + job.QuotedAmountMinor));
+    }
+    catch (OverflowException)
+    {
+        return Results.UnprocessableEntity(new
+        {
+            code = "batch_payment_overflow",
+            message = "The accepted batch total exceeds the supported payment amount."
+        });
+    }
+
+    var batchPayment = new PrintBatchPayment
+    {
+        TenantId = session.TenantId,
+        CustomerSessionId = session.Id,
+        BatchId = batchId,
+        Method = request.Method,
+        Status = request.Method == "UPI" ? "AWAITING_CUSTOMER_PAYMENT" : "CASH_AWAITING_PAYMENT",
+        AmountMinor = totalAmountMinor,
+        Currency = "INR",
+        UpiIdSnapshot = request.Method == "UPI" ? settings.UpiId : null,
+        PayeeNameSnapshot = request.Method == "UPI" ? settings.PayeeName : null,
+        CreatedUtc = now,
+        UpdatedUtc = now
+    };
+
+    await using var transaction = await db.Database.BeginTransactionAsync(ct);
+    db.PrintBatchPayments.Add(batchPayment);
+    foreach (var job in payableJobs)
+    {
+        var payment = new PrintPayment
+        {
+            TenantId = session.TenantId,
+            PrintJobId = job.Id,
+            BatchPaymentId = batchPayment.Id,
+            Method = request.Method,
+            Status = batchPayment.Status,
+            AmountMinor = job.QuotedAmountMinor,
+            Currency = job.Currency,
+            UpiIdSnapshot = batchPayment.UpiIdSnapshot,
+            PayeeNameSnapshot = batchPayment.PayeeNameSnapshot,
+            CreatedUtc = now,
+            UpdatedUtc = now
+        };
+        var previousStatus = job.Status;
+        job.Status = request.Method == "UPI" ? "AWAITING_CUSTOMER_PAYMENT" : "AWAITING_COUNTER_PAYMENT";
+        job.UpdatedUtc = now;
+        db.PrintPayments.Add(payment);
+        db.PrintJobEvents.Add(new PrintJobEvent
+        {
+            TenantId = job.TenantId,
+            PrintJobId = job.Id,
+            PreviousStatus = previousStatus,
+            NewStatus = job.Status,
+            ActorType = "Customer",
+            ReasonCode = request.Method == "UPI"
+                ? "BATCH_UPI_PAYMENT_INTENT_CREATED"
+                : "BATCH_CASH_AT_COUNTER_SELECTED",
+            CreatedUtc = now
+        });
+    }
+
+    try
+    {
+        await db.SaveChangesAsync(ct);
+        await transaction.CommitAsync(ct);
+    }
+    catch (DbUpdateException)
+    {
+        await transaction.RollbackAsync(ct);
+        return Results.Conflict(new
+        {
+            code = "batch_payment_attempt_already_active",
+            message = "A batch payment was started at the same time. Refresh the batch status and continue with the active attempt."
+        });
+    }
+
+    return Results.Ok(BuildBatchPaymentResponse(batchPayment, payableJobs.Count));
+});
+
+
 publicApi.MapPost("/jobs/{jobId:guid}/payments", async (
     Guid jobId,
     StartPrintPaymentRequest request,
@@ -5364,6 +5829,150 @@ publicApi.MapPost("/jobs/{jobId:guid}/payments", async (
 
     return Results.Ok(BuildPaymentResponse(payment, job));
 });
+
+publicApi.MapPost("/batch-payments/{paymentId:guid}/report", async (
+    Guid paymentId,
+    ReportPrintPaymentRequest request,
+    HttpContext context,
+    SmartPrintDbContext db,
+    CancellationToken ct) =>
+{
+    var reference = request.ReferenceNumber?.Trim();
+    if (string.IsNullOrWhiteSpace(reference) ||
+        reference.Length is < 4 or > 100 ||
+        reference.Any(character => !char.IsLetterOrDigit(character) && character is not '-' and not '_'))
+        return Results.ValidationProblem(new Dictionary<string, string[]>
+        {
+            ["referenceNumber"] = ["Enter the UPI transaction reference/UTR (4–100 letters or digits, with optional hyphens/underscores)."]
+        });
+
+    var rawToken = context.Request.Headers["X-Print-Session"].FirstOrDefault();
+    if (string.IsNullOrWhiteSpace(rawToken)) return Results.Unauthorized();
+    var now = DateTimeOffset.UtcNow;
+    var tokenHash = HashOpaqueToken(rawToken);
+    var session = await db.CustomerPrintSessions.AsNoTracking()
+        .Where(item => item.TokenHash == tokenHash && item.Status == "Active" &&
+                       item.RevokedUtc == null && item.ExpiresUtc > now)
+        .Select(item => new { item.Id, item.TenantId })
+        .SingleOrDefaultAsync(ct);
+    if (session is null) return Results.Unauthorized();
+
+    await using var transaction = await db.Database.BeginTransactionAsync(ct);
+    var lockedPayments = await db.PrintBatchPayments.FromSqlInterpolated(
+        $"SELECT * FROM \"PrintBatchPayments\" WHERE \"Id\" = {paymentId} AND \"TenantId\" = {session.TenantId} AND \"CustomerSessionId\" = {session.Id} FOR UPDATE")
+        .ToListAsync(ct);
+    var batchPayment = lockedPayments.SingleOrDefault();
+    if (batchPayment is null)
+    {
+        await transaction.RollbackAsync(ct);
+        return Results.NotFound();
+    }
+
+    if (batchPayment.Method != "UPI")
+    {
+        await transaction.RollbackAsync(ct);
+        return Results.Conflict(new
+        {
+            code = "batch_payment_not_awaiting_reference",
+            message = "Only an active UPI batch payment can receive a transaction reference."
+        });
+    }
+    if (batchPayment.Status == "CUSTOMER_REPORTED" &&
+        string.Equals(batchPayment.PaymentReference, reference, StringComparison.Ordinal))
+    {
+        await transaction.RollbackAsync(ct);
+        return Results.Ok(new
+        {
+            batchPayment.Id,
+            batchPayment.Status,
+            batchPayment.AmountMinor,
+            batchPayment.Currency,
+            batchPayment.PaymentReference,
+            DuplicateRequest = true,
+            Message = "This reference was already submitted. The shop still needs to verify the transaction."
+        });
+    }
+    if (batchPayment.Status != "AWAITING_CUSTOMER_PAYMENT")
+    {
+        await transaction.RollbackAsync(ct);
+        return Results.Conflict(new
+        {
+            code = "batch_payment_not_awaiting_reference",
+            message = "This batch payment is no longer accepting a transaction reference."
+        });
+    }
+
+    var filePayments = await db.PrintPayments
+        .Where(item => item.TenantId == session.TenantId && item.BatchPaymentId == batchPayment.Id)
+        .ToListAsync(ct);
+    var jobIds = filePayments.Select(item => item.PrintJobId).ToArray();
+    var jobs = await db.PrintJobs
+        .Where(item => item.TenantId == session.TenantId &&
+                       item.CustomerSessionId == session.Id &&
+                       jobIds.Contains(item.Id))
+        .ToListAsync(ct);
+    if (filePayments.Count == 0 || jobs.Count != filePayments.Count)
+    {
+        await transaction.RollbackAsync(ct);
+        return Results.Conflict(new
+        {
+            code = "batch_payment_allocations_missing",
+            message = "The batch payment allocations could not be verified. Contact the shop before paying again."
+        });
+    }
+
+    batchPayment.PaymentReference = reference;
+    batchPayment.Status = "CUSTOMER_REPORTED";
+    batchPayment.UpdatedUtc = now;
+    var jobsById = jobs.ToDictionary(item => item.Id);
+    foreach (var filePayment in filePayments)
+    {
+        filePayment.PaymentReference = reference;
+        filePayment.Status = "CUSTOMER_REPORTED";
+        filePayment.UpdatedUtc = now;
+        var job = jobsById[filePayment.PrintJobId];
+        var previousStatus = job.Status;
+        job.Status = "PAYMENT_REPORTED";
+        job.UpdatedUtc = now;
+        db.PrintJobEvents.Add(new PrintJobEvent
+        {
+            TenantId = job.TenantId,
+            PrintJobId = job.Id,
+            PreviousStatus = previousStatus,
+            NewStatus = job.Status,
+            ActorType = "Customer",
+            ReasonCode = "CUSTOMER_SUBMITTED_BATCH_UPI_REFERENCE",
+            CreatedUtc = now
+        });
+    }
+
+    try
+    {
+        await db.SaveChangesAsync(ct);
+        await transaction.CommitAsync(ct);
+    }
+    catch (DbUpdateConcurrencyException)
+    {
+        await transaction.RollbackAsync(ct);
+        return Results.Conflict(new
+        {
+            code = "batch_payment_changed_concurrently",
+            message = "This batch payment changed while the reference was being submitted. Refresh the batch status before trying again."
+        });
+    }
+
+    return Results.Ok(new
+    {
+        batchPayment.Id,
+        batchPayment.Status,
+        batchPayment.AmountMinor,
+        batchPayment.Currency,
+        batchPayment.PaymentReference,
+        FileCount = filePayments.Count,
+        Message = "The reference was submitted. The shop must verify the single batch payment in its bank/UPI app before any file is authorised."
+    });
+});
+
 
 publicApi.MapPost("/payments/{paymentId:guid}/report", async (
     Guid paymentId,
@@ -5670,6 +6279,7 @@ publicApi.MapGet("/jobs/{jobId:guid}/status", async (
         .Select(item => new
         {
             item.Id,
+            item.BatchPaymentId,
             item.Method,
             item.Status,
             item.AmountMinor,
@@ -5683,6 +6293,12 @@ publicApi.MapGet("/jobs/{jobId:guid}/status", async (
             item.VerifiedUtc
         })
         .FirstOrDefaultAsync(ct);
+    PrintBatchPayment? batchPayment = null;
+    if (payment?.BatchPaymentId is Guid batchPaymentId)
+    {
+        batchPayment = await db.PrintBatchPayments.AsNoTracking()
+            .SingleOrDefaultAsync(item => item.Id == batchPaymentId && item.TenantId == session.TenantId, ct);
+    }
     var paymentStatus = payment is null ? null : new
     {
         payment.Id,
@@ -5697,8 +6313,27 @@ publicApi.MapGet("/jobs/{jobId:guid}/status", async (
         payment.RejectionReason,
         payment.CreatedUtc,
         payment.VerifiedUtc,
-        UpiUri = BuildUpiUri(payment.Id, payment.Method, payment.UpiIdSnapshot,
-            payment.PayeeNameSnapshot, payment.AmountMinor, payment.Currency, job.JobNumber)
+        UpiUri = batchPayment is null
+            ? BuildUpiUri(payment.Id, payment.Method, payment.UpiIdSnapshot,
+                payment.PayeeNameSnapshot, payment.AmountMinor, payment.Currency, job.JobNumber)
+            : null,
+        BatchPayment = batchPayment is null ? null : new
+        {
+            batchPayment.Id,
+            batchPayment.Method,
+            batchPayment.Status,
+            batchPayment.AmountMinor,
+            batchPayment.Currency,
+            batchPayment.UpiIdSnapshot,
+            batchPayment.PayeeNameSnapshot,
+            batchPayment.PaymentReference,
+            batchPayment.RejectionReason,
+            batchPayment.CreatedUtc,
+            batchPayment.VerifiedUtc,
+            UpiUri = BuildUpiUri(batchPayment.Id, batchPayment.Method, batchPayment.UpiIdSnapshot,
+                batchPayment.PayeeNameSnapshot, batchPayment.AmountMinor, batchPayment.Currency,
+                "Batch " + batchPayment.BatchId.ToString("N")[..8].ToUpperInvariant())
+        }
     };
     return Results.Ok(new { Job = job, Timeline = timeline, Payment = paymentStatus });
 });
@@ -6128,6 +6763,27 @@ static object BuildPaymentResponse(PrintPayment payment, PrintJob job) =>
         JobId = job.Id,
         JobNumber = job.JobNumber,
         JobStatus = job.Status
+    };
+
+static object BuildBatchPaymentResponse(PrintBatchPayment payment, int fileCount) =>
+    new
+    {
+        payment.Id,
+        payment.Method,
+        payment.Status,
+        payment.AmountMinor,
+        payment.Currency,
+        payment.UpiIdSnapshot,
+        payment.PayeeNameSnapshot,
+        payment.PaymentReference,
+        payment.RejectionReason,
+        payment.CreatedUtc,
+        payment.VerifiedUtc,
+        BatchId = payment.BatchId,
+        FileCount = fileCount,
+        UpiUri = BuildUpiUri(payment.Id, payment.Method, payment.UpiIdSnapshot,
+            payment.PayeeNameSnapshot, payment.AmountMinor, payment.Currency,
+            "Batch " + payment.BatchId.ToString("N")[..8].ToUpperInvariant())
     };
 
 static bool IsHexColor(string value) =>
