@@ -16,6 +16,7 @@
 - Suspension blocks new QR sessions, print submissions, quotes, payment starts, new Agent claims and new authorisation/dispatch actions. Read-only history and limited recovery operations remain available so already-paid or physically submitted jobs can be reconciled, refunded, rejected or confirmed.
 - The shop API enforces subscription access and feature entitlements server-side. Portal navigation is not an enforcement boundary.
 - API rate limits use source-IP partitions so clients cannot bypass them by changing untrusted session or Agent headers. The current defaults are 20 authentication requests/minute, 120 public requests/minute, 30 Agent requests/minute, 30 QR session creations/minute and 8 document uploads/minute. Review these values against production traffic and trusted proxy configuration.
+- In the provided Cloudflare Tunnel Compose deployment, portal Nginx overwrites `X-Forwarded-For` with Cloudflare's `CF-Connecting-IP` value before proxying to the API. Keep the API container private and do not publish port 8080 directly; this is the trust boundary for forwarded client addresses.
 
 ## 2. QR session security
 
