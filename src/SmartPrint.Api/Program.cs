@@ -1974,13 +1974,14 @@ shop.MapGet("/reports/summary", async (
         .ThenBy(group => group.status)
         .ToListAsync(ct);
 
-    var verifiedPayments = db.PrintPayments.AsNoTracking().Where(payment =>
-        payment.TenantId == tenantId &&
-        payment.VerifiedUtc != null &&
-        payment.VerifiedUtc >= fromUtc &&
-        payment.VerifiedUtc < toUtc);
-
-    var verifiedCollectionsByMethod = await verifiedPayments
+    // File-level payment allocations remain the source of refund accounting,
+    // but a batch checkout is one customer payment, not one payment per file.
+    var verifiedIndividualCollections = await db.PrintPayments.AsNoTracking()
+        .Where(payment => payment.TenantId == tenantId &&
+                          payment.BatchPaymentId == null &&
+                          payment.VerifiedUtc != null &&
+                          payment.VerifiedUtc >= fromUtc &&
+                          payment.VerifiedUtc < toUtc)
         .GroupBy(payment => new { payment.Method, payment.Currency })
         .Select(group => new
         {
@@ -1989,9 +1990,37 @@ shop.MapGet("/reports/summary", async (
             paymentCount = group.Count(),
             amountMinor = group.Sum(payment => payment.AmountMinor)
         })
+        .ToListAsync(ct);
+
+    var verifiedBatchCollections = await db.PrintBatchPayments.AsNoTracking()
+        .Where(payment => payment.TenantId == tenantId &&
+                          payment.Status == "VERIFIED" &&
+                          payment.VerifiedUtc != null &&
+                          payment.VerifiedUtc >= fromUtc &&
+                          payment.VerifiedUtc < toUtc)
+        .GroupBy(payment => new { payment.Method, payment.Currency })
+        .Select(group => new
+        {
+            method = group.Key.Method,
+            currency = group.Key.Currency,
+            paymentCount = group.Count(),
+            amountMinor = group.Sum(payment => payment.AmountMinor)
+        })
+        .ToListAsync(ct);
+
+    var verifiedCollectionsByMethod = verifiedIndividualCollections
+        .Concat(verifiedBatchCollections)
+        .GroupBy(item => new { item.method, item.currency })
+        .Select(group => new
+        {
+            method = group.Key.method,
+            currency = group.Key.currency,
+            paymentCount = group.Sum(item => item.paymentCount),
+            amountMinor = group.Sum(item => item.amountMinor)
+        })
         .OrderBy(group => group.currency)
         .ThenBy(group => group.method)
-        .ToListAsync(ct);
+        .ToList();
 
     var refundsRecordedByMethod = await db.PrintRefunds.AsNoTracking()
         .Where(refund => refund.TenantId == tenantId &&
@@ -2010,11 +2039,18 @@ shop.MapGet("/reports/summary", async (
         .ThenBy(group => group.method)
         .ToListAsync(ct);
 
-    var pendingPaymentCount = await db.PrintPayments.AsNoTracking().CountAsync(payment =>
+    var pendingIndividualPaymentCount = await db.PrintPayments.AsNoTracking().CountAsync(payment =>
+        payment.TenantId == tenantId &&
+        payment.BatchPaymentId == null &&
+        (payment.Status == "AWAITING_CUSTOMER_PAYMENT" ||
+         payment.Status == "CUSTOMER_REPORTED" ||
+         payment.Status == "CASH_AWAITING_PAYMENT"), ct);
+    var pendingBatchPaymentCount = await db.PrintBatchPayments.AsNoTracking().CountAsync(payment =>
         payment.TenantId == tenantId &&
         (payment.Status == "AWAITING_CUSTOMER_PAYMENT" ||
          payment.Status == "CUSTOMER_REPORTED" ||
          payment.Status == "CASH_AWAITING_PAYMENT"), ct);
+    var pendingPaymentCount = pendingIndividualPaymentCount + pendingBatchPaymentCount;
 
     return Results.Ok(new
     {
