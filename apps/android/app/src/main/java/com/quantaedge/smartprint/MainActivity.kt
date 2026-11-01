@@ -1628,6 +1628,10 @@ class MainActivity : AppCompatActivity() {
             .apply { setPadding(0, dp(2), 0, 0) })
         heading.addView(fileDetails, LinearLayout.LayoutParams(0, -2, 1f))
         heading.addView(text("Page ${selectedIndex + 1} of ${pages.size}", 11, R.color.qp_muted, true))
+        heading.addView(text(
+            if (selectedPage.rotationDegrees == 0) "Original" else "${selectedPage.rotationDegrees}°",
+            10, R.color.qp_muted, false
+        ).apply { setPadding(dp(7), 0, 0, 0) })
         editor.addView(heading, linearParams())
 
         val previewStage = FrameLayout(this).apply {
@@ -1635,7 +1639,7 @@ class MainActivity : AppCompatActivity() {
         }
         val pagePreview = ImageView(this).apply {
             scaleType = ImageView.ScaleType.FIT_CENTER
-            contentDescription = "PDF page preview"
+            contentDescription = "PDF page preview loading"
             adjustViewBounds = false
             setPadding(dp(5), dp(5), dp(5), dp(5))
         }
@@ -1767,11 +1771,13 @@ class MainActivity : AppCompatActivity() {
                 }
                 if (rendered == null) {
                     previewStatus.text = "Could not render this page."
+                    pagePreview.contentDescription = "PDF page preview unavailable"
                     return@runOnUiThread
                 }
                 editingPdfPreviewBitmap?.let { if (!it.isRecycled) it.recycle() }
                 editingPdfPreviewBitmap = rendered
                 pagePreview.setImageBitmap(rendered)
+                pagePreview.contentDescription = "Page preview ready"
                 previewStatus.visibility = View.GONE
             }
         }.start()
