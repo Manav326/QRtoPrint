@@ -9,6 +9,8 @@ import AuthScreen from "./AuthScreen";
 import PublicLandingPage from "./PublicLandingPage";
 import { getPublicDownloadPath, usePublicRelease } from "./release-metadata";
 import PlatformAdminConsole from "./PlatformAdminConsole";
+import PlatformAdminAuthScreen from "./PlatformAdminAuthScreen";
+import { resolvePortalRoute, shopPathForSection, shopSectionFromPath } from "./portal-routing";
 import {
   ApiError, isPlatformAdminSession, acceptCustomerQuote, approveShopPrintJob, assignShopPrintJobPrinter, calculateCustomerQuote, getShopCustomerHistory, getShopCustomers, getShopReportSummary,
   confirmShopPrintOutput, dispatchShopPrintJob,
@@ -43,32 +45,72 @@ const sections: { label: Section; icon: typeof LayoutDashboard }[] = [
 ];
 
 export default function App() {
-  const [tokens, setTokens] = useState<AuthTokens | null>(() => readStoredTokens());
-  const path = window.location.pathname.replace(/\/+$/, "") || "/";
-  const stationRoute = path.match(/^\/s\/([A-Za-z0-9_-]+)$/);
-  const shopAuthRoute = path === "/shop" || path === "/login" || path === "/signup";
+  const route = resolvePortalRoute(window.location.pathname);
+  const [tokens, setTokens] = useState<AuthTokens | null>(() =>
+    route.kind === "admin" ? readStoredTokens("admin")
+      : route.kind === "shop" ? readStoredTokens("shop")
+      : null
+  );
 
-  if (stationRoute) {
-    return <CustomerEntry publicCode={stationRoute[1]} />;
+  if (route.kind === "station") {
+    return <CustomerEntry publicCode={route.publicCode} />;
   }
 
-  if (!tokens) {
-    return shopAuthRoute
-      ? <AuthScreen onAuthenticated={setTokens} />
-      : <PublicLandingPage />;
+  if (route.kind === "public") {
+    return <PublicLandingPage />;
   }
 
-  const onSignOut = async () => {
-    await storeTokens(null);
+  if (route.kind === "admin") {
+    const onAdminSignOut = async () => {
+      await storeTokens(null, "admin");
+      setTokens(null);
+    };
+    if (!tokens) return <PlatformAdminAuthScreen onAuthenticated={setTokens}/>;
+    if (!isPlatformAdminSession(tokens)) {
+      return <ScopeAccessDenied scope="platform administration" onSignOut={onAdminSignOut}/>;
+    }
+    return <PlatformAdminConsole tokens={tokens} onSignOut={onAdminSignOut}/>;
+  }
+
+  const onShopSignOut = async () => {
+    await storeTokens(null, "shop");
     setTokens(null);
   };
-  return isPlatformAdminSession(tokens)
-    ? <PlatformAdminConsole tokens={tokens} onSignOut={onSignOut}/>
-    : <ShopConsole tokens={tokens} onSignOut={onSignOut}/>;
+  if (!tokens) return <AuthScreen onAuthenticated={setTokens}/>;
+  if (isPlatformAdminSession(tokens)) {
+    return <ScopeAccessDenied scope="the shop workspace" onSignOut={onShopSignOut}/>;
+  }
+  return <ShopConsole tokens={tokens} onSignOut={onShopSignOut}/>;
+}
+
+function ScopeAccessDenied({ scope, onSignOut }: { scope: string; onSignOut: () => Promise<void> }) {
+  const [busy, setBusy] = useState(false);
+  async function signOut() {
+    setBusy(true);
+    try { await onSignOut(); } finally { setBusy(false); }
+  }
+  return (
+    <main className="auth-screen">
+      <header className="auth-topbar">
+        <div className="brand-lockup auth-brand"><div className="brand-mark"><Printer size={21}/></div><div><div className="brand-name">smart<span>print</span></div><div className="brand-caption">BY QRtoPrint</div></div></div>
+        <a className="auth-home-link" href="/">Back to website</a>
+      </header>
+      <section className="auth-card" style={{ maxWidth: 520, margin: "12vh auto" }}>
+        <div className="auth-card-heading"><div className="auth-card-icon"><ShieldCheck size={20}/></div><div><span>APPLICATION SCOPE MISMATCH</span><h2>Access not available</h2><p>This signed-in account is not authorized for {scope}.</p></div></div>
+        <button className="auth-submit" onClick={() => void signOut()} disabled={busy}>{busy ? <span className="button-spinner"/> : "Sign out and use another account"} <ArrowRight size={16}/></button>
+      </section>
+    </main>
+  );
 }
 
 function ShopConsole({ tokens, onSignOut }: { tokens: AuthTokens; onSignOut: () => Promise<void> }) {
-  const [active, setActive] = useState<Section>("Overview");
+  const [active, setActive] = useState<Section>(() => shopSectionFromPath(window.location.pathname));
+
+  useEffect(() => {
+    const syncSectionFromPath = () => setActive(shopSectionFromPath(window.location.pathname));
+    window.addEventListener("popstate", syncSectionFromPath);
+    return () => window.removeEventListener("popstate", syncSectionFromPath);
+  }, []);
   const [dark, setDark] = useState(true);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
@@ -1042,7 +1084,15 @@ function ShopConsole({ tokens, onSignOut }: { tokens: AuthTokens; onSignOut: () 
     }
   }
 
-  const navAction = (section: Section) => { setActive(section); setSidebarOpen(false); setError(""); };
+  const navAction = (section: Section) => {
+    const nextPath = shopPathForSection(section);
+    if (window.location.pathname !== nextPath) {
+      window.history.pushState({}, "", nextPath);
+    }
+    setActive(section);
+    setSidebarOpen(false);
+    setError("");
+  };
 
   if (loading && !profile) {
     return <div className={dark ? "app-shell dark boot-screen" : "app-shell light boot-screen"}><div className="boot-card"><div className="brand-mark"><QrCode size={22}/></div><div className="boot-title">Preparing your workspace</div><div className="boot-subtitle">Connecting securely to your shop…</div><div className="button-spinner boot-spinner"/></div></div>;

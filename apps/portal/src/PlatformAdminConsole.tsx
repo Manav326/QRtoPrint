@@ -7,6 +7,7 @@ import {
 import PlatformPlansSection from "./PlatformPlansSection";
 import PlatformSubscriptionsSection from "./PlatformSubscriptionsSection";
 import PlatformOperationsSection from "./PlatformOperationsSection";
+import { adminPathForSection, adminSectionFromPath } from "./portal-routing";
 import {
   getPlatformOverview, getPlatformTenants, getPlatformTenantStatusHistory, updatePlatformTenantStatus, logout,
   type AuthTokens, type PlatformOverview, type PlatformTenantsPage, type PlatformTenant
@@ -21,7 +22,13 @@ export default function PlatformAdminConsole({
   tokens: AuthTokens;
   onSignOut: () => Promise<void>;
 }) {
-  const [section, setSection] = useState<Section>("Overview");
+  const [section, setSection] = useState<Section>(() => adminSectionFromPath(window.location.pathname));
+
+  useEffect(() => {
+    const syncSectionFromPath = () => setSection(adminSectionFromPath(window.location.pathname));
+    window.addEventListener("popstate", syncSectionFromPath);
+    return () => window.removeEventListener("popstate", syncSectionFromPath);
+  }, []);
   const [dark, setDark] = useState(true);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [overview, setOverview] = useState<PlatformOverview | null>(null);
@@ -110,6 +117,10 @@ export default function PlatformAdminConsole({
   }
 
   function navigate(next: Section) {
+    const nextPath = adminPathForSection(next);
+    if (window.location.pathname !== nextPath) {
+      window.history.pushState({}, "", nextPath);
+    }
     setSection(next);
     setSidebarOpen(false);
   }
@@ -377,3 +388,4 @@ function toneForStatus(value: string): string {
 function prettyStatus(value: string): string {
   return value.replace(/[_-]+/g, " ").toLowerCase().replace(/\b\w/g, letter => letter.toUpperCase());
 }
+

@@ -1,11 +1,11 @@
 import { useState, type FormEvent } from "react";
 import { ArrowLeft, ArrowRight, Eye, EyeOff, LockKeyhole, Mail, Printer, ShieldCheck, Sparkles, Store, UserRound } from "lucide-react";
-import { registerShop, signIn, storeTokens, type AuthTokens } from "./api";
+import { isPlatformAdminSession, registerShop, signIn, storeTokens, type AuthTokens } from "./api";
 import { isDesktopApp } from "./desktop-bridge";
 
 export default function AuthScreen({ onAuthenticated }: { onAuthenticated: (tokens: AuthTokens) => void }) {
   const desktop = isDesktopApp();
-  const initialMode = window.location.pathname === "/signup" || new URLSearchParams(window.location.search).get("mode") === "register" ? "register" : "signin";
+  const initialMode = window.location.pathname.replace(/\/+$/, "") === "/signup" || new URLSearchParams(window.location.search).get("mode") === "register" ? "register" : "signin";
   const [mode, setMode] = useState<"signin" | "register">(initialMode);
   const [showPassword, setShowPassword] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -28,9 +28,12 @@ export default function AuthScreen({ onAuthenticated }: { onAuthenticated: (toke
       const tokens = mode === "register"
         ? await registerShop({ businessName, ownerName, email, password })
         : await signIn(email, password);
-      // On desktop, persist the session in Windows Credential Manager before
-      // entering the workspace. On web, storeTokens resolves immediately.
-      await storeTokens(tokens);
+      if (isPlatformAdminSession(tokens)) {
+        throw new Error("Platform administrator accounts must sign in at /admin.");
+      }
+      // On desktop, persist the shop session in Windows Credential Manager
+      // before entering the workspace. Web shop credentials have their own key.
+      await storeTokens(tokens, "shop");
       onAuthenticated(tokens);
     } catch (exception) {
       setError(exception instanceof Error ? exception.message : "Something went wrong. Please try again.");
