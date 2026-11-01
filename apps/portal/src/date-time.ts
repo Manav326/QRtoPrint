@@ -1,4 +1,4 @@
-const IST_TIME_ZONE = "Asia/Kolkata";
+export const IST_TIME_ZONE = "Asia/Kolkata";
 
 function asValidDate(value: string | Date | null | undefined): Date | null {
   if (value == null) return null;
