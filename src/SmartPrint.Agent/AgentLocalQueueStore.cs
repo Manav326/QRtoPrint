@@ -298,6 +298,62 @@ public sealed class AgentLocalQueueStore
         await Task.CompletedTask;
     }
 
+    public async Task<int> PruneRetainedEntriesAsync(
+        DateTimeOffset now,
+        TimeSpan completedRetention,
+        string pdfExportDirectory,
+        CancellationToken cancellationToken)
+    {
+        if (completedRetention <= TimeSpan.Zero)
+            throw new ArgumentOutOfRangeException(nameof(completedRetention));
+        if (string.IsNullOrWhiteSpace(pdfExportDirectory) || !Path.IsPathFullyQualified(pdfExportDirectory))
+            throw new ArgumentException("A fully qualified PDF export directory is required.", nameof(pdfExportDirectory));
+
+        var queueRootFull = Path.GetFullPath(queueRoot);
+        var queuePrefix = queueRootFull.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + Path.DirectorySeparatorChar;
+        var outputRootFull = Path.GetFullPath(pdfExportDirectory);
+        var outputPrefix = outputRootFull.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + Path.DirectorySeparatorChar;
+        var comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
+        var cutoff = now - completedRetention;
+        var removed = 0;
+
+        foreach (var entry in ReadEntries())
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            if (entry.State == "LOCAL_UPLOAD_STAGED" && entry.LeaseExpiresUtc <= now)
+            {
+                await DeleteExpiredLocalUploadAsync(entry.JobId, now, cancellationToken);
+                removed++;
+                continue;
+            }
+
+            if (entry.State is not ("OUTPUT_CONFIRMED" or "PDF_EXPORT_REPORTED") ||
+                entry.CompletedUtc is not DateTimeOffset completedUtc ||
+                completedUtc > cutoff)
+                continue;
+
+            var documentPath = Path.GetFullPath(entry.DocumentPath);
+            if (!documentPath.StartsWith(queuePrefix, comparison))
+                continue;
+
+            if (!string.IsNullOrWhiteSpace(entry.OutputFilePath))
+            {
+                var outputPath = Path.GetFullPath(entry.OutputFilePath);
+                if (!outputPath.StartsWith(outputPrefix, comparison))
+                    continue;
+                if (File.Exists(outputPath)) File.Delete(outputPath);
+            }
+
+            var manifestPath = GetManifestPath(entry.JobId);
+            if (File.Exists(documentPath)) File.Delete(documentPath);
+            if (File.Exists(manifestPath)) File.Delete(manifestPath);
+            removed++;
+        }
+
+        return removed;
+    }
+
     public async Task UpdateFromClaimAsync(AgentClaimedJob job, CancellationToken cancellationToken)
     {
         var entry = Find(job.Id)
@@ -429,10 +485,15 @@ public sealed class AgentLocalQueueStore
     public async Task MarkPdfExportReceiptReportedAsync(Guid jobId, CancellationToken ct)
     {
         var entry = Find(jobId) ?? throw new FileNotFoundException("The local PDF export manifest does not exist.");
-        if (entry.State == "PDF_EXPORT_REPORTED") return;
+        if (entry.State == "PDF_EXPORT_REPORTED")
+        {
+            if (entry.CompletedUtc is null)
+                await SaveManifestAsync(entry with { CompletedUtc = DateTimeOffset.UtcNow }, ct);
+            return;
+        }
         if (entry.State != "PDF_EXPORTED")
             throw new InvalidOperationException($"Cannot acknowledge a PDF export receipt from state {entry.State}.");
-        await SaveManifestAsync(entry with { State = "PDF_EXPORT_REPORTED" }, ct);
+        await SaveManifestAsync(entry with { State = "PDF_EXPORT_REPORTED", CompletedUtc = DateTimeOffset.UtcNow }, ct);
     }
 
     public async Task MarkPdfExportReadyToRetryAsync(Guid jobId, CancellationToken ct)
@@ -509,10 +570,20 @@ public sealed class AgentLocalQueueStore
     public async Task MarkOutputConfirmedAsync(Guid jobId, CancellationToken ct)
     {
         var entry = Find(jobId) ?? throw new FileNotFoundException("The local print job does not exist.");
-        if (entry.State == "OUTPUT_CONFIRMED") return;
+        if (entry.State == "OUTPUT_CONFIRMED")
+        {
+            if (entry.CompletedUtc is null)
+                await SaveManifestAsync(entry with { CompletedUtc = DateTimeOffset.UtcNow }, ct);
+            return;
+        }
         if (entry.State is not ("SPOOLER_ACCEPTED" or "OUTPUT_UNCONFIRMED"))
             throw new InvalidOperationException($"Cannot confirm local output from state {entry.State}.");
-        await SaveManifestAsync(entry with { State = "OUTPUT_CONFIRMED", SpoolerStatus = "SHOP_CONFIRMED_OUTPUT" }, ct);
+        await SaveManifestAsync(entry with
+        {
+            State = "OUTPUT_CONFIRMED",
+            SpoolerStatus = "SHOP_CONFIRMED_OUTPUT",
+            CompletedUtc = DateTimeOffset.UtcNow
+        }, ct);
     }
 
     public async Task UpdateSpoolerStatusAsync(Guid jobId, string status, CancellationToken ct)

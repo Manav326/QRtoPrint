@@ -869,9 +869,17 @@ function ReportsPage({ token }: { token: string }) {
                 <strong className="report-collection-amount">{formatMoney(item.amountMinor, item.currency)}</strong>
               </div>)}</div>}
           </section>
+          <section className="panel reports-panel">
+            <div className="panel-heading"><div><h2>Refunds recorded</h2><p>Refunds the shop confirmed sending during this period</p></div><span className="neutral-chip">Recorded as sent</span></div>
+            {summary.refundsRecordedByMethod.length === 0 ? <div className="reports-empty">No refunds were recorded as sent during this period.</div> :
+              <div className="report-collection-list">{summary.refundsRecordedByMethod.map(item => <div className="report-collection-row" key={`refund-${item.currency}-${item.method}`}>
+                <div><strong>{item.method === "UPI" ? "UPI refund" : "Cash refund"}</strong><small>{item.refundCount} recorded {item.refundCount === 1 ? "refund" : "refunds"}</small></div>
+                <strong className="report-collection-amount">{formatMoney(item.amountMinor, item.currency)}</strong>
+              </div>)}</div>}
+          </section>
         </div>
         {summary.outputUnconfirmedJobs > 0 && <div className="report-caution"><ShieldCheck size={16}/><span><strong>{summary.outputUnconfirmedJobs} output-unconfirmed {summary.outputUnconfirmedJobs === 1 ? "job" : "jobs"}.</strong> Check the actual pages before any manual retry. These jobs are not counted as completed.</span></div>}
-        <div className="reports-footnote">Report window: {new Date(summary.fromUtc).toLocaleString("en-IN")} – {new Date(summary.toUtc).toLocaleString("en-IN")}. Job counts use creation time; verified collections use payment verification time. Pages requested are not a claim of pages physically printed. A UPI reference is excluded until the shop verifies the receipt.</div>
+        <div className="reports-footnote">Report window: {new Date(summary.fromUtc).toLocaleString("en-IN")} – {new Date(summary.toUtc).toLocaleString("en-IN")}. Job counts use creation time, gross collections use payment verification time, and refunds use the date the shop recorded sending them. Pages requested are not a claim of pages physically printed. A UPI reference is excluded until the shop verifies the receipt.</div>
       </>}
     </section>
   );

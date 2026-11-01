@@ -67,7 +67,8 @@ public sealed record AgentLocalQueueEntry(
     string? OutputFileName = null,
     string? OutputFileSha256 = null,
     long? OutputFileSizeBytes = null,
-    IReadOnlyList<int>? RejectedPageNumbers = null);
+    IReadOnlyList<int>? RejectedPageNumbers = null,
+    DateTimeOffset? CompletedUtc = null);
 
 public sealed record AgentLocalQueueProof(Guid JobId, string Sha256, long SizeBytes);
 public sealed record AgentPrintClaimRequest(IReadOnlyList<AgentLocalQueueProof> LocalJobs);
