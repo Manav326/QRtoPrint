@@ -7,7 +7,7 @@ import {
 import QRCode from "react-qr-code";
 import AuthScreen from "./AuthScreen";
 import PublicLandingPage from "./PublicLandingPage";
-import { getReleaseAssetUrl, usePublicRelease } from "./release-metadata";
+import { getPublicDownloadPath, usePublicRelease } from "./release-metadata";
 import PlatformAdminConsole from "./PlatformAdminConsole";
 import {
   ApiError, isPlatformAdminSession, acceptCustomerQuote, approveShopPrintJob, assignShopPrintJobPrinter, calculateCustomerQuote, getShopCustomerHistory, getShopCustomers, getShopReportSummary,
@@ -1544,8 +1544,8 @@ function PrintAgentPage({agents,enrollmentCode,busy,onGenerate,onRevoke,desktop,
   onConnect:()=>void;
   onReconnectAfterRevocation:()=>void;
 }) {
-  const { release, releasesPageUrl } = usePublicRelease();
-  const windowsInstallerUrl = getReleaseAssetUrl(release, "SmartPrint-Windows-Setup.exe");
+  const { release, state: releaseState } = usePublicRelease();
+  const windowsInstallerUrl = release?.windowsAvailable ? getPublicDownloadPath("windows") : null;
   const connected = Boolean(localAgentStatus?.paired && agents.some(agent =>
     !agent.revokedUtc && agent.id === localAgentStatus.agentDeviceId
   ));
@@ -1601,10 +1601,8 @@ function PrintAgentPage({agents,enrollmentCode,busy,onGenerate,onRevoke,desktop,
       <div className="agent-command-panel">
         <div><span>GUIDED WINDOWS INSTALLER</span><strong>Download and run SmartPrint Windows Setup on the shop computer.</strong><small>Run setup as administrator, enter the one-time pairing code in its wizard, and let it install and start the background service.</small></div>
         {windowsInstallerUrl
-          ? <a className="secondary-button" href={windowsInstallerUrl} rel="noopener noreferrer"><Monitor size={14}/> Download Windows installer</a>
-          : releasesPageUrl
-            ? <a className="secondary-button" href={releasesPageUrl} rel="noopener noreferrer"><Monitor size={14}/> View available releases</a>
-            : <span className="subtle-button" aria-disabled="true">Windows installer not published</span>}
+          ? <a className="secondary-button" href={windowsInstallerUrl}><Monitor size={14}/> Download Windows installer</a>
+          : <span className="subtle-button" aria-disabled="true">{releaseState === "loading" ? "Checking installer availability…" : releaseState === "error" ? "Installer availability temporarily unavailable" : "Windows installer not published"}</span>}
       </div>
       <div className="agent-security-note"><ShieldCheck size={16}/><span>The pairing code expires after 10 minutes. The agent secret is returned only once and stored on the Windows machine using DPAPI LocalMachine encryption. Revoke a computer here if it is replaced or lost.</span></div>
       <div className="agent-generate-row"><span>Pairing codes are single use. Generating a new one does not revoke already paired computers.</span><button className="primary-button" disabled={busy} onClick={onGenerate}>{busy?<span className="button-spinner"/>:<><Plus size={15}/> Generate pairing code</>}</button></div>
