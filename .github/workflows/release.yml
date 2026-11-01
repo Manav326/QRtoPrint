@@ -1,0 +1,135 @@
+name: Release SmartPrint
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+env:
+  SMARTPRINT_PUBLIC_BASE_URL: ${{ vars.SMARTPRINT_PUBLIC_BASE_URL || 'https://qr-test.paintpulp.com' }}
+
+jobs:
+  windows-setup:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+      - name: Publish self-contained Windows Agent
+        shell: pwsh
+        run: |
+          dotnet publish src/SmartPrint.Agent/SmartPrint.Agent.csproj --configuration Release --runtime win-x64 --self-contained true --output artifacts/agent
+          if ($LASTEXITCODE -ne 0) { throw "Windows Agent publish failed." }
+          Copy-Item scripts/install-agent-service.ps1, scripts/uninstall-agent-service.ps1 artifacts/agent/
+      - name: Build guided Windows setup
+        shell: pwsh
+        run: |
+          choco install innosetup --no-progress -y
+          New-Item -ItemType Directory -Force -Path artifacts/agent-installer | Out-Null
+          $iscc = "C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
+          & $iscc "/DSmartPrintPublicUrl=$env:SMARTPRINT_PUBLIC_BASE_URL" "/DSmartPrintVersion=$env:GITHUB_REF_NAME" scripts/build-windows-installer.iss
+          if ($LASTEXITCODE -ne 0) { throw "SmartPrint Windows installer compilation failed." }
+      - name: Upload Windows installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: smartprint-windows-release
+          path: artifacts/agent-installer/SmartPrint-Windows-Setup.exe
+          if-no-files-found: error
+          retention-days: 5
+
+  android-release:
+    runs-on: ubuntu-latest
+    env:
+      ANDROID_SIGNING_KEYSTORE_BASE64: ${{ secrets.ANDROID_SIGNING_KEYSTORE_BASE64 }}
+      ANDROID_SIGNING_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_SIGNING_KEYSTORE_PASSWORD }}
+      ANDROID_SIGNING_KEY_ALIAS: ${{ secrets.ANDROID_SIGNING_KEY_ALIAS }}
+      ANDROID_SIGNING_KEY_PASSWORD: ${{ secrets.ANDROID_SIGNING_KEY_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate Android release signing secrets
+        shell: bash
+        run: |
+          set -euo pipefail
+          for name in ANDROID_SIGNING_KEYSTORE_BASE64 ANDROID_SIGNING_KEYSTORE_PASSWORD ANDROID_SIGNING_KEY_ALIAS ANDROID_SIGNING_KEY_PASSWORD; do
+            if [ -z "${!name}" ]; then
+              echo "::error::Missing GitHub Actions secret: $name. Configure the SmartPrint Android release keystore before creating a release tag."
+              exit 1
+            fi
+          done
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.13"
+      - uses: android-actions/setup-android@v4
+        with:
+          packages: "platform-tools"
+      - name: Install Android SDK build tools
+        run: sdkmanager "platforms;android-36" "build-tools;36.0.0"
+      - name: Prepare release keystore
+        shell: bash
+        run: |
+          set -euo pipefail
+          key_file="$RUNNER_TEMP/smartprint-release.jks"
+          printf '%s' "$ANDROID_SIGNING_KEYSTORE_BASE64" | base64 --decode > "$key_file"
+          test -s "$key_file"
+          echo "ANDROID_SIGNING_KEYSTORE_FILE=$key_file" >> "$GITHUB_ENV"
+      - name: Build signed Android release APK
+        shell: bash
+        run: |
+          set -euo pipefail
+          gradle --no-daemon -p apps/android \
+            -PsmartPrintServiceUrl="$SMARTPRINT_PUBLIC_BASE_URL" \
+            -PsmartPrintVersionCode="$GITHUB_RUN_NUMBER" \
+            -PsmartPrintVersionName="$GITHUB_REF_NAME" \
+            :app:testDebugUnitTest :app:assembleRelease
+          mkdir -p artifacts/android
+          cp apps/android/app/build/outputs/apk/release/app-release.apk artifacts/android/SmartPrint-Android.apk
+          apksigner_path="$(find "$ANDROID_HOME/build-tools" -name apksigner -type f | sort | tail -n 1)"
+          test -n "$apksigner_path"
+          "$apksigner_path" verify --verbose artifacts/android/SmartPrint-Android.apk
+      - name: Upload Android release APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: smartprint-android-release
+          path: artifacts/android/SmartPrint-Android.apk
+          if-no-files-found: error
+          retention-days: 5
+
+  publish-release:
+    runs-on: ubuntu-latest
+    needs:
+      - windows-setup
+      - android-release
+    steps:
+      - name: Download Windows installer
+        uses: actions/download-artifact@v4
+        with:
+          name: smartprint-windows-release
+          path: artifacts
+      - name: Download Android APK
+        uses: actions/download-artifact@v4
+        with:
+          name: smartprint-android-release
+          path: artifacts
+      - name: Generate SHA-256 checksums
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd artifacts
+          sha256sum SmartPrint-Windows-Setup.exe SmartPrint-Android.apk > SHA256SUMS.txt
+      - name: Publish versioned SmartPrint release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: SmartPrint ${{ github.ref_name }}
+          generate_release_notes: true
+          make_latest: true
+          files: |
+            artifacts/SmartPrint-Windows-Setup.exe
+            artifacts/SmartPrint-Android.apk
+            artifacts/SHA256SUMS.txt
