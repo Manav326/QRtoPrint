@@ -2212,7 +2212,6 @@ function CustomerEntry({publicCode}:{publicCode:string}) {
     const stationKey=`qrtoprint.customer-session:${publicCode}`;
     const restore=async()=>{
       const storedToken=sessionStorage.getItem(stationKey) ||
-        sessionStorage.getItem("qrtoprint.customer-session") ||
         await getNativeCustomerPrintSession(publicCode);
       let existing:Awaited<ReturnType<typeof createCustomerSession>>|null=null;
       if(storedToken){
@@ -2227,13 +2226,13 @@ function CustomerEntry({publicCode}:{publicCode:string}) {
         }
       }
       const value=existing??await createCustomerSession(publicCode);
+      // Wait for native encrypted persistence before presenting the connected session.
+      // In a regular browser the bridge is absent and this safely becomes a no-op.
+      await saveNativeCustomerPrintSession(publicCode,value.sessionToken);
       if(!mounted)return;
       setResult(value);
       sessionStorage.setItem(stationKey,value.sessionToken);
       sessionStorage.removeItem("qrtoprint.customer-session");
-      // The native app encrypts this capability with Android Keystore. In a browser
-      // the call is a no-op and the normal browser session remains supported.
-      void saveNativeCustomerPrintSession(publicCode,value.sessionToken);
     };
     void restore().catch(exception=>{
       if(mounted)setError(exception instanceof Error?exception.message:"This QR station is unavailable.");
