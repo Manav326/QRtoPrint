@@ -1027,11 +1027,13 @@ export function getShopJobEvents(token: string, jobId: string) {
   return apiRequest<ShopJobEvent[]>(`/api/v1/shop/print-jobs/${jobId}/events`, {}, token);
 }
 
-export function getShopPrintJobsPage(token: string, offset: number, take = 100) {
+export function getShopPrintJobsPage(token: string, offset: number, take = 100, search = "") {
   const safeOffset = Math.max(0, Math.floor(offset));
   const safeTake = Math.max(1, Math.min(100, Math.floor(take)));
+  const query = new URLSearchParams({ offset: String(safeOffset), take: String(safeTake) });
+  if (search.trim()) query.set("search", search.trim());
   return apiRequest<ShopPrintJob[]>(
-    `/api/v1/shop/print-jobs?offset=${safeOffset}&take=${safeTake}`,
+    `/api/v1/shop/print-jobs?${query.toString()}`,
     {},
     token
   );
