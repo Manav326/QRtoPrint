@@ -3,6 +3,7 @@ import {
   LockKeyhole, Monitor, Printer, QrCode, ShieldCheck, Smartphone, Store, Wifi
 } from "lucide-react";
 import { getPublicDownloadPath, usePublicRelease } from "./release-metadata";
+import { useFileDownload, type FileDownloadState } from "./download-manager";
 import "./public-landing.css";
 
 export default function PublicLandingPage() {
@@ -148,11 +149,7 @@ export default function PublicLandingPage() {
                 </span>
               </div>
               <h3>SmartPrint for Windows</h3><p>Install the shop Agent on the computer connected to your printers. The guided setup will help connect it to your shop workspace.</p>
-              {windowsDownloadUrl
-                ? <a className="sp-download-link-button sp-download-button" href={windowsDownloadUrl}>Download Windows installer <ArrowRight size={16}/></a>
-                : releaseState === "error"
-                  ? <button className="sp-download-unavailable sp-download-button" type="button" onClick={() => void refresh()}>Retry download availability</button>
-                  : <span className="sp-download-unavailable sp-download-button" aria-disabled="true">{releaseState === "loading" ? "Checking download availability…" : "Windows installer not published"}</span>}
+              <DownloadAction platform="windows" label="Download Windows installer" available={Boolean(windowsDownloadUrl)} releaseState={releaseState} onRefresh={refresh}/>
               <small className="sp-download-note">Windows x64 · Guided installation · Official stable release</small>
               <p className="sp-download-security-note">The interim Windows beta installer is unsigned. Windows may show an Unknown Publisher or SmartScreen prompt; some managed devices may block unsigned installers.</p>
             </article>
@@ -165,11 +162,7 @@ export default function PublicLandingPage() {
                 </span>
               </div>
               <h3>SmartPrint for Android</h3><p>Scan shop QR codes, organise documents in your library and send files through the connected SmartPrint customer journey.</p>
-              {androidDownloadUrl
-                ? <a className="sp-download-link-button sp-download-button" href={androidDownloadUrl}>Download signed Android APK <ArrowRight size={16}/></a>
-                : releaseState === "error"
-                  ? <button className="sp-download-unavailable sp-download-button" type="button" onClick={() => void refresh()}>Retry download availability</button>
-                  : <span className="sp-download-unavailable sp-download-button" aria-disabled="true">{releaseState === "loading" ? "Checking download availability…" : "Signed APK not published"}</span>}
+              <DownloadAction platform="android" label="Download signed Android APK" available={Boolean(androidDownloadUrl)} releaseState={releaseState} onRefresh={refresh}/>
               <small className="sp-download-note">Android 8.0 or later · Production-signed APK</small>
               <p className="sp-release-pending">{androidDownloadUrl
                 ? `Latest stable release: ${release?.version ?? "published"}.`
@@ -195,3 +188,89 @@ export default function PublicLandingPage() {
   );
 }
 
+
+
+type DownloadPlatform = "windows" | "android";
+
+function formatDownloadBytes(value: number): string {
+  if (!Number.isFinite(value) || value <= 0) return "0 B";
+  if (value < 1000) return `${Math.floor(value)} B`;
+  const units = ["KB", "MB", "GB"];
+  let size = value / 1000;
+  let index = 0;
+  while (size >= 1000 && index < units.length - 1) {
+    size /= 1000;
+    index += 1;
+  }
+  return `${size.toFixed(size >= 10 ? 1 : 2)} ${units[index]}`;
+}
+
+function DownloadAction({
+  platform,
+  label,
+  available,
+  releaseState,
+  onRefresh
+}: {
+  platform: DownloadPlatform;
+  label: string;
+  available: boolean;
+  releaseState: "loading" | "ready" | "error";
+  onRefresh: () => Promise<void>;
+}) {
+  const fileName = platform === "windows" ? "SmartPrint-Windows-Setup.exe" : "SmartPrint-Android.apk";
+  const { download, start, cancel } = useFileDownload(fileName);
+  const percent = download.totalBytes && download.totalBytes > 0
+    ? Math.min(100, Math.floor((download.bytesReceived / download.totalBytes) * 100))
+    : null;
+
+  if (!available) {
+    if (releaseState === "error") {
+      return <button className="sp-download-unavailable sp-download-button" type="button" onClick={() => void onRefresh()}>Retry download availability</button>;
+    }
+    return <span className="sp-download-unavailable sp-download-button" aria-disabled="true">{releaseState === "loading" ? "Checking download availability…" : platform === "windows" ? "Windows installer not published" : "Signed APK not published"}</span>;
+  }
+
+  if (download.status === "downloading") {
+    return (
+      <div className="sp-download-progress" role="group" aria-label={`${label} progress`}>
+        <div className="sp-download-progress-heading">
+          <span><span className="sp-download-live-dot"/> Downloading</span>
+          <strong>{percent === null ? "In progress" : `${percent}%`}</strong>
+        </div>
+        <div className="sp-download-progress-track" role="progressbar" aria-label={`${fileName} download progress`} aria-valuemin={0} aria-valuemax={100} aria-valuenow={percent ?? undefined}>
+          <span className={percent === null ? "sp-download-progress-fill sp-download-progress-indeterminate" : "sp-download-progress-fill"} style={percent === null ? undefined : { width: `${percent}%` }}/>
+        </div>
+        <div className="sp-download-progress-details">
+          <span>{formatDownloadBytes(download.bytesReceived)} downloaded</span>
+          <span>{download.totalBytes ? `of ${formatDownloadBytes(download.totalBytes)}` : "Total size unavailable"}</span>
+        </div>
+        <button className="sp-download-cancel" type="button" onClick={cancel}><X size={14}/> Cancel download</button>
+      </div>
+    );
+  }
+
+  if (download.status === "complete") {
+    return (
+      <div className="sp-download-result sp-download-result-success" role="status">
+        <div><Check size={15}/><span>Download complete</span><strong>{formatDownloadBytes(download.bytesReceived)}</strong></div>
+        <button type="button" onClick={() => void start(getPublicDownloadPath(platform))}><Download size={14}/> Download again</button>
+      </div>
+    );
+  }
+
+  if (download.status === "error" || download.status === "cancelled") {
+    return (
+      <div className={download.status === "error" ? "sp-download-result sp-download-result-error" : "sp-download-result"}>
+        <p role="status">{download.status === "cancelled" ? "Download cancelled." : download.errorMessage ?? "The download could not be completed."}</p>
+        <button type="button" onClick={() => void start(getPublicDownloadPath(platform))}><RotateCcw size={14}/> {download.status === "cancelled" ? "Try again" : "Retry download"}</button>
+      </div>
+    );
+  }
+
+  return (
+    <button className="sp-download-link-button sp-download-button" type="button" onClick={() => void start(getPublicDownloadPath(platform))}>
+      <Download size={16}/> {label}
+    </button>
+  );
+}
