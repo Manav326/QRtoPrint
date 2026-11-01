@@ -23,6 +23,14 @@ export function applyThemePreference(dark: boolean): void {
   const theme = dark ? "dark" : "light";
   document.documentElement.dataset.theme = theme;
   document.documentElement.style.colorScheme = theme;
+  // Tauri/WebView Android installs this optional bridge only on the trusted origin.
+  // Browsers simply continue using the same localStorage preference.
+  try {
+    const nativeBridge = (window as Window & { SmartPrintNative?: { postMessage: (message: string) => void } }).SmartPrintNative;
+    nativeBridge?.postMessage(`setTheme|${theme}`);
+  } catch {
+    // The native bridge is optional and never blocks a browser theme change.
+  }
 }
 export function saveDarkModePreference(dark: boolean): void {
   writePreference(DARK_MODE_KEY, dark ? "dark" : "light");
