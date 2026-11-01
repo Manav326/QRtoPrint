@@ -88,7 +88,7 @@ class SmartPrintDocumentViewer(
         visibility = View.GONE
     }
     private val thumbnailRow = LinearLayout(context).apply {
-        orientation = HORIZONTAL
+        orientation = LinearLayout.HORIZONTAL
         gravity = Gravity.CENTER_VERTICAL
     }
 
@@ -102,13 +102,13 @@ class SmartPrintDocumentViewer(
     private val isPdf = startFile.extension.equals("pdf", ignoreCase = true)
 
     init {
-        orientation = VERTICAL
+        orientation = LinearLayout.VERTICAL
         setBackgroundColor(getColor(R.color.qp_surface))
         clipToPadding = false
 
         if (isPdf) {
             val pageControls = LinearLayout(context).apply {
-                orientation = HORIZONTAL
+                orientation = LinearLayout.HORIZONTAL
                 gravity = Gravity.CENTER_VERTICAL
                 setPadding(dp(8), 0, dp(8), 0)
             }
@@ -388,7 +388,7 @@ class SmartPrintDocumentViewer(
         filmstrip.visibility = View.VISIBLE
         thumbnails.forEach { thumbnail ->
             val frame = LinearLayout(context).apply {
-                orientation = VERTICAL
+                orientation = LinearLayout.VERTICAL
                 gravity = Gravity.CENTER
                 setPadding(dp(4), dp(3), dp(4), dp(3))
                 contentDescription = if (isPdf) {
