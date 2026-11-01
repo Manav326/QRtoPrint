@@ -3486,11 +3486,12 @@ agentApi.MapGet("/local-uploads/{jobId:guid}/status", async (
     {
         var job = await db.PrintJobs.AsNoTracking()
             .Where(item => item.TenantId == device.TenantId && item.Id == jobId)
-            .Select(item => new { item.Status, item.UpdatedUtc, item.OutputConfirmedUtc })
+            .Select(item => new { item.Status, item.UpdatedUtc, item.OutputConfirmedUtc, item.OutputCompletedUtc })
             .SingleOrDefaultAsync(ct);
         if (job is not null &&
             (job.Status is "REJECTED" or "PAYMENT_REJECTED" or "QUOTE_EXPIRED" or "REFUNDED") &&
-            job.OutputConfirmedUtc == null)
+            job.OutputConfirmedUtc == null &&
+            job.OutputCompletedUtc == null)
         {
             var hasFinancialHold = await db.PrintPayments.AsNoTracking().AnyAsync(payment =>
                 payment.TenantId == device.TenantId && payment.PrintJobId == jobId &&
