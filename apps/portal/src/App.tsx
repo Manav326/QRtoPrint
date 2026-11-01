@@ -357,6 +357,7 @@ function ShopConsole({ tokens, onSignOut }: { tokens: AuthTokens; onSignOut: () 
       setLocalAgentStatus({
         serviceReachable: true,
         localApiReachable: postEnrollmentStatus.localApiReachable,
+        apiBaseUrl: postEnrollmentStatus.apiBaseUrl,
         paired: true,
         agentDeviceId: enrolled.agentDeviceId,
         status: "CONNECTED"
