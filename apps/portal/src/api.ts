@@ -219,13 +219,15 @@ async function fetchApiResponse(path: string, options: RequestInit): Promise<Res
   try {
     return await fetch(`${requestBase}${path}`, options);
   } catch {
-    // A read-only request can safely follow a centrally updated tunnel/API
-    // origin. Never replay writes: the server may have committed them before
-    // the network connection was lost.
+    // Refresh the destination after any desktop network failure so the next
+    // explicit owner action uses the current URL. Only reads are safe to replay:
+    // the server may have committed a write before its response was lost.
     const canRetry = ["GET", "HEAD", "OPTIONS"].includes(method);
-    if (isDesktopApp() && canRetry) {
+    let destinationChanged = false;
+    if (isDesktopApp()) {
       await refreshDesktopApiBaseUrl(true);
-      if (apiBase !== requestBase) {
+      destinationChanged = apiBase !== requestBase;
+      if (canRetry && destinationChanged) {
         try {
           return await fetch(`${apiBase}${path}`, options);
         } catch {
@@ -234,10 +236,10 @@ async function fetchApiResponse(path: string, options: RequestInit): Promise<Res
       }
     }
 
-    throw new ApiError(
-      `Unable to reach Smart Print API at ${apiBase}. Check that the network is available.`,
-      0
-    );
+    const message = !canRetry
+      ? "The connection was lost before SmartPrint could confirm this action. Check the latest job or order status before trying again."
+      : `Unable to reach Smart Print API at ${apiBase}. Check that the network is available.`;
+    throw new ApiError(message, 0);
   }
 }
 
