@@ -439,14 +439,14 @@ export function getShopSubscription(token: string) {
   return apiRequest<ShopSubscriptionSummary>("/api/v1/shop/subscription", {}, token);
 }
 
-export async function loadShopData(token: string) {
+export async function loadShopData(token: string, queueSearch = "") {
   const [profile, printers, stations, pricing, printJobs, agentDevices, paymentSettings, payments, refunds, subscription] = await Promise.all([
     apiRequest<ShopProfile>("/api/v1/shop/profile", {}, token),
-    apiRequest<PrinterDevice[]>("/api/v1/shop/printers", {}, token),
+    getShopPrinters(token),
     apiRequest<QrStation[]>("/api/v1/shop/qr-stations", {}, token),
     apiRequest<ShopPricingProfile>("/api/v1/shop/pricing", {}, token),
-    apiRequest<ShopPrintJob[]>("/api/v1/shop/print-jobs", {}, token),
-    apiRequest<AgentDevice[]>("/api/v1/shop/agent-devices", {}, token),
+    getShopPrintJobsPage(token, 0, 100, queueSearch),
+    getShopAgentDevices(token),
     apiRequest<ShopPaymentSettings>("/api/v1/shop/payment-settings", {}, token),
     apiRequest<ShopPayment[]>("/api/v1/shop/payments", {}, token),
     apiRequest<ShopRefund[]>("/api/v1/shop/refunds", {}, token),
@@ -693,6 +693,7 @@ export interface ShopPrintJob {
   printerDeviceId?: string | null;
   printerName?: string | null;
   queueName?: string | null;
+  printerStatus?: string | null;
   claimedByAgentDeviceId?: string | null;
   agentLeaseExpiresUtc?: string | null;
   localQueueReceivedUtc?: string | null;
@@ -1023,8 +1024,28 @@ export function confirmShopPrintOutput(token: string, jobId: string) {
     `/api/v1/shop/print-jobs/${jobId}/confirm-output`, { method: "POST" }, token);
 }
 
+export function getShopPrinters(token: string) {
+  return apiRequest<PrinterDevice[]>("/api/v1/shop/printers", {}, token);
+}
+
+export function getShopAgentDevices(token: string) {
+  return apiRequest<AgentDevice[]>("/api/v1/shop/agent-devices", {}, token);
+}
+
 export function getShopJobEvents(token: string, jobId: string) {
   return apiRequest<ShopJobEvent[]>(`/api/v1/shop/print-jobs/${jobId}/events`, {}, token);
+}
+
+export function getShopPrintJobsPage(token: string, offset: number, take = 100, search = "") {
+  const safeOffset = Math.max(0, Math.floor(offset));
+  const safeTake = Math.max(1, Math.min(100, Math.floor(take)));
+  const query = new URLSearchParams({ offset: String(safeOffset), take: String(safeTake) });
+  if (search.trim()) query.set("search", search.trim());
+  return apiRequest<ShopPrintJob[]>(
+    `/api/v1/shop/print-jobs?${query.toString()}`,
+    {},
+    token
+  );
 }
 
 export function approveShopPrintJob(token: string, jobId: string) {

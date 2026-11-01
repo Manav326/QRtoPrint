@@ -12,19 +12,22 @@ Pair the Agent with the same PUBLIC_BASE_URL. After an authenticated heartbeat, 
 
 ## Pair and install
 
-1. In the shop workspace, open Print Agent and generate a one-time pairing code. It expires after 10 minutes.
-2. Build or extract the SmartPrint.Agent Windows release on the shop computer.
-3. Open PowerShell as Administrator and pair the computer:
+### Shop-owner setup (recommended)
 
-   .\scripts\pair-agent.ps1 -ApiBaseUrl "https://YOUR_PUBLIC_BASE_URL" -AgentExePath ".\SmartPrint.Agent.exe"
-
-4. Install and start the Windows Service using the same canonical customer portal HTTPS origin:
-
-   .\scripts\install-agent-service.ps1 -AgentExePath ".\SmartPrint.Agent.exe" -CustomerPortalOrigin "https://YOUR_PUBLIC_BASE_URL"
+1. In the shop workspace, open **Print Agent** and generate a one-time pairing code. It expires after 10 minutes.
+2. On the Windows 10/11 computer connected to the shop printers, download and run the official **SmartPrint Windows Setup** installer from the QRtoPrint Downloads page or the latest GitHub release.
+3. Approve the Windows administrator prompt. In the setup wizard, enter the pairing code from the shop workspace. The wizard pairs the computer, installs the Windows Service, configures its local endpoint and starts the service.
+4. Return to **Print Agent** in the shop workspace. Wait for the computer heartbeat and discovered printer queues; do not treat installation alone as proof that a printer is ready.
 
 The installer enables the local status and direct-upload endpoint and opens TCP 17842 through Windows Firewall on Private network profiles only. The authenticated heartbeat keeps the runtime browser CORS origin aligned with PUBLIC_BASE_URL.
 
-5. Return to the Print Agent screen in the shop workspace. The computer should report its next heartbeat and installed printer queues.
+### Advanced / developer setup
+
+For a release ZIP or manual recovery, an administrator can pair and install from elevated PowerShell with the scripts in the package:
+
+   .\scripts\pair-agent.ps1 -ApiBaseUrl "https://YOUR_PUBLIC_BASE_URL" -AgentExePath ".\SmartPrint.Agent.exe"
+
+   .\scripts\install-agent-service.ps1 -AgentExePath ".\SmartPrint.Agent.exe" -CustomerPortalOrigin "https://YOUR_PUBLIC_BASE_URL"
 
 To remove the Windows Service, run scripts\uninstall-agent-service.ps1 from an elevated PowerShell. This leaves the encrypted machine identity intact; revoke the agent in the shop workspace before disposing of or replacing the computer.
 
