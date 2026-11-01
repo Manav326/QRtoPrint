@@ -12,7 +12,7 @@ import {
   ApiError, isPlatformAdminSession, acceptCustomerQuote, approveShopPrintJob, assignShopPrintJobPrinter, calculateCustomerQuote, getShopCustomerHistory, getShopCustomers, getShopReportSummary,
   confirmShopPrintOutput, dispatchShopPrintJob,
   createAgentEnrollmentCode, createCustomerSession, createPrinter, createStation,
-  downloadShopDocument, getCustomerJobStatus, getShopJobEvents, getShopPrinters, getShopPrintJobsPage, loadShopData,
+  downloadShopDocument, getCustomerJobStatus, getShopAgentDevices, getShopJobEvents, getShopPrinters, getShopPrintJobsPage, loadShopData,
   logout, readStoredTokens, rejectShopPrintJob, rejectShopPayment, revokeAgentDevice,
   reportCustomerUpiPayment, renewCustomerPrintSession, resumeCustomerSession, rotateStationCode, startCustomerPayment, storeTokens,
   updatePrinterActive, updateShopPaymentSettings, updateShopPricing,
@@ -87,6 +87,7 @@ function ShopConsole({ tokens, onSignOut }: { tokens: AuthTokens; onSignOut: () 
   const [payments, setPayments] = useState<ShopPayment[]>([]);
   const [refunds, setRefunds] = useState<ShopRefund[]>([]);
   const [subscription, setSubscription] = useState<ShopSubscriptionSummary | null>(null);
+  const [apiConnectionState, setApiConnectionState] = useState<"checking" | "connected" | "degraded" | "offline">("checking");
   const [enrollmentCode, setEnrollmentCode] = useState<{ code: string; expiresUtc: string } | null>(null);
   const [agentBusy, setAgentBusy] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -108,6 +109,7 @@ function ShopConsole({ tokens, onSignOut }: { tokens: AuthTokens; onSignOut: () 
     queueSearchGeneration.current++;
     queuePageGeneration.current++;
     reloadInFlight.current = true;
+    setApiConnectionState("checking");
     setLoading(true);
     setError("");
     try {
@@ -125,7 +127,10 @@ function ShopConsole({ tokens, onSignOut }: { tokens: AuthTokens; onSignOut: () 
       setPayments(snapshot.payments);
       setRefunds(snapshot.refunds);
       setSubscription(snapshot.subscription);
+      setApiConnectionState("connected");
     } catch (exception) {
+      const status = exception instanceof ApiError ? exception.status : 0;
+      setApiConnectionState(status === 0 ? "offline" : status >= 500 ? "degraded" : "connected");
       if (exception instanceof ApiError && exception.status === 401) {
         storeTokens(null);
         onSignOut();
@@ -140,11 +145,14 @@ function ShopConsole({ tokens, onSignOut }: { tokens: AuthTokens; onSignOut: () 
 
   async function refreshPrintQueue() {
     try {
-      const [latest, latestPrinters] = await Promise.all([
+      const [latest, latestPrinters, latestAgents] = await Promise.all([
         getShopPrintJobsPage(tokens.accessToken, 0, 100, queueSearch),
-        getShopPrinters(tokens.accessToken)
+        getShopPrinters(tokens.accessToken),
+        getShopAgentDevices(tokens.accessToken)
       ]);
+      setApiConnectionState("connected");
       setPrinters(latestPrinters);
+      setAgentDevices(latestAgents);
       const latestIds = new Set(latest.map(job => job.id));
       const firstPageMembershipChanged = latest.length !== queueFirstPageIds.current.size ||
         latest.some(job => !queueFirstPageIds.current.has(job.id));
@@ -167,6 +175,8 @@ function ShopConsole({ tokens, onSignOut }: { tokens: AuthTokens; onSignOut: () 
       });
       setHasMoreQueueJobs(latest.length === 100 || printJobs.length > latest.length);
     } catch (exception) {
+      const status = exception instanceof ApiError ? exception.status : 0;
+      setApiConnectionState(status === 0 ? "offline" : status >= 500 ? "degraded" : "connected");
       setError(exception instanceof Error ? exception.message : "Could not refresh the print queue.");
     }
   }
@@ -254,6 +264,14 @@ function ShopConsole({ tokens, onSignOut }: { tokens: AuthTokens; onSignOut: () 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tokens.accessToken]);
 
+  const onlineAgentCount = agentDevices.filter(agent =>
+    !agent.revokedUtc && agent.status === "Online" && !!agent.lastSeenUtc &&
+    Date.parse(agent.lastSeenUtc) > Date.now() - 2 * 60 * 1000
+  ).length;
+  const usablePrinterCount = printers.filter(printer =>
+    printer.isActive && (printer.status === "Ready" || printer.status === "Busy" || printer.outputMode === "PDF_EXPORT")
+  ).length;
+  const offlinePrinterCount = printers.filter(printer => printer.isActive && printer.status === "Offline").length;
   const today = new Intl.DateTimeFormat("en-IN", { weekday: "long", day: "numeric", month: "long" }).format(new Date());
 
   async function signOut() {
@@ -665,6 +683,11 @@ function ShopConsole({ tokens, onSignOut }: { tokens: AuthTokens; onSignOut: () 
           </div>
           <div className="topbar-actions">
             <button className="icon-button theme-button" aria-label={dark ? "Switch to light theme" : "Switch to dark theme"} onClick={() => setDark(!dark)}>{dark ? <Sun size={18}/> : <Moon size={18}/>}</button>
+            <div className="service-status-row" aria-label="Live shop system status">
+              <span className={"service-status "+apiConnectionState} title="API connection"><i/>API {apiConnectionState === "connected" ? "Connected" : apiConnectionState === "degraded" ? "Degraded" : apiConnectionState === "offline" ? "Offline" : "Checking"}</span>
+              <span className={"service-status "+(onlineAgentCount > 0 ? "connected" : "offline")} title="Windows Agent heartbeat"><i/>Agent {onlineAgentCount > 0 ? onlineAgentCount+" online" : agentDevices.length > 0 ? "Offline" : "Not paired"}</span>
+              <span className={"service-status "+(usablePrinterCount > 0 ? "connected" : offlinePrinterCount > 0 ? "offline" : "checking")} title="Active printer availability"><i/>Printers {usablePrinterCount > 0 ? usablePrinterCount+" available" : offlinePrinterCount > 0 ? offlinePrinterCount+" offline" : "Unavailable"}</span>
+            </div>
             <div className="topbar-divider"/>
             <span className="topbar-product-tag"><span className="mode-indicator"/> Shop console</span>
           </div>
