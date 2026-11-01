@@ -71,6 +71,20 @@ jobs:
           path: artifacts/agent/
           if-no-files-found: error
           retention-days: 30
+      - name: Build guided Windows setup
+        shell: pwsh
+        run: |
+          choco install innosetup --no-progress -y
+          New-Item -ItemType Directory -Force -Path artifacts/agent-installer | Out-Null
+          & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" /DSmartPrintPublicUrl="https://qr-test.paintpulp.com" scripts/build-windows-installer.iss
+          if ($LASTEXITCODE -ne 0) { throw "Inno Setup compilation failed." }
+      - name: Upload customer Windows installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: qrtoprint-windows-setup
+          path: artifacts/agent-installer/SmartPrint-Windows-Setup.exe
+          if-no-files-found: error
+          retention-days: 30
 
   android:
     runs-on: ubuntu-latest
