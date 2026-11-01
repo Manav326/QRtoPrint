@@ -93,19 +93,19 @@ builder.Services.AddHostedService<DocumentRetentionWorker>();
 builder.Services.AddRateLimiter(options =>
 {
     options.AddPolicy("authentication", context =>
-        RateLimitPartition.GetFixedWindowLimiter(GetRateLimitPartitionKey(context.HttpContext),
+        RateLimitPartition.GetFixedWindowLimiter(GetRateLimitPartitionKey(context),
             _ => new FixedWindowRateLimiterOptions { PermitLimit = 20, Window = TimeSpan.FromMinutes(1), QueueLimit = 0 }));
     options.AddPolicy("public-api", context =>
-        RateLimitPartition.GetFixedWindowLimiter(GetRateLimitPartitionKey(context.HttpContext),
+        RateLimitPartition.GetFixedWindowLimiter(GetRateLimitPartitionKey(context),
             _ => new FixedWindowRateLimiterOptions { PermitLimit = 120, Window = TimeSpan.FromMinutes(1), QueueLimit = 0 }));
     options.AddPolicy("agent-api", context =>
-        RateLimitPartition.GetFixedWindowLimiter(GetAgentRateLimitPartitionKey(context.HttpContext),
+        RateLimitPartition.GetFixedWindowLimiter(GetAgentRateLimitPartitionKey(context),
             _ => new FixedWindowRateLimiterOptions { PermitLimit = 30, Window = TimeSpan.FromMinutes(1), QueueLimit = 0 }));
     options.AddPolicy("qr-session", context =>
-        RateLimitPartition.GetFixedWindowLimiter(GetRateLimitPartitionKey(context.HttpContext),
+        RateLimitPartition.GetFixedWindowLimiter(GetRateLimitPartitionKey(context),
             _ => new FixedWindowRateLimiterOptions { PermitLimit = 30, Window = TimeSpan.FromMinutes(1), QueueLimit = 0 }));
     options.AddPolicy("document-upload", context =>
-        RateLimitPartition.GetFixedWindowLimiter(GetSessionRateLimitPartitionKey(context.HttpContext),
+        RateLimitPartition.GetFixedWindowLimiter(GetSessionRateLimitPartitionKey(context),
             _ => new FixedWindowRateLimiterOptions { PermitLimit = 8, Window = TimeSpan.FromMinutes(1), QueueLimit = 0 }));
 });
 var configuredCorsOrigins = builder.Configuration.GetSection("Cors:AllowedOrigins")
