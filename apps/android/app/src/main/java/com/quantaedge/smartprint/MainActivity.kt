@@ -833,9 +833,29 @@ class MainActivity : AppCompatActivity() {
                                 setPadding(0, dp(3), 0, 0)
                             })
                             body.addView(text(
+                                job.originalFileName,
+                                13, R.color.qp_text, true
+                            ).apply { setPadding(0, dp(7), 0, 0) })
+                            body.addView(text(
                                 "${job.pageCount} page(s) · ${job.copies} copy/copies · Quote ${job.currency} ${"%.2f".format(Locale.ROOT, job.quotedAmountMinor / 100.0)}",
                                 12, R.color.qp_muted, false
                             ).apply { setPadding(0, dp(4), 0, 0) })
+                            body.addView(text(
+                                "Payment: ${job.paymentStatus.ifBlank { "Not recorded" }} · Paid ${job.currency} ${"%.2f".format(Locale.ROOT, job.paidAmountMinor / 100.0)} · Refunded ${job.currency} ${"%.2f".format(Locale.ROOT, job.refundedAmountMinor / 100.0)} · Net ${job.currency} ${"%.2f".format(Locale.ROOT, maxOf(0L, job.paidAmountMinor - job.refundedAmountMinor) / 100.0)}",
+                                12, R.color.qp_muted, false
+                            ).apply { setPadding(0, dp(4), 0, 0) })
+                            if (job.rejectedPageNumbersJson != "[]" && job.rejectedPageNumbersJson.isNotBlank()) {
+                                body.addView(text(
+                                    "Rejected pages: ${job.rejectedPageNumbersJson}",
+                                    12, R.color.qp_muted, false
+                                ).apply { setPadding(0, dp(4), 0, 0) })
+                            }
+                            if (job.outputCompletedUtc != null) {
+                                body.addView(text(
+                                    "Output confirmed: ${job.outputCompletedUtc}",
+                                    12, R.color.qp_muted, false
+                                ).apply { setPadding(0, dp(4), 0, 0) })
+                            }
                             item.addView(body)
                             container.addView(item, linearParams().apply { bottomMargin = dp(9) })
                         }
