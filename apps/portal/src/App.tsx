@@ -349,6 +349,11 @@ function ShopConsole({ tokens, onSignOut }: { tokens: AuthTokens; onSignOut: () 
 
       const authorization = await createAgentEnrollmentCode(tokens.accessToken);
       const enrolled = await enrollLocalAgent(authorization.code);
+      if (!enrolled.success) {
+        const message = enrolled.message || "This computer could not be connected to the shop.";
+        if (enrolled.code) throw new ApiError(message, 409, enrolled.code);
+        throw new Error(message);
+      }
       locallyAuthorizedAgentId.current = enrolled.agentDeviceId;
       let postEnrollmentStatus = status;
       try {

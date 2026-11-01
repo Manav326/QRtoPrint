@@ -250,12 +250,16 @@ public sealed class AgentControlPipeHostedService(
         }
         catch (Exception exception) when (exception is HttpRequestException or InvalidOperationException or TaskCanceledException)
         {
-            var userMessage = exception is InvalidOperationException &&
-                exception.Message.StartsWith("This computer is still paired with an active SmartPrint shop.", StringComparison.Ordinal)
+            var enrollmentFailure = exception as AgentEnrollmentException;
+            var userMessage = enrollmentFailure?.Message ??
+                (exception is InvalidOperationException &&
+                 exception.Message.StartsWith("This computer is still paired with an active SmartPrint shop.", StringComparison.Ordinal)
                     ? exception.Message
-                    : "The computer could not be connected. Check the internet connection and try again.";
+                    : "The computer could not be connected. Check the internet connection and try again.");
             logger.LogWarning("SmartPrint Agent enrollment was declined or unavailable ({FailureType}).", exception.GetType().Name);
-            await writer.WriteLineAsync(JsonSerializer.Serialize(new PipeResponse(false, null, userMessage), PipeJsonOptions));
+            await writer.WriteLineAsync(JsonSerializer.Serialize(
+                new PipeResponse(false, null, userMessage, Code: enrollmentFailure?.Code),
+                PipeJsonOptions));
         }
     }
 
@@ -271,5 +275,6 @@ public sealed class AgentControlPipeHostedService(
         bool? Paired = null,
         string? Status = null,
         bool? LocalApiReachable = null,
-        string? ApiBaseUrl = null);
+        string? ApiBaseUrl = null,
+        string? Code = null);
 }

@@ -7,6 +7,11 @@ using Microsoft.Win32;
 
 namespace SmartPrint.Agent;
 
+public sealed class AgentEnrollmentException(string code, string message) : InvalidOperationException(message)
+{
+    public string Code { get; } = code;
+}
+
 public static class AgentPairing
 {
     public static async Task RunAsync(IConfiguration configuration)
@@ -73,11 +78,32 @@ public static class AgentPairing
         if (!response.IsSuccessStatusCode)
         {
             var responseBody = await response.Content.ReadAsStringAsync(cancellationToken);
-            if (response.StatusCode == System.Net.HttpStatusCode.Conflict &&
-                responseBody.Contains("\"agent_already_enrolled\"", StringComparison.Ordinal))
+            if (response.StatusCode == System.Net.HttpStatusCode.Conflict)
             {
-                throw new InvalidOperationException(
-                    "This computer is still paired with an active SmartPrint shop. Ask the owner of that shop to revoke its pairing before reconnecting it.");
+                try
+                {
+                    using var errorDocument = JsonDocument.Parse(responseBody);
+                    var error = errorDocument.RootElement;
+                    var code = error.TryGetProperty("code", out var codeValue)
+                        ? codeValue.GetString()
+                        : null;
+                    var message = error.TryGetProperty("message", out var messageValue)
+                        ? messageValue.GetString()
+                        : null;
+
+                    if (!string.IsNullOrWhiteSpace(code))
+                    {
+                        throw new AgentEnrollmentException(
+                            code,
+                            string.IsNullOrWhiteSpace(message)
+                                ? "The shop could not accept this computer enrollment."
+                                : message);
+                    }
+                }
+                catch (JsonException)
+                {
+                    // Fall through to a safe generic HTTP error for an invalid server response.
+                }
             }
 
             throw new InvalidOperationException(response.StatusCode switch

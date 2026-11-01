@@ -34,6 +34,7 @@ struct AgentPipeResponse {
     status: Option<String>,
     local_api_reachable: Option<bool>,
     api_base_url: Option<String>,
+    code: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -185,7 +186,7 @@ async fn enroll_local_agent(enrollment_code: String) -> Result<AgentPipeResponse
             operation: "enroll",
             enrollment_code: Some(&enrollment_code),
         })?;
-        if !response.success {
+        if !response.success && response.code.is_none() {
             return Err(response.message.clone().unwrap_or_else(|| "This computer could not be connected to the shop.".into()));
         }
         Ok(response)

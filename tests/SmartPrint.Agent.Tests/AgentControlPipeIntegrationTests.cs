@@ -21,6 +21,7 @@ public sealed class AgentControlPipeIntegrationTests
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
         var deviceId = Guid.NewGuid();
         const string agentSecret = "integration-test-agent-secret";
+        const string conflictEnrollmentCode = "QRTP-Integration-Conflict-00001";
         const string enrollmentCode = "QRTP-Integration-Test-Code-00001";
 
         using var portProbe = new TcpListener(IPAddress.Loopback, 0);
@@ -35,35 +36,57 @@ public sealed class AgentControlPipeIntegrationTests
 
         var apiRequestTask = Task.Run(async () =>
         {
-            var context = await listener.GetContextAsync().WaitAsync(timeout.Token);
-            using var reader = new StreamReader(context.Request.InputStream, context.Request.ContentEncoding);
-            var requestBody = await reader.ReadToEndAsync(timeout.Token);
-            using var document = JsonDocument.Parse(requestBody);
-            var root = document.RootElement;
+            for (var attempt = 0; attempt < 2; attempt++)
+            {
+                var context = await listener.GetContextAsync().WaitAsync(timeout.Token);
+                using var reader = new StreamReader(context.Request.InputStream, context.Request.ContentEncoding);
+                var requestBody = await reader.ReadToEndAsync(timeout.Token);
+                using var document = JsonDocument.Parse(requestBody);
+                var root = document.RootElement;
 
-            Assert.Equal("POST", context.Request.HttpMethod);
-            Assert.Equal("/api/v1/agent/enroll", context.Request.Url?.AbsolutePath);
-            Assert.Equal(enrollmentCode, root.GetProperty("code").GetString());
+                Assert.Equal("POST", context.Request.HttpMethod);
+                Assert.Equal("/api/v1/agent/enroll", context.Request.Url?.AbsolutePath);
+                Assert.Equal(
+                    attempt == 0 ? conflictEnrollmentCode : enrollmentCode,
+                    root.GetProperty("code").GetString());
 
-            var fingerprint = root.GetProperty("fingerprint").GetString();
-            Assert.NotNull(fingerprint);
-            Assert.Equal(64, fingerprint!.Length);
-            Assert.All(fingerprint, character => Assert.True(Uri.IsHexDigit(character)));
-            Assert.Equal(Environment.MachineName, root.GetProperty("deviceName").GetString());
+                var fingerprint = root.GetProperty("fingerprint").GetString();
+                Assert.NotNull(fingerprint);
+                Assert.Equal(64, fingerprint!.Length);
+                Assert.All(fingerprint, character => Assert.True(Uri.IsHexDigit(character)));
+                Assert.Equal(Environment.MachineName, root.GetProperty("deviceName").GetString());
 
-            var payload = JsonSerializer.SerializeToUtf8Bytes(
-                new
+                byte[] payload;
+                if (attempt == 0)
                 {
-                    agentDeviceId = deviceId,
-                    agentSecret,
-                    createdUtc = DateTimeOffset.UtcNow
-                },
-                new JsonSerializerOptions(JsonSerializerDefaults.Web));
-            context.Response.StatusCode = (int)HttpStatusCode.Created;
-            context.Response.ContentType = "application/json";
-            context.Response.ContentLength64 = payload.Length;
-            await context.Response.OutputStream.WriteAsync(payload, timeout.Token);
-            context.Response.Close();
+                    payload = JsonSerializer.SerializeToUtf8Bytes(
+                        new
+                        {
+                            code = "agent_already_enrolled",
+                            message = "This computer is still paired with an active SmartPrint shop. Ask the owner of that shop to revoke its pairing before reconnecting it."
+                        },
+                        new JsonSerializerOptions(JsonSerializerDefaults.Web));
+                    context.Response.StatusCode = (int)HttpStatusCode.Conflict;
+                }
+                else
+                {
+                    payload = JsonSerializer.SerializeToUtf8Bytes(
+                        new
+                        {
+                            agentDeviceId = deviceId,
+                            agentSecret,
+                            createdUtc = DateTimeOffset.UtcNow
+                        },
+                        new JsonSerializerOptions(JsonSerializerDefaults.Web));
+                    context.Response.StatusCode = (int)HttpStatusCode.Created;
+                }
+
+                context.Response.ContentType = "application/json";
+                context.Response.ContentLength64 = payload.Length;
+                await context.Response.OutputStream.WriteAsync(payload, timeout.Token);
+                context.Response.Close();
+            }
+
             return true;
         }, timeout.Token);
 
@@ -98,12 +121,24 @@ public sealed class AgentControlPipeIntegrationTests
                 Assert.Equal(apiOrigin, initialStatus.RootElement.GetProperty("apiBaseUrl").GetString());
             }
 
+            using (var conflict = await SendPipeRequestAsync("enroll", conflictEnrollmentCode, timeout.Token))
+            {
+                Assert.False(conflict.RootElement.GetProperty("success").GetBoolean());
+                Assert.Equal("agent_already_enrolled", conflict.RootElement.GetProperty("code").GetString());
+                Assert.Contains("still paired with an active SmartPrint shop", conflict.RootElement.GetProperty("message").GetString());
+                Assert.Null(credentialStore.Load());
+                Assert.False(credentialStore.IsRevoked());
+            }
+
             using (var response = await SendPipeRequestAsync("enroll", enrollmentCode, timeout.Token))
             {
                 Assert.True(response.RootElement.GetProperty("success").GetBoolean());
                 Assert.Equal(deviceId, response.RootElement.GetProperty("agentDeviceId").GetGuid());
                 Assert.True(response.RootElement.GetProperty("message").ValueKind is JsonValueKind.Null);
+                Assert.True(response.RootElement.GetProperty("code").ValueKind is JsonValueKind.Null);
             }
+
+            Assert.True(await apiRequestTask);
 
             using (var pairedStatus = await SendPipeRequestAsync("status", null, timeout.Token))
             {

@@ -13,6 +13,7 @@ export interface DesktopEnrollmentResult {
   success: boolean;
   agentDeviceId: string | null;
   message: string | null;
+  code: string | null;
 }
 
 export function isDesktopApp(): boolean {
