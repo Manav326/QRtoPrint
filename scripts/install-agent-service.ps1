@@ -121,6 +121,18 @@ try {
         Where-Object { $_.DisplayName -like "$firewallRulePrefix*" -and $_.Name -ne $newFirewallRule.Name } |
         Remove-NetFirewallRule -ErrorAction SilentlyContinue
 
+    # The replacement service is now confirmed healthy. Remove older versioned
+    # payloads to avoid accumulating unused binaries in Program Files. This is
+    # deliberately after the successful start/firewall checks so rollback always
+    # has the previous executable available until the switch is complete.
+    $currentAgentDirectory = Split-Path -Parent $resolvedExe
+    $agentRoot = Split-Path -Parent $currentAgentDirectory
+    if ((Split-Path -Leaf $agentRoot) -ieq "agent") {
+        Get-ChildItem -LiteralPath $agentRoot -Directory -ErrorAction SilentlyContinue |
+            Where-Object { $_.FullName -ne $currentAgentDirectory } |
+            Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
+    }
+
     Write-Host "Configured the local Agent API CORS origin: $allowedOrigin"
     Write-Host "QRtoPrint Smart Print Agent $AgentVersion is installed and running." -ForegroundColor Green
     Write-Host "The local status endpoint listens on TCP 17842 for Private network profiles only."
