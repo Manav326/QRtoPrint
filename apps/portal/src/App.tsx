@@ -3140,8 +3140,8 @@ function CustomerPrintFlow({publicCode,sessionToken,paymentOptions,localAgent,lo
       <label className="customer-upload-zone folder-upload-zone">
         <input type="file" multiple accept={nativeAppMode?"application/x-smartprint-folder-selection":".pdf,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png"} {...({webkitdirectory:"true",directory:"true"} as any)} onChange={event=>{chooseFiles(Array.from(event.currentTarget.files||[]),consumeSmartPrintNativePickerGroups());event.currentTarget.value="";}}/>
         <span className="customer-upload-icon"><FolderOpen size={21}/></span>
-        <strong>Choose folders</strong>
-        <small>Add multiple folders to this batch</small>
+        <strong>{nativeAppMode?"Choose folders":"Add a folder"}</strong>
+        <small>{nativeAppMode?"Select multiple folders at once":"Choose one folder; select again to add another to this batch"}</small>
       </label>
     </div>
     {files.length>0&&<div className="customer-selected-files">

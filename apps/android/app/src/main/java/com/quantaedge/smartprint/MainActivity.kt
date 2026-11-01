@@ -1096,9 +1096,12 @@ class MainActivity : AppCompatActivity() {
 
         if (visibleEntries.isEmpty()) {
             column.addView(text(
-                if (librarySearchQuery.isNotBlank() && !isPicker) "No matches"
-                else if (isPicker) "No printable files"
-                else "This folder is empty",
+                when {
+                    librarySearchQuery.isNotBlank() && !isPicker -> "No matches"
+                    isPicker && fileChooserSelectFolders -> "No folders yet"
+                    isPicker -> "No printable files"
+                    else -> "This folder is empty"
+                },
                 13, R.color.qp_muted, false
             ).apply { setPadding(dp(4), dp(24), dp(4), dp(24)) })
         } else {
@@ -1878,7 +1881,7 @@ class MainActivity : AppCompatActivity() {
         val folders = store.root.walkTopDown()
             .filter { it.isDirectory && it.canonicalPath != store.root.canonicalPath }
             .sortedBy { runCatching { store.pathOf(it).lowercase(Locale.ROOT) }.getOrDefault(it.name.lowercase(Locale.ROOT)) }
-            .take(80).toList()
+            .toList()
         if (folders.isEmpty()) {
             root.addView(text("No saved folders yet. You can create one above.", 12, R.color.qp_muted, false)
                 .apply { setPadding(dp(2), dp(8), 0, dp(8)) })
