@@ -995,10 +995,10 @@ function Overview({ profile, printers, stations, printJobs, pricing, agentDevice
       !!paymentSettings.upiId?.trim() && !!paymentSettings.payeeName?.trim());
   const setupChecks: { complete: boolean; title: string; detail: string; target: Section }[] = [
     { complete: !!profile?.displayName, title: "Create your shop identity", detail: "Your shop name and customer-facing brand.", target: "Settings" },
-    { complete: printers.length > 0, title: "Register your printers", detail: "Add the printers available at your counter.", target: "Printers" },
+    { complete: activePrinters.length > 0, title: "Register your printers", detail: "Add and enable the printers available at your counter.", target: "Printers" },
     { complete: hasOnlineAgent, title: "Connect the shop computer", detail: "The Windows Agent must be paired and recently online.", target: "Print Agent" },
     { complete: hasReachablePrinter, title: "Verify a live printer", detail: "At least one enabled output must be visible to the connected computer.", target: "Printers" },
-    { complete: stations.length > 0, title: "Create your first QR station", detail: "Give customers a secure way to connect.", target: "QR Stations" },
+    { complete: stations.some(station => station.isEnabled), title: "Enable a QR station", detail: "At least one customer-facing QR station must be enabled.", target: "QR Stations" },
     { complete: !!pricing?.isConfigured, title: "Set your print prices", detail: "Configure mono, colour and duplex rates.", target: "Pricing" },
     { complete: hasPaymentMethod, title: "Enable a payment method", detail: "Configure cash at counter or a complete UPI payee profile.", target: "Payments" }
   ];
