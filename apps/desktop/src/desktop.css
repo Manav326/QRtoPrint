@@ -402,3 +402,9 @@ html[data-theme="light"] body[data-app-shell="desktop"] {
   background: #f4f6fa;
   color: #202638;
 }
+
+
+body[data-app-shell="desktop"] .app-shell.light {
+  --muted: #5f6b80;
+  --faint: #626f84;
+}
