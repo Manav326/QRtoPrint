@@ -64,10 +64,9 @@ jobs:
         shell: pwsh
         run: |
           $agent = Join-Path (Resolve-Path artifacts/agent) "SmartPrint.Agent.exe"
-          & $agent --check-pairing
-          $pairingExitCode = $LASTEXITCODE
-          if ($pairingExitCode -ne 2) {
-            throw "Expected an unpaired Windows Agent to exit with code 2, got $pairingExitCode."
+          $agentProcess = Start-Process -FilePath $agent -ArgumentList @("--check-pairing") -NoNewWindow -Wait -PassThru
+          if ($agentProcess.ExitCode -ne 2) {
+            throw "Expected an unpaired Windows Agent to exit with code 2, got $($agentProcess.ExitCode)."
           }
       - name: Add Agent setup scripts and guide
         shell: pwsh
