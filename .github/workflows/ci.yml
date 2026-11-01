@@ -35,8 +35,72 @@ jobs:
       - name: Validate portal Nginx proxy configuration
         run: docker run --rm --add-host api:127.0.0.1 -v "$GITHUB_WORKSPACE/apps/portal/nginx.conf:/etc/nginx/conf.d/default.conf:ro" nginx:alpine nginx -t
 
-  dotnet:
+  api_dotnet:
     runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: 10.0.x
+      - name: Build cloud API
+        run: dotnet build src/SmartPrint.Api/SmartPrint.Api.csproj --configuration Release
+      - name: Run API unit and model tests
+        run: dotnet test tests/SmartPrint.Api.Tests/SmartPrint.Api.Tests.csproj --configuration Release
+
+  agent_dotnet:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: 10.0.x
+      - name: Validate PowerShell deployment scripts
+        shell: pwsh
+        run: |
+          $scriptFiles = Get-ChildItem scripts -Filter *.ps1 -Recurse
+          foreach ($scriptFile in $scriptFiles) {
+            $tokens = $null
+            $parseErrors = $null
+            [System.Management.Automation.Language.Parser]::ParseFile($scriptFile.FullName, [ref]$tokens, [ref]$parseErrors) | Out-Null
+            if ($parseErrors.Count -gt 0) {
+              foreach ($parseError in $parseErrors) {
+                Write-Error "$($scriptFile.Name): $($parseError.Message) at line $($parseError.Extent.StartLineNumber)"
+              }
+              throw "PowerShell syntax validation failed for $($scriptFile.Name)."
+            }
+          }
+      - name: Build Windows Print Agent
+        run: dotnet build src/SmartPrint.Agent/SmartPrint.Agent.csproj --configuration Release
+      - name: Run Windows Agent local queue tests
+        run: dotnet test tests/SmartPrint.Agent.Tests/SmartPrint.Agent.Tests.csproj --configuration Release
+      - name: Publish self-contained Windows Agent
+        run: dotnet publish src/SmartPrint.Agent/SmartPrint.Agent.csproj --configuration Release --runtime win-x64 --self-contained true --output artifacts/agent
+      - name: Smoke-test non-interactive Agent pairing status command
+        shell: pwsh
+        run: |
+          $agent = Join-Path (Resolve-Path artifacts/agent) "SmartPrint.Agent.exe"
+          $agentProcess = Start-Process -FilePath $agent -ArgumentList @("--check-pairing") -NoNewWindow -Wait -PassThru
+          if ($agentProcess.ExitCode -ne 2) {
+            throw "Expected an unpaired Windows Agent to exit with code 2, got $($agentProcess.ExitCode)."
+          }
+      - name: Add Agent setup scripts and guide
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path artifacts/agent | Out-Null
+          Copy-Item scripts/pair-agent.ps1, scripts/install-agent-service.ps1, scripts/uninstall-agent-service.ps1, scripts/verify-agent-local.ps1, src/SmartPrint.Agent/appsettings.example.json, src/SmartPrint.Agent/README.md artifacts/agent/
+      - name: Upload Windows Agent package
+        uses: actions/upload-artifact@v7
+        with:
+          name: qrtoprint-agent-win-x64
+          path: artifacts/agent/
+          if-no-files-found: error
+          retention-days: 30
+
+  windows_desktop:
+    runs-on: windows-latest
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v7
       - uses: pnpm/action-setup@v6
@@ -78,53 +142,30 @@ jobs:
           if ($signature.Status -ne [System.Management.Automation.SignatureStatus]::Valid -or $signature.SignerCertificate.Subject -notmatch "Microsoft") {
             throw "The downloaded WebView2 prerequisite did not pass Microsoft Authenticode verification."
           }
-      - name: Validate PowerShell deployment scripts
-        shell: pwsh
-        run: |
-          $scriptFiles = Get-ChildItem scripts -Filter *.ps1 -Recurse
-          foreach ($scriptFile in $scriptFiles) {
-            $tokens = $null
-            $parseErrors = $null
-            [System.Management.Automation.Language.Parser]::ParseFile($scriptFile.FullName, [ref]$tokens, [ref]$parseErrors) | Out-Null
-            if ($parseErrors.Count -gt 0) {
-              foreach ($parseError in $parseErrors) {
-                Write-Error "$($scriptFile.Name): $($parseError.Message) at line $($parseError.Extent.StartLineNumber)"
-              }
-              throw "PowerShell syntax validation failed for $($scriptFile.Name)."
-            }
-          }
-      - uses: actions/setup-dotnet@v6
-        with:
-          dotnet-version: 10.0.x
-      - name: Build cloud API
-        run: dotnet build src/SmartPrint.Api/SmartPrint.Api.csproj --configuration Release
-      - name: Build Windows Print Agent
-        run: dotnet build src/SmartPrint.Agent/SmartPrint.Agent.csproj --configuration Release
-      - name: Run API unit and model tests
-        run: dotnet test tests/SmartPrint.Api.Tests/SmartPrint.Api.Tests.csproj --configuration Release
-      - name: Run Windows Agent local queue tests
-        run: dotnet test tests/SmartPrint.Agent.Tests/SmartPrint.Agent.Tests.csproj --configuration Release
-      - name: Publish self-contained Windows Agent
-        run: dotnet publish src/SmartPrint.Agent/SmartPrint.Agent.csproj --configuration Release --runtime win-x64 --self-contained true --output artifacts/agent
-      - name: Smoke-test non-interactive Agent pairing status command
-        shell: pwsh
-        run: |
-          $agent = Join-Path (Resolve-Path artifacts/agent) "SmartPrint.Agent.exe"
-          $agentProcess = Start-Process -FilePath $agent -ArgumentList @("--check-pairing") -NoNewWindow -Wait -PassThru
-          if ($agentProcess.ExitCode -ne 2) {
-            throw "Expected an unpaired Windows Agent to exit with code 2, got $($agentProcess.ExitCode)."
-          }
-      - name: Add Agent setup scripts and guide
-        shell: pwsh
-        run: |
-          Copy-Item scripts/pair-agent.ps1, scripts/install-agent-service.ps1, scripts/uninstall-agent-service.ps1, scripts/verify-agent-local.ps1, src/SmartPrint.Agent/appsettings.example.json, src/SmartPrint.Agent/README.md artifacts/agent/
-      - name: Upload Windows Agent package
+      - name: Upload Windows desktop package
         uses: actions/upload-artifact@v7
         with:
-          name: qrtoprint-agent-win-x64
-          path: artifacts/agent/
+          name: qrtoprint-desktop-win-x64
+          path: artifacts/desktop/
           if-no-files-found: error
           retention-days: 30
+
+  windows_installer:
+    needs: [agent_dotnet, windows_desktop]
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      - name: Download Windows Agent package
+        uses: actions/download-artifact@v8
+        with:
+          name: qrtoprint-agent-win-x64
+          path: artifacts/agent
+      - name: Download Windows desktop package
+        uses: actions/download-artifact@v8
+        with:
+          name: qrtoprint-desktop-win-x64
+          path: artifacts/desktop
       - name: Build guided Windows setup
         shell: pwsh
         run: |
@@ -147,6 +188,28 @@ jobs:
           path: artifacts/agent-installer/SmartPrint-Windows-Setup.exe
           if-no-files-found: error
           retention-days: 30
+
+  # Keep the original "dotnet" required-check name stable while the
+  # independent API, Agent, desktop and installer jobs execute in parallel.
+  dotnet:
+    if: always()
+    needs: [api_dotnet, agent_dotnet, windows_desktop, windows_installer]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require every split Windows build to pass
+        env:
+          API_RESULT: ${{ needs.api_dotnet.result }}
+          AGENT_RESULT: ${{ needs.agent_dotnet.result }}
+          DESKTOP_RESULT: ${{ needs.windows_desktop.result }}
+          INSTALLER_RESULT: ${{ needs.windows_installer.result }}
+        run: |
+          set -euo pipefail
+          printf 'API: %s\nAgent: %s\nDesktop: %s\nInstaller: %s\n' \
+            "$API_RESULT" "$AGENT_RESULT" "$DESKTOP_RESULT" "$INSTALLER_RESULT"
+          test "$API_RESULT" = "success"
+          test "$AGENT_RESULT" = "success"
+          test "$DESKTOP_RESULT" = "success"
+          test "$INSTALLER_RESULT" = "success"
 
   postgres-integration:
     runs-on: ubuntu-latest
