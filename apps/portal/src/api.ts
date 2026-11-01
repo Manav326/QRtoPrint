@@ -1390,6 +1390,7 @@ export interface CustomerBatchPayment {
   batchId: string;
   fileCount: number;
   createdUtc: string;
+  updatedUtc?: string;
   verifiedUtc?: string | null;
 }
 
@@ -1408,6 +1409,9 @@ export interface CustomerPayment {
   batchPayment?: CustomerBatchPayment | null;
   jobNumber?: string;
   jobStatus?: string;
+  createdUtc?: string;
+  updatedUtc?: string;
+  verifiedUtc?: string | null;
 }
 
 export function startCustomerBatchPayment(sessionToken: string, batchId: string, method: "UPI" | "CASH") {
