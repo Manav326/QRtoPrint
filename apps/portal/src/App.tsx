@@ -31,6 +31,65 @@ import { readDarkModePreference, readSidebarCollapsedPreference, saveDarkModePre
 type Section = "Overview" | "Print Queue" | "Printers" | "QR Stations" | "Print Agent" | "Pricing" | "Subscription" | "Payments" | "Customers" | "Reports" | "Settings";
 type Modal = "printer" | "station" | null;
 
+const IST_TIME_ZONE = "Asia/Kolkata";
+
+function asValidDate(value: string | Date | null | undefined): Date | null {
+  if (value == null) return null;
+  const date = value instanceof Date ? value : new Date(value);
+  return Number.isFinite(date.getTime()) ? date : null;
+}
+
+function formatIstDateTime(value: string | Date | null | undefined): string {
+  const date = asValidDate(value);
+  return date
+    ? `${new Intl.DateTimeFormat("en-IN", {
+        timeZone: IST_TIME_ZONE,
+        day: "2-digit",
+        month: "short",
+        year: "numeric",
+        hour: "2-digit",
+        minute: "2-digit",
+        hour12: true
+      }).format(date)} IST`
+    : "—";
+}
+
+function formatIstDate(value: string | Date | null | undefined): string {
+  const date = asValidDate(value);
+  return date
+    ? `${new Intl.DateTimeFormat("en-IN", {
+        timeZone: IST_TIME_ZONE,
+        day: "numeric",
+        month: "short",
+        year: "numeric"
+      }).format(date)} IST`
+    : "—";
+}
+
+function formatIstTime(value: string | Date | null | undefined): string {
+  const date = asValidDate(value);
+  return date
+    ? `${new Intl.DateTimeFormat("en-IN", {
+        timeZone: IST_TIME_ZONE,
+        hour: "2-digit",
+        minute: "2-digit",
+        hour12: true
+      }).format(date)} IST`
+    : "—";
+}
+
+function istDateKey(value: string | Date): string {
+  const date = asValidDate(value);
+  return date
+    ? new Intl.DateTimeFormat("en-CA", {
+        timeZone: IST_TIME_ZONE,
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit"
+      }).format(date)
+    : "";
+}
+
 const sections: { label: Section; icon: typeof LayoutDashboard }[] = [
   { label: "Overview", icon: LayoutDashboard },
   { label: "Print Queue", icon: FileText },
@@ -410,7 +469,7 @@ function ShopConsole({ tokens, onSignOut }: { tokens: AuthTokens; onSignOut: () 
   const offlinePrinterCount = printers.filter(printer =>
     printer.isActive && !isPrinterAvailable(printer, onlineAgentIds)
   ).length;
-  const today = new Intl.DateTimeFormat("en-IN", { weekday: "long", day: "numeric", month: "long" }).format(new Date());
+  const today = new Intl.DateTimeFormat("en-IN", { timeZone: IST_TIME_ZONE, weekday: "long", day: "numeric", month: "long" }).format(new Date());
 
   async function signOut() {
     try { await logout(tokens.accessToken); } catch { /* Local sign-out still clears the session. */ }
@@ -1217,7 +1276,7 @@ function ShopConsole({ tokens, onSignOut }: { tokens: AuthTokens; onSignOut: () 
           ))}
         </nav>
         <div className="sidebar-bottom">
-          <button type="button" className="plan-card" onClick={() => navAction("Subscription")}><div className="plan-icon"><ShieldCheck size={17}/></div><div><strong>{subscription?.plan?.name || (subscription?.subscription.planCode === "TRIAL" ? "Trial plan" : "Subscription")}</strong><span>{subscription ? `${subscription.subscription.status} · ends ${new Date(subscription.subscription.periodEndUtc).toLocaleDateString("en-IN")}` : "View plan and usage"}</span></div><ArrowRight size={14}/></button>
+          <button type="button" className="plan-card" onClick={() => navAction("Subscription")}><div className="plan-icon"><ShieldCheck size={17}/></div><div><strong>{subscription?.plan?.name || (subscription?.subscription.planCode === "TRIAL" ? "Trial plan" : "Subscription")}</strong><span>{subscription ? `${subscription.subscription.status} · ends ${formatIstDate(subscription.subscription.periodEndUtc)}` : "View plan and usage"}</span></div><ArrowRight size={14}/></button>
           <button className="nav-item support-link" onClick={() => navAction("Settings")}><LifeBuoy size={18}/><span>Help & support</span></button>
           <div className="profile-row">
             <div className="profile-avatar">{initials(profile?.ownerName || "Shop Owner")}</div>
@@ -1405,7 +1464,7 @@ function CustomersPage({ token }: { token: string }) {
                     <td><div className="customer-cell"><strong>{customer.displayName || "SmartPrint customer"}</strong><span>{customer.maskedEmail}</span></div></td>
                     <td><strong className="customers-number">{customer.printJobCount}</strong><small className="customers-subvalue">{customer.sessionCount} QR sessions</small></td>
                     <td><strong className="customers-number">{customer.completedJobCount}</strong><small className="customers-subvalue">output confirmed</small></td>
-                    <td><span className="customers-date">{new Date(customer.lastSeenUtc).toLocaleString()}</span></td>
+                    <td><span className="customers-date">{formatIstDateTime(customer.lastSeenUtc)}</span></td>
                     <td><button type="button" className="customers-history-button" onClick={() => void openHistory(customer)}>View history <ArrowRight size={13}/></button></td>
                   </tr>
                 ))}
@@ -1444,7 +1503,7 @@ function CustomersPage({ token }: { token: string }) {
                       return (
                         <article className="customer-history-row" key={job.id}>
                           <div className="customer-history-heading">
-                            <div><strong>{job.document.originalFileName}</strong><span>{job.jobNumber} · {new Date(job.createdUtc).toLocaleString()}</span></div>
+                            <div><strong>{job.document.originalFileName}</strong><span>{job.jobNumber} · {formatIstDateTime(job.createdUtc)}</span></div>
                             <Status label={prettyStatus(job.status)} tone={tone}/>
                           </div>
                           <div className="customer-history-facts">
@@ -1546,7 +1605,7 @@ function ReportsPage({ token }: { token: string }) {
           </section>
         </div>
         {summary.outputUnconfirmedJobs > 0 && <div className="report-caution"><ShieldCheck size={16}/><span><strong>{summary.outputUnconfirmedJobs} output-unconfirmed {summary.outputUnconfirmedJobs === 1 ? "job" : "jobs"}.</strong> Check the actual pages before any manual retry. These jobs are not counted as completed.</span></div>}
-        <div className="reports-footnote">Report window: {new Date(summary.fromUtc).toLocaleString("en-IN")} – {new Date(summary.toUtc).toLocaleString("en-IN")}. Job counts use creation time, gross collections use payment verification time, and refunds use the date the shop recorded sending them. Pages requested are not a claim of pages physically printed. A UPI reference is excluded until the shop verifies the receipt.</div>
+        <div className="reports-footnote">Report window: {formatIstDateTime(summary.fromUtc)} – {formatIstDateTime(summary.toUtc)}. Job counts use creation time, gross collections use payment verification time, and refunds use the date the shop recorded sending them. Pages requested are not a claim of pages physically printed. A UPI reference is excluded until the shop verifies the receipt.</div>
       </>}
     </section>
   );
@@ -1559,8 +1618,8 @@ function Overview({ profile, printers, stations, printJobs, pricing, agentDevice
   onNavigate: (section: Section) => void;
 }) {
   const activePrinters = printers.filter(printer => printer.isActive);
-  const todayKey = new Date().toDateString();
-  const jobsToday = printJobs.filter(job => new Date(job.createdUtc).toDateString() === todayKey);
+  const todayKey = istDateKey(new Date());
+  const jobsToday = printJobs.filter(job => istDateKey(job.createdUtc) === todayKey);
   const quotesAwaiting = printJobs.filter(job => job.status === "AWAITING_SHOP_APPROVAL");
   const onlineAgentIds = new Set(agentDevices
     .filter(agent => !agent.revokedUtc && agent.status === "Online" &&
@@ -1593,7 +1652,7 @@ function Overview({ profile, printers, stations, printJobs, pricing, agentDevice
           <div className="panel-heading"><div><h2>Customer activity</h2><p>Recent uploads and quote requests from your QR stations</p></div><span className="neutral-chip">{printJobs.length} recent jobs</span></div>
           {printJobs.length===0 ? <div className="activity-empty-content"><div className="activity-empty-art"><div className="activity-art-sheet"><FileText size={25}/><i/><i/><i/></div><div className="activity-art-printer"><Printer size={27}/></div><span className="activity-art-spark">✦</span></div><h3>Ready when your first customer is</h3><p>Set your prices and share a QR station. Customer uploads will appear here as soon as they arrive.</p><button className="text-action" onClick={() => onNavigate(printers.length ? "QR Stations" : "Printers")}>{printers.length ? "Open QR stations" : "Add your first printer"} <span>→</span></button></div> :
             <div className="activity-job-list">
-              {printJobs.slice(0,4).map(job=><div className="activity-job-row" key={job.id}><div className="activity-job-icon"><FileText size={16}/></div><div className="activity-job-copy"><strong>{job.jobNumber}</strong><span>{job.document.originalFileName} · {job.pageCount} pages</span></div><div className="activity-job-status"><Status label={prettyStatus(job.status)} tone={job.status==="AWAITING_CUSTOMER_APPROVAL"||job.status==="AWAITING_SHOP_APPROVAL"?"amber":"blue"}/><small>{new Date(job.createdUtc).toLocaleTimeString([], {hour:"2-digit",minute:"2-digit"})}</small></div></div>)}
+              {printJobs.slice(0,4).map(job=><div className="activity-job-row" key={job.id}><div className="activity-job-icon"><FileText size={16}/></div><div className="activity-job-copy"><strong>{job.jobNumber}</strong><span>{job.document.originalFileName} · {job.pageCount} pages</span></div><div className="activity-job-status"><Status label={prettyStatus(job.status)} tone={job.status==="AWAITING_CUSTOMER_APPROVAL"||job.status==="AWAITING_SHOP_APPROVAL"?"amber":"blue"}/><small>{formatIstTime(job.createdUtc)}</small></div></div>)}
               <button className="text-action" onClick={()=>onNavigate("Print Queue")}>Open print queue <span>→</span></button>
             </div>}
         </section>
@@ -1745,7 +1804,7 @@ function PrintAgentPage({agents,enrollmentCode,busy,onGenerate,onRevoke,desktop,
         <div><span>03</span><strong>Confirm the connection</strong><small>Return here and wait for the computer heartbeat and printer discovery.</small></div>
       </div>
       {enrollmentCode&&<div className="agent-code-panel">
-        <div><span>ONE-TIME PAIRING CODE</span><strong>{enrollmentCode.code}</strong><small>Expires {new Date(enrollmentCode.expiresUtc).toLocaleTimeString([], {hour:"2-digit",minute:"2-digit"})}</small></div>
+        <div><span>ONE-TIME PAIRING CODE</span><strong>{enrollmentCode.code}</strong><small>Expires {formatIstTime(enrollmentCode.expiresUtc)}</small></div>
         <button className="secondary-button" onClick={()=>void copyText(enrollmentCode.code)}><Copy size={14}/> Copy code</button>
       </div>}
       <div className="agent-command-panel">
@@ -1763,7 +1822,7 @@ function PrintAgentPage({agents,enrollmentCode,busy,onGenerate,onRevoke,desktop,
       {agents.length===0?<div className="agent-empty"><Monitor size={25}/><strong>No Windows computer paired yet</strong><span>Generate a pairing code above and run the agent on the computer connected to your printers.</span></div>:
         <div className="agent-device-list">{agents.map(agent=><article className="agent-device-card" key={agent.id}>
           <div className="agent-device-icon"><Monitor size={19}/></div>
-          <div className="agent-device-copy"><strong>{agent.deviceName}</strong><span>{agent.printerCount} printer {agent.printerCount===1?"queue":"queues"} discovered · Paired {new Date(agent.createdUtc).toLocaleDateString()}</span><small>{agent.lastSeenUtc?("Last contact "+new Date(agent.lastSeenUtc).toLocaleString()):"No heartbeat received yet"}</small>{agent.localEndpoints?.length?<small>LAN status endpoint: {agent.localEndpoints.join(" · ")}</small>:<small>LAN endpoint not detected · check that the computer is on a private shop network</small>}</div>
+          <div className="agent-device-copy"><strong>{agent.deviceName}</strong><span>{agent.printerCount} printer {agent.printerCount===1?"queue":"queues"} discovered · Paired {formatIstDate(agent.createdUtc)}</span><small>{agent.lastSeenUtc?("Last contact "+formatIstDateTime(agent.lastSeenUtc)):"No heartbeat received yet"}</small>{agent.localEndpoints?.length?<small>LAN status endpoint: {agent.localEndpoints.join(" · ")}</small>:<small>LAN endpoint not detected · check that the computer is on a private shop network</small>}</div>
           <Status label={agent.revokedUtc?"Revoked":agent.status} tone={agent.revokedUtc?"red":agent.status==="Online"?"green":"slate"}/>
           {!agent.revokedUtc&&<button className="subtle-button reject-action" disabled={busy} onClick={()=>onRevoke(agent)}>Revoke</button>}
         </article>)}</div>}
@@ -1825,7 +1884,7 @@ function PricingPage({ pricing, onSave, busy }: {
       <div className="settings-summary"><ShieldCheck size={16}/><span>Customer payment gateway setup is separate and is not active yet. This screen configures print quotations only; no money is collected here.</span></div>
       <div className="settings-actions"><button className="primary-button" disabled={busy||!valid||toMinor(mono)<=0||toMinor(colour)<=0}>{busy?<span className="button-spinner"/>:"Save print prices"}</button></div>
     </form>
-    <div className="pricing-version-row"><span>Rate card version</span><strong>v{pricing.version}</strong><span>Last updated</span><strong>{new Date(pricing.updatedUtc).toLocaleString()}</strong></div>
+    <div className="pricing-version-row"><span>Rate card version</span><strong>v{pricing.version}</strong><span>Last updated</span><strong>{formatIstDateTime(pricing.updatedUtc)}</strong></div>
   </section>;
 }
 
@@ -1872,18 +1931,18 @@ function PaymentsPage({settings,payments,refunds,onSave,onVerify,onReject,busy,b
         <p className="instant-payment-setting-note">Requires your print rate card and at least one payment method. UPI references and cash are still verified by the shop before printing. Leave this off when you want to review and approve every quote before customers can pay.</p>
       </div>
       <div className="payment-security-note"><ShieldCheck size={16}/><span>SmartPrint by QuantaEdge does not receive, hold or route your customer print revenue. Verify every UPI reference against your own bank/UPI app; cash must be physically received. SmartPrint platform subscription charges are billed separately.</span></div>
-      <div className="payment-settings-footer"><span>Last updated {new Date(settings.updatedUtc).toLocaleString()}</span><button className="primary-button" disabled={busy||(!upiEnabled&&!cashEnabled)||(upiEnabled&&(!upiId.trim()||!payeeName.trim()))} onClick={()=>onSave({upiEnabled,upiId:upiEnabled?upiId.trim():null,payeeName:upiEnabled?payeeName.trim():null,cashEnabled,instantPaymentEnabled})}>{busy?<span className="button-spinner"/>:"Save payment methods"}</button></div>
+      <div className="payment-settings-footer"><span>Last updated {formatIstDateTime(settings.updatedUtc)}</span><button className="primary-button" disabled={busy||(!upiEnabled&&!cashEnabled)||(upiEnabled&&(!upiId.trim()||!payeeName.trim()))} onClick={()=>onSave({upiEnabled,upiId:upiEnabled?upiId.trim():null,payeeName:upiEnabled?payeeName.trim():null,cashEnabled,instantPaymentEnabled})}>{busy?<span className="button-spinner"/>:"Save payment methods"}</button></div>
     </section>
     <section className="panel payment-review-panel">
       <div className="collection-header"><div><h2>Payment verification</h2><p>Review UPI references and confirm cash collected before a job becomes payment-authorised.</p></div><span className="setup-count">{pending.length} need review</span></div>
       {payments.length===0?<EmptyModule icon={<Wallet size={24}/>} title="No print payments yet" text="When customers choose UPI or cash for a shop-approved job, the payment attempt will appear here."/>:
       <div className="payment-record-list">{payments.map(payment=><article className="payment-record" key={payment.id}>
         <div className="payment-record-head"><div><strong>{payment.batchPaymentId?(`Batch checkout · ${payment.batchFileCount??1} files`):payment.jobNumber}</strong><small>{payment.documentName}</small></div><div className="payment-record-amount-wrap"><div className="payment-record-amount">{formatMoney(payment.amountMinor,payment.currency)}</div>{(payment.refundedAmountMinor??0)>0&&<small className="payment-record-refund-summary">Refund recorded: {formatMoney(payment.refundedAmountMinor??0,payment.currency)} · Net retained: {formatMoney(Math.max(0,payment.amountMinor-(payment.refundedAmountMinor??0)),payment.currency)}</small>}</div></div>
-        <div className="payment-record-meta"><span>{payment.method}</span><span>{new Date(payment.createdUtc).toLocaleString()}</span><Status label={payment.status.replaceAll("_"," ")} tone={payment.status==="VERIFIED"?"green":payment.status==="REJECTED"?"red":payment.status==="CUSTOMER_REPORTED"||payment.status==="CASH_AWAITING_PAYMENT"?"amber":"slate"}/></div>
+        <div className="payment-record-meta"><span>{payment.method}</span><span>{formatIstDateTime(payment.createdUtc)}</span><Status label={payment.status.replaceAll("_"," ")} tone={payment.status==="VERIFIED"?"green":payment.status==="REJECTED"?"red":payment.status==="CUSTOMER_REPORTED"||payment.status==="CASH_AWAITING_PAYMENT"?"amber":"slate"}/></div>
         {payment.method==="UPI"&&<div className="payment-reference-details"><span>Transaction reference</span><strong>{payment.paymentReference||"Customer has not submitted a reference"}</strong><small>Payee snapshot: {payment.payeeNameSnapshot||"Not recorded"} · {payment.upiIdSnapshot||"No UPI ID snapshot"}</small></div>}
         {payment.rejectionReason&&<div className="payment-rejection-note">Reason: {payment.rejectionReason}</div>}
         {(payment.status==="AWAITING_CUSTOMER_PAYMENT"||payment.status==="CUSTOMER_REPORTED"||payment.status==="CASH_AWAITING_PAYMENT")&&<div className="payment-review-actions">{payment.status==="AWAITING_CUSTOMER_PAYMENT"&&<button className="secondary-button reject-action" disabled={busy||busyJobId===payment.printJobId} onClick={()=>onReject(payment)}>Cancel attempt</button>}{payment.status==="CASH_AWAITING_PAYMENT"&&<button className="secondary-button reject-action" disabled={busy||busyJobId===payment.printJobId} onClick={()=>onReject(payment)}>{payment.batchPaymentId?"Cancel batch cash attempt":"Cancel cash attempt"}</button>}{payment.status==="CUSTOMER_REPORTED"&&<button className="secondary-button reject-action" disabled={busy||busyJobId===payment.printJobId} onClick={()=>onReject(payment)}>{payment.batchPaymentId?"Reject batch report":"Reject report"}</button>}<button className="primary-button" disabled={busy||busyJobId===payment.printJobId} onClick={()=>onVerify(payment)}>{busyJobId===payment.printJobId?<span className="button-spinner"/>:payment.method==="UPI"?(payment.batchPaymentId?"Verify full batch in bank app":"Verify in bank app"):(payment.batchPaymentId?"Confirm full batch cash":"Confirm cash received")}</button></div>}
-        {payment.status==="VERIFIED"&&<div className="payment-verified-note"><Check size={14}/> Verified {payment.verifiedUtc?new Date(payment.verifiedUtc).toLocaleString():"by shop"}</div>}
+        {payment.status==="VERIFIED"&&<div className="payment-verified-note"><Check size={14}/> Verified {payment.verifiedUtc?formatIstDateTime(payment.verifiedUtc):"by shop"}</div>}
       </article>)}</div>}
     </section>
     <section className="panel refund-audit-panel">
@@ -1891,7 +1950,7 @@ function PaymentsPage({settings,payments,refunds,onSave,onVerify,onReject,busy,b
       {refunds.length===0?<EmptyModule icon={<RotateCcw size={24}/>} title="No refunds recorded" text="When a shopkeeper rejects a paid file and records its return, the audit entry will appear here."/>:
       <div className="payment-record-list">{refunds.map(refund=><article className="payment-record refund-record" key={refund.id}>
         <div className="payment-record-head"><div><strong>{refund.jobNumber}</strong><small>{refund.documentName}</small></div><div className="payment-record-amount">{formatMoney(refund.amountMinor,refund.currency)}</div></div>
-        <div className="payment-record-meta"><span>{refund.method} refund</span><span>{new Date(refund.refundedUtc).toLocaleString()}</span><Status label="Recorded as sent" tone="green"/></div>
+        <div className="payment-record-meta"><span>{refund.method} refund</span><span>{formatIstDateTime(refund.refundedUtc)}</span><Status label="Recorded as sent" tone="green"/></div>
         <div className="refund-record-details"><span>Shopkeeper</span><strong>{refund.refundedByName}</strong><span>Reason</span><strong>{refund.reason}</strong>{refund.reference&&<><span>Refund reference</span><strong>{refund.reference}</strong></>}</div>
       </article>)}</div>}
     </section>
@@ -1993,7 +2052,7 @@ function PrintQueuePage({ jobs, printers, agentDevices, searchQuery, loadingBatc
               <td className="amount-cell">{totalAmount>0?formatMoney(totalAmount,first.currency):"Not quoted"}</td>
               <td><div className="queue-printer-cell"><strong>{printersInBatch.length===1?printersInBatch[0]:"Multiple printers"}</strong><small>{waiting.length} awaiting review</small></div></td>
               <td><Status label={label} tone={tone}/></td>
-              <td className="time-cell">{new Date(first.createdUtc).toLocaleString()}</td>
+              <td className="time-cell">{formatIstDateTime(first.createdUtc)}</td>
               <td><div className="queue-actions">
                 {waiting.length>0&&batch.batchId&&<button className="subtle-button approve-action" disabled={busyJobId==="batch-review"||!!loadingBatchId} onClick={()=>onReviewBatch(batch.batchId!)}>{loadingBatchId===batch.batchId?"Loading…":"Preview & review"}</button>}
                 <button className="subtle-button" onClick={()=>setExpandedBatchKeys(current=>{const next=new Set(current);if(next.has(batch.key))next.delete(batch.key);else next.add(batch.key);return next;})}>{expanded?"Hide files":"Files"}</button>
@@ -2073,7 +2132,7 @@ function BatchReviewModal({jobs,busy,decisions,retrying,onDecision,onClose,onPre
 
 function JobHistoryModal({job,events,onClose}:{job:ShopPrintJob;events:ShopJobEvent[];onClose:()=>void}) {
   return <Modal title={job.jobNumber} subtitle={`Audit history · ${job.document.originalFileName}`} onClose={onClose}>
-    <div className="shop-history-list">{events.length===0?<p>No recorded events yet.</p>:events.map(event=><div key={event.id}><i/><span><strong>{prettyStatus(event.newStatus)}</strong><small>{event.actorType==="ShopUser"?"Shop team":event.actorType==="Customer"?"Customer":"System"} · {new Date(event.createdUtc).toLocaleString()}</small>{event.reasonCode&&<small>{event.reasonCode.replaceAll("_"," ").toLowerCase()}</small>}</span></div>)}</div>
+    <div className="shop-history-list">{events.length===0?<p>No recorded events yet.</p>:events.map(event=><div key={event.id}><i/><span><strong>{prettyStatus(event.newStatus)}</strong><small>{event.actorType==="ShopUser"?"Shop team":event.actorType==="Customer"?"Customer":"System"} · {formatIstDateTime(event.createdUtc)}</small>{event.reasonCode&&<small>{event.reasonCode.replaceAll("_"," ").toLowerCase()}</small>}</span></div>)}</div>
     <div className="modal-actions"><button className="secondary-button" onClick={onClose}>Close history</button></div>
   </Modal>;
 }
@@ -2328,8 +2387,8 @@ function SubscriptionPage({ summary }: { summary: ShopSubscriptionSummary }) {
   const status = subscription.status.toLowerCase();
   const statusTone = status === "active" ? "tone-success" : status === "trial" ? "tone-warning" : "tone-neutral";
   const planName = plan?.name ?? (subscription.planCode === "TRIAL" ? "Trial plan" : subscription.planCode);
-  const periodStart = new Date(subscription.periodStartUtc).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" });
-  const periodEnd = new Date(subscription.periodEndUtc).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" });
+  const periodStart = formatIstDate(subscription.periodStartUtc);
+  const periodEnd = formatIstDate(subscription.periodEndUtc);
   const price = (amount: number | null | undefined, currency: string) =>
     amount == null ? "Not configured" : `${currency} ${(amount / 100).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
@@ -2378,7 +2437,7 @@ function SubscriptionPage({ summary }: { summary: ShopSubscriptionSummary }) {
       <section className="panel subscription-usage-panel">
         <div className="subscription-usage-heading">
           <div><h2>Usage and limits</h2><p>Live counts for this shop. Monthly print jobs use the UTC calendar month.</p></div>
-          <span className="subscription-updated">Updated {new Date(summary.generatedUtc).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" })}</span>
+          <span className="subscription-updated">Updated {formatIstTime(summary.generatedUtc)}</span>
         </div>
         <div className="subscription-usage-grid">
           <UsageMeter label="Registered printers" used={usage.printerCount} maximum={entitlements.maxPrinters}/>
@@ -2535,7 +2594,7 @@ function CustomerEntry({publicCode}:{publicCode:string}) {
       error?<><div className="entry-error-icon"><X size={23}/></div><div className="entry-eyebrow">STATION UNAVAILABLE</div><h1>{nativeAppMode?"Shop unavailable":"This QR station can't be reached"}</h1>{!nativeAppMode&&<p>{error}</p>}<button className="primary-button" onClick={()=>window.location.reload()}>Try again</button></>:
       result?<><div className="entry-success-icon"><Check size={23}/></div><div className="entry-eyebrow">SECURE SESSION CREATED</div><h1>{nativeAppMode?result.shop.displayName:"Welcome to "+result.shop.displayName}</h1><p>{nativeAppMode?"Shop connected.":"Your phone is connected to this shop's print station."}</p>
         <div className="entry-printer-card"><div className="entry-printer-icon"><Printer size={20}/></div><div><strong>{result.printer?.displayName||"Shop print counter"}</strong><span>{nativeAppMode?(result.printer?.status||"Printer not selected"):result.printer?result.printer.manufacturer+" · "+result.printer.model:"The shop will select a printer for your job."}</span></div><Status label={result.printer?.status||"Session ready"} tone="blue"/></div>
-        <div className="entry-session-note"><ShieldCheck size={16}/><span>{nativeAppMode?"Secure session · Expires "+new Date(result.expiresUtc).toLocaleTimeString([], {hour:"2-digit",minute:"2-digit"}):"This session expires at "+new Date(result.expiresUtc).toLocaleTimeString([], {hour:"2-digit",minute:"2-digit"})+". Your document access stays limited to this shop session."}</span></div>
+        <div className="entry-session-note"><ShieldCheck size={16}/><span>{nativeAppMode?"Secure session · Expires "+formatIstTime(result.expiresUtc):"This session expires at "+formatIstTime(result.expiresUtc)+". Your document access stays limited to this shop session."}</span></div>
         <CustomerLocalConnection localAgent={result.localAgent} onReady={setLocalReady}/>
         <CustomerPrintFlow publicCode={publicCode} sessionToken={result.sessionToken} paymentOptions={result.paymentOptions} localAgent={result.localAgent} localReady={localReady}/>
       </>:null}
@@ -3565,7 +3624,7 @@ function CustomerPrintFlow({publicCode,sessionToken,paymentOptions,localAgent,lo
       <strong>{nativeAppMode?smartPrintNativeHeadline(jobStatus.status):jobStatus.status==="AWAITING_SHOP_APPROVAL"?"Your request is with the shop":jobStatus.status==="AWAITING_PAYMENT"?"The shop accepted your request":jobStatus.status==="LOCAL_QUEUE_CLAIMED"?"Your document is reaching the shop":jobStatus.status==="LOCAL_QUEUE_READY"?"Your document is secured at the shop":jobStatus.status==="PRINT_AUTHORISED"?"The shop started printing":jobStatus.status==="PRINT_SUBMITTING"?"Your document is being sent to the printer":jobStatus.status==="SPOOLER_ACCEPTED"?"The printer queue accepted your document":jobStatus.status==="PRINTING"?"Your document is printing":jobStatus.status==="OUTPUT_UNCONFIRMED"?"The shop is checking your print":jobStatus.status==="COMPLETED"?"Your print is ready":jobStatus.status==="PAID_AUTHORISED"?"Your payment is verified":jobStatus.status==="REJECTED"?"The shop could not accept this request":jobStatus.status==="QUOTE_EXPIRED"?"Your quote has expired":"Your request is being reviewed"}</strong>
       <p>{nativeAppMode ? smartPrintNativeStatus(jobStatus.status) : jobStatus.status==="AWAITING_SHOP_APPROVAL"?"The shop will review your request next. No payment has been collected.":jobStatus.status==="AWAITING_PAYMENT"?"The shop approved your quote. Choose one of the payment methods enabled by the shop.":jobStatus.status==="LOCAL_QUEUE_CLAIMED"?"Your paid document is being transferred securely to the shop's Windows computer. It has not been sent to the printer.":jobStatus.status==="LOCAL_QUEUE_READY"?"The document is safely stored in the shop's local queue and is waiting for the print operator. Physical printing has not started.":jobStatus.status==="PRINT_AUTHORISED"?"The shop has authorised printing. The Windows agent will submit the document once.":jobStatus.status==="PRINT_SUBMITTING"?"The Windows agent is submitting your document to the printer.":jobStatus.status==="SPOOLER_ACCEPTED"?"Windows accepted the job into the printer queue. This does not yet confirm paper output.":jobStatus.status==="PRINTING"?"The printer driver reports that the job is printing. The shop will confirm the pages before marking it complete.":jobStatus.status==="OUTPUT_UNCONFIRMED"?"The printer queue could not confirm the final output. The shop operator is checking the pages before any retry.":jobStatus.status==="COMPLETED"?"The shop has checked the physical pages and marked your print ready for collection.":jobStatus.status==="AWAITING_COUNTER_PAYMENT"?"Please pay the shop at the counter. The job is not authorised until the shop confirms receipt.":jobStatus.status==="AWAITING_CUSTOMER_PAYMENT"?"Complete the UPI payment and submit its transaction reference. The shop must independently verify it.":jobStatus.status==="PAYMENT_REPORTED"?"Your UPI reference was sent to the shop. It is not marked paid until the shop verifies the transaction.":jobStatus.status==="PAID_AUTHORISED"?"The shop has verified your payment. The print queue is being prepared; physical printing has not yet started.":jobStatus.status==="PAYMENT_REJECTED"?"The shop could not verify that payment. Check with the shop before trying another method.":jobStatus.status==="REJECTED"?"Please speak with the shop operator if you need help with this request.":jobStatus.status==="QUOTE_EXPIRED"?"This quote is no longer valid. Please ask the shop for a fresh quote.":"Check back for the latest request status."}</p>
       {payment&&!!payment.refundedAmountMinor&&payment.refundedAmountMinor>0&&<div className="customer-refund-note"><Wallet size={16}/><span><strong>{formatMoney(payment.refundedAmountMinor,payment.currency)} returned</strong> for rejected pages ({rejectedPageList(jobStatus.rejectedPageNumbersJson)}). {formatMoney(Math.max(0,payment.amountMinor-payment.refundedAmountMinor),payment.currency)} remains paid; only accepted pages proceed to printing.</span></div>}
-      {!!jobStatus.timeline?.length&&<div className="customer-state-timeline">{jobStatus.timeline.map((event,index)=><div key={index}><i/><span><strong>{prettyStatus(event.newStatus)}</strong><small>{event.actorType==="ShopUser"?"Shop team":event.actorType==="Customer"?"You":"System"} · {new Date(event.createdUtc).toLocaleString()}</small></span></div>)}</div>}
+      {!!jobStatus.timeline?.length&&<div className="customer-state-timeline">{jobStatus.timeline.map((event,index)=><div key={index}><i/><span><strong>{prettyStatus(event.newStatus)}</strong><small>{event.actorType==="ShopUser"?"Shop team":event.actorType==="Customer"?"You":"System"} · {formatIstDateTime(event.createdUtc)}</small></span></div>)}</div>}
 
       {legacyIndividualPayment&&(jobStatus.status==="AWAITING_PAYMENT"||jobStatus.status==="PAYMENT_REJECTED")&&<div className="customer-pay-panel">
         <div className="customer-pay-heading"><span>PAY THE SHOP</span><strong>{formatMoney(jobStatus.quotedAmountMinor,jobStatus.currency)}</strong></div>
