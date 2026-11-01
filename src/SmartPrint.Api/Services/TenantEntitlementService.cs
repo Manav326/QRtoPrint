@@ -55,14 +55,21 @@ public sealed class TenantEntitlementService(SmartPrintDbContext db)
             PlanEntitlementRules.IsSubscriptionAccessActive(
                 subscription.Status, subscription.PeriodEndUtc, DateTimeOffset.UtcNow);
 
+        var operationalSettings = await db.PlatformOperationalSettings.AsNoTracking()
+            .SingleOrDefaultAsync(item => item.Id == PlatformOperationalSettings.SingletonIdValue, cancellationToken);
+        var trialMonthlyLimit = operationalSettings?.TrialMaxMonthlyPrintJobs ??
+            PlatformOperationalSettings.DefaultTrialMaxMonthlyPrintJobs;
+        var isTrialPlan = string.Equals(subscription?.PlanCode, "TRIAL", StringComparison.OrdinalIgnoreCase);
+
         // Legacy subscriptions have no immutable version reference. Preserve their existing access
-        // only while their recorded Trial/Active period is still valid.
+        // only while their recorded Trial/Active period is still valid. The platform trial quota
+        // remains enforceable even for legacy trial rows without a plan-version reference.
         if (subscription?.PlanVersionId is not Guid planVersionId)
         {
             return new TenantEntitlementSnapshot(
                 tenantId, subscription?.PlanCode ?? "UNCONFIGURED",
                 subscription?.Status ?? "Unconfigured", null,
-                null, null, null, null, null,
+                null, null, null, isTrialPlan ? trialMonthlyLimit : null, null,
                 accessActive, false, accessActive, true, accessActive);
         }
 
@@ -77,7 +84,7 @@ public sealed class TenantEntitlementService(SmartPrintDbContext db)
         return new TenantEntitlementSnapshot(
             tenantId, subscription.PlanCode, subscription.Status, version.Id,
             version.MaxPrinters, version.MaxAgentDevices, version.MaxQrStations,
-            version.MaxMonthlyPrintJobs, version.MaxDocumentBytes,
+            isTrialPlan ? trialMonthlyLimit : version.MaxMonthlyPrintJobs, version.MaxDocumentBytes,
             version.CloudAssistedPrintingEnabled && accessActive,
             version.WhiteLabelEnabled && accessActive,
             version.AdvancedReportsEnabled && accessActive,
@@ -177,7 +184,8 @@ public sealed class TenantEntitlementService(SmartPrintDbContext db)
             item => item.TenantId == tenantId &&
                     item.CreatedUtc >= periodStart &&
                     item.CreatedUtc < periodEnd &&
-                    (item.CompletedUtc != null || item.ExpiresUtc > now) &&
+                    item.CompletedUtc == null &&
+                    item.ExpiresUtc > now &&
                     !db.PrintJobs.Any(job => job.TenantId == item.TenantId && job.Id == item.PrintJobId),
             cancellationToken);
         return checked(createdJobs + unmaterializedLocalReservations);

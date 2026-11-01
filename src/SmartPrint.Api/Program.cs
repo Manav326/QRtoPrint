@@ -183,6 +183,7 @@ var platform = app.MapGroup("/api/v1/platform")
 
 platform.MapSubscriptionPlanEndpoints();
 platform.MapPlatformSubscriptionEndpoints();
+platform.MapPlatformOperationalSettingsEndpoints();
 
 platform.MapGet("/overview", async (SmartPrintDbContext db, CancellationToken ct) =>
 {
