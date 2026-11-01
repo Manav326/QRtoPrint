@@ -1355,67 +1355,79 @@ class MainActivity : AppCompatActivity() {
 
     private fun renderPdfEditor(file: File, pages: MutableList<PdfPageEdit>) {
         pickerMode = false
-        toolbar.title = "Edit PDF pages"
+        toolbar.title = "PDF editor"
         toolbar.setNavigationIcon(android.R.drawable.ic_media_previous)
         toolbar.setNavigationOnClickListener { showFiles() }
         navigation.visibility = View.GONE
         content.removeAllViews()
 
-        val scroll = ScrollView(this).apply { isFillViewport = true }
+        val scroll = ScrollView(this).apply { isFillViewport = true; clipToPadding = false }
         val column = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(dp(18), dp(16), dp(18), dp(28))
+            setPadding(dp(16), dp(14), dp(16), dp(24))
         }
         scroll.addView(column)
-        column.addView(text(file.name, 17, R.color.qp_text, true))
+
+        column.addView(text(file.name, 15, R.color.qp_text, true))
         column.addView(text(
-            "Preview pages, rotate them, change their order or remove unwanted pages. Save creates a new image-based PDF; searchable text, vector artwork and some fine detail may be lost. Your original stays unchanged.",
-            13, R.color.qp_muted, false
-        ).apply { setPadding(0, dp(5), 0, dp(14)) })
-        column.addView(button("Save edited copy", true).apply {
+            "Rasterized copy · Original kept.",
+            11, R.color.qp_muted, false
+        ).apply { setPadding(0, dp(4), 0, dp(12)) })
+        column.addView(button("Save copy", true).apply {
             setOnClickListener { savePdfEdits(file, pages.toList()) }
-        }, linearParams().apply { bottomMargin = dp(14) })
+        }, linearParams().apply { bottomMargin = dp(12) })
 
         pages.forEachIndexed { position, page ->
-            val item = card()
-            val body = LinearLayout(this).apply {
+            val row = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                setPadding(dp(9), dp(8), dp(7), dp(8))
+                background = roundedDrawable(getColor(R.color.qp_card), dp(11), getColor(R.color.qp_outline))
+            }
+            val pageMark = TextView(this).apply {
+                text = (position + 1).toString()
+                textSize = 13f
+                gravity = Gravity.CENTER
+                setTypeface(typeface, android.graphics.Typeface.BOLD)
+                setTextColor(getColor(R.color.qp_primary))
+                background = roundedDrawable(getColor(R.color.qp_soft), dp(9))
+            }
+            row.addView(pageMark, LinearLayout.LayoutParams(dp(36), dp(40)))
+            val meta = LinearLayout(this).apply {
                 orientation = LinearLayout.VERTICAL
-                setPadding(dp(13), dp(12), dp(13), dp(12))
+                setPadding(dp(10), 0, dp(6), 0)
             }
-            val heading = LinearLayout(this).apply {
-                orientation = LinearLayout.HORIZONTAL
-                gravity = Gravity.CENTER_VERTICAL
-            }
-            heading.addView(text("Page ${position + 1}", 15, R.color.qp_text, true),
-                LinearLayout.LayoutParams(0, -2, 1f))
-            heading.addView(text(
-                if (page.rotationDegrees == 0) "Original orientation" else "Rotated ${page.rotationDegrees}°",
-                11, R.color.qp_muted, false
-            ))
-            body.addView(heading)
-            val actions = LinearLayout(this).apply {
-                orientation = LinearLayout.HORIZONTAL
-                gravity = Gravity.CENTER_VERTICAL
-            }
-            actions.addView(button("Preview", false).apply {
+            meta.addView(text("Page ${position + 1}", 12, R.color.qp_text, true))
+            meta.addView(text(
+                if (page.rotationDegrees == 0) "Original" else "${page.rotationDegrees}°",
+                10, R.color.qp_muted, false
+            ).apply { setPadding(0, dp(2), 0, 0) })
+            row.addView(meta, LinearLayout.LayoutParams(0, -2, 1f))
+            val actions = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+            actions.addView(button("View", false).apply {
+                minHeight = dp(34)
+                minWidth = dp(44)
                 contentDescription = "Preview page ${position + 1}"
                 setOnClickListener {
                     try {
-                        val bitmap = DocumentBatchComposer.renderPagePreview(file, page)
-                        showImageSheet("Page ${position + 1}", bitmap)
+                        showImageSheet("Page ${position + 1}", DocumentBatchComposer.renderPagePreview(file, page))
                     } catch (e: Exception) {
-                        toast("Page preview failed: ${message(e)}")
+                        toast("Preview failed: ${message(e)}")
                     }
                 }
-            }, LinearLayout.LayoutParams(0, dp(42), 1f))
-            actions.addView(button("Rotate", false).apply {
+            })
+            actions.addView(button("↻", false).apply {
+                minHeight = dp(34)
+                minWidth = dp(38)
                 contentDescription = "Rotate page ${position + 1}"
                 setOnClickListener {
                     pages[position] = page.copy(rotationDegrees = (page.rotationDegrees + 90) % 360)
                     renderPdfEditor(file, pages)
                 }
-            }, LinearLayout.LayoutParams(0, dp(42), 1f).apply { marginStart = dp(6) })
-            actions.addView(button("Up", false).apply {
+            }, LinearLayout.LayoutParams(-2, dp(34)).apply { marginStart = dp(4) })
+            actions.addView(button("↑", false).apply {
+                minHeight = dp(34)
+                minWidth = dp(34)
                 contentDescription = "Move page ${position + 1} up"
                 isEnabled = position > 0
                 alpha = if (position > 0) 1f else 0.4f
@@ -1426,8 +1438,10 @@ class MainActivity : AppCompatActivity() {
                         renderPdfEditor(file, pages)
                     }
                 }
-            }, LinearLayout.LayoutParams(0, dp(42), 0.7f).apply { marginStart = dp(6) })
-            actions.addView(button("Down", false).apply {
+            }, LinearLayout.LayoutParams(-2, dp(34)).apply { marginStart = dp(4) })
+            actions.addView(button("↓", false).apply {
+                minHeight = dp(34)
+                minWidth = dp(34)
                 contentDescription = "Move page ${position + 1} down"
                 isEnabled = position < pages.lastIndex
                 alpha = if (position < pages.lastIndex) 1f else 0.4f
@@ -1438,22 +1452,23 @@ class MainActivity : AppCompatActivity() {
                         renderPdfEditor(file, pages)
                     }
                 }
-            }, LinearLayout.LayoutParams(0, dp(42), 0.9f).apply { marginStart = dp(6) })
-            body.addView(actions, linearParams().apply { topMargin = dp(9) })
-            body.addView(button("Remove page", false).apply {
-                contentDescription = "Remove page ${position + 1}"
-                setOnClickListener {
+            }, LinearLayout.LayoutParams(-2, dp(34)).apply { marginStart = dp(4) })
+            row.addView(actions)
+            row.setOnLongClickListener {
+                showConfirmSheet("Remove page?", "The original stays unchanged.", "Remove", destructive = true) {
                     if (pages.size <= 1) {
-                        toast("A PDF must keep at least one page.")
+                        toast("A PDF needs one page.")
                     } else {
                         pages.removeAt(position)
                         renderPdfEditor(file, pages)
                     }
                 }
-            }, linearParams().apply { topMargin = dp(7) })
-            item.addView(body)
-            column.addView(item, linearParams().apply { bottomMargin = dp(8) })
+                true
+            }
+            column.addView(row, linearParams().apply { bottomMargin = dp(5) })
         }
+        column.addView(text("Swipe-free · Use arrows to reorder.", 10, R.color.qp_muted, false)
+            .apply { setPadding(dp(2), dp(8), 0, 0) })
         content.addView(scroll, frameParams())
     }
 
