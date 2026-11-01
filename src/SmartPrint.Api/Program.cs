@@ -2642,6 +2642,18 @@ shop.MapPost("/print-batches/{batchId:guid}/review", async (
             if (job.Status == "REJECTED")
                 continue;
 
+            if (protectedJobIds.Contains(job.Id))
+            {
+                await transaction.RollbackAsync(ct);
+                return Results.Conflict(new
+                {
+                    code = "batch_file_has_payment_attempt",
+                    jobId = job.Id,
+                    jobNumber = job.JobNumber,
+                    message = "This file already has an active or verified individual payment. Resolve that payment first, then refresh the batch review."
+                });
+            }
+
             if (job.Status is not ("AWAITING_SHOP_APPROVAL" or "AWAITING_PAYMENT" or "PAYMENT_REJECTED"))
             {
                 await transaction.RollbackAsync(ct);
