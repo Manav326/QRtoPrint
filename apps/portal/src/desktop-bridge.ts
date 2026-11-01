@@ -6,6 +6,7 @@ export interface DesktopAgentStatus {
   paired: boolean;
   agentDeviceId: string | null;
   status: string;
+  apiBaseUrl: string | null;
 }
 
 export interface DesktopEnrollmentResult {
@@ -21,6 +22,10 @@ export function isDesktopApp(): boolean {
 
 export function getLocalAgentStatus(): Promise<DesktopAgentStatus> {
   return invoke<DesktopAgentStatus>("get_local_agent_status");
+}
+
+export function getAgentApiBaseUrl(): Promise<string | null> {
+  return invoke<string | null>("get_agent_api_base_url");
 }
 
 export function enrollLocalAgent(enrollmentCode: string): Promise<DesktopEnrollmentResult> {

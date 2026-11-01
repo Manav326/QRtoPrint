@@ -1,4 +1,4 @@
-import { isDesktopApp, writeDesktopSession } from "./desktop-bridge";
+import { getAgentApiBaseUrl, isDesktopApp, writeDesktopSession } from "./desktop-bridge";
 export interface AuthTokens {
   tokenType: string;
   accessToken: string;
@@ -157,7 +157,48 @@ export class ApiError extends Error {
   }
 }
 
-const apiBase = (import.meta.env.VITE_API_BASE_URL || "").replace(/\/$/, "");
+const defaultApiBase = (import.meta.env.VITE_API_BASE_URL || "").replace(/\/$/, "");
+let apiBase = defaultApiBase;
+let desktopApiBaseRefresh: Promise<void> | null = null;
+let lastDesktopApiBaseRefreshUtc = 0;
+
+export function configureApiBaseUrl(value: string | null | undefined): void {
+  if (!value) return;
+  try {
+    const parsed = new URL(value);
+    if (
+      !["https:", "http:"].includes(parsed.protocol) ||
+      !parsed.hostname ||
+      parsed.username ||
+      parsed.password ||
+      parsed.pathname !== "/" ||
+      parsed.search ||
+      parsed.hash
+    ) return;
+
+    apiBase = parsed.origin;
+  } catch {
+    // Keep the previously validated base URL if the local service returns invalid data.
+  }
+}
+
+async function refreshDesktopApiBaseUrl(): Promise<void> {
+  if (!isDesktopApp()) return;
+  if (desktopApiBaseRefresh) return desktopApiBaseRefresh;
+  if (Date.now() - lastDesktopApiBaseRefreshUtc < 30_000) return;
+
+  desktopApiBaseRefresh = getAgentApiBaseUrl()
+    .then(value => {
+      configureApiBaseUrl(value);
+      lastDesktopApiBaseRefreshUtc = Date.now();
+    })
+    .catch(() => undefined)
+    .finally(() => {
+      desktopApiBaseRefresh = null;
+    });
+
+  return desktopApiBaseRefresh;
+}
 
 let refreshInFlight: Promise<AuthTokens | null> | null = null;
 let desktopSessionWrite: Promise<void> = Promise.resolve();
@@ -209,6 +250,8 @@ export async function apiRequest<T>(
   options: RequestInit = {},
   accessToken?: string
 ): Promise<T> {
+  await refreshDesktopApiBaseUrl();
+
   const send = async (bearerToken?: string): Promise<Response> => {
     const headers = new Headers(options.headers);
     headers.set("Accept", "application/json");

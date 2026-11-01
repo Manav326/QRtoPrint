@@ -95,6 +95,7 @@ public sealed class AgentControlPipeIntegrationTests
                 Assert.False(initialStatus.RootElement.GetProperty("localApiReachable").GetBoolean());
                 Assert.False(initialStatus.RootElement.GetProperty("paired").GetBoolean());
                 Assert.Equal("UNPAIRED", initialStatus.RootElement.GetProperty("status").GetString());
+                Assert.Equal(apiOrigin, initialStatus.RootElement.GetProperty("apiBaseUrl").GetString());
             }
 
             using (var response = await SendPipeRequestAsync("enroll", enrollmentCode, timeout.Token))
@@ -112,6 +113,7 @@ public sealed class AgentControlPipeIntegrationTests
                 Assert.True(pairedStatus.RootElement.GetProperty("paired").GetBoolean());
                 Assert.Equal(deviceId, pairedStatus.RootElement.GetProperty("agentDeviceId").GetGuid());
                 Assert.Equal("CONNECTED", pairedStatus.RootElement.GetProperty("status").GetString());
+                Assert.Equal(apiOrigin, pairedStatus.RootElement.GetProperty("apiBaseUrl").GetString());
             }
 
             Assert.True(await apiRequestTask.WaitAsync(timeout.Token));

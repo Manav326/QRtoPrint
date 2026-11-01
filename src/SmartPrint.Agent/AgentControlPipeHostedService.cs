@@ -144,14 +144,14 @@ public sealed class AgentControlPipeHostedService(
                 var paired = credentials is not null;
                 var status = paired ? "CONNECTED" : credentialStore.IsRevoked() ? "REVOKED" : "UNPAIRED";
                 await writer.WriteLineAsync(JsonSerializer.Serialize(
-                    new PipeResponse(true, credentials?.AgentDeviceId, null, true, paired, status, localAgentApiState.IsRunning),
+                    new PipeResponse(true, credentials?.AgentDeviceId, null, true, paired, status, localAgentApiState.IsRunning, credentials?.ApiBaseUrl ?? configuration["Agent:ApiBaseUrl"]),
                     PipeJsonOptions));
             }
             catch (Exception exception) when (exception is CryptographicException or IOException or JsonException or UnauthorizedAccessException)
             {
                 logger.LogWarning("SmartPrint local identity status could not be read ({FailureType}).", exception.GetType().Name);
                 await writer.WriteLineAsync(JsonSerializer.Serialize(
-                    new PipeResponse(false, null, "The local SmartPrint identity could not be read.", true, false, "IDENTITY_UNAVAILABLE"),
+                    new PipeResponse(false, null, "The local SmartPrint identity could not be read.", true, false, "IDENTITY_UNAVAILABLE", localAgentApiState.IsRunning, configuration["Agent:ApiBaseUrl"]),
                     PipeJsonOptions));
             }
             return;
@@ -200,5 +200,6 @@ public sealed class AgentControlPipeHostedService(
         bool? ServiceReachable = null,
         bool? Paired = null,
         string? Status = null,
-        bool? LocalApiReachable = null);
+        bool? LocalApiReachable = null,
+        string? ApiBaseUrl = null);
 }

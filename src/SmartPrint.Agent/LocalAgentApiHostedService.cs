@@ -218,25 +218,30 @@ public sealed class LocalAgentApiHostedService(
                     var credentials = credentialStore.Load();
                     if (credentials is null)
                     {
-                        return Results.Problem(
-                            statusCode: StatusCodes.Status503ServiceUnavailable,
-                            title: credentialStore.IsRevoked()
+                        return Results.Json(new
+                        {
+                            title = credentialStore.IsRevoked()
                                 ? "This computer's SmartPrint pairing was revoked by its shop owner."
-                                : "This computer is not paired with a print shop.");
+                                : "This computer is not paired with a print shop.",
+                            apiBaseUrl = configuration["Agent:ApiBaseUrl"]
+                        }, statusCode: StatusCodes.Status503ServiceUnavailable);
                     }
 
                     return Results.Ok(new
                     {
                         agentDeviceId = credentials.AgentDeviceId,
                         protocolVersion = 1,
-                        status = "LOCAL_ENDPOINT_READY"
+                        status = "LOCAL_ENDPOINT_READY",
+                        apiBaseUrl = credentials.ApiBaseUrl
                     });
                 }
                 catch (CryptographicException)
                 {
-                    return Results.Problem(
-                        statusCode: StatusCodes.Status503ServiceUnavailable,
-                        title: "The local agent identity is unavailable.");
+                    return Results.Json(new
+                    {
+                        title = "The local agent identity is unavailable.",
+                        apiBaseUrl = configuration["Agent:ApiBaseUrl"]
+                    }, statusCode: StatusCodes.Status503ServiceUnavailable);
                 }
             }).RequireCors("CustomerPortal");
 

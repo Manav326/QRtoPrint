@@ -20,6 +20,7 @@ struct LocalAgentStatus {
     paired: bool,
     agent_device_id: Option<String>,
     status: String,
+    api_base_url: Option<String>,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -32,6 +33,7 @@ struct AgentPipeResponse {
     paired: Option<bool>,
     status: Option<String>,
     local_api_reachable: Option<bool>,
+    api_base_url: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -55,6 +57,10 @@ async fn get_local_agent_status() -> LocalAgentStatus {
             let title = problem.as_ref()
                 .and_then(|value| value.get("title"))
                 .and_then(serde_json::Value::as_str);
+            let api_base_url = problem.as_ref()
+                .and_then(|value| value.get("apiBaseUrl"))
+                .and_then(serde_json::Value::as_str)
+                .map(str::to_owned);
             if title == Some("This computer's SmartPrint pairing was revoked by its shop owner.") {
                 LocalAgentStatus {
                     service_reachable: true,
@@ -62,6 +68,7 @@ async fn get_local_agent_status() -> LocalAgentStatus {
                     paired: false,
                     agent_device_id: None,
                     status: "REVOKED".into(),
+                    api_base_url,
                 }
             } else if title == Some("This computer is not paired with a print shop.") {
                 LocalAgentStatus {
@@ -70,6 +77,7 @@ async fn get_local_agent_status() -> LocalAgentStatus {
                     paired: false,
                     agent_device_id: None,
                     status: "UNPAIRED".into(),
+                    api_base_url,
                 }
             } else {
                 pipe_agent_status().unwrap_or_else(|_| unavailable_status())
@@ -90,6 +98,9 @@ async fn get_local_agent_status() -> LocalAgentStatus {
                             .and_then(serde_json::Value::as_str)
                             .unwrap_or("CONNECTED")
                             .to_owned(),
+                        api_base_url: payload.get("apiBaseUrl")
+                            .and_then(serde_json::Value::as_str)
+                            .map(str::to_owned),
                     }
                 }
                 Err(_) => pipe_agent_status().unwrap_or_else(|_| unavailable_status()),
@@ -106,6 +117,7 @@ fn unavailable_status() -> LocalAgentStatus {
         paired: false,
         agent_device_id: None,
         status: "SERVICE_UNAVAILABLE".into(),
+        api_base_url: None,
     }
 }
 
@@ -151,12 +163,44 @@ fn pipe_agent_status() -> Result<LocalAgentStatus, String> {
         paired,
         agent_device_id: response.agent_device_id,
         status: response.status.unwrap_or_else(|| if paired { "CONNECTED" } else { "UNPAIRED" }.into()),
+        api_base_url: response.api_base_url,
     })
 }
 
 #[cfg(not(windows))]
 fn pipe_agent_status() -> Result<LocalAgentStatus, String> {
     Err("The local Windows Agent pipe is unavailable on this platform.".into())
+}
+
+#[tauri::command]
+fn get_agent_api_base_url() -> Option<String> {
+    #[cfg(windows)]
+    {
+        return send_agent_pipe_request(&AgentPipeRequest {
+            operation: "status",
+            enrollment_code: None,
+        })
+        .ok()
+        .filter(|response| response.service_reachable == Some(true))
+        .and_then(|response| response.api_base_url)
+        .filter(|value| is_canonical_api_origin(value));
+    }
+    #[cfg(not(windows))]
+    {
+        None
+    }
+}
+
+fn is_canonical_api_origin(value: &str) -> bool {
+    url::Url::parse(value).map(|parsed| {
+        matches!(parsed.scheme(), "https" | "http") &&
+        parsed.host_str().is_some() &&
+        parsed.username().is_empty() &&
+        parsed.password().is_none() &&
+        parsed.path() == "/" &&
+        parsed.query().is_none() &&
+        parsed.fragment().is_none()
+    }).unwrap_or(false)
 }
 
 #[tauri::command]
@@ -289,6 +333,7 @@ fn main() {
     tauri::Builder::default()
         .invoke_handler(tauri::generate_handler![
             get_local_agent_status,
+            get_agent_api_base_url,
             enroll_local_agent,
             read_secure_session,
             write_secure_session
