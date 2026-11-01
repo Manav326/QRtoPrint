@@ -21,6 +21,20 @@ QRtoPrint serves its public, platform-administration and shop experiences from o
 
 The Nginx portal serves the SPA entry document for `/admin/*`, `/shop/*`, legacy `/login` and `/signup`, and `/s/*`. Built assets remain rooted at `/`, so the same compiled portal bundle can serve all scopes without embedding a deployment hostname.
 
+Shop workspace sections have stable paths:
+
+- `/shop` — Overview
+- `/shop/queue` — Print Queue
+- `/shop/printers` — Printers
+- `/shop/qr-stations` — QR Stations
+- `/shop/print-agent` — Print Agent
+- `/shop/pricing` — Pricing
+- `/shop/subscription` — Subscription
+- `/shop/payments` — Payments
+- `/shop/customers` — Customers
+- `/shop/reports` — Reports
+- `/shop/settings` — Settings
+
 Platform console sections have stable paths:
 
 - `/admin` — Overview
