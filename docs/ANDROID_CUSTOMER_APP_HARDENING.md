@@ -17,7 +17,7 @@ Scope: the SmartPrint Android application remains customer-facing. Shop staff co
 - [x] Refresh and display status for every file in a multi-file batch.
 - [x] Make customer navigation/back handling return to the previous screen.
 - [x] Explain image-based PDF conversion before combine/edit operations.
-- [x] Add useful date and job context to account activity/history.
+- [x] Add useful date, original filename, payment/refund/net amounts, rejected pages and output confirmation to account activity/history.
 
 ### Library, accessibility and reliability
 - [x] Add library search/filter.
@@ -34,7 +34,7 @@ Scope: the SmartPrint Android application remains customer-facing. Shop staff co
 
 ## Dependencies / not safe to fake
 - Customer email verification and password recovery are not implemented in the current API. The API currently creates unconfirmed customer accounts but has no customer verification/reset-token endpoints or configured email delivery contract. Do not display a working-looking reset flow until backend token issuance, delivery, expiry, rate limits and redemption are implemented and tested.
-- Account history currently returns only job number/status/page count/copies/currency/quoted total/date/shop. Paid/refunded/net amounts and original filename must come from an expanded tenant-safe customer-history API before they can be truthfully displayed.
+- Account history now returns original filename, latest payment state/method, verified paid amount, recorded refunds, net paid amount, rejected pages and output-confirmation time through tenant-scoped document/payment queries. A full event-by-event history timeline remains a possible follow-up; the current screen shows the job date and output confirmation.
 - The Android app's cleartext exception currently supports dynamic private IPv4 Agent endpoints. Android Network Security Config cannot safely express an arbitrary private IPv4 range as a static exception. Moving Agent bytes through a native, policy-checked transport is the clean route to turn off global cleartext permission; do not break local printing by changing only the manifest.
 - Physical-device and shop-network acceptance cannot be simulated by repository CI.
 - Guest-session recovery is bounded by the API's existing print-session expiry. Android can restore a stored token after process death while the server still accepts it. If the app is not reopened before expiry, the current API does not expose an expired-guest-job recovery capability; this requires a backend recovery token or explicit customer-account linking flow.
