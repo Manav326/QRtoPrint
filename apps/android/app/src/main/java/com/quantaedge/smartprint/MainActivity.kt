@@ -587,7 +587,7 @@ class MainActivity : AppCompatActivity() {
             orientation = LinearLayout.VERTICAL
         }
         heading.addView(text("Your space", 23, R.color.qp_text, true))
-        heading.addView(text("\${recentFiles.size} files · $used used", 12, R.color.qp_muted, false).apply {
+        heading.addView(text("${recentFiles.size} files · $used used", 12, R.color.qp_muted, false).apply {
             setPadding(0, dp(3), 0, 0)
         })
         column.addView(heading, linearParams().apply { bottomMargin = dp(16) })
@@ -739,8 +739,6 @@ class MainActivity : AppCompatActivity() {
         }, LinearLayout.LayoutParams(-1, dp(44)).apply { topMargin = dp(8) })
         return column
     }
-
-    private fun journeyIcon(resourceId: Int): ImageView = ImageView(this).apply {
 
     private fun journeyIcon(resourceId: Int): ImageView = ImageView(this).apply {
         setImageResource(resourceId)
