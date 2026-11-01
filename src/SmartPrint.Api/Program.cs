@@ -930,6 +930,7 @@ customerApi.MapGet("/jobs", async (
         select new
         {
             job.Id,
+            job.BatchGroupName,
             job.JobNumber,
             job.Status,
             job.PageCount,
@@ -1822,6 +1823,7 @@ shop.MapGet("/print-jobs", async (
         {
             job.Id,
             job.BatchId,
+            job.BatchGroupName,
             job.RejectedPageNumbersJson,
             job.JobNumber,
             job.Status,
@@ -3320,6 +3322,7 @@ agentApi.MapPost("/local-uploads/{ticketId:guid}/claim", async (
         AlreadyCompleted = false,
         ticket.Id,
         ticket.PrintJobId,
+        ticket.BatchGroupName,
         ticket.JobNumber,
         ticket.AgentDeviceId,
         PrinterDeviceId = stationPrinter.Id,
@@ -3519,6 +3522,7 @@ agentApi.MapPost("/local-uploads/{ticketId:guid}/complete", async (
         Id = ticket.PrintJobId,
         TenantId = ticket.TenantId,
         BatchId = ticket.BatchId,
+        BatchGroupName = ticket.BatchGroupName,
         QrStationId = ticket.QrStationId,
         PrinterDeviceId = ticket.PrinterDeviceId,
         CustomerSessionId = ticket.CustomerSessionId,
@@ -4614,6 +4618,15 @@ publicApi.MapPost("/sessions/current/jobs", async (
     }
 
     var file = form.Files[0];
+    string batchGroupName;
+    try
+    {
+        batchGroupName = PrintBatchGroupRules.Normalize(form["batchGroupName"].FirstOrDefault());
+    }
+    catch (ArgumentException exception)
+    {
+        return Results.BadRequest(new { code = "invalid_batch_group", message = exception.Message });
+    }
     if (file.Length is <= 0 or > 20 * 1024 * 1024)
     {
         return Results.Problem(statusCode: StatusCodes.Status413PayloadTooLarge, title: "File size must be between 1 byte and 20 MB.");
@@ -4675,6 +4688,7 @@ publicApi.MapPost("/sessions/current/jobs", async (
         QrStationId = session.QrStationId,
         CustomerSessionId = session.Id,
         BatchId = batchId,
+        BatchGroupName = batchGroupName,
         JobNumber = $"SP-{now:yyMMdd}-{Guid.NewGuid().ToString("N")[..8].ToUpperInvariant()}",
         Status = "AWAITING_CONFIGURATION",
         IdempotencyKey = idempotencyKey,
@@ -4780,6 +4794,7 @@ publicApi.MapPost("/sessions/current/jobs", async (
         Job = new
         {
             job.Id,
+            job.BatchGroupName,
             job.JobNumber,
             job.Status,
             job.PageCount,
@@ -4817,6 +4832,16 @@ publicApi.MapPost("/sessions/current/local-upload-tickets", async (
         string.IsNullOrWhiteSpace(request.GrantToken) || request.GrantToken.Length is < 40 or > 128)
     {
         return Results.BadRequest(new { code = "local_upload_ticket_request_invalid", message = "A live print session, idempotency key and one-use upload grant are required." });
+    }
+
+    string batchGroupName;
+    try
+    {
+        batchGroupName = PrintBatchGroupRules.Normalize(request.BatchGroupName);
+    }
+    catch (ArgumentException exception)
+    {
+        return Results.BadRequest(new { code = "invalid_batch_group", message = exception.Message });
     }
 
     var originalName = request.OriginalFileName?.Split('/', '\\').LastOrDefault() ?? string.Empty;
@@ -4864,7 +4889,8 @@ publicApi.MapPost("/sessions/current/local-upload-tickets", async (
         if (!CryptographicOperations.FixedTimeEquals(existingGrantHash, suppliedGrantHash) ||
             existing.SizeBytes != request.SizeBytes ||
             !string.Equals(existing.Sha256, sha, StringComparison.OrdinalIgnoreCase) ||
-            existing.OriginalFileName != originalName)
+            existing.OriginalFileName != originalName ||
+            PrintBatchGroupRules.Normalize(existing.BatchGroupName) != batchGroupName)
         {
             return Results.Conflict(new { code = "local_upload_idempotency_conflict", message = "This upload attempt key is already associated with a different document." });
         }
@@ -4941,6 +4967,7 @@ publicApi.MapPost("/sessions/current/local-upload-tickets", async (
         PrinterDeviceId = stationPrinter.PrinterDeviceId,
         AgentDeviceId = stationPrinter.AgentDeviceId,
         BatchId = batchId,
+        BatchGroupName = batchGroupName,
         JobNumber = $"SP-{now:yyMMdd}-{Guid.NewGuid().ToString("N")[..8].ToUpperInvariant()}",
         IdempotencyKey = idempotencyKey,
         GrantHash = grantHash,
@@ -4964,6 +4991,7 @@ publicApi.MapPost("/sessions/current/local-upload-tickets", async (
         var sameRequest = racedTicket.SizeBytes == request.SizeBytes &&
             string.Equals(racedTicket.Sha256, sha, StringComparison.OrdinalIgnoreCase) &&
             racedTicket.OriginalFileName == originalName &&
+            PrintBatchGroupRules.Normalize(racedTicket.BatchGroupName) == batchGroupName &&
             CryptographicOperations.FixedTimeEquals(
                 Convert.FromHexString(racedTicket.GrantHash),
                 Convert.FromHexString(grantHash));
@@ -5023,6 +5051,7 @@ publicApi.MapPost("/sessions/current/local-upload-tickets", async (
     {
         ticket.Id,
         ticket.PrintJobId,
+        ticket.BatchGroupName,
         ticket.JobNumber,
         ticket.AgentDeviceId,
         ticket.ExpiresUtc,
