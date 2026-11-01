@@ -30,7 +30,7 @@ jobs:
               repo,
               per_page: 100,
             });
-            const stableTag = tags.find(({ name }) => /^v\\d+\\.\\d+\\.\\d+$/.test(name));
+            const stableTag = tags.find(({ name }) => /^v\d+\.\d+\.\d+$/.test(name));
             if (stableTag) {
               core.notice(`Stable release tag ${stableTag.name} already exists; no bootstrap release is needed.`);
               return;
@@ -38,9 +38,9 @@ jobs:
 
             const gradleFile = fs.readFileSync("apps/android/app/build.gradle.kts", "utf8");
             const match = gradleFile.match(
-              /val smartPrintVersionName = providers\\.gradleProperty\\("smartPrintVersionName"\\)\\.orElse\\("([^"]+)"\\)\\.get\\(\\)/
+              /val smartPrintVersionName = providers\.gradleProperty\("smartPrintVersionName"\)\.orElse\("([^"]+)"\)\.get\(\)/
             );
-            if (!match || !/^\\d+\\.\\d+\\.\\d+$/.test(match[1])) {
+            if (!match || !/^\d+\.\d+\.\d+$/.test(match[1])) {
               core.setFailed("Could not derive a stable X.Y.Z version from smartPrintVersionName in apps/android/app/build.gradle.kts.");
               return;
             }
