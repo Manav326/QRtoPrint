@@ -220,7 +220,7 @@ jobs:
           verification_output="$("$apksigner_path" verify --verbose --print-certs artifacts/android/SmartPrint-Android.apk 2>&1)"
           printf '%s\n' "$verification_output"
           signer_count="$(awk -F': ' '/^Number of signers:/ { print $2; exit }' <<< "$verification_output")"
-          certificate_fingerprint="$(sed -nE 's/.*certificate SHA-256 digest: ([[:xdigit:]]{64}).*/\\1/p' <<< "$verification_output" | head -n 1)"
+          certificate_fingerprint="$(sed -nE 's/.*certificate SHA-256 digest: ([[:xdigit:]]{64}).*/\1/p' <<< "$verification_output" | head -n 1)"
           if [[ "$signer_count" != "1" || ! "$certificate_fingerprint" =~ ^[[:xdigit:]]{64}$ ]]; then
             echo "::error::Android APK signature verification did not report exactly one signing certificate fingerprint."
             exit 1
