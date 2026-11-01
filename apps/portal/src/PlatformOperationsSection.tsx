@@ -37,8 +37,10 @@ const fields: Array<{ key: NumericKey; label: string; hint: string; min: number;
 
 type Draft = Omit<PlatformOperationalSettings, "updatedByUserId" | "updatedUtc">;
 function toDraft(value: PlatformOperationalSettings): Draft {
-  const { updatedByUserId: _actor, updatedUtc: _updated, ...draft } = value;
-  return draft;
+  const draft: Partial<PlatformOperationalSettings> = { ...value };
+  delete draft.updatedByUserId;
+  delete draft.updatedUtc;
+  return draft as Draft;
 }
 
 export default function PlatformOperationsSection({ tokens }: { tokens: AuthTokens }) {
