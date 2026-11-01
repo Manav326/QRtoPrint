@@ -23,6 +23,8 @@ export function applyThemePreference(dark: boolean): void {
   const theme = dark ? "dark" : "light";
   document.documentElement.dataset.theme = theme;
   document.documentElement.style.colorScheme = theme;
+  const themeColor = document.querySelector<HTMLMetaElement>('meta[name="theme-color"]');
+  if (themeColor) themeColor.content = dark ? "#0c0f16" : "#f4f6fa";
   // Tauri/WebView Android installs this optional bridge only on the trusted origin.
   // Browsers simply continue using the same localStorage preference.
   try {
