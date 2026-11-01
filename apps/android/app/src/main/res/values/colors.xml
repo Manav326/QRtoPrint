@@ -2,6 +2,8 @@
     <color name="qp_icon_background">#1A1C2A</color>
     <color name="qp_primary">#6557D2</color>
     <color name="qp_primary_dark">#4F43B4</color>
+    <color name="qp_primary_content">#FFFFFF</color>
+    <color name="qp_danger_content">#FFFFFF</color>
     <color name="qp_soft">#F0EEFF</color>
     <color name="qp_surface">#F7F7FA</color>
     <color name="qp_card">#FFFFFF</color>
