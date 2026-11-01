@@ -4713,8 +4713,8 @@ shop.MapPost("/payments/{paymentId:guid}/verify", async (
             filePayment.UpdatedUtc = batchVerifiedUtc;
             var batchJob = jobsById[filePayment.PrintJobId];
             var batchPreviousStatus = batchJob.Status;
-            var fileWasRejected = batchJob.Status is "REJECTED" or "REFUNDED";
-            if (!fileWasRejected)
+            var batchFileWasRejected = batchJob.Status is "REJECTED" or "REFUNDED";
+            if (!batchFileWasRejected)
             {
                 batchJob.Status = "PAID_AUTHORISED";
                 batchJob.UpdatedUtc = batchVerifiedUtc;
@@ -4727,7 +4727,7 @@ shop.MapPost("/payments/{paymentId:guid}/verify", async (
                 NewStatus = batchJob.Status,
                 ActorType = "ShopUser",
                 ActorId = actorId,
-                ReasonCode = fileWasRejected
+                ReasonCode = batchFileWasRejected
                     ? "BATCH_PAYMENT_VERIFIED_FOR_REJECTED_FILE_REFUND"
                     : batchPayment.Method == "UPI"
                         ? "BATCH_UPI_PAYMENT_MANUALLY_VERIFIED"
@@ -4806,8 +4806,8 @@ shop.MapPost("/payments/{paymentId:guid}/verify", async (
     payment.VerifiedUtc = now;
     payment.UpdatedUtc = now;
     var previousStatus = job.Status;
-    var fileWasRejected = job.Status is "REJECTED" or "REFUNDED";
-    if (!fileWasRejected)
+    var singleFileWasRejected = job.Status is "REJECTED" or "REFUNDED";
+    if (!batchFileWasRejected)
         job.Status = "PAID_AUTHORISED";
     job.UpdatedUtc = now;
     db.PrintJobEvents.Add(new PrintJobEvent
@@ -4818,7 +4818,7 @@ shop.MapPost("/payments/{paymentId:guid}/verify", async (
         NewStatus = job.Status,
         ActorType = "ShopUser",
         ActorId = GetActorId(principal),
-        ReasonCode = fileWasRejected
+        ReasonCode = batchFileWasRejected
             ? "PAYMENT_VERIFIED_FOR_REJECTED_FILE_REFUND"
             : payment.Method == "UPI"
                 ? "UPI_PAYMENT_MANUALLY_VERIFIED"
@@ -4846,9 +4846,9 @@ shop.MapPost("/payments/{paymentId:guid}/verify", async (
         payment.Id,
         payment.Status,
         payment.VerifiedUtc,
-        JobId = batchJob.Id,
-        JobNumber = batchJob.JobNumber,
-        JobStatus = batchJob.Status,
+        JobId = job.Id,
+        JobNumber = job.JobNumber,
+        JobStatus = job.Status,
         NextStep = "Payment is verified. Assign this job to a live printer on its paired computer. The agent will secure the document locally before you explicitly start printing."
     });
 });
@@ -5038,9 +5038,9 @@ shop.MapPost("/payments/{paymentId:guid}/reject", async (
         payment.Id,
         payment.Status,
         payment.RejectionReason,
-        JobId = batchJob.Id,
-        JobStatus = batchJob.Status,
-        batchJob.UpdatedUtc
+        JobId = job.Id,
+        JobStatus = job.Status,
+        job.UpdatedUtc
     });
 });
 
