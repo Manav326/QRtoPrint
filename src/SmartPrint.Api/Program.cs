@@ -9,6 +9,7 @@ using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.IdentityModel.Tokens;
 using SmartPrint.Api.Contracts;
 using SmartPrint.Api.Data;
@@ -45,7 +46,8 @@ var issuer = builder.Configuration["Authentication:Issuer"] ?? "QRtoPrint";
 var audience = builder.Configuration["Authentication:Audience"] ?? "QRtoPrint.Clients";
 
 builder.Services.AddProblemDetails();
-builder.Services.AddDbContext<SmartPrintDbContext>(options => options.UseNpgsql(connectionString));
+builder.Services.AddDbContext<SmartPrintDbContext>(options => options.UseNpgsql(connectionString)
+    .ReplaceService<IMigrationsIdGenerator, LegacyCompatibleMigrationsIdGenerator>());
 builder.Services
     .AddIdentityCore<AppUser>(options =>
     {
@@ -89,20 +91,24 @@ builder.Services.AddAuthorization(options =>
 builder.Services.AddScoped<TokenIssuer>();
 builder.Services.AddScoped<TenantEntitlementService>();
 builder.Services.AddSingleton<DocumentStorage>();
+builder.Services.AddHostedService<DocumentRetentionWorker>();
 builder.Services.AddRateLimiter(options =>
 {
-    options.AddFixedWindowLimiter("qr-session", limiter =>
-    {
-        limiter.PermitLimit = 30;
-        limiter.Window = TimeSpan.FromMinutes(1);
-        limiter.QueueLimit = 0;
-    });
-    options.AddFixedWindowLimiter("document-upload", limiter =>
-    {
-        limiter.PermitLimit = 8;
-        limiter.Window = TimeSpan.FromMinutes(1);
-        limiter.QueueLimit = 0;
-    });
+    options.AddPolicy("authentication", context =>
+        RateLimitPartition.GetFixedWindowLimiter(GetRateLimitPartitionKey(context),
+            _ => new FixedWindowRateLimiterOptions { PermitLimit = 20, Window = TimeSpan.FromMinutes(1), QueueLimit = 0 }));
+    options.AddPolicy("public-api", context =>
+        RateLimitPartition.GetFixedWindowLimiter(GetRateLimitPartitionKey(context),
+            _ => new FixedWindowRateLimiterOptions { PermitLimit = 120, Window = TimeSpan.FromMinutes(1), QueueLimit = 0 }));
+    options.AddPolicy("agent-api", context =>
+        RateLimitPartition.GetFixedWindowLimiter(GetAgentRateLimitPartitionKey(context),
+            _ => new FixedWindowRateLimiterOptions { PermitLimit = 30, Window = TimeSpan.FromMinutes(1), QueueLimit = 0 }));
+    options.AddPolicy("qr-session", context =>
+        RateLimitPartition.GetFixedWindowLimiter(GetRateLimitPartitionKey(context),
+            _ => new FixedWindowRateLimiterOptions { PermitLimit = 30, Window = TimeSpan.FromMinutes(1), QueueLimit = 0 }));
+    options.AddPolicy("document-upload", context =>
+        RateLimitPartition.GetFixedWindowLimiter(GetSessionRateLimitPartitionKey(context),
+            _ => new FixedWindowRateLimiterOptions { PermitLimit = 8, Window = TimeSpan.FromMinutes(1), QueueLimit = 0 }));
 });
 var configuredCorsOrigins = builder.Configuration.GetSection("Cors:AllowedOrigins")
     .Get<string[]>()?
@@ -179,6 +185,7 @@ var platform = app.MapGroup("/api/v1/platform")
 
 platform.MapSubscriptionPlanEndpoints();
 platform.MapPlatformSubscriptionEndpoints();
+platform.MapPlatformOperationalSettingsEndpoints();
 
 platform.MapGet("/overview", async (SmartPrintDbContext db, CancellationToken ct) =>
 {
@@ -318,7 +325,126 @@ platform.MapGet("/tenants", async (
     });
 });
 
-var auth = app.MapGroup("/api/v1/auth");
+platform.MapPatch("/tenants/{tenantId:guid}/status", async (
+    Guid tenantId,
+    ChangeTenantStatusRequest request,
+    ClaimsPrincipal principal,
+    SmartPrintDbContext db,
+    CancellationToken ct) =>
+{
+    var nextStatus = request.Status?.Trim();
+    var reason = request.Reason?.Trim();
+    if (nextStatus is not ("Active" or "Suspended" or "Inactive") ||
+        string.IsNullOrWhiteSpace(reason) || reason.Length is < 5 or > 500)
+    {
+        return Results.ValidationProblem(new Dictionary<string, string[]>
+        {
+            ["status"] = ["Choose Active, Suspended or Inactive and provide an audit reason of 5–500 characters."]
+        });
+    }
+
+    var actorId = GetActorId(principal);
+    if (actorId is not Guid actorUserId) return Results.Forbid();
+
+    await using var transaction = await db.Database.BeginTransactionAsync(ct);
+    var lockedTenants = await db.Tenants.FromSqlInterpolated(
+        $"SELECT * FROM \"Tenants\" WHERE \"Id\" = {tenantId} FOR UPDATE").ToListAsync(ct);
+    var tenant = lockedTenants.SingleOrDefault();
+    if (tenant is null)
+    {
+        await transaction.RollbackAsync(ct);
+        return Results.NotFound();
+    }
+
+    if (string.Equals(tenant.Status, nextStatus, StringComparison.OrdinalIgnoreCase))
+    {
+        await transaction.RollbackAsync(ct);
+        return Results.Ok(new { tenant.Id, tenant.Status, tenant.UpdatedUtc, DuplicateRequest = true });
+    }
+
+    if (!TenantStatusRules.CanTransition(tenant.Status, nextStatus))
+    {
+        await transaction.RollbackAsync(ct);
+        return Results.Conflict(new
+        {
+            code = "tenant_status_transition_not_allowed",
+            message = tenant.Status == "Inactive"
+                ? "A permanently inactive tenant cannot be reactivated."
+                : "The requested tenant status transition is not allowed."
+        });
+    }
+
+    if (nextStatus == "Inactive")
+    {
+        var unresolvedJobs = await db.PrintJobs.LongCountAsync(job =>
+            job.TenantId == tenant.Id &&
+            job.Status != "COMPLETED" &&
+            job.Status != "REJECTED" &&
+            job.Status != "PAYMENT_REJECTED" &&
+            job.Status != "QUOTE_EXPIRED" &&
+            job.Status != "REFUNDED", ct);
+        var pendingPayments = await db.PrintPayments.LongCountAsync(payment =>
+            payment.TenantId == tenant.Id &&
+            (payment.Status == "AWAITING_CUSTOMER_PAYMENT" ||
+             payment.Status == "CUSTOMER_REPORTED" ||
+             payment.Status == "CASH_AWAITING_PAYMENT"), ct);
+        var outstandingRejectedRefunds = await db.PrintPayments.LongCountAsync(payment =>
+            payment.TenantId == tenant.Id &&
+            (payment.Status == "VERIFIED" || payment.Status == "PARTIALLY_REFUNDED") &&
+            payment.RefundedAmountMinor < payment.AmountMinor &&
+            db.PrintJobs.Any(job => job.TenantId == tenant.Id &&
+                job.Id == payment.PrintJobId &&
+                (job.Status == "REJECTED" || job.Status == "PAYMENT_REJECTED" || job.Status == "QUOTE_EXPIRED")), ct);
+        if (unresolvedJobs > 0 || pendingPayments > 0 || outstandingRejectedRefunds > 0)
+        {
+            await transaction.RollbackAsync(ct);
+            return Results.Conflict(new
+            {
+                code = "tenant_has_unresolved_print_work",
+                message = "Resolve open print jobs, pending customer payments, output-unconfirmed work and refunds for rejected paid files before permanent deactivation.",
+                unresolvedJobs,
+                pendingPayments,
+                outstandingRejectedRefunds
+            });
+        }
+    }
+
+    var now = DateTimeOffset.UtcNow;
+    var previousStatus = tenant.Status;
+    tenant.Status = nextStatus!;
+    tenant.UpdatedUtc = now;
+    db.TenantStatusAudits.Add(new TenantStatusAudit
+    {
+        TenantId = tenant.Id,
+        PreviousStatus = previousStatus,
+        NewStatus = tenant.Status,
+        Reason = reason!,
+        ActorUserId = actorUserId,
+        CreatedUtc = now
+    });
+    await db.SaveChangesAsync(ct);
+    await transaction.CommitAsync(ct);
+    return Results.Ok(new { tenant.Id, tenant.Status, tenant.UpdatedUtc, DuplicateRequest = false });
+});
+
+platform.MapGet("/tenants/{tenantId:guid}/status-history", async (
+    Guid tenantId,
+    SmartPrintDbContext db,
+    CancellationToken ct) =>
+{
+    if (!await db.Tenants.AsNoTracking().AnyAsync(item => item.Id == tenantId, ct))
+        return Results.NotFound();
+
+    var history = await db.TenantStatusAudits.AsNoTracking()
+        .Where(item => item.TenantId == tenantId)
+        .OrderByDescending(item => item.CreatedUtc)
+        .Select(item => new { item.Id, item.PreviousStatus, item.NewStatus, item.Reason, item.ActorUserId, item.CreatedUtc })
+        .Take(100)
+        .ToListAsync(ct);
+    return Results.Ok(history);
+});
+
+var auth = app.MapGroup("/api/v1/auth").RequireRateLimiting("authentication");
 auth.MapPost("/register-shop", async (
     RegisterShopRequest request,
     UserManager<AppUser> userManager,
@@ -736,7 +862,8 @@ customerApi.MapGet("/jobs", async (
     return Results.Ok(new { Jobs = jobs });
 });
 
-var shop = app.MapGroup("/api/v1/shop").RequireAuthorization();
+var shop = app.MapGroup("/api/v1/shop").RequireAuthorization()
+    .AddEndpointFilter((context, next) => EnforceTenantActiveAsync(context, next, allowSubscriptionRead: true));
 
 shop.MapGet("/subscription", async (
     ClaimsPrincipal principal,
@@ -812,10 +939,7 @@ shop.MapGet("/subscription", async (
                                 item.RevokedUtc == null && item.Status != "Revoked", ct);
     var qrStationCount = await db.QrStations.AsNoTracking()
         .LongCountAsync(item => item.TenantId == tenantId, ct);
-    var monthlyPrintJobCount = await db.PrintJobs.AsNoTracking()
-        .LongCountAsync(item => item.TenantId == tenantId &&
-                                item.CreatedUtc >= periodStart &&
-                                item.CreatedUtc < periodEnd, ct);
+    var monthlyPrintJobCount = await entitlements.GetMonthlyPrintJobUsageAsync(tenantId, ct);
 
     return Results.Ok(new
     {
@@ -887,6 +1011,7 @@ shop.MapPut("/profile", async (
     ShopProfileRequest request,
     ClaimsPrincipal principal,
     SmartPrintDbContext db,
+    TenantEntitlementService entitlements,
     CancellationToken ct) =>
 {
     if (!IsShopOwner(principal) || !TryGetTenantId(principal, out var tenantId))
@@ -902,6 +1027,15 @@ shop.MapPut("/profile", async (
         {
             ["profile"] = ["Provide a display name, a six-digit hex accent colour, and an optional HTTPS logo URL."]
         });
+    }
+
+    var plan = await entitlements.GetForTenantAsync(tenantId, ct);
+    var requestsCustomBranding = request.LogoUrl is not null ||
+        !string.Equals(request.AccentColor, "#7662E8", StringComparison.OrdinalIgnoreCase);
+    if (requestsCustomBranding && !plan.WhiteLabelEnabled)
+    {
+        return Results.Problem(statusCode: StatusCodes.Status403Forbidden,
+            title: "Custom shop branding is not included in this shop's current plan.");
     }
 
     var profile = await db.ShopProfiles.SingleOrDefaultAsync(x => x.TenantId == tenantId, ct);
@@ -1629,6 +1763,7 @@ shop.MapGet("/print-jobs", async (
 shop.MapGet("/reports/summary", async (
     ClaimsPrincipal principal,
     SmartPrintDbContext db,
+    TenantEntitlementService entitlements,
     int? days,
     CancellationToken ct) =>
 {
@@ -1636,6 +1771,14 @@ shop.MapGet("/reports/summary", async (
     {
         return Results.Forbid();
     }
+
+    var plan = await entitlements.GetForTenantAsync(tenantId, ct);
+    if (!plan.IsAccessActive)
+        return Results.Problem(statusCode: StatusCodes.Status403Forbidden,
+            title: "This shop's trial or subscription period is no longer active.");
+    if (!plan.AdvancedReportsEnabled)
+        return Results.Problem(statusCode: StatusCodes.Status403Forbidden,
+            title: "Advanced reporting is not included in this shop's current plan.");
 
     var periodDays = days ?? 30;
     if (periodDays != 7 && periodDays != 30 && periodDays != 90)
@@ -1670,8 +1813,6 @@ shop.MapGet("/reports/summary", async (
 
     var verifiedPayments = db.PrintPayments.AsNoTracking().Where(payment =>
         payment.TenantId == tenantId &&
-        (payment.Status == "VERIFIED" || payment.Status == "PARTIALLY_REFUNDED") &&
-        payment.AmountMinor > payment.RefundedAmountMinor &&
         payment.VerifiedUtc != null &&
         payment.VerifiedUtc >= fromUtc &&
         payment.VerifiedUtc < toUtc);
@@ -1683,7 +1824,24 @@ shop.MapGet("/reports/summary", async (
             method = group.Key.Method,
             currency = group.Key.Currency,
             paymentCount = group.Count(),
-            amountMinor = group.Sum(payment => payment.AmountMinor - payment.RefundedAmountMinor)
+            amountMinor = group.Sum(payment => payment.AmountMinor)
+        })
+        .OrderBy(group => group.currency)
+        .ThenBy(group => group.method)
+        .ToListAsync(ct);
+
+    var refundsRecordedByMethod = await db.PrintRefunds.AsNoTracking()
+        .Where(refund => refund.TenantId == tenantId &&
+                         refund.Status == "RECORDED_AS_SENT" &&
+                         refund.RefundedUtc >= fromUtc &&
+                         refund.RefundedUtc < toUtc)
+        .GroupBy(refund => new { refund.Method, refund.Currency })
+        .Select(group => new
+        {
+            method = group.Key.Method,
+            currency = group.Key.Currency,
+            refundCount = group.Count(),
+            amountMinor = group.Sum(refund => refund.AmountMinor)
         })
         .OrderBy(group => group.currency)
         .ThenBy(group => group.method)
@@ -1707,7 +1865,8 @@ shop.MapGet("/reports/summary", async (
         pagesRequested,
         pendingPaymentCount,
         jobsByStatus,
-        verifiedCollectionsByMethod
+        verifiedCollectionsByMethod,
+        refundsRecordedByMethod
     });
 });
 
@@ -2102,7 +2261,7 @@ shop.MapGet("/print-jobs/{jobId:guid}/document", async (
 
     var document = await db.PrintDocuments.AsNoTracking()
         .Where(item => item.TenantId == tenantId && item.PrintJobId == jobId)
-        .Select(item => new { item.StorageKey, item.StorageMode, item.MediaType })
+        .Select(item => new { item.StorageKey, item.StorageMode, item.MediaType, item.PurgedUtc })
         .SingleOrDefaultAsync(ct);
     if (document is null)
     {
@@ -2112,6 +2271,10 @@ shop.MapGet("/print-jobs/{jobId:guid}/document", async (
     if (document.StorageMode == "LOCAL_AGENT")
     {
         return Results.Conflict(new { code = "document_stored_on_local_agent", message = "This document is stored only on the shop's Windows Print Agent; cloud preview is not available." });
+    }
+    if (document.PurgedUtc is not null)
+    {
+        return Results.StatusCode(StatusCodes.Status410Gone);
     }
 
     MemoryStream content;
@@ -2419,7 +2582,8 @@ shop.MapPost("/print-jobs/{jobId:guid}/refund", async (
         RemainingPaidAmountMinor = payment.AmountMinor - cumulative });
 });
 
-var shopAgents = app.MapGroup("/api/v1/shop").RequireAuthorization();
+var shopAgents = app.MapGroup("/api/v1/shop").RequireAuthorization()
+    .AddEndpointFilter((context, next) => EnforceTenantActiveAsync(context, next, allowSubscriptionRead: false));
 
 shopAgents.MapPost("/agent-enrollment-codes", async (
     ClaimsPrincipal principal,
@@ -2514,7 +2678,9 @@ shopAgents.MapPatch("/agent-devices/{agentId:guid}/revoke", async (
     return Results.Ok(new { device.Id, device.Status, device.RevokedUtc });
 });
 
-var agentApi = app.MapGroup("/api/v1/agent").AllowAnonymous();
+var agentApi = app.MapGroup("/api/v1/agent").AllowAnonymous()
+    .RequireRateLimiting("agent-api")
+    .AddEndpointFilter((context, next) => EnforceTenantActiveAsync(context, next, allowSubscriptionRead: false));
 
 agentApi.MapPost("/enroll", async (
     AgentEnrollmentRequest request,
@@ -2627,6 +2793,13 @@ agentApi.MapPost("/jobs/claim", async (
     }
 
     await using var transaction = await db.Database.BeginTransactionAsync(ct);
+    var claimAccess = await GetAgentClaimAccessAsync(device.TenantId, db, ct);
+    if (!claimAccess.Allowed)
+    {
+        await transaction.RollbackAsync(ct);
+        return Results.Forbid();
+    }
+    var suspendedAtUtc = claimAccess.SuspendedAtUtc;
     var candidates = await (
         from job in db.PrintJobs.AsNoTracking()
         join document in db.PrintDocuments.AsNoTracking()
@@ -2636,10 +2809,12 @@ agentApi.MapPost("/jobs/claim", async (
             on new { job.TenantId, PrinterId = job.PrinterDeviceId!.Value }
             equals new { printer.TenantId, PrinterId = printer.Id }
         where job.TenantId == device.TenantId &&
+              (!suspendedAtUtc.HasValue || job.CreatedUtc < suspendedAtUtc.Value) &&
               db.PrintPayments.Any(payment =>
                   payment.TenantId == job.TenantId &&
                   payment.PrintJobId == job.Id &&
-                  (payment.Status == "VERIFIED" || payment.Status == "PARTIALLY_REFUNDED")) &&
+                  (payment.Status == "VERIFIED" || payment.Status == "PARTIALLY_REFUNDED") &&
+                  (!suspendedAtUtc.HasValue || (payment.VerifiedUtc != null && payment.VerifiedUtc <= suspendedAtUtc.Value))) &&
               availablePrinterIds.Contains(printer.Id) &&
               (job.Status == "PAID_AUTHORISED" ||
                (job.Status == "LOCAL_QUEUE_CLAIMED" &&
@@ -2677,6 +2852,7 @@ agentApi.MapPost("/jobs/claim", async (
         var updated = await db.PrintJobs
             .Where(job => job.Id == candidate.Id &&
                           job.TenantId == device.TenantId &&
+                          (!suspendedAtUtc.HasValue || job.CreatedUtc < suspendedAtUtc.Value) &&
                           job.PrinterDeviceId == candidate.PrinterDeviceId &&
                           db.PrinterDevices.Any(printer =>
                               printer.Id == job.PrinterDeviceId &&
@@ -2694,7 +2870,8 @@ agentApi.MapPost("/jobs/claim", async (
                           db.PrintPayments.Any(payment =>
                               payment.TenantId == job.TenantId &&
                               payment.PrintJobId == job.Id &&
-                              (payment.Status == "VERIFIED" || payment.Status == "PARTIALLY_REFUNDED")) &&
+                              (payment.Status == "VERIFIED" || payment.Status == "PARTIALLY_REFUNDED") &&
+                  (!suspendedAtUtc.HasValue || (payment.VerifiedUtc != null && payment.VerifiedUtc <= suspendedAtUtc.Value))) &&
                           (job.Status == "PAID_AUTHORISED" ||
                            (job.Status == "LOCAL_QUEUE_CLAIMED" &&
                             (job.AgentLeaseExpiresUtc == null || job.AgentLeaseExpiresUtc <= now))))
@@ -3302,10 +3479,44 @@ agentApi.MapGet("/local-uploads/{jobId:guid}/status", async (
         item.StorageMode == "LOCAL_AGENT" &&
         item.AgentDeviceId == device.Id, ct);
 
+    var safeToDelete = false;
+    DateTimeOffset? deleteAfterUtc = null;
+    if (ticket.CompletedUtc != null && documentExists)
+    {
+        var job = await db.PrintJobs.AsNoTracking()
+            .Where(item => item.TenantId == device.TenantId && item.Id == jobId)
+            .Select(item => new { item.Status, item.UpdatedUtc, item.OutputConfirmedUtc, item.OutputCompletedUtc })
+            .SingleOrDefaultAsync(ct);
+        if (job is not null &&
+            (job.Status is "REJECTED" or "PAYMENT_REJECTED" or "QUOTE_EXPIRED" or "REFUNDED") &&
+            job.OutputConfirmedUtc == null &&
+            job.OutputCompletedUtc == null)
+        {
+            var hasFinancialHold = await db.PrintPayments.AsNoTracking().AnyAsync(payment =>
+                payment.TenantId == device.TenantId && payment.PrintJobId == jobId &&
+                (payment.Status == "AWAITING_CUSTOMER_PAYMENT" ||
+                 payment.Status == "CUSTOMER_REPORTED" ||
+                 payment.Status == "CASH_AWAITING_PAYMENT" ||
+                 ((payment.Status == "VERIFIED" || payment.Status == "PARTIALLY_REFUNDED") &&
+                  payment.RefundedAmountMinor < payment.AmountMinor)), ct);
+            if (!hasFinancialHold)
+            {
+                var retentionDays = await db.PlatformOperationalSettings.AsNoTracking()
+                    .Where(item => item.Id == PlatformOperationalSettings.SingletonIdValue)
+                    .Select(item => (int?)item.PendingLocalUploadRetentionDays)
+                    .SingleOrDefaultAsync(ct) ?? 30;
+                safeToDelete = true;
+                deleteAfterUtc = job.UpdatedUtc.AddDays(retentionDays);
+            }
+        }
+    }
+
     return Results.Ok(new
     {
         Completed = ticket.CompletedUtc != null && documentExists,
-        ticket.ExpiresUtc
+        ticket.ExpiresUtc,
+        SafeToDelete = safeToDelete,
+        DeleteAfterUtc = deleteAfterUtc
     });
 });
 
@@ -3326,6 +3537,13 @@ agentApi.MapPost("/jobs/print-claim", async (AgentPrintClaimRequest request, Htt
     var onlineAfter = now.AddMinutes(-2);
     var claimed = new List<object>();
     await using var tx = await db.Database.BeginTransactionAsync(ct);
+    var claimAccess = await GetAgentClaimAccessAsync(device.TenantId, db, ct);
+    if (!claimAccess.Allowed)
+    {
+        await tx.RollbackAsync(ct);
+        return Results.Forbid();
+    }
+    var suspendedAtUtc = claimAccess.SuspendedAtUtc;
     foreach (var proof in proofs)
     {
         var candidate = await (
@@ -3334,7 +3552,9 @@ agentApi.MapPost("/jobs/print-claim", async (AgentPrintClaimRequest request, Htt
                 on new { job.TenantId, PrintJobId = job.Id } equals new { document.TenantId, document.PrintJobId }
             join printer in db.PrinterDevices.AsNoTracking()
                 on new { job.TenantId, PrinterId = job.PrinterDeviceId!.Value } equals new { printer.TenantId, PrinterId = printer.Id }
-            where job.Id == proof.JobId && job.TenantId == device.TenantId && (job.Status == "PRINT_AUTHORISED" ||
+            where job.Id == proof.JobId && job.TenantId == device.TenantId &&
+                   (!suspendedAtUtc.HasValue || job.CreatedUtc < suspendedAtUtc.Value) &&
+                   (job.Status == "PRINT_AUTHORISED" ||
                    (job.Status == "PRINT_SUBMITTING" &&
                     job.PrintDispatchLeaseExpiresUtc != null &&
                     job.PrintDispatchLeaseExpiresUtc <= now)) &&
@@ -3348,7 +3568,8 @@ agentApi.MapPost("/jobs/print-claim", async (AgentPrintClaimRequest request, Htt
                   db.AgentDevices.Any(a => a.Id == device.Id && a.TenantId == device.TenantId &&
                       a.RevokedUtc == null && a.Status != "Revoked" &&
                       a.LastSeenUtc != null && a.LastSeenUtc >= onlineAfter) &&
-                  db.PrintPayments.Any(pay => pay.TenantId == job.TenantId && pay.PrintJobId == job.Id && (pay.Status == "VERIFIED" || pay.Status == "PARTIALLY_REFUNDED"))
+                  db.PrintPayments.Any(pay => pay.TenantId == job.TenantId && pay.PrintJobId == job.Id && (pay.Status == "VERIFIED" || pay.Status == "PARTIALLY_REFUNDED") &&
+                      (!suspendedAtUtc.HasValue || (pay.VerifiedUtc != null && pay.VerifiedUtc <= suspendedAtUtc.Value)))
             select new { job.Id, job.JobNumber, job.Status, job.SpoolerJobName, job.RejectedPageNumbersJson, QueueName = printer.QueueName, OutputMode = printer.OutputMode }
         ).SingleOrDefaultAsync(ct);
         if (candidate is null || string.IsNullOrWhiteSpace(candidate.SpoolerJobName)) continue;
@@ -3356,6 +3577,7 @@ agentApi.MapPost("/jobs/print-claim", async (AgentPrintClaimRequest request, Htt
         var lease = now.AddMinutes(5);
         var updated = await db.PrintJobs.Where(job =>
             job.Id == candidate.Id && job.TenantId == device.TenantId &&
+            (!suspendedAtUtc.HasValue || job.CreatedUtc < suspendedAtUtc.Value) &&
             (job.Status == "PRINT_AUTHORISED" ||
                            (job.Status == "PRINT_SUBMITTING" && job.PrintDispatchLeaseExpiresUtc != null && job.PrintDispatchLeaseExpiresUtc <= now)) &&
                           job.ClaimedByAgentDeviceId == device.Id &&
@@ -3368,7 +3590,8 @@ agentApi.MapPost("/jobs/print-claim", async (AgentPrintClaimRequest request, Htt
             db.AgentDevices.Any(agent => agent.Id == device.Id && agent.TenantId == device.TenantId &&
                 agent.RevokedUtc == null && agent.Status != "Revoked" &&
                 agent.LastSeenUtc != null && agent.LastSeenUtc >= onlineAfter) &&
-            db.PrintPayments.Any(pay => pay.TenantId == job.TenantId && pay.PrintJobId == job.Id && (pay.Status == "VERIFIED" || pay.Status == "PARTIALLY_REFUNDED")))
+            db.PrintPayments.Any(pay => pay.TenantId == job.TenantId && pay.PrintJobId == job.Id && (pay.Status == "VERIFIED" || pay.Status == "PARTIALLY_REFUNDED") &&
+                      (!suspendedAtUtc.HasValue || (pay.VerifiedUtc != null && pay.VerifiedUtc <= suspendedAtUtc.Value))))
             .ExecuteUpdateAsync(u => u
                 .SetProperty(job => job.Status, "PRINT_SUBMITTING")
                 .SetProperty(job => job.PrintDispatchLeaseExpiresUtc, lease)
@@ -3646,6 +3869,8 @@ agentApi.MapPost("/heartbeat", async (
     device.LastSeenUtc = now;
     await db.SaveChangesAsync(ct);
     var publicBaseUrl = (configuration["PublicPortal:BaseUrl"] ?? string.Empty).TrimEnd('/');
+    var operationalSettings = await db.PlatformOperationalSettings.AsNoTracking()
+        .SingleAsync(item => item.Id == PlatformOperationalSettings.SingletonIdValue, ct);
     return Results.Ok(new
     {
         device.Id,
@@ -3654,7 +3879,9 @@ agentApi.MapPost("/heartbeat", async (
         AgentVersion = request.Version,
         LocalEndpoints = localEndpoints,
         PublicBaseUrl = publicBaseUrl,
-        AllowedPortalOrigins = corsOrigins
+        AllowedPortalOrigins = corsOrigins,
+        AgentCompletedDocumentRetentionDays = operationalSettings.AgentCompletedDocumentRetentionDays,
+        AgentRetentionSweepHours = operationalSettings.AgentRetentionSweepHours
     });
 });
 
@@ -4179,7 +4406,9 @@ shop.MapPost("/payments/{paymentId:guid}/reject", async (
     });
 });
 
-var publicApi = app.MapGroup("/api/v1/public").AllowAnonymous();
+var publicApi = app.MapGroup("/api/v1/public").AllowAnonymous()
+    .RequireRateLimiting("public-api")
+    .AddEndpointFilter((context, next) => EnforceTenantActiveAsync(context, next, allowSubscriptionRead: false));
 
 publicApi.MapPost("/sessions/current/jobs", async (
     HttpContext context,
@@ -4339,6 +4568,23 @@ publicApi.MapPost("/sessions/current/jobs", async (
     {
         await using var transaction = await db.Database.BeginTransactionAsync(ct);
         await entitlements.AcquireQuotaLockAsync(session.TenantId, TenantQuotaResource.MonthlyPrintJob, ct);
+        var racedJob = await db.PrintJobs.AsNoTracking()
+            .Where(item => item.TenantId == session.TenantId && item.IdempotencyKey == idempotencyKey)
+            .Select(item => new { item.Id, item.CustomerSessionId, item.BatchId, item.JobNumber, item.Status, item.PageCount, item.CreatedUtc })
+            .SingleOrDefaultAsync(ct);
+        if (racedJob is not null)
+        {
+            await transaction.RollbackAsync(ct);
+            await storage.DeleteAsync(stored.StorageKey);
+            if (racedJob.CustomerSessionId != session.Id)
+                return Results.Conflict(new { code = "idempotency_key_reused", message = "This request key has already been used for another customer session." });
+            var racedDocument = await db.PrintDocuments.AsNoTracking()
+                .Where(item => item.TenantId == session.TenantId && item.PrintJobId == racedJob.Id)
+                .Select(item => new { item.OriginalFileName, item.MediaType, item.SizeBytes, item.Sha256, item.PageSizesJson })
+                .SingleOrDefaultAsync(ct);
+            return Results.Ok(new { Job = racedJob, Document = racedDocument, DuplicateRequest = true });
+        }
+
         var batchJobSizes = await (
             from batchJob in db.PrintJobs.AsNoTracking()
             join batchDocument in db.PrintDocuments.AsNoTracking()
@@ -4351,10 +4597,13 @@ publicApi.MapPost("/sessions/current/jobs", async (
             .Where(ticket => ticket.TenantId == session.TenantId &&
                              ticket.CustomerSessionId == session.Id &&
                              ticket.BatchId == batchId &&
-                             ticket.CompletedUtc == null)
+                             ticket.CompletedUtc == null &&
+                             ticket.ExpiresUtc > now)
             .Select(ticket => ticket.SizeBytes).ToListAsync(ct);
-        if (batchJobSizes.Count + pendingBatchTicketSizes.Count >= 20 ||
-            batchJobSizes.Sum() + pendingBatchTicketSizes.Sum() + file.Length > 50L * 1024 * 1024)
+        if (!PrintBatchCapacityRules.CanAdd(
+            batchJobSizes.Count + pendingBatchTicketSizes.Count,
+            checked(batchJobSizes.Sum() + pendingBatchTicketSizes.Sum()),
+            file.Length))
         {
             await transaction.RollbackAsync(ct);
             await storage.DeleteAsync(stored.StorageKey);
@@ -4548,12 +4797,6 @@ publicApi.MapPost("/sessions/current/local-upload-tickets", async (
         return Results.Problem(statusCode: StatusCodes.Status413PayloadTooLarge, title: "This document exceeds the maximum size configured for this shop's plan.");
     }
 
-    var quota = await entitlements.CheckCapacityAsync(session.TenantId, TenantQuotaResource.MonthlyPrintJob, ct);
-    if (!quota.Allowed)
-    {
-        return Results.Conflict(new { code = quota.Code, message = quota.Message, current = quota.Current, maximum = quota.Maximum });
-    }
-
     var ticket = new LocalPrintUploadTicket
     {
         TenantId = session.TenantId,
@@ -4573,6 +4816,44 @@ publicApi.MapPost("/sessions/current/local-upload-tickets", async (
         CreatedUtc = now,
         ExpiresUtc = now.AddMinutes(15)
     };
+    await using var transaction = await db.Database.BeginTransactionAsync(ct);
+    await entitlements.AcquireQuotaLockAsync(session.TenantId, TenantQuotaResource.MonthlyPrintJob, ct);
+
+    var racedTicket = await db.LocalPrintUploadTickets.AsNoTracking()
+        .SingleOrDefaultAsync(item => item.TenantId == session.TenantId &&
+            item.CustomerSessionId == session.Id && item.IdempotencyKey == idempotencyKey, ct);
+    if (racedTicket is not null)
+    {
+        await transaction.RollbackAsync(ct);
+        var sameRequest = racedTicket.SizeBytes == request.SizeBytes &&
+            string.Equals(racedTicket.Sha256, sha, StringComparison.OrdinalIgnoreCase) &&
+            racedTicket.OriginalFileName == originalName &&
+            CryptographicOperations.FixedTimeEquals(
+                Convert.FromHexString(racedTicket.GrantHash),
+                Convert.FromHexString(grantHash));
+        if (!sameRequest)
+            return Results.Conflict(new { code = "local_upload_idempotency_conflict", message = "This upload attempt key is already associated with a different document." });
+        if (racedTicket.CompletedUtc is null && racedTicket.ExpiresUtc <= now)
+            return Results.Conflict(new { code = "local_upload_ticket_expired", message = "This local upload attempt expired. Start a new upload attempt." });
+        return Results.Ok(new
+        {
+            racedTicket.Id,
+            racedTicket.PrintJobId,
+            racedTicket.BatchId,
+            racedTicket.JobNumber,
+            racedTicket.AgentDeviceId,
+            racedTicket.ExpiresUtc,
+            Completed = racedTicket.CompletedUtc != null
+        });
+    }
+
+    var quota = await entitlements.CheckCapacityAsync(session.TenantId, TenantQuotaResource.MonthlyPrintJob, ct);
+    if (!quota.Allowed)
+    {
+        await transaction.RollbackAsync(ct);
+        return Results.Conflict(new { code = quota.Code, message = quota.Message, current = quota.Current, maximum = quota.Maximum });
+    }
+
     var batchJobSizes = await (
         from batchJob in db.PrintJobs.AsNoTracking()
         join batchDocument in db.PrintDocuments.AsNoTracking()
@@ -4585,17 +4866,22 @@ publicApi.MapPost("/sessions/current/local-upload-tickets", async (
         .Where(item => item.TenantId == session.TenantId &&
                        item.CustomerSessionId == session.Id &&
                        item.BatchId == batchId &&
-                       item.CompletedUtc == null)
+                       item.CompletedUtc == null &&
+                       item.ExpiresUtc > now)
         .Select(item => item.SizeBytes).ToListAsync(ct);
-    if (batchJobSizes.Count + pendingBatchTicketSizes.Count >= 20 ||
-        batchJobSizes.Sum() + pendingBatchTicketSizes.Sum() + request.SizeBytes > 50L * 1024 * 1024)
+    if (!PrintBatchCapacityRules.CanAdd(
+        batchJobSizes.Count + pendingBatchTicketSizes.Count,
+        checked(batchJobSizes.Sum() + pendingBatchTicketSizes.Sum()),
+        request.SizeBytes))
     {
+        await transaction.RollbackAsync(ct);
         return Results.Problem(statusCode: StatusCodes.Status413PayloadTooLarge,
             title: "A print batch can contain up to 20 files and 50 MB in total.");
     }
 
     db.LocalPrintUploadTickets.Add(ticket);
     await db.SaveChangesAsync(ct);
+    await transaction.CommitAsync(ct);
 
     return Results.Created($"/api/v1/public/sessions/current/local-upload-tickets/{ticket.Id}", new
     {
@@ -4613,6 +4899,7 @@ publicApi.MapPost("/jobs/{jobId:guid}/quote", async (
     PrintQuoteRequest request,
     HttpContext context,
     SmartPrintDbContext db,
+    TenantEntitlementService entitlements,
     CancellationToken ct) =>
 {
     var rawToken = context.Request.Headers["X-Print-Session"].FirstOrDefault();
@@ -4632,6 +4919,11 @@ publicApi.MapPost("/jobs/{jobId:guid}/quote", async (
     {
         return Results.Unauthorized();
     }
+
+    var subscription = await entitlements.GetForTenantAsync(session.TenantId, ct);
+    if (!subscription.IsAccessActive)
+        return Results.Problem(statusCode: StatusCodes.Status403Forbidden,
+            title: "This shop's trial or subscription period is no longer active.");
 
     var job = await db.PrintJobs.SingleOrDefaultAsync(
         item => item.Id == jobId && item.TenantId == session.TenantId &&
@@ -5380,6 +5672,144 @@ publicApi.MapGet("/sessions/current", async (
     return Results.Ok(new { session.Id, session.ExpiresUtc, Shop = shopProfile, LocalAgent = localAgent });
 });
 
+
+static string GetRateLimitPartitionKey(HttpContext context) =>
+    context.Connection.RemoteIpAddress?.ToString() ?? "unknown";
+
+static string GetSessionRateLimitPartitionKey(HttpContext context) =>
+    GetRateLimitPartitionKey(context);
+
+static string GetAgentRateLimitPartitionKey(HttpContext context) =>
+    GetRateLimitPartitionKey(context);
+
+static async Task<(bool Allowed, DateTimeOffset? SuspendedAtUtc)> GetAgentClaimAccessAsync(
+    Guid tenantId,
+    SmartPrintDbContext db,
+    CancellationToken ct)
+{
+    if (db.Database.CurrentTransaction is null)
+        throw new InvalidOperationException("A transaction is required for a suspended-tenant claim check.");
+
+    // Hold shared locks until commit. Tenant suspension/deactivation and platform recovery-policy
+    // updates take update locks on these same rows, preventing a time-of-check/time-of-use race.
+    var tenant = await db.Tenants.FromSqlInterpolated(
+        $"""SELECT * FROM "Tenants" WHERE "Id" = {tenantId} FOR SHARE""")
+        .SingleOrDefaultAsync(ct);
+    if (tenant is null) return (false, null);
+    if (tenant.Status == "Active") return (true, null);
+    if (tenant.Status != "Suspended") return (false, null);
+
+    var settings = await db.PlatformOperationalSettings.FromSqlRaw(
+        """SELECT * FROM "PlatformOperationalSettings" WHERE "Id" = 1 FOR SHARE""")
+        .SingleOrDefaultAsync(ct);
+    if (settings?.AllowPaidJobClaimsWhenSuspended != true) return (false, null);
+
+    var suspendedAt = await db.TenantStatusAudits.AsNoTracking()
+        .Where(item => item.TenantId == tenantId && item.NewStatus == "Suspended")
+        .OrderByDescending(item => item.CreatedUtc)
+        .Select(item => (DateTimeOffset?)item.CreatedUtc)
+        .FirstOrDefaultAsync(ct);
+    return (suspendedAt is not null, suspendedAt);
+}
+
+static bool IsTenantRecoveryOperation(
+    HttpContext context,
+    bool shopOperations,
+    bool allowPaidJobClaimsWhileSuspended = false)
+{
+    if (HttpMethods.IsGet(context.Request.Method) || HttpMethods.IsHead(context.Request.Method))
+        return true;
+
+    var path = context.Request.Path.Value ?? string.Empty;
+    if (!shopOperations && allowPaidJobClaimsWhileSuspended &&
+        HttpMethods.IsPost(context.Request.Method) &&
+        (path.EndsWith("/jobs/claim", StringComparison.OrdinalIgnoreCase) ||
+         path.EndsWith("/jobs/print-claim", StringComparison.OrdinalIgnoreCase)))
+        return true;
+    if (shopOperations)
+    {
+        return HttpMethods.IsPost(context.Request.Method) &&
+            (path.EndsWith("/confirm-output", StringComparison.OrdinalIgnoreCase) ||
+             path.EndsWith("/refund-preview", StringComparison.OrdinalIgnoreCase) ||
+             path.EndsWith("/refund", StringComparison.OrdinalIgnoreCase) ||
+             path.EndsWith("/reject", StringComparison.OrdinalIgnoreCase));
+    }
+
+    if (HttpMethods.IsPatch(context.Request.Method) &&
+        path.EndsWith("/revoke", StringComparison.OrdinalIgnoreCase))
+        return true;
+
+    if (!HttpMethods.IsPost(context.Request.Method))
+        return false;
+
+    return path.EndsWith("/heartbeat", StringComparison.OrdinalIgnoreCase) ||
+        path.EndsWith("/printers/sync", StringComparison.OrdinalIgnoreCase) ||
+        path.EndsWith("/received", StringComparison.OrdinalIgnoreCase) ||
+        path.EndsWith("/pdf-exported", StringComparison.OrdinalIgnoreCase) ||
+        path.EndsWith("/spooler-accepted", StringComparison.OrdinalIgnoreCase) ||
+        path.EndsWith("/print-blocked", StringComparison.OrdinalIgnoreCase) ||
+        path.EndsWith("/output-unconfirmed", StringComparison.OrdinalIgnoreCase) ||
+        path.EndsWith("/spooler-status", StringComparison.OrdinalIgnoreCase);
+}
+
+static async ValueTask<object?> EnforceTenantActiveAsync(
+    EndpointFilterInvocationContext context,
+    EndpointFilterDelegate next,
+    bool allowSubscriptionRead)
+{
+    var http = context.HttpContext;
+    var db = http.RequestServices.GetRequiredService<SmartPrintDbContext>();
+    Guid? tenantId = null;
+
+    if (TryGetTenantId(http.User, out var userTenantId))
+        tenantId = userTenantId;
+    else if (Guid.TryParse(http.Request.Headers["X-Print-Agent-Id"].FirstOrDefault(), out var agentId))
+        tenantId = await db.AgentDevices.AsNoTracking()
+            .Where(item => item.Id == agentId)
+            .Select(item => (Guid?)item.TenantId)
+            .SingleOrDefaultAsync(http.RequestAborted);
+    else if (http.Request.RouteValues.TryGetValue("publicCode", out var routeCode) && routeCode is not null)
+    {
+        var codeHash = HashOpaqueToken(routeCode.ToString()!);
+        tenantId = await db.QrStations.AsNoTracking()
+            .Where(item => item.PublicCodeHash == codeHash)
+            .Select(item => (Guid?)item.TenantId)
+            .SingleOrDefaultAsync(http.RequestAborted);
+    }
+    else
+    {
+        var sessionToken = http.Request.Headers["X-Print-Session"].FirstOrDefault();
+        if (!string.IsNullOrWhiteSpace(sessionToken))
+        {
+            var tokenHash = HashOpaqueToken(sessionToken);
+            tenantId = await db.CustomerPrintSessions.AsNoTracking()
+                .Where(item => item.TokenHash == tokenHash)
+                .Select(item => (Guid?)item.TenantId)
+                .SingleOrDefaultAsync(http.RequestAborted);
+        }
+    }
+
+    if (tenantId is not Guid resolvedTenantId) return await next(context);
+    if (allowSubscriptionRead &&
+        http.Request.Path.Value?.EndsWith("/subscription", StringComparison.OrdinalIgnoreCase) == true)
+        return await next(context);
+
+    var status = await db.Tenants.AsNoTracking()
+        .Where(item => item.Id == resolvedTenantId)
+        .Select(item => item.Status)
+        .SingleOrDefaultAsync(http.RequestAborted);
+    var allowPaidJobClaimsWhileSuspended = status == "Suspended" &&
+        (await db.PlatformOperationalSettings.AsNoTracking()
+            .Where(item => item.Id == PlatformOperationalSettings.SingletonIdValue)
+            .Select(item => (bool?)item.AllowPaidJobClaimsWhenSuspended)
+            .SingleOrDefaultAsync(http.RequestAborted) ?? false);
+    if (!TenantAccessRules.IsActive(status) &&
+        !IsTenantRecoveryOperation(http, allowSubscriptionRead, allowPaidJobClaimsWhileSuspended))
+        return Results.Problem(statusCode: StatusCodes.Status403Forbidden,
+            title: "This shop is suspended or inactive. New print work is blocked; existing jobs and financial recovery remain accessible.");
+
+    return await next(context);
+}
 
 static string[] ReadLocalAgentEndpoints(string? json)
 {

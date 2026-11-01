@@ -9,6 +9,9 @@ public sealed class SmartPrintDbContext(DbContextOptions<SmartPrintDbContext> op
     : IdentityDbContext<AppUser, IdentityRole<Guid>, Guid>(options)
 {
     public DbSet<Tenant> Tenants => Set<Tenant>();
+    public DbSet<TenantStatusAudit> TenantStatusAudits => Set<TenantStatusAudit>();
+    public DbSet<PlatformOperationalSettings> PlatformOperationalSettings => Set<PlatformOperationalSettings>();
+    public DbSet<PlatformOperationalSettingsAudit> PlatformOperationalSettingsAudits => Set<PlatformOperationalSettingsAudit>();
     public DbSet<AgentDevice> AgentDevices => Set<AgentDevice>();
     public DbSet<AgentEnrollmentCode> AgentEnrollmentCodes => Set<AgentEnrollmentCode>();
     public DbSet<ShopProfile> ShopProfiles => Set<ShopProfile>();
@@ -48,6 +51,43 @@ public sealed class SmartPrintDbContext(DbContextOptions<SmartPrintDbContext> op
             entity.Property(x => x.BusinessName).HasMaxLength(180).IsRequired();
             entity.Property(x => x.Status).HasMaxLength(24).IsRequired();
             entity.HasIndex(x => x.Slug).IsUnique();
+        });
+
+        modelBuilder.Entity<TenantStatusAudit>(entity =>
+        {
+            entity.ToTable("TenantStatusAudits");
+            entity.HasKey(x => x.Id);
+            entity.Property(x => x.PreviousStatus).HasMaxLength(24).IsRequired();
+            entity.Property(x => x.NewStatus).HasMaxLength(24).IsRequired();
+            entity.Property(x => x.Reason).HasMaxLength(500).IsRequired();
+            entity.HasIndex(x => new { x.TenantId, x.CreatedUtc });
+            entity.HasOne<Tenant>().WithMany().HasForeignKey(x => x.TenantId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<AppUser>().WithMany().HasForeignKey(x => x.ActorUserId).OnDelete(DeleteBehavior.Restrict);
+        });
+
+        modelBuilder.Entity<PlatformOperationalSettings>(entity =>
+        {
+            entity.ToTable("PlatformOperationalSettings", table =>
+            {
+                table.HasCheckConstraint("CK_PlatformOperationalSettings_Singleton", "\"Id\" = 1");
+                table.HasCheckConstraint("CK_PlatformOperationalSettings_TrialQuota", "\"TrialMaxMonthlyPrintJobs\" BETWEEN 1 AND 10000000");
+                table.HasCheckConstraint("CK_PlatformOperationalSettings_RetentionDays",
+                    "\"CloudCompletedDocumentRetentionDays\" BETWEEN 1 AND 3650 AND \"AgentCompletedDocumentRetentionDays\" BETWEEN 1 AND 3650 AND \"AbandonedDocumentRetentionDays\" BETWEEN 1 AND 3650 AND \"PendingLocalUploadRetentionDays\" BETWEEN 1 AND 3650 AND \"ExpiredUploadTicketRetentionDays\" BETWEEN 1 AND 3650 AND \"EmptyCustomerSessionRetentionDays\" BETWEEN 1 AND 3650 AND \"StaleRefreshTokenRetentionDays\" BETWEEN 1 AND 3650");
+                table.HasCheckConstraint("CK_PlatformOperationalSettings_SweepHours",
+                    "\"ApiRetentionSweepHours\" BETWEEN 1 AND 168 AND \"AgentRetentionSweepHours\" BETWEEN 1 AND 24");
+            });
+            entity.HasKey(x => x.Id);
+            entity.HasOne<AppUser>().WithMany().HasForeignKey(x => x.UpdatedByUserId).OnDelete(DeleteBehavior.SetNull);
+        });
+
+        modelBuilder.Entity<PlatformOperationalSettingsAudit>(entity =>
+        {
+            entity.ToTable("PlatformOperationalSettingsAudits");
+            entity.HasKey(x => x.Id);
+            entity.Property(x => x.ChangesJson).HasColumnType("jsonb").IsRequired();
+            entity.Property(x => x.Reason).HasMaxLength(500).IsRequired();
+            entity.HasIndex(x => x.CreatedUtc);
+            entity.HasOne<AppUser>().WithMany().HasForeignKey(x => x.ActorUserId).OnDelete(DeleteBehavior.SetNull);
         });
 
         modelBuilder.Entity<AgentDevice>(entity =>
@@ -384,6 +424,7 @@ public sealed class SmartPrintDbContext(DbContextOptions<SmartPrintDbContext> op
                 .HasFilter("\"AgentDeviceId\" IS NOT NULL");
             entity.HasIndex(x => new { x.TenantId, x.PrintJobId }).IsUnique();
             entity.HasIndex(x => new { x.TenantId, x.Sha256 });
+            entity.HasIndex(x => new { x.StorageMode, x.PurgedUtc });
             entity.HasOne<PrintJob>().WithOne().HasForeignKey<PrintDocument>(x => new { x.TenantId, x.PrintJobId })
                 .HasPrincipalKey<PrintJob>(x => new { x.TenantId, x.Id }).OnDelete(DeleteBehavior.Cascade);
 

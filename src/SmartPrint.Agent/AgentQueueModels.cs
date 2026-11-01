@@ -67,7 +67,8 @@ public sealed record AgentLocalQueueEntry(
     string? OutputFileName = null,
     string? OutputFileSha256 = null,
     long? OutputFileSizeBytes = null,
-    IReadOnlyList<int>? RejectedPageNumbers = null);
+    IReadOnlyList<int>? RejectedPageNumbers = null,
+    DateTimeOffset? CompletedUtc = null);
 
 public sealed record AgentLocalQueueProof(Guid JobId, string Sha256, long SizeBytes);
 public sealed record AgentPrintClaimRequest(IReadOnlyList<AgentLocalQueueProof> LocalJobs);
@@ -81,4 +82,8 @@ public sealed record AgentSpoolerStatusRequest(int SpoolerJobId, string SpoolerS
 public sealed record WindowsSpoolerJob(int JobId, string DocumentName, string Status, uint StatusFlags, int PagesPrinted, int TotalPages);
 
 public sealed record AgentCloudSpoolerStatusResponse(Guid Id, string Status, bool? DuplicateRequest = null);
-public sealed record AgentLocalUploadStatusResponse(bool Completed, DateTimeOffset ExpiresUtc);
+public sealed record AgentLocalUploadStatusResponse(
+    bool Completed,
+    DateTimeOffset ExpiresUtc,
+    bool SafeToDelete = false,
+    DateTimeOffset? DeleteAfterUtc = null);

@@ -2,6 +2,20 @@
 
 This roadmap distinguishes implemented capabilities from remaining work. A checked item means it exists in the repository and is covered by build/tests where applicable; it does not mean that production network access or physical hardware has been validated.
 
+## Phase 1 / Phase 2 hardening — feature branch implementation
+
+The branch `feature/phase-1-2-security-data-hardening` adds the following controls; they remain pending branch CI review and merge:
+
+- [x] Tenant status enforcement at API boundaries, safe suspension recovery paths and audited platform-admin lifecycle controls.
+- [x] Backend plan enforcement for active subscription access, Advanced Reports and White-label custom branding.
+- [x] Source-IP-partitioned request limiting for authentication, public, QR, Agent and upload APIs.
+- [x] Transactional local/cloud upload reservations, idempotency rechecks and shared batch capacity enforcement.
+- [x] Payment gross collections and shop-sent refunds reported as separately dated financial events.
+- [x] Configurable cloud and Windows-Agent document retention that preserves output-unconfirmed jobs and financial/job metadata.
+- [x] Regression coverage for tenant status transitions, batch bounds and retention decisions.
+
+Production blockers still outstanding: end-to-end encryption of LAN upload bytes, least-privilege Agent service account validation, malware scanning/parser isolation, email verification/account recovery, PostgreSQL concurrency integration tests, encrypted off-host backups/restore drills, per-tenant storage quotas and local-Agent disk-loss re-upload recovery. See `docs/IMPLEMENTATION_TRACKER.md` and `docs/SECURITY_AND_OPERATIONS.md`.
+
 ## Workstream 0 — engineering and delivery foundation
 
 - [x] Monorepo with React/TypeScript portal, .NET 10 API/Agent and PostgreSQL migrations.

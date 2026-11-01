@@ -155,6 +155,43 @@ public sealed class AgentLocalQueueStoreTests
     }
 
     [Fact]
+    public async Task ExpiredLocalUploadCannotDeleteAFileOutsideTheProtectedQueue()
+    {
+        var root = CreateTemporaryDirectory();
+        var outsidePath = Path.Combine(Path.GetDirectoryName(root)!, $"outside-{Guid.NewGuid():N}.txt");
+        try
+        {
+            await File.WriteAllTextAsync(outsidePath, "must remain untouched");
+            var store = new AgentLocalQueueStore(root);
+            await store.InitializeAsync(CancellationToken.None);
+            var bytes = "Tampered manifest path"u8.ToArray();
+            var job = CreateJob(bytes) with
+            {
+                StorageMode = "LOCAL_AGENT",
+                LeaseExpiresUtc = DateTimeOffset.UtcNow.AddMinutes(-1)
+            };
+            await store.EnqueueLocalUploadAsync(job, bytes, CancellationToken.None);
+
+            var manifestPath = Directory.GetFiles(root, "*.json").Single();
+            var manifest = System.Text.Json.Nodes.JsonNode.Parse(await File.ReadAllTextAsync(manifestPath));
+            Assert.NotNull(manifest);
+            manifest["documentPath"] = outsidePath;
+            await File.WriteAllTextAsync(manifestPath, manifest.ToJsonString());
+
+            await Assert.ThrowsAsync<InvalidDataException>(() =>
+                store.DeleteExpiredLocalUploadAsync(job.Id, DateTimeOffset.UtcNow, CancellationToken.None));
+
+            Assert.True(File.Exists(outsidePath));
+            Assert.NotNull(store.Find(job.Id));
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+            if (File.Exists(outsidePath)) File.Delete(outsidePath);
+        }
+    }
+
+    [Fact]
     public async Task DeletesOnlyExpiredUnfinalizedLocalUploads()
     {
         var root = CreateTemporaryDirectory();
@@ -263,6 +300,62 @@ public sealed class AgentLocalQueueStoreTests
     }
 
     [Fact]
+    public async Task RetentionPurgesConfirmedOutputOnlyAfterTheRetentionWindow()
+    {
+        var root = CreateTemporaryDirectory();
+        try
+        {
+            var store = new AgentLocalQueueStore(root);
+            await store.InitializeAsync(CancellationToken.None);
+            var bytes = "Confirmed print output retention"u8.ToArray();
+            var job = CreateJob(bytes);
+            var entry = await store.EnqueueAsync(job, bytes, CancellationToken.None);
+            await store.MarkAcknowledgedAsync(job.Id, CancellationToken.None);
+            await store.MarkSubmissionStartedAsync(job.Id, "SmartPrint-Retention-Test", CancellationToken.None);
+            await store.MarkSpoolerAcceptedAsync(job.Id, 321, "SmartPrint-Retention-Test", CancellationToken.None);
+            await store.MarkOutputConfirmedAsync(job.Id, CancellationToken.None);
+
+            var completed = store.Find(job.Id)!.CompletedUtc;
+            Assert.NotNull(completed);
+            Assert.Equal(0, await store.PruneRetainedEntriesAsync(
+                completed!.Value.AddDays(29), TimeSpan.FromDays(30), root, CancellationToken.None));
+            Assert.True(File.Exists(entry.DocumentPath));
+
+            Assert.Equal(1, await store.PruneRetainedEntriesAsync(
+                completed.Value.AddDays(31), TimeSpan.FromDays(30), root, CancellationToken.None));
+            Assert.Null(store.Find(job.Id));
+            Assert.False(File.Exists(entry.DocumentPath));
+            Assert.Empty(Directory.GetFiles(root, "*.json"));
+        }
+        finally { Directory.Delete(root, recursive: true); }
+    }
+
+    [Fact]
+    public async Task RetentionNeverPurgesOutputUnconfirmedJobs()
+    {
+        var root = CreateTemporaryDirectory();
+        try
+        {
+            var store = new AgentLocalQueueStore(root);
+            await store.InitializeAsync(CancellationToken.None);
+            var bytes = "Unconfirmed output must remain recoverable"u8.ToArray();
+            var job = CreateJob(bytes);
+            var entry = await store.EnqueueAsync(job, bytes, CancellationToken.None);
+            await store.MarkAcknowledgedAsync(job.Id, CancellationToken.None);
+            await store.MarkSubmissionStartedAsync(job.Id, "SmartPrint-Unconfirmed-Test", CancellationToken.None);
+            await store.MarkSpoolerAcceptedAsync(job.Id, 654, "SmartPrint-Unconfirmed-Test", CancellationToken.None);
+            await store.MarkOutputUnconfirmedAsync(job.Id, "SPOOLER_JOB_NO_LONGER_VISIBLE", CancellationToken.None);
+
+            var future = DateTimeOffset.UtcNow.AddDays(365);
+            Assert.Equal(0, await store.PruneRetainedEntriesAsync(
+                future, TimeSpan.FromDays(30), root, CancellationToken.None));
+            Assert.Equal("OUTPUT_UNCONFIRMED", store.Find(job.Id)!.State);
+            Assert.True(File.Exists(entry.DocumentPath));
+        }
+        finally { Directory.Delete(root, recursive: true); }
+    }
+
+    [Fact]
     public async Task UnconfirmedPdfExportCanBeExplicitlyRequeuedFromTheProtectedLocalCopy()
     {
         var root = CreateTemporaryDirectory();
@@ -336,6 +429,40 @@ public sealed class AgentLocalQueueStoreTests
             Assert.Empty(store.GetSpoolerTrackingJobs());
         }
         finally { Directory.Delete(root, recursive: true); }
+    }
+
+    [Fact]
+    public async Task PendingPaymentUploadIsRemovedOnlyAfterPlatformDeadlineAuthorisesIt()
+    {
+        var root = CreateTemporaryDirectory();
+        try
+        {
+            var store = new AgentLocalQueueStore(root);
+            await store.InitializeAsync(CancellationToken.None);
+            var bytes = "Pending payment source remains protected"u8.ToArray();
+            var job = CreateJob(bytes);
+            var entry = await store.EnqueueLocalUploadAsync(job, bytes, CancellationToken.None);
+            await store.MarkLocalUploadFinalizedAsync(job.Id, CancellationToken.None);
+
+            Assert.Contains(store.GetPendingPaymentLocalUploads(), item => item.JobId == job.Id);
+            Assert.Equal(0, await store.PruneRetainedEntriesAsync(
+                DateTimeOffset.UtcNow.AddDays(365), TimeSpan.FromDays(1), root, CancellationToken.None));
+            Assert.True(File.Exists(entry.DocumentPath));
+
+            var deleteAfter = DateTimeOffset.UtcNow.AddDays(-1);
+            await Assert.ThrowsAsync<InvalidOperationException>(() =>
+                store.DeleteExpiredPendingPaymentUploadAsync(
+                    job.Id, deleteAfter, deleteAfter.AddDays(-1), CancellationToken.None));
+
+            await store.DeleteExpiredPendingPaymentUploadAsync(
+                job.Id, deleteAfter, DateTimeOffset.UtcNow, CancellationToken.None);
+            Assert.Null(store.Find(job.Id));
+            Assert.False(File.Exists(entry.DocumentPath));
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
     }
 
     private static AgentClaimedJob CreateJob(byte[] content)

@@ -9,6 +9,15 @@
 - Apply rate limits and abuse controls to QR sessions, uploads, login, quotes and payment callbacks.
 - Audit role changes, refunds, overrides, retries, data exports and support access.
 
+## 1A. Tenant lifecycle and subscription enforcement
+
+- Tenant state is controlled through the platform-only `PATCH /api/v1/platform/tenants/{tenantId}/status` endpoint. The platform administrator must provide a 5–500 character reason; the actor, previous status, new status and timestamp are persisted in `TenantStatusAudits`.
+- Supported transitions are Active → Suspended/Inactive and Suspended → Active/Inactive. Inactive is terminal; reactivation is not supported.
+- Suspension blocks new QR sessions, print submissions, quotes, payment starts, new Agent claims and new authorisation/dispatch actions. Read-only history and limited recovery operations remain available so already-paid or physically submitted jobs can be reconciled, refunded, rejected or confirmed.
+- The shop API enforces subscription access and feature entitlements server-side. Portal navigation is not an enforcement boundary.
+- API rate limits use source-IP partitions so clients cannot bypass them by changing untrusted session or Agent headers. The current defaults are 20 authentication requests/minute, 120 public requests/minute, 30 Agent requests/minute, 30 QR session creations/minute and 8 document uploads/minute. Review these values against production traffic and trusted proxy configuration.
+- In the provided Cloudflare Tunnel Compose deployment, portal Nginx overwrites `X-Forwarded-For` with Cloudflare's `CF-Connecting-IP` value before proxying to the API. Keep the API container private and do not publish port 8080 directly; this is the trust boundary for forwarded client addresses.
+
 ## 2. QR session security
 
 A printed QR identifies a shop station; it does not authorise printing by itself. On scan, issue a short-lived, random, scoped session bound to tenant/station and validated by the local edge or cloud. Support expiry, revocation, rotation, abuse limits and replay protection. Do not embed long-lived secrets or customer data in static QR codes.
@@ -25,6 +34,13 @@ A printed QR identifies a shop station; it does not authorise printing by itself
 - The document storage format is versioned (`QSP1`); never reuse the development key in production.
 - Scan uploads where configured and isolate conversion/rendering processes.
 - Apply explicit retention and deletion policies. Never log document contents or public file URLs.
+- Platform administrators configure print quota and document/database retention under **Platform Control Centre → Operations & retention**. The seeded trial quota is 3,000 print jobs per calendar month. Paid-plan quotas remain versioned in **Plans & entitlements**. Operations controls cloud-completed, Agent-completed, abandoned-unpaid, pending-local-upload, expired-ticket, empty-session and stale-refresh-token retention, plus API/Agent sweep intervals and whether already-paid work may continue during a shop suspension. Every update requires an audit reason and records before/after settings.
+- Cloud source documents are purged only after confirmed physical output or a verified PDF export, or after a terminal rejection, quote expiry or full refund has passed the configured abandonment period without a financial hold. The database retains job, payment and refund metadata and marks purged documents with `PurgedUtc`; subsequent cloud preview/download returns HTTP 410.
+- The Windows Agent receives its completed-document retention window and sweep interval from the platform heartbeat. It removes pending-payment local source documents only after the API confirms the job is terminal unpaid, financial holds are clear and the platform retention deadline has passed. Output-unconfirmed jobs and paid work remain recoverable.
+- The API sweeps old expired local-upload tickets, empty customer sessions and expired/revoked refresh tokens at the platform-configured intervals. Historical print jobs, payment events, refund events and tenant audit history are retained.
+- Both cloud and local customer upload paths share the 20-file / 50-MB batch limit. Local upload reservations are serialized with the tenant's monthly print-job quota lock; expired, uncompleted reservations no longer consume capacity.
+- Collection reports record gross payments in the payment verification period and refunds in the period when the shop records that the refund was actually sent. A later refund does not rewrite the earlier gross collection period.
+
 - Prevent path traversal, archive bombs, malicious Office content and unsafe preview rendering.
 
 ## 4. Payments and financial integrity
@@ -48,6 +64,8 @@ A printed QR identifies a shop station; it does not authorise printing by itself
 ## 6. Offline, backup and recovery
 
 - Local authorised jobs should continue during temporary internet outages.
+- Current limitation: direct LAN document upload and local Agent status/preview communication use private-network HTTP. CORS, one-use grants, ownership checks and hashes do not encrypt the document bytes in transit. Until end-to-end local payload encryption or trusted HTTPS is implemented and tested, treat the shop LAN as a trusted, segmented network and do not use this path on guest/public Wi-Fi.
+- Current limitation: the Windows Agent installer does not yet configure a dedicated least-privilege service identity. Validate the service account and printer permissions before production deployment.
 - Local queue and event journal must be durable across process and machine restart.
 - Define recovery and reconciliation for interrupted uploads, conversion, payment, spooler submission and sync.
 - Provide encrypted backup/restore for local configuration and metadata; document customer document retention separately.
@@ -69,3 +87,6 @@ Platform support access to tenant records must be least-privilege, time-bound, p
 - Preserve queue state and local configuration during upgrade.
 - Publish checksums and release notes.
 - Provide diagnostics bundle export with secrets and document contents redacted.
+- Current backup scripts restrict local filesystem ACLs but do not encrypt the generated database dump, document archive or secrets file themselves. Encrypt the complete three-file backup set before transferring it to off-host storage. Perform and record restore drills; do not assume successful backup creation proves recoverability.
+- Email verification and account recovery are not yet implemented. New accounts are not gated on confirmed email; complete verification and recovery workflows before relying on email ownership for sensitive account changes.
+- Malware scanning and isolated document conversion/rendering remain deployment hardening requirements; do not treat file-signature validation as malware protection.

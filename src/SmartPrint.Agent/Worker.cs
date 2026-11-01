@@ -18,6 +18,10 @@ public sealed class Worker(
     private readonly TimeSpan pollInterval = TimeSpan.FromSeconds(
         Math.Clamp(configuration.GetValue<int?>("Agent:PollIntervalSeconds") ?? 30, 10, 300));
     private readonly string pdfExportDirectory = ResolvePdfExportDirectory(configuration);
+    private readonly TimeSpan configuredCompletedDocumentRetention = TimeSpan.FromDays(
+        Math.Clamp(configuration.GetValue<int?>("Agent:CompletedDocumentRetentionDays") ?? 30, 1, 3650));
+    private readonly int configuredRetentionSweepHours =
+        Math.Clamp(configuration.GetValue<int?>("Agent:RetentionSweepHours") ?? 6, 1, 24);
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
@@ -32,8 +36,34 @@ public sealed class Worker(
             return;
         }
 
+        var lastRetentionSweepUtc = DateTimeOffset.MinValue;
+        var completedDocumentRetention = configuredCompletedDocumentRetention;
+        var retentionSweepInterval = TimeSpan.FromHours(configuredRetentionSweepHours);
+        var hasReceivedPlatformRetentionPolicy = false;
         while (!stoppingToken.IsCancellationRequested)
         {
+            var sweepNow = DateTimeOffset.UtcNow;
+            if (hasReceivedPlatformRetentionPolicy &&
+                sweepNow - lastRetentionSweepUtc >= retentionSweepInterval)
+            {
+                try
+                {
+                    var removed = await localQueueStore.PruneRetainedEntriesAsync(
+                        sweepNow, completedDocumentRetention, pdfExportDirectory, stoppingToken);
+                    if (removed > 0)
+                        logger.LogInformation("Removed {RemovedCount} expired or retained local document entries.", removed);
+                }
+                catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+                {
+                    break;
+                }
+                catch (Exception exception)
+                {
+                    logger.LogWarning(exception, "The local document retention sweep failed; it will be retried on a later cycle.");
+                }
+                lastRetentionSweepUtc = sweepNow;
+            }
+
             AgentCredentials? credentials;
             try
             {
@@ -78,6 +108,13 @@ public sealed class Worker(
                 else if (heartbeat.IsSuccessStatusCode)
                 {
                     var serverConfiguration = await heartbeat.Content.ReadFromJsonAsync<AgentHeartbeatResponse>(cancellationToken: stoppingToken);
+                    if (serverConfiguration?.AgentCompletedDocumentRetentionDays is int retentionDays &&
+                        serverConfiguration.AgentRetentionSweepHours is int sweepHours)
+                    {
+                        completedDocumentRetention = TimeSpan.FromDays(Math.Clamp(retentionDays, 1, 3650));
+                        retentionSweepInterval = TimeSpan.FromHours(Math.Clamp(sweepHours, 1, 24));
+                        hasReceivedPlatformRetentionPolicy = true;
+                    }
                     if (Uri.TryCreate(serverConfiguration?.PublicBaseUrl, UriKind.Absolute, out var configuredBaseUri) &&
                         configuredBaseUri.Scheme == Uri.UriSchemeHttps && configuredBaseUri.AbsolutePath == "/" &&
                         string.IsNullOrEmpty(configuredBaseUri.Query) && string.IsNullOrEmpty(configuredBaseUri.Fragment) && string.IsNullOrEmpty(configuredBaseUri.UserInfo))
@@ -166,6 +203,7 @@ public sealed class Worker(
         CancellationToken cancellationToken)
     {
         await ReconcileStagedLocalUploadsAsync(client, credentials, cancellationToken);
+        await ReconcilePendingPaymentLocalUploadsAsync(client, credentials, cancellationToken);
         await RetryPendingAcknowledgementsAsync(client, credentials, cancellationToken);
 
         using var claimResponse = await SendAgentRequestAsync(
@@ -316,6 +354,47 @@ public sealed class Worker(
             catch (Exception exception)
             {
                 logger.LogWarning(exception, "Could not reconcile staged local upload {JobNumber}; keeping its protected file.", entry.JobNumber);
+            }
+        }
+    }
+
+    private async Task ReconcilePendingPaymentLocalUploadsAsync(
+        HttpClient client,
+        AgentCredentials credentials,
+        CancellationToken cancellationToken)
+    {
+        foreach (var entry in localQueueStore.GetPendingPaymentLocalUploads())
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            try
+            {
+                using var response = await SendAgentGetRequestAsync(
+                    client,
+                    credentials,
+                    $"api/v1/agent/local-uploads/{entry.JobId}/status",
+                    cancellationToken);
+                if (!response.IsSuccessStatusCode)
+                {
+                    logger.LogWarning("Pending local upload status for {JobNumber} returned HTTP {StatusCode}; keeping its protected file.", entry.JobNumber, (int)response.StatusCode);
+                    continue;
+                }
+
+                var status = await response.Content.ReadFromJsonAsync<AgentLocalUploadStatusResponse>(cancellationToken);
+                if (status?.SafeToDelete == true && status.DeleteAfterUtc is DateTimeOffset deleteAfterUtc &&
+                    deleteAfterUtc <= DateTimeOffset.UtcNow)
+                {
+                    await localQueueStore.DeleteExpiredPendingPaymentUploadAsync(
+                        entry.JobId, deleteAfterUtc, DateTimeOffset.UtcNow, cancellationToken);
+                    logger.LogInformation("Removed terminal pending-payment local upload {JobNumber} after the platform retention deadline.", entry.JobNumber);
+                }
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (Exception exception)
+            {
+                logger.LogWarning(exception, "Could not reconcile pending-payment local upload {JobNumber}; keeping its protected file.", entry.JobNumber);
             }
         }
     }

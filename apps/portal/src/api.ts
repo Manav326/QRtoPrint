@@ -60,6 +60,25 @@ export interface PlatformTenantsPage {
   items: PlatformTenant[];
 }
 
+export function updatePlatformTenantStatus(token: string, tenantId: string, status: "Active" | "Suspended" | "Inactive", reason: string) {
+  return apiRequest<{ id: string; status: string; updatedUtc: string; duplicateRequest: boolean }>(
+    `/api/v1/platform/tenants/${tenantId}/status`,
+    { method: "PATCH", body: JSON.stringify({ status, reason }) },
+    token
+  );
+}
+
+export function getPlatformTenantStatusHistory(token: string, tenantId: string) {
+  return apiRequest<Array<{
+    id: string;
+    previousStatus: string;
+    newStatus: string;
+    reason: string;
+    actorUserId: string | null;
+    createdUtc: string;
+  }>>(`/api/v1/platform/tenants/${tenantId}/status-history`, {}, token);
+}
+
 export function getPlatformOverview(token: string) {
   return apiRequest<PlatformOverview>("/api/v1/platform/overview", {}, token);
 }
@@ -281,6 +300,7 @@ export interface ShopReportSummary {
   pendingPaymentCount: number;
   jobsByStatus: { status: string; count: number }[];
   verifiedCollectionsByMethod: { method: string; currency: string; paymentCount: number; amountMinor: number }[];
+  refundsRecordedByMethod: { method: string; currency: string; refundCount: number; amountMinor: number }[];
 }
 export interface ShopPayment {
   id: string;
@@ -1380,4 +1400,59 @@ export function publishPlatformPlanVersion(token: string, planId: string, versio
     { method: "POST" },
     token
   );
+}
+
+
+export interface PlatformOperationalSettings {
+  trialMaxMonthlyPrintJobs: number;
+  cloudCompletedDocumentRetentionDays: number;
+  agentCompletedDocumentRetentionDays: number;
+  abandonedDocumentRetentionDays: number;
+  pendingLocalUploadRetentionDays: number;
+  expiredUploadTicketRetentionDays: number;
+  emptyCustomerSessionRetentionDays: number;
+  staleRefreshTokenRetentionDays: number;
+  apiRetentionSweepHours: number;
+  agentRetentionSweepHours: number;
+  allowPaidJobClaimsWhenSuspended: boolean;
+  updatedByUserId: string | null;
+  updatedUtc: string;
+}
+
+export interface PlatformOperationalSettingsInput {
+  trialMaxMonthlyPrintJobs: number;
+  cloudCompletedDocumentRetentionDays: number;
+  agentCompletedDocumentRetentionDays: number;
+  abandonedDocumentRetentionDays: number;
+  pendingLocalUploadRetentionDays: number;
+  expiredUploadTicketRetentionDays: number;
+  emptyCustomerSessionRetentionDays: number;
+  staleRefreshTokenRetentionDays: number;
+  apiRetentionSweepHours: number;
+  agentRetentionSweepHours: number;
+  allowPaidJobClaimsWhenSuspended: boolean;
+  reason: string;
+}
+
+export interface PlatformOperationalSettingsAudit {
+  id: string;
+  reason: string;
+  actorUserId: string | null;
+  createdUtc: string;
+  changesJson: string;
+}
+
+export function getPlatformOperationalSettings(token: string) {
+  return apiRequest<PlatformOperationalSettings>("/api/v1/platform/settings/operations", {}, token);
+}
+
+export function getPlatformOperationalSettingsHistory(token: string) {
+  return apiRequest<PlatformOperationalSettingsAudit[]>("/api/v1/platform/settings/operations/history", {}, token);
+}
+
+export function updatePlatformOperationalSettings(token: string, values: PlatformOperationalSettingsInput) {
+  return apiRequest<PlatformOperationalSettings>("/api/v1/platform/settings/operations", {
+    method: "PUT",
+    body: JSON.stringify(values)
+  }, token);
 }

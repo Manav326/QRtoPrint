@@ -18,6 +18,47 @@ public sealed class Tenant
     public DateTimeOffset UpdatedUtc { get; set; } = DateTimeOffset.UtcNow;
 }
 
+public sealed class TenantStatusAudit
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+    public Guid TenantId { get; set; }
+    public string PreviousStatus { get; set; } = string.Empty;
+    public string NewStatus { get; set; } = string.Empty;
+    public string Reason { get; set; } = string.Empty;
+    public Guid? ActorUserId { get; set; }
+    public DateTimeOffset CreatedUtc { get; set; } = DateTimeOffset.UtcNow;
+}
+
+public sealed class PlatformOperationalSettings
+{
+    public const int SingletonIdValue = 1;
+    public const int DefaultTrialMaxMonthlyPrintJobs = 3000;
+
+    public int Id { get; set; } = SingletonIdValue;
+    public int TrialMaxMonthlyPrintJobs { get; set; } = DefaultTrialMaxMonthlyPrintJobs;
+    public int CloudCompletedDocumentRetentionDays { get; set; } = 30;
+    public int AgentCompletedDocumentRetentionDays { get; set; } = 30;
+    public int AbandonedDocumentRetentionDays { get; set; } = 30;
+    public int PendingLocalUploadRetentionDays { get; set; } = 30;
+    public int ExpiredUploadTicketRetentionDays { get; set; } = 7;
+    public int EmptyCustomerSessionRetentionDays { get; set; } = 90;
+    public int StaleRefreshTokenRetentionDays { get; set; } = 30;
+    public int ApiRetentionSweepHours { get; set; } = 24;
+    public int AgentRetentionSweepHours { get; set; } = 6;
+    public bool AllowPaidJobClaimsWhenSuspended { get; set; } = true;
+    public Guid? UpdatedByUserId { get; set; }
+    public DateTimeOffset UpdatedUtc { get; set; } = DateTimeOffset.UtcNow;
+}
+
+public sealed class PlatformOperationalSettingsAudit
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+    public string ChangesJson { get; set; } = "{}";
+    public string Reason { get; set; } = string.Empty;
+    public Guid? ActorUserId { get; set; }
+    public DateTimeOffset CreatedUtc { get; set; } = DateTimeOffset.UtcNow;
+}
+
 public sealed class ShopProfile
 {
     public Guid TenantId { get; set; }
@@ -239,6 +280,7 @@ public sealed class PrintDocument
     public Guid? AgentDeviceId { get; set; }
     public string PageSizesJson { get; set; } = "[]";
     public DateTimeOffset CreatedUtc { get; set; } = DateTimeOffset.UtcNow;
+    public DateTimeOffset? PurgedUtc { get; set; }
 }
 
 public sealed class LocalPrintUploadTicket
