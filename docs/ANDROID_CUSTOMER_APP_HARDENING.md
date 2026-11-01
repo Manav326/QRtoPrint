@@ -8,7 +8,7 @@ Scope: the SmartPrint Android application remains customer-facing. Shop staff co
 - [x] Bind production QR station URLs to the configured SmartPrint service origin.
 - [x] Keep the native WebView message bridge pinned to the configured origin; never trust a host supplied by a QR code.
 - [x] Persist guest print-session tokens encrypted with Android Keystore and scope them by station.
-- [x] Persist non-secret active-job drafts per station so a restarted WebView can restore uploaded jobs.
+- [x] Persist non-secret active-job drafts per station so a restarted WebView can restore uploaded jobs while the server still accepts that station's guest-session token.
 - [x] Preserve WebView state on Android Activity recreation.
 - [x] Add an explicit switch-shop flow without discarding another shop's active session.
 
@@ -28,7 +28,8 @@ Scope: the SmartPrint Android application remains customer-facing. Shop staff co
 - [ ] Tighten or explicitly constrain cleartext networking without breaking private-LAN Agent upload.
 
 ### Release validation
-- [ ] Add unit/instrumented tests for QR origin validation, encrypted guest-session storage, shop switching and navigation.
+- [x] Add unit/instrumented regression coverage for QR origin validation, encrypted per-shop guest-session storage and Account back-navigation.
+- [ ] Add instrumented end-to-end shop-switch/process-death recovery tests and portal batch-status tests.
 - [ ] Pass Android unit tests, Android emulator tests, portal build/tests and full CI.
 - [ ] Complete physical Android, camera/scanner, file-provider, process-kill recovery, shop Wi-Fi, payment and real-printer acceptance.
 
