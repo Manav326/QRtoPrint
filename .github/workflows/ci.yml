@@ -63,7 +63,7 @@ jobs:
       - name: Add Agent setup scripts and guide
         shell: pwsh
         run: |
-          Copy-Item scripts/pair-agent.ps1, scripts/install-agent-service.ps1, scripts/uninstall-agent-service.ps1, src/SmartPrint.Agent/appsettings.example.json, src/SmartPrint.Agent/README.md artifacts/agent/
+          Copy-Item scripts/pair-agent.ps1, scripts/install-agent-service.ps1, scripts/uninstall-agent-service.ps1, scripts/verify-agent-local.ps1, src/SmartPrint.Agent/appsettings.example.json, src/SmartPrint.Agent/README.md artifacts/agent/
       - name: Upload Windows Agent package
         uses: actions/upload-artifact@v4
         with:
