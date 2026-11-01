@@ -155,6 +155,43 @@ public sealed class AgentLocalQueueStoreTests
     }
 
     [Fact]
+    public async Task ExpiredLocalUploadCannotDeleteAFileOutsideTheProtectedQueue()
+    {
+        var root = CreateTemporaryDirectory();
+        var outsidePath = Path.Combine(Path.GetDirectoryName(root)!, $"outside-{Guid.NewGuid():N}.txt");
+        try
+        {
+            await File.WriteAllTextAsync(outsidePath, "must remain untouched");
+            var store = new AgentLocalQueueStore(root);
+            await store.InitializeAsync(CancellationToken.None);
+            var bytes = "Tampered manifest path"u8.ToArray();
+            var job = CreateJob(bytes) with
+            {
+                StorageMode = "LOCAL_AGENT",
+                LeaseExpiresUtc = DateTimeOffset.UtcNow.AddMinutes(-1)
+            };
+            await store.EnqueueLocalUploadAsync(job, bytes, CancellationToken.None);
+
+            var manifestPath = Directory.GetFiles(root, "*.json").Single();
+            var manifest = System.Text.Json.Nodes.JsonNode.Parse(await File.ReadAllTextAsync(manifestPath));
+            Assert.NotNull(manifest);
+            manifest["documentPath"] = outsidePath;
+            await File.WriteAllTextAsync(manifestPath, manifest.ToJsonString());
+
+            await Assert.ThrowsAsync<InvalidDataException>(() =>
+                store.DeleteExpiredLocalUploadAsync(job.Id, DateTimeOffset.UtcNow, CancellationToken.None));
+
+            Assert.True(File.Exists(outsidePath));
+            Assert.NotNull(store.Find(job.Id));
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+            if (File.Exists(outsidePath)) File.Delete(outsidePath);
+        }
+    }
+
+    [Fact]
     public async Task DeletesOnlyExpiredUnfinalizedLocalUploads()
     {
         var root = CreateTemporaryDirectory();
