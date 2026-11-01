@@ -1203,6 +1203,8 @@ shop.MapPatch("/printers/{printerId:guid}/active", async (
             .Where(job => job.TenantId == tenantId &&
                           job.PrinterDeviceId == printerId &&
                           (job.Status == "LOCAL_QUEUE_CLAIMED" ||
+                           job.Status == "LOCAL_QUEUE_READY" ||
+                           job.Status == "PRINT_AUTHORISED" ||
                            job.Status == "PRINT_SUBMITTING" ||
                            job.Status == "SPOOLER_ACCEPTED" ||
                            job.Status == "PRINTING"))
