@@ -3,8 +3,8 @@ body[data-app-shell="desktop"] {
   min-width: 1000px;
   min-height: 680px;
   overflow: hidden;
-  background: #0b1020;
-  color: #eef2fb;
+  background: #f4f6fa;
+  color: #202638;
   font-family: "DM Sans", "Segoe UI Variable", "Segoe UI", sans-serif;
   font-size: 14px;
 }
@@ -391,4 +391,36 @@ body[data-app-shell="desktop"] .desktop-agent-actions .primary-button:disabled {
   body[data-app-shell="desktop"] .page-heading { padding-block: 19px; margin-bottom: 18px; }
   body[data-app-shell="desktop"] .metric-card { min-height: 132px; padding-block: 15px; }
   body[data-app-shell="desktop"] .chart-area { height: 150px; }
+}
+
+
+html[data-theme="dark"] body[data-app-shell="desktop"] {
+  background: #0b1020;
+  color: #eef2fb;
+}
+html[data-theme="light"] body[data-app-shell="desktop"] {
+  background: #f4f6fa;
+  color: #202638;
+}
+
+
+body[data-app-shell="desktop"] .app-shell.light {
+  --muted: #5f6b80;
+  --faint: #626f84;
+}
+
+
+/* The desktop surface has its own higher-specificity palette. Keep its
+   semantic/secondary labels at the same contrast as the browser workspace. */
+html[data-theme="dark"] body[data-app-shell="desktop"] .app-shell:not(.light) {
+  --muted: #aab6ca;
+  --faint: #8996aa;
+}
+html[data-theme="light"] body[data-app-shell="desktop"] .app-shell.light {
+  --muted: #5f6b80;
+  --faint: #626f84;
+  --green: #126f4c;
+  --amber: #86520b;
+  --red: #b23d4d;
+  --blue: #2d5fa8;
 }

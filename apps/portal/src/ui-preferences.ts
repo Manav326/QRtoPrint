@@ -14,7 +14,25 @@ function writePreference(key: string, value: string): void {
 }
 
 export function readDarkModePreference(): boolean {
-  return readPreference(DARK_MODE_KEY) !== "light";
+  // A first visit is always light. Only an explicit saved "dark" choice opts in.
+  return readPreference(DARK_MODE_KEY) === "dark";
+}
+
+export function applyThemePreference(dark: boolean): void {
+  if (typeof document === "undefined") return;
+  const theme = dark ? "dark" : "light";
+  document.documentElement.dataset.theme = theme;
+  document.documentElement.style.colorScheme = theme;
+  const themeColor = document.querySelector<HTMLMetaElement>('meta[name="theme-color"]');
+  if (themeColor) themeColor.content = dark ? "#0c0f16" : "#f4f6fa";
+  // Tauri/WebView Android installs this optional bridge only on the trusted origin.
+  // Browsers simply continue using the same localStorage preference.
+  try {
+    const nativeBridge = (window as Window & { SmartPrintNative?: { postMessage: (message: string) => void } }).SmartPrintNative;
+    nativeBridge?.postMessage(`setTheme|${theme}`);
+  } catch {
+    // The native bridge is optional and never blocks a browser theme change.
+  }
 }
 export function saveDarkModePreference(dark: boolean): void {
   writePreference(DARK_MODE_KEY, dark ? "dark" : "light");

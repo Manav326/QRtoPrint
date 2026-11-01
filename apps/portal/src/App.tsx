@@ -1,8 +1,8 @@
 import { Fragment, useEffect, useRef, useState, type ReactNode } from "react";
 import {
   Activity, ArrowRight, Check, Clock3, Copy, CreditCard, FileText, FileUp, FolderOpen, LayoutDashboard,
-  LifeBuoy, LogOut, Menu, Moon, Monitor, Plus, Printer, QrCode, Search, Settings,
-  ShieldCheck, Sun, Users, Wallet, X, PanelLeftClose, PanelLeftOpen, RotateCcw
+  LifeBuoy, LogOut, Menu, Monitor, Plus, Printer, QrCode, Search, Settings,
+  ShieldCheck, Users, Wallet, X, PanelLeftClose, PanelLeftOpen, RotateCcw
 } from "lucide-react";
 import QRCode from "react-qr-code";
 import AuthScreen from "./AuthScreen";
@@ -27,7 +27,8 @@ import {
 } from "./api";
 import { enrollLocalAgent, getLocalAgentStatus, isDesktopApp, type DesktopAgentStatus } from "./desktop-bridge";
 import { verifiedPdfExportPath } from "./print-output";
-import { readDarkModePreference, readSidebarCollapsedPreference, saveDarkModePreference, saveSidebarCollapsedPreference } from "./ui-preferences";
+import { applyThemePreference, readDarkModePreference, readSidebarCollapsedPreference, saveDarkModePreference, saveSidebarCollapsedPreference } from "./ui-preferences";
+import ThemeToggleButton from "./ThemeToggleButton";
 
 type Section = "Overview" | "Print Queue" | "Printers" | "QR Stations" | "Print Agent" | "Pricing" | "Subscription" | "Payments" | "Customers" | "Reports" | "Settings";
 type Modal = "printer" | "station" | null;
@@ -48,6 +49,20 @@ const sections: { label: Section; icon: typeof LayoutDashboard }[] = [
 
 export default function App() {
   const route = resolvePortalRoute(window.location.pathname);
+  const [dark, setDark] = useState(readDarkModePreference);
+  const toggleTheme = () => setDark(value => !value);
+  useEffect(() => {
+    saveDarkModePreference(dark);
+    applyThemePreference(dark);
+  }, [dark]);
+  useEffect(() => {
+    const syncNativeTheme = (event: Event) => {
+      const selected = (event as CustomEvent<string>).detail;
+      if (selected === "light" || selected === "dark") setDark(selected === "dark");
+    };
+    window.addEventListener("smartprint-theme-change", syncNativeTheme);
+    return () => window.removeEventListener("smartprint-theme-change", syncNativeTheme);
+  }, []);
   const [tokens, setTokens] = useState<AuthTokens | null>(() =>
     route.kind === "admin" ? readStoredTokens("admin")
       : route.kind === "shop" ? readStoredTokens("shop")
@@ -55,11 +70,11 @@ export default function App() {
   );
 
   if (route.kind === "station") {
-    return <CustomerEntry publicCode={route.publicCode} />;
+    return <CustomerEntry publicCode={route.publicCode} dark={dark} onToggleTheme={toggleTheme} />;
   }
 
   if (route.kind === "public") {
-    return <PublicLandingPage />;
+    return <PublicLandingPage dark={dark} onToggleTheme={toggleTheme} />;
   }
 
   if (route.kind === "admin") {
@@ -67,25 +82,25 @@ export default function App() {
       await storeTokens(null, "admin");
       setTokens(null);
     };
-    if (!tokens) return <PlatformAdminAuthScreen onAuthenticated={setTokens}/>;
+    if (!tokens) return <PlatformAdminAuthScreen onAuthenticated={setTokens} dark={dark} onToggleTheme={toggleTheme}/>;
     if (!isPlatformAdminSession(tokens)) {
-      return <ScopeAccessDenied scope="platform administration" onSignOut={onAdminSignOut}/>;
+      return <ScopeAccessDenied scope="platform administration" onSignOut={onAdminSignOut} dark={dark} onToggleTheme={toggleTheme}/>;
     }
-    return <PlatformAdminConsole tokens={tokens} onSignOut={onAdminSignOut}/>;
+    return <PlatformAdminConsole tokens={tokens} onSignOut={onAdminSignOut} dark={dark} onToggleTheme={toggleTheme}/>;
   }
 
   const onShopSignOut = async () => {
     await storeTokens(null, "shop");
     setTokens(null);
   };
-  if (!tokens) return <AuthScreen onAuthenticated={setTokens}/>;
+  if (!tokens) return <AuthScreen onAuthenticated={setTokens} dark={dark} onToggleTheme={toggleTheme}/>;
   if (isPlatformAdminSession(tokens)) {
-    return <ScopeAccessDenied scope="the shop workspace" onSignOut={onShopSignOut}/>;
+    return <ScopeAccessDenied scope="the shop workspace" onSignOut={onShopSignOut} dark={dark} onToggleTheme={toggleTheme}/>;
   }
-  return <ShopConsole tokens={tokens} onSignOut={onShopSignOut}/>;
+  return <ShopConsole tokens={tokens} onSignOut={onShopSignOut} dark={dark} onToggleTheme={toggleTheme}/>;
 }
 
-function ScopeAccessDenied({ scope, onSignOut }: { scope: string; onSignOut: () => Promise<void> }) {
+function ScopeAccessDenied({ scope, onSignOut, dark, onToggleTheme }: { scope: string; onSignOut: () => Promise<void>; dark: boolean; onToggleTheme: () => void }) {
   const [busy, setBusy] = useState(false);
   async function signOut() {
     setBusy(true);
@@ -95,7 +110,7 @@ function ScopeAccessDenied({ scope, onSignOut }: { scope: string; onSignOut: () 
     <main className="auth-screen">
       <header className="auth-topbar">
         <div className="brand-lockup auth-brand"><div className="brand-mark"><Printer size={21}/></div><div><div className="brand-name">smart<span>print</span></div><div className="brand-caption">BY QRtoPrint</div></div></div>
-        <a className="auth-home-link" href="/">Back to website</a>
+        <div className="auth-top-actions"><ThemeToggleButton dark={dark} onToggle={onToggleTheme}/><a className="auth-home-link" href="/">Back to website</a></div>
       </header>
       <section className="auth-card" style={{ maxWidth: 520, margin: "12vh auto" }}>
         <div className="auth-card-heading"><div className="auth-card-icon"><ShieldCheck size={20}/></div><div><span>APPLICATION SCOPE MISMATCH</span><h2>Access not available</h2><p>This signed-in account is not authorized for {scope}.</p></div></div>
@@ -105,7 +120,7 @@ function ScopeAccessDenied({ scope, onSignOut }: { scope: string; onSignOut: () 
   );
 }
 
-function ShopConsole({ tokens, onSignOut }: { tokens: AuthTokens; onSignOut: () => Promise<void> }) {
+function ShopConsole({ tokens, onSignOut, dark, onToggleTheme }: { tokens: AuthTokens; onSignOut: () => Promise<void>; dark: boolean; onToggleTheme: () => void }) {
   const [active, setActive] = useState<Section>(() => shopSectionFromPath(window.location.pathname));
 
   useEffect(() => {
@@ -113,10 +128,8 @@ function ShopConsole({ tokens, onSignOut }: { tokens: AuthTokens; onSignOut: () 
     window.addEventListener("popstate", syncSectionFromPath);
     return () => window.removeEventListener("popstate", syncSectionFromPath);
   }, []);
-  const [dark, setDark] = useState(readDarkModePreference);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(readSidebarCollapsedPreference);
-  useEffect(() => { saveDarkModePreference(dark); }, [dark]);
   const reloadInFlight = useRef(false);
   const desktopAgentSyncTimer = useRef<number | null>(null);
   const desktopAgentSyncInFlight = useRef(false);
@@ -1255,7 +1268,7 @@ function ShopConsole({ tokens, onSignOut }: { tokens: AuthTokens; onSignOut: () 
               <span className="live-dot" style={{ opacity: cloudStatus === "unavailable" ? 0.45 : 1 }}/>
               <span>{cloudStatus === "connected" ? "Cloud connected" : cloudStatus === "checking" ? "Checking cloud" : "Cloud unavailable"}</span>
             </div>
-            <button className="icon-button theme-button" aria-label={dark ? "Switch to light theme" : "Switch to dark theme"} onClick={() => setDark(!dark)}>{dark ? <Sun size={18}/> : <Moon size={18}/>}</button>
+            <ThemeToggleButton dark={dark} onToggle={onToggleTheme} className="theme-toggle-compact"/>
             <div className="service-status-row" aria-label="Live shop system status">
               <span className={"service-status "+apiConnectionState} title="API connection"><i/>API {apiConnectionState === "connected" ? "Connected" : apiConnectionState === "degraded" ? "Degraded" : apiConnectionState === "offline" ? "Offline" : "Checking"}</span>
               <span className={"service-status "+(onlineAgentCount > 0 ? "connected" : activeAgentCount > 0 ? "offline" : "checking")} title="Windows Agent heartbeat"><i/>Agent {onlineAgentCount > 0 ? onlineAgentCount+" online" : activeAgentCount > 0 ? "Offline" : "Not paired"}</span>
@@ -2458,7 +2471,7 @@ async function copyText(value:string) {
   try { document.execCommand("copy"); } finally { helper.remove(); }
 }
 
-function CustomerEntry({publicCode}:{publicCode:string}) {
+function CustomerEntry({publicCode,dark,onToggleTheme}:{publicCode:string;dark:boolean;onToggleTheme:()=>void}) {
   const [result,setResult]=useState<Awaited<ReturnType<typeof createCustomerSession>>|null>(null);
   const [error,setError]=useState("");
   const [loading,setLoading]=useState(true);
@@ -2534,7 +2547,7 @@ function CustomerEntry({publicCode}:{publicCode:string}) {
 
   const nativeAppMode = navigator.userAgent.includes("SmartPrintAndroid/1");
   return <div className={nativeAppMode ? "customer-entry smartprint-native" : "customer-entry"}><div className="customer-entry-glow"/>
-    <header className="customer-entry-brand"><div className="brand-mark"><QrCode size={21}/></div><div><div className="brand-name">smart<span>print</span></div><div className="brand-caption">BY QUANTAEDGE</div></div></header>
+    <header className="customer-entry-brand"><div className="customer-entry-brand-lockup"><div className="brand-mark"><QrCode size={21}/></div><div><div className="brand-name">smart<span>print</span></div><div className="brand-caption">BY QUANTAEDGE</div></div></div><ThemeToggleButton dark={dark} onToggle={onToggleTheme}/></header>
     <main className="customer-entry-card">
       {loading?<><div className="customer-entry-spinner"><span className="button-spinner"/></div><h1>{nativeAppMode?"Connecting…":"Connecting to your print shop"}</h1>{!nativeAppMode&&<p>Creating a secure, time-limited session for this QR station.</p>}</>:
       error?<><div className="entry-error-icon"><X size={23}/></div><div className="entry-eyebrow">STATION UNAVAILABLE</div><h1>{nativeAppMode?"Shop unavailable":"This QR station can't be reached"}</h1>{!nativeAppMode&&<p>{error}</p>}<button className="primary-button" onClick={()=>window.location.reload()}>Try again</button></>:

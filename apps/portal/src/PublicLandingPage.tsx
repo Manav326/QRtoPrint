@@ -4,9 +4,10 @@ import {
 } from "lucide-react";
 import { getPublicDownloadPath, usePublicRelease } from "./release-metadata";
 import { useFileDownload } from "./download-manager";
+import ThemeToggleButton from "./ThemeToggleButton";
 import "./public-landing.css";
 
-export default function PublicLandingPage() {
+export default function PublicLandingPage({ dark, onToggleTheme }: { dark: boolean; onToggleTheme: () => void }) {
   const { release, state: releaseState, refresh } = usePublicRelease();
   const windowsDownloadUrl = release?.windowsAvailable ? getPublicDownloadPath("windows") : null;
   const androidDownloadUrl = release?.androidAvailable ? getPublicDownloadPath("android") : null;
@@ -27,6 +28,7 @@ export default function PublicLandingPage() {
           <a href="#for-customers">For customers</a>
           <a href="#downloads">Downloads</a>
         </nav>
+        <ThemeToggleButton dark={dark} onToggle={onToggleTheme} className="sp-theme-toggle"/>
         <a className="sp-shop-entry" href="/shop">
           <span className="sp-shop-entry-icon"><Store size={18}/><Printer size={10}/></span>
           <span>For print shops</span>
