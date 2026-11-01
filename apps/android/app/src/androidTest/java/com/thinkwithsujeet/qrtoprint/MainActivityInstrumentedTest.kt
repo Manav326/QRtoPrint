@@ -1,6 +1,8 @@
 package com.thinkwithsujeet.qrtoprint
 
+import android.content.Context
 import androidx.test.core.app.ActivityScenario
+import androidx.test.core.app.ApplicationProvider
 import androidx.test.espresso.Espresso.onView
 import androidx.test.espresso.action.ViewActions.click
 import androidx.test.espresso.action.ViewActions.closeSoftKeyboard
@@ -36,6 +38,8 @@ class MainActivityInstrumentedTest {
 
     @Test
     fun guestCanOpenGlobalSmartPrintAccountAndSeeCustomerSignInOptions() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        CustomerAccountStore(context).clear()
         ActivityScenario.launch(MainActivity::class.java).use {
             onView(withContentDescription("Account")).perform(click())
             onView(withText(containsString("Every print shop."))).check(matches(isDisplayed()))
