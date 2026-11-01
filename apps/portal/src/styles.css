@@ -1861,3 +1861,14 @@ html[data-theme="dark"] .customer-entry .batch-file-copy strong {
 html[data-theme="dark"] .customer-entry .quote-validity {
   color: #8fe1bd;
 }
+
+
+/* Light theme secondary text meets readable contrast on the app surfaces. */
+.app-shell.light {
+  --muted: #5f6b80;
+  --faint: #626f84;
+}
+html[data-theme="light"] .customer-entry :where(.customer-entry-card>p,.entry-printer-card span,.entry-session-note,.entry-local-agent-head>div>span,.entry-local-agent>p,.entry-local-agent-message,.entry-next-step span,.customer-upload-mode small,.customer-upload-local-note,.customer-upload-zone small,.customer-file-label,.customer-option-group>span,.customer-option-grid>label,.customer-duplex-toggle small,.customer-paper-note,.customer-quote-card small,.customer-payment-boundary,.customer-job-state>p,.customer-state-timeline small,.customer-pay-panel>p,.customer-upi-details>span,.customer-reference-field,.customer-payment-model-note,.upload-limit,.batch-file-copy small,.uploaded-document-card span,.customer-folder-title small,.customer-folder-file-name small,.customer-folder-defaults>div>span,.customer-folder-copies,.customer-batch-quote-action small,.customer-batch-quote-lines>div) {
+  color: #5f6b80;
+}
+html[data-theme="light"] .customer-entry .customer-entry-footer { color: #626f84; }
