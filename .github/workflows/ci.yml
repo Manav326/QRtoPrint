@@ -329,7 +329,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: qrtoprint-android-test-reports
+          name: smartprint-android-test-reports
           path: |
             apps/android/app/build/test-results/testDebugUnitTest/
             apps/android/app/build/reports/tests/testDebugUnitTest/
@@ -340,7 +340,7 @@ jobs:
       - name: Upload debug APK
         uses: actions/upload-artifact@v7
         with:
-          name: qrtoprint-android-debug
+          name: smartprint-android-debug
           path: apps/android/app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
           retention-days: 30
