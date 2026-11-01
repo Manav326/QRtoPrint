@@ -98,8 +98,10 @@ var
   AgentPath: string;
   PairExitCode: Integer;
   InstallExitCode: Integer;
+  VerifyExitCode: Integer;
   PowerShellPath: string;
   InstallParameters: string;
+  VerifyParameters: string;
 begin
   if CurStep <> ssPostInstall then
     Exit;
@@ -134,4 +136,12 @@ begin
   SetEnvironmentVariableW('Agent__ApiBaseUrl', '');
   if InstallExitCode <> 0 then
     RaiseException('SmartPrint paired successfully, but Windows could not finish service setup. Run setup again as an administrator or contact support.');
+
+  VerifyParameters :=
+    '-NoProfile -NonInteractive -ExecutionPolicy Bypass -File "' +
+    ExpandConstant('{app}\\verify-agent-local.ps1') + '" -TimeoutSeconds 60';
+  if not Exec(PowerShellPath, VerifyParameters, ExpandConstant('{app}'), SW_HIDE, ewWaitUntilTerminated, VerifyExitCode) then
+    RaiseException('SmartPrint was installed, but its local readiness check could not start.');
+  if VerifyExitCode <> 0 then
+    RaiseException('SmartPrint was installed but did not become ready. Restart the computer and check the SmartPrint Windows Service.');
 end;
