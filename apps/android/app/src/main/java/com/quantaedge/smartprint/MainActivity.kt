@@ -1117,7 +1117,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun addLibraryEntries(parentView: LinearLayout, entries: List<File>, isPicker: Boolean, depth: Int) {
         entries.forEach { entry ->
-            if (!isPicker || entry.isDirectory || DocumentNamePolicy.isPrintable(entry.name, entry.length())) {
+            if (!isPicker || entry.isDirectory || (!fileChooserSelectFolders && DocumentNamePolicy.isPrintable(entry.name, entry.length()))) {
                 parentView.addView(entryView(entry, isPicker, depth), linearParams())
                 if (entry.isDirectory && expandedFolderPaths.contains(entry.canonicalPath) && depth < MAX_TREE_DEPTH) {
                     val children = runCatching { store.list(entry).toList() }.getOrDefault(emptyList())
