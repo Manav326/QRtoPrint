@@ -472,16 +472,9 @@
 
 /* Accessibility and typography refresh inspired by the BajajDealership console. */
 :root { font-family: Inter, "Segoe UI", Arial, sans-serif; }
+/* Legacy typography remains, but theme colours come from the single root palette above. */
 .app-shell {
-  --bg:#0b1423; --sidebar:#101d31; --surface:#15243a; --surface-2:#1b2d46; --surface-3:#243a57;
-  --border:#334760; --border-soft:#293d56; --text:#f5f7fb; --muted:#c0cada; --faint:#a0aec2;
-  --accent:#ff9a52; --accent-strong:#ed7b2c; --accent-soft:rgba(249,115,22,.16);
-  font-family:Inter,"Segoe UI",Arial,sans-serif;
-}
-.app-shell.light {
-  --bg:#f2f5f9; --sidebar:#ffffff; --surface:#ffffff; --surface-2:#f6f8fb; --surface-3:#eaf0f7;
-  --border:#d8e0ea; --border-soft:#e5ebf2; --text:#17243b; --muted:#43536a; --faint:#5c6d84;
-  --accent:#e96f23; --accent-strong:#d95f17; --accent-soft:rgba(233,111,35,.11);
+  font-family: Inter, "Segoe UI", Arial, sans-serif;
 }
 .app-shell,.app-shell button,.app-shell input,.app-shell select,.app-shell textarea {
   font-family:Inter,"Segoe UI",Arial,sans-serif;
