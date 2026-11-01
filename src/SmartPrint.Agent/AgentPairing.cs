@@ -120,7 +120,7 @@ public static class AgentPairing
                 {
                     version = typeof(AgentPairing).Assembly.GetName().Version?.ToString() ?? "1.0.0",
                     operatingSystem = Environment.OSVersion.VersionString,
-                    localEndpoints = Array.Empty<string>()
+                    localEndpoints = LocalNetworkEndpointDiscovery.Discover()
                 })
             };
             request.Headers.Add("X-Print-Agent-Id", credentials.AgentDeviceId.ToString());
