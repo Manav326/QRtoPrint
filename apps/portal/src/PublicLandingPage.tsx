@@ -1,76 +1,14 @@
-import { useEffect, useState } from "react";
 import {
   ArrowRight, ArrowUpRight, Check, ChevronRight, Cloud, FileCheck2, FileText,
   LockKeyhole, Monitor, Printer, QrCode, ShieldCheck, Smartphone, Store, Wifi
 } from "lucide-react";
+import { getReleaseAssetUrl, usePublicRelease } from "./release-metadata";
 import "./public-landing.css";
 
-type PublicRelease = {
-  tag_name: string;
-  html_url: string;
-  assets: Array<{ name: string; browser_download_url: string }>;
-};
-
-const releasesApiUrl = import.meta.env.VITE_SMARTPRINT_RELEASES_API_URL?.trim() ?? "";
-const releasesPageUrl = import.meta.env.VITE_SMARTPRINT_RELEASES_URL?.trim() ?? "";
-
-function releaseAssetUrl(release: PublicRelease | null, assetName: string): string | null {
-  const asset = release?.assets.find(candidate => candidate.name === assetName);
-  if (!asset?.browser_download_url || !releasesPageUrl) return null;
-  try {
-    const expectedOrigin = new URL(releasesPageUrl).origin;
-    const download = new URL(asset.browser_download_url);
-    return download.protocol === "https:" && download.origin === expectedOrigin
-      ? download.toString()
-      : null;
-  } catch {
-    return null;
-  }
-}
-
 export default function PublicLandingPage() {
-  const [release, setRelease] = useState<PublicRelease | null>(null);
-  const [releaseState, setReleaseState] = useState<"loading" | "ready" | "error">("loading");
-
-  useEffect(() => {
-    if (!releasesApiUrl) {
-      setReleaseState("error");
-      return;
-    }
-    const controller = new AbortController();
-    const loadLatestRelease = async () => {
-      try {
-        const response = await fetch(releasesApiUrl, {
-          headers: { Accept: "application/vnd.github+json" },
-          cache: "force-cache",
-          signal: controller.signal
-        });
-        if (response.status === 404) {
-          setRelease(null);
-          setReleaseState("ready");
-          return;
-        }
-        if (!response.ok) throw new Error(`Release lookup failed with HTTP ${response.status}.`);
-        const value: unknown = await response.json();
-        if (typeof value !== "object" || value === null || !("assets" in value) ||
-            !Array.isArray(value.assets) || !("tag_name" in value) || !("html_url" in value)) {
-          throw new Error("The release response was not in the expected format.");
-        }
-        setRelease(value as PublicRelease);
-        setReleaseState("ready");
-      } catch {
-        if (!controller.signal.aborted) {
-          setRelease(null);
-          setReleaseState("error");
-        }
-      }
-    };
-    void loadLatestRelease();
-    return () => controller.abort();
-  }, []);
-
-  const windowsDownloadUrl = releaseAssetUrl(release, "SmartPrint-Windows-Setup.exe");
-  const androidDownloadUrl = releaseAssetUrl(release, "SmartPrint-Android.apk");
+  const { release, state: releaseState, releasesPageUrl } = usePublicRelease();
+  const windowsDownloadUrl = getReleaseAssetUrl(release, "SmartPrint-Windows-Setup.exe");
+  const androidDownloadUrl = getReleaseAssetUrl(release, "SmartPrint-Android.apk");
   const releaseLink = release?.html_url || releasesPageUrl;
 
   return (
