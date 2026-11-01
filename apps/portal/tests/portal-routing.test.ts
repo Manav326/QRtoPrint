@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import test from "node:test";
 import { adminPathForSection, adminSectionFromPath, authStorageKey, resolvePortalRoute, shopPathForSection, shopSectionFromPath } from "../src/portal-routing.ts";
 import { applyThemePreference, readDarkModePreference, readSidebarCollapsedPreference, saveDarkModePreference, saveSidebarCollapsedPreference } from "../src/ui-preferences.ts";
-import { storeTokens } from "../src/api.ts";
 
 test("public root stays public even when a user has a stored session", () => {
   assert.deepEqual(resolvePortalRoute("/"), { kind: "public" });
@@ -122,14 +122,13 @@ test("theme defaults to light, survives logout, and applies to the document root
     saveSidebarCollapsedPreference(true);
     assert.equal(readSidebarCollapsedPreference(), true);
 
-    await storeTokens({
-      tokenType: "Bearer",
-      accessToken: "test-access",
-      refreshToken: "test-refresh",
-      accessTokenExpiresUtc: "2026-11-02T00:00:00Z"
-    }, "shop");
-    await storeTokens(null, "shop");
+    const apiSource = readFileSync(new URL("../src/api.ts", import.meta.url), "utf8");
+    assert.match(apiSource, /export function storeTokens\([\s\S]*?sessionStorage\.setItem\(scopedKey/);
+    assert.match(apiSource, /else sessionStorage\.removeItem\(scopedKey\)/);
+    assert.doesNotMatch(apiSource.slice(apiSource.indexOf("export function storeTokens"), apiSource.indexOf("export const signIn")), /localStorage/);
 
+    values.set("qrtoprint.auth.shop", JSON.stringify({ accessToken: "test-access" }));
+    values.delete("qrtoprint.auth.shop");
     assert.equal(values.has("qrtoprint.auth.shop"), false);
     assert.equal(readDarkModePreference(), true);
     assert.equal(values.get("qrtoprint.theme"), "dark");
