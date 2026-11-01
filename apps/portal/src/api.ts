@@ -731,8 +731,8 @@ export function getNativeCustomerPrintSession(publicCode: string): Promise<strin
   return nativeCustomerBridgeRequest(`getCustomerPrintSession|${publicCode}`);
 }
 
-export async function saveNativeCustomerPrintSession(publicCode: string, token: string): Promise<void> {
-  await nativeCustomerBridgeRequest(`saveCustomerPrintSession|${publicCode}|${token}`);
+export async function saveNativeCustomerPrintSession(publicCode: string, token: string): Promise<boolean> {
+  return (await nativeCustomerBridgeRequest(`saveCustomerPrintSession|${publicCode}|${token}`)) === "OK";
 }
 
 export async function clearNativeCustomerPrintSession(publicCode: string): Promise<void> {
