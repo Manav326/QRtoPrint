@@ -7,6 +7,9 @@ param(
     [string]$CustomerPortalOrigin = "http://localhost:3000",
 
     [Parameter()]
+    [string]$ApiBaseUrl = "",
+
+    [Parameter()]
     [switch]$AllowInsecureLocalDevelopment
 )
 
@@ -39,6 +42,14 @@ if (-not $isAllowedScheme -or $portalUri.AbsolutePath -ne "/" -or $portalUri.Que
     throw "Use HTTPS normally. HTTP is allowed for localhost, or a private IPv4 portal on port 3000 only with -AllowInsecureLocalDevelopment."
 }
 $allowedOrigin = $portalUri.GetLeftPart([UriPartial]::Authority)
+$apiValue = if ([string]::IsNullOrWhiteSpace($ApiBaseUrl)) { $CustomerPortalOrigin } else { $ApiBaseUrl }
+$apiUri = $null
+if (-not [Uri]::TryCreate($apiValue.TrimEnd('/'), [UriKind]::Absolute, [ref]$apiUri) -or
+    $apiUri.AbsolutePath -ne "/" -or $apiUri.Query -or $apiUri.Fragment -or $apiUri.UserInfo -or
+    -not ($apiUri.Scheme -eq "https" -or ($apiUri.Scheme -eq "http" -and $apiUri.Host -in @("localhost", "127.0.0.1")))) {
+    throw "The Agent API address must be a canonical HTTPS origin. HTTP is supported only for localhost development."
+}
+$apiOrigin = $apiUri.GetLeftPart([UriPartial]::Authority)
 $settingsPath = Join-Path (Split-Path -Parent $resolvedExe) "appsettings.json"
 $settings = if (Test-Path -LiteralPath $settingsPath) {
     Get-Content -LiteralPath $settingsPath -Raw | ConvertFrom-Json
@@ -51,8 +62,9 @@ if (-not $settings.PSObject.Properties["Agent"] -or $null -eq $settings.Agent) {
 if (-not $settings.Agent.PSObject.Properties["LocalApi"] -or $null -eq $settings.Agent.LocalApi) {
     $settings.Agent | Add-Member -NotePropertyName LocalApi -NotePropertyValue ([PSCustomObject]@{}) -Force
 }
+$settings.Agent | Add-Member -NotePropertyName ApiBaseUrl -NotePropertyValue $apiOrigin -Force
 $settings.Agent.LocalApi | Add-Member -NotePropertyName Enabled -NotePropertyValue $true -Force
-$settings.Agent.LocalApi | Add-Member -NotePropertyName AllowedOrigins -NotePropertyValue @($allowedOrigin) -Force
+$settings.Agent.LocalApi | Add-Member -NotePropertyName AllowedOrigins -NotePropertyValue @($allowedOrigin, "http://tauri.localhost") -Force
 $settings | ConvertTo-Json -Depth 20 | Set-Content -LiteralPath $settingsPath -Encoding utf8
 Write-Host "Configured the local Agent API CORS origin: $allowedOrigin"
 
