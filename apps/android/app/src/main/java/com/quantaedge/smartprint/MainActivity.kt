@@ -1514,7 +1514,7 @@ class MainActivity : AppCompatActivity() {
                     sourceOrigin.port == trustedPage.port) {
                     Thread {
                         val response = try {
-                            val parts = message.data.split("|", limit = 3)
+                            val parts = message.data.orEmpty().split("|", limit = 3)
                             when {
                                 message.data == "getCustomerAccessToken" -> {
                                     var auth = customerAccountStore.read()
