@@ -1739,3 +1739,84 @@ button, input, select, textarea { max-width: 100%; }
   .content-wrap { padding-left: 12px; padding-right: 12px; }
   .topbar { padding-left: 12px; padding-right: 12px; }
 }
+
+
+/* Additional light-theme contrast for login and recovery states. */
+html[data-theme="light"] .auth-kicker { color: #5d4ab9; }
+html[data-theme="light"] .auth-story h1 span {
+  background-image: linear-gradient(90deg, #5c48bd, #286b8c);
+}
+html[data-theme="light"] .auth-benefits>div>span {
+  background: #efedff;
+  border-color: #ddd7ff;
+  color: #5e4db2;
+}
+html[data-theme="light"] .auth-card-icon {
+  background: #efedff;
+  color: #5b49b7;
+}
+html[data-theme="light"] .auth-card-heading>div:last-child>span { color: #5d4bb7; }
+html[data-theme="light"] .auth-error {
+  border-color: #e8bbc2;
+  background: #fff3f5;
+  color: #a52f41;
+}
+
+/* Customer station dark surfaces for selection, uploads, folder groups and payment. */
+html[data-theme="dark"] .customer-entry :where(h1,h2,h3,strong,b,label) { color: #eef2fb; }
+html[data-theme="dark"] .customer-entry :where(p,small) { color: #aab6ca; }
+html[data-theme="dark"] .customer-entry :where(.customer-uploaded-document,.customer-selected-files,.customer-uploaded-batch,.customer-folder-group,.customer-file-custom) {
+  background: #182335;
+  border-color: #344158;
+  color: #e8edf7;
+}
+html[data-theme="dark"] .customer-entry :where(.customer-selected-files-head,.customer-uploaded-batch-head,.customer-folder-group-head) {
+  background: #202c40;
+  color: #e8edf7;
+  border-color: #3a4860;
+}
+html[data-theme="dark"] .customer-entry :where(.customer-selected-file-list button,.customer-uploaded-batch-item,.customer-folder-file-row) {
+  background: #1b2739;
+  border-color: #344158;
+  color: #e8edf7;
+}
+html[data-theme="dark"] .customer-entry :where(.customer-selected-file-list button.selected,.customer-uploaded-batch-item.active,.customer-folder-file-row.selected) {
+  background: #302b51;
+  border-color: #8c79ec;
+}
+html[data-theme="dark"] .customer-entry :where(.customer-folder-title,.customer-folder-file-name,.customer-file-custom) {
+  color: #c4bbff;
+}
+html[data-theme="dark"] .customer-entry :where(.customer-folder-title strong,.customer-folder-file-name strong,.customer-folder-copies input,.customer-option-grid input) {
+  color: #eef2fb;
+}
+html[data-theme="dark"] .customer-entry :where(.customer-folder-title small,.customer-folder-file-name small,.customer-folder-defaults>div>span,.customer-folder-copies,.customer-batch-quote-action small,.customer-batch-quote-lines>div,.customer-payment-model-note,.customer-upload-progress>small) {
+  color: #aab6ca;
+}
+html[data-theme="dark"] .customer-entry :where(.customer-folder-copies input,.customer-file-custom,.customer-uploaded-batch-item) {
+  background: #111a28;
+  border-color: #39465c;
+}
+html[data-theme="dark"] .customer-entry .customer-batch-quote-lines strong,
+html[data-theme="dark"] .customer-entry .customer-uploaded-batch-head strong { color: #eef2fb; }
+html[data-theme="dark"] .customer-entry .customer-upload-progress { color: #d0d8e6; }
+html[data-theme="dark"] .customer-entry .customer-upload-progress>div { background: #27354a; }
+html[data-theme="dark"] .customer-entry .customer-uploaded-folder>strong { color: #c4bbff; }
+html[data-theme="dark"] .customer-entry .customer-file-remove {
+  background: #34232c;
+  border-color: #69414d;
+  color: #ffb3bb;
+}
+html[data-theme="dark"] .customer-entry .customer-payment-warning { color: #f1c17d; }
+html[data-theme="dark"] .customer-entry :where(.entry-eyebrow,.customer-flow-heading>div>span) { color: #c0b3ff; }
+html[data-theme="dark"] .customer-entry .entry-printer-card span { color: #b4c0d2; }
+html[data-theme="dark"] .customer-entry .entry-local-agent-head strong,
+html[data-theme="dark"] .customer-entry .entry-next-step strong { color: #eef2fb; }
+html[data-theme="dark"] .customer-entry :where(.entry-local-agent-head>div>span,.entry-local-agent>p,.entry-local-agent-message,.entry-next-step span) { color: #aab6ca; }
+
+/* Keep semantic statuses visible rather than flattening them into body text. */
+html[data-theme="dark"] .customer-entry .status-badge.green { color: #8de2bd; background: #173b33; }
+html[data-theme="dark"] .customer-entry .status-badge.blue { color: #a8c8ff; background: #1e3556; }
+html[data-theme="dark"] .customer-entry .status-badge.amber { color: #f3cc83; background: #45351d; }
+html[data-theme="dark"] .customer-entry .status-badge.red { color: #ffadb5; background: #48262e; }
+html[data-theme="dark"] .customer-entry .status-badge.slate { color: #c2ccda; background: #2a3547; }
