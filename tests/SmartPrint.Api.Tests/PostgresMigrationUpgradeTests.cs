@@ -3,6 +3,7 @@ using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Migrations;
 using SmartPrint.Api.Data;
 using SmartPrint.Api.Domain;
+using SmartPrint.Api.Migrations;
 using SmartPrint.Api.Services;
 
 namespace SmartPrint.Api.Tests;
@@ -18,11 +19,14 @@ public sealed class PostgresMigrationUpgradeTests
 
         var options = new DbContextOptionsBuilder<SmartPrintDbContext>()
             .UseNpgsql(connectionString, npgsql => npgsql.MigrationsAssembly(
-                typeof(SmartPrintDbContext).Assembly.GetName().Name))
+                typeof(InitialPlatform).Assembly.GetName().Name))
             .Options;
 
         await using var db = new SmartPrintDbContext(options);
         await db.Database.EnsureDeletedAsync();
+
+        var discoveredMigrations = db.Database.GetMigrations().ToArray();
+        Assert.Contains("202610310010_CustomerPrintAccounts", discoveredMigrations);
 
         var migrator = db.GetService<IMigrator>();
         await migrator.MigrateAsync("202610310010_CustomerPrintAccounts");
