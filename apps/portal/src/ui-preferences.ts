@@ -14,7 +14,15 @@ function writePreference(key: string, value: string): void {
 }
 
 export function readDarkModePreference(): boolean {
-  return readPreference(DARK_MODE_KEY) !== "light";
+  // A first visit is always light. Only an explicit saved "dark" choice opts in.
+  return readPreference(DARK_MODE_KEY) === "dark";
+}
+
+export function applyThemePreference(dark: boolean): void {
+  if (typeof document === "undefined") return;
+  const theme = dark ? "dark" : "light";
+  document.documentElement.dataset.theme = theme;
+  document.documentElement.style.colorScheme = theme;
 }
 export function saveDarkModePreference(dark: boolean): void {
   writePreference(DARK_MODE_KEY, dark ? "dark" : "light");
