@@ -263,6 +263,62 @@ public sealed class AgentLocalQueueStoreTests
     }
 
     [Fact]
+    public async Task RetentionPurgesConfirmedOutputOnlyAfterTheRetentionWindow()
+    {
+        var root = CreateTemporaryDirectory();
+        try
+        {
+            var store = new AgentLocalQueueStore(root);
+            await store.InitializeAsync(CancellationToken.None);
+            var bytes = "Confirmed print output retention"u8.ToArray();
+            var job = CreateJob(bytes);
+            var entry = await store.EnqueueAsync(job, bytes, CancellationToken.None);
+            await store.MarkAcknowledgedAsync(job.Id, CancellationToken.None);
+            await store.MarkSubmissionStartedAsync(job.Id, "SmartPrint-Retention-Test", CancellationToken.None);
+            await store.MarkSpoolerAcceptedAsync(job.Id, 321, "SmartPrint-Retention-Test", CancellationToken.None);
+            await store.MarkOutputConfirmedAsync(job.Id, CancellationToken.None);
+
+            var completed = store.Find(job.Id)!.CompletedUtc;
+            Assert.NotNull(completed);
+            Assert.Equal(0, await store.PruneRetainedEntriesAsync(
+                completed!.Value.AddDays(29), TimeSpan.FromDays(30), root, CancellationToken.None));
+            Assert.True(File.Exists(entry.DocumentPath));
+
+            Assert.Equal(1, await store.PruneRetainedEntriesAsync(
+                completed.Value.AddDays(31), TimeSpan.FromDays(30), root, CancellationToken.None));
+            Assert.Null(store.Find(job.Id));
+            Assert.False(File.Exists(entry.DocumentPath));
+            Assert.Empty(Directory.GetFiles(root, "*.json"));
+        }
+        finally { Directory.Delete(root, recursive: true); }
+    }
+
+    [Fact]
+    public async Task RetentionNeverPurgesOutputUnconfirmedJobs()
+    {
+        var root = CreateTemporaryDirectory();
+        try
+        {
+            var store = new AgentLocalQueueStore(root);
+            await store.InitializeAsync(CancellationToken.None);
+            var bytes = "Unconfirmed output must remain recoverable"u8.ToArray();
+            var job = CreateJob(bytes);
+            var entry = await store.EnqueueAsync(job, bytes, CancellationToken.None);
+            await store.MarkAcknowledgedAsync(job.Id, CancellationToken.None);
+            await store.MarkSubmissionStartedAsync(job.Id, "SmartPrint-Unconfirmed-Test", CancellationToken.None);
+            await store.MarkSpoolerAcceptedAsync(job.Id, 654, "SmartPrint-Unconfirmed-Test", CancellationToken.None);
+            await store.MarkOutputUnconfirmedAsync(job.Id, "SPOOLER_JOB_NO_LONGER_VISIBLE", CancellationToken.None);
+
+            var future = DateTimeOffset.UtcNow.AddDays(365);
+            Assert.Equal(0, await store.PruneRetainedEntriesAsync(
+                future, TimeSpan.FromDays(30), root, CancellationToken.None));
+            Assert.Equal("OUTPUT_UNCONFIRMED", store.Find(job.Id)!.State);
+            Assert.True(File.Exists(entry.DocumentPath));
+        }
+        finally { Directory.Delete(root, recursive: true); }
+    }
+
+    [Fact]
     public async Task UnconfirmedPdfExportCanBeExplicitlyRequeuedFromTheProtectedLocalCopy()
     {
         var root = CreateTemporaryDirectory();

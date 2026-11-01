@@ -46,7 +46,12 @@ public sealed class TenantEntitlementService(SmartPrintDbContext db)
             .Select(item => new { item.PlanCode, item.Status, item.PlanVersionId, item.PeriodEndUtc })
             .FirstOrDefaultAsync(cancellationToken);
 
-        var accessActive = subscription is not null &&
+        var tenantStatus = await db.Tenants.AsNoTracking()
+            .Where(item => item.Id == tenantId)
+            .Select(item => item.Status)
+            .SingleOrDefaultAsync(cancellationToken);
+        var accessActive = TenantAccessRules.IsActive(tenantStatus) &&
+            subscription is not null &&
             PlanEntitlementRules.IsSubscriptionAccessActive(
                 subscription.Status, subscription.PeriodEndUtc, DateTimeOffset.UtcNow);
 
@@ -163,10 +168,18 @@ public sealed class TenantEntitlementService(SmartPrintDbContext db)
         var now = DateTimeOffset.UtcNow;
         var periodStart = new DateTimeOffset(now.Year, now.Month, 1, 0, 0, 0, TimeSpan.Zero);
         var periodEnd = periodStart.AddMonths(1);
-        return await db.PrintJobs.AsNoTracking().LongCountAsync(
+        var createdJobs = await db.PrintJobs.AsNoTracking().LongCountAsync(
             item => item.TenantId == tenantId &&
                     item.CreatedUtc >= periodStart &&
                     item.CreatedUtc < periodEnd,
             cancellationToken);
+        var unmaterializedLocalReservations = await db.LocalPrintUploadTickets.AsNoTracking().LongCountAsync(
+            item => item.TenantId == tenantId &&
+                    item.CreatedUtc >= periodStart &&
+                    item.CreatedUtc < periodEnd &&
+                    (item.CompletedUtc != null || item.ExpiresUtc > now) &&
+                    !db.PrintJobs.Any(job => job.TenantId == item.TenantId && job.Id == item.PrintJobId),
+            cancellationToken);
+        return checked(createdJobs + unmaterializedLocalReservations);
     }
 }

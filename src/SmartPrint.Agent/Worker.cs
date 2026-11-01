@@ -18,6 +18,8 @@ public sealed class Worker(
     private readonly TimeSpan pollInterval = TimeSpan.FromSeconds(
         Math.Clamp(configuration.GetValue<int?>("Agent:PollIntervalSeconds") ?? 30, 10, 300));
     private readonly string pdfExportDirectory = ResolvePdfExportDirectory(configuration);
+    private readonly TimeSpan completedDocumentRetention = TimeSpan.FromDays(
+        Math.Clamp(configuration.GetValue<int?>("Agent:CompletedDocumentRetentionDays") ?? 30, 7, 3650));
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
@@ -32,8 +34,30 @@ public sealed class Worker(
             return;
         }
 
+        var lastRetentionSweepUtc = DateTimeOffset.MinValue;
         while (!stoppingToken.IsCancellationRequested)
         {
+            var sweepNow = DateTimeOffset.UtcNow;
+            if (sweepNow - lastRetentionSweepUtc >= TimeSpan.FromHours(6))
+            {
+                try
+                {
+                    var removed = await localQueueStore.PruneRetainedEntriesAsync(
+                        sweepNow, completedDocumentRetention, pdfExportDirectory, stoppingToken);
+                    if (removed > 0)
+                        logger.LogInformation("Removed {RemovedCount} expired or retained local document entries.", removed);
+                }
+                catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+                {
+                    break;
+                }
+                catch (Exception exception)
+                {
+                    logger.LogWarning(exception, "The local document retention sweep failed; it will be retried on a later cycle.");
+                }
+                lastRetentionSweepUtc = sweepNow;
+            }
+
             AgentCredentials? credentials;
             try
             {

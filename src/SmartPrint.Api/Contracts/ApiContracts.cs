@@ -9,6 +9,7 @@ public sealed record RegisterShopRequest(
 public sealed record LoginRequest(string Email, string Password);
 public sealed record RegisterCustomerRequest(string DisplayName, string Email, string Password);
 public sealed record RefreshRequest(string RefreshToken);
+public sealed record ChangeTenantStatusRequest(string Status, string Reason);
 public sealed record ShopProfileRequest(string DisplayName, string? LogoUrl, string AccentColor);
 
 public sealed record CreatePrinterRequest(

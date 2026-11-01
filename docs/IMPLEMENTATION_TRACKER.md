@@ -15,6 +15,33 @@ Integration target: `main`. The initial shop-review/refund work (PR #2), Android
 - [x] Shop collection reports subtract recorded refunds from net collections.
 - [x] SmartPrint by QuantaEdge branding is applied to portal metadata, Android launcher and primary documentation.
 
+## Phase 1 / Phase 2 security and data-integrity hardening
+
+Implementation is on `feature/phase-1-2-security-data-hardening`; merge acceptance remains subject to the branch CI and review.
+
+- [x] Backend tenant-active enforcement on shop, public customer and Agent operation groups; suspended shops cannot start new work while read-only history and narrowly scoped recovery actions remain available.
+- [x] Platform-admin tenant suspension, reactivation and permanent deactivation with required reason, actor/timestamp audit history, and terminal Inactive state.
+- [x] Server-side checks for active subscription access, Advanced Reports and White-label branding; portal-only feature hiding is not relied upon.
+- [x] Partitioned API request limiting for authentication, public, QR-session, Agent and document-upload traffic, keyed by source IP to prevent header-based partition evasion.
+- [x] Local and cloud batch upload capacity share one overflow-safe 20-file / 50-MB rule; local ticket reservation, idempotency and monthly quota checks are serialized with the tenant quota lock.
+- [x] Monthly print-job quota counts unexpired local reservations and completed-but-not-yet-materialised tickets until their PrintJob exists.
+- [x] Gross payment collections are reported by payment verification date; refunds are a separate event stream by the date the shop records sending the refund.
+- [x] Cloud document retention purges source documents only after confirmed completion; configurable default 30 days, with a persistent purge timestamp and HTTP 410 for purged previews.
+- [x] Windows Agent retention removes expired unfinished staging and confirmed print/PDF source documents after its configurable retention period; output-unconfirmed documents are preserved for recovery.
+- [x] Regression tests cover tenant status transitions, batch bounds, cloud retention eligibility and safe local-queue retention.
+- [x] Android guest-account instrumentation test clears persistent customer-account state before asserting guest UI.
+
+### Remaining production blockers / acceptance work
+
+- [ ] Encrypt direct LAN document payloads end-to-end. Current local HTTP uses one-use grants, CORS, ownership checks and hashes, but those controls do not encrypt bytes on the shop network.
+- [ ] Run the Windows Agent under a tested least-privilege service identity and confirm printer, DPAPI and queue permissions; current installer identity has not been changed without physical Windows validation.
+- [ ] Add malware scanning and isolate document parsers/converters.
+- [ ] Add email verification and secure account recovery.
+- [ ] Add integration/concurrency tests against PostgreSQL for simultaneous local completion, cloud upload, quota checks, refunds and Agent claims.
+- [ ] Encrypt backup artifacts before off-host transfer and rehearse database/document/secret restore as one recovery set.
+- [ ] Add per-tenant cloud/local storage quotas and the local-Agent disk-loss re-upload recovery flow.
+- [ ] Validate retention behavior against real shop operations, disputes, legal holds and customer support policy before selecting the production retention period.
+
 ## Acceptance still required
 - [ ] Re-run portal typecheck/build and .NET Release build/tests after quote-allocation and row-lock changes.
 - [ ] Apply the EF migration against PostgreSQL containing historical refund rows.

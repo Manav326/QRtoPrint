@@ -1,14 +1,14 @@
 import { useEffect, useState, type ReactNode } from "react";
 import {
   Activity, Building2, CheckCircle2, ChevronLeft, ChevronRight,
-  Clock3, CreditCard, Layers3, LogOut, Menu, Moon, Monitor, Printer, RefreshCw, Search, ShieldCheck,
+  Clock3, CreditCard, Layers3, LogOut, Menu, Moon, Monitor, PauseCircle, PlayCircle, Printer, RefreshCw, Search, ShieldCheck,
   Sun
 } from "lucide-react";
 import PlatformPlansSection from "./PlatformPlansSection";
 import PlatformSubscriptionsSection from "./PlatformSubscriptionsSection";
 import {
-  getPlatformOverview, getPlatformTenants, logout,
-  type AuthTokens, type PlatformOverview, type PlatformTenantsPage
+  getPlatformOverview, getPlatformTenants, getPlatformTenantStatusHistory, updatePlatformTenantStatus, logout,
+  type AuthTokens, type PlatformOverview, type PlatformTenantsPage, type PlatformTenant
 } from "./api";
 
 type Section = "Overview" | "Tenants" | "Plans" | "Subscriptions";
@@ -29,6 +29,10 @@ export default function PlatformAdminConsole({
   const [tenants, setTenants] = useState<PlatformTenantsPage | null>(null);
   const [tenantLoading, setTenantLoading] = useState(false);
   const [tenantError, setTenantError] = useState("");
+  const [tenantActionError, setTenantActionError] = useState("");
+  const [tenantActionId, setTenantActionId] = useState("");
+  const [statusHistoryTenant, setStatusHistoryTenant] = useState<PlatformTenant | null>(null);
+  const [statusHistory, setStatusHistory] = useState<Array<{ id: string; previousStatus: string; newStatus: string; reason: string; actorUserId: string | null; createdUtc: string }> | null>(null);
   const [search, setSearch] = useState("");
   const [status, setStatus] = useState("");
   const [page, setPage] = useState(1);
@@ -60,6 +64,38 @@ export default function PlatformAdminConsole({
       .finally(() => { if (active) setTenantLoading(false); });
     return () => { active = false; };
   }, [tokens.accessToken, search, status, page, refreshKey]);
+
+  async function changeTenantStatus(tenant: PlatformTenant, nextStatus: "Active" | "Suspended" | "Inactive") {
+    const action = nextStatus === "Active" ? "reactivate" : nextStatus === "Suspended" ? "suspend" : "permanently deactivate";
+    const reason = window.prompt(`Why are you choosing to ${action} ${tenant.businessName}? This reason is recorded in the platform audit history.`);
+    if (!reason?.trim() || reason.trim().length < 5) {
+      setTenantActionError("A reason of at least five characters is required. No tenant status was changed.");
+      return;
+    }
+    if (!window.confirm(`Confirm: ${action} ${tenant.businessName}? This affects new print activity for this shop.`)) return;
+
+    setTenantActionId(tenant.id);
+    setTenantActionError("");
+    try {
+      await updatePlatformTenantStatus(tokens.accessToken, tenant.id, nextStatus, reason.trim());
+      setRefreshKey(value => value + 1);
+    } catch (exception) {
+      setTenantActionError(exception instanceof Error ? exception.message : "Could not update this shop's status.");
+    } finally {
+      setTenantActionId("");
+    }
+  }
+
+  async function showTenantStatusHistory(tenant: PlatformTenant) {
+    setStatusHistoryTenant(tenant);
+    setStatusHistory(null);
+    try {
+      const history = await getPlatformTenantStatusHistory(tokens.accessToken, tenant.id);
+      setStatusHistory(history);
+    } catch (exception) {
+      setTenantActionError(exception instanceof Error ? exception.message : "Could not load tenant status history.");
+    }
+  }
 
   async function signOut() {
     setSigningOut(true);
@@ -223,16 +259,26 @@ export default function PlatformAdminConsole({
                     <option value="">All statuses</option>
                     <option value="Active">Active</option>
                     <option value="Suspended">Suspended</option>
+                    <option value="Inactive">Inactive</option>
                   </select>
                 </label>
               </div>
               {tenantError && <div className="inline-error" role="alert">{tenantError}</div>}
+              {tenantActionError && <div className="inline-error" role="alert">{tenantActionError}</div>}
               {tenantLoading && !tenants ? <div className="platform-loading-inline"><span className="button-spinner"/> Loading shops…</div> : null}
+              {statusHistoryTenant && <section className="panel platform-status-history">
+                <div className="panel-heading"><div><h2>Status history · {statusHistoryTenant.businessName}</h2><p>Audited platform tenant lifecycle changes</p></div><button className="text-action" onClick={() => { setStatusHistoryTenant(null); setStatusHistory(null); }}>Close</button></div>
+                {statusHistory === null ? <div className="platform-loading-inline">Loading status history…</div> :
+                  statusHistory.length === 0 ? <div className="platform-loading-inline">No status changes have been recorded.</div> :
+                  <div className="platform-status-history-list">{statusHistory.map(item => <div className="platform-status-history-row" key={item.id}>
+                    <strong>{item.previousStatus} → {item.newStatus}</strong><span>{item.reason}</span><small>{new Date(item.createdUtc).toLocaleString("en-IN")} · {item.actorUserId || "Platform administrator"}</small>
+                  </div>)}</div>}
+              </section>}
               {tenants && (
                 <>
                   <div className="platform-table-scroll">
                     <table className="platform-tenant-table">
-                      <thead><tr><th>SHOP</th><th>TENANT STATUS</th><th>SUBSCRIPTION</th><th>DEVICES</th><th>JOBS · 30 DAYS</th><th>CREATED</th></tr></thead>
+                      <thead><tr><th>SHOP</th><th>TENANT STATUS</th><th>SUBSCRIPTION</th><th>DEVICES</th><th>JOBS · 30 DAYS</th><th>CREATED</th><th>ACTIONS</th></tr></thead>
                       <tbody>
                         {tenants.items.map(tenant => (
                           <tr key={tenant.id}>
@@ -242,9 +288,21 @@ export default function PlatformAdminConsole({
                             <td><div className="platform-device-cell"><strong>{tenant.activePrinterCount} / {tenant.printerCount} printers</strong><small>{tenant.agentCount} paired agents</small></div></td>
                             <td><strong className="platform-numeric">{tenant.jobsLast30Days.toLocaleString("en-IN")}</strong></td>
                             <td><span className="platform-date">{new Date(tenant.createdUtc).toLocaleDateString("en-IN")}</span></td>
+                            <td><div className="platform-tenant-actions">
+                              {tenant.status === "Active" && <>
+                                <button className="secondary-button" onClick={() => void changeTenantStatus(tenant, "Suspended")} disabled={tenantActionId === tenant.id || tenantLoading} title="Block new print activity while preserving recovery"><PauseCircle size={13}/> Suspend</button>
+                                <button className="secondary-button" onClick={() => void changeTenantStatus(tenant, "Inactive")} disabled={tenantActionId === tenant.id || tenantLoading}>Deactivate</button>
+                              </>}
+                              {tenant.status === "Suspended" && <>
+                                <button className="secondary-button" onClick={() => void changeTenantStatus(tenant, "Active")} disabled={tenantActionId === tenant.id || tenantLoading}><PlayCircle size={13}/> Reactivate</button>
+                                <button className="secondary-button" onClick={() => void changeTenantStatus(tenant, "Inactive")} disabled={tenantActionId === tenant.id || tenantLoading}>Deactivate</button>
+                              </>}
+                              {tenant.status === "Inactive" && <span className="platform-date">Permanently inactive</span>}
+                              <button className="text-action" onClick={() => void showTenantStatusHistory(tenant)}>History</button>
+                            </div></td>
                           </tr>
                         ))}
-                        {tenants.items.length === 0 && <tr><td className="platform-no-results" colSpan={6}>No shops match this filter.</td></tr>}
+                        {tenants.items.length === 0 && <tr><td className="platform-no-results" colSpan={7}>No shops match this filter.</td></tr>}
                       </tbody>
                     </table>
                   </div>
