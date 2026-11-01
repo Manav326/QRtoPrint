@@ -80,6 +80,9 @@ public sealed record StartPrintPaymentRequest(string Method);
 public sealed record ReportPrintPaymentRequest(string ReferenceNumber);
 
 public sealed record RejectPrintPaymentRequest(string Reason);
+public sealed record ApplyPrintBatchReviewRequest(
+    IReadOnlyList<Guid> ReviewedJobIds,
+    IReadOnlyList<Guid> AcceptedJobIds);
 
 
 public sealed record ResumeCustomerSessionRequest(string PublicCode);
