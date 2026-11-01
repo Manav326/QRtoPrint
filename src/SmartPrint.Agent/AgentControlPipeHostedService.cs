@@ -29,7 +29,9 @@ public sealed class AgentControlPipeHostedService(
             {
                 await using var pipe = CreatePipe();
                 await pipe.WaitForConnectionAsync(stoppingToken);
-                await HandleConnectionAsync(pipe, stoppingToken);
+                using var requestTimeout = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
+                requestTimeout.CancelAfter(TimeSpan.FromSeconds(20));
+                await HandleConnectionAsync(pipe, requestTimeout.Token);
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
             {

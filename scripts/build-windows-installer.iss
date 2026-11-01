@@ -38,13 +38,6 @@ Source: "artifacts\agent\*"; DestDir: "{app}\agent"; Excludes: "pair-agent.ps1,a
 Source: "artifacts\desktop\MicrosoftEdgeWebView2RuntimeInstallerX64.exe"; DestDir: "{tmp}"; Flags: deleteafterinstall
 Source: "artifacts\desktop\*"; DestDir: "{app}"; Excludes: "MicrosoftEdgeWebView2RuntimeInstallerX64.exe"; Flags: ignoreversion recursesubdirs createallsubdirs
 
-[InstallDelete]
-Type: files; Name: "{app}\SmartPrint.Agent.exe"
-Type: files; Name: "{app}\appsettings.json"
-Type: files; Name: "{app}\install-agent-service.ps1"
-Type: files; Name: "{app}\uninstall-agent-service.ps1"
-Type: files; Name: "{app}\verify-agent-local.ps1"
-
 [Icons]
 Name: "{group}\SmartPrint"; Filename: "{app}\SmartPrint.Desktop.exe"; WorkingDir: "{app}"
 Name: "{autodesktop}\SmartPrint"; Filename: "{app}\SmartPrint.Desktop.exe"; WorkingDir: "{app}"; Tasks: desktopicon
@@ -158,4 +151,17 @@ begin
     RaiseException('SmartPrint could not install or start the background print service. No printer connection has been changed. Restart Windows and run setup again.');
 
   ServiceInstallSucceeded := True;
+
+  // Remove legacy Agent files from the old install layout only after the
+  // replacement Windows service has started successfully. If setup fails
+  // earlier, DeinitializeSetup can still restart the old service binary.
+  DeleteFile(ExpandConstant('{app}\SmartPrint.Agent.exe'));
+  DeleteFile(ExpandConstant('{app}\SmartPrint.Agent.dll'));
+  DeleteFile(ExpandConstant('{app}\SmartPrint.Agent.deps.json'));
+  DeleteFile(ExpandConstant('{app}\SmartPrint.Agent.runtimeconfig.json'));
+  DeleteFile(ExpandConstant('{app}\SmartPrint.Agent.pdb'));
+  DeleteFile(ExpandConstant('{app}\appsettings.json'));
+  DeleteFile(ExpandConstant('{app}\install-agent-service.ps1'));
+  DeleteFile(ExpandConstant('{app}\uninstall-agent-service.ps1'));
+  DeleteFile(ExpandConstant('{app}\verify-agent-local.ps1'));
 end;
