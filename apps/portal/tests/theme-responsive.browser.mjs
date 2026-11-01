@@ -137,7 +137,7 @@ async function assertRouteContrast(page, route) {
         const hex = match[1];
         channels = [0, 2, 4].map(offset => parseInt(hex.slice(offset, offset + 2), 16) / 255);
       } else {
-        const rgb = normalized.match(/^rgba?\\(\\s*(\\d+)\\s*,\\s*(\\d+)\\s*,\\s*(\\d+)/i);
+        const rgb = normalized.match(/^rgba?\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)/i);
         if (!rgb) return null;
         channels = [Number(rgb[1]), Number(rgb[2]), Number(rgb[3])].map(value => value / 255);
       }
