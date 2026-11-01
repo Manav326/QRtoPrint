@@ -3,7 +3,7 @@ import { ArrowLeft, ArrowRight, Eye, EyeOff, LockKeyhole, Mail, Printer, ShieldC
 import { ApiError, registerShop, signIn, storeTokens, type AuthTokens } from "./api";
 
 export default function AuthScreen({ onAuthenticated }: { onAuthenticated: (tokens: AuthTokens) => void }) {
-  const initialMode = new URLSearchParams(window.location.search).get("mode") === "register" ? "register" : "signin";
+  const initialMode = window.location.pathname === "/signup" || new URLSearchParams(window.location.search).get("mode") === "register" ? "register" : "signin";
   const [mode, setMode] = useState<"signin" | "register">(initialMode);
   const [showPassword, setShowPassword] = useState(false);
   const [busy, setBusy] = useState(false);
