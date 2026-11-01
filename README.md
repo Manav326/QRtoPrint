@@ -12,7 +12,7 @@ SmartPrint by QuantaEdge (QRtoPrint) is a multi-tenant SaaS platform for QR-init
 - Route customer print payments to the shop's own payment account. Route Smart Print SaaS subscription payments to the platform owner. These are separate financial flows.
 - Deliver a premium, coherent, accessible UI across customer PWA, shop desktop/web, platform administration, and the Windows agent.
 
-## Preferred domain
+## Deployment origin
 
 The application has one public origin, configured per deployment in PUBLIC_BASE_URL. The customer portal, shop portal, platform administration, API and station QR links all use that origin; do not add separate API or admin hostnames for this application. Set IMAGE_NAMESPACE in .env to the GHCR namespace that owns the API and portal images. Both values are required; neither has a baked-in production default.
 
