@@ -212,6 +212,35 @@ async function refreshDesktopApiBaseUrl(force = false): Promise<void> {
 let refreshInFlight: Promise<AuthTokens | null> | null = null;
 let desktopSessionWrite: Promise<void> = Promise.resolve();
 
+async function fetchApiResponse(path: string, options: RequestInit): Promise<Response> {
+  const requestBase = apiBase;
+  const method = (options.method || "GET").toUpperCase();
+
+  try {
+    return await fetch(`${requestBase}${path}`, options);
+  } catch {
+    // A read-only request can safely follow a centrally updated tunnel/API
+    // origin. Never replay writes: the server may have committed them before
+    // the network connection was lost.
+    const canRetry = ["GET", "HEAD", "OPTIONS"].includes(method);
+    if (isDesktopApp() && canRetry) {
+      await refreshDesktopApiBaseUrl(true);
+      if (apiBase !== requestBase) {
+        try {
+          return await fetch(`${apiBase}${path}`, options);
+        } catch {
+          // Surface one stable network error below using the latest origin.
+        }
+      }
+    }
+
+    throw new ApiError(
+      `Unable to reach Smart Print API at ${apiBase}. Check that the network is available.`,
+      0
+    );
+  }
+}
+
 async function refreshStoredSession(expectedAccessToken: string): Promise<AuthTokens | null> {
   const stored = readStoredTokens();
   if (!stored?.refreshToken) return null;
@@ -269,22 +298,7 @@ export async function apiRequest<T>(
       headers.set("Content-Type", "application/json");
     }
 
-    try {
-      return await fetch(`${apiBase}${path}`, { ...options, headers });
-    } catch {
-      if (isDesktopApp()) {
-        const previousApiBase = apiBase;
-        await refreshDesktopApiBaseUrl(true);
-        if (apiBase !== previousApiBase) {
-          try {
-            return await fetch(`${apiBase}${path}`, { ...options, headers });
-          } catch {
-            // Report the latest destination below, after its one safe retry.
-          }
-        }
-      }
-      throw new ApiError(`Unable to reach Smart Print API at ${apiBase}. Check that the network is available.`, 0);
-    }
+    return fetchApiResponse(path, { ...options, headers });
   };
 
   let response = await send(accessToken);
@@ -1144,7 +1158,7 @@ export async function downloadShopDocument(token: string, jobId: string): Promis
   >(`/api/v1/shop/print-jobs/${jobId}/preview-source`, {}, token);
 
   if (source.mode === "CLOUD") {
-    const response = await fetch(`${apiBase}/api/v1/shop/print-jobs/${jobId}/document`, {
+    const response = await fetchApiResponse(`/api/v1/shop/print-jobs/${jobId}/document`, {
       headers: { Accept: "application/pdf,image/jpeg,image/png", Authorization: `Bearer ${token}` },
       cache: "no-store"
     });
