@@ -1568,3 +1568,30 @@ table td {
     max-width: 100%;
   }
 }
+
+
+/* Keep queue status chips and action labels inside their allocated columns. */
+.queue-jobs-table .status-badge {
+  max-width: 100%;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  line-height: 1.4;
+}
+.queue-jobs-table .queue-actions button {
+  white-space: nowrap;
+}
+.queue-pdf-path {
+  display: block;
+  font-size: 8px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+/* Subscription descriptors are variable-length table content, not fixed labels. */
+.platform-subs-copy small {
+  white-space: normal;
+  overflow-wrap: anywhere;
+  word-break: normal;
+  line-height: 1.45;
+}
