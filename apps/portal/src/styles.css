@@ -1820,3 +1820,28 @@ html[data-theme="dark"] .customer-entry .status-badge.blue { color: #a8c8ff; bac
 html[data-theme="dark"] .customer-entry .status-badge.amber { color: #f3cc83; background: #45351d; }
 html[data-theme="dark"] .customer-entry .status-badge.red { color: #ffadb5; background: #48262e; }
 html[data-theme="dark"] .customer-entry .status-badge.slate { color: #c2ccda; background: #2a3547; }
+
+
+/* Keep the full customer file/quote surfaces readable in dark mode too. */
+html[data-theme="dark"] .customer-entry :where(.uploaded-document-card,.customer-selected-files,.customer-uploaded-batch,.customer-folder-group) {
+  background: #182335;
+  border-color: #344158;
+  color: #e8edf7;
+}
+html[data-theme="dark"] .customer-entry .uploaded-document-icon {
+  background: #1d4239;
+  color: #90e3bd;
+}
+html[data-theme="dark"] .customer-entry .uploaded-document-card strong,
+html[data-theme="dark"] .customer-entry .customer-selected-files-head,
+html[data-theme="dark"] .customer-entry .customer-uploaded-batch-head strong,
+html[data-theme="dark"] .customer-entry .customer-folder-title strong,
+html[data-theme="dark"] .customer-entry .customer-folder-file-name strong {
+  color: #eef2fb;
+}
+html[data-theme="dark"] .customer-entry .customer-selected-files-head span,
+html[data-theme="dark"] .customer-entry .customer-uploaded-batch-head span,
+html[data-theme="dark"] .customer-entry .customer-folder-title small,
+html[data-theme="dark"] .customer-entry .customer-folder-file-name small {
+  color: #aab6ca;
+}
