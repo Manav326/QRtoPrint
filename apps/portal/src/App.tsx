@@ -144,7 +144,6 @@ function ShopConsole({ tokens, onSignOut }: { tokens: AuthTokens; onSignOut: () 
       setQueueApiOffset(snapshot.printJobs.length);
       agentDevicesRef.current = snapshot.agentDevices;
       setAgentDevices(snapshot.agentDevices);
-      setCloudStatus("connected");
       setPaymentSettings(snapshot.paymentSettings);
       setPayments(snapshot.payments);
       setRefunds(snapshot.refunds);
@@ -156,7 +155,6 @@ function ShopConsole({ tokens, onSignOut }: { tokens: AuthTokens; onSignOut: () 
         // Keep discovery off the initial shop-data load and retry quietly.
         scheduleDesktopAgentSync(0);
       }
-    } catch (exception) {
     } catch (exception) {
       setCloudStatus("unavailable");
       if (exception instanceof ApiError && exception.status === 401) {
