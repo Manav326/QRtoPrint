@@ -15,7 +15,7 @@ The release workflow:
 
 Customers should download the installer only from the official SmartPrint website or its linked GitHub Release. Windows may show an Unknown Publisher or SmartScreen prompt. Some Windows 11 devices with Smart App Control or managed security policy may block unsigned installers entirely. Do not ask customers to turn off Defender, SmartScreen, Smart App Control, or other security protections.
 
-The website uses a compact **Available** label and a brief first-run security note. Do not present the installer as signed or imply that Windows will always permit it to run.
+The website shows **Available** only when the latest stable release contains the Windows installer, and includes a brief first-run security note. Do not present the installer as signed or imply that Windows will always permit it to run.
 
 ## 2. Android release keystore
 
