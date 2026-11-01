@@ -415,6 +415,7 @@ export interface ShopPaymentSettings {
   upiId?: string | null;
   payeeName?: string | null;
   cashEnabled: boolean;
+  instantPaymentEnabled: boolean;
   updatedUtc: string;
 }
 
@@ -437,9 +438,12 @@ export interface ShopPayment {
   printJobId: string;
   jobNumber: string;
   documentName: string;
+  batchPaymentId?: string | null;
+  batchFileCount?: number | null;
   method: "UPI" | "CASH";
   status: string;
   amountMinor: number;
+  refundedAmountMinor?: number;
   currency: string;
   paymentReference?: string | null;
   upiIdSnapshot?: string | null;
@@ -777,7 +781,7 @@ export async function createCustomerSession(publicCode: string) {
     sessionToken: string;
     shop: { displayName: string; logoUrl?: string | null; accentColor: string; currency: string };
     printer: { displayName: string; manufacturer: string; model: string; status: string; capabilitiesJson: string } | null;
-    paymentOptions: { upiEnabled: boolean; upiId?: string | null; payeeName?: string | null; cashEnabled: boolean };
+    paymentOptions: { upiEnabled: boolean; upiId?: string | null; payeeName?: string | null; cashEnabled: boolean; instantPaymentEnabled: boolean };
     localAgent: { agentDeviceId: string; endpoints: string[] } | null;
   }>(`/api/v1/public/stations/${encodeURIComponent(publicCode)}/sessions`, {
     method: "POST",
@@ -800,7 +804,7 @@ export function resumeCustomerSession(sessionToken: string, publicCode: string) 
     expiresUtc: string;
     sessionToken: string;
     shop: { displayName: string; logoUrl?: string | null; accentColor: string; currency: string };
-    paymentOptions: { upiEnabled: boolean; upiId?: string | null; payeeName?: string | null; cashEnabled: boolean };
+    paymentOptions: { upiEnabled: boolean; upiId?: string | null; payeeName?: string | null; cashEnabled: boolean; instantPaymentEnabled: boolean };
     printer: { displayName: string; manufacturer: string; model: string; status: string; capabilitiesJson: string } | null;
     localAgent: { agentDeviceId: string; endpoints: string[] } | null;
   }>("/api/v1/public/sessions/current/resume", {
@@ -1221,6 +1225,26 @@ export function rejectShopPrintJob(token: string, jobId: string) {
   );
 }
 
+export function applyShopPrintBatchReview(
+  token: string,
+  batchId: string,
+  reviewedJobIds: string[],
+  acceptedJobIds: string[]
+) {
+  return apiRequest<{
+    batchId: string;
+    reviewedCount: number;
+    acceptedCount: number;
+    rejectedCount: number;
+    quoteRefreshRequiredCount: number;
+    updatedUtc: string;
+    nextStep: string;
+  }>(`/api/v1/shop/print-batches/${batchId}/review`, {
+    method: "POST",
+    body: JSON.stringify({ reviewedJobIds, acceptedJobIds })
+  }, token);
+}
+
 function isPrivateLocalPreviewEndpoint(value: string): URL | null {
   try {
     const endpoint = new URL(value);
@@ -1328,6 +1352,7 @@ export function updateShopPaymentSettings(token: string, values: {
   upiId: string | null;
   payeeName: string | null;
   cashEnabled: boolean;
+  instantPaymentEnabled: boolean;
 }) {
   return apiRequest<ShopPaymentSettings>("/api/v1/shop/payment-settings", {
     method: "PUT",
@@ -1351,8 +1376,27 @@ export function rejectShopPayment(token: string, paymentId: string, reason: stri
   );
 }
 
+export interface CustomerBatchPayment {
+  id: string;
+  method: "UPI" | "CASH";
+  status: string;
+  amountMinor: number;
+  currency: string;
+  upiIdSnapshot?: string | null;
+  payeeNameSnapshot?: string | null;
+  paymentReference?: string | null;
+  rejectionReason?: string | null;
+  upiUri?: string | null;
+  batchId: string;
+  fileCount: number;
+  createdUtc: string;
+  updatedUtc?: string;
+  verifiedUtc?: string | null;
+}
+
 export interface CustomerPayment {
   id: string;
+  batchPaymentId?: string | null;
   method: "UPI" | "CASH";
   status: string;
   amountMinor: number;
@@ -1362,8 +1406,36 @@ export interface CustomerPayment {
   payeeNameSnapshot?: string | null;
   paymentReference?: string | null;
   upiUri?: string | null;
+  batchPayment?: CustomerBatchPayment | null;
   jobNumber?: string;
   jobStatus?: string;
+  createdUtc?: string;
+  updatedUtc?: string;
+  verifiedUtc?: string | null;
+}
+
+export function startCustomerBatchPayment(sessionToken: string, batchId: string, method: "UPI" | "CASH") {
+  return apiRequest<CustomerBatchPayment>(`/api/v1/public/batches/${batchId}/payments`, {
+    method: "POST",
+    headers: { "X-Print-Session": sessionToken },
+    body: JSON.stringify({ method })
+  });
+}
+
+export function reportCustomerBatchPayment(sessionToken: string, paymentId: string, referenceNumber: string) {
+  return apiRequest<{
+    id: string;
+    status: string;
+    amountMinor: number;
+    currency: string;
+    paymentReference: string;
+    fileCount: number;
+    message: string;
+  }>(`/api/v1/public/batch-payments/${paymentId}/report`, {
+    method: "POST",
+    headers: { "X-Print-Session": sessionToken },
+    body: JSON.stringify({ referenceNumber })
+  });
 }
 
 export function startCustomerPayment(sessionToken: string, jobId: string, method: "UPI" | "CASH") {

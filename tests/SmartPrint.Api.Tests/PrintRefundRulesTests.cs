@@ -87,6 +87,13 @@ public sealed class PrintRefundRulesTests
     }
 
     [Fact]
+    public void AllowsRejectedInstantPaymentFileToBeRefundedBeforeHandoff()
+    {
+        Assert.True(PrintRefundRules.CanRefundBeforePrintHandoff(new PrintJob { Status = "REJECTED" }));
+        Assert.False(PrintRefundRules.CanRefundBeforePrintHandoff(new PrintJob { Status = "REJECTED", LocalQueueReceivedUtc = DateTimeOffset.UtcNow }));
+    }
+
+    [Fact]
     public void BlocksRefundAfterComputerHandoff()
     {
         Assert.False(PrintRefundRules.CanRefundBeforePrintHandoff(new PrintJob { Status = "PAID_AUTHORISED", LocalQueueReceivedUtc = DateTimeOffset.UtcNow }));

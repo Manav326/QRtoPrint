@@ -49,6 +49,12 @@ public sealed class PostgresMigrationUpgradeTests
         Assert.Contains(
             "202611010004_ActiveAgentFingerprints",
             await db.Database.GetAppliedMigrationsAsync());
+        Assert.Contains(
+            "202611020001_AddBatchCheckoutPayments",
+            await db.Database.GetAppliedMigrationsAsync());
+        Assert.Contains(
+            "202611020002_AddShopInstantPaymentPreference",
+            await db.Database.GetAppliedMigrationsAsync());
 
         // Reproduce the local-upload completion transaction at the exact monthly quota boundary.
         settings.TrialMaxMonthlyPrintJobs = 1;

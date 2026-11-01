@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { formatIstDate } from "./date-time";
 import {
   CheckCircle2, CirclePlus, Cloud, FileText, Layers3, LoaderCircle,
   LockKeyhole, RefreshCw, Save, ShieldCheck, Sparkles, ToggleLeft, ToggleRight
@@ -333,7 +334,7 @@ export default function PlatformPlansSection({ tokens }: { tokens: AuthTokens })
                   <div>
                     <span className="platform-plan-panel-kicker">{selectedPlan.isSystemPlan ? "PROTECTED SYSTEM PLAN" : "PLAN DETAILS"}</span>
                     <h3>{selectedPlan.name}</h3>
-                    <p>{selectedPlan.code} · created {new Date(selectedPlan.createdUtc).toLocaleDateString("en-IN")}</p>
+                    <p>{selectedPlan.code} · created {formatIstDate(selectedPlan.createdUtc)}</p>
                   </div>
                   {selectedPlan.isSystemPlan ? <span className="platform-plan-protected"><LockKeyhole size={13}/> Protected</span> : <span className={active ? "platform-plan-state active" : "platform-plan-state inactive"}>{active ? "Active" : "Inactive"}</span>}
                 </div>
@@ -403,7 +404,7 @@ export default function PlatformPlansSection({ tokens }: { tokens: AuthTokens })
                     <strong>{version.status}</strong>
                     <small>{version.currency} · monthly {formatPrice(version.monthlyPriceMinor, version.currency)} · annual {formatPrice(version.annualPriceMinor, version.currency)}</small>
                   </div>
-                  <span className="platform-plan-version-date">{version.publishedUtc ? `Published ${new Date(version.publishedUtc).toLocaleDateString("en-IN")}` : `Updated ${new Date(version.updatedUtc).toLocaleDateString("en-IN")}`}</span>
+                  <span className="platform-plan-version-date">{version.publishedUtc ? `Published ${formatIstDate(version.publishedUtc)}` : `Updated ${formatIstDate(version.updatedUtc)}`}</span>
                 </div>
               ))}
             </div>
