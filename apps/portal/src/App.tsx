@@ -78,6 +78,7 @@ function ShopConsole({ tokens, onSignOut }: { tokens: AuthTokens; onSignOut: () 
   const [hasMoreQueueJobs, setHasMoreQueueJobs] = useState(false);
   const [loadingOlderQueueJobs, setLoadingOlderQueueJobs] = useState(false);
   const [queueApiOffset, setQueueApiOffset] = useState(0);
+  const [queueSearch, setQueueSearch] = useState("");
   const [agentDevices, setAgentDevices] = useState<AgentDevice[]>([]);
   const [paymentSettings, setPaymentSettings] = useState<ShopPaymentSettings | null>(null);
   const [payments, setPayments] = useState<ShopPayment[]>([]);
@@ -105,7 +106,7 @@ function ShopConsole({ tokens, onSignOut }: { tokens: AuthTokens; onSignOut: () 
     setLoading(true);
     setError("");
     try {
-      const snapshot = await loadShopData(tokens.accessToken);
+      const snapshot = await loadShopData(tokens.accessToken, queueSearch);
       setProfile(snapshot.profile);
       setPrinters(snapshot.printers);
       setStations(snapshot.stations);
@@ -133,7 +134,7 @@ function ShopConsole({ tokens, onSignOut }: { tokens: AuthTokens; onSignOut: () 
 
   async function refreshPrintQueue() {
     try {
-      const latest = await getShopPrintJobsPage(tokens.accessToken, 0);
+      const latest = await getShopPrintJobsPage(tokens.accessToken, 0, 100, queueSearch);
       const currentIds = new Set(printJobs.map(job => job.id));
       const newlyDiscovered = latest.filter(job => !currentIds.has(job.id)).length;
       if (newlyDiscovered > 0) setQueueApiOffset(offset => offset + newlyDiscovered);
@@ -154,7 +155,7 @@ function ShopConsole({ tokens, onSignOut }: { tokens: AuthTokens; onSignOut: () 
     if (loadingOlderQueueJobs || !hasMoreQueueJobs) return;
     setLoadingOlderQueueJobs(true);
     try {
-      const older = await getShopPrintJobsPage(tokens.accessToken, queueApiOffset);
+      const older = await getShopPrintJobsPage(tokens.accessToken, queueApiOffset, 100, queueSearch);
       setPrintJobs(current => {
         const knownIds = new Set(current.map(job => job.id));
         const merged = [...current, ...older.filter(job => !knownIds.has(job.id))];
@@ -168,6 +169,19 @@ function ShopConsole({ tokens, onSignOut }: { tokens: AuthTokens; onSignOut: () 
       setError(exception instanceof Error ? exception.message : "Could not load older print jobs.");
     } finally {
       setLoadingOlderQueueJobs(false);
+    }
+  }
+
+  async function searchPrintQueue(value: string) {
+    const normalized = value.trim().slice(0, 120);
+    setQueueSearch(normalized);
+    try {
+      const matches = await getShopPrintJobsPage(tokens.accessToken, 0, 100, normalized);
+      setPrintJobs(matches);
+      setQueueApiOffset(matches.length);
+      setHasMoreQueueJobs(matches.length === 100);
+    } catch (exception) {
+      setError(exception instanceof Error ? exception.message : "Could not search the print queue.");
     }
   }
 
@@ -645,7 +659,7 @@ function ShopConsole({ tokens, onSignOut }: { tokens: AuthTokens; onSignOut: () 
           {active === "Subscription" && subscription && <SubscriptionPage summary={subscription}/>}
           {active === "Payments" && paymentSettings && <PaymentsPage settings={paymentSettings} payments={payments} refunds={refunds} onSave={savePaymentSettings} onVerify={verifyPayment} onReject={rejectPayment} busy={busy} busyJobId={busyJobId}/>}
           {active === "Settings" && profile && <SettingsPage profile={profile} onSave={saveProfile} busy={busy}/>}
-          {active === "Print Queue" && <PrintQueuePage jobs={printJobs} printers={printers} onPreview={previewJob} onApprove={approveJob} onReject={rejectJob} onRefund={job=>setRefundJob(job)} onReviewBatch={batchId=>setBatchReviewJobs(printJobs.filter(job=>job.batchId===batchId&&job.status==="AWAITING_SHOP_APPROVAL"))} onHistory={viewJobHistory} onAssignPrinter={assignPrinter} onDispatch={dispatchPrintJob} onConfirmOutput={confirmPrintedOutput} onRetryPdfExport={retryPdfExport} onRefresh={refreshPrintQueue} onLoadOlder={loadOlderQueueJobs} hasMoreJobs={hasMoreQueueJobs} loadingOlderJobs={loadingOlderQueueJobs} busyJobId={busyJobId}/>} 
+          {active === "Print Queue" && <PrintQueuePage jobs={printJobs} printers={printers} searchQuery={queueSearch} onSearch={searchPrintQueue} onPreview={previewJob} onApprove={approveJob} onReject={rejectJob} onRefund={job=>setRefundJob(job)} onReviewBatch={batchId=>setBatchReviewJobs(printJobs.filter(job=>job.batchId===batchId&&job.status==="AWAITING_SHOP_APPROVAL"))} onHistory={viewJobHistory} onAssignPrinter={assignPrinter} onDispatch={dispatchPrintJob} onConfirmOutput={confirmPrintedOutput} onRetryPdfExport={retryPdfExport} onRefresh={refreshPrintQueue} onLoadOlder={loadOlderQueueJobs} hasMoreJobs={hasMoreQueueJobs} loadingOlderJobs={loadingOlderQueueJobs} busyJobId={busyJobId}/>} 
           {active === "Customers" && <CustomersPage token={tokens.accessToken}/>}
           {active === "Reports" && <ReportsPage token={tokens.accessToken}/>} 
 
@@ -1201,9 +1215,11 @@ function PaymentsPage({settings,payments,refunds,onSave,onVerify,onReject,busy,b
   </div>;
 }
 
-function PrintQueuePage({ jobs, printers, onPreview, onApprove, onReject, onRefund, onReviewBatch, onHistory, onAssignPrinter, onDispatch, onConfirmOutput, onRetryPdfExport, onRefresh, onLoadOlder, hasMoreJobs, loadingOlderJobs, busyJobId }: {
+function PrintQueuePage({ jobs, printers, searchQuery, onSearch, onPreview, onApprove, onReject, onRefund, onReviewBatch, onHistory, onAssignPrinter, onDispatch, onConfirmOutput, onRetryPdfExport, onRefresh, onLoadOlder, hasMoreJobs, loadingOlderJobs, busyJobId }: {
   jobs: ShopPrintJob[];
   printers: PrinterDevice[];
+  searchQuery: string;
+  onSearch: (query: string) => Promise<void>;
   onPreview: (job: ShopPrintJob) => void;
   onApprove: (job: ShopPrintJob) => void;
   onReject: (job: ShopPrintJob) => void;
@@ -1222,6 +1238,8 @@ function PrintQueuePage({ jobs, printers, onPreview, onApprove, onReject, onRefu
 }) {
   const [autoRefresh,setAutoRefresh]=useState(true);
   const [refreshSeconds,setRefreshSeconds]=useState(10);
+  const [searchInput,setSearchInput]=useState(searchQuery);
+  useEffect(()=>setSearchInput(searchQuery),[searchQuery]);
   const refreshRunning=useRef(false);
   const refreshCallback=useRef(onRefresh);
   refreshCallback.current=onRefresh;
@@ -1248,7 +1266,7 @@ function PrintQueuePage({ jobs, printers, onPreview, onApprove, onReject, onRefu
   );
 
   return <section className="panel queue-panel live-queue-panel">
-    <div className="collection-header"><div><h2>Customer print jobs</h2><p>Preview every file separately. Each file can be accepted or rejected without changing the rest of its upload batch. Refunds are available before handoff to the print computer.</p></div><div className="queue-header-actions"><span className="setup-count">{jobs.length} recent jobs</span><button className="secondary-button queue-refresh-button" onClick={()=>void refreshQueue()} disabled={refreshRunning.current}><Activity size={13}/> Refresh queue</button></div></div>
+    <div className="collection-header"><div><h2>Customer print jobs</h2><p>Preview every file separately. Each file can be accepted or rejected without changing the rest of its upload batch. Refunds are available before handoff to the print computer.</p></div><div className="queue-header-actions"><span className="setup-count">{jobs.length} jobs shown</span><form className="queue-search-form" onSubmit={event=>{event.preventDefault();void onSearch(searchInput);}}><input aria-label="Search all print jobs" type="search" maxLength={120} placeholder="Job, file or printer" value={searchInput} onChange={event=>setSearchInput(event.target.value)}/><button className="secondary-button" type="submit"><Search size={13}/> Search</button></form><button className="secondary-button queue-refresh-button" onClick={()=>void refreshQueue()} disabled={refreshRunning.current}><Activity size={13}/> Refresh queue</button></div></div>
     <div className="queue-refresh-controls">
       <label className="queue-auto-toggle"><input type="checkbox" checked={autoRefresh} onChange={event=>setAutoRefresh(event.target.checked)}/><span className="queue-toggle-track"/><strong>Auto refresh</strong><small>{autoRefresh?"On":"Off"}</small></label>
       <label className="queue-refresh-interval">Refresh every <input type="number" min={5} max={3600} step={1} value={refreshSeconds} onChange={event=>setRefreshSeconds(Math.max(5,Math.min(3600,Number(event.target.value)||5)))}/> seconds</label>
