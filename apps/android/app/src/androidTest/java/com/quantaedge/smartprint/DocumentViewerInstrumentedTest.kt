@@ -53,10 +53,38 @@ class DocumentViewerInstrumentedTest {
     }
 
     @Test
-    fun opensImageInsideSmartPrintWithoutLaunchingAnotherApp() {
+    fun opensTheTappedImageAndRestoresItsPositionAfterRecreation() {
         val context = ApplicationProvider.getApplicationContext<Context>()
-        val source = File(context.filesDir, "documents/CI-in-app-reader-${System.currentTimeMillis()}.png")
-        source.parentFile?.mkdirs()
+        val directory = File(context.filesDir, "documents")
+        directory.mkdirs()
+        val suffix = System.currentTimeMillis()
+        val first = File(directory, "CI-reader-first-$suffix.png")
+        val selected = File(directory, "CI-reader-selected-$suffix.png")
+        writeTestImage(first)
+        writeTestImage(selected)
+        first.setLastModified(1_000L)
+        selected.setLastModified(2_000L)
+
+        try {
+            ActivityScenario.launch(MainActivity::class.java).use {
+                val filesTab = com.google.android.material.R.id.navigation_bar_item_small_label_view
+                onView(org.hamcrest.Matchers.allOf(withText("Files"), withId(filesTab))).perform(click())
+                onView(withText(selected.name)).perform(scrollTo(), click())
+
+                onView(withContentDescription("Image preview")).check(matches(isDisplayed()))
+                onView(withText("Photo 2 of 2")).check(matches(isDisplayed()))
+                it.recreate()
+                onView(withText("Photo 2 of 2")).check(matches(isDisplayed()))
+                onView(withContentDescription("Back to My Files")).perform(click())
+                onView(withText(selected.name)).check(matches(isDisplayed()))
+            }
+        } finally {
+            first.delete()
+            selected.delete()
+        }
+    }
+
+    private fun writeTestImage(file: File) {
         val bitmap = Bitmap.createBitmap(640, 900, Bitmap.Config.ARGB_8888).apply {
             eraseColor(Color.rgb(245, 242, 235))
             val canvas = android.graphics.Canvas(this)
@@ -66,25 +94,11 @@ class DocumentViewerInstrumentedTest {
             })
         }
         try {
-            FileOutputStream(source).use { output ->
+            FileOutputStream(file).use { output ->
                 assertTrue(bitmap.compress(Bitmap.CompressFormat.PNG, 100, output))
             }
         } finally {
             bitmap.recycle()
-        }
-
-        try {
-            ActivityScenario.launch(MainActivity::class.java).use {
-                val filesTab = com.google.android.material.R.id.navigation_bar_item_small_label_view
-                onView(org.hamcrest.Matchers.allOf(withText("Files"), withId(filesTab))).perform(click())
-                onView(withText(source.name)).perform(scrollTo(), click())
-
-                onView(withContentDescription("Image preview")).check(matches(isDisplayed()))
-                onView(withContentDescription("Back to My Files")).perform(click())
-                onView(withText(source.name)).check(matches(isDisplayed()))
-            }
-        } finally {
-            source.delete()
         }
     }
 
