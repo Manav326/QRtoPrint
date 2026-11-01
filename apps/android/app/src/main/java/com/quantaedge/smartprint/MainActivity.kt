@@ -1691,7 +1691,7 @@ class MainActivity : AppCompatActivity() {
                 marginEnd = dp(6)
             })
         }
-        pageStrip.addView(pageStripRow, android.widget.FrameLayout.LayoutParams(-2, -1))
+        pageStrip.addView(pageStripRow, FrameLayout.LayoutParams(-2, -1))
         editor.addView(pageStrip, LinearLayout.LayoutParams(-1, dp(56)))
 
         val actions = LinearLayout(this).apply {
