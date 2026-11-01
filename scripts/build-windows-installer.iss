@@ -139,7 +139,7 @@ begin
 
   VerifyParameters :=
     '-NoProfile -NonInteractive -ExecutionPolicy Bypass -File "' +
-    ExpandConstant('{app}\\verify-agent-local.ps1') + '" -TimeoutSeconds 60';
+    ExpandConstant('{app}\verify-agent-local.ps1') + '" -TimeoutSeconds 60';
   if not Exec(PowerShellPath, VerifyParameters, ExpandConstant('{app}'), SW_HIDE, ewWaitUntilTerminated, VerifyExitCode) then
     RaiseException('SmartPrint was installed, but its local readiness check could not start.');
   if VerifyExitCode <> 0 then
