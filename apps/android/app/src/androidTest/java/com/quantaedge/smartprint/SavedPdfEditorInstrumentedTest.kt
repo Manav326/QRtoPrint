@@ -62,6 +62,7 @@ class SavedPdfEditorInstrumentedTest {
                 onView(withContentDescription("Save edited PDF copy")).perform(click())
                 waitForView(withText("CI-editor-document_edited.pdf"))
                 onView(withContentDescription("Open folder My Files")).check(matches(isDisplayed()))
+                onView(withContentDescription("Open folder $folderName")).check(matches(isDisplayed()))
             }
             val saveDeadline = System.currentTimeMillis() + 10_000
             while (!edited.isFile && System.currentTimeMillis() < saveDeadline) {
