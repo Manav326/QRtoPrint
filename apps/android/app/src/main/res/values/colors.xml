@@ -14,4 +14,12 @@
     <color name="qp_muted">#69758A</color>
     <color name="qp_outline">#E5E9F0</color>
     <color name="qp_danger">#CB4D5B</color>
+    <color name="qp_glass_top_overlay">#E6F8FBFF</color>
+    <color name="qp_glass_bottom_overlay">#E6F8FBFF</color>
+    <color name="qp_glass_card">#EBFFFFFF</color>
+    <color name="qp_glass_inset">#DFFFFFFF</color>
+    <color name="qp_glass_border">#948DA0B9</color>
+    <color name="qp_glass_edge">#E6FFFFFF</color>
+    <color name="qp_glass_warm_glow">#2EF49167</color>
+    <color name="qp_glass_cool_glow">#29709DD6</color>
 </resources>

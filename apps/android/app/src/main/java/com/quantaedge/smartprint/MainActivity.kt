@@ -47,6 +47,8 @@ import com.google.android.material.bottomnavigation.BottomNavigationView
 import com.google.android.material.button.MaterialButton
 import com.google.android.material.card.MaterialCardView
 import com.google.android.material.bottomsheet.BottomSheetDialog
+import eightbitlab.com.blurview.BlurTarget
+import eightbitlab.com.blurview.BlurView
 import com.google.mlkit.vision.documentscanner.GmsDocumentScannerOptions
 import com.google.mlkit.vision.documentscanner.GmsDocumentScanning
 import com.google.mlkit.vision.documentscanner.GmsDocumentScanningResult
@@ -82,6 +84,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var toolbar: MaterialToolbar
     private lateinit var content: FrameLayout
     private lateinit var navigation: BottomNavigationView
+    private lateinit var bottomGlass: BlurView
     private lateinit var accountAction: ImageView
     private var documentViewer: SmartPrintDocumentViewer? = null
     private var viewingDocument: File? = null
@@ -356,16 +359,27 @@ class MainActivity : AppCompatActivity() {
     private fun buildLayout() {
         window.statusBarColor = getColor(R.color.qp_surface)
         window.navigationBarColor = getColor(R.color.qp_surface)
-        val root = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
+        val backdrop = SmartPrintGlass.backdrop(this)
+        val root = FrameLayout(this).apply {
+            clipChildren = false
             clipToPadding = false
-            setBackgroundColor(getColor(R.color.qp_surface))
+            background = backdrop
         }
+
+        val blurTarget = BlurTarget(this)
+        content = FrameLayout(this).apply {
+            clipToPadding = false
+            setPadding(0, dp(64), 0, dp(76))
+            setBackgroundColor(android.graphics.Color.TRANSPARENT)
+        }
+        blurTarget.addView(content, FrameLayout.LayoutParams(-1, -1))
+        root.addView(blurTarget, FrameLayout.LayoutParams(-1, -1))
+
         toolbar = MaterialToolbar(this).apply {
             title = "Home"
             setTitleTextColor(getColor(R.color.qp_text))
             setTitleTextAppearance(this@MainActivity, R.style.TextAppearance_SmartPrint_Toolbar)
-            setBackgroundColor(getColor(R.color.qp_surface))
+            setBackgroundColor(android.graphics.Color.TRANSPARENT)
             elevation = 0f
             menu.add(Menu.NONE, SWITCH_SHOP, Menu.NONE, "Switch shop").apply {
                 setIcon(android.R.drawable.ic_menu_camera)
@@ -400,35 +414,29 @@ class MainActivity : AppCompatActivity() {
                 isFocusable = true
                 setOnClickListener { showProfile() }
             }
-            addView(
-                accountAction,
-                androidx.appcompat.widget.Toolbar.LayoutParams(
-                    dp(44), dp(44), Gravity.END or Gravity.CENTER_VERTICAL
-                )
-            )
+            addView(accountAction, androidx.appcompat.widget.Toolbar.LayoutParams(
+                dp(44), dp(44), Gravity.END or Gravity.CENTER_VERTICAL
+            ))
         }
-        root.addView(toolbar, LinearLayout.LayoutParams(-1, dp(56)))
-        content = FrameLayout(this).apply {
-            clipToPadding = false
-            setBackgroundColor(getColor(R.color.qp_surface))
+
+        val topGlass = BlurView(this).apply {
+            foreground = SmartPrintGlass.edge(this@MainActivity)
+            addView(toolbar, FrameLayout.LayoutParams(-1, dp(56), Gravity.BOTTOM))
         }
-        root.addView(content, LinearLayout.LayoutParams(-1, 0, 1f))
+        root.addView(topGlass, FrameLayout.LayoutParams(-1, dp(64), Gravity.TOP))
+
         navigation = BottomNavigationView(this).apply {
             menu.add(Menu.NONE, HOME, 0, "Home").apply {
-                setIcon(R.drawable.ic_nav_home)
-                setContentDescription("Home")
+                setIcon(R.drawable.ic_nav_home); setContentDescription("Home")
             }
             menu.add(Menu.NONE, FILES, 1, "Files").apply {
-                setIcon(R.drawable.ic_nav_files)
-                setContentDescription("My Files")
+                setIcon(R.drawable.ic_nav_files); setContentDescription("My Files")
             }
             menu.add(Menu.NONE, SCAN_PRINT, 2, "Print").apply {
-                setIcon(R.drawable.ic_nav_scan_print)
-                setContentDescription("Print at a shop")
+                setIcon(R.drawable.ic_nav_scan_print); setContentDescription("Print at a shop")
             }
             menu.add(Menu.NONE, ACTIVITY, 3, "Activity").apply {
-                setIcon(R.drawable.ic_nav_activity)
-                setContentDescription("Activity")
+                setIcon(R.drawable.ic_nav_activity); setContentDescription("Activity")
             }
             labelVisibilityMode = BottomNavigationView.LABEL_VISIBILITY_LABELED
             setItemHorizontalTranslationEnabled(false)
@@ -438,14 +446,15 @@ class MainActivity : AppCompatActivity() {
             setItemPaddingTop(dp(4))
             setItemPaddingBottom(dp(4))
             minimumHeight = dp(64)
-            backgroundTintList = ColorStateList.valueOf(getColor(R.color.qp_card))
+            backgroundTintList = ColorStateList.valueOf(android.graphics.Color.TRANSPARENT)
+            setBackgroundColor(android.graphics.Color.TRANSPARENT)
             itemIconTintList = ColorStateList(
                 arrayOf(intArrayOf(android.R.attr.state_checked), intArrayOf()),
                 intArrayOf(getColor(R.color.qp_primary), getColor(R.color.qp_muted))
             )
             itemTextColor = itemIconTintList
             itemRippleColor = ColorStateList.valueOf(getColor(R.color.qp_soft))
-            elevation = dp(8).toFloat()
+            elevation = 0f
             setOnItemSelectedListener { item ->
                 when (item.itemId) {
                     HOME -> { showHome(); true }
@@ -456,14 +465,29 @@ class MainActivity : AppCompatActivity() {
                 }
             }
         }
-        root.addView(navigation, LinearLayout.LayoutParams(-1, dp(66)))
+
+        bottomGlass = BlurView(this).apply {
+            foreground = SmartPrintGlass.edge(this@MainActivity)
+            addView(navigation, FrameLayout.LayoutParams(-1, dp(66), Gravity.BOTTOM))
+        }
+        root.addView(bottomGlass, FrameLayout.LayoutParams(-1, dp(76), Gravity.BOTTOM))
+
         ViewCompat.setOnApplyWindowInsetsListener(root) { view, insets ->
             val bars = insets.getInsets(WindowInsetsCompat.Type.systemBars())
             view.setPadding(bars.left, bars.top, bars.right, bars.bottom)
             insets
         }
         setContentView(root)
+        SmartPrintGlass.bindBlur(topGlass, blurTarget, this, R.color.qp_glass_top_overlay, backdrop)
+        SmartPrintGlass.bindBlur(bottomGlass, blurTarget, this, R.color.qp_glass_bottom_overlay, backdrop)
         ViewCompat.requestApplyInsets(root)
+    }
+
+    private fun setBottomNavigationVisible(visible: Boolean) {
+        val visibility = if (visible) View.VISIBLE else View.GONE
+        navigation.visibility = visibility
+        if (::bottomGlass.isInitialized) bottomGlass.visibility = visibility
+        if (::content.isInitialized) content.setPadding(0, dp(64), 0, if (visible) dp(76) else dp(8))
     }
 
     private fun resetToolbar(title: String) {
@@ -474,7 +498,7 @@ class MainActivity : AppCompatActivity() {
         toolbar.menu.findItem(SWITCH_SHOP)?.isVisible = portalUrl != null
         toolbar.menu.findItem(OPEN_WITH)?.isVisible = false
         accountAction.visibility = View.VISIBLE
-        navigation.visibility = View.VISIBLE
+        setBottomNavigationVisible(true)
     }
 
     private fun showProfile() {
@@ -485,7 +509,7 @@ class MainActivity : AppCompatActivity() {
         toolbar.setNavigationIcon(android.R.drawable.ic_media_previous)
         toolbar.setNavigationOnClickListener { returnFromProfile() }
         accountAction.visibility = View.GONE
-        navigation.visibility = View.GONE
+        setBottomNavigationVisible(false)
         content.removeAllViews()
         content.addView(accountView(), frameParams())
     }
@@ -966,7 +990,7 @@ class MainActivity : AppCompatActivity() {
         }
         toolbar.setNavigationIcon(android.R.drawable.ic_media_previous)
         toolbar.setNavigationOnClickListener { cancelPicker() }
-        navigation.visibility = View.GONE
+        setBottomNavigationVisible(false)
         content.removeAllViews()
         content.addView(libraryView(true), frameParams())
     }
@@ -979,7 +1003,7 @@ class MainActivity : AppCompatActivity() {
         toolbar.setNavigationIcon(android.R.drawable.ic_media_previous)
         toolbar.setNavigationOnClickListener { showFiles() }
         accountAction.visibility = View.VISIBLE
-        navigation.visibility = View.VISIBLE
+        setBottomNavigationVisible(true)
         navigation.menu.findItem(SCAN_PRINT).isChecked = true
         content.removeAllViews()
         val view = ensureWebView()
@@ -1499,7 +1523,7 @@ class MainActivity : AppCompatActivity() {
         toolbar.title = "Edit PDF"
         toolbar.setNavigationIcon(android.R.drawable.ic_media_previous)
         toolbar.setNavigationOnClickListener { showFiles() }
-        navigation.visibility = View.GONE
+        setBottomNavigationVisible(false)
         content.removeAllViews()
 
         val scroll = ScrollView(this).apply { isFillViewport = true; clipToPadding = false }
@@ -1665,7 +1689,7 @@ class MainActivity : AppCompatActivity() {
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(20), dp(10), dp(20), dp(22))
-            background = roundedDrawable(getColor(R.color.qp_card), dp(22))
+            background = SmartPrintGlass.surface(this@MainActivity, 22)
         }
         val handle = View(this).apply {
             background = roundedDrawable(getColor(R.color.qp_outline), dp(2))
@@ -2275,7 +2299,7 @@ class MainActivity : AppCompatActivity() {
         toolbar.menu.findItem(SWITCH_SHOP)?.isVisible = false
         toolbar.menu.findItem(OPEN_WITH)?.isVisible = true
         accountAction.visibility = View.GONE
-        navigation.visibility = View.GONE
+        setBottomNavigationVisible(false)
         content.removeAllViews()
 
         val images = if (file.extension.equals("pdf", true)) {
@@ -2378,11 +2402,11 @@ class MainActivity : AppCompatActivity() {
 
     private fun parent(path: String) = path.substringBeforeLast('/', "").trim('/')
     private fun card() = MaterialCardView(this).apply {
-        radius = dp(14).toFloat()
-        cardElevation = 0f
+        radius = dp(21).toFloat()
+        cardElevation = dp(4).toFloat()
         strokeWidth = dp(1)
-        strokeColor = getColor(R.color.qp_outline)
-        setCardBackgroundColor(getColor(R.color.qp_card))
+        strokeColor = getColor(R.color.qp_glass_border)
+        setCardBackgroundColor(getColor(R.color.qp_glass_card))
         useCompatPadding = false
     }
     private fun text(value: String, size: Int, color: Int, bold: Boolean) = TextView(this).apply {
@@ -2399,7 +2423,7 @@ class MainActivity : AppCompatActivity() {
         minWidth = dp(0)
         insetTop = 0
         insetBottom = 0
-        cornerRadius = dp(12)
+        cornerRadius = dp(16)
         setPadding(dp(12), dp(7), dp(12), dp(7))
         textSize = 13f
         if (primary) {
@@ -2407,8 +2431,8 @@ class MainActivity : AppCompatActivity() {
             setTextColor(getColor(R.color.qp_primary_content))
         } else {
             strokeWidth = dp(1)
-            strokeColor = ColorStateList.valueOf(getColor(R.color.qp_outline))
-            backgroundTintList = ColorStateList.valueOf(getColor(R.color.qp_card))
+            strokeColor = ColorStateList.valueOf(getColor(R.color.qp_glass_border))
+            backgroundTintList = ColorStateList.valueOf(getColor(R.color.qp_glass_inset))
             setTextColor(getColor(R.color.qp_text))
         }
     }

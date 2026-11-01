@@ -878,14 +878,15 @@
 
 /* SmartPrint native Android shell: customer print workflow without website framing. */
 .customer-entry.smartprint-native {
-  --native-bg:#f7f7fa;
-  --native-surface:#ffffff;
-  --native-surface-2:#f0eff7;
-  --native-border:#e5e6ec;
-  --native-text:#191b2a;
-  --native-muted:#686d7d;
-  --native-accent:#6557d2;
+  --native-bg:#f4f6fa;
+  --native-surface:rgba(255,255,255,.92);
+  --native-surface-2:rgba(255,255,255,.84);
+  --native-border:rgba(141,160,185,.52);
+  --native-text:#202638;
+  --native-muted:#69758a;
+  --native-accent:#7258e8;
   --native-accent-text:#ffffff;
+  --native-glass-shadow:0 9px 24px rgba(83,105,135,.14),inset 0 1px 0 rgba(255,255,255,.86);
   min-height:100%;
   width:100%;
   display:block;
@@ -893,7 +894,10 @@
   padding:0;
   overflow-x:hidden;
   overflow-y:auto;
-  background:var(--native-bg);
+  background:
+    radial-gradient(ellipse at 92% 5%,rgba(244,145,103,.12),transparent 30rem),
+    radial-gradient(ellipse at 6% 82%,rgba(112,157,214,.14),transparent 31rem),
+    var(--native-bg);
   color:var(--native-text);
 }
 .customer-entry.smartprint-native .customer-entry-glow,
@@ -933,9 +937,10 @@
 .customer-entry.smartprint-native .entry-printer-card {
   margin:10px 0;
   padding:10px;
-  border-radius:12px;
+  border-radius:20px;
   border:1px solid var(--native-border);
   background:var(--native-surface);
+  box-shadow:var(--native-glass-shadow);
   color:var(--native-text);
 }
 .customer-entry.smartprint-native .entry-session-note,
@@ -1140,15 +1145,17 @@
 }
 @media(prefers-color-scheme:dark) {
   .customer-entry.smartprint-native {
-    --native-bg:#10131b;
-    --native-surface:#191e29;
-    --native-surface-2:#24213d;
-    --native-border:#2c3240;
-    --native-text:#eff0f7;
-    --native-muted:#a4a9b7;
-    --native-accent:#b6afff;
+    --native-bg:#0c0f16;
+    --native-surface:rgba(20,26,37,.90);
+    --native-surface-2:rgba(25,33,48,.86);
+    --native-border:rgba(156,175,201,.24);
+    --native-text:#f0f3fa;
+    --native-muted:#aab4c8;
+    --native-accent:#9b8cff;
     --native-accent-text:#17152a;
+    --native-glass-shadow:0 10px 28px rgba(0,0,0,.28),inset 0 1px 0 rgba(255,255,255,.08);
   }
+  .customer-entry.smartprint-native .customer-entry-card,
   .customer-entry.smartprint-native .customer-upload-zone,
   .customer-entry.smartprint-native .customer-upload-mode,
   .customer-entry.smartprint-native .customer-choice,
