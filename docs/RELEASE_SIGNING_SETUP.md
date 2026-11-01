@@ -86,11 +86,11 @@ The website reads the latest stable release from the repository and uses the ass
 
 The release workflow:
 1. Accepts stable `vMAJOR.MINOR.PATCH` tags only.
-2. Requires all four Android signing secrets; a missing secret fails the release before package publication.
-3. Creates or refreshes an unpublished draft for that tag; a retry may refresh a draft only.
-4. Verifies the Android signature, local package checksums and uploaded release asset names and sizes.
-5. Publishes both the Windows installer and signed Android APK together, then marks the release latest only after verification.
-6. Refuses to publish an already-published release tag or a release draft without the signed Android APK.
+2. Always builds and verifies the Windows installer.
+3. Builds the signed Android APK when all four Android signing secrets are configured; if none are present, the Android job is skipped. A partially configured signing setup fails closed.
+4. Creates or refreshes an unpublished draft for that tag; a retry may refresh a draft only.
+5. Verifies local package checksums and the exact uploaded asset set and sizes, including the Android signature when that asset is present.
+6. Publishes the verified Windows asset and, when available, the signed Android APK; it refuses to modify an already-published release tag.
 
 The five-day retention on GitHub Actions artifacts applies only to temporary build-transfer artifacts. It does not apply to files attached to published GitHub Releases.
 
