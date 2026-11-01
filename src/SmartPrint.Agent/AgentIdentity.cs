@@ -39,4 +39,6 @@ public static class PrinterOutputModeRules
 
 public sealed record AgentHeartbeatResponse(
     string? PublicBaseUrl,
-    IReadOnlyList<string>? AllowedPortalOrigins = null);
+    IReadOnlyList<string>? AllowedPortalOrigins = null,
+    int? AgentCompletedDocumentRetentionDays = null,
+    int? AgentRetentionSweepHours = null);

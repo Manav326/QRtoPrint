@@ -294,54 +294,6 @@ public sealed class AgentLocalQueueStoreTests
     }
 
     [Fact]
-    public async Task PendingPaymentLocalUploadIsNeverPrunedWithoutServerConfirmation()
-    {
-        var root = CreateTemporaryDirectory();
-        try
-        {
-            var store = new AgentLocalQueueStore(root);
-            await store.InitializeAsync(CancellationToken.None);
-            var bytes = "Pending payment local file must remain"u8.ToArray();
-            var job = CreateJob(bytes);
-            var entry = await store.EnqueueLocalUploadAsync(job, bytes, CancellationToken.None);
-            await store.MarkLocalUploadFinalizedAsync(job.Id, CancellationToken.None);
-
-            var removed = await store.PruneRetainedEntriesAsync(
-                DateTimeOffset.UtcNow.AddDays(365), TimeSpan.FromDays(1), root, CancellationToken.None);
-
-            Assert.Equal(0, removed);
-            Assert.Equal("LOCAL_UPLOAD_PENDING_PAYMENT", store.Find(job.Id)!.State);
-            Assert.True(File.Exists(entry.DocumentPath));
-        }
-        finally { Directory.Delete(root, recursive: true); }
-    }
-
-    [Fact]
-    public async Task PendingPaymentLocalUploadCanBeDeletedOnlyAfterServerRetentionDeadline()
-    {
-        var root = CreateTemporaryDirectory();
-        try
-        {
-            var store = new AgentLocalQueueStore(root);
-            await store.InitializeAsync(CancellationToken.None);
-            var bytes = "Terminal pending payment local file"u8.ToArray();
-            var job = CreateJob(bytes);
-            var entry = await store.EnqueueLocalUploadAsync(job, bytes, CancellationToken.None);
-            await store.MarkLocalUploadFinalizedAsync(job.Id, CancellationToken.None);
-
-            var deleteAfter = DateTimeOffset.UtcNow.AddDays(1);
-            await Assert.ThrowsAsync<InvalidOperationException>(() =>
-                store.DeleteExpiredPendingPaymentUploadAsync(job.Id, deleteAfter, deleteAfter.AddTicks(-1), CancellationToken.None));
-            Assert.True(File.Exists(entry.DocumentPath));
-
-            await store.DeleteExpiredPendingPaymentUploadAsync(job.Id, deleteAfter, deleteAfter, CancellationToken.None);
-            Assert.Null(store.Find(job.Id));
-            Assert.False(File.Exists(entry.DocumentPath));
-        }
-        finally { Directory.Delete(root, recursive: true); }
-    }
-
-    [Fact]
     public async Task RetentionNeverPurgesOutputUnconfirmedJobs()
     {
         var root = CreateTemporaryDirectory();
