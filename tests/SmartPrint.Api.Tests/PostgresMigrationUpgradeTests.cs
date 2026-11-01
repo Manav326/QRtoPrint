@@ -119,8 +119,8 @@ public sealed class PostgresMigrationUpgradeTests
             tenant.Id, TenantQuotaResource.MonthlyPrintJob, CancellationToken.None);
 
         Assert.True(decision.Allowed, decision.Message);
-        Assert.Equal(0, decision.Current);
-        Assert.Equal(1, decision.Maximum);
+        Assert.Equal(0L, decision.Current);
+        Assert.Equal(1L, decision.Maximum);
         await transaction.RollbackAsync();
     }
 }
