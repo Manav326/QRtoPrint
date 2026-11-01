@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { AlertTriangle, Clock3, LoaderCircle, RefreshCw, Save, ShieldCheck } from "lucide-react";
+import { formatIstDateTime } from "./date-time";
 import {
   getPlatformOperationalSettings,
   getPlatformOperationalSettingsHistory,
@@ -157,7 +158,7 @@ export default function PlatformOperationsSection({ tokens }: { tokens: AuthToke
               <div className="platform-ops-history-list">
                 {history.map(item => (
                   <details className="platform-ops-history-item" key={item.id}>
-                    <summary><span><strong>{item.reason}</strong><small>{new Date(item.createdUtc).toLocaleString("en-IN")} · {item.actorUserId ?? "Platform administrator"}</small></span><Clock3 size={15}/></summary>
+                    <summary><span><strong>{item.reason}</strong><small>{formatIstDateTime(item.createdUtc)} · {item.actorUserId ?? "Platform administrator"}</small></span><Clock3 size={15}/></summary>
                     <pre>{item.changesJson}</pre>
                   </details>
                 ))}
