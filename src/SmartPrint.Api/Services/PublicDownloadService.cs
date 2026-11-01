@@ -137,11 +137,13 @@ public sealed class PublicDownloadService(HttpClient httpClient, IConfiguration 
         }
 
         var apiUri = new Uri($"https://api.github.com/repos/{_repository}/releases/latest");
+        using var metadataTimeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        metadataTimeout.CancelAfter(TimeSpan.FromSeconds(15));
         using var request = new HttpRequestMessage(HttpMethod.Get, apiUri);
         request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/vnd.github+json"));
 
         using var response = await httpClient.SendAsync(
-            request, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
+            request, HttpCompletionOption.ResponseHeadersRead, metadataTimeout.Token);
 
         if (response.StatusCode == HttpStatusCode.NotFound)
         {
@@ -155,8 +157,8 @@ public sealed class PublicDownloadService(HttpClient httpClient, IConfiguration 
                 $"The release metadata provider returned HTTP {(int)response.StatusCode}.");
         }
 
-        await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
-        using var document = await JsonDocument.ParseAsync(stream, cancellationToken: cancellationToken);
+        await using var stream = await response.Content.ReadAsStreamAsync(metadataTimeout.Token);
+        using var document = await JsonDocument.ParseAsync(stream, cancellationToken: metadataTimeout.Token);
         var root = document.RootElement;
 
         var tagName = root.TryGetProperty("tag_name", out var tagProperty)
@@ -207,6 +209,7 @@ public sealed class PublicDownloadService(HttpClient httpClient, IConfiguration 
         if (!Uri.TryCreate(value, UriKind.Absolute, out var candidate) ||
             candidate.Scheme != Uri.UriSchemeHttps ||
             !candidate.IdnHost.Equals("github.com", StringComparison.OrdinalIgnoreCase) ||
+            !candidate.IsDefaultPort ||
             !string.IsNullOrEmpty(candidate.UserInfo) ||
             !string.IsNullOrEmpty(candidate.Query) ||
             !string.IsNullOrEmpty(candidate.Fragment))
@@ -285,7 +288,7 @@ public sealed class PublicDownloadService(HttpClient httpClient, IConfiguration 
     private static bool TryGetRange(HttpRequest request, out RangeHeaderValue? range)
     {
         range = null;
-        var rangeHeader = request.Headers.Range.ToString();
+        var rangeHeader = request.Headers["Range"].ToString();
         if (string.IsNullOrWhiteSpace(rangeHeader))
         {
             return true;

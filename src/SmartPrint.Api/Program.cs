@@ -172,6 +172,13 @@ app.MapGet("/downloads/status", async (
     {
         return Results.Ok(await downloads.GetStatusAsync(cancellationToken));
     }
+    catch (OperationCanceledException exception) when (!cancellationToken.IsCancellationRequested)
+    {
+        app.Logger.LogWarning(exception, "Public release availability lookup timed out.");
+        return Results.Problem(
+            statusCode: StatusCodes.Status503ServiceUnavailable,
+            title: "Download availability is temporarily unavailable.");
+    }
     catch (Exception exception) when (
         exception is HttpRequestException or JsonException or InvalidOperationException)
     {
@@ -195,6 +202,20 @@ app.MapGet("/downloads/{platform}", async (
     catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
     {
         // The browser closed or cancelled the download.
+    }
+    catch (OperationCanceledException exception)
+    {
+        app.Logger.LogWarning(exception, "Public release lookup timed out for platform {Platform}.", platform);
+        if (!context.Response.HasStarted)
+        {
+            context.Response.Clear();
+            context.Response.StatusCode = StatusCodes.Status503ServiceUnavailable;
+            context.Response.Headers["Cache-Control"] = "no-store";
+        }
+        else
+        {
+            context.Abort();
+        }
     }
     catch (Exception exception) when (
         exception is HttpRequestException or JsonException or InvalidOperationException)

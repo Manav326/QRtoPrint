@@ -172,7 +172,7 @@ export default function PublicLandingPage() {
                   : <span className="sp-download-unavailable sp-download-button" aria-disabled="true">{releaseState === "loading" ? "Checking download availability…" : "Signed APK not published"}</span>}
               <small className="sp-download-note">Android 8.0 or later · Production-signed APK</small>
               <p className="sp-release-pending">{androidDownloadUrl
-                ? `Latest stable release: ${release?.tag_name ?? "published"}.`
+                ? `Latest stable release: ${release?.version ?? "published"}.`
                 : releaseState === "error"
                   ? "Download information is temporarily unavailable. Retry to check again."
                   : "The signed APK download appears automatically when the latest stable release contains the verified Android package."}</p>
