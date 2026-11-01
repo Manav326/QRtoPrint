@@ -101,7 +101,10 @@ test("theme defaults to light, survives logout, and applies to the document root
   });
   Object.defineProperty(globalThis, "document", {
     configurable: true,
-    value: { documentElement }
+    value: {
+      documentElement,
+      querySelector: () => null
+    }
   });
   try {
     assert.equal(readDarkModePreference(), false);
