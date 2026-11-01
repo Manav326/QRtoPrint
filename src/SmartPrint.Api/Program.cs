@@ -2566,6 +2566,7 @@ shop.MapPost("/print-batches/{batchId:guid}/review", async (
     var now = DateTimeOffset.UtcNow;
     var acceptedCount = 0;
     var rejectedCount = 0;
+    var quoteRefreshRequiredCount = 0;
     foreach (var job in lockedJobs)
     {
         var shouldAccept = accepted.Contains(job.Id);
@@ -2589,6 +2590,7 @@ shop.MapPost("/print-batches/{batchId:guid}/review", async (
                 var previousStatus = job.Status;
                 var quoteExpired = job.QuoteExpiresUtc is null || job.QuoteExpiresUtc <= now;
                 job.Status = quoteExpired ? "QUOTE_EXPIRED" : "AWAITING_PAYMENT";
+                if (quoteExpired) quoteRefreshRequiredCount++;
                 job.FailureCode = null;
                 job.UpdatedUtc = now;
                 db.PrintJobEvents.Add(new PrintJobEvent
@@ -2607,20 +2609,11 @@ shop.MapPost("/print-batches/{batchId:guid}/review", async (
             }
             else if (job.Status == "AWAITING_SHOP_APPROVAL")
             {
-                if (job.QuoteExpiresUtc is null || job.QuoteExpiresUtc <= now)
-                {
-                    await transaction.RollbackAsync(ct);
-                    return Results.Conflict(new
-                    {
-                        code = "batch_quote_expired",
-                        jobId = job.Id,
-                        jobNumber = job.JobNumber,
-                        message = "At least one accepted file has an expired quote. Refresh its quote before applying this batch review."
-                    });
-                }
-
                 var previousStatus = job.Status;
-                job.Status = "AWAITING_PAYMENT";
+                var quoteExpired = job.QuoteExpiresUtc is null || job.QuoteExpiresUtc <= now;
+                job.Status = quoteExpired ? "QUOTE_EXPIRED" : "AWAITING_PAYMENT";
+                if (quoteExpired) quoteRefreshRequiredCount++;
+                job.FailureCode = null;
                 job.UpdatedUtc = now;
                 db.PrintJobEvents.Add(new PrintJobEvent
                 {
@@ -2630,11 +2623,35 @@ shop.MapPost("/print-batches/{batchId:guid}/review", async (
                     NewStatus = job.Status,
                     ActorType = "ShopUser",
                     ActorId = GetActorId(principal),
-                    ReasonCode = "SHOP_APPROVED_BATCH_AWAITING_PAYMENT",
+                    ReasonCode = quoteExpired
+                        ? "SHOP_REVIEW_FOUND_EXPIRED_BATCH_QUOTE"
+                        : "SHOP_APPROVED_BATCH_AWAITING_PAYMENT",
                     CreatedUtc = now
                 });
             }
-            else if (job.Status is not ("AWAITING_PAYMENT" or "PAYMENT_REJECTED"))
+            else if (job.Status is "AWAITING_PAYMENT" or "PAYMENT_REJECTED")
+            {
+                if (job.QuoteExpiresUtc is null || job.QuoteExpiresUtc <= now)
+                {
+                    var previousStatus = job.Status;
+                    job.Status = "QUOTE_EXPIRED";
+                    job.FailureCode = null;
+                    job.UpdatedUtc = now;
+                    quoteRefreshRequiredCount++;
+                    db.PrintJobEvents.Add(new PrintJobEvent
+                    {
+                        TenantId = tenantId,
+                        PrintJobId = job.Id,
+                        PreviousStatus = previousStatus,
+                        NewStatus = job.Status,
+                        ActorType = "ShopUser",
+                        ActorId = GetActorId(principal),
+                        ReasonCode = "SHOP_REVIEW_FOUND_EXPIRED_BATCH_QUOTE",
+                        CreatedUtc = now
+                    });
+                }
+            }
+            else
             {
                 await transaction.RollbackAsync(ct);
                 return Results.Conflict(new
@@ -2715,8 +2732,11 @@ shop.MapPost("/print-batches/{batchId:guid}/review", async (
         ReviewedCount = lockedJobs.Count,
         AcceptedCount = acceptedCount,
         RejectedCount = rejectedCount,
+        QuoteRefreshRequiredCount = quoteRefreshRequiredCount,
         UpdatedUtc = now,
-        NextStep = "The batch review was applied together. Accepted files can proceed to one batch checkout; rejected files are excluded from printing."
+        NextStep = quoteRefreshRequiredCount > 0
+            ? $"The batch review was applied. {quoteRefreshRequiredCount} accepted file(s) have expired quotes and must be re-quoted before checkout; rejected files remain excluded."
+            : "The batch review was applied together. Accepted files can proceed to one batch checkout; rejected files are excluded from printing."
     });
 });
 
