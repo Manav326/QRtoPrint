@@ -2347,7 +2347,8 @@ function CustomerEntry({publicCode}:{publicCode:string}) {
     };
   },[result?.sessionToken,result?.expiresUtc]);
 
-  return <div className="customer-entry"><div className="customer-entry-glow"/>
+  const nativeAppMode = navigator.userAgent.includes("SmartPrintAndroid/1");
+  return <div className={nativeAppMode ? "customer-entry smartprint-native" : "customer-entry"}><div className="customer-entry-glow"/>
     <header className="customer-entry-brand"><div className="brand-mark"><QrCode size={21}/></div><div><div className="brand-name">smart<span>print</span></div><div className="brand-caption">BY QUANTAEDGE</div></div></header>
     <main className="customer-entry-card">
       {loading?<><div className="customer-entry-spinner"><span className="button-spinner"/></div><h1>Connecting to your print shop</h1><p>Creating a secure, time-limited session for this QR station.</p></>:
