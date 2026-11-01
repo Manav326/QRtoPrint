@@ -13,6 +13,9 @@ on:
 permissions:
   contents: read
 
+env:
+  SMARTPRINT_PUBLIC_BASE_URL: ${{ vars.SMARTPRINT_PUBLIC_BASE_URL }}
+
 jobs:
   portal:
     runs-on: ubuntu-latest
@@ -34,6 +37,20 @@ jobs:
         run: pnpm --filter @qrtoprint/desktop build
       - name: Validate portal Nginx proxy configuration
         run: docker run --rm --add-host api:127.0.0.1 -v "$GITHUB_WORKSPACE/apps/portal/nginx.conf:/etc/nginx/conf.d/default.conf:ro" nginx:alpine nginx -t
+      - name: Validate production Compose configuration
+        env:
+          PUBLIC_BASE_URL: https://example.invalid
+          IMAGE_NAMESPACE: ghcr.io/compose-validation
+        run: docker compose --env-file .env.example -f compose.yml config --quiet
+      - name: Validate local development Compose configuration
+        env:
+          POSTGRES_DB: qrtoprint
+          POSTGRES_USER: qrtoprint
+          POSTGRES_PASSWORD: local-ci-validation-only
+          AUTH_SIGNING_KEY: YWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFh
+          DOCUMENTS_ENCRYPTION_KEY: YWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWE=
+          PUBLIC_BASE_URL: https://example.invalid
+        run: docker compose -f compose.local.yml config --quiet
 
   api_dotnet:
     runs-on: windows-latest
@@ -124,7 +141,10 @@ jobs:
       - name: Build native Windows desktop executable
         shell: pwsh
         run: |
-          $env:VITE_API_BASE_URL = "https://qr-test.paintpulp.com"
+          if ([string]::IsNullOrWhiteSpace($env:SMARTPRINT_PUBLIC_BASE_URL)) {
+            throw "Configure the SMARTPRINT_PUBLIC_BASE_URL Actions variable before building the desktop application."
+          }
+          $env:VITE_API_BASE_URL = $env:SMARTPRINT_PUBLIC_BASE_URL
           pnpm --filter @qrtoprint/desktop exec tauri build --no-bundle --ci
           if ($LASTEXITCODE -ne 0) { throw "SmartPrint native desktop build failed." }
           $nativeExe = "apps/desktop/src-tauri/target/release/smartprint-desktop.exe"
@@ -171,7 +191,10 @@ jobs:
         run: |
           choco install innosetup --no-progress -y
           New-Item -ItemType Directory -Force -Path artifacts/agent-installer | Out-Null
-          & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" /DSmartPrintPublicUrl="https://qr-test.paintpulp.com" /DSmartPrintVersion="ci" /DSmartPrintBuildId="${{ github.run_number }}" scripts/build-windows-installer.iss
+          if ([string]::IsNullOrWhiteSpace($env:SMARTPRINT_PUBLIC_BASE_URL)) {
+            throw "Configure the SMARTPRINT_PUBLIC_BASE_URL Actions variable before building the installer."
+          }
+          & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" "/DSmartPrintPublicUrl=$env:SMARTPRINT_PUBLIC_BASE_URL" /DSmartPrintVersion="ci" /DSmartPrintBuildId="${{ github.run_number }}" scripts/build-windows-installer.iss
           if ($LASTEXITCODE -ne 0) { throw "Inno Setup compilation failed." }
       - name: Verify Windows beta installer is unsigned
         shell: pwsh
@@ -253,10 +276,23 @@ jobs:
       - uses: android-actions/setup-android@v4
         with:
           packages: 'platform-tools'
+      - name: Validate configured Android service origin
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import os
+          from urllib.parse import urlsplit
+          value = os.environ.get("SMARTPRINT_PUBLIC_BASE_URL", "").strip()
+          parsed = urlsplit(value)
+          if parsed.scheme != "https" or not parsed.hostname or parsed.username or parsed.password or parsed.path not in ("", "/") or parsed.query or parsed.fragment:
+              raise SystemExit("SMARTPRINT_PUBLIC_BASE_URL must be configured as the canonical public HTTPS origin.")
+          print(f"Android service origin validated: {parsed.scheme}://{parsed.netloc}")
+          PY
       - name: Install Android SDK 36
         run: sdkmanager "platforms;android-36" "build-tools;36.0.0"
       - name: Run Android unit tests and build APK
-        run: gradle --no-daemon -p apps/android :app:testDebugUnitTest :app:assembleDebug
+        run: gradle --no-daemon -p apps/android -PsmartPrintServiceUrl="$SMARTPRINT_PUBLIC_BASE_URL" :app:testDebugUnitTest :app:assembleDebug
       - name: Enable KVM for Android emulator
         run: |
           echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
@@ -288,7 +324,7 @@ jobs:
             echo "Current Android window focus:"
             adb shell dumpsys window | grep -E 'mCurrentFocus|mFocusedApp' || true
 
-            gradle --no-daemon -p apps/android :app:connectedDebugAndroidTest
+            gradle --no-daemon -p apps/android -PsmartPrintServiceUrl="$SMARTPRINT_PUBLIC_BASE_URL" :app:connectedDebugAndroidTest
       - name: Upload Android test reports
         if: always()
         uses: actions/upload-artifact@v7
@@ -323,6 +359,9 @@ jobs:
           mkdir -p .secrets/cloudflare
           printf 'ci-placeholder-token' > .secrets/cloudflare/tunnel-token
       - name: Validate Docker Compose configuration
+        env:
+          PUBLIC_BASE_URL: https://example.invalid
+          IMAGE_NAMESPACE: ghcr.io/compose-validation
         run: docker compose --env-file .env.example -f compose.yml config --quiet
       - name: Validate local-only Docker Compose configuration
         env:
@@ -334,6 +373,12 @@ jobs:
           PUBLIC_BASE_URL: https://print.example.test
         run: docker compose -f compose.local.yml config --quiet
       - uses: docker/setup-buildx-action@v4
+      - id: image_namespace
+        name: Resolve lower-case GitHub Container Registry namespace
+        shell: bash
+        run: |
+          namespace="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}"
+          echo "value=$namespace" >> "$GITHUB_OUTPUT"
       - name: Log in to GitHub Container Registry
         uses: docker/login-action@v4
         with:
@@ -347,9 +392,11 @@ jobs:
           file: Dockerfile.api
           platforms: linux/amd64
           push: true
+          build-args: |
+            SOURCE_REPOSITORY=${{ github.server_url }}/${{ github.repository }}
           tags: |
-            ghcr.io/manav326/qrtoprint-api:latest
-            ghcr.io/manav326/qrtoprint-api:sha-${{ github.sha }}
+            ${{ steps.image_namespace.outputs.value }}/qrtoprint-api:latest
+            ${{ steps.image_namespace.outputs.value }}/qrtoprint-api:sha-${{ github.sha }}
           cache-from: type=gha,scope=qrtoprint-api
           cache-to: type=gha,mode=max,scope=qrtoprint-api
       - name: Build and publish portal image
@@ -359,9 +406,13 @@ jobs:
           file: apps/portal/Dockerfile
           platforms: linux/amd64
           push: true
+          build-args: |
+            SOURCE_REPOSITORY=${{ github.server_url }}/${{ github.repository }}
+            VITE_SMARTPRINT_RELEASES_API_URL=${{ github.api_url }}/repos/${{ github.repository }}/releases/latest
+            VITE_SMARTPRINT_RELEASES_URL=${{ github.server_url }}/${{ github.repository }}/releases
           tags: |
-            ghcr.io/manav326/qrtoprint-portal:latest
-            ghcr.io/manav326/qrtoprint-portal:sha-${{ github.sha }}
+            ${{ steps.image_namespace.outputs.value }}/qrtoprint-portal:latest
+            ${{ steps.image_namespace.outputs.value }}/qrtoprint-portal:sha-${{ github.sha }}
           cache-from: type=gha,scope=qrtoprint-portal
           cache-to: type=gha,mode=max,scope=qrtoprint-portal
 
@@ -374,8 +425,9 @@ jobs:
           trap 'docker compose --project-name "$project" --env-file "$env_file" -f compose.yml logs --tail 100 || true; docker compose --project-name "$project" --env-file "$env_file" -f compose.yml down -v || true; rm -f "$env_file"' EXIT
 
           cat > "$env_file" <<EOF
+          IMAGE_NAMESPACE="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}"
           IMAGE_TAG=sha-${GITHUB_SHA}
-          PUBLIC_BASE_URL=https://print.test
+          PUBLIC_BASE_URL=https://example.invalid
           POSTGRES_DB=qrtoprint
           POSTGRES_USER=qrtoprint
           POSTGRES_PASSWORD=$(openssl rand -hex 32)

@@ -1,12 +1,17 @@
 FROM node:22-alpine AS build
-LABEL org.opencontainers.image.source="https://github.com/Manav326/QRtoPrint"
+ARG SOURCE_REPOSITORY=
+LABEL org.opencontainers.image.source="${SOURCE_REPOSITORY}"
 LABEL org.opencontainers.image.description="QRtoPrint customer and shop web portal"
 WORKDIR /workspace
 RUN corepack enable && corepack prepare pnpm@10.18.0 --activate
 COPY . .
 RUN pnpm install --no-frozen-lockfile
 ARG VITE_API_BASE_URL=
+ARG VITE_SMARTPRINT_RELEASES_API_URL=
+ARG VITE_SMARTPRINT_RELEASES_URL=
 ENV VITE_API_BASE_URL=${VITE_API_BASE_URL}
+ENV VITE_SMARTPRINT_RELEASES_API_URL=${VITE_SMARTPRINT_RELEASES_API_URL}
+ENV VITE_SMARTPRINT_RELEASES_URL=${VITE_SMARTPRINT_RELEASES_URL}
 RUN pnpm --filter @qrtoprint/portal build
 
 FROM nginx:alpine AS runtime

@@ -15,7 +15,7 @@ The release workflow:
 
 Customers should download the installer only from the official SmartPrint website or its linked GitHub Release. Windows may show an Unknown Publisher or SmartScreen prompt. Some Windows 11 devices with Smart App Control or managed security policy may block unsigned installers entirely. Do not ask customers to turn off Defender, SmartScreen, Smart App Control, or other security protections.
 
-The website uses a compact **Available** label and a brief first-run security note. Do not present the installer as signed or imply that Windows will always permit it to run.
+The website shows **Available** only when the latest stable release contains the Windows installer, and includes a brief first-run security note. Do not present the installer as signed or imply that Windows will always permit it to run.
 
 ## 2. Android release keystore
 
@@ -51,7 +51,7 @@ The release workflow checks all four Android secrets together. If none are confi
 Add or update the repository Actions variable:
 
 - Name: `SMARTPRINT_PUBLIC_BASE_URL`
-- Value: the canonical public HTTPS origin, currently `https://qr-test.paintpulp.com`
+- Value: the exact canonical HTTPS origin configured for the active deployment. Do not enter a path, query string, or fragment.
 
 The Windows setup and Android APK are both built against this origin. The deployment's `PUBLIC_BASE_URL` must agree with it.
 
@@ -82,15 +82,15 @@ The future Microsoft Store channel will use a separate MSIX package. Microsoft r
 
 Every public stable release is a separate GitHub Release with a semantic-version tag such as `v0.1.0`. **Retain every published stable version indefinitely.** Do not delete older releases and do not replace the binaries attached to a published tag. A new build must receive a new version tag.
 
-The website's `releases/latest/download/...` URLs are a moving pointer to the latest stable release. Publishing a newer version moves that pointer; it does not remove or replace the older versioned release. Older releases remain available from their individual release pages and tag-specific asset URLs.
+The website reads the latest stable release from the repository and uses the asset download URLs returned by GitHub. It does not contain a repository slug, release tag, or direct asset URL in application source. The `VITE_SMARTPRINT_RELEASES_API_URL` and `VITE_SMARTPRINT_RELEASES_URL` build arguments are populated from GitHub Actions repository context. Publishing a newer version moves that pointer; it does not remove or replace the older versioned release. Older releases remain available from their individual release pages and tag-specific asset URLs.
 
 The release workflow:
 1. Accepts stable `vMAJOR.MINOR.PATCH` tags only.
-2. Creates or refreshes an unpublished draft for that tag; a retry may refresh a draft only.
-3. Verifies local package checksums and uploaded release asset names and sizes.
-4. Publishes the release and marks it latest only after verification.
-5. Refuses to run against an already-published release tag and never overwrites a published asset.
-6. Publishes Windows independently; Android remains optional until all signing secrets are configured.
+2. Always builds and verifies the Windows installer.
+3. Builds the signed Android APK when all four Android signing secrets are configured; if none are present, the Android job is skipped. A partially configured signing setup fails closed.
+4. Creates or refreshes an unpublished draft for that tag; a retry may refresh a draft only.
+5. Verifies local package checksums and the exact uploaded asset set and sizes, including the Android signature when that asset is present.
+6. Publishes the verified Windows asset and, when available, the signed Android APK; it refuses to modify an already-published release tag.
 
 The five-day retention on GitHub Actions artifacts applies only to temporary build-transfer artifacts. It does not apply to files attached to published GitHub Releases.
 

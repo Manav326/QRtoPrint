@@ -51,7 +51,9 @@ function Save-Utf8NoBom([string]$Path, [string[]]$Lines) {
 
 $exampleLines = @(Get-Content -LiteralPath $exampleEnvPath)
 $defaultBaseUrl = Get-EnvValue $exampleLines "PUBLIC_BASE_URL"
-if ([string]::IsNullOrWhiteSpace($defaultBaseUrl)) { throw ".env.example must define PUBLIC_BASE_URL." }
+if (-not [string]::IsNullOrWhiteSpace($PublicBaseUrl)) {
+    $defaultBaseUrl = $PublicBaseUrl.Trim()
+}
 
 if (-not (Get-Command docker -ErrorAction SilentlyContinue)) { throw "Install and start Docker Desktop first." }
 docker compose version | Out-Null
@@ -60,6 +62,10 @@ docker info | Out-Null
 if ($LASTEXITCODE -ne 0) { throw "Docker Desktop engine is not running." }
 
 if (-not (Test-Path -LiteralPath $envPath)) {
+    if ([string]::IsNullOrWhiteSpace($defaultBaseUrl)) {
+        $defaultBaseUrl = (Read-Host "Enter the canonical public HTTPS origin for this deployment").Trim()
+    }
+    if ([string]::IsNullOrWhiteSpace($defaultBaseUrl)) { throw "A PUBLIC_BASE_URL is required; no deployment hostname is assumed." }
     $lines = @(
         "POSTGRES_DB=qrtoprint",
         "POSTGRES_USER=qrtoprint",
@@ -81,13 +87,16 @@ if (-not (Test-Path -LiteralPath $envPath)) {
 }
 
 $currentBaseUrl = Get-EnvValue $lines "PUBLIC_BASE_URL"
-if ([string]::IsNullOrWhiteSpace($currentBaseUrl)) { $currentBaseUrl = $defaultBaseUrl }
 if (-not [string]::IsNullOrWhiteSpace($PublicBaseUrl)) { $currentBaseUrl = $PublicBaseUrl.Trim() }
+if ([string]::IsNullOrWhiteSpace($currentBaseUrl)) {
+    $currentBaseUrl = (Read-Host "Enter the canonical public HTTPS origin for this deployment").Trim()
+}
+if ([string]::IsNullOrWhiteSpace($currentBaseUrl)) { throw "A PUBLIC_BASE_URL is required; no deployment hostname is assumed." }
 $uri = $null
 if (-not [Uri]::TryCreate($currentBaseUrl, [UriKind]::Absolute, [ref]$uri) -or
     $uri.Scheme -ne "https" -or $uri.AbsolutePath -ne "/" -or
     $uri.Query -or $uri.Fragment -or $uri.UserInfo) {
-    throw "PUBLIC_BASE_URL must be an HTTPS origin only, e.g. https://print.thinkwithsujeet.in."
+    throw "PUBLIC_BASE_URL must be a canonical HTTPS origin without a path, query string, fragment, or credentials."
 }
 $currentBaseUrl = $uri.GetLeftPart([UriPartial]::Authority).TrimEnd("/")
 $lines = Set-EnvValue $lines "PUBLIC_BASE_URL" $currentBaseUrl

@@ -12,7 +12,7 @@ permissions:
   contents: read
 
 env:
-  SMARTPRINT_PUBLIC_BASE_URL: ${{ vars.SMARTPRINT_PUBLIC_BASE_URL || 'https://qr-test.paintpulp.com' }}
+  SMARTPRINT_PUBLIC_BASE_URL: ${{ vars.SMARTPRINT_PUBLIC_BASE_URL }}
 
 jobs:
   validate-release-config:
@@ -50,7 +50,7 @@ jobs:
           ):
               raise SystemExit(
                   "SMARTPRINT_PUBLIC_BASE_URL must be a canonical HTTPS origin, "
-                  "for example https://qr-test.paintpulp.com"
+                  "without a path, query string, or fragment"
               )
           print(f"Release origin validated: {parsed.scheme}://{parsed.netloc}")
           PY
@@ -163,7 +163,7 @@ jobs:
           done
           if (( present == 0 )); then
             echo "available=false" >> "$GITHUB_OUTPUT"
-            echo "::notice::Android release skipped. Configure the four Android signing secrets when the production keystore is ready."
+            echo "::notice::Android release skipped. Configure the four Android signing secrets to publish the signed APK."
             exit 0
           fi
           if (( missing > 0 )); then
@@ -213,7 +213,12 @@ jobs:
           cp apps/android/app/build/outputs/apk/release/app-release.apk artifacts/android/SmartPrint-Android.apk
           apksigner_path="$(find "$ANDROID_HOME/build-tools" -name apksigner -type f | sort | tail -n 1)"
           test -n "$apksigner_path"
-          "$apksigner_path" verify --verbose artifacts/android/SmartPrint-Android.apk
+          verification_output="$("$apksigner_path" verify --verbose --print-certs artifacts/android/SmartPrint-Android.apk 2>&1)"
+          printf '%s\n' "$verification_output"
+          if ! grep -Eiq 'Signer #1 certificate SHA-256 digest: [[:xdigit:]]{64}' <<< "$verification_output"; then
+            echo "::error::Android APK signature verification did not report a signing certificate fingerprint."
+            exit 1
+          fi
       - name: Upload Android release APK
         if: steps.check-signing.outputs.available == 'true'
         uses: actions/upload-artifact@v7
@@ -272,7 +277,7 @@ jobs:
           repository = os.environ["REPOSITORY"]
           tag = os.environ["RELEASE_TAG"]
           token = os.environ["GH_TOKEN"]
-          api = f"https://api.github.com/repos/{repository}/releases/tags/{quote(tag, safe='')}"
+          api = f"{os.environ['GITHUB_API_URL'].rstrip('/')}/repos/{repository}/releases/tags/{quote(tag, safe='')}"
           headers = {
               "Accept": "application/vnd.github+json",
               "Authorization": f"Bearer {token}",
@@ -305,7 +310,7 @@ jobs:
               if asset.get("name") not in generated_assets:
                   continue
               delete_url = (
-                  f"https://api.github.com/repos/{repository}/releases/assets/{asset['id']}"
+                  f"{os.environ['GITHUB_API_URL'].rstrip('/')}/repos/{repository}/releases/assets/{asset['id']}"
               )
               delete_request = Request(delete_url, headers=headers, method="DELETE")
               with urlopen(delete_request, timeout=30):
@@ -365,7 +370,7 @@ jobs:
                   raise SystemExit(f"Local checksum verification failed for {filename}.")
 
           release_url = (
-              f"https://api.github.com/repos/{repository}/releases/tags/{quote(tag, safe='')}"
+              f"{os.environ['GITHUB_API_URL'].rstrip('/')}/repos/{repository}/releases/tags/{quote(tag, safe='')}"
           )
           with urlopen(Request(release_url, headers=headers), timeout=30) as response:
               release = json.loads(response.read())
@@ -388,7 +393,7 @@ jobs:
                   raise SystemExit(f"GitHub's asset digest does not match SHA256SUMS.txt: {filename}.")
 
           release_id = release["id"]
-          publish_url = f"https://api.github.com/repos/{repository}/releases/{release_id}"
+          publish_url = f"{os.environ['GITHUB_API_URL'].rstrip('/')}/repos/{repository}/releases/{release_id}"
           payload = json.dumps({"draft": False, "make_latest": "true"}).encode("utf-8")
           publish_request = Request(
               publish_url,
@@ -400,10 +405,9 @@ jobs:
               published = json.loads(response.read())
           if published.get("draft") or published.get("tag_name") != tag:
               raise SystemExit("GitHub did not confirm publication of the verified stable release.")
+          android_status = "and signed Android APK" if "SmartPrint-Android.apk" in binaries else "without Android until signing is configured"
           print(
-              f"Published {tag} with the unsigned Windows beta installer"
-              + (" and signed Android APK." if "SmartPrint-Android.apk" in binaries else
-                 ". Android remains unpublished until its signing credentials are configured.")
-              + " Older releases are not modified or deleted."
+              f"Published {tag} with the unsigned Windows beta installer {android_status}. "
+              "Older releases are not modified or deleted."
           )
           PY

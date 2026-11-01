@@ -8,6 +8,7 @@ import androidx.test.core.app.ActivityScenario
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.espresso.Espresso.onView
 import androidx.test.espresso.action.ViewActions.click
+import androidx.test.espresso.action.ViewActions.scrollTo
 import androidx.test.espresso.assertion.ViewAssertions.matches
 import androidx.test.espresso.matcher.ViewMatchers.isDisplayed
 import androidx.test.espresso.matcher.ViewMatchers.withContentDescription
@@ -34,7 +35,7 @@ class SavedPdfEditorInstrumentedTest {
             ActivityScenario.launch(MainActivity::class.java).use {
                 val navigationLabel = com.google.android.material.R.id.navigation_bar_item_small_label_view
                 onView(allOf(withId(navigationLabel), withText("My Files"))).perform(click())
-                onView(withContentDescription("More options for CI-editor-document.pdf")).perform(click())
+                onView(withContentDescription("More options for CI-editor-document.pdf")).perform(scrollTo(), click())
                 onView(withText("Edit PDF pages")).perform(click())
 
                 onView(withText("Edit PDF pages")).check(matches(isDisplayed()))

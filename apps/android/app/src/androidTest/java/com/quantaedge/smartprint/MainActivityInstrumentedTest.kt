@@ -62,6 +62,20 @@ class MainActivityInstrumentedTest {
     }
 
     @Test
+    fun systemBackReturnsFromAccountToThePreviouslySelectedDestination() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        CustomerAccountStore(context).clear()
+        ActivityScenario.launch(MainActivity::class.java).use {
+            val navigationLabel = com.google.android.material.R.id.navigation_bar_item_small_label_view
+            onView(allOf(withId(navigationLabel), withText("Activity"))).perform(click())
+            onView(withContentDescription("Account")).perform(click())
+            onView(withText(containsString("Every print shop."))).check(matches(isDisplayed()))
+            androidx.test.espresso.Espresso.pressBack()
+            onView(withText("Your print history")).check(matches(isDisplayed()))
+        }
+    }
+
+    @Test
     fun createsFolderAndNavigatesIntoAndOutOfIt() {
         ActivityScenario.launch(MainActivity::class.java).use {
             val navigationLabel = com.google.android.material.R.id.navigation_bar_item_small_label_view

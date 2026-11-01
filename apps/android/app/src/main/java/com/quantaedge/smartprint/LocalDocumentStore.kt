@@ -36,9 +36,13 @@ class LocalDocumentStore(filesDir: File) {
     }
 
     fun importFile(input: InputStream, name: String, destinationPath: String): File {
-        val target = uniqueFile(folder(destinationPath), DocumentNamePolicy.safeName(name))
+        val parent = folder(destinationPath)
+        val target = uniqueFile(parent, DocumentNamePolicy.safeName(name))
         var total = 0L
         try {
+            require(parent.usableSpace > MIN_FREE_SPACE_RESERVE) {
+                "There is not enough free storage to import this document. Free up space and try again."
+            }
             FileOutputStream(target).use { output ->
                 val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
                 while (true) {
@@ -46,6 +50,9 @@ class LocalDocumentStore(filesDir: File) {
                     if (n < 0) break
                     total += n
                     require(total <= DocumentNamePolicy.MAX_IMPORT_BYTES) { "Imported files must be 100 MB or smaller." }
+                    require(parent.usableSpace > MIN_FREE_SPACE_RESERVE + n) {
+                        "Device storage is almost full. The import was stopped before the phone ran out of space."
+                    }
                     output.write(buffer, 0, n)
                 }
                 output.fd.sync()
@@ -56,6 +63,14 @@ class LocalDocumentStore(filesDir: File) {
             target.delete()
             throw e
         }
+    }
+
+    /** Total bytes in the app-private customer document library. */
+    fun storageUsageBytes(): Long =
+        root.walkTopDown().filter { it.isFile }.sumOf { it.length() }
+
+    private companion object {
+        const val MIN_FREE_SPACE_RESERVE = 5L * 1024L * 1024L
     }
 
     fun list(directory: File): Array<File> {

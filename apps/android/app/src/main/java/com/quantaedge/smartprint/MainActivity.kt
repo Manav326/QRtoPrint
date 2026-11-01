@@ -54,6 +54,9 @@ import java.io.ByteArrayInputStream
 import java.io.File
 import java.io.FileInputStream
 import java.text.SimpleDateFormat
+import java.time.Instant
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
 import java.util.Date
 import java.util.Locale
 import java.util.zip.ZipEntry
@@ -65,12 +68,14 @@ class MainActivity : AppCompatActivity() {
         private const val FILES = 2
         private const val SCAN_PRINT = 3
         private const val ACTIVITY = 4
+        private const val SWITCH_SHOP = 91
         private const val MAX_TREE_FILES = 500
         private const val MAX_TREE_DEPTH = 12
     }
 
     private lateinit var store: LocalDocumentStore
     private lateinit var customerAccountStore: CustomerAccountStore
+    private lateinit var customerPrintSessionStore: CustomerPrintSessionStore
     private lateinit var toolbar: MaterialToolbar
     private lateinit var content: FrameLayout
     private lateinit var navigation: BottomNavigationView
@@ -89,6 +94,9 @@ class MainActivity : AppCompatActivity() {
     private val selectedFilePaths = linkedSetOf<String>()
     private val chooserSelectedFilePaths = linkedSetOf<String>()
     private var fileChooserAllowsMultiple = false
+    private var profileVisible = false
+    private var profileReturnDestination = HOME
+    private var librarySearchQuery = ""
 
     private lateinit var importFiles: ActivityResultLauncher<Array<String>>
     private lateinit var importTree: ActivityResultLauncher<Uri?>
@@ -103,18 +111,34 @@ class MainActivity : AppCompatActivity() {
         WindowCompat.setDecorFitsSystemWindows(window, false)
         store = LocalDocumentStore(filesDir)
         customerAccountStore = CustomerAccountStore(this)
+        customerPrintSessionStore = CustomerPrintSessionStore(this)
         registerFileActions()
         buildLayout()
         showHome()
+        val savedShop = getSharedPreferences("smartprint.customer.last-shop", MODE_PRIVATE)
         portalUrl = savedInstanceState?.getString("portalUrl")
+            ?: savedShop.getString("portalUrl", null)
         portalHost = savedInstanceState?.getString("portalHost")
-        portalUrl?.let { ensureWebView().loadUrl(it); showPrint() }
+            ?: savedShop.getString("portalHost", null)
+            ?: portalUrl?.let { Uri.parse(it).host }
+        portalUrl?.let { url ->
+            val view = ensureWebView()
+            val webState = savedInstanceState?.getBundle("webViewState")
+            val restored = webState?.let { view.restoreState(it) != null } ?: false
+            if (!restored) view.loadUrl(url)
+            showPrint()
+        }
         handleShareIntent(intent)
     }
 
     override fun onSaveInstanceState(outState: Bundle) {
         outState.putString("portalUrl", portalUrl)
         outState.putString("portalHost", portalHost)
+        webView?.let { view ->
+            val webState = Bundle()
+            view.saveState(webState)
+            outState.putBundle("webViewState", webState)
+        }
         super.onSaveInstanceState(outState)
     }
 
@@ -127,6 +151,7 @@ class MainActivity : AppCompatActivity() {
     @Deprecated("Deprecated in Java")
     override fun onBackPressed() {
         when {
+            profileVisible -> returnFromProfile()
             pickerMode -> cancelPicker()
             editingPdf != null -> showFiles()
             navigation.selectedItemId == SCAN_PRINT && webView?.canGoBack() == true -> webView?.goBack()
@@ -142,7 +167,11 @@ class MainActivity : AppCompatActivity() {
             if (result.resultCode == RESULT_OK) {
                 val rawValue = result.data?.getStringExtra(QrScannerActivity.EXTRA_RAW_VALUE)
                 try {
-                    confirmShop(StationQrLink.parse(rawValue, allowLocalDevelopment = BuildConfig.DEBUG))
+                    confirmShop(StationQrLink.parse(
+                        rawValue,
+                        expectedServiceUrl = BuildConfig.SERVICE_BASE_URL,
+                        allowLocalDevelopment = BuildConfig.DEBUG
+                    ))
                 } catch (_: Exception) {
                     toast("This is not a valid SmartPrint shop QR code.")
                 }
@@ -251,6 +280,14 @@ class MainActivity : AppCompatActivity() {
             setTitleTextColor(getColor(R.color.qp_text))
             setBackgroundColor(getColor(R.color.qp_surface))
             elevation = dp(1).toFloat()
+            menu.add(Menu.NONE, SWITCH_SHOP, Menu.NONE, "Switch shop").apply {
+                setIcon(android.R.drawable.ic_menu_camera)
+                setContentDescription("Switch print shop")
+                setTooltipText("Scan another shop QR code")
+                setShowAsAction(android.view.MenuItem.SHOW_AS_ACTION_NEVER)
+                isVisible = false
+                setOnMenuItemClickListener { switchShop(); true }
+            }
             val accountAction = ImageView(this@MainActivity).apply {
                 contentDescription = "Account"
                 setImageResource(R.drawable.ic_account)
@@ -329,20 +366,35 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun resetToolbar(title: String) {
+        profileVisible = false
         toolbar.title = title
         toolbar.navigationIcon = null
         toolbar.setNavigationOnClickListener(null)
+        toolbar.menu.findItem(SWITCH_SHOP)?.isVisible = portalUrl != null
         navigation.visibility = View.VISIBLE
     }
 
     private fun showProfile() {
         pickerMode = false
+        if (!profileVisible) profileReturnDestination = navigation.selectedItemId
+        profileVisible = true
         toolbar.title = "Your account"
         toolbar.setNavigationIcon(android.R.drawable.ic_media_previous)
-        toolbar.setNavigationOnClickListener { showHome() }
+        toolbar.setNavigationOnClickListener { returnFromProfile() }
         navigation.visibility = View.GONE
         content.removeAllViews()
         content.addView(accountView(), frameParams())
+    }
+
+    private fun returnFromProfile() {
+        if (!profileVisible) return
+        profileVisible = false
+        when (profileReturnDestination) {
+            FILES -> showFiles()
+            SCAN_PRINT -> if (portalUrl != null) showPrint() else showScanPrint()
+            ACTIVITY -> showActivity()
+            else -> showHome()
+        }
     }
 
     private fun accountView(): View {
@@ -577,11 +629,41 @@ class MainActivity : AppCompatActivity() {
 
     private fun showScanPrint() {
         pickerMode = false
-        if (portalUrl != null) { showPrint(); return }
+        if (portalUrl != null) { showConnectedShop(); return }
         resetToolbar("Scan & Print")
         navigation.menu.findItem(SCAN_PRINT).isChecked = true
         content.removeAllViews()
         content.addView(scanPrintView(), frameParams())
+    }
+
+    private fun showConnectedShop() {
+        resetToolbar("Your print shop")
+        navigation.menu.findItem(SCAN_PRINT).isChecked = true
+        content.removeAllViews()
+        val column = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(20), dp(22), dp(20), dp(28))
+        }
+        val connected = card()
+        val body = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(18), dp(18), dp(18), dp(18))
+        }
+        body.addView(text("Shop session saved", 20, R.color.qp_text, true))
+        body.addView(text(
+            "You are connected to ${portalHost ?: "your selected SmartPrint shop"}. Your existing uploaded jobs remain associated with that shop session.",
+            13, R.color.qp_muted, false
+        ).apply { setPadding(0, dp(7), 0, dp(14)) })
+        body.addView(button("Open current shop session", true).apply { setOnClickListener { showPrint() } }, linearParams())
+        connected.addView(body)
+        column.addView(connected, linearParams())
+        column.addView(button("Scan another shop", false).apply { setOnClickListener { switchShop() } },
+            linearParams().apply { topMargin = dp(12) })
+        column.addView(text(
+            "Switching shops does not cancel or delete an existing order. Re-scan the previous shop QR code to return to its session.",
+            12, R.color.qp_muted, false
+        ).apply { setPadding(dp(3), dp(12), dp(3), 0) })
+        content.addView(column, frameParams())
     }
 
     private fun scanPrintView(): View {
@@ -758,10 +840,43 @@ class MainActivity : AppCompatActivity() {
                             body.addView(text(job.shopName, 12, R.color.qp_muted, false).apply {
                                 setPadding(0, dp(5), 0, 0)
                             })
+                            val createdLabel = runCatching {
+                                Instant.parse(job.createdUtc)
+                                    .atZone(ZoneId.systemDefault())
+                                    .format(DateTimeFormatter.ofPattern("dd MMM yyyy, hh:mm a", Locale.ROOT))
+                            }.getOrDefault("Date unavailable")
+                            body.addView(text(createdLabel, 12, R.color.qp_muted, false).apply {
+                                setPadding(0, dp(3), 0, 0)
+                            })
                             body.addView(text(
-                                "${job.pageCount} page(s) · ${job.copies} copy/copies · ${job.currency} ${"%.2f".format(Locale.ROOT, job.quotedAmountMinor / 100.0)}",
+                                job.originalFileName,
+                                13, R.color.qp_text, true
+                            ).apply { setPadding(0, dp(7), 0, 0) })
+                            body.addView(text(
+                                "${job.pageCount} page(s) · ${job.copies} copy/copies · Quote ${job.currency} ${"%.2f".format(Locale.ROOT, job.quotedAmountMinor / 100.0)}",
                                 12, R.color.qp_muted, false
                             ).apply { setPadding(0, dp(4), 0, 0) })
+                            body.addView(text(
+                                "${job.paymentMethod.ifBlank { "Payment" }} · ${job.paymentStatus.ifBlank { "Not recorded" }} · Paid ${job.currency} ${"%.2f".format(Locale.ROOT, job.paidAmountMinor / 100.0)} · Refunded ${job.currency} ${"%.2f".format(Locale.ROOT, job.refundedAmountMinor / 100.0)} · Net ${job.currency} ${"%.2f".format(Locale.ROOT, maxOf(0L, job.paidAmountMinor - job.refundedAmountMinor) / 100.0)}",
+                                12, R.color.qp_muted, false
+                            ).apply { setPadding(0, dp(4), 0, 0) })
+                            if (job.rejectedPageNumbersJson != "[]" && job.rejectedPageNumbersJson.isNotBlank()) {
+                                body.addView(text(
+                                    "Rejected pages: ${job.rejectedPageNumbersJson}",
+                                    12, R.color.qp_muted, false
+                                ).apply { setPadding(0, dp(4), 0, 0) })
+                            }
+                            if (job.outputCompletedUtc != null) {
+                                val outputConfirmedLabel = runCatching {
+                                    Instant.parse(job.outputCompletedUtc)
+                                        .atZone(ZoneId.systemDefault())
+                                        .format(DateTimeFormatter.ofPattern("dd MMM yyyy, hh:mm a", Locale.ROOT))
+                                }.getOrDefault(job.outputCompletedUtc)
+                                body.addView(text(
+                                    "Output confirmed: $outputConfirmedLabel",
+                                    12, R.color.qp_muted, false
+                                ).apply { setPadding(0, dp(4), 0, 0) })
+                            }
                             item.addView(body)
                             container.addView(item, linearParams().apply { bottomMargin = dp(9) })
                         }
@@ -805,6 +920,8 @@ class MainActivity : AppCompatActivity() {
 
     private fun showPrint() {
         pickerMode = false
+        profileVisible = false
+        toolbar.menu.findItem(SWITCH_SHOP)?.isVisible = portalUrl != null
         toolbar.title = portalHost?.let { "SmartPrint · $it" } ?: "SmartPrint at a shop"
         toolbar.setNavigationIcon(android.R.drawable.ic_media_previous)
         toolbar.setNavigationOnClickListener { showFiles() }
@@ -842,6 +959,48 @@ class MainActivity : AppCompatActivity() {
         hero.addView(heroText)
         column.addView(hero, linearParams())
 
+        if (!isPicker) {
+            val usedBytes = store.storageUsageBytes()
+            val freeBytes = filesDir.usableSpace
+            val storage = card()
+            val storageContent = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                setPadding(dp(14), dp(11), dp(14), dp(11))
+            }
+            storageContent.addView(text(
+                "On-device storage · ${android.text.format.Formatter.formatFileSize(this, usedBytes)} used",
+                13, R.color.qp_text, true
+            ))
+            storageContent.addView(text(
+                "${android.text.format.Formatter.formatFileSize(this, freeBytes)} free on this device. Documents remain in private app storage until you export or delete them.",
+                11, R.color.qp_muted, false
+            ).apply { setPadding(0, dp(4), 0, 0) })
+            storage.addView(storageContent)
+            column.addView(storage, linearParams().apply { topMargin = dp(10) })
+
+            val searchRow = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+            }
+            val search = EditText(this).apply {
+                hint = "Search this folder"
+                maxLines = 1
+                setSingleLine(true)
+                setText(librarySearchQuery)
+            }
+            searchRow.addView(search, LinearLayout.LayoutParams(0, dp(48), 1f))
+            searchRow.addView(button("Search", false).apply {
+                setOnClickListener {
+                    librarySearchQuery = search.text.toString().trim()
+                    showFiles()
+                }
+            }, LinearLayout.LayoutParams(-2, dp(48)).apply { marginStart = dp(8) })
+            searchRow.addView(button("Clear", false).apply {
+                setOnClickListener { librarySearchQuery = ""; showFiles() }
+            }, LinearLayout.LayoutParams(-2, dp(48)).apply { marginStart = dp(6) })
+            column.addView(searchRow, linearParams().apply { topMargin = dp(12) })
+        }
+
         val actions = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
         val importButton = button("Import files", false)
         val folderButton = button("Import folder", false)
@@ -873,7 +1032,7 @@ class MainActivity : AppCompatActivity() {
         ), LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
         if (path.isNotEmpty()) {
             val up = button("Up", false)
-            crumb.addView(up, LinearLayout.LayoutParams(-2, dp(40)))
+            crumb.addView(up, LinearLayout.LayoutParams(-2, dp(48)))
             up.setOnClickListener {
                 if (isPicker) pickerPath = parent(pickerPath) else folderPath = parent(folderPath)
                 refreshLibrary()
@@ -888,7 +1047,9 @@ class MainActivity : AppCompatActivity() {
         }
 
         val folder = try { store.folder(path) } catch (_: Exception) { store.root }
-        val entries = store.list(folder)
+        val entries = store.list(folder).filter {
+            isPicker || librarySearchQuery.isBlank() || it.name.contains(librarySearchQuery, ignoreCase = true)
+        }
         val selectedHere = entries.filter { !it.isDirectory && selectedFilePaths.contains(it.canonicalPath) }
         val chooserSelection = if (isPicker && fileChooserAllowsMultiple) selectedChooserFiles() else emptyList()
         if (isPicker && fileChooserAllowsMultiple) {
@@ -904,7 +1065,7 @@ class MainActivity : AppCompatActivity() {
                 isEnabled = validSelection
                 alpha = if (validSelection) 1f else 0.45f
                 setOnClickListener { chooseFiles(chooserSelection) }
-            }, LinearLayout.LayoutParams(0, dp(44), 1f))
+            }, LinearLayout.LayoutParams(0, dp(48), 1f))
             selectionActions.addView(button("Clear", false).apply {
                 isEnabled = chooserSelection.isNotEmpty()
                 setOnClickListener { chooserSelectedFilePaths.clear(); refreshLibrary() }
@@ -942,7 +1103,7 @@ class MainActivity : AppCompatActivity() {
             }, LinearLayout.LayoutParams(0, dp(44), 1f).apply { marginStart = dp(8) })
             selectionContent.addView(selectionActions, linearParams().apply { topMargin = dp(8) })
             selectionContent.addView(text(
-                if (supportedBatch) "Creates one combined PDF. For separately reviewable print files, use Select multiple files after scanning a shop QR code."
+                if (supportedBatch) "Creates one image-based PDF. Searchable text and vector quality may be lost. For separately reviewable print files, use Select multiple files after scanning a shop QR code."
                 else "Select 2–20 PDF/JPG/PNG files, each up to 20 MB and 100 MB total, to combine them into one PDF.",
                 11, R.color.qp_muted, false
             ).apply { setPadding(0, dp(7), 0, 0) })
@@ -953,6 +1114,7 @@ class MainActivity : AppCompatActivity() {
             val empty = card()
             empty.addView(text(
                 if (isPicker) "No printable files here. Import a document or open another folder."
+                else if (librarySearchQuery.isNotBlank()) "No files or folders match “$librarySearchQuery” in this folder."
                 else "No documents here yet. Scan paper pages, import files or create a folder to get started.",
                 14, R.color.qp_muted, false
             ).apply { setPadding(dp(18), dp(22), dp(18), dp(22)) })
@@ -992,7 +1154,7 @@ class MainActivity : AppCompatActivity() {
                 contentDescription = "Select " + file.name
                 setOnCheckedChangeListener { _, checked -> setChooserFileSelected(file, checked) }
             }
-            row.addView(selected, LinearLayout.LayoutParams(dp(42), dp(44)))
+            row.addView(selected, LinearLayout.LayoutParams(dp(48), dp(44)))
         } else if (isPicker && !file.isDirectory) {
             row.addView(button("Select", true).apply {
                 minWidth = dp(72)
@@ -1088,10 +1250,7 @@ class MainActivity : AppCompatActivity() {
                 }
                 "Export" -> { exportFile = file; exportOne.launch(file.name) }
                 "Export folder" -> { exportFolder = file; exportTree.launch(null) }
-                "Move to folder" -> nameDialog("Destination folder path", file.parentFile?.let { store.pathOf(it) }.orEmpty()) { path ->
-                    try { store.move(file, path); selectedFilePaths.remove(file.canonicalPath); showFiles() }
-                    catch (e: Exception) { toast("Move failed: ${message(e)}") }
-                }
+                "Move to folder" -> showMoveDestinationPicker(file)
                 "Move earlier" -> { try { store.reorder(file, -1); showFiles() } catch (e: Exception) { toast("Reorder failed: ${message(e)}") } }
                 "Move later" -> { try { store.reorder(file, 1); showFiles() } catch (e: Exception) { toast("Reorder failed: ${message(e)}") } }
                 "Share" -> shareDocument(file)
@@ -1107,6 +1266,36 @@ class MainActivity : AppCompatActivity() {
             true
         }
         menu.show()
+    }
+
+    private fun showMoveDestinationPicker(file: File) {
+        val sourcePath = runCatching { store.pathOf(file) }.getOrDefault("")
+        val currentParent = file.parentFile?.let { store.pathOf(it) }.orEmpty()
+        val destinations = mutableListOf("")
+        store.root.walkTopDown()
+            .filter { it.isDirectory && it.canonicalPath != store.root.canonicalPath }
+            .take(MAX_TREE_FILES)
+            .forEach { directory ->
+                val path = runCatching { store.pathOf(directory) }.getOrNull() ?: return@forEach
+                if (path != currentParent &&
+                    !(file.isDirectory && (path == sourcePath || path.startsWith("$sourcePath/")))) {
+                    destinations.add(path)
+                }
+            }
+        val labels = destinations.map { if (it.isBlank()) "My files" else "My files / " + it.replace("/", " / ") }
+        MaterialAlertDialogBuilder(this)
+            .setTitle("Move to folder")
+            .setItems(labels.toTypedArray()) { _, index ->
+                try {
+                    store.move(file, destinations[index])
+                    selectedFilePaths.remove(file.canonicalPath)
+                    showFiles()
+                } catch (e: Exception) {
+                    toast("Move failed: ${message(e)}")
+                }
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
     }
 
     private fun exportSelected(files: List<File>) {
@@ -1169,7 +1358,7 @@ class MainActivity : AppCompatActivity() {
         scroll.addView(column)
         column.addView(text(file.name, 17, R.color.qp_text, true))
         column.addView(text(
-            "Preview pages, rotate them, change their order or remove unwanted pages. Save creates a new PDF; your original stays unchanged.",
+            "Preview pages, rotate them, change their order or remove unwanted pages. Save creates a new image-based PDF; searchable text, vector artwork and some fine detail may be lost. Your original stays unchanged.",
             13, R.color.qp_muted, false
         ).apply { setPadding(0, dp(5), 0, dp(14)) })
         column.addView(button("Save edited copy", true).apply {
@@ -1307,37 +1496,47 @@ class MainActivity : AppCompatActivity() {
     private fun ensureWebView(): WebView {
         webView?.let { return it }
         val view = WebView(this)
-        val trustedPage = Uri.parse(portalUrl ?: BuildConfig.SERVICE_BASE_URL)
+        // Never trust the QR-selected route as a credential-sharing origin.
+        // The bridge is pinned to the configured service origin for this build.
+        val trustedPage = Uri.parse(BuildConfig.SERVICE_BASE_URL)
         val trustedOrigin = "${trustedPage.scheme}://${trustedPage.authority}"
-        if (trustedPage.scheme in setOf("https", "http") &&
+        if (trustedPage.scheme in setOf("https", "http") && trustedPage.host != null &&
             WebViewFeature.isFeatureSupported(WebViewFeature.WEB_MESSAGE_LISTENER)) {
             WebViewCompat.addWebMessageListener(
                 view,
                 "SmartPrintNative",
                 setOf(trustedOrigin)
             ) { _, message, sourceOrigin, isMainFrame, replyProxy ->
-                // Only the trusted top-level shop page may request a customer token.
-                // Third-party frames and all other messages receive no credentials.
+                // Only the fixed configured origin and the top-level document may use this bridge.
                 if (isMainFrame &&
                     sourceOrigin.scheme == trustedPage.scheme &&
                     sourceOrigin.host.equals(trustedPage.host, true) &&
-                    sourceOrigin.port == trustedPage.port &&
-                    message.data == "getCustomerAccessToken") {
+                    sourceOrigin.port == trustedPage.port) {
                     Thread {
-                        val token = try {
-                            var auth = customerAccountStore.read()
-                            if (auth != null) {
-                                if (CustomerAccountClient.accessTokenIsExpired(auth)) {
-                                    auth = CustomerAccountClient.refresh(BuildConfig.SERVICE_BASE_URL, auth)
-                                    customerAccountStore.save(auth)
+                        val response = try {
+                            val parts = message.data.orEmpty().split("|", limit = 3)
+                            when {
+                                message.data == "getCustomerAccessToken" -> {
+                                    var auth = customerAccountStore.read()
+                                    if (auth != null && CustomerAccountClient.accessTokenIsExpired(auth)) {
+                                        auth = CustomerAccountClient.refresh(BuildConfig.SERVICE_BASE_URL, auth)
+                                        customerAccountStore.save(auth)
+                                    }
+                                    auth?.accessToken.orEmpty()
                                 }
-                                auth.accessToken
-                            } else ""
-                        } catch (_: Exception) {
-                            ""
-                        }
+                                parts.size == 2 && parts[0] == "getCustomerPrintSession" && isActiveStationCode(parts[1]) ->
+                                    customerPrintSessionStore.read(parts[1]).orEmpty()
+                                parts.size == 3 && parts[0] == "saveCustomerPrintSession" && isActiveStationCode(parts[1]) -> {
+                                    customerPrintSessionStore.save(parts[1], parts[2]); "OK"
+                                }
+                                parts.size == 2 && parts[0] == "clearCustomerPrintSession" && isActiveStationCode(parts[1]) -> {
+                                    customerPrintSessionStore.clear(parts[1]); "OK"
+                                }
+                                else -> ""
+                            }
+                        } catch (_: Exception) { "" }
                         runOnUiThread {
-                            if (!isFinishing && !isDestroyed) replyProxy.postMessage(token)
+                            if (!isFinishing && !isDestroyed) replyProxy.postMessage(response)
                         }
                     }.start()
                 }
@@ -1401,6 +1600,11 @@ class MainActivity : AppCompatActivity() {
         return view
     }
 
+    private fun isActiveStationCode(candidate: String): Boolean {
+        val activeCode = portalUrl?.let { Uri.parse(it).lastPathSegment } ?: return false
+        return candidate.matches(Regex("^[A-Za-z0-9_-]{32}$")) && candidate == activeCode
+    }
+
     private fun allowedAgentUpload(uri: Uri): Boolean =
         LocalAgentUploadPolicy.allows(uri.scheme.orEmpty(), uri.host.orEmpty(), uri.port, uri.path.orEmpty())
 
@@ -1411,6 +1615,16 @@ class MainActivity : AppCompatActivity() {
             uri.host.equals(portalHost, true) &&
             LocalAgentUploadPolicy.isPrivateIpv4Host(uri.host.orEmpty())
 
+    private fun switchShop() {
+        if (portalUrl == null) { scanQr(); return }
+        MaterialAlertDialogBuilder(this)
+            .setTitle("Switch print shop?")
+            .setMessage("Your current shop session and uploaded jobs will be kept. Scan the next shop's official QR code to connect to it.")
+            .setNegativeButton("Stay here", null)
+            .setPositiveButton("Scan another shop") { _, _ -> scanQr() }
+            .show()
+    }
+
     private fun scanQr() {
         navigation.menu.findItem(SCAN_PRINT).isChecked = true
         scannerLauncher.launch(Intent(this, QrScannerActivity::class.java))
@@ -1420,10 +1634,7 @@ class MainActivity : AppCompatActivity() {
         val options = GmsDocumentScannerOptions.Builder()
             .setGalleryImportAllowed(true)
             .setPageLimit(50)
-            .setResultFormats(
-                GmsDocumentScannerOptions.RESULT_FORMAT_PDF,
-                GmsDocumentScannerOptions.RESULT_FORMAT_JPEG
-            )
+            .setResultFormats(GmsDocumentScannerOptions.RESULT_FORMAT_PDF)
             .setScannerMode(GmsDocumentScannerOptions.SCANNER_MODE_FULL)
             .build()
         GmsDocumentScanning.getClient(options)
@@ -1447,12 +1658,7 @@ class MainActivity : AppCompatActivity() {
                 input.use { store.importFile(it, "Scanned document.pdf", targetPath) }
                 saved++
             }
-            scan.getPages().orEmpty().forEachIndexed { index, page ->
-                val input = contentResolver.openInputStream(page.getImageUri()) ?: error("Scanned page ${index + 1} is unavailable.")
-                input.use { store.importFile(it, "Page ${(index + 1).toString().padStart(2, '0')}.jpg", targetPath) }
-                saved++
-            }
-            require(saved > 0) { "The scanner returned no pages." }
+            require(saved > 0) { "The scanner did not return a PDF." }
         } catch (error: Exception) {
             runCatching { store.delete(folder) }
             throw error
@@ -1474,6 +1680,11 @@ class MainActivity : AppCompatActivity() {
             .setPositiveButton("Continue") { _, _ ->
                 portalHost = link.host
                 portalUrl = link.url
+                getSharedPreferences("smartprint.customer.last-shop", MODE_PRIVATE).edit()
+                    .putString("portalUrl", link.url)
+                    .putString("portalHost", link.host)
+                    .apply()
+                toolbar.menu.findItem(SWITCH_SHOP)?.isVisible = true
                 ensureWebView().loadUrl(link.url)
                 showPrint()
             }.show()
@@ -1690,13 +1901,15 @@ class MainActivity : AppCompatActivity() {
     }
     private fun text(value: String, size: Int, color: Int, bold: Boolean) = TextView(this).apply {
         text = value
-        textSize = size.toFloat()
+        textSize = maxOf(size, 12).toFloat()
         setTextColor(getColor(color))
         if (bold) setTypeface(typeface, android.graphics.Typeface.BOLD)
     }
     private fun button(value: String, primary: Boolean) = MaterialButton(this).apply {
         text = value
         isAllCaps = false
+        minHeight = dp(48)
+        minWidth = dp(48)
         cornerRadius = dp(12)
         if (primary) {
             backgroundTintList = android.content.res.ColorStateList.valueOf(getColor(R.color.qp_primary))

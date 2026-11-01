@@ -12,9 +12,9 @@ SmartPrint by QuantaEdge (QRtoPrint) is a multi-tenant SaaS platform for QR-init
 - Route customer print payments to the shop's own payment account. Route Smart Print SaaS subscription payments to the platform owner. These are separate financial flows.
 - Deliver a premium, coherent, accessible UI across customer PWA, shop desktop/web, platform administration, and the Windows agent.
 
-## Preferred domain
+## Deployment origin
 
-thinkwithsujeet.in is the preferred domain zone. The application has one public origin, configured per deployment in PUBLIC_BASE_URL. The customer portal, shop portal, platform administration, API and station QR links all use that origin; do not add separate API or admin hostnames for this application.
+The application has one public origin, configured per deployment in PUBLIC_BASE_URL. The customer portal, shop portal, platform administration, API and station QR links all use that origin; do not add separate API or admin hostnames for this application. Set IMAGE_NAMESPACE in .env to the GHCR namespace that owns the API and portal images. Both values are required; neither has a baked-in production default.
 
 ## Repository status
 
@@ -35,16 +35,16 @@ CI builds the Android debug APK and runs JVM unit tests. A real-device matrix (Q
 
 ## Public SmartPrint downloads
 
-The public landing page links to the latest SmartPrint release:
+The public landing page reads the latest stable GitHub release metadata and renders a download link only when that exact release contains the corresponding binary:
 
-- Windows shop installer: `https://github.com/Manav326/QRtoPrint/releases/latest/download/SmartPrint-Windows-Setup.exe`
-- Android customer APK (once production signing is configured): `https://github.com/Manav326/QRtoPrint/releases/latest/download/SmartPrint-Android.apk`
+- Windows shop installer: resolved from the latest published stable release metadata.
+- Android customer APK: resolved from the latest published stable release metadata when that release contains the verified signed APK.
 
-The Windows installer is intentionally unsigned for the interim beta channel. The website marks it **Available** with a compact status tag and a short note that Windows may show a first-run security prompt. Some managed Windows 11 devices may block unsigned installers. Do not advise customers to disable Windows security protections. The Android card stays **Coming soon** until the production signing keystore is configured.
+The Windows installer is intentionally unsigned for the interim beta channel. The website marks it **Available** only when the latest stable release actually contains the installer, and shows a short note that Windows may display a first-run security prompt. Some managed Windows 11 devices may block unsigned installers. Do not advise customers to disable Windows security protections. The Android card stays **Coming soon** until the production signing keystore is configured.
 
-Every stable release is retained indefinitely as its own versioned GitHub Release; publishing a newer version updates the `latest` pointer but does not delete or replace older versions. The release workflow uploads to a draft, verifies the enabled assets and SHA-256 manifest, and refuses to overwrite a published tag. Windows can publish independently. Android is included only after all four Android signing secrets are configured.
+Every stable release is retained indefinitely as its own versioned GitHub Release; publishing a newer version updates the `latest` pointer but does not delete or replace older versions. The release workflow always verifies and publishes the Windows installer. When all four Android signing secrets are present, it also builds and verifies the signed Android APK and publishes it in the same release. If none of the Android secrets are configured, Android is skipped and its website card remains unavailable; a partially configured signing setup fails the release.
 
-Create a version tag (for example, `v0.1.0`) after the current main-branch CI passes and the public origin is confirmed. The `.github/workflows/release.yml` workflow builds the guided Windows installer and publishes it unsigned with a SHA-256 checksum. When Android credentials are present, it also builds, verifies and publishes the signed Android APK.
+Create a version tag (for example, `v0.1.0`) only after the intended changes are merged to `main`, main-branch CI passes, and `SMARTPRINT_PUBLIC_BASE_URL` matches the deployment. Configure all four Android signing secrets before expecting the signed APK to appear. The `.github/workflows/release.yml` workflow always builds and publishes the guided Windows installer; it also builds, verifies and publishes the Android APK when signing is configured.
 
 Required GitHub Actions repository secrets for Android (not required for the Windows beta):
 
@@ -59,7 +59,7 @@ Keep the Android keystore and its passwords backed up securely. Every Android up
 
 The future Microsoft Store channel will be a separate MSIX package, not the current EXE installer. Microsoft Store submissions of accepted MSIX packages are re-signed by Microsoft. Before Store submission, the current Windows Service and firewall installation architecture must be validated against MSIX packaging and restricted capabilities.
 
-The release workflow builds the Android app against the repository variable `SMARTPRINT_PUBLIC_BASE_URL`. It defaults to `https://qr-test.paintpulp.com`; set that GitHub Actions variable to the current canonical public HTTPS origin before building a release for a different deployment.
+The release and CI workflows require the repository Actions variable `SMARTPRINT_PUBLIC_BASE_URL`. No production host fallback is embedded in the Gradle build or installer scripts; a missing or invalid value fails validation before packaging.
 
 The guided **SmartPrint Desktop** installer does not ask the shop owner for a pairing code, API URL, or PowerShell command. After sign-in, the desktop requests a short-lived, single-use enrollment authorization from the authenticated shop API and sends it directly to the local Windows Agent over its ACL-protected, remote-client-rejecting named pipe. The Agent stores its device secret with DPAPI LocalMachine protection. For an existing pairing, startup checks the saved identity; an owner-revoked computer is not silently re-enrolled and requires one explicit **Reconnect this computer** action after the server confirms revocation. A computer paired to another active shop cannot be transferred until that shop revokes it. The separate **Agent-only/manual deployment** workflow below still uses a one-time code from **Shop workspace → Print Agent → Generate pairing code**; that code expires after 10 minutes. The guided installer stages Agent files in a version/build-specific folder, switches the Windows service only after the new files are present, and restores the previous executable path and running state if the new service cannot be started. Superseded Agent files are removed only after the replacement service and firewall rule are confirmed healthy.
 
@@ -88,7 +88,7 @@ This is the recommended local end-to-end test path. The phone opens the same pub
     .\scripts\docker-up-local.ps1
 
    The helper reuses .env.local and the existing database/document volumes. It asks once for the tunnel connector token and stores it in the Git-ignored .secrets/cloudflare/tunnel-token file. The token is not printed or placed in the environment file.
-4. The only application URL is PUBLIC_BASE_URL in .env.local. It defaults to the value in .env.example. Change it in .env.local to use another HTTPS origin. The portal and API share this hostname; Nginx routes /api and /health internally to the API.
+4. The only application URL is PUBLIC_BASE_URL in .env.local. The helper asks for it when no value is configured; it has no domain fallback. The portal and API share this hostname; Nginx routes /api and /health internally to the API.
 
 The phone opens that Cloudflare HTTPS URL. When the customer taps Check shop Wi-Fi, Chrome may request Local Network Access permission for the shop computer. No certificate installation is required. Cloud-assisted upload remains available when local access is unavailable.
 
@@ -146,7 +146,7 @@ The script prompts securely for a password and creates or repairs only a tenantl
 
 Install the Windows Agent on the computer physically connected to the printer. Pair it with PUBLIC_BASE_URL and install the Windows Service using the exact same customer origin. The Agent learns later URL changes from the authenticated heartbeat and updates its API destination and local CORS allowlist without re-pairing.
 
-During a hostname migration, keep the previous hostname routed to the portal until Agents have updated. If older Agent installations were paired to api.thinkwithsujeet.in, temporarily add that hostname as a second Cloudflare Published application route to http://portal:80 so their existing heartbeat can receive the new canonical URL. Keep the old print hostname routed too if old QR codes are still in use.
+During a hostname migration, keep every previously configured public or legacy Agent API hostname routed to the portal until Agents have updated and old QR codes are no longer in circulation. Legacy Agent heartbeats must continue to reach the API long enough to receive the new canonical URL.
 
 Direct LAN uploads still require the phone and Agent to share the shop LAN, the browser's Local Network Access permission when requested, and the Agent's Private-profile firewall rule on TCP 17842. Cloud-assisted upload remains the fallback.
 

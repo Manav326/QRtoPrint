@@ -39,6 +39,31 @@ function Set-EnvValue([string[]]$Lines, [string]$Name, [string]$Value) {
     if (-not $found) { $result += "$prefix$Value" }
     return ,([string[]]$result)
 }
+function Get-RepositoryImageNamespace {
+    if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
+        throw "Set IMAGE_NAMESPACE in .env or install Git so the repository GHCR namespace can be derived."
+    }
+    $remoteOutput = @(& git -C $repoRoot remote get-url origin 2>$null)
+    if ($LASTEXITCODE -ne 0 -or $remoteOutput.Count -eq 0) {
+        throw "Set IMAGE_NAMESPACE in .env or configure the repository origin remote."
+    }
+    $remoteUrl = [string]$remoteOutput[0]
+    $marker = "github.com/"
+    $markerIndex = $remoteUrl.IndexOf($marker, [StringComparison]::OrdinalIgnoreCase)
+    if ($markerIndex -lt 0) {
+        $marker = "github.com:"
+        $markerIndex = $remoteUrl.IndexOf($marker, [StringComparison]::OrdinalIgnoreCase)
+    }
+    if ($markerIndex -lt 0) {
+        throw "Set IMAGE_NAMESPACE in .env; the repository origin must identify a GitHub owner."
+    }
+    $repositoryPath = $remoteUrl.Substring($markerIndex + $marker.Length).TrimEnd("/")
+    $segments = $repositoryPath.Split("/")
+    if ($segments.Length -lt 2 -or [string]::IsNullOrWhiteSpace($segments[0])) {
+        throw "Set IMAGE_NAMESPACE in .env; the repository origin must include an owner and repository."
+    }
+    return ("ghcr.io/" + $segments[0].ToLowerInvariant())
+}
 function Get-CloudflareToken {
     $secure = Read-Host "Paste the Cloudflare Tunnel token (hidden input)" -AsSecureString
     $pointer = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($secure)
@@ -51,7 +76,9 @@ function Save-Utf8NoBom([string]$Path, [string[]]$Lines) {
 
 $exampleLines = @(Get-Content -LiteralPath $exampleEnvPath)
 $defaultBaseUrl = Get-EnvValue $exampleLines "PUBLIC_BASE_URL"
-if ([string]::IsNullOrWhiteSpace($defaultBaseUrl)) { throw ".env.example must define PUBLIC_BASE_URL." }
+if (-not [string]::IsNullOrWhiteSpace($PublicBaseUrl)) {
+    $defaultBaseUrl = $PublicBaseUrl.Trim()
+}
 
 if (-not (Get-Command docker -ErrorAction SilentlyContinue)) { throw "Install and start Docker Desktop first." }
 docker compose version | Out-Null
@@ -60,15 +87,24 @@ docker info | Out-Null
 if ($LASTEXITCODE -ne 0) { throw "Docker Desktop engine is not running." }
 
 if (-not (Test-Path -LiteralPath $envPath)) {
+    if ([string]::IsNullOrWhiteSpace($defaultBaseUrl)) {
+        $defaultBaseUrl = (Read-Host "Enter the canonical public HTTPS origin for this deployment").Trim()
+    }
+    if ([string]::IsNullOrWhiteSpace($defaultBaseUrl)) {
+        throw "A PUBLIC_BASE_URL is required; no deployment hostname is assumed."
+    }
+    $imageNamespace = Get-RepositoryImageNamespace
     $lines = @(
         "POSTGRES_DB=qrtoprint",
         "POSTGRES_USER=qrtoprint",
         "POSTGRES_PASSWORD=$(New-RandomHex 32)",
         "AUTH_SIGNING_KEY=$(New-RandomBase64 48)",
         "DOCUMENTS_ENCRYPTION_KEY=$(New-RandomBase64 32)",
-        "PUBLIC_BASE_URL=$defaultBaseUrl"
+        "PUBLIC_BASE_URL=$defaultBaseUrl",
+        "IMAGE_NAMESPACE=$imageNamespace",
+        "IMAGE_TAG=latest"
     )
-    Write-Host "Created .env with fresh production secrets." -ForegroundColor Green
+    Write-Host "Created .env with fresh production secrets and repository-derived GHCR namespace." -ForegroundColor Green
 } else {
     $lines = @(Get-Content -LiteralPath $envPath)
     if (($lines -join "`n") -match "CHANGE_ME") { throw "The existing .env contains example secrets. Replace them before deployment." }
@@ -81,13 +117,23 @@ if (-not (Test-Path -LiteralPath $envPath)) {
 }
 
 $currentBaseUrl = Get-EnvValue $lines "PUBLIC_BASE_URL"
-if ([string]::IsNullOrWhiteSpace($currentBaseUrl)) { $currentBaseUrl = $defaultBaseUrl }
 if (-not [string]::IsNullOrWhiteSpace($PublicBaseUrl)) { $currentBaseUrl = $PublicBaseUrl.Trim() }
+if ([string]::IsNullOrWhiteSpace($currentBaseUrl)) {
+    $currentBaseUrl = (Read-Host "Enter the canonical public HTTPS origin for this deployment").Trim()
+}
+if ([string]::IsNullOrWhiteSpace($currentBaseUrl)) {
+    throw "A PUBLIC_BASE_URL is required; no deployment hostname is assumed."
+}
+$imageNamespace = Get-EnvValue $lines "IMAGE_NAMESPACE"
+if ([string]::IsNullOrWhiteSpace($imageNamespace) -or $imageNamespace -match 'your-github-owner') {
+    $imageNamespace = Get-RepositoryImageNamespace
+}
+$lines = Set-EnvValue $lines "IMAGE_NAMESPACE" $imageNamespace
 $uri = $null
 if (-not [Uri]::TryCreate($currentBaseUrl, [UriKind]::Absolute, [ref]$uri) -or
     $uri.Scheme -ne "https" -or $uri.AbsolutePath -ne "/" -or
     $uri.Query -or $uri.Fragment -or $uri.UserInfo) {
-    throw "PUBLIC_BASE_URL must be an HTTPS origin only, e.g. https://print.thinkwithsujeet.in."
+    throw "PUBLIC_BASE_URL must be a canonical HTTPS origin without a path, query string, fragment, or credentials."
 }
 $currentBaseUrl = $uri.GetLeftPart([UriPartial]::Authority).TrimEnd("/")
 $lines = Set-EnvValue $lines "PUBLIC_BASE_URL" $currentBaseUrl

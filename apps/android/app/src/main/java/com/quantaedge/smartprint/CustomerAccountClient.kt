@@ -37,7 +37,14 @@ data class CustomerPrintHistoryItem(
     val currency: String,
     val quotedAmountMinor: Long,
     val createdUtc: String,
-    val shopName: String
+    val shopName: String,
+    val originalFileName: String,
+    val paidAmountMinor: Long,
+    val refundedAmountMinor: Long,
+    val paymentStatus: String,
+    val paymentMethod: String,
+    val rejectedPageNumbersJson: String,
+    val outputCompletedUtc: String?
 )
 
 /**
@@ -182,7 +189,14 @@ object CustomerAccountClient {
                 currency = job.optString("currency", "INR"),
                 quotedAmountMinor = job.optLong("quotedAmountMinor"),
                 createdUtc = job.optString("createdUtc"),
-                shopName = job.optString("shopName")
+                shopName = job.optString("shopName"),
+                originalFileName = job.optString("originalFileName").takeUnless { it.isBlank() || it == "null" } ?: "Print document",
+                paidAmountMinor = job.optLong("paidAmountMinor"),
+                refundedAmountMinor = job.optLong("refundedAmountMinor"),
+                paymentStatus = job.optString("paymentStatus").takeUnless { it.isBlank() || it == "null" }.orEmpty(),
+                paymentMethod = job.optString("paymentMethod").takeUnless { it.isBlank() || it == "null" }.orEmpty(),
+                rejectedPageNumbersJson = job.optString("rejectedPageNumbersJson", "[]"),
+                outputCompletedUtc = job.optString("outputCompletedUtc").takeUnless { it.isBlank() || it == "null" }
             )
         }
     }

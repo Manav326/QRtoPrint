@@ -3,9 +3,14 @@ plugins {
     id("org.jetbrains.kotlin.android")
 }
 val smartPrintServiceUrl = providers.gradleProperty("smartPrintServiceUrl")
-    .orElse("https://print.thinkwithsujeet.in")
-    .get()
-    .trimEnd('/')
+    .orElse(providers.environmentVariable("SMARTPRINT_PUBLIC_BASE_URL"))
+    .orNull
+    ?.trim()
+    ?.trimEnd('/')
+    ?.takeIf { it.isNotBlank() }
+    ?: throw GradleException(
+        "Set smartPrintServiceUrl or SMARTPRINT_PUBLIC_BASE_URL to the configured public HTTPS origin."
+    )
 val smartPrintVersionCode = providers.gradleProperty("smartPrintVersionCode").orNull?.toIntOrNull() ?: 1
 val smartPrintVersionName = providers.gradleProperty("smartPrintVersionName").orElse("0.1.0").get()
 val releaseKeystorePath = providers.environmentVariable("ANDROID_SIGNING_KEYSTORE_FILE").orNull

@@ -18,7 +18,7 @@ services:
       start_period: 10s
 
   api:
-    image: ghcr.io/manav326/qrtoprint-api:${IMAGE_TAG:-latest}
+    image: ${IMAGE_NAMESPACE:?Set IMAGE_NAMESPACE in .env}/qrtoprint-api:${IMAGE_TAG:-latest}
     build:
       context: .
       dockerfile: Dockerfile.api
@@ -48,7 +48,7 @@ services:
       start_period: 45s
 
   portal:
-    image: ghcr.io/manav326/qrtoprint-portal:${IMAGE_TAG:-latest}
+    image: ${IMAGE_NAMESPACE:?Set IMAGE_NAMESPACE in .env}/qrtoprint-portal:${IMAGE_TAG:-latest}
     build:
       context: .
       dockerfile: apps/portal/Dockerfile

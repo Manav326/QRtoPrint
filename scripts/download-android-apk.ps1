@@ -11,16 +11,29 @@ if (Get-Variable -Name PSNativeCommandUseErrorActionPreference -ErrorAction Sile
     $PSNativeCommandUseErrorActionPreference = $false
 }
 
-$repository = 'Manav326/QRtoPrint'
 $workflow = 'ci.yml'
 $artifactName = 'qrtoprint-android-debug'
 
 if (-not (Get-Command gh -ErrorAction SilentlyContinue)) {
     throw 'GitHub CLI (gh) was not found. Install it from https://cli.github.com/ and retry.'
 }
-$authOutput = @(& gh auth status --hostname github.com 2>&1)
+$authOutput = @(& gh auth status 2>&1)
 if ($LASTEXITCODE -ne 0) {
     throw ("Sign in to GitHub CLI first by running 'gh auth login'. Details: {0}" -f ($authOutput -join ' '))
+}
+$repositoryOutput = @(& gh repo view --json nameWithOwner 2>&1)
+if ($LASTEXITCODE -ne 0) {
+    throw ("Could not identify the GitHub repository from the current directory. Run this script from the repository checkout. Details: {0}" -f ($repositoryOutput -join ' '))
+}
+try {
+    $repositoryInfo = (($repositoryOutput | ForEach-Object { [string]$_ }) -join [Environment]::NewLine) | ConvertFrom-Json -ErrorAction Stop
+    $repository = [string]$repositoryInfo.nameWithOwner
+} catch {
+    throw ("GitHub CLI returned invalid repository metadata: {0}" -f ($repositoryOutput -join ' '))
+}
+$repositoryParts = $repository.Split('/')
+if ($repositoryParts.Count -ne 2 -or $repositoryParts[0].Length -eq 0 -or $repositoryParts[1].Length -eq 0) {
+    throw 'GitHub CLI returned an invalid repository name.'
 }
 if ($Install -and -not (Get-Command adb -ErrorAction SilentlyContinue)) {
     throw 'ADB was not found. Install Android platform-tools and add adb to PATH.'

@@ -7,6 +7,7 @@ import {
 import QRCode from "react-qr-code";
 import AuthScreen from "./AuthScreen";
 import PublicLandingPage from "./PublicLandingPage";
+import { getReleaseAssetUrl, usePublicRelease } from "./release-metadata";
 import PlatformAdminConsole from "./PlatformAdminConsole";
 import {
   ApiError, isPlatformAdminSession, acceptCustomerQuote, approveShopPrintJob, assignShopPrintJobPrinter, calculateCustomerQuote, getShopCustomerHistory, getShopCustomers, getShopReportSummary,
@@ -14,7 +15,7 @@ import {
   createAgentEnrollmentCode, createCustomerSession, createPrinter, createStation,
   downloadShopDocument, getCustomerJobStatus, getShopAgentDevices, getShopJobEvents, getShopPrinters, getShopPrintJobsPage, loadShopData,
   logout, readStoredTokens, rejectShopPrintJob, rejectShopPayment, revokeAgentDevice,
-  reportCustomerUpiPayment, renewCustomerPrintSession, resumeCustomerSession, rotateStationCode, startCustomerPayment, storeTokens,
+  reportCustomerUpiPayment, renewCustomerPrintSession, getNativeCustomerPrintSession, saveNativeCustomerPrintSession, clearNativeCustomerPrintSession, resumeCustomerSession, rotateStationCode, startCustomerPayment, storeTokens,
   updatePrinterActive, updateShopPaymentSettings, updateShopPricing,
   updateShopProfile, updateStationEnabled, uploadCustomerDocument, uploadCustomerDocumentLocally,
   verifyShopPayment, retryShopPdfExport, recordShopPrintRefund, previewShopPrintRefund, type CustomerPayment, type ShopPayment, type ShopPaymentSettings, type ShopRefund,
@@ -1482,17 +1483,34 @@ function StationsPage({ stations, profile, onAdd, onToggle, onGenerate }: {
   const [printingStationId,setPrintingStationId]=useState<string|null>(null);
   useEffect(()=>{
     if(!printingStationId)return;
+    let cancelled=false;
     const onAfterPrint=()=>setPrintingStationId(null);
+    const printSelectedStation=async()=>{
+      const card=document.getElementById(`qr-station-${printingStationId}`);
+      const images=Array.from(card?.querySelectorAll("img")??[]);
+      await Promise.all(images.map(async image=>{
+        if(image.complete)return;
+        try{await image.decode();}catch{/* A missing optional logo must not block printing. */}
+      }));
+      await document.fonts.ready.catch(()=>undefined);
+      await new Promise<void>(resolve=>{
+        window.requestAnimationFrame(()=>window.requestAnimationFrame(()=>resolve()));
+      });
+      if(!cancelled)window.print();
+    };
     window.addEventListener("afterprint",onAfterPrint);
-    const timer=window.setTimeout(()=>window.print(),120);
-    return ()=>{window.clearTimeout(timer);window.removeEventListener("afterprint",onAfterPrint);};
+    void printSelectedStation();
+    return ()=>{
+      cancelled=true;
+      window.removeEventListener("afterprint",onAfterPrint);
+    };
   },[printingStationId]);
 
   return (
     <section className="panel collection-panel">
       <div className="collection-header"><div><h2>Customer QR stations</h2><p>Each station has a permanent public link. Every scan creates a separate short-lived customer session.</p></div><button className="primary-button" onClick={onAdd}><Plus size={16}/> Create station</button></div>
       {stations.length===0 ? <EmptyModule icon={<QrCode size={24}/>} title="Your first QR station starts here" text="Create a station for a counter or printer. The QR code identifies the station; every scan gets a separate expiring customer session." actionLabel="Create QR station" onAction={onAdd}/> :
-      <div className="station-grid">{stations.map(station=><article className={printingStationId===station.id?"station-card print-active":"station-card"} key={station.id}><div className="station-card-head"><div className="station-icon"><QrCode size={18}/></div><div className="station-head-copy"><strong>{station.displayName}</strong><span>{station.isEnabled?"Accepting new sessions":"Disabled"}</span></div><Status label={station.isEnabled?"Enabled":"Disabled"} tone={station.isEnabled?"green":"slate"}/></div>
+      <div className="station-grid">{stations.map(station=><article id={`qr-station-${station.id}`} className={printingStationId===station.id?"station-card print-active":"station-card"} key={station.id}><div className="station-card-head"><div className="station-icon"><QrCode size={18}/></div><div className="station-head-copy"><strong>{station.displayName}</strong><span>{station.isEnabled?"Accepting new sessions":"Disabled"}</span></div><Status label={station.isEnabled?"Enabled":"Disabled"} tone={station.isEnabled?"green":"slate"}/></div>
         <div className="station-qr-area">{station.publicUrl ? <div className="qr-paper">
           <div className="qr-shop-brand">{profile?.logoUrl?<img src={profile.logoUrl} alt={profile.displayName+" logo"}/>:<span className="qr-shop-initial">{(profile?.displayName||"S").slice(0,1).toUpperCase()}</span>}<div><strong>{profile?.displayName||station.displayName}</strong><small>DOCUMENT PRINTING STATION</small></div></div>
           <div className="qr-code-frame"><QRCode value={station.publicUrl} size={172} level="H" fgColor="#101c35" bgColor="#ffffff"/></div>
@@ -1526,6 +1544,8 @@ function PrintAgentPage({agents,enrollmentCode,busy,onGenerate,onRevoke,desktop,
   onConnect:()=>void;
   onReconnectAfterRevocation:()=>void;
 }) {
+  const { release, releasesPageUrl } = usePublicRelease();
+  const windowsInstallerUrl = getReleaseAssetUrl(release, "SmartPrint-Windows-Setup.exe");
   const connected = Boolean(localAgentStatus?.paired && agents.some(agent =>
     !agent.revokedUtc && agent.id === localAgentStatus.agentDeviceId
   ));
@@ -1580,7 +1600,11 @@ function PrintAgentPage({agents,enrollmentCode,busy,onGenerate,onRevoke,desktop,
       </div>}
       <div className="agent-command-panel">
         <div><span>GUIDED WINDOWS INSTALLER</span><strong>Download and run SmartPrint Windows Setup on the shop computer.</strong><small>Run setup as administrator, enter the one-time pairing code in its wizard, and let it install and start the background service.</small></div>
-        <a className="secondary-button" href="https://github.com/Manav326/QRtoPrint/releases/latest/download/SmartPrint-Windows-Setup.exe"><Monitor size={14}/> Download Windows installer</a>
+        {windowsInstallerUrl
+          ? <a className="secondary-button" href={windowsInstallerUrl} rel="noopener noreferrer"><Monitor size={14}/> Download Windows installer</a>
+          : releasesPageUrl
+            ? <a className="secondary-button" href={releasesPageUrl} rel="noopener noreferrer"><Monitor size={14}/> View available releases</a>
+            : <span className="subtle-button" aria-disabled="true">Windows installer not published</span>}
       </div>
       <div className="agent-security-note"><ShieldCheck size={16}/><span>The pairing code expires after 10 minutes. The agent secret is returned only once and stored on the Windows machine using DPAPI LocalMachine encryption. Revoke a computer here if it is replaced or lost.</span></div>
       <div className="agent-generate-row"><span>Pairing codes are single use. Generating a new one does not revoke already paired computers.</span><button className="primary-button" disabled={busy} onClick={onGenerate}>{busy?<span className="button-spinner"/>:<><Plus size={15}/> Generate pairing code</>}</button></div>
@@ -2209,23 +2233,33 @@ function CustomerEntry({publicCode}:{publicCode:string}) {
   useEffect(()=>{setLocalReady(false);},[result?.localAgent?.agentDeviceId]);
   useEffect(()=>{
     let mounted=true;
-    const storedToken=sessionStorage.getItem("qrtoprint.customer-session");
-    const resume=storedToken
-      ? resumeCustomerSession(storedToken,publicCode).catch(exception=>{
-          if (exception instanceof ApiError && exception.status === 401) {
+    const stationKey=`qrtoprint.customer-session:${publicCode}`;
+    const restore=async()=>{
+      const storedToken=sessionStorage.getItem(stationKey) ||
+        await getNativeCustomerPrintSession(publicCode);
+      let existing:Awaited<ReturnType<typeof createCustomerSession>>|null=null;
+      if(storedToken){
+        try {
+          existing=await resumeCustomerSession(storedToken,publicCode);
+        } catch(exception) {
+          if(exception instanceof ApiError&&exception.status===401){
+            sessionStorage.removeItem(stationKey);
             sessionStorage.removeItem("qrtoprint.customer-session");
-            return null;
-          }
-          throw exception;
-        })
-      : Promise.resolve(null);
-
-    void resume.then(existing=>existing??createCustomerSession(publicCode)).then(value=>{
-      if(mounted){
-        setResult(value);
-        sessionStorage.setItem("qrtoprint.customer-session",value.sessionToken);
+            await clearNativeCustomerPrintSession(publicCode);
+          } else throw exception;
+        }
       }
-    }).catch(exception=>{
+      const value=existing??await createCustomerSession(publicCode);
+      // Wait for native encrypted persistence before presenting the connected session.
+      // In a regular browser the bridge is absent and this safely becomes a no-op.
+      const storedNatively=await saveNativeCustomerPrintSession(publicCode,value.sessionToken);
+      if(!mounted)return;
+      setResult(value);
+      if(storedNatively)sessionStorage.removeItem(stationKey);
+      else sessionStorage.setItem(stationKey,value.sessionToken);
+      sessionStorage.removeItem("qrtoprint.customer-session");
+    };
+    void restore().catch(exception=>{
       if(mounted)setError(exception instanceof Error?exception.message:"This QR station is unavailable.");
     }).finally(()=>{if(mounted)setLoading(false);});
     return ()=>{mounted=false;};
@@ -2274,7 +2308,7 @@ function CustomerEntry({publicCode}:{publicCode:string}) {
         <div className="entry-printer-card"><div className="entry-printer-icon"><Printer size={20}/></div><div><strong>{result.printer?.displayName||"Shop print counter"}</strong><span>{result.printer?result.printer.manufacturer+" · "+result.printer.model:"The shop will select a printer for your job."}</span></div><Status label={result.printer?.status||"Session ready"} tone="blue"/></div>
         <div className="entry-session-note"><ShieldCheck size={16}/><span>This session expires at {new Date(result.expiresUtc).toLocaleTimeString([], {hour:"2-digit",minute:"2-digit"})}. Your document access stays limited to this shop session.</span></div>
         <CustomerLocalConnection localAgent={result.localAgent} onReady={setLocalReady}/>
-        <CustomerPrintFlow sessionToken={result.sessionToken} paymentOptions={result.paymentOptions} localAgent={result.localAgent} localReady={localReady}/>
+        <CustomerPrintFlow publicCode={publicCode} sessionToken={result.sessionToken} paymentOptions={result.paymentOptions} localAgent={result.localAgent} localReady={localReady}/>
       </>:null}
     </main>
     <footer className="customer-entry-footer">© 2026 SmartPrint by QuantaEdge · Secure customer printing</footer>
@@ -2479,7 +2513,7 @@ function CustomerLocalConnection({localAgent,onReady}:{localAgent:CustomerLocalA
 
 
 type StoredCustomerDraft = {
-  sessionToken: string;
+  sessionMarker: string;
   uploaded: UploadedPrintJob;
   uploadedBatch?: UploadedPrintJob[];
   uploadedFileFingerprints?: string[];
@@ -2491,19 +2525,20 @@ function customerFileFingerprint(file:File):string {
   return `${file.name}\u0000${file.size}\u0000${file.lastModified}\u0000${file.type}`;
 }
 
-function readStoredCustomerDraft(sessionToken:string):StoredCustomerDraft|null {
+function readStoredCustomerDraft(publicCode:string,sessionToken:string):StoredCustomerDraft|null {
   try {
-    const raw=sessionStorage.getItem("qrtoprint.customer-active-job");
+    const raw=localStorage.getItem(`qrtoprint.customer-active-job:${publicCode}`);
     if(!raw)return null;
     const draft=JSON.parse(raw) as StoredCustomerDraft;
-    return draft.sessionToken===sessionToken&&(draft.uploaded?.job?.id||draft.uploadedBatch?.length)?draft:null;
+    return draft.sessionMarker===sessionToken.slice(-16)&&
+      (draft.uploaded?.job?.id||draft.uploadedBatch?.length)?draft:null;
   } catch {
     return null;
   }
 }
 
-function CustomerPrintFlow({sessionToken,paymentOptions,localAgent,localReady}:{sessionToken:string;paymentOptions:{upiEnabled:boolean;upiId?:string|null;payeeName?:string|null;cashEnabled:boolean};localAgent:CustomerLocalAgent|null;localReady:boolean}) {
-  const initialDraft=readStoredCustomerDraft(sessionToken);
+function CustomerPrintFlow({publicCode,sessionToken,paymentOptions,localAgent,localReady}:{publicCode:string;sessionToken:string;paymentOptions:{upiEnabled:boolean;upiId?:string|null;payeeName?:string|null;cashEnabled:boolean};localAgent:CustomerLocalAgent|null;localReady:boolean}) {
+  const initialDraft=readStoredCustomerDraft(publicCode,sessionToken);
   const [files,setFiles]=useState<File[]>([]);
   const [selectedFileIndex,setSelectedFileIndex]=useState(0);
   const file=files[selectedFileIndex]??null;
@@ -2515,6 +2550,7 @@ function CustomerPrintFlow({sessionToken,paymentOptions,localAgent,localReady}:{
   const [uploadProgress,setUploadProgress]=useState<{completed:number;total:number}|null>(null);
   const [quote,setQuote]=useState<PrintQuoteResult|null>(()=>initialDraft?.quote??null);
   const [jobStatus,setJobStatus]=useState<CustomerJobStatus|null>(null);
+  const [batchStatuses,setBatchStatuses]=useState<Record<string,CustomerJobStatus>>({});
   const [payment,setPayment]=useState<CustomerPayment|null>(null);
   const [paymentReference,setPaymentReference]=useState("");
   const [paymentMethod,setPaymentMethod]=useState<"UPI"|"CASH">(paymentOptions.upiEnabled?"UPI":"CASH");
@@ -2536,19 +2572,61 @@ function CustomerPrintFlow({sessionToken,paymentOptions,localAgent,localReady}:{
   },[paymentOptions.upiEnabled,paymentOptions.cashEnabled]);
 
   useEffect(()=>{
+    const storageKey=`qrtoprint.customer-active-job:${publicCode}`;
     if(!uploaded&&uploadedBatch.length===0){
-      sessionStorage.removeItem("qrtoprint.customer-active-job");
+      localStorage.removeItem(storageKey);
       return;
     }
-    sessionStorage.setItem("qrtoprint.customer-active-job",JSON.stringify({
-      sessionToken,
+    // Store only job metadata, never the bearer session capability.
+    localStorage.setItem(storageKey,JSON.stringify({
+      sessionMarker:sessionToken.slice(-16),
       uploaded: uploaded??uploadedBatch[0],
       uploadedBatch,
       uploadedFileFingerprints,
       batchId,
       quote
     } satisfies StoredCustomerDraft));
-  },[sessionToken,uploaded,uploadedBatch,uploadedFileFingerprints,batchId,quote]);
+  },[publicCode,sessionToken,uploaded,uploadedBatch,uploadedFileFingerprints,batchId,quote]);
+
+  const batchItemsForStatus=uploadedBatch.length?uploadedBatch:(uploaded?[uploaded]:[]);
+  const batchStatusKey=batchItemsForStatus.map(item=>item.job.id).join("|");
+
+  useEffect(()=>{
+    const items=uploadedBatch.length?uploadedBatch:(uploaded?[uploaded]:[]);
+    if(items.length===0)return;
+    let active=true;
+    let refreshing=false;
+    const refreshAll=async()=>{
+      if(refreshing)return;
+      refreshing=true;
+      try{
+        const results=await Promise.all(items.map(async item=>{
+          try{return [item.job.id,await getCustomerJobStatus(sessionToken,item.job.id)] as const;}
+          catch{return null;}
+        }));
+        if(!active)return;
+        const fresh=results.reduce<Record<string,Awaited<ReturnType<typeof getCustomerJobStatus>>>>((map,item)=>{
+          if(item)map[item[0]]=item[1];
+          return map;
+        },{});
+        setBatchStatuses(current=>({...current,...fresh}));
+        const selectedId=uploaded?.job.id;
+        if(selectedId&&fresh[selectedId]){
+          const selected=fresh[selectedId];
+          if(selected.status==="Uploaded"||selected.status==="UPLOADED"||selected.status==="AWAITING_CONFIGURATION"){
+            setJobStatus(null);
+            setPayment(null);
+          } else {
+            setJobStatus(selected);
+            setPayment(selected.payment??null);
+          }
+        }
+      } finally {refreshing=false;}
+    };
+    void refreshAll();
+    const timer=window.setInterval(()=>void refreshAll(),30000);
+    return ()=>{active=false;window.clearInterval(timer);};
+  },[sessionToken,batchStatusKey,uploaded?.job.id]);
 
   useEffect(()=>{
     if(!uploaded)return;
@@ -2761,13 +2839,17 @@ function CustomerPrintFlow({sessionToken,paymentOptions,localAgent,localReady}:{
     {files.length>0&&uploadMode==="CLOUD"&&localAgent&&<small className="customer-upload-local-note">Cloud-assisted fallback: files are uploaded encrypted to the API before being transferred to the shop computer.</small>}
     {uploaded&&<>
       {uploadedBatch.length>1&&<div className="customer-uploaded-batch">
-        <div className="customer-uploaded-batch-head"><strong>Batch review · {uploadedBatch.length} files</strong><span>Each document is quoted, paid and managed independently.</span></div>
+        <div className="customer-uploaded-batch-head"><strong>Batch review · {uploadedBatch.length} files</strong><span>Each file's shop status refreshes automatically.</span></div>
         {uploadedBatch.map((item,index)=><button type="button" key={item.job.id} className={uploaded.job.id===item.job.id?"customer-uploaded-batch-item active":"customer-uploaded-batch-item"} onClick={()=>selectUploadedFile(item)}>
           <span className="batch-file-index">{index+1}</span><span className="batch-file-copy"><strong>{item.document.originalFileName}</strong><small>{formatBytes(item.document.sizeBytes)} · {item.job.pageCount} {item.job.pageCount===1?"page":"pages"}</small></span>
-          <Status label={item.job.id===uploaded.job.id?"Selected":"Uploaded"} tone={item.job.id===uploaded.job.id?"blue":"green"}/>
+          <Status
+            label={prettyStatus(batchStatuses[item.job.id]?.status??item.job.status??"UPLOADED")}
+            tone={["REJECTED","PAYMENT_REJECTED"].includes((batchStatuses[item.job.id]?.status??item.job.status??"").toUpperCase())?"red":
+              ["COMPLETED","PAID_AUTHORISED","AWAITING_PAYMENT"].includes((batchStatuses[item.job.id]?.status??item.job.status??"").toUpperCase())?"green":"amber"}
+          />
         </button>)}
       </div>}
-      <div className="uploaded-document-card"><div className="uploaded-document-icon"><FileText size={18}/></div><div><strong>{uploaded.document.originalFileName}</strong><span>{uploaded.job.pageCount} {uploaded.job.pageCount===1?"page":"pages"} · {formatBytes(uploaded.document.sizeBytes)} · Validated</span></div><Status label="Uploaded" tone="green"/></div>
+      <div className="uploaded-document-card"><div className="uploaded-document-icon"><FileText size={18}/></div><div><strong>{uploaded.document.originalFileName}</strong><span>{uploaded.job.pageCount} {uploaded.job.pageCount===1?"page":"pages"} · {formatBytes(uploaded.document.sizeBytes)} · Validated</span></div><Status label={prettyStatus(batchStatuses[uploaded.job.id]?.status??jobStatus?.status??uploaded.job.status??"UPLOADED")} tone={["REJECTED","PAYMENT_REJECTED"].includes((batchStatuses[uploaded.job.id]?.status??jobStatus?.status??uploaded.job.status??"").toUpperCase())?"red":["COMPLETED","PAID_AUTHORISED","AWAITING_PAYMENT"].includes((batchStatuses[uploaded.job.id]?.status??jobStatus?.status??uploaded.job.status??"").toUpperCase())?"green":"amber"}/></div>
       {!quote&&!jobStatus&&<>
         <div className="customer-flow-heading customer-config-heading"><div><span>STEP 2</span><h2>Choose print settings</h2></div></div>
         <div className="customer-option-group"><span>Colour mode</span><div className="customer-choice-row"><button className={colourMode==="Mono"?"customer-choice selected":"customer-choice"} onClick={()=>{setColourMode("Mono");setQuote(null);}}>Black & white</button><button className={colourMode==="Colour"?"customer-choice selected":"customer-choice"} onClick={()=>{setColourMode("Colour");setQuote(null);}}>Colour</button></div></div>

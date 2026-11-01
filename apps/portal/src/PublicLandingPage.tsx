@@ -2,9 +2,15 @@ import {
   ArrowRight, ArrowUpRight, Check, ChevronRight, Cloud, FileCheck2, FileText,
   LockKeyhole, Monitor, Printer, QrCode, ShieldCheck, Smartphone, Store, Wifi
 } from "lucide-react";
+import { getReleaseAssetUrl, usePublicRelease } from "./release-metadata";
 import "./public-landing.css";
 
 export default function PublicLandingPage() {
+  const { release, state: releaseState, releasesPageUrl } = usePublicRelease();
+  const windowsDownloadUrl = getReleaseAssetUrl(release, "SmartPrint-Windows-Setup.exe");
+  const androidDownloadUrl = getReleaseAssetUrl(release, "SmartPrint-Android.apk");
+  const releaseLink = release?.html_url || releasesPageUrl;
+
   return (
     <div className="sp-public">
       <header className="sp-public-header">
@@ -138,23 +144,39 @@ export default function PublicLandingPage() {
               <div className="sp-download-icon sp-windows-icon"><Monitor size={25}/></div>
               <div className="sp-download-label-row">
                 <div className="sp-download-platform">FOR SHOP OWNERS · WINDOWS 10/11</div>
-                <span className="sp-download-tag sp-download-tag-available">Available</span>
+                <span className={windowsDownloadUrl ? "sp-download-tag sp-download-tag-available" : "sp-download-tag sp-download-tag-coming"}>
+                  {releaseState === "loading" ? "Checking" : releaseState === "error" ? "Check release" : windowsDownloadUrl ? "Available" : "Coming soon"}
+                </span>
               </div>
               <h3>SmartPrint for Windows</h3><p>Install the shop Agent on the computer connected to your printers. The guided setup will help connect it to your shop workspace.</p>
-              <a className="sp-download-link-button sp-download-button" href="https://github.com/Manav326/QRtoPrint/releases/latest/download/SmartPrint-Windows-Setup.exe">Download Windows installer <ArrowRight size={16}/></a>
-              <small className="sp-download-note">Windows x64 · Guided installation · SmartPrint official release</small>
-              <p className="sp-download-security-note">Windows may show an Unknown Publisher or SmartScreen prompt. Setup requires administrator approval, and some managed Windows 11 devices may block unsigned installers.</p>
+              {windowsDownloadUrl
+                ? <a className="sp-download-link-button sp-download-button" href={windowsDownloadUrl} rel="noopener noreferrer">Download Windows installer <ArrowRight size={16}/></a>
+                : releaseLink
+                  ? <a className="sp-download-unavailable sp-download-button" href={releaseLink} rel="noopener noreferrer">View release status <ArrowUpRight size={15}/></a>
+                  : <span className="sp-download-unavailable sp-download-button" aria-disabled="true">Windows release not published</span>}
+              <small className="sp-download-note">Windows x64 · Guided installation · Official stable release</small>
+              <p className="sp-download-security-note">The interim Windows beta installer is unsigned. Windows may show an Unknown Publisher or SmartScreen prompt; some managed devices may block unsigned installers.</p>
             </article>
             <article className="sp-download-card">
               <div className="sp-download-icon sp-android-icon"><Smartphone size={25}/></div>
               <div className="sp-download-label-row">
                 <div className="sp-download-platform">FOR CUSTOMERS · ANDROID</div>
-                <span className="sp-download-tag sp-download-tag-coming">Coming soon</span>
+                <span className={androidDownloadUrl ? "sp-download-tag sp-download-tag-available" : "sp-download-tag sp-download-tag-coming"}>
+                  {releaseState === "loading" ? "Checking" : releaseState === "error" ? "Check release" : androidDownloadUrl ? "Available" : "Coming soon"}
+                </span>
               </div>
               <h3>SmartPrint for Android</h3><p>Scan shop QR codes, organise documents in your library and send files through the connected SmartPrint customer journey.</p>
-              <span className="sp-download-unavailable sp-download-button" aria-disabled="true">Android app coming soon</span>
-              <small className="sp-download-note">Android 8.0 or later · APK distribution</small>
-              <p className="sp-release-pending">The production APK will be published after the Android release signing setup is ready.</p>
+              {androidDownloadUrl
+                ? <a className="sp-download-link-button sp-download-button" href={androidDownloadUrl} rel="noopener noreferrer">Download signed Android APK <ArrowRight size={16}/></a>
+                : releaseLink
+                  ? <a className="sp-download-unavailable sp-download-button" href={releaseLink} rel="noopener noreferrer">View release status <ArrowUpRight size={15}/></a>
+                  : <span className="sp-download-unavailable sp-download-button" aria-disabled="true">Signed APK not published</span>}
+              <small className="sp-download-note">Android 8.0 or later · Production-signed APK</small>
+              <p className="sp-release-pending">{androidDownloadUrl
+                ? `Latest stable release: ${release?.tag_name ?? "published"}.`
+                : releaseState === "error"
+                  ? "Release information is temporarily unavailable. Check the official release page."
+                  : "The signed APK download appears automatically when the latest stable release contains the verified Android package."}</p>
             </article>
           </div>
           <p className="sp-download-footnote"><ShieldCheck size={14}/> Download only from the official SmartPrint website or its linked GitHub release.</p>
