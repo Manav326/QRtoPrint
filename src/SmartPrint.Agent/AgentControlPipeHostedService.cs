@@ -1,9 +1,12 @@
+using System.ComponentModel;
 using System.IO.Pipes;
+using System.Runtime.InteropServices;
 using System.Security.AccessControl;
 using System.Security.Cryptography;
 using System.Security.Principal;
 using System.Text;
 using System.Text.Json;
+using Microsoft.Win32.SafeHandles;
 using Microsoft.Extensions.Hosting;
 
 namespace SmartPrint.Agent;
@@ -54,6 +57,29 @@ public sealed class AgentControlPipeHostedService(
         }
     }
 
+    private const uint PipeAccessDuplex = 0x00000003;
+    private const uint FileFlagOverlapped = 0x40000000;
+    private const uint PipeRejectRemoteClients = 0x00000008;
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct NativeSecurityAttributes
+    {
+        public int Length;
+        public IntPtr SecurityDescriptor;
+        public int InheritHandle;
+    }
+
+    [DllImport("kernel32.dll", EntryPoint = "CreateNamedPipeW", CharSet = CharSet.Unicode, SetLastError = true)]
+    private static extern SafePipeHandle CreateNamedPipeNative(
+        string pipeName,
+        uint openMode,
+        uint pipeMode,
+        uint maxInstances,
+        uint outBufferSize,
+        uint inBufferSize,
+        uint defaultTimeout,
+        ref NativeSecurityAttributes securityAttributes);
+
     private static NamedPipeServerStream CreatePipe()
     {
         var security = new PipeSecurity();
@@ -71,15 +97,48 @@ public sealed class AgentControlPipeHostedService(
             PipeAccessRights.FullControl,
             AccessControlType.Allow));
 
-        return NamedPipeServerStreamAcl.Create(
-            PipeName,
-            PipeDirection.InOut,
-            maxNumberOfServerInstances: 1,
-            PipeTransmissionMode.Byte,
-            PipeOptions.Asynchronous,
-            inBufferSize: 4096,
-            outBufferSize: 4096,
-            pipeSecurity: security);
+        // .NET's public PipeOptions do not expose PIPE_REJECT_REMOTE_CLIENTS.
+        // Create the local-only pipe with the same explicit ACL, then wrap the
+        // overlapped handle so WaitForConnectionAsync remains non-blocking.
+        var descriptor = security.GetSecurityDescriptorBinaryForm();
+        var descriptorPointer = Marshal.AllocHGlobal(descriptor.Length);
+        try
+        {
+            Marshal.Copy(descriptor, 0, descriptorPointer, descriptor.Length);
+            var attributes = new NativeSecurityAttributes
+            {
+                Length = Marshal.SizeOf<NativeSecurityAttributes>(),
+                SecurityDescriptor = descriptorPointer,
+                InheritHandle = 0
+            };
+
+            var handle = CreateNamedPipeNative(
+                PipePath,
+                PipeAccessDuplex | FileFlagOverlapped,
+                PipeRejectRemoteClients,
+                maxInstances: 1,
+                outBufferSize: 4096,
+                inBufferSize: 4096,
+                defaultTimeout: 0,
+                ref attributes);
+
+            if (handle.IsInvalid)
+            {
+                var error = Marshal.GetLastWin32Error();
+                handle.Dispose();
+                throw new Win32Exception(error, "Could not create the local SmartPrint control pipe.");
+            }
+
+            return new NamedPipeServerStream(
+                PipeDirection.InOut,
+                isAsync: true,
+                isConnected: false,
+                handle);
+        }
+        finally
+        {
+            Marshal.FreeHGlobal(descriptorPointer);
+        }
     }
 
     private async Task HandleConnectionAsync(NamedPipeServerStream pipe, CancellationToken ct)
