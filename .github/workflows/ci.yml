@@ -171,7 +171,7 @@ jobs:
         run: |
           choco install innosetup --no-progress -y
           New-Item -ItemType Directory -Force -Path artifacts/agent-installer | Out-Null
-          & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" /DSmartPrintPublicUrl="https://qr-test.paintpulp.com" /DSmartPrintVersion="ci" /DSmartPrintBuildId="\${{ github.run_number }}" scripts/build-windows-installer.iss
+          & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" /DSmartPrintPublicUrl="https://qr-test.paintpulp.com" /DSmartPrintVersion="ci" /DSmartPrintBuildId="${{ github.run_number }}" scripts/build-windows-installer.iss
           if ($LASTEXITCODE -ne 0) { throw "Inno Setup compilation failed." }
       - name: Verify Windows beta installer is unsigned
         shell: pwsh
@@ -198,10 +198,10 @@ jobs:
     steps:
       - name: Require every split Windows build to pass
         env:
-          API_RESULT: \${{ needs.api_dotnet.result }}
-          AGENT_RESULT: \${{ needs.agent_dotnet.result }}
-          DESKTOP_RESULT: \${{ needs.windows_desktop.result }}
-          INSTALLER_RESULT: \${{ needs.windows_installer.result }}
+          API_RESULT: ${{ needs.api_dotnet.result }}
+          AGENT_RESULT: ${{ needs.agent_dotnet.result }}
+          DESKTOP_RESULT: ${{ needs.windows_desktop.result }}
+          INSTALLER_RESULT: ${{ needs.windows_installer.result }}
         run: |
           set -euo pipefail
           printf 'API: %s\nAgent: %s\nDesktop: %s\nInstaller: %s\n' \
