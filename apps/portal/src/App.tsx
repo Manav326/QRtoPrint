@@ -2564,7 +2564,8 @@ function CustomerPrintFlow({publicCode,sessionToken,paymentOptions,localAgent,lo
     } satisfies StoredCustomerDraft));
   },[publicCode,sessionToken,uploaded,uploadedBatch,uploadedFileFingerprints,batchId,quote]);
 
-  const batchStatusKey=(uploadedBatch.length?uploadedBatch:[uploaded].filter(Boolean) as UploadedPrintJob[]).map(item=>item.job.id).join("|");
+  const batchItemsForStatus=uploadedBatch.length?uploadedBatch:(uploaded?[uploaded]:[]);
+  const batchStatusKey=batchItemsForStatus.map(item=>item.job.id).join("|");
 
   useEffect(()=>{
     const items=uploadedBatch.length?uploadedBatch:(uploaded?[uploaded]:[]);
@@ -2821,7 +2822,7 @@ function CustomerPrintFlow({publicCode,sessionToken,paymentOptions,localAgent,lo
           />
         </button>)}
       </div>}
-      <div className="uploaded-document-card"><div className="uploaded-document-icon"><FileText size={18}/></div><div><strong>{uploaded.document.originalFileName}</strong><span>{uploaded.job.pageCount} {uploaded.job.pageCount===1?"page":"pages"} · {formatBytes(uploaded.document.sizeBytes)} · Validated</span></div><Status label="Uploaded" tone="green"/></div>
+      <div className="uploaded-document-card"><div className="uploaded-document-icon"><FileText size={18}/></div><div><strong>{uploaded.document.originalFileName}</strong><span>{uploaded.job.pageCount} {uploaded.job.pageCount===1?"page":"pages"} · {formatBytes(uploaded.document.sizeBytes)} · Validated</span></div><Status label={prettyStatus(batchStatuses[uploaded.job.id]?.status??jobStatus?.status??uploaded.job.status??"UPLOADED")} tone={["REJECTED","PAYMENT_REJECTED"].includes((batchStatuses[uploaded.job.id]?.status??jobStatus?.status??uploaded.job.status??"").toUpperCase())?"red":["COMPLETED","PAID_AUTHORISED","AWAITING_PAYMENT"].includes((batchStatuses[uploaded.job.id]?.status??jobStatus?.status??uploaded.job.status??"").toUpperCase())?"green":"amber"}/></div>
       {!quote&&!jobStatus&&<>
         <div className="customer-flow-heading customer-config-heading"><div><span>STEP 2</span><h2>Choose print settings</h2></div></div>
         <div className="customer-option-group"><span>Colour mode</span><div className="customer-choice-row"><button className={colourMode==="Mono"?"customer-choice selected":"customer-choice"} onClick={()=>{setColourMode("Mono");setQuote(null);}}>Black & white</button><button className={colourMode==="Colour"?"customer-choice selected":"customer-choice"} onClick={()=>{setColourMode("Colour");setQuote(null);}}>Colour</button></div></div>
