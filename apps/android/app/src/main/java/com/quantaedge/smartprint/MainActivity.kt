@@ -994,7 +994,7 @@ class MainActivity : AppCompatActivity() {
         }, LinearLayout.LayoutParams(0, dp(38), 1f).apply { marginStart = dp(7) })
         column.addView(actions, linearParams().apply { bottomMargin = dp(12) })
 
-        val selectedHere = visibleEntries.filter { !it.isDirectory && selectedFilePaths.contains(it.canonicalPath) }
+        val selectedHere = selectedFilePaths.mapNotNull { runCatching { File(it).canonicalFile }.getOrNull() }.filter { it.isFile && it.exists() }
         val chooserSelection = if (isPicker && fileChooserAllowsMultiple) selectedChooserFiles() else emptyList()
         if (isPicker && fileChooserAllowsMultiple) {
             val selectionRow = LinearLayout(this).apply {
@@ -1437,6 +1437,19 @@ class MainActivity : AppCompatActivity() {
                     if (position < pages.lastIndex) {
                         val value = pages.removeAt(position)
                         pages.add(position + 1, value)
+                        renderPdfEditor(file, pages)
+                    }
+                }
+            }, LinearLayout.LayoutParams(-2, dp(34)).apply { marginStart = dp(4) })
+            actions.addView(button("×", false).apply {
+                minHeight = dp(34)
+                minWidth = dp(34)
+                contentDescription = "Remove page ${position + 1}"
+                setOnClickListener {
+                    if (pages.size <= 1) {
+                        toast("A PDF needs one page.")
+                    } else {
+                        pages.removeAt(position)
                         renderPdfEditor(file, pages)
                     }
                 }
