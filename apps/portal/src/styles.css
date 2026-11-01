@@ -1912,3 +1912,33 @@ html[data-theme="light"] .sp-public :where(.sp-public-footer>span,.sp-download-p
 html[data-theme="light"] .auth-screen {
   --auth-muted: #5f6b80;
 }
+
+
+/* Small-screen shell header: status telemetry must never squeeze breadcrumbs
+   or split the current route title into single-character lines. */
+@media (max-width: 600px) {
+  .app-shell .topbar { gap: 8px; }
+  .app-shell .topbar-left { flex: 1 1 auto; min-width: 0; overflow: hidden; }
+  .app-shell .breadcrumb {
+    flex: 1 1 auto;
+    min-width: 0;
+    gap: 6px;
+    white-space: nowrap;
+    overflow: hidden;
+  }
+  .app-shell .breadcrumb > span:first-child {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .app-shell .breadcrumb strong {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .app-shell .topbar-actions { flex: 0 0 auto; min-width: 0; }
+  .app-shell .service-status-row,
+  .app-shell .topbar-product-tag { display: none !important; }
+}
