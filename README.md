@@ -35,10 +35,12 @@ CI builds the Android debug APK and runs JVM unit tests. A real-device matrix (Q
 
 ## Public SmartPrint downloads
 
-The public landing page uses the latest GitHub Release assets:
+The public landing page reserves the latest-release URLs for signed customer packages:
 
 - Windows shop installer: `https://github.com/Manav326/QRtoPrint/releases/latest/download/SmartPrint-Windows-Setup.exe`
 - Android customer APK: `https://github.com/Manav326/QRtoPrint/releases/latest/download/SmartPrint-Android.apk`
+
+The download cards stay disabled until the first signed release is published. Every stable release is retained indefinitely as its own versioned GitHub Release; publishing a newer version updates the `latest` pointer but does not delete or replace older versions. The release workflow uploads to a draft, verifies the assets and SHA-256 manifest, and refuses to overwrite a published tag.
 
 Create a version tag (for example, `v0.1.0`) after configuring the release credentials below. The `.github/workflows/release.yml` workflow builds the guided Windows installer, signs it, builds and signs the Android release APK, verifies both outputs and publishes them with a SHA-256 checksum file.
 
