@@ -5968,6 +5968,15 @@ publicApi.MapPost("/batches/{batchId:guid}/payments", async (
         .OrderBy(item => item.CreatedUtc)
         .ToList();
     if (jobs.Count == 0) return Results.NotFound();
+    if (jobs.Count > PrintBatchCapacityRules.MaximumFiles)
+    {
+        await transaction.RollbackAsync(ct);
+        return Results.Conflict(new
+        {
+            code = "batch_file_limit_exceeded",
+            message = $"This batch contains more than {PrintBatchCapacityRules.MaximumFiles} files and cannot be checked out safely. Contact the shop before attempting another payment."
+        });
+    }
 
     var pendingLocalUpload = await db.LocalPrintUploadTickets.AsNoTracking().AnyAsync(ticket =>
         ticket.TenantId == session.TenantId &&
