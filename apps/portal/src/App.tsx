@@ -80,6 +80,8 @@ function ShopConsole({ tokens, onSignOut }: { tokens: AuthTokens; onSignOut: () 
   const [queueApiOffset, setQueueApiOffset] = useState(0);
   const [queueSearch, setQueueSearch] = useState("");
   const queueSearchGeneration = useRef(0);
+  const queuePageGeneration = useRef(0);
+  const queueFirstPageIds = useRef<Set<string>>(new Set());
   const [agentDevices, setAgentDevices] = useState<AgentDevice[]>([]);
   const [paymentSettings, setPaymentSettings] = useState<ShopPaymentSettings | null>(null);
   const [payments, setPayments] = useState<ShopPayment[]>([]);
@@ -103,6 +105,8 @@ function ShopConsole({ tokens, onSignOut }: { tokens: AuthTokens; onSignOut: () 
 
   async function reload() {
     if (reloadInFlight.current) return;
+    queueSearchGeneration.current++;
+    queuePageGeneration.current++;
     reloadInFlight.current = true;
     setLoading(true);
     setError("");
@@ -113,6 +117,7 @@ function ShopConsole({ tokens, onSignOut }: { tokens: AuthTokens; onSignOut: () 
       setStations(snapshot.stations);
       setPricing(snapshot.pricing);
       setPrintJobs(snapshot.printJobs);
+      queueFirstPageIds.current = new Set(snapshot.printJobs.map(job => job.id));
       setHasMoreQueueJobs(snapshot.printJobs.length === 100);
       setQueueApiOffset(snapshot.printJobs.length);
       setAgentDevices(snapshot.agentDevices);
@@ -140,11 +145,14 @@ function ShopConsole({ tokens, onSignOut }: { tokens: AuthTokens; onSignOut: () 
         getShopPrinters(tokens.accessToken)
       ]);
       setPrinters(latestPrinters);
-      const currentIds = new Set(printJobs.map(job => job.id));
-      const hasNewJobs = latest.some(job => !currentIds.has(job.id));
-      if (hasNewJobs) {
-        // A new record shifts every offset page. Reset to a fresh first page
-        // rather than risking skipped or duplicated older records.
+      const latestIds = new Set(latest.map(job => job.id));
+      const firstPageMembershipChanged = latest.length !== queueFirstPageIds.current.size ||
+        latest.some(job => !queueFirstPageIds.current.has(job.id));
+      if (firstPageMembershipChanged) {
+        // Any insert/removal shifts every offset page. Reset pagination to the
+        // current first page so no older records are skipped or duplicated.
+        queuePageGeneration.current++;
+        queueFirstPageIds.current = latestIds;
         setPrintJobs(latest);
         setQueueApiOffset(latest.length);
         setHasMoreQueueJobs(latest.length === 100);
@@ -165,9 +173,12 @@ function ShopConsole({ tokens, onSignOut }: { tokens: AuthTokens; onSignOut: () 
 
   async function loadOlderQueueJobs() {
     if (loadingOlderQueueJobs || !hasMoreQueueJobs) return;
+    const generation = queuePageGeneration.current;
+    const offset = queueApiOffset;
     setLoadingOlderQueueJobs(true);
     try {
-      const older = await getShopPrintJobsPage(tokens.accessToken, queueApiOffset, 100, queueSearch);
+      const older = await getShopPrintJobsPage(tokens.accessToken, offset, 100, queueSearch);
+      if (generation !== queuePageGeneration.current) return;
       setPrintJobs(current => {
         const knownIds = new Set(current.map(job => job.id));
         const merged = [...current, ...older.filter(job => !knownIds.has(job.id))];
@@ -187,10 +198,12 @@ function ShopConsole({ tokens, onSignOut }: { tokens: AuthTokens; onSignOut: () 
   async function searchPrintQueue(value: string) {
     const normalized = value.trim().slice(0, 120);
     const generation = ++queueSearchGeneration.current;
+    queuePageGeneration.current++;
     setQueueSearch(normalized);
     try {
       const matches = await getShopPrintJobsPage(tokens.accessToken, 0, 100, normalized);
       if (generation !== queueSearchGeneration.current) return;
+      queueFirstPageIds.current = new Set(matches.map(job => job.id));
       setPrintJobs(matches);
       setQueueApiOffset(matches.length);
       setHasMoreQueueJobs(matches.length === 100);
