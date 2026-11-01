@@ -89,7 +89,14 @@ $firewallRuleName = "QRtoPrint Smart Print Agent Local API"
 Get-NetFirewallRule -DisplayName $firewallRuleName -ErrorAction SilentlyContinue | Remove-NetFirewallRule
 New-NetFirewallRule -DisplayName $firewallRuleName -Direction Inbound -Action Allow -Protocol TCP -LocalPort 17842 -Program $resolvedExe -Profile Private -Description "Allows same-private-network devices to reach the QRtoPrint local agent status endpoint." | Out-Null
 
+# Recover automatically from an unexpected process/service failure without requiring the shop owner to restart Windows.
+& sc.exe failure $serviceName reset= 86400 actions= restart/5000/restart/15000/restart/60000 | Out-Null
+if ($LASTEXITCODE -ne 0) { throw "Could not configure automatic QRtoPrint service recovery." }
+& sc.exe failureflag $serviceName 1 | Out-Null
+if ($LASTEXITCODE -ne 0) { throw "Could not enable QRtoPrint service failure recovery." }
+
 Start-Service -Name $serviceName
+(Get-Service -Name $serviceName).WaitForStatus("Running", [TimeSpan]::FromSeconds(30))
 Write-Host "QRtoPrint Smart Print Agent is installed and running." -ForegroundColor Green
 Write-Host "The local status endpoint listens on TCP 17842 for Private network profiles only."
 Write-Host "Use Get-Service $serviceName to inspect the service state."

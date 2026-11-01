@@ -81,8 +81,20 @@ public sealed class LocalAgentApiHostedService(
     ILogger<LocalAgentApiHostedService> logger) : IHostedService, IAsyncDisposable
 {
     private WebApplication? application;
+    private CancellationTokenSource? retryLifetime;
+    private Task? retryTask;
 
-    public async Task StartAsync(CancellationToken cancellationToken)
+    public Task StartAsync(CancellationToken cancellationToken)
+    {
+        if (retryTask is not null)
+            return Task.CompletedTask;
+
+        retryLifetime = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        retryTask = StartWithRetryAsync(retryLifetime.Token);
+        return Task.CompletedTask;
+    }
+
+    private async Task StartWithRetryAsync(CancellationToken cancellationToken)
     {
         if (!configuration.GetValue("Agent:LocalApi:Enabled", true))
         {
@@ -90,6 +102,41 @@ public sealed class LocalAgentApiHostedService(
             return;
         }
 
+        var delay = TimeSpan.FromSeconds(2);
+        while (!cancellationToken.IsCancellationRequested)
+        {
+            try
+            {
+                await StartApplicationAsync(cancellationToken);
+                return;
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                return;
+            }
+            catch (Exception exception)
+            {
+                logger.LogWarning(
+                    exception,
+                    "The local Agent listener could not start. Cloud printing remains available; retrying the LAN listener in {RetrySeconds} seconds.",
+                    delay.TotalSeconds);
+            }
+
+            try
+            {
+                await Task.Delay(delay, cancellationToken);
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                return;
+            }
+
+            delay = TimeSpan.FromSeconds(Math.Min(delay.TotalSeconds * 2, 30));
+        }
+    }
+
+    private async Task StartApplicationAsync(CancellationToken cancellationToken)
+    {
         const int port = LocalNetworkEndpointDiscovery.DefaultPort;
 
         try
@@ -435,7 +482,7 @@ public sealed class LocalAgentApiHostedService(
             state.IsRunning = true;
             logger.LogInformation("Local Agent status endpoint is listening on port {Port}.", port);
         }
-        catch (Exception exception) when (exception is not OperationCanceledException)
+        catch
         {
             state.IsRunning = false;
             if (application is not null)
@@ -443,7 +490,22 @@ public sealed class LocalAgentApiHostedService(
                 await application.DisposeAsync();
                 application = null;
             }
-            logger.LogError(exception, "The Local Agent API could not start. Cloud-assisted printing will continue; LAN discovery is disabled.");
+            throw;
+        }
+    }
+
+    public async Task StopAsync(CancellationToken cancellationToken)
+    {
+        state.IsRunning = false;
+        retryLifetime?.Cancel();
+        if (retryTask is not null)
+            await retryTask;
+
+        if (application is not null)
+        {
+            await application.StopAsync(cancellationToken);
+            await application.DisposeAsync();
+            application = null;
         }
     }
 
@@ -504,10 +566,9 @@ public sealed class LocalAgentApiHostedService(
 
     public async ValueTask DisposeAsync()
     {
-        if (application is not null)
-        {
-            await application.DisposeAsync();
-            application = null;
-        }
+        await StopAsync(CancellationToken.None);
+        retryLifetime?.Dispose();
+        retryLifetime = null;
+        retryTask = null;
     }
 }
