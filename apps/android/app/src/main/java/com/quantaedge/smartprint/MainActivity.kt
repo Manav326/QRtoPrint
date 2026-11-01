@@ -252,16 +252,33 @@ class MainActivity : AppCompatActivity() {
             setTitleTextColor(getColor(R.color.qp_text))
             setBackgroundColor(getColor(R.color.qp_surface))
             elevation = dp(1).toFloat()
-            menu.add(Menu.NONE, PROFILE, Menu.NONE, "Account").apply {
-                setIcon(R.drawable.ic_account)
-                setContentDescription("Account")
-                setTooltipText("SmartPrint account")
-                setShowAsAction(android.view.MenuItem.SHOW_AS_ACTION_ALWAYS)
-                setOnMenuItemClickListener {
-                    showProfile()
-                    true
+            val accountAction = ImageView(this).apply {
+                contentDescription = "Account"
+                setImageResource(R.drawable.ic_account)
+                imageTintList = ColorStateList.valueOf(getColor(R.color.qp_text))
+                scaleType = ImageView.ScaleType.CENTER_INSIDE
+                setPadding(dp(12), dp(12), dp(12), dp(12))
+                val selectableBackground = android.util.TypedValue()
+                if (theme.resolveAttribute(
+                        android.R.attr.selectableItemBackgroundBorderless,
+                        selectableBackground,
+                        true
+                    )
+                ) {
+                    setBackgroundResource(selectableBackground.resourceId)
                 }
+                isClickable = true
+                isFocusable = true
+                setOnClickListener { showProfile() }
             }
+            toolbar.addView(
+                accountAction,
+                androidx.appcompat.widget.Toolbar.LayoutParams(
+                    dp(48),
+                    dp(48),
+                    Gravity.END or Gravity.CENTER_VERTICAL
+                )
+            )
         }
         root.addView(toolbar, LinearLayout.LayoutParams(-1, dp(62)))
         content = FrameLayout(this)
