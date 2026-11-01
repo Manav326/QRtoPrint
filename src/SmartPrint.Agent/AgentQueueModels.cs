@@ -82,8 +82,4 @@ public sealed record AgentSpoolerStatusRequest(int SpoolerJobId, string SpoolerS
 public sealed record WindowsSpoolerJob(int JobId, string DocumentName, string Status, uint StatusFlags, int PagesPrinted, int TotalPages);
 
 public sealed record AgentCloudSpoolerStatusResponse(Guid Id, string Status, bool? DuplicateRequest = null);
-public sealed record AgentLocalUploadStatusResponse(
-    bool Completed,
-    DateTimeOffset ExpiresUtc,
-    bool SafeToDelete = false,
-    DateTimeOffset? DeleteAfterUtc = null);
+public sealed record AgentLocalUploadStatusResponse(bool Completed, DateTimeOffset ExpiresUtc);

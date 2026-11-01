@@ -8,7 +8,7 @@ public static class TenantStatusRules
         var next = nextStatus?.Trim();
         return (current, next) switch
         {
-            ("Active", "Suspended") => true,
+            ("Active", "Suspended" or "Inactive") => true,
             ("Suspended", "Active" or "Inactive") => true,
             _ => false
         };

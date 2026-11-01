@@ -7,16 +7,21 @@ namespace SmartPrint.Api.Services;
 
 public sealed class DocumentRetentionWorker(
     IServiceScopeFactory scopeFactory,
+    IConfiguration configuration,
     ILogger<DocumentRetentionWorker> logger) : BackgroundService
 {
+    private static readonly TimeSpan SweepInterval = TimeSpan.FromHours(24);
+    private readonly int retentionDays = Math.Clamp(
+        configuration.GetValue<int?>("Documents:RetentionDays") ?? 30, 7, 3650);
+
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        var sweepIntervalHours = 24;
-        while (!stoppingToken.IsCancellationRequested)
+        using var timer = new PeriodicTimer(SweepInterval);
+        do
         {
             try
             {
-                sweepIntervalHours = await RunSweepAsync(stoppingToken);
+                await RunSweepAsync(stoppingToken);
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
             {
@@ -26,28 +31,16 @@ public sealed class DocumentRetentionWorker(
             {
                 logger.LogError(exception, "The document retention sweep failed; it will be retried at the next interval.");
             }
-
-            try
-            {
-                await Task.Delay(TimeSpan.FromHours(Math.Clamp(sweepIntervalHours, 1, 168)), stoppingToken);
-            }
-            catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
-            {
-                break;
-            }
-        }
+        } while (await timer.WaitForNextTickAsync(stoppingToken));
     }
 
-    private async Task<int> RunSweepAsync(CancellationToken cancellationToken)
+    private async Task RunSweepAsync(CancellationToken cancellationToken)
     {
         using var scope = scopeFactory.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<SmartPrintDbContext>();
         var storage = scope.ServiceProvider.GetRequiredService<DocumentStorage>();
-        var settings = await db.PlatformOperationalSettings.AsNoTracking()
-            .SingleAsync(item => item.Id == PlatformOperationalSettings.SingletonIdValue, cancellationToken);
         var now = DateTimeOffset.UtcNow;
-        var completedCutoff = now.AddDays(-settings.CloudCompletedDocumentRetentionDays);
-        var abandonedCutoff = now.AddDays(-settings.AbandonedDocumentRetentionDays);
+        var cutoff = now.AddDays(-retentionDays);
         var purgedCount = 0;
 
         for (var batch = 0; batch < 10; batch++)
@@ -58,28 +51,13 @@ public sealed class DocumentRetentionWorker(
                     on new { document.TenantId, PrintJobId = document.PrintJobId }
                     equals new { job.TenantId, PrintJobId = job.Id }
                 let completedUtc = job.OutputConfirmedUtc ?? job.OutputCompletedUtc
-                let hasFinancialHold = db.PrintPayments.Any(payment =>
-                    payment.TenantId == job.TenantId && payment.PrintJobId == job.Id &&
-                    (payment.Status == "AWAITING_CUSTOMER_PAYMENT" ||
-                     payment.Status == "CUSTOMER_REPORTED" ||
-                     payment.Status == "CASH_AWAITING_PAYMENT" ||
-                     ((payment.Status == "VERIFIED" || payment.Status == "PARTIALLY_REFUNDED") &&
-                      payment.RefundedAmountMinor < payment.AmountMinor)))
                 where document.StorageMode == "CLOUD" &&
                       document.PurgedUtc == null &&
-                      ((job.Status == "COMPLETED" && completedUtc != null && completedUtc <= completedCutoff) ||
-                       ((job.Status == "REJECTED" || job.Status == "PAYMENT_REJECTED" || job.Status == "QUOTE_EXPIRED") &&
-                        job.OutputConfirmedUtc == null && job.UpdatedUtc <= abandonedCutoff && !hasFinancialHold))
-                orderby job.UpdatedUtc, document.Id
-                select new
-                {
-                    Document = document,
-                    job.Status,
-                    job.OutputConfirmedUtc,
-                    job.OutputCompletedUtc,
-                    job.UpdatedUtc,
-                    HasFinancialHold = hasFinancialHold
-                })
+                      job.Status == "COMPLETED" &&
+                      completedUtc != null &&
+                      completedUtc <= cutoff
+                orderby completedUtc, document.Id
+                select new { Document = document, job.Status, job.OutputConfirmedUtc, job.OutputCompletedUtc })
                 .Take(100)
                 .ToListAsync(cancellationToken);
 
@@ -91,8 +69,7 @@ public sealed class DocumentRetentionWorker(
                 if (!DocumentRetentionRules.ShouldPurgeCloudDocument(
                     candidate.Document.StorageMode, candidate.Status,
                     candidate.OutputConfirmedUtc, candidate.OutputCompletedUtc,
-                    candidate.UpdatedUtc, candidate.HasFinancialHold,
-                    candidate.Document.PurgedUtc, completedCutoff, abandonedCutoff))
+                    candidate.Document.PurgedUtc, cutoff))
                     continue;
 
                 try
@@ -117,19 +94,19 @@ public sealed class DocumentRetentionWorker(
             if (hadStorageFailure) break;
         }
 
-        var expiredTicketCutoff = now.AddDays(-settings.ExpiredUploadTicketRetentionDays);
+        var expiredTicketCutoff = now.AddDays(-7);
         var removedTickets = await db.LocalPrintUploadTickets
             .Where(ticket => ticket.CompletedUtc == null && ticket.ExpiresUtc < expiredTicketCutoff)
             .ExecuteDeleteAsync(cancellationToken);
 
-        var expiredSessionCutoff = now.AddDays(-settings.EmptyCustomerSessionRetentionDays);
+        var expiredSessionCutoff = now.AddDays(-90);
         var removedSessions = await db.CustomerPrintSessions
             .Where(session => session.ExpiresUtc < expiredSessionCutoff &&
                 !db.PrintJobs.Any(job => job.TenantId == session.TenantId && job.CustomerSessionId == session.Id) &&
                 !db.LocalPrintUploadTickets.Any(ticket => ticket.TenantId == session.TenantId && ticket.CustomerSessionId == session.Id))
             .ExecuteDeleteAsync(cancellationToken);
 
-        var staleTokenCutoff = now.AddDays(-settings.StaleRefreshTokenRetentionDays);
+        var staleTokenCutoff = now.AddDays(-30);
         var removedRefreshTokens = await db.RefreshTokens
             .Where(token => token.ExpiresUtc < staleTokenCutoff ||
                 (token.RevokedUtc != null && token.RevokedUtc < staleTokenCutoff))
@@ -137,10 +114,7 @@ public sealed class DocumentRetentionWorker(
 
         if (purgedCount + removedTickets + removedSessions + removedRefreshTokens > 0)
             logger.LogInformation(
-                "Retention sweep complete. Cloud documents: {PurgedDocuments}; expired local tickets: {ExpiredTickets}; empty sessions: {ExpiredSessions}; stale refresh tokens: {StaleRefreshTokens}; completed retention: {CompletedRetentionDays}; abandoned retention: {AbandonedRetentionDays}.",
-                purgedCount, removedTickets, removedSessions, removedRefreshTokens,
-                settings.CloudCompletedDocumentRetentionDays, settings.AbandonedDocumentRetentionDays);
-
-        return settings.ApiRetentionSweepHours;
+                "Retention sweep complete. Cloud documents: {PurgedDocuments}; expired local tickets: {ExpiredTickets}; empty sessions: {ExpiredSessions}; stale refresh tokens: {StaleRefreshTokens}; retention: {RetentionDays} days.",
+                purgedCount, removedTickets, removedSessions, removedRefreshTokens, retentionDays);
     }
 }

@@ -7,23 +7,15 @@ public static class DocumentRetentionRules
         string jobStatus,
         DateTimeOffset? outputConfirmedUtc,
         DateTimeOffset? outputCompletedUtc,
-        DateTimeOffset updatedUtc,
-        bool hasFinancialHold,
         DateTimeOffset? purgedUtc,
-        DateTimeOffset completedCutoffUtc,
-        DateTimeOffset abandonedCutoffUtc)
+        DateTimeOffset cutoffUtc)
     {
-        if (!string.Equals(storageMode, "CLOUD", StringComparison.OrdinalIgnoreCase) || purgedUtc is not null)
+        if (!string.Equals(storageMode, "CLOUD", StringComparison.OrdinalIgnoreCase) ||
+            !string.Equals(jobStatus, "COMPLETED", StringComparison.OrdinalIgnoreCase) ||
+            purgedUtc is not null)
             return false;
 
-        if (string.Equals(jobStatus, "COMPLETED", StringComparison.OrdinalIgnoreCase))
-        {
-            var completionUtc = outputConfirmedUtc ?? outputCompletedUtc;
-            return completionUtc is not null && completionUtc <= completedCutoffUtc;
-        }
-
-        var terminalUnpaid = jobStatus is "REJECTED" or "PAYMENT_REJECTED" or "QUOTE_EXPIRED";
-        return terminalUnpaid && outputConfirmedUtc is null &&
-            !hasFinancialHold && updatedUtc <= abandonedCutoffUtc;
+        var completedUtc = outputConfirmedUtc ?? outputCompletedUtc;
+        return completedUtc is not null && completedUtc <= cutoffUtc;
     }
 }
