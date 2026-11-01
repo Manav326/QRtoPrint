@@ -32,8 +32,10 @@ class SavedPdfEditorInstrumentedTest {
     @Test
     fun savesReorderedAndRotatedPdfCopyWithoutTouchingSource() {
         val context = ApplicationProvider.getApplicationContext<Context>()
-        val source = File(context.filesDir, "documents/CI-editor-document.pdf")
-        source.parentFile?.mkdirs()
+        val folderName = "CI-editor-folder-${System.currentTimeMillis()}"
+        val directory = File(context.filesDir, "documents/$folderName")
+        val source = File(directory, "CI-editor-document.pdf")
+        directory.mkdirs()
         createPdf(source, 2)
         val edited = File(source.parentFile, "CI-editor-document_edited.pdf")
         edited.delete()
@@ -43,6 +45,7 @@ class SavedPdfEditorInstrumentedTest {
             ActivityScenario.launch(MainActivity::class.java).use {
                 val navigationLabel = com.google.android.material.R.id.navigation_bar_item_small_label_view
                 onView(allOf(withId(navigationLabel), withText("Files"))).perform(click())
+                onView(withText(folderName)).perform(scrollTo(), click())
                 onView(withContentDescription("More options for CI-editor-document.pdf")).perform(scrollTo(), click())
                 onView(withText("Edit PDF")).perform(click())
 
@@ -57,6 +60,8 @@ class SavedPdfEditorInstrumentedTest {
                 onView(withContentDescription("Select page 2")).perform(click())
                 onView(withContentDescription("Move page 2 up")).perform(click())
                 onView(withContentDescription("Save edited PDF copy")).perform(click())
+                waitForView(withText("CI-editor-document_edited.pdf"))
+                onView(withContentDescription("Open folder My Files")).check(matches(isDisplayed()))
             }
             val saveDeadline = System.currentTimeMillis() + 10_000
             while (!edited.isFile && System.currentTimeMillis() < saveDeadline) {
@@ -83,8 +88,7 @@ class SavedPdfEditorInstrumentedTest {
                 sha256(source)
             )
         } finally {
-            source.delete()
-            edited.delete()
+            directory.deleteRecursively()
         }
     }
 
