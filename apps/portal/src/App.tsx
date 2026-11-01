@@ -937,16 +937,23 @@ function ShopConsole({ tokens, onSignOut }: { tokens: AuthTokens; onSignOut: () 
   }
 
   async function verifyPayment(payment: ShopPayment) {
+    const isBatch = Boolean(payment.batchPaymentId);
     const confirmation = payment.method === "UPI"
-      ? `Have you independently confirmed this UPI transaction in your shop's bank/UPI app? Reference: ${payment.paymentReference || "not supplied"}`
-      : "Have you physically received the cash for this print job?";
-    if (!(await confirmInApp(confirmation, "Verify payment received", "Verify payment"))) return;
+      ? isBatch
+        ? `Have you independently confirmed the full batch UPI amount in your shop's bank/UPI app? Reference: ${payment.paymentReference || "not supplied"}`
+        : `Have you independently confirmed this UPI transaction in your shop's bank/UPI app? Reference: ${payment.paymentReference || "not supplied"}`
+      : isBatch
+        ? "Have you physically received the full cash amount for this batch?"
+        : "Have you physically received the cash for this print job?";
+    if (!(await confirmInApp(confirmation, "Verify payment received", isBatch ? "Verify batch payment" : "Verify payment"))) return;
 
     setBusyJobId(payment.printJobId);
     setError("");
     try {
       await verifyShopPayment(tokens.accessToken, payment.id);
-      setToast("Payment verified. The job is paid/authorised; printing still requires printer assignment and an explicit dispatch.");
+      setToast(isBatch
+        ? "Batch payment verified. Every accepted file is now authorised; assign and dispatch each file through the print queue."
+        : "Payment verified. The job is paid/authorised; printing still requires printer assignment and an explicit dispatch.");
       await reload();
     } catch (exception) {
       setError(exception instanceof Error ? exception.message : "Could not verify this payment.");
@@ -956,7 +963,11 @@ function ShopConsole({ tokens, onSignOut }: { tokens: AuthTokens; onSignOut: () 
   }
 
   async function rejectPayment(payment: ShopPayment) {
-    const reason = await promptInApp("Explain why this payment report is being rejected.", "Reject payment report", "Rejection reason");
+    const reason = await promptInApp(
+      payment.batchPaymentId ? "Explain why this full batch payment is being rejected." : "Explain why this payment report is being rejected.",
+      payment.batchPaymentId ? "Reject batch payment" : "Reject payment report",
+      "Rejection reason"
+    );
     if (reason === null) return;
     if (reason.trim().length < 3) {
       setError("A rejection reason of at least 3 characters is required.");
@@ -967,7 +978,9 @@ function ShopConsole({ tokens, onSignOut }: { tokens: AuthTokens; onSignOut: () 
     setError("");
     try {
       await rejectShopPayment(tokens.accessToken, payment.id, reason.trim());
-      setToast("Payment report rejected. The customer can choose a new payment attempt.");
+      setToast(payment.batchPaymentId
+        ? "Batch payment rejected. The customer can retry checkout for the accepted files."
+        : "Payment report rejected. The customer can choose a new payment attempt.");
       await reload();
     } catch (exception) {
       setError(exception instanceof Error ? exception.message : "Could not reject this payment.");
@@ -1886,11 +1899,11 @@ function PaymentsPage({settings,payments,refunds,onSave,onVerify,onReject,busy,b
       <div className="collection-header"><div><h2>Payment verification</h2><p>Review UPI references and confirm cash collected before a job becomes payment-authorised.</p></div><span className="setup-count">{pending.length} need review</span></div>
       {payments.length===0?<EmptyModule icon={<Wallet size={24}/>} title="No print payments yet" text="When customers choose UPI or cash for a shop-approved job, the payment attempt will appear here."/>:
       <div className="payment-record-list">{payments.map(payment=><article className="payment-record" key={payment.id}>
-        <div className="payment-record-head"><div><strong>{payment.jobNumber}</strong><small>{payment.documentName}</small></div><div className="payment-record-amount">{formatMoney(payment.amountMinor,payment.currency)}</div></div>
+        <div className="payment-record-head"><div><strong>{payment.batchPaymentId?(`Batch checkout · ${payment.batchFileCount??1} files`):payment.jobNumber}</strong><small>{payment.documentName}</small></div><div className="payment-record-amount">{formatMoney(payment.amountMinor,payment.currency)}</div></div>
         <div className="payment-record-meta"><span>{payment.method}</span><span>{new Date(payment.createdUtc).toLocaleString()}</span><Status label={payment.status.replaceAll("_"," ")} tone={payment.status==="VERIFIED"?"green":payment.status==="REJECTED"?"red":payment.status==="CUSTOMER_REPORTED"||payment.status==="CASH_AWAITING_PAYMENT"?"amber":"slate"}/></div>
         {payment.method==="UPI"&&<div className="payment-reference-details"><span>Transaction reference</span><strong>{payment.paymentReference||"Customer has not submitted a reference"}</strong><small>Payee snapshot: {payment.payeeNameSnapshot||"Not recorded"} · {payment.upiIdSnapshot||"No UPI ID snapshot"}</small></div>}
         {payment.rejectionReason&&<div className="payment-rejection-note">Reason: {payment.rejectionReason}</div>}
-        {(payment.status==="AWAITING_CUSTOMER_PAYMENT"||payment.status==="CUSTOMER_REPORTED"||payment.status==="CASH_AWAITING_PAYMENT")&&<div className="payment-review-actions">{payment.status==="AWAITING_CUSTOMER_PAYMENT"&&<button className="secondary-button reject-action" disabled={busy||busyJobId===payment.printJobId} onClick={()=>onReject(payment)}>Cancel attempt</button>}{payment.status==="CUSTOMER_REPORTED"&&<button className="secondary-button reject-action" disabled={busy||busyJobId===payment.printJobId} onClick={()=>onReject(payment)}>Reject report</button>}<button className="primary-button" disabled={busy||busyJobId===payment.printJobId} onClick={()=>onVerify(payment)}>{busyJobId===payment.printJobId?<span className="button-spinner"/>:payment.method==="UPI"?"Verify in bank app":"Confirm cash received"}</button></div>}
+        {(payment.status==="AWAITING_CUSTOMER_PAYMENT"||payment.status==="CUSTOMER_REPORTED"||payment.status==="CASH_AWAITING_PAYMENT")&&<div className="payment-review-actions">{payment.status==="AWAITING_CUSTOMER_PAYMENT"&&<button className="secondary-button reject-action" disabled={busy||busyJobId===payment.printJobId} onClick={()=>onReject(payment)}>Cancel attempt</button>}{payment.status==="CUSTOMER_REPORTED"&&<button className="secondary-button reject-action" disabled={busy||busyJobId===payment.printJobId} onClick={()=>onReject(payment)}>{payment.batchPaymentId?"Reject batch report":"Reject report"}</button>}<button className="primary-button" disabled={busy||busyJobId===payment.printJobId} onClick={()=>onVerify(payment)}>{busyJobId===payment.printJobId?<span className="button-spinner"/>:payment.method==="UPI"?(payment.batchPaymentId?"Verify full batch in bank app":"Verify in bank app"):(payment.batchPaymentId?"Confirm full batch cash":"Confirm cash received")}</button></div>}
         {payment.status==="VERIFIED"&&<div className="payment-verified-note"><Check size={14}/> Verified {payment.verifiedUtc?new Date(payment.verifiedUtc).toLocaleString():"by shop"}</div>}
       </article>)}</div>}
     </section>
