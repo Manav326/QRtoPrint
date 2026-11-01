@@ -475,13 +475,22 @@ public sealed class WindowsPrintExecutor
         finally { pin.Free(); }
     }
 
+    public static string ResolveSpoolerStatus(uint statusFlags) =>
+        // Fault flags take precedence over PRINTING/SPOOLING so an offline
+        // or paper-out condition is never hidden behind queue activity.
+        (statusFlags & 0x00000020) != 0 ? "OFFLINE"
+        : (statusFlags & 0x00000040) != 0 ? "PAPEROUT"
+        : (statusFlags & 0x00000001) != 0 ? "PAUSED"
+        : (statusFlags & 0x00000002) != 0 ? "ERROR"
+        : (statusFlags & 0x00000400) != 0 ? "USERINTERVENTION"
+        : (statusFlags & 0x00000010) != 0 ? "PRINTING"
+        : (statusFlags & 0x00000008) != 0 ? "SPOOLING"
+        : (statusFlags & 0x00000080) != 0 ? "PRINTED"
+        : "QUEUED";
+
     private static WindowsSpoolerJob ConvertJob(JobInfo1W item)
     {
-        var status = (item.Status & 0x00000010) != 0 ? "PRINTING"
-            : (item.Status & 0x00000008) != 0 ? "SPOOLING"
-            : (item.Status & 0x00000020) != 0 ? "OFFLINE"
-            : (item.Status & 0x00000040) != 0 ? "PAPEROUT"
-            : (item.Status & 0x00000001) != 0 ? "PAUSED" : "QUEUED";
+        var status = ResolveSpoolerStatus(item.Status);
         return new WindowsSpoolerJob(checked((int)item.JobId), Marshal.PtrToStringUni(item.DocumentName) ?? string.Empty,
             status, item.Status, checked((int)item.PagesPrinted), checked((int)item.TotalPages));
     }

@@ -12,7 +12,7 @@ import {
   ApiError, isPlatformAdminSession, acceptCustomerQuote, approveShopPrintJob, assignShopPrintJobPrinter, calculateCustomerQuote, getShopCustomerHistory, getShopCustomers, getShopReportSummary,
   confirmShopPrintOutput, dispatchShopPrintJob,
   createAgentEnrollmentCode, createCustomerSession, createPrinter, createStation,
-  downloadShopDocument, getCustomerJobStatus, getShopJobEvents, loadShopData,
+  downloadShopDocument, getCustomerJobStatus, getShopAgentDevices, getShopJobEvents, getShopPrinters, getShopPrintJobsPage, loadShopData,
   logout, readStoredTokens, rejectShopPrintJob, rejectShopPayment, revokeAgentDevice,
   reportCustomerUpiPayment, renewCustomerPrintSession, resumeCustomerSession, rotateStationCode, startCustomerPayment, storeTokens,
   updatePrinterActive, updateShopPaymentSettings, updateShopPricing,
@@ -75,11 +75,20 @@ function ShopConsole({ tokens, onSignOut }: { tokens: AuthTokens; onSignOut: () 
   const [stations, setStations] = useState<QrStation[]>([]);
   const [pricing, setPricing] = useState<ShopPricingProfile | null>(null);
   const [printJobs, setPrintJobs] = useState<ShopPrintJob[]>([]);
+  const [hasMoreQueueJobs, setHasMoreQueueJobs] = useState(false);
+  const [loadingOlderQueueJobs, setLoadingOlderQueueJobs] = useState(false);
+  const loadingOlderQueueJobsRef = useRef(false);
+  const [queueApiOffset, setQueueApiOffset] = useState(0);
+  const [queueSearch, setQueueSearch] = useState("");
+  const queueSearchGeneration = useRef(0);
+  const queuePageGeneration = useRef(0);
+  const queueFirstPageIds = useRef<Set<string>>(new Set());
   const [agentDevices, setAgentDevices] = useState<AgentDevice[]>([]);
   const [paymentSettings, setPaymentSettings] = useState<ShopPaymentSettings | null>(null);
   const [payments, setPayments] = useState<ShopPayment[]>([]);
   const [refunds, setRefunds] = useState<ShopRefund[]>([]);
   const [subscription, setSubscription] = useState<ShopSubscriptionSummary | null>(null);
+  const [apiConnectionState, setApiConnectionState] = useState<"checking" | "connected" | "degraded" | "offline">("checking");
   const [enrollmentCode, setEnrollmentCode] = useState<{ code: string; expiresUtc: string } | null>(null);
   const [agentBusy, setAgentBusy] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -98,31 +107,128 @@ function ShopConsole({ tokens, onSignOut }: { tokens: AuthTokens; onSignOut: () 
 
   async function reload() {
     if (reloadInFlight.current) return;
+    queueSearchGeneration.current++;
+    queuePageGeneration.current++;
     reloadInFlight.current = true;
+    setApiConnectionState("checking");
     setLoading(true);
     setError("");
     try {
-      const snapshot = await loadShopData(tokens.accessToken);
+      const snapshot = await loadShopData(tokens.accessToken, queueSearch);
       setProfile(snapshot.profile);
       setPrinters(snapshot.printers);
       setStations(snapshot.stations);
       setPricing(snapshot.pricing);
       setPrintJobs(snapshot.printJobs);
+      queueFirstPageIds.current = new Set(snapshot.printJobs.map(job => job.id));
+      setHasMoreQueueJobs(snapshot.printJobs.length === 100);
+      setQueueApiOffset(snapshot.printJobs.length);
       setAgentDevices(snapshot.agentDevices);
       setPaymentSettings(snapshot.paymentSettings);
       setPayments(snapshot.payments);
       setRefunds(snapshot.refunds);
       setSubscription(snapshot.subscription);
+      setApiConnectionState("connected");
     } catch (exception) {
-      if (exception instanceof ApiError && exception.status === 401) {
-        storeTokens(null);
-        onSignOut();
-      } else {
-        setError(exception instanceof Error ? exception.message : "Could not load your shop.");
-      }
+      handleShopApiError(exception, "Could not load your shop.");
     } finally {
       setLoading(false);
       reloadInFlight.current = false;
+    }
+  }
+
+  function handleShopApiError(exception: unknown, fallback: string) {
+    if (exception instanceof ApiError && exception.status === 401) {
+      storeTokens(null);
+      onSignOut();
+      return;
+    }
+    const status = exception instanceof ApiError ? exception.status : 0;
+    setApiConnectionState(status === 0 ? "offline" : status >= 500 ? "degraded" : "connected");
+    setError(exception instanceof Error ? exception.message : fallback);
+  }
+
+  async function refreshPrintQueue() {
+    const generation = queuePageGeneration.current;
+    try {
+      const [latest, latestPrinters, latestAgents] = await Promise.all([
+        getShopPrintJobsPage(tokens.accessToken, 0, 100, queueSearch),
+        getShopPrinters(tokens.accessToken),
+        getShopAgentDevices(tokens.accessToken)
+      ]);
+      if (generation !== queuePageGeneration.current) return;
+      setApiConnectionState("connected");
+      setPrinters(latestPrinters);
+      setAgentDevices(latestAgents);
+      const latestIds = new Set(latest.map(job => job.id));
+      const firstPageMembershipChanged = latest.length !== queueFirstPageIds.current.size ||
+        latest.some(job => !queueFirstPageIds.current.has(job.id));
+      if (firstPageMembershipChanged) {
+        // Any insert/removal shifts every offset page. Reset pagination to the
+        // current first page so no older records are skipped or duplicated.
+        queuePageGeneration.current++;
+        queueFirstPageIds.current = latestIds;
+        setPrintJobs(latest);
+        setQueueApiOffset(latest.length);
+        setHasMoreQueueJobs(latest.length === 100);
+        return;
+      }
+      setPrintJobs(current => {
+        const byId = new Map(current.map(job => [job.id, job]));
+        for (const job of latest) byId.set(job.id, job);
+        return Array.from(byId.values()).sort((left, right) =>
+          Date.parse(right.createdUtc) - Date.parse(left.createdUtc) || right.id.localeCompare(left.id)
+        );
+      });
+      setHasMoreQueueJobs(latest.length === 100 || printJobs.length > latest.length);
+    } catch (exception) {
+      if (generation !== queuePageGeneration.current) return;
+      handleShopApiError(exception, "Could not refresh the print queue.");
+    }
+  }
+
+  async function loadOlderQueueJobs() {
+    if (loadingOlderQueueJobsRef.current || !hasMoreQueueJobs) return;
+    loadingOlderQueueJobsRef.current = true;
+    const generation = queuePageGeneration.current;
+    const offset = queueApiOffset;
+    setLoadingOlderQueueJobs(true);
+    try {
+      const older = await getShopPrintJobsPage(tokens.accessToken, offset, 100, queueSearch);
+      if (generation !== queuePageGeneration.current) return;
+      setPrintJobs(current => {
+        const knownIds = new Set(current.map(job => job.id));
+        const merged = [...current, ...older.filter(job => !knownIds.has(job.id))];
+        return merged.sort((left, right) =>
+          Date.parse(right.createdUtc) - Date.parse(left.createdUtc) || right.id.localeCompare(left.id)
+        );
+      });
+      setQueueApiOffset(offset => offset + older.length);
+      setHasMoreQueueJobs(older.length === 100);
+    } catch (exception) {
+      if (generation !== queuePageGeneration.current) return;
+      handleShopApiError(exception, "Could not load older print jobs.");
+    } finally {
+      loadingOlderQueueJobsRef.current = false;
+      setLoadingOlderQueueJobs(false);
+    }
+  }
+
+  async function searchPrintQueue(value: string) {
+    const normalized = value.trim().slice(0, 120);
+    const generation = ++queueSearchGeneration.current;
+    queuePageGeneration.current++;
+    setQueueSearch(normalized);
+    try {
+      const matches = await getShopPrintJobsPage(tokens.accessToken, 0, 100, normalized);
+      if (generation !== queueSearchGeneration.current) return;
+      queueFirstPageIds.current = new Set(matches.map(job => job.id));
+      setPrintJobs(matches);
+      setQueueApiOffset(matches.length);
+      setHasMoreQueueJobs(matches.length === 100);
+    } catch (exception) {
+      if (generation !== queueSearchGeneration.current) return;
+      handleShopApiError(exception, "Could not search the print queue.");
     }
   }
 
@@ -167,6 +273,55 @@ function ShopConsole({ tokens, onSignOut }: { tokens: AuthTokens; onSignOut: () 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tokens.accessToken]);
 
+  useEffect(() => {
+    if (active === "Print Queue") return;
+    let mounted = true;
+    let inFlight = false;
+    const refreshDevices = async () => {
+      if (inFlight) return;
+      inFlight = true;
+      try {
+        const [latestPrinters, latestAgents] = await Promise.all([
+          getShopPrinters(tokens.accessToken),
+          getShopAgentDevices(tokens.accessToken)
+        ]);
+        if (mounted) {
+          setPrinters(latestPrinters);
+          setAgentDevices(latestAgents);
+          setApiConnectionState("connected");
+        }
+      } catch (exception) {
+        if (mounted) {
+          if (exception instanceof ApiError && exception.status === 401) {
+            storeTokens(null);
+            onSignOut();
+          } else {
+            const status = exception instanceof ApiError ? exception.status : 0;
+            setApiConnectionState(status === 0 ? "offline" : status >= 500 ? "degraded" : "connected");
+          }
+        }
+      } finally {
+        inFlight = false;
+      }
+    };
+    void refreshDevices();
+    const timer = window.setInterval(() => void refreshDevices(), 15_000);
+    return () => {
+      mounted = false;
+      window.clearInterval(timer);
+    };
+  }, [active, tokens.accessToken]);
+
+  const activeAgentCount = agentDevices.filter(agent => !agent.revokedUtc).length;
+  const onlineAgentIds = new Set(agentDevices.filter(agent =>
+    !agent.revokedUtc && agent.status === "Online" && !!agent.lastSeenUtc &&
+    Date.parse(agent.lastSeenUtc) > Date.now() - 2 * 60 * 1000
+  ).map(agent => agent.id));
+  const onlineAgentCount = onlineAgentIds.size;
+  const usablePrinterCount = printers.filter(printer => isPrinterAvailable(printer, onlineAgentIds)).length;
+  const offlinePrinterCount = printers.filter(printer =>
+    printer.isActive && !isPrinterAvailable(printer, onlineAgentIds)
+  ).length;
   const today = new Intl.DateTimeFormat("en-IN", { weekday: "long", day: "numeric", month: "long" }).format(new Date());
 
   async function signOut() {
@@ -553,7 +708,7 @@ function ShopConsole({ tokens, onSignOut }: { tokens: AuthTokens; onSignOut: () 
         <nav className="primary-nav" aria-label="Shop navigation">
           {sections.map(({ label, icon: Icon }) => (
             <button key={label} title={label} aria-label={label} className={active === label ? "nav-item active" : "nav-item"} onClick={() => navAction(label)}>
-              <Icon size={18} strokeWidth={1.8}/><span>{label}</span>{label === "Print Queue" && <span className="nav-soon">SOON</span>}
+              <Icon size={18} strokeWidth={1.8}/><span>{label}</span>
             </button>
           ))}
         </nav>
@@ -577,8 +732,12 @@ function ShopConsole({ tokens, onSignOut }: { tokens: AuthTokens; onSignOut: () 
             <div className="breadcrumb"><span>Shop workspace</span><span className="crumb-slash">/</span><strong>{active}</strong></div>
           </div>
           <div className="topbar-actions">
-            <div className="connection-pill"><span className="live-dot"/><span>Cloud connected</span></div>
             <button className="icon-button theme-button" aria-label={dark ? "Switch to light theme" : "Switch to dark theme"} onClick={() => setDark(!dark)}>{dark ? <Sun size={18}/> : <Moon size={18}/>}</button>
+            <div className="service-status-row" aria-label="Live shop system status">
+              <span className={"service-status "+apiConnectionState} title="API connection"><i/>API {apiConnectionState === "connected" ? "Connected" : apiConnectionState === "degraded" ? "Degraded" : apiConnectionState === "offline" ? "Offline" : "Checking"}</span>
+              <span className={"service-status "+(onlineAgentCount > 0 ? "connected" : activeAgentCount > 0 ? "offline" : "checking")} title="Windows Agent heartbeat"><i/>Agent {onlineAgentCount > 0 ? onlineAgentCount+" online" : activeAgentCount > 0 ? "Offline" : "Not paired"}</span>
+              <span className={"service-status "+(usablePrinterCount > 0 ? "connected" : offlinePrinterCount > 0 ? "offline" : "checking")} title="Active printer availability"><i/>Printers {usablePrinterCount > 0 ? usablePrinterCount+" available" : offlinePrinterCount > 0 ? offlinePrinterCount+" unavailable" : "Unavailable"}</span>
+            </div>
             <div className="topbar-divider"/>
             <span className="topbar-product-tag"><span className="mode-indicator"/> Shop console</span>
           </div>
@@ -593,7 +752,7 @@ function ShopConsole({ tokens, onSignOut }: { tokens: AuthTokens; onSignOut: () 
           {error && <div className="inline-error" role="alert"><span>{error}</span><button onClick={() => setError("")} aria-label="Dismiss error"><X size={15}/></button></div>}
           {toast && <div className="inline-success" role="status"><Check size={15}/><span>{toast}</span><button onClick={() => setToast("")} aria-label="Dismiss message"><X size={15}/></button></div>}
 
-          {active === "Overview" && <Overview profile={profile} printers={printers} stations={stations} printJobs={printJobs} pricing={pricing} onNavigate={navAction}/>}
+          {active === "Overview" && <Overview profile={profile} printers={printers} stations={stations} printJobs={printJobs} pricing={pricing} agentDevices={agentDevices} paymentSettings={paymentSettings} onNavigate={navAction}/>}
           {active === "Printers" && <PrintersPage printers={printers} onAdd={() => setModal("printer")} onToggle={togglePrinter}/>}
           {active === "QR Stations" && <StationsPage stations={stations} profile={profile} onAdd={() => setModal("station")} onToggle={toggleStation} onGenerate={createFreshStationCode}/>}
           {active === "Print Agent" && <PrintAgentPage agents={agentDevices} enrollmentCode={enrollmentCode} busy={agentBusy} onGenerate={generateAgentCode} onRevoke={revokeAgent}/>}
@@ -601,7 +760,7 @@ function ShopConsole({ tokens, onSignOut }: { tokens: AuthTokens; onSignOut: () 
           {active === "Subscription" && subscription && <SubscriptionPage summary={subscription}/>}
           {active === "Payments" && paymentSettings && <PaymentsPage settings={paymentSettings} payments={payments} refunds={refunds} onSave={savePaymentSettings} onVerify={verifyPayment} onReject={rejectPayment} busy={busy} busyJobId={busyJobId}/>}
           {active === "Settings" && profile && <SettingsPage profile={profile} onSave={saveProfile} busy={busy}/>}
-          {active === "Print Queue" && <PrintQueuePage jobs={printJobs} printers={printers} onPreview={previewJob} onApprove={approveJob} onReject={rejectJob} onRefund={job=>setRefundJob(job)} onReviewBatch={batchId=>setBatchReviewJobs(printJobs.filter(job=>job.batchId===batchId&&job.status==="AWAITING_SHOP_APPROVAL"))} onHistory={viewJobHistory} onAssignPrinter={assignPrinter} onDispatch={dispatchPrintJob} onConfirmOutput={confirmPrintedOutput} onRetryPdfExport={retryPdfExport} onRefresh={reload} busyJobId={busyJobId}/>} 
+          {active === "Print Queue" && <PrintQueuePage jobs={printJobs} printers={printers} agentDevices={agentDevices} searchQuery={queueSearch} onSearch={searchPrintQueue} onPreview={previewJob} onApprove={approveJob} onReject={rejectJob} onRefund={job=>setRefundJob(job)} onReviewBatch={batchId=>setBatchReviewJobs(printJobs.filter(job=>job.batchId===batchId&&job.status==="AWAITING_SHOP_APPROVAL"))} onHistory={viewJobHistory} onAssignPrinter={assignPrinter} onDispatch={dispatchPrintJob} onConfirmOutput={confirmPrintedOutput} onRetryPdfExport={retryPdfExport} onRefresh={refreshPrintQueue} onLoadOlder={loadOlderQueueJobs} hasMoreJobs={hasMoreQueueJobs} loadingOlderJobs={loadingOlderQueueJobs} busyJobId={busyJobId}/>} 
           {active === "Customers" && <CustomersPage token={tokens.accessToken}/>}
           {active === "Reports" && <ReportsPage token={tokens.accessToken}/>} 
 
@@ -885,14 +1044,34 @@ function ReportsPage({ token }: { token: string }) {
   );
 }
 
-function Overview({ profile, printers, stations, printJobs, pricing, onNavigate }: {
+function Overview({ profile, printers, stations, printJobs, pricing, agentDevices, paymentSettings, onNavigate }: {
   profile: ShopProfile | null; printers: PrinterDevice[]; stations: QrStation[];
-  printJobs: ShopPrintJob[]; pricing: ShopPricingProfile | null; onNavigate: (section: Section) => void;
+  printJobs: ShopPrintJob[]; pricing: ShopPricingProfile | null;
+  agentDevices: AgentDevice[]; paymentSettings: ShopPaymentSettings | null;
+  onNavigate: (section: Section) => void;
 }) {
   const activePrinters = printers.filter(printer => printer.isActive);
   const todayKey = new Date().toDateString();
   const jobsToday = printJobs.filter(job => new Date(job.createdUtc).toDateString() === todayKey);
-  const quotesAwaiting = printJobs.filter(job => job.status === "AWAITING_CUSTOMER_APPROVAL");
+  const quotesAwaiting = printJobs.filter(job => job.status === "AWAITING_SHOP_APPROVAL");
+  const onlineAgentIds = new Set(agentDevices
+    .filter(agent => !agent.revokedUtc && agent.status === "Online" &&
+      !!agent.lastSeenUtc && Date.parse(agent.lastSeenUtc) > Date.now() - 2 * 60 * 1000)
+    .map(agent => agent.id));
+  const hasOnlineAgent = onlineAgentIds.size > 0;
+  const hasReachablePrinter = printers.some(printer => isPrinterAvailable(printer, onlineAgentIds));
+  const hasPaymentMethod = paymentSettings?.cashEnabled === true ||
+    (paymentSettings?.upiEnabled === true &&
+      !!paymentSettings.upiId?.trim() && !!paymentSettings.payeeName?.trim());
+  const setupChecks: { complete: boolean; title: string; detail: string; target: Section }[] = [
+    { complete: !!profile?.displayName, title: "Create your shop identity", detail: "Your shop name and customer-facing brand.", target: "Settings" },
+    { complete: activePrinters.length > 0, title: "Register your printers", detail: "Add and enable the printers available at your counter.", target: "Printers" },
+    { complete: hasOnlineAgent, title: "Connect the shop computer", detail: "The Windows Agent must be paired and recently online.", target: "Print Agent" },
+    { complete: hasReachablePrinter, title: "Verify a live printer", detail: "At least one enabled output must be visible to the connected computer.", target: "Printers" },
+    { complete: stations.some(station => station.isEnabled), title: "Enable a QR station", detail: "At least one customer-facing QR station must be enabled.", target: "QR Stations" },
+    { complete: !!pricing?.isConfigured, title: "Set your print prices", detail: "Configure mono, colour and duplex rates.", target: "Pricing" },
+    { complete: hasPaymentMethod, title: "Enable a payment method", detail: "Configure cash at counter or a complete UPI payee profile.", target: "Payments" }
+  ];
   return (
     <>
       <div className="stat-grid">
@@ -906,7 +1085,7 @@ function Overview({ profile, printers, stations, printJobs, pricing, onNavigate 
           <div className="panel-heading"><div><h2>Customer activity</h2><p>Recent uploads and quote requests from your QR stations</p></div><span className="neutral-chip">{printJobs.length} recent jobs</span></div>
           {printJobs.length===0 ? <div className="activity-empty-content"><div className="activity-empty-art"><div className="activity-art-sheet"><FileText size={25}/><i/><i/><i/></div><div className="activity-art-printer"><Printer size={27}/></div><span className="activity-art-spark">✦</span></div><h3>Ready when your first customer is</h3><p>Set your prices and share a QR station. Customer uploads will appear here as soon as they arrive.</p><button className="text-action" onClick={() => onNavigate(printers.length ? "QR Stations" : "Printers")}>{printers.length ? "Open QR stations" : "Add your first printer"} <span>→</span></button></div> :
             <div className="activity-job-list">
-              {printJobs.slice(0,4).map(job=><div className="activity-job-row" key={job.id}><div className="activity-job-icon"><FileText size={16}/></div><div className="activity-job-copy"><strong>{job.jobNumber}</strong><span>{job.document.originalFileName} · {job.pageCount} pages</span></div><div className="activity-job-status"><Status label={prettyStatus(job.status)} tone={job.status==="AWAITING_CUSTOMER_APPROVAL"?"amber":"blue"}/><small>{new Date(job.createdUtc).toLocaleTimeString([], {hour:"2-digit",minute:"2-digit"})}</small></div></div>)}
+              {printJobs.slice(0,4).map(job=><div className="activity-job-row" key={job.id}><div className="activity-job-icon"><FileText size={16}/></div><div className="activity-job-copy"><strong>{job.jobNumber}</strong><span>{job.document.originalFileName} · {job.pageCount} pages</span></div><div className="activity-job-status"><Status label={prettyStatus(job.status)} tone={job.status==="AWAITING_CUSTOMER_APPROVAL"||job.status==="AWAITING_SHOP_APPROVAL"?"amber":"blue"}/><small>{new Date(job.createdUtc).toLocaleTimeString([], {hour:"2-digit",minute:"2-digit"})}</small></div></div>)}
               <button className="text-action" onClick={()=>onNavigate("Print Queue")}>Open print queue <span>→</span></button>
             </div>}
         </section>
@@ -918,12 +1097,9 @@ function Overview({ profile, printers, stations, printJobs, pricing, onNavigate 
         </section>
       </div>
       <section className="panel setup-panel">
-        <div className="panel-heading"><div><h2>Shop setup checklist</h2><p>Complete these steps before accepting customer print jobs.</p></div><span className="setup-count">{Number(!!profile?.displayName)+Number(printers.length>0)+Number(stations.length>0)+Number(!!pricing?.isConfigured)} / 4 complete</span></div>
+        <div className="panel-heading"><div><h2>Shop setup checklist</h2><p>Complete these steps before accepting customer print jobs.</p></div><span className="setup-count">{setupChecks.filter(check => check.complete).length} / {setupChecks.length} complete</span></div>
         <div className="setup-checks">
-          <SetupCheck complete={!!profile?.displayName} title="Create your shop identity" detail="Your shop name and customer-facing brand." onClick={()=>onNavigate("Settings")}/>
-          <SetupCheck complete={printers.length>0} title="Register your printers" detail="Add the printers available at your counter." onClick={()=>onNavigate("Printers")}/>
-          <SetupCheck complete={stations.length>0} title="Create your first QR station" detail="Give customers a secure way to connect." onClick={()=>onNavigate("QR Stations")}/>
-          <SetupCheck complete={!!pricing?.isConfigured} title="Set your print prices" detail="Configure mono, colour and duplex rates." onClick={()=>onNavigate("Pricing")}/>
+          {setupChecks.map(check => <SetupCheck key={check.title} complete={check.complete} title={check.title} detail={check.detail} onClick={() => onNavigate(check.target)}/>)}
         </div>
       </section>
     </>
@@ -933,7 +1109,7 @@ function Overview({ profile, printers, stations, printJobs, pricing, onNavigate 
 function PrintersPage({ printers, onAdd, onToggle }: { printers: PrinterDevice[]; onAdd:()=>void; onToggle:(printer:PrinterDevice)=>void }) {
   return (
     <section className="panel collection-panel">
-      <div className="collection-header"><div><h2>Your printers</h2><p>Manage physical printers and local PDF export destinations.</p></div><button className="primary-button" onClick={onAdd}><Plus size={16}/> Add printer</button></div>
+      <div className="collection-header"><div><h2>Your printers</h2><p>Manage physical printers and local PDF export destinations. Disabling a printer blocks new assignments; it does not cancel a Windows spooler job already accepted.</p></div><button className="primary-button" onClick={onAdd}><Plus size={16}/> Add printer</button></div>
       {printers.length===0 ? <EmptyModule icon={<Printer size={24}/>} title="No printers registered yet" text="Add your first printer. It will appear here as awaiting local-agent discovery until the Windows Print Agent reports its capabilities and live status." actionLabel="Add your first printer" onAction={onAdd}/> :
       <div className="printer-grid">{printers.map(printer=><article className="printer-card" key={printer.id}><div className="printer-card-top"><div className="printer-card-icon"><Printer size={20}/></div><Status label={printer.status} tone={printer.status.toLowerCase()==="ready"?"green":"slate"}/></div><h3>{printer.outputMode==="PDF_EXPORT"?"PDF export · "+printer.displayName:printer.displayName}</h3><p>{printer.outputMode==="PDF_EXPORT"?"Direct local PDF generation · no Windows Save As dialog":printer.manufacturer+" · "+printer.model}</p><div className="printer-meta"><span>{printer.outputMode==="PDF_EXPORT"?"PDF export destination":printer.connectionType}{printer.isDefault?(printer.outputMode==="PDF_EXPORT"?" · Default output destination":" · Default Windows queue"):""}</span><span>{printer.queueName || printer.connectionAddress || "Connection not verified"}</span></div><div className="printer-card-footer"><span className={printer.isActive?"enabled-label":"disabled-label"}>{printer.isActive?"Enabled":"Disabled"}</span><button className="subtle-button" onClick={()=>onToggle(printer)}>{printer.isActive?"Disable":"Enable"}</button></div></article>)}</div>}
     </section>
@@ -989,20 +1165,16 @@ function PrintAgentPage({agents,enrollmentCode,busy,onGenerate,onRevoke}:{
       </div>
       <div className="agent-steps">
         <div><span>01</span><strong>Generate a pairing code</strong><small>One-time code, valid for 10 minutes.</small></div>
-        <div><span>02</span><strong>Run the agent on Windows</strong><small>Open an elevated PowerShell and run the pairing command.</small></div>
-        <div><span>03</span><strong>Watch printer discovery</strong><small>Installed Windows queues appear in your printer list after the next sync.</small></div>
+        <div><span>02</span><strong>Run the guided Windows installer</strong><small>Enter the code in the setup wizard. No PowerShell commands are required.</small></div>
+        <div><span>03</span><strong>Confirm the connection</strong><small>Return here and wait for the computer heartbeat and printer discovery.</small></div>
       </div>
       {enrollmentCode&&<div className="agent-code-panel">
         <div><span>ONE-TIME PAIRING CODE</span><strong>{enrollmentCode.code}</strong><small>Expires {new Date(enrollmentCode.expiresUtc).toLocaleTimeString([], {hour:"2-digit",minute:"2-digit"})}</small></div>
         <button className="secondary-button" onClick={()=>void copyText(enrollmentCode.code)}><Copy size={14}/> Copy code</button>
       </div>}
       <div className="agent-command-panel">
-        <div><span>1 · PAIR THIS COMPUTER</span><code>.\scripts\pair-agent.ps1 -ApiBaseUrl "YOUR_API_URL" -AgentExePath ".\SmartPrint.Agent.exe"</code></div>
-        <button className="secondary-button" onClick={()=>void copyText('.\scripts\pair-agent.ps1 -ApiBaseUrl "YOUR_API_URL" -AgentExePath ".\SmartPrint.Agent.exe"')}><Copy size={14}/> Copy command</button>
-      </div>
-      <div className="agent-command-panel">
-        <div><span>2 · INSTALL THE WINDOWS SERVICE</span><code>.\scripts\install-agent-service.ps1 -AgentExePath ".\SmartPrint.Agent.exe"</code></div>
-        <button className="secondary-button" onClick={()=>void copyText('.\scripts\install-agent-service.ps1 -AgentExePath ".\SmartPrint.Agent.exe"')}><Copy size={14}/> Copy command</button>
+        <div><span>GUIDED WINDOWS INSTALLER</span><strong>Download and run SmartPrint Windows Setup on the shop computer.</strong><small>Run setup as administrator, enter the one-time pairing code in its wizard, and let it install and start the background service.</small></div>
+        <a className="secondary-button" href="https://github.com/Manav326/QRtoPrint/releases/latest/download/SmartPrint-Windows-Setup.exe"><Monitor size={14}/> Download Windows installer</a>
       </div>
       <div className="agent-security-note"><ShieldCheck size={16}/><span>The pairing code expires after 10 minutes. The agent secret is returned only once and stored on the Windows machine using DPAPI LocalMachine encryption. Revoke a computer here if it is replaced or lost.</span></div>
       <div className="agent-generate-row"><span>Pairing codes are single use. Generating a new one does not revoke already paired computers.</span><button className="primary-button" disabled={busy} onClick={onGenerate}>{busy?<span className="button-spinner"/>:<><Plus size={15}/> Generate pairing code</>}</button></div>
@@ -1141,9 +1313,12 @@ function PaymentsPage({settings,payments,refunds,onSave,onVerify,onReject,busy,b
   </div>;
 }
 
-function PrintQueuePage({ jobs, printers, onPreview, onApprove, onReject, onRefund, onReviewBatch, onHistory, onAssignPrinter, onDispatch, onConfirmOutput, onRetryPdfExport, onRefresh, busyJobId }: {
+function PrintQueuePage({ jobs, printers, agentDevices, searchQuery, onSearch, onPreview, onApprove, onReject, onRefund, onReviewBatch, onHistory, onAssignPrinter, onDispatch, onConfirmOutput, onRetryPdfExport, onRefresh, onLoadOlder, hasMoreJobs, loadingOlderJobs, busyJobId }: {
   jobs: ShopPrintJob[];
   printers: PrinterDevice[];
+  agentDevices: AgentDevice[];
+  searchQuery: string;
+  onSearch: (query: string) => Promise<void>;
   onPreview: (job: ShopPrintJob) => void;
   onApprove: (job: ShopPrintJob) => void;
   onReject: (job: ShopPrintJob) => void;
@@ -1155,10 +1330,15 @@ function PrintQueuePage({ jobs, printers, onPreview, onApprove, onReject, onRefu
   onConfirmOutput: (job: ShopPrintJob) => void;
   onRetryPdfExport: (job: ShopPrintJob) => void;
   onRefresh: () => Promise<void> | void;
+  onLoadOlder: () => Promise<void> | void;
+  hasMoreJobs: boolean;
+  loadingOlderJobs: boolean;
   busyJobId: string | null;
 }) {
-  const [autoRefresh,setAutoRefresh]=useState(false);
+  const [autoRefresh,setAutoRefresh]=useState(true);
   const [refreshSeconds,setRefreshSeconds]=useState(10);
+  const [searchInput,setSearchInput]=useState(searchQuery);
+  useEffect(()=>setSearchInput(searchQuery),[searchQuery]);
   const refreshRunning=useRef(false);
   const refreshCallback=useRef(onRefresh);
   refreshCallback.current=onRefresh;
@@ -1177,15 +1357,16 @@ function PrintQueuePage({ jobs, printers, onPreview, onApprove, onReject, onRefu
   },[autoRefresh,refreshSeconds]);
 
   const reviewBatches=Array.from(new Map(jobs.filter(job=>job.batchId&&job.status==="AWAITING_SHOP_APPROVAL").map(job=>[job.batchId!,job])).keys());
+  const onlineAgentIds = new Set(agentDevices.filter(agent =>
+    !agent.revokedUtc && agent.status === "Online" && !!agent.lastSeenUtc &&
+    Date.parse(agent.lastSeenUtc) > Date.now() - 2 * 60 * 1000
+  ).map(agent => agent.id));
   const dispatchablePrinters = printers.filter(printer =>
-    printer.isActive &&
-    !!printer.agentDeviceId &&
-    (printer.status === "Ready" || printer.status === "Busy" ||
-      (printer.outputMode === "PDF_EXPORT" && printer.status === "Unknown"))
+    isPrinterAvailable(printer, onlineAgentIds)
   );
 
   return <section className="panel queue-panel live-queue-panel">
-    <div className="collection-header"><div><h2>Customer print jobs</h2><p>Preview every file separately. Each file can be accepted or rejected without changing the rest of its upload batch. Refunds are available before handoff to the print computer.</p></div><div className="queue-header-actions"><span className="setup-count">{jobs.length} recent jobs</span><button className="secondary-button queue-refresh-button" onClick={()=>void refreshQueue()} disabled={refreshRunning.current}><Activity size={13}/> Refresh queue</button></div></div>
+    <div className="collection-header"><div><h2>Customer print jobs</h2><p>Preview every file separately. Each file can be accepted or rejected without changing the rest of its upload batch. Refunds are available before handoff to the print computer.</p></div><div className="queue-header-actions"><span className="setup-count">{jobs.length} jobs shown</span><form className="queue-search-form" onSubmit={event=>{event.preventDefault();void onSearch(searchInput);}}><input aria-label="Search all print jobs" type="search" maxLength={120} placeholder="Job, file or printer" value={searchInput} onChange={event=>setSearchInput(event.target.value)}/><button className="secondary-button" type="submit"><Search size={13}/> Search</button></form><button className="secondary-button queue-refresh-button" onClick={()=>void refreshQueue()} disabled={refreshRunning.current}><Activity size={13}/> Refresh queue</button></div></div>
     <div className="queue-refresh-controls">
       <label className="queue-auto-toggle"><input type="checkbox" checked={autoRefresh} onChange={event=>setAutoRefresh(event.target.checked)}/><span className="queue-toggle-track"/><strong>Auto refresh</strong><small>{autoRefresh?"On":"Off"}</small></label>
       <label className="queue-refresh-interval">Refresh every <input type="number" min={5} max={3600} step={1} value={refreshSeconds} onChange={event=>setRefreshSeconds(Math.max(5,Math.min(3600,Number(event.target.value)||5)))}/> seconds</label>
@@ -1206,12 +1387,14 @@ function PrintQueuePage({ jobs, printers, onPreview, onApprove, onReject, onRefu
             </select>}
             {job.status!=="PAID_AUTHORISED"&&job.status!=="LOCAL_QUEUE_CLAIMED"&&<><strong>{job.outputType==="PDF_EXPORT"&&job.status==="COMPLETED"?"PDF saved":job.printerName||"Not assigned"}</strong><small>{job.outputType==="PDF_EXPORT"&&job.outputFilePath?job.outputFilePath:job.localQueueReceivedUtc?"Local copy secured "+new Date(job.localQueueReceivedUtc).toLocaleTimeString():(job.queueName||"Waiting for local queue handoff")}</small></>}
             {job.status==="LOCAL_QUEUE_CLAIMED"&&<><strong>{job.printerName||"Agent claimed job"}</strong><small>{job.agentLeaseExpiresUtc?"Claim lease expires "+new Date(job.agentLeaseExpiresUtc).toLocaleTimeString():"Waiting for local agent acknowledgement"}</small></>}
+            {spoolerStatusWarning(job.spoolerStatus, job.printerStatus) && <small className="queue-device-warning" role="status">{spoolerStatusWarning(job.spoolerStatus, job.printerStatus)}</small>}
           </div></td>
           <td><Status label={job.outputType==="PDF_EXPORT"&&job.status==="COMPLETED"?"PDF saved":job.outputMode==="PDF_EXPORT"&&job.status==="PRINT_SUBMITTING"?"Creating PDF":prettyStatus(job.status)} tone={job.status==="AWAITING_CUSTOMER_APPROVAL"||job.status==="AWAITING_SHOP_APPROVAL"?"amber":job.status==="COMPLETED"||job.status==="LOCAL_QUEUE_READY"?"green":job.status==="OUTPUT_UNCONFIRMED"?"amber":job.status==="REFUNDED"?"green":"blue"}/></td>
           <td className="time-cell">{new Date(job.createdUtc).toLocaleString()}</td>
-          <td><div className="queue-actions"><button className="subtle-button" disabled={busyJobId===job.id} onClick={()=>onPreview(job)}>Preview</button><button className="subtle-button" disabled={busyJobId===job.id} onClick={()=>onHistory(job)}>History</button>{job.status==="AWAITING_SHOP_APPROVAL"&&<><button className="subtle-button approve-action" disabled={busyJobId===job.id} onClick={()=>onApprove(job)}>Accept file</button><button className="subtle-button reject-action" disabled={busyJobId===job.id} onClick={()=>onReject(job)}>Reject file</button></>}{job.status==="PAID_AUTHORISED"&&(job.payment?.status==="VERIFIED"||job.payment?.status==="PARTIALLY_REFUNDED")&&!job.localQueueReceivedUtc&&!job.claimedByAgentDeviceId&&<button className="subtle-button reject-action" disabled={busyJobId===job.id} onClick={()=>onRefund(job)}>Review pages</button>}{job.status==="LOCAL_QUEUE_READY"&&<button className="subtle-button approve-action" disabled={busyJobId===job.id} onClick={()=>onDispatch(job)}>{job.outputMode==="PDF_EXPORT"?"Save PDF":"Start printing"}</button>}{job.status==="OUTPUT_UNCONFIRMED"&&job.outputMode==="PDF_EXPORT"&&<button className="subtle-button approve-action" disabled={busyJobId===job.id} onClick={()=>onRetryPdfExport(job)}>Save PDF again</button>}{(job.status==="SPOOLER_ACCEPTED"||job.status==="PRINTING"||(job.status==="OUTPUT_UNCONFIRMED"&&job.outputMode!=="PDF_EXPORT"))&&<button className="subtle-button approve-action" disabled={busyJobId===job.id} onClick={()=>onConfirmOutput(job)}>Confirm output</button>}</div></td>
+          <td><div className="queue-actions"><button className="subtle-button" disabled={busyJobId===job.id} onClick={()=>onPreview(job)}>Preview</button><button className="subtle-button" disabled={busyJobId===job.id} onClick={()=>onHistory(job)}>History</button>{job.status==="AWAITING_SHOP_APPROVAL"&&<><button className="subtle-button approve-action" disabled={busyJobId===job.id} onClick={()=>onApprove(job)}>Accept file</button><button className="subtle-button reject-action" disabled={busyJobId===job.id} onClick={()=>onReject(job)}>Reject file</button></>}{job.status==="PAID_AUTHORISED"&&(job.payment?.status==="VERIFIED"||job.payment?.status==="PARTIALLY_REFUNDED")&&!job.localQueueReceivedUtc&&!job.claimedByAgentDeviceId&&<button className="subtle-button reject-action" disabled={busyJobId===job.id} onClick={()=>onRefund(job)}>Review pages</button>}{job.status==="LOCAL_QUEUE_READY"&&<button className="subtle-button approve-action" disabled={busyJobId===job.id} onClick={()=>onDispatch(job)}>{job.outputMode==="PDF_EXPORT"?"Save PDF":"Start printing"}</button>}{job.status==="OUTPUT_UNCONFIRMED"&&job.outputMode==="PDF_EXPORT"&&<button className="subtle-button approve-action" disabled={busyJobId===job.id} onClick={()=>onRetryPdfExport(job)}>Save PDF again</button>}{(job.status==="SPOOLER_ACCEPTED"||job.status==="PRINTING"||(job.status==="OUTPUT_UNCONFIRMED"&&job.outputMode!=="PDF_EXPORT"))&&<button className="subtle-button approve-action" disabled={busyJobId===job.id||(job.status!=="OUTPUT_UNCONFIRMED"&&!!spoolerStatusWarning(job.spoolerStatus, job.printerStatus))} title={spoolerStatusWarning(job.spoolerStatus, job.printerStatus)||undefined} onClick={()=>onConfirmOutput(job)}>Confirm output</button>}</div></td>
         </tr>)}
       </tbody></table></div>}
+    {hasMoreJobs && <div className="queue-load-older"><button className="secondary-button" type="button" onClick={() => void onLoadOlder()} disabled={loadingOlderJobs}>{loadingOlderJobs ? <span className="button-spinner"/> : <ArrowRight size={14}/>} Load older jobs</button></div>}
   </section>;
 }
 
@@ -1342,6 +1525,23 @@ function rejectedPageList(json?:string) {
   }
 }
 
+function spoolerStatusWarning(status?: string | null, printerStatus?: string | null) {
+  const spooler = (status || "").toUpperCase();
+  const printer = (printerStatus || "").toUpperCase();
+  if (spooler === "OFFLINE" || printer === "OFFLINE")
+    return "Printer is offline. Reconnect it; Windows may resume this same queued job. Do not start a duplicate.";
+  if (spooler === "PAPEROUT")
+    return "The printer reports no paper. Refill it and check the same Windows queue before continuing.";
+  if (spooler === "PAUSED" || printer === "PAUSED")
+    return "The printer or Windows print queue is paused. Resume the existing job in Windows; do not submit another copy.";
+  if (spooler === "PRINTER_UNAVAILABLE")
+    return "The Agent cannot currently open this printer queue. Reconnect or restore the queue, then refresh this job.";
+  if (spooler === "ERROR")
+    return "Windows reports a printer error. Resolve it in the printer queue and inspect any pages already produced.";
+  if (spooler === "USERINTERVENTION")
+    return "The printer requires attention. Resolve the prompt at the device before checking the same queued job.";
+  return "";
+}
 function prettyStatus(status:string) {
   const names:Record<string,string>={
     AWAITING_CONFIGURATION:"Configure options",
@@ -1376,6 +1576,14 @@ function prettyStatus(status:string) {
   };
   return names[status] || status.replaceAll("_"," ").toLowerCase().replace(/\\b\\w/g,letter=>letter.toUpperCase());
 }
+function isPrinterAvailable(printer: PrinterDevice, onlineAgentIds: ReadonlySet<string>, now = Date.now()) {
+  if (!printer.isActive || !printer.agentDeviceId || !onlineAgentIds.has(printer.agentDeviceId)) return false;
+  if (printer.outputMode === "PDF_EXPORT") return true;
+  const lastSeen = printer.lastSeenUtc ? Date.parse(printer.lastSeenUtc) : Number.NaN;
+  return Number.isFinite(lastSeen) && lastSeen > now - 2 * 60 * 1000 &&
+    (printer.status === "Ready" || printer.status === "Busy");
+}
+
 function formatMoney(minor:number,currency:string) {
   return new Intl.NumberFormat("en-IN",{style:"currency",currency,minimumFractionDigits:2}).format(minor/100);
 }
@@ -1596,9 +1804,12 @@ function CustomerEntry({publicCode}:{publicCode:string}) {
     let mounted=true;
     const storedToken=sessionStorage.getItem("qrtoprint.customer-session");
     const resume=storedToken
-      ? resumeCustomerSession(storedToken,publicCode).catch(()=>{
-          sessionStorage.removeItem("qrtoprint.customer-session");
-          return null;
+      ? resumeCustomerSession(storedToken,publicCode).catch(exception=>{
+          if (exception instanceof ApiError && exception.status === 401) {
+            sessionStorage.removeItem("qrtoprint.customer-session");
+            return null;
+          }
+          throw exception;
         })
       : Promise.resolve(null);
 
@@ -1765,7 +1976,7 @@ function CustomerLocalConnection({localAgent,onReady}:{localAgent:CustomerLocalA
            status.status==="LOCAL_ENDPOINT_READY") {
           setCheckStatus("connected");
           onReady(true);
-          setMessage("This phone can reach the shop computer. Direct uploads can use shop Wi-Fi.");
+          setMessage("This phone can reach the shop computer. Direct uploads use the shop's private Wi-Fi, but this local HTTP connection is not encrypted in transit. Choose cloud-assisted upload for HTTPS transfer.");
           return;
         }
       } catch {

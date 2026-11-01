@@ -703,7 +703,30 @@ public sealed class Worker(
                         await localQueueStore.MarkOutputConfirmedAsync(entry.JobId, ct);
                 }
             }
-            catch (Win32Exception ex) { logger.LogWarning(ex, "Could not inspect Windows print job {SpoolerJobId}.", entry.SpoolerJobId); }
+            catch (Win32Exception ex)
+            {
+                logger.LogWarning(ex, "Could not inspect Windows print job {SpoolerJobId}.", entry.SpoolerJobId);
+                try
+                {
+                    await localQueueStore.UpdateSpoolerStatusAsync(entry.JobId, "PRINTER_UNAVAILABLE", ct);
+                    using var status = await SendAgentRequestAsync(
+                        client,
+                        credentials,
+                        $"api/v1/agent/jobs/{entry.JobId}/spooler-status",
+                        new AgentSpoolerStatusRequest(entry.SpoolerJobId.Value, "PRINTER_UNAVAILABLE", 0, 0),
+                        ct);
+                    if (!status.IsSuccessStatusCode)
+                        logger.LogWarning("Printer-unavailable status for {JobNumber} returned HTTP {StatusCode}.", entry.JobNumber, (int)status.StatusCode);
+                }
+                catch (OperationCanceledException) when (ct.IsCancellationRequested)
+                {
+                    throw;
+                }
+                catch (Exception reportException)
+                {
+                    logger.LogWarning(reportException, "Could not report printer-unavailable state for {JobNumber}.", entry.JobNumber);
+                }
+            }
             catch (Exception ex) { logger.LogWarning(ex, "Spooler monitor error for {JobNumber}.", entry.JobNumber); }
         }
     }
