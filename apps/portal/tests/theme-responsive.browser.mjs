@@ -131,11 +131,11 @@ async function assertRouteContrast(page, route) {
   const result = await page.evaluate(() => {
     const parse = value => {
       const normalized = value.trim();
-      const match = normalized.match(/^#([0-9a-f]{6})$/i);
+      const hex = normalized.match(/^#([0-9a-f]{3}|[0-9a-f]{6})$/i);
       let channels;
-      if (match) {
-        const hex = match[1];
-        channels = [0, 2, 4].map(offset => parseInt(hex.slice(offset, offset + 2), 16) / 255);
+      if (hex) {
+        const digits = hex[1].length === 3 ? hex[1].split("").map(value => value + value).join("") : hex[1];
+        channels = [0, 2, 4].map(offset => parseInt(digits.slice(offset, offset + 2), 16) / 255);
       } else {
         const rgb = normalized.match(/^rgba?\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)/i);
         if (!rgb) return null;
