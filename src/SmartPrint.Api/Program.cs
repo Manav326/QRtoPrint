@@ -5321,6 +5321,26 @@ publicApi.MapPost("/sessions/current/jobs", async (
             return Results.Ok(new { Job = racedJob, Document = racedDocument, DuplicateRequest = true });
         }
 
+        var batchIdOwnedByAnotherSession =
+            await db.PrintJobs.AsNoTracking().AnyAsync(item =>
+                item.TenantId == session.TenantId &&
+                item.BatchId == batchId &&
+                item.CustomerSessionId != session.Id, ct) ||
+            await db.LocalPrintUploadTickets.AsNoTracking().AnyAsync(item =>
+                item.TenantId == session.TenantId &&
+                item.BatchId == batchId &&
+                item.CustomerSessionId != session.Id, ct);
+        if (batchIdOwnedByAnotherSession)
+        {
+            await transaction.RollbackAsync(ct);
+            await storage.DeleteAsync(stored.StorageKey);
+            return Results.Conflict(new
+            {
+                code = "batch_id_already_owned",
+                message = "This batch identifier is already associated with another customer session. Start a new batch and retry the upload."
+            });
+        }
+
         _ = await db.PrintJobs.FromSqlInterpolated(
             $"SELECT * FROM \"PrintJobs\" WHERE \"TenantId\" = {session.TenantId} AND \"CustomerSessionId\" = {session.Id} AND \"BatchId\" = {batchId} FOR UPDATE")
             .ToListAsync(ct);
@@ -5599,6 +5619,25 @@ publicApi.MapPost("/sessions/current/local-upload-tickets", async (
     };
     await using var transaction = await db.Database.BeginTransactionAsync(ct);
     await entitlements.AcquireQuotaLockAsync(session.TenantId, TenantQuotaResource.MonthlyPrintJob, ct);
+
+    var batchIdOwnedByAnotherSession =
+        await db.PrintJobs.AsNoTracking().AnyAsync(item =>
+            item.TenantId == session.TenantId &&
+            item.BatchId == batchId &&
+            item.CustomerSessionId != session.Id, ct) ||
+        await db.LocalPrintUploadTickets.AsNoTracking().AnyAsync(item =>
+            item.TenantId == session.TenantId &&
+            item.BatchId == batchId &&
+            item.CustomerSessionId != session.Id, ct);
+    if (batchIdOwnedByAnotherSession)
+    {
+        await transaction.RollbackAsync(ct);
+        return Results.Conflict(new
+        {
+            code = "batch_id_already_owned",
+            message = "This batch identifier is already associated with another customer session. Start a new batch and retry the upload."
+        });
+    }
 
     _ = await db.PrintJobs.FromSqlInterpolated(
         $"SELECT * FROM \"PrintJobs\" WHERE \"TenantId\" = {session.TenantId} AND \"CustomerSessionId\" = {session.Id} AND \"BatchId\" = {batchId} FOR UPDATE")
