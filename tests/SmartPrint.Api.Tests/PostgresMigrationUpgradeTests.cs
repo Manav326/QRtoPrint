@@ -109,11 +109,14 @@ public sealed class PostgresMigrationUpgradeTests
         db.AddRange(tenant, agent, printer, station, session, subscription, ticket);
         await db.SaveChangesAsync();
 
+        var entitlements = new TenantEntitlementService(db);
+        Assert.Equal(1L, await entitlements.GetMonthlyPrintJobUsageAsync(
+            tenant.Id, CancellationToken.None));
+
         await using var transaction = await db.Database.BeginTransactionAsync();
         ticket.CompletedUtc = now;
         await db.SaveChangesAsync();
 
-        var entitlements = new TenantEntitlementService(db);
         await entitlements.AcquireQuotaLockAsync(
             tenant.Id, TenantQuotaResource.MonthlyPrintJob, CancellationToken.None);
         var decision = await entitlements.CheckCapacityAsync(
@@ -148,6 +151,8 @@ public sealed class PostgresMigrationUpgradeTests
         Assert.False(afterMaterialisation.Allowed);
         Assert.Equal(1L, afterMaterialisation.Current);
         Assert.Equal(1L, afterMaterialisation.Maximum);
+        Assert.Equal(1L, await entitlements.GetMonthlyPrintJobUsageAsync(
+            tenant.Id, CancellationToken.None));
         await transaction.RollbackAsync();
     }
 }
