@@ -84,8 +84,11 @@ public sealed class AgentCredentialStore
                 return false;
             }
 
-            DeleteCore();
+            // Persist the revocation tombstone before removing the credential.
+            // If marker creation fails (disk/ACL issues), keep the old identity so
+            // the desktop can never mistake a failed revoke for a fresh installation.
             WriteRevocationMarker();
+            DeleteCore();
             return true;
         }
     }
