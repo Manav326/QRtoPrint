@@ -33,6 +33,32 @@ A native Android client is located in `apps/android`. It complements the custome
 
 CI builds the Android debug APK and runs JVM unit tests. A real-device matrix (QR scanning, file-provider interoperability, Android version coverage and shop-Wi-Fi Agent upload) is still required before production or Play Store release. The debug APK is published as the `qrtoprint-android-debug` workflow artifact.
 
+## Public SmartPrint downloads
+
+The public landing page uses the latest GitHub Release assets:
+
+- Windows shop installer: `https://github.com/Manav326/QRtoPrint/releases/latest/download/SmartPrint-Windows-Setup.exe`
+- Android customer APK: `https://github.com/Manav326/QRtoPrint/releases/latest/download/SmartPrint-Android.apk`
+
+Create a version tag (for example, `v0.1.0`) after configuring the release credentials below. The `.github/workflows/release.yml` workflow builds the guided Windows installer, signs it, builds and signs the Android release APK, verifies both outputs and publishes them with a SHA-256 checksum file.
+
+Required GitHub Actions repository secrets:
+
+| Secret | Purpose |
+| --- | --- |
+| `WINDOWS_SIGNING_CERT_BASE64` | Base64-encoded PFX code-signing certificate |
+| `WINDOWS_SIGNING_CERT_PASSWORD` | Password for the PFX certificate |
+| `ANDROID_SIGNING_KEYSTORE_BASE64` | Base64-encoded Android release keystore |
+| `ANDROID_SIGNING_KEYSTORE_PASSWORD` | Android keystore password |
+| `ANDROID_SIGNING_KEY_ALIAS` | Android release key alias |
+| `ANDROID_SIGNING_KEY_PASSWORD` | Android release key password |
+
+Keep the Android keystore and its passwords backed up securely. Every Android update must use the same signing identity or existing installations will not accept it as an in-place update. Obtain a trusted Windows code-signing certificate for the publisher identity shown to shop owners; the release workflow intentionally refuses to publish an unsigned Windows installer.
+
+The release workflow builds the Android app against the repository variable `SMARTPRINT_PUBLIC_BASE_URL`. It defaults to `https://qr-test.paintpulp.com`; set that GitHub Actions variable to the current canonical public HTTPS origin before building a release for a different deployment.
+
+The Windows setup wizard asks the shop owner for a one-time 32-character pairing code generated from **Shop workspace → Print Agent → Add computer**. It installs the Agent as a Windows Service, configures the Private-profile firewall rule and checks that the local Agent endpoint is responding. The owner then returns to the shop workspace to confirm the cloud heartbeat and discovered printer inventory.
+
 ## Download and install the Android debug APK
 
 On Windows with GitHub CLI authenticated and Android Debug Bridge (ADB) installed:
