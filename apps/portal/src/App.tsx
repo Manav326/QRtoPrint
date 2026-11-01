@@ -2089,6 +2089,7 @@ function RefundModal({job,token,busy,onClose,onSubmit}:{
   onSubmit:(values:{refundMethod:"UPI"|"CASH";refundReference:string|null;reason:string;rejectedPageNumbers:number[];idempotencyKey:string})=>void;
 }) {
   const [rejectedPages,setRejectedPages]=useState<Set<number>>(()=>{
+    if(job.status==="REJECTED")return new Set<number>(Array.from({length:job.pageCount},(_,index)=>index+1));
     try{return new Set<number>(JSON.parse(job.rejectedPageNumbersJson||"[]") as number[]);}catch{return new Set<number>();}
   });
   const [estimate,setEstimate]=useState<Awaited<ReturnType<typeof previewShopPrintRefund>>|null>(null);
@@ -2096,7 +2097,7 @@ function RefundModal({job,token,busy,onClose,onSubmit}:{
   const [estimateError,setEstimateError]=useState("");
   const [method,setMethod]=useState<"UPI"|"CASH">(job.payment?.method==="CASH"?"CASH":"UPI");
   const [reference,setReference]=useState("");
-  const [reason,setReason]=useState("Customer rejected selected pages after shop preview.");
+  const [reason,setReason]=useState(job.status==="REJECTED"?"Shop rejected the entire file after preview.":"Customer rejected selected pages after shop preview.");
   const [confirmed,setConfirmed]=useState(false);
   const refundRequest=useRef<{signature:string;key:string}|null>(null);
   const selectedPages=Array.from(rejectedPages).sort((a,b)=>a-b);
@@ -2121,7 +2122,7 @@ function RefundModal({job,token,busy,onClose,onSubmit}:{
     setRejectedPages(current=>{const next=new Set(current);if(checked)next.add(page);else next.delete(page);return next;});
   };
 
-  return <Modal title="Review pages and refund" subtitle="Every page starts accepted. Tick only pages to reject; selections can be undone before recording. Already refunded pages stay excluded." onClose={onClose}>
+  return <Modal title={job.status==="REJECTED"?"Refund rejected file":"Review pages and refund"} subtitle={job.status==="REJECTED"?"All pages are selected because the shop rejected this entire file. Confirm the full-file refund before handoff.":"Every page starts accepted. Tick only pages to reject; selections can be undone before recording. Already refunded pages stay excluded."} onClose={onClose}>
     <div className="refund-summary-card">
       <div><span>FILE</span><strong>{job.document.originalFileName}</strong></div>
       <div><span>VERIFIED PAYMENT</span><strong>{formatMoney(job.payment?.amountMinor||job.quotedAmountMinor,job.payment?.currency||job.currency)}</strong></div>
