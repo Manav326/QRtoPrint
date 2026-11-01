@@ -75,8 +75,8 @@ public sealed class DocumentRetentionWorker(
                 {
                     Document = document,
                     job.Status,
-                    job.OutputConfirmedUtc,
-                    job.OutputCompletedUtc,
+                    OutputConfirmedUtc = job.OutputType == "PDF_EXPORT" ? (DateTimeOffset?)null : job.OutputConfirmedUtc,
+                    OutputCompletedUtc = completedUtc,
                     job.UpdatedUtc,
                     HasFinancialHold = hasFinancialHold
                 })
