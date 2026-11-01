@@ -1,4 +1,5 @@
 import { getLocalAgentStatus, isDesktopApp, writeDesktopSession } from "./desktop-bridge";
+import { authStorageKey } from "./portal-routing";
 export interface AuthTokens {
   tokenType: string;
   accessToken: string;
@@ -19,7 +20,7 @@ export function isPlatformAdminSession(tokens: AuthTokens | null): boolean {
     const roles = Array.isArray(payload.platform_role)
       ? payload.platform_role
       : [payload.platform_role];
-    return !payload.tenant_id && roles.includes("PlatformAdmin");
+    return !Object.prototype.hasOwnProperty.call(payload, "tenant_id") && roles.includes("PlatformAdmin");
   } catch {
     return false;
   }
@@ -354,7 +355,7 @@ function isSerializedPlatformAdmin(raw: string): boolean {
 
 export function readStoredTokens(scope: AuthScope = currentAuthScope()): AuthTokens | null {
   try {
-    const scopedKey = `qrtoprint.auth.${scope}`;
+    const scopedKey = authStorageKey(scope);
     const scoped = sessionStorage.getItem(scopedKey);
     if (scoped) return JSON.parse(scoped) as AuthTokens;
 
