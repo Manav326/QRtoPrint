@@ -135,21 +135,29 @@ export default function PublicLandingPage() {
           </div>
           <div className="sp-download-grid">
             <article className="sp-download-card">
-              <div className="sp-download-icon sp-windows-icon"><Monitor size={25}/></div><div className="sp-download-platform">FOR SHOP OWNERS · WINDOWS 10/11</div>
+              <div className="sp-download-icon sp-windows-icon"><Monitor size={25}/></div>
+              <div className="sp-download-label-row">
+                <div className="sp-download-platform">FOR SHOP OWNERS · WINDOWS 10/11</div>
+                <span className="sp-download-tag sp-download-tag-available">Available</span>
+              </div>
               <h3>SmartPrint for Windows</h3><p>Install the shop Agent on the computer connected to your printers. The guided setup will help connect it to your shop workspace.</p>
-              <span className="sp-download-unavailable sp-download-button" aria-disabled="true">Signed Windows setup coming soon</span>
-              <small className="sp-download-note">Windows x64 · Guided installation · Public code signing pending</small>
-              <p className="sp-release-pending">The installer has passed automated build validation. It will be downloadable after the trusted Windows publisher certificate is configured and the signed release is published.</p>
+              <a className="sp-download-link-button sp-download-button" href="https://github.com/Manav326/QRtoPrint/releases/latest/download/SmartPrint-Windows-Setup.exe">Download Windows installer <ArrowRight size={16}/></a>
+              <small className="sp-download-note">Windows x64 · Guided installation · SmartPrint official release</small>
+              <p className="sp-download-security-note">Windows may show a first-run security prompt. Some managed Windows 11 devices may block unsigned installers.</p>
             </article>
             <article className="sp-download-card">
-              <div className="sp-download-icon sp-android-icon"><Smartphone size={25}/></div><div className="sp-download-platform">FOR CUSTOMERS · ANDROID</div>
+              <div className="sp-download-icon sp-android-icon"><Smartphone size={25}/></div>
+              <div className="sp-download-label-row">
+                <div className="sp-download-platform">FOR CUSTOMERS · ANDROID</div>
+                <span className="sp-download-tag sp-download-tag-coming">Coming soon</span>
+              </div>
               <h3>SmartPrint for Android</h3><p>Scan shop QR codes, organise documents in your library and send files through the connected SmartPrint customer journey.</p>
-              <span className="sp-download-unavailable sp-download-button" aria-disabled="true">Signed Android APK coming soon</span>
-              <small className="sp-download-note">Android 8.0 or later · APK installation · Production signing pending</small>
-              <p className="sp-release-pending">Android unit and emulator tests have passed. The customer APK will be available after the permanent release keystore is configured and the signed release is published.</p>
+              <span className="sp-download-unavailable sp-download-button" aria-disabled="true">Android app coming soon</span>
+              <small className="sp-download-note">Android 8.0 or later · APK distribution</small>
+              <p className="sp-release-pending">The production APK will be published after the Android release signing setup is ready.</p>
             </article>
           </div>
-          <p className="sp-download-footnote"><ShieldCheck size={14}/> Official signed downloads will appear here after release publication.</p>
+          <p className="sp-download-footnote"><ShieldCheck size={14}/> Download only from the official SmartPrint website or its linked GitHub release.</p>
         </section>
 
         <section className="sp-final-cta">
