@@ -2565,8 +2565,7 @@ shop.MapPost("/print-batches/{batchId:guid}/review", async (
                     CreatedUtc = now
                 });
             }
-            else if (job.Status is not ("AWAITING_PAYMENT" or "AWAITING_CUSTOMER_PAYMENT" or
-                                       "PAYMENT_REPORTED" or "AWAITING_COUNTER_PAYMENT"))
+            else if (job.Status != "AWAITING_PAYMENT")
             {
                 await transaction.RollbackAsync(ct);
                 return Results.Conflict(new
@@ -2584,9 +2583,7 @@ shop.MapPost("/print-batches/{batchId:guid}/review", async (
             if (job.Status == "REJECTED")
                 continue;
 
-            if (job.Status is not ("AWAITING_SHOP_APPROVAL" or "AWAITING_PAYMENT" or
-                                  "AWAITING_CUSTOMER_PAYMENT" or "PAYMENT_REPORTED" or
-                                  "AWAITING_COUNTER_PAYMENT"))
+            if (job.Status is not ("AWAITING_SHOP_APPROVAL" or "AWAITING_PAYMENT"))
             {
                 await transaction.RollbackAsync(ct);
                 return Results.Conflict(new
@@ -2755,14 +2752,12 @@ shop.MapPost("/print-jobs/{jobId:guid}/reject", async (
         return Results.Ok(new { job.Id, job.JobNumber, job.Status, DuplicateRequest = true });
     }
 
-    if (job.Status is not ("AWAITING_SHOP_APPROVAL" or "AWAITING_PAYMENT" or
-                          "AWAITING_CUSTOMER_PAYMENT" or "PAYMENT_REPORTED" or
-                          "AWAITING_COUNTER_PAYMENT"))
+    if (job.Status is not ("AWAITING_SHOP_APPROVAL" or "AWAITING_PAYMENT"))
     {
         return Results.Conflict(new
         {
             code = "job_not_ready_for_rejection",
-            message = "Only a file that has not been handed to the shop computer can be rejected here. Paid files use the file-level refund review."
+            message = "Only a file awaiting approval or checkout can be rejected here. Once batch payment starts, use the file-level refund review after payment verification."
         });
     }
 
