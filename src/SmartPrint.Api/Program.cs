@@ -5104,6 +5104,18 @@ publicApi.MapPost("/sessions/current/jobs", async (
         return Results.Ok(new { Job = existing, Document = existingDocument, DuplicateRequest = true });
     }
 
+    var batchCheckoutLocked = await db.PrintBatchPayments.AsNoTracking().AnyAsync(item =>
+        item.TenantId == session.TenantId &&
+        item.CustomerSessionId == session.Id &&
+        item.BatchId == batchId &&
+        item.Status != "REJECTED", ct);
+    if (batchCheckoutLocked)
+        return Results.Conflict(new
+        {
+            code = "batch_upload_locked_after_payment_start",
+            message = "This batch has a payment attempt or a verified payment. Start a new batch for additional files so every file has a clear payment total."
+        });
+
     if (!context.Request.HasFormContentType)
     {
         return Results.BadRequest(new { code = "multipart_form_required", message = "Upload the document using multipart/form-data." });
@@ -5410,6 +5422,18 @@ publicApi.MapPost("/sessions/current/local-upload-tickets", async (
             Completed = existing.CompletedUtc != null
         });
     }
+
+    var batchCheckoutLocked = await db.PrintBatchPayments.AsNoTracking().AnyAsync(item =>
+        item.TenantId == session.TenantId &&
+        item.CustomerSessionId == session.Id &&
+        item.BatchId == batchId &&
+        item.Status != "REJECTED", ct);
+    if (batchCheckoutLocked)
+        return Results.Conflict(new
+        {
+            code = "batch_upload_locked_after_payment_start",
+            message = "This batch has a payment attempt or a verified payment. Start a new batch for additional files so every file has a clear payment total."
+        });
 
     var stationPrinter = await (
         from station in db.QrStations.AsNoTracking()
