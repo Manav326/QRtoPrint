@@ -1188,16 +1188,21 @@ export function getShopJobEvents(token: string, jobId: string) {
   return apiRequest<ShopJobEvent[]>(`/api/v1/shop/print-jobs/${jobId}/events`, {}, token);
 }
 
-export function getShopPrintJobsPage(token: string, offset: number, take = 100, search = "") {
+export function getShopPrintJobsPage(token: string, offset: number, take = 100, search = "", batchId?: string) {
   const safeOffset = Math.max(0, Math.floor(offset));
   const safeTake = Math.max(1, Math.min(100, Math.floor(take)));
   const query = new URLSearchParams({ offset: String(safeOffset), take: String(safeTake) });
-  if (search.trim()) query.set("search", search.trim());
+  if (search.trim()) query.set("search", search.trim().slice(0, 120));
+  if (batchId) query.set("batchId", batchId);
   return apiRequest<ShopPrintJob[]>(
     `/api/v1/shop/print-jobs?${query.toString()}`,
     {},
     token
   );
+}
+
+export function getShopPrintBatchJobs(token: string, batchId: string) {
+  return getShopPrintJobsPage(token, 0, 100, "", batchId);
 }
 
 export function approveShopPrintJob(token: string, jobId: string) {
