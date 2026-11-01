@@ -257,7 +257,7 @@ class QrScannerActivity : AppCompatActivity() {
                 val hasFlash = camera?.cameraInfo?.hasFlashUnit() == true
                 torchButton.isEnabled = hasFlash
                 if (!hasFlash) torchEnabled = false
-                statusText.text = if (hasFlash) "Align QR inside frame · Flashlight available."
+                statusText.text = if (hasFlash) "Align QR · Flashlight available."
                     else "Align QR inside frame."
             } catch (_: Exception) {
                 camera = null
@@ -293,7 +293,7 @@ class QrScannerActivity : AppCompatActivity() {
             setPadding(0, dp(12), 0, dp(8))
         })
         panel.addView(label(
-            "Allow camera to scan QR codes.",
+            "Allow camera for QR scanning.",
             13, getColor(R.color.qp_muted), false
         ).apply { gravity = Gravity.CENTER; textAlignment = View.TEXT_ALIGNMENT_CENTER })
         val action = MaterialButton(this).apply {
