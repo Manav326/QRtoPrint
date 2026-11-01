@@ -19,7 +19,7 @@ The website uses a compact **Available** label and a brief first-run security no
 
 ## 2. Android release keystore
 
-The Android package ID is `com.thinkwithsujeet.qrtoprint`. Its production signing key must remain stable for all future updates to install over the existing app.
+The Android package ID is `com.quantaedge.smartprint`. Its production signing key must remain stable for all future updates to install over the existing app.
 
 Generate a dedicated release keystore on a secure machine with JDK 17 or later:
 
