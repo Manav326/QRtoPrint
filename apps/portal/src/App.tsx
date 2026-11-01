@@ -1854,7 +1854,7 @@ function PrintQueuePage({ jobs, printers, agentDevices, searchQuery, onSearch, o
   const queueBatches=Array.from(batchMap.values());
 
   return <section className="panel queue-panel live-queue-panel">
-    <div className="collection-header"><div><h2>Customer print jobs</h2><p>Preview every file separately. Each file can be accepted or rejected without changing the rest of its upload batch. Refunds are available before handoff to the print computer.</p></div><div className="queue-header-actions"><span className="setup-count">{jobs.length} jobs shown</span><form className="queue-search-form" onSubmit={event=>{event.preventDefault();void onSearch(searchInput);}}><input aria-label="Search all print jobs" type="search" maxLength={120} placeholder="Job, file or printer" value={searchInput} onChange={event=>setSearchInput(event.target.value)}/><button className="secondary-button" type="submit"><Search size={13}/> Search</button></form><button className="secondary-button queue-refresh-button" onClick={()=>void refreshQueue()} disabled={refreshRunning.current}><Activity size={13}/> Refresh queue</button></div></div>
+    <div className="collection-header"><div><h2>Customer print jobs</h2><p>Preview every file separately. Each file can be accepted or rejected without changing the rest of its upload batch. Refunds are available before handoff to the print computer.</p></div><div className="queue-header-actions"><span className="setup-count">{queueBatches.length} batches shown</span><form className="queue-search-form" onSubmit={event=>{event.preventDefault();void onSearch(searchInput);}}><input aria-label="Search all print jobs" type="search" maxLength={120} placeholder="Job, file or printer" value={searchInput} onChange={event=>setSearchInput(event.target.value)}/><button className="secondary-button" type="submit"><Search size={13}/> Search</button></form><button className="secondary-button queue-refresh-button" onClick={()=>void refreshQueue()} disabled={refreshRunning.current}><Activity size={13}/> Refresh queue</button></div></div>
     <div className="queue-refresh-controls">
       <label className="queue-auto-toggle"><input type="checkbox" checked={autoRefresh} onChange={event=>setAutoRefresh(event.target.checked)}/><span className="queue-toggle-track"/><strong>Auto refresh</strong><small>{autoRefresh?"On":"Off"}</small></label>
       <label className="queue-refresh-interval">Refresh every <input type="number" min={5} max={3600} step={1} value={refreshSeconds} onChange={event=>setRefreshSeconds(Math.max(5,Math.min(3600,Number(event.target.value)||5)))}/> seconds</label>
@@ -1869,8 +1869,9 @@ function PrintQueuePage({ jobs, printers, agentDevices, searchQuery, onSearch, o
           const folders=Array.from(new Set(batch.jobs.map(job=>job.batchGroupName??"Loose files")));
           const statusLabels=Array.from(new Set(batch.jobs.map(job=>job.status)));
           const settings=Array.from(new Set(batch.jobs.map(job=>`${job.colourMode} · ${job.isDuplex?"Double":"Single"}-sided`)));
-          const totalCopies=batch.jobs.reduce((sum,job)=>sum+job.copies,0);
-          const totalAmount=batch.jobs.reduce((sum,job)=>sum+Math.max(0,job.quotedAmountMinor),0);
+          const payableJobs=batch.jobs.filter(job=>job.status!=="REJECTED"&&job.status!=="REFUNDED");
+          const totalCopies=payableJobs.reduce((sum,job)=>sum+job.copies,0);
+          const totalAmount=payableJobs.reduce((sum,job)=>sum+Math.max(0,job.quotedAmountMinor),0);
           const printersInBatch=Array.from(new Set(batch.jobs.map(job=>job.printerName||"Not assigned")));
           const expanded=expandedBatchKeys.has(batch.key);
           const label=statusLabels.length===1?prettyStatus(statusLabels[0]):`${statusLabels.length} states`;
@@ -2635,7 +2636,9 @@ function customerBatchGroupName(file:File):string {
 }
 
 function normalizeCustomerCopies(value:string):string {
-  const copies=Number.parseInt(value,10);
+  const trimmed=value.trim();
+  if(!/^\\d+$/.test(trimmed))return "1";
+  const copies=Number(trimmed);
   return Number.isInteger(copies)&&copies>=1&&copies<=100?String(copies):"1";
 }
 
@@ -3182,7 +3185,7 @@ function CustomerPrintFlow({publicCode,sessionToken,paymentOptions,localAgent,lo
         {Array.from(new Set(uploadedBatch.map(item=>item.job.batchGroupName??"Loose files"))).map(groupName=><section className="customer-uploaded-folder" key={groupName}>
           <strong>{groupName}</strong>
           {uploadedBatch.filter(item=>(item.job.batchGroupName??"Loose files")===groupName).map(item=><button type="button" key={item.job.id} className={uploaded.job.id===item.job.id?"customer-uploaded-batch-item active":"customer-uploaded-batch-item"} onClick={()=>selectUploadedFile(item)}>
-            <span className="batch-file-index"><FileText size={14}/></span><span className="batch-file-copy"><strong>{item.document.originalFileName}</strong><small>{item.job.pageCount} {item.job.pageCount===1?"page":"pages"} · {printSettingsByJobId[item.job.id]?.copies??item.job.copies} copies · {printSettingsByJobId[item.job.id]?.colourMode??"Mono"} · {(printSettingsByJobId[item.job.id]?.isDuplex??false)?"Double-sided":"Single-sided"} · {formatMoney(item.job.quotedAmountMinor,item.job.currency)}</small></span>
+            <span className="batch-file-index"><FileText size={14}/></span><span className="batch-file-copy"><strong>{item.document.originalFileName}</strong><small>{item.job.pageCount} {item.job.pageCount===1?"page":"pages"} · {printSettingsByJobId[item.job.id]?.copies??item.job.copies} copies · {printSettingsByJobId[item.job.id]?.colourMode??"Mono"} · {(printSettingsByJobId[item.job.id]?.isDuplex??false)?"Double-sided":"Single-sided"} · {item.job.quotedAmountMinor>0?formatMoney(item.job.quotedAmountMinor,item.job.currency):"Awaiting quote"}</small></span>
             <Status
               label={prettyStatus(batchStatuses[item.job.id]?.status??item.job.status??"UPLOADED")}
               tone={["REJECTED","PAYMENT_REJECTED"].includes((batchStatuses[item.job.id]?.status??item.job.status??"").toUpperCase())?"red":

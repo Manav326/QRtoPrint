@@ -4590,7 +4590,7 @@ publicApi.MapPost("/sessions/current/jobs", async (
 
     var existing = await db.PrintJobs.AsNoTracking()
         .Where(job => job.TenantId == session.TenantId && job.IdempotencyKey == idempotencyKey)
-        .Select(job => new { job.Id, job.BatchId, job.CustomerSessionId, job.JobNumber, job.Status, job.PageCount, job.CreatedUtc })
+        .Select(job => new { job.Id, job.BatchId, job.BatchGroupName, job.CustomerSessionId, job.JobNumber, job.Status, job.PageCount, job.CreatedUtc })
         .SingleOrDefaultAsync(ct);
     if (existing is not null)
     {
@@ -4905,6 +4905,7 @@ publicApi.MapPost("/sessions/current/local-upload-tickets", async (
             existing.Id,
             existing.PrintJobId,
             existing.BatchId,
+            existing.BatchGroupName,
             existing.JobNumber,
             existing.AgentDeviceId,
             existing.ExpiresUtc,
@@ -5004,6 +5005,7 @@ publicApi.MapPost("/sessions/current/local-upload-tickets", async (
             racedTicket.Id,
             racedTicket.PrintJobId,
             racedTicket.BatchId,
+            racedTicket.BatchGroupName,
             racedTicket.JobNumber,
             racedTicket.AgentDeviceId,
             racedTicket.ExpiresUtc,
