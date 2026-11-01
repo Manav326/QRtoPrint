@@ -30,6 +30,7 @@ RestartApplications=no
 Name: "english"; MessagesFile: "compiler:Default.isl"
 
 [Files]
+Source: "scripts\agent-service-lifecycle.ps1"; Flags: dontcopy
 Source: "artifacts\agent\*"; DestDir: "{app}"; Excludes: "pair-agent.ps1,appsettings.example.json,README.md"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Icons]
@@ -42,6 +43,8 @@ Filename: "{sys}\WindowsPowerShell\v1.0\powershell.exe"; Parameters: "-NoProfile
 [Code]
 var
   PairingPage: TInputQueryWizardPage;
+  ServiceWasRunning: Boolean;
+  ServiceInstallSucceeded: Boolean;
 
 function SetEnvironmentVariableW(lpName, lpValue: string): Boolean;
   external 'SetEnvironmentVariableW@kernel32.dll stdcall';
@@ -95,6 +98,47 @@ begin
   end;
 end;
 
+function PrepareToInstall(var NeedsRestart: Boolean): String;
+var
+  PowerShellPath: string;
+  Parameters: string;
+  ExitCode: Integer;
+begin
+  Result := '';
+  ExtractTemporaryFile('agent-service-lifecycle.ps1');
+  PowerShellPath := ExpandConstant('{sys}\WindowsPowerShell\v1.0\powershell.exe');
+  Parameters :=
+    '-NoProfile -NonInteractive -ExecutionPolicy Bypass -File "' +
+    ExpandConstant('{tmp}\agent-service-lifecycle.ps1') + '"';
+
+  if not Exec(PowerShellPath, Parameters, '', SW_HIDE, ewWaitUntilTerminated, ExitCode) then
+  begin
+    Result := 'SmartPrint could not start the Windows service stop step. Restart Windows and run setup again.';
+    Exit;
+  end;
+
+  if ExitCode = 10 then
+    ServiceWasRunning := True
+  else if ExitCode <> 0 then
+    Result := 'SmartPrint could not stop its existing Windows service safely. Restart Windows and try setup again.';
+end;
+
+procedure DeinitializeSetup();
+var
+  PowerShellPath: string;
+  Parameters: string;
+  ExitCode: Integer;
+begin
+  if not ServiceWasRunning or ServiceInstallSucceeded then
+    Exit;
+
+  PowerShellPath := ExpandConstant('{sys}\WindowsPowerShell\v1.0\powershell.exe');
+  Parameters :=
+    '-NoProfile -NonInteractive -ExecutionPolicy Bypass -File "' +
+    ExpandConstant('{tmp}\agent-service-lifecycle.ps1') + '" -Start';
+  Exec(PowerShellPath, Parameters, '', SW_HIDE, ewWaitUntilTerminated, ExitCode);
+end;
+
 procedure CurStepChanged(CurStep: TSetupStep);
 var
   AgentPath: string;
@@ -146,6 +190,7 @@ begin
   SetEnvironmentVariableW('Agent__ApiBaseUrl', '');
   if InstallExitCode <> 0 then
     RaiseException('SmartPrint paired successfully, but Windows could not finish service setup. Run setup again as an administrator or contact support.');
+  ServiceInstallSucceeded := True;
 
   VerifyParameters :=
     '-NoProfile -NonInteractive -ExecutionPolicy Bypass -File "' +
