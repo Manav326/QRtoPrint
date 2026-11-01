@@ -26,6 +26,7 @@ public sealed class SmartPrintDbContext(DbContextOptions<SmartPrintDbContext> op
     public DbSet<CustomerPrintSession> CustomerPrintSessions => Set<CustomerPrintSession>();
     public DbSet<RefreshToken> RefreshTokens => Set<RefreshToken>();
     public DbSet<PrintJob> PrintJobs => Set<PrintJob>();
+    public DbSet<PrintBatchPayment> PrintBatchPayments => Set<PrintBatchPayment>();
     public DbSet<PrintPayment> PrintPayments => Set<PrintPayment>();
     public DbSet<PrintRefund> PrintRefunds => Set<PrintRefund>();
     public DbSet<PrintDocument> PrintDocuments => Set<PrintDocument>();
@@ -340,6 +341,34 @@ public sealed class SmartPrintDbContext(DbContextOptions<SmartPrintDbContext> op
                 .OnDelete(DeleteBehavior.Restrict);
         });
 
+        modelBuilder.Entity<PrintBatchPayment>(entity =>
+        {
+            entity.ToTable("PrintBatchPayments", table =>
+            {
+                table.HasCheckConstraint("CK_PrintBatchPayments_AmountMinor", "\\"AmountMinor\\" > 0");
+            });
+            entity.HasKey(x => x.Id);
+            entity.Property(x => x.Method).HasMaxLength(16).IsRequired();
+            entity.Property(x => x.Status).HasMaxLength(32).IsRequired();
+            entity.Property(x => x.Currency).HasMaxLength(3).IsRequired();
+            entity.Property(x => x.UpiIdSnapshot).HasMaxLength(160);
+            entity.Property(x => x.PayeeNameSnapshot).HasMaxLength(120);
+            entity.Property(x => x.PaymentReference).HasMaxLength(100);
+            entity.Property(x => x.RejectionReason).HasMaxLength(300);
+            entity.Property(x => x.UpdatedUtc).IsConcurrencyToken();
+            entity.HasAlternateKey(x => new { x.TenantId, x.Id });
+            entity.HasIndex(x => new { x.TenantId, x.BatchId, x.CreatedUtc });
+            entity.HasIndex(x => new { x.TenantId, x.BatchId })
+                .IsUnique()
+                .HasFilter("\\"Status\\" IN ('AWAITING_CUSTOMER_PAYMENT','CUSTOMER_REPORTED','CASH_AWAITING_PAYMENT')");
+            entity.HasOne<Tenant>().WithMany()
+                .HasForeignKey(x => x.TenantId)
+                .OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne<AppUser>().WithMany()
+                .HasForeignKey(x => x.VerifiedByUserId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
         modelBuilder.Entity<PrintPayment>(entity =>
         {
             entity.ToTable("PrintPayments");
@@ -355,6 +384,7 @@ public sealed class SmartPrintDbContext(DbContextOptions<SmartPrintDbContext> op
             entity.Property(x => x.UpdatedUtc).IsConcurrencyToken();
             entity.HasAlternateKey(x => new { x.TenantId, x.Id });
             entity.HasIndex(x => new { x.TenantId, x.PrintJobId, x.CreatedUtc });
+            entity.HasIndex(x => new { x.TenantId, x.BatchPaymentId });
             entity.HasIndex(x => new { x.TenantId, x.PrintJobId })
                 .IsUnique()
                 .HasFilter("\"Status\" IN ('AWAITING_CUSTOMER_PAYMENT','CUSTOMER_REPORTED','CASH_AWAITING_PAYMENT')");
@@ -362,6 +392,10 @@ public sealed class SmartPrintDbContext(DbContextOptions<SmartPrintDbContext> op
                 .HasForeignKey(x => new { x.TenantId, x.PrintJobId })
                 .HasPrincipalKey(x => new { x.TenantId, x.Id })
                 .OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne<PrintBatchPayment>().WithMany()
+                .HasForeignKey(x => new { x.TenantId, x.BatchPaymentId })
+                .HasPrincipalKey(x => new { x.TenantId, x.Id })
+                .OnDelete(DeleteBehavior.Restrict);
         });
 
         modelBuilder.Entity<PrintRefund>(entity =>
