@@ -1306,16 +1306,17 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun entryView(file: File, isPicker: Boolean, depth: Int = 0, showActions: Boolean = true): View {
+        val normalRowBackground = roundedDrawable(
+            if (file.isDirectory && expandedFolderPaths.contains(file.canonicalPath)) getColor(R.color.qp_soft) else getColor(R.color.qp_surface),
+            dp(9)
+        )
         val row = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
             setPadding(dp(8 + depth * 15), dp(7), dp(5), dp(7))
             minimumHeight = dp(52)
             elevation = dp(3).toFloat()
-            background = roundedDrawable(
-                if (file.isDirectory && expandedFolderPaths.contains(file.canonicalPath)) getColor(R.color.qp_soft) else getColor(R.color.qp_surface),
-                dp(9)
-            )
+            background = normalRowBackground
         }
         val icon = ImageView(this).apply {
             setImageResource(fileIconResource(file))
@@ -1422,10 +1423,28 @@ class MainActivity : AppCompatActivity() {
             }
             row.setOnDragListener { _, event ->
                 when (event.action) {
-                    android.view.DragEvent.ACTION_DRAG_STARTED ->
-                        event.clipDescription?.hasMimeType(ClipDescription.MIMETYPE_TEXT_PLAIN) == true
-                    android.view.DragEvent.ACTION_DRAG_ENTERED -> { row.alpha = 0.65f; true }
-                    android.view.DragEvent.ACTION_DRAG_EXITED -> { row.alpha = 1f; true }
+                    android.view.DragEvent.ACTION_DRAG_STARTED -> {
+                        val source = (event.localState as? String)?.let(::File)
+                        event.clipDescription?.hasMimeType(ClipDescription.MIMETYPE_TEXT_PLAIN) == true &&
+                            source != null &&
+                            source.parentFile?.canonicalPath == file.parentFile?.canonicalPath
+                    }
+                    android.view.DragEvent.ACTION_DRAG_ENTERED -> {
+                        row.alpha = 1f
+                        row.background = roundedDrawable(
+                            getColor(R.color.qp_soft), dp(9), getColor(R.color.qp_primary)
+                        )
+                        row.scaleX = 1.015f
+                        row.scaleY = 1.015f
+                        true
+                    }
+                    android.view.DragEvent.ACTION_DRAG_EXITED -> {
+                        row.alpha = 1f
+                        row.background = normalRowBackground
+                        row.scaleX = 1f
+                        row.scaleY = 1f
+                        true
+                    }
                     android.view.DragEvent.ACTION_DROP -> {
                         val sourcePath = event.localState as? String
                         val source = sourcePath?.let(::File)
@@ -1439,7 +1458,13 @@ class MainActivity : AppCompatActivity() {
                         }
                         true
                     }
-                    android.view.DragEvent.ACTION_DRAG_ENDED -> { row.alpha = 1f; true }
+                    android.view.DragEvent.ACTION_DRAG_ENDED -> {
+                        row.alpha = 1f
+                        row.background = normalRowBackground
+                        row.scaleX = 1f
+                        row.scaleY = 1f
+                        true
+                    }
                     else -> true
                 }
             }
