@@ -937,10 +937,7 @@ shop.MapGet("/subscription", async (
                                 item.RevokedUtc == null && item.Status != "Revoked", ct);
     var qrStationCount = await db.QrStations.AsNoTracking()
         .LongCountAsync(item => item.TenantId == tenantId, ct);
-    var monthlyPrintJobCount = await db.PrintJobs.AsNoTracking()
-        .LongCountAsync(item => item.TenantId == tenantId &&
-                                item.CreatedUtc >= periodStart &&
-                                item.CreatedUtc < periodEnd, ct);
+    var monthlyPrintJobCount = await entitlements.GetMonthlyPrintJobUsageAsync(tenantId, ct);
 
     return Results.Ok(new
     {
