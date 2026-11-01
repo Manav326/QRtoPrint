@@ -51,7 +51,7 @@ The release workflow checks all four Android secrets together. If none are confi
 Add or update the repository Actions variable:
 
 - Name: `SMARTPRINT_PUBLIC_BASE_URL`
-- Value: the canonical public HTTPS origin, currently `https://qr-test.paintpulp.com`
+- Value: the exact canonical HTTPS origin configured for the active deployment. Do not enter a path, query string, or fragment.
 
 The Windows setup and Android APK are both built against this origin. The deployment's `PUBLIC_BASE_URL` must agree with it.
 
@@ -82,7 +82,7 @@ The future Microsoft Store channel will use a separate MSIX package. Microsoft r
 
 Every public stable release is a separate GitHub Release with a semantic-version tag such as `v0.1.0`. **Retain every published stable version indefinitely.** Do not delete older releases and do not replace the binaries attached to a published tag. A new build must receive a new version tag.
 
-The website's `releases/latest/download/...` URLs are a moving pointer to the latest stable release. Publishing a newer version moves that pointer; it does not remove or replace the older versioned release. Older releases remain available from their individual release pages and tag-specific asset URLs.
+The website reads the latest stable release from the repository and uses the asset download URLs returned by GitHub. It does not contain a repository slug, release tag, or direct asset URL in application source. The `VITE_SMARTPRINT_RELEASES_API_URL` and `VITE_SMARTPRINT_RELEASES_URL` build arguments are populated from GitHub Actions repository context. Publishing a newer version moves that pointer; it does not remove or replace the older versioned release. Older releases remain available from their individual release pages and tag-specific asset URLs.
 
 The release workflow:
 1. Accepts stable `vMAJOR.MINOR.PATCH` tags only.
