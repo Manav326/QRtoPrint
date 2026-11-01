@@ -416,7 +416,6 @@ class MainActivity : AppCompatActivity() {
         scroll.addView(column)
         val auth = customerAccountStore.read()
 
-        column.addView(text("Account", 22, R.color.qp_text, true))
         column.addView(text(
             if (auth == null) "Guest access is ready" else "SmartPrint customer",
             12, R.color.qp_muted, false
