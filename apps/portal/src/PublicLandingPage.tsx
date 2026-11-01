@@ -1,5 +1,5 @@
 import {
-  ArrowRight, ArrowUpRight, Check, ChevronRight, Cloud, Download, FileCheck2, FileText,
+  ArrowRight, ArrowUpRight, Check, ChevronRight, Cloud, FileCheck2, FileText,
   LockKeyhole, Monitor, Printer, QrCode, ShieldCheck, Smartphone, Store, Wifi
 } from "lucide-react";
 import "./public-landing.css";
@@ -149,7 +149,7 @@ export default function PublicLandingPage() {
               <p className="sp-release-pending">Android unit and emulator tests have passed. The customer APK will be available after the permanent release keystore is configured and the signed release is published.</p>
             </article>
           </div>
-          <p className="sp-download-footnote"><ShieldCheck size={14}/> Download links are served from SmartPrint's official release channel.</p>
+          <p className="sp-download-footnote"><ShieldCheck size={14}/> Official signed downloads will appear here after release publication.</p>
         </section>
 
         <section className="sp-final-cta">
@@ -166,6 +166,3 @@ export default function PublicLandingPage() {
   );
 }
 
-function ArrowDownIcon() {
-  return <Download size={16}/>;
-}
