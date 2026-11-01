@@ -76,8 +76,12 @@ class QrScannerActivity : AppCompatActivity() {
         WindowCompat.setDecorFitsSystemWindows(window, false)
         window.statusBarColor = getColor(R.color.qp_surface)
         window.navigationBarColor = getColor(R.color.qp_surface)
-        WindowInsetsControllerCompat(window, window.decorView).isAppearanceLightStatusBars =
+        val useLightSystemBars =
             (resources.configuration.uiMode and android.content.res.Configuration.UI_MODE_NIGHT_MASK) == android.content.res.Configuration.UI_MODE_NIGHT_NO
+        WindowInsetsControllerCompat(window, window.decorView).apply {
+            isAppearanceLightStatusBars = useLightSystemBars
+            isAppearanceLightNavigationBars = useLightSystemBars
+        }
 
         permissionLauncher = registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
             if (granted) bindCamera() else showPermissionPanel()
