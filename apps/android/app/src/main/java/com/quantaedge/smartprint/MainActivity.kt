@@ -257,9 +257,10 @@ class MainActivity : AppCompatActivity() {
                 setContentDescription("Account")
                 setTooltipText("SmartPrint account")
                 setShowAsAction(android.view.MenuItem.SHOW_AS_ACTION_ALWAYS)
-            }
-            setOnMenuItemClickListener { item ->
-                if (item.itemId == PROFILE) { showProfile(); true } else false
+                setOnMenuItemClickListener {
+                    showProfile()
+                    true
+                }
             }
         }
         root.addView(toolbar, LinearLayout.LayoutParams(-1, dp(62)))

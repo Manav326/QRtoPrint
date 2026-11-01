@@ -115,7 +115,7 @@ var configuredCorsOrigins = builder.Configuration.GetSection("Cors:AllowedOrigin
     .Where(origin => !string.IsNullOrWhiteSpace(origin))
     .Distinct(StringComparer.OrdinalIgnoreCase)
     .ToArray();
-var corsOrigins = configuredCorsOrigins is { Length: > 0 }
+var corsOrigins = (configuredCorsOrigins is { Length: > 0 }
     ? configuredCorsOrigins
     : new[]
     {
@@ -124,7 +124,10 @@ var corsOrigins = configuredCorsOrigins is { Length: > 0 }
         "https://admin.thinkwithsujeet.in",
         "http://localhost:3000",
         "http://localhost:3001"
-    };
+    })
+    .Append("http://tauri.localhost")
+    .Distinct(StringComparer.OrdinalIgnoreCase)
+    .ToArray();
 builder.Services.AddCors(options => options.AddPolicy("web", policy => policy
     .WithOrigins(corsOrigins)
     .AllowAnyHeader()
@@ -1699,9 +1702,6 @@ shop.MapGet("/customers/{customerId:guid}/jobs", async (
 shop.MapGet("/print-jobs", async (
     ClaimsPrincipal principal,
     SmartPrintDbContext db,
-    string? search,
-    int? offset,
-    int? take,
     CancellationToken ct) =>
 {
     if (!TryGetTenantId(principal, out var tenantId))
@@ -1709,25 +1709,12 @@ shop.MapGet("/print-jobs", async (
         return Results.Forbid();
     }
 
-    var boundedOffset = Math.Clamp(offset ?? 0, 0, 1_000_000);
-    var boundedTake = Math.Clamp(take ?? 100, 1, 100);
-    var trimmedSearch = search?.Trim();
-    var normalizedSearch = string.IsNullOrEmpty(trimmedSearch)
-        ? null
-        : trimmedSearch[..Math.Min(trimmedSearch.Length, 120)].ToLowerInvariant();
     var jobs = await (
         from job in db.PrintJobs.AsNoTracking()
         join document in db.PrintDocuments.AsNoTracking()
             on new { job.TenantId, PrintJobId = job.Id } equals new { document.TenantId, document.PrintJobId }
-        where job.TenantId == tenantId &&
-              (string.IsNullOrEmpty(normalizedSearch) ||
-               job.JobNumber.ToLower().Contains(normalizedSearch) ||
-               job.Status.ToLower().Contains(normalizedSearch) ||
-               document.OriginalFileName.ToLower().Contains(normalizedSearch) ||
-               db.PrinterDevices.Any(printer =>
-                   printer.TenantId == tenantId && printer.Id == job.PrinterDeviceId &&
-                   printer.DisplayName.ToLower().Contains(normalizedSearch)))
-        orderby job.CreatedUtc descending, job.Id descending
+        where job.TenantId == tenantId
+        orderby job.CreatedUtc descending
         select new
         {
             job.Id,
@@ -1752,10 +1739,6 @@ shop.MapGet("/print-jobs", async (
             QueueName = db.PrinterDevices
                 .Where(printer => printer.TenantId == tenantId && printer.Id == job.PrinterDeviceId)
                 .Select(printer => printer.QueueName)
-                .FirstOrDefault(),
-            PrinterStatus = db.PrinterDevices
-                .Where(printer => printer.TenantId == tenantId && printer.Id == job.PrinterDeviceId)
-                .Select(printer => printer.Status)
                 .FirstOrDefault(),
             job.ClaimedByAgentDeviceId,
             job.AgentLeaseExpiresUtc,
@@ -1797,8 +1780,7 @@ shop.MapGet("/print-jobs", async (
                 document.SizeBytes
             }
         })
-        .Skip(boundedOffset)
-        .Take(boundedTake)
+        .Take(100)
         .ToListAsync(ct);
     return Results.Ok(jobs);
 });
@@ -2758,15 +2740,20 @@ agentApi.MapPost("/enroll", async (
     }
 
     var fingerprintHash = HashOpaqueToken(request.Fingerprint);
+
+    // Serialize enrollments for the same physical Windows identity across tenants.
+    // This prevents two shops from claiming the same PC during concurrent activation.
+    await db.Database.ExecuteSqlInterpolatedAsync(
+        $"SELECT pg_advisory_xact_lock(hashtextextended({fingerprintHash}, 0))", ct);
+
     if (await db.AgentDevices.AnyAsync(
-        device => device.TenantId == enrollment.TenantId &&
-                  device.FingerprintHash == fingerprintHash && device.RevokedUtc == null, ct))
+        device => device.FingerprintHash == fingerprintHash && device.RevokedUtc == null, ct))
     {
         await transaction.RollbackAsync(ct);
         return Results.Conflict(new
         {
             code = "agent_already_enrolled",
-            message = "This Windows computer is already paired with this shop. Revoke the previous pairing before enrolling it again."
+            message = "This computer is still paired with an active SmartPrint shop. Ask the owner of that shop to revoke its pairing before reconnecting it."
         });
     }
 

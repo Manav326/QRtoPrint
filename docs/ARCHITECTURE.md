@@ -6,10 +6,11 @@ Use a modular monolith for the cloud control plane and a local edge runtime for 
 
 ### Proposed technology baseline
 
-- Web/PWA and shop portal: React + TypeScript + Vite, shared component/design packages.
+- Customer PWA and shop operations portal: React + TypeScript + Vite, shared component/design packages.
+- Windows shop-management desktop app: Tauri 2 native window hosting the compiled React shop workspace. It is a first-class desktop application, not a browser tab or tray-only shell (1360 × 900 default; 1000 × 680 minimum).
 - Cloud API: ASP.NET Core on .NET 10, modular application layers and versioned REST endpoints.
 - Cloud database: PostgreSQL with tenant-scoped data access and migrations.
-- Local Windows Agent/edge runtime: .NET 10 Worker Service with a local authenticated HTTP endpoint and tray companion.
+- Local Windows Agent/edge runtime: separate .NET 10 Worker Service with the existing local document/upload API and printer execution. The native desktop UI uses an ACL-protected Windows named pipe for first-run owner-authorized enrollment. The pipe rejects remote clients and claims the first instance name; closing the desktop window never stops the service.
 - Local durable state (current implementation): DPAPI LocalMachine-encrypted document files and JSON manifests under an ACL-protected ProgramData directory. SQLite remains a future option for richer queue/event history; it is not used by the current Agent queue.
 - Contracts: versioned OpenAPI plus shared, generated TypeScript client types where practical.
 - CI: build, lint, typecheck, unit tests, API integration tests, dependency/security checks and packaging validation.
@@ -41,12 +42,15 @@ This is the initial engineering baseline and may be adjusted only with a documen
 - Cloud synchronisation and cloud-assisted job retrieval
 - Local diagnostics, backup and retention
 
-### Web clients
+### Client applications
 
-- Customer PWA
-- Shop operations portal (desktop-first, responsive)
-- Platform-owner admin portal
-- Shared UI, API client, auth/session and telemetry packages
+- Customer PWA, including the public QR station routes.
+- Shop operations web portal.
+- Windows SmartPrint desktop workspace, reusing the same shop components and API contracts inside a native Tauri window.
+- Platform-owner admin portal.
+- Shared UI, API client, auth/session and telemetry packages.
+
+The desktop app stores its owner session in Windows Credential Manager. After the owner signs in, it requests a short-lived, single-use Agent enrollment authorization from the existing shop API and sends it directly to the local service through the named pipe. The code is never shown or copied by the owner. The Agent keeps its separate DPAPI LocalMachine device secret. The API remains authoritative for shop membership and device enrollment. A computer already paired to a different shop is never silently transferred; the previous shop must revoke it first.
 
 ## 3. Multi-tenancy
 

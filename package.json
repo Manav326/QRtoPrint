@@ -5,6 +5,9 @@
   "scripts": {
     "dev": "pnpm --filter @qrtoprint/portal dev",
     "build": "pnpm --filter @qrtoprint/portal build",
-    "typecheck": "pnpm --filter @qrtoprint/portal typecheck"
+    "typecheck": "pnpm --filter @qrtoprint/portal typecheck",
+    "desktop:dev": "pnpm --filter @qrtoprint/desktop tauri dev",
+    "desktop:build": "pnpm --filter @qrtoprint/desktop tauri build",
+    "desktop:typecheck": "pnpm --filter @qrtoprint/desktop typecheck"
   }
 }

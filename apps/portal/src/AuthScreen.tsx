@@ -1,8 +1,10 @@
 import { useState, type FormEvent } from "react";
 import { ArrowLeft, ArrowRight, Eye, EyeOff, LockKeyhole, Mail, Printer, ShieldCheck, Sparkles, Store, UserRound } from "lucide-react";
-import { ApiError, registerShop, signIn, storeTokens, type AuthTokens } from "./api";
+import { registerShop, signIn, storeTokens, type AuthTokens } from "./api";
+import { isDesktopApp } from "./desktop-bridge";
 
 export default function AuthScreen({ onAuthenticated }: { onAuthenticated: (tokens: AuthTokens) => void }) {
+  const desktop = isDesktopApp();
   const initialMode = window.location.pathname === "/signup" || new URLSearchParams(window.location.search).get("mode") === "register" ? "register" : "signin";
   const [mode, setMode] = useState<"signin" | "register">(initialMode);
   const [showPassword, setShowPassword] = useState(false);
@@ -26,10 +28,12 @@ export default function AuthScreen({ onAuthenticated }: { onAuthenticated: (toke
       const tokens = mode === "register"
         ? await registerShop({ businessName, ownerName, email, password })
         : await signIn(email, password);
-      storeTokens(tokens);
+      // On desktop, persist the session in Windows Credential Manager before
+      // entering the workspace. On web, storeTokens resolves immediately.
+      await storeTokens(tokens);
       onAuthenticated(tokens);
     } catch (exception) {
-      setError(exception instanceof ApiError ? exception.message : "Something went wrong. Please try again.");
+      setError(exception instanceof Error ? exception.message : "Something went wrong. Please try again.");
     } finally {
       setBusy(false);
     }
@@ -40,7 +44,7 @@ export default function AuthScreen({ onAuthenticated }: { onAuthenticated: (toke
       <div className="auth-glow auth-glow-one"/><div className="auth-glow auth-glow-two"/>
       <header className="auth-topbar">
         <div className="brand-lockup auth-brand"><div className="brand-mark"><Printer size={21}/></div><div><div className="brand-name">smart<span>print</span></div><div className="brand-caption">BY QRtoPrint</div></div></div>
-        <div className="auth-top-actions"><a className="auth-home-link" href="/"><ArrowLeft size={14}/> Back to website</a><span className="auth-top-note"><ShieldCheck size={15}/> Secure Smart Print workspace</span></div>
+        <div className="auth-top-actions">{!desktop && <a className="auth-home-link" href="/"><ArrowLeft size={14}/> Back to website</a>}<span className="auth-top-note"><ShieldCheck size={15}/> Secure Smart Print workspace</span></div>
       </header>
       <main className="auth-layout">
         <section className="auth-story">

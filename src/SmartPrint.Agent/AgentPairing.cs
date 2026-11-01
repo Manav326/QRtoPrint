@@ -7,26 +7,23 @@ using Microsoft.Win32;
 
 namespace SmartPrint.Agent;
 
+public sealed class AgentEnrollmentException(string code, string message) : InvalidOperationException(message)
+{
+    public string Code { get; } = code;
+}
+
 public static class AgentPairing
 {
     public static async Task RunAsync(IConfiguration configuration)
     {
         if (!OperatingSystem.IsWindows())
-        {
             throw new PlatformNotSupportedException("The Smart Print Agent can only be paired on Windows.");
-        }
 
         var apiBaseUrl = configuration["Agent:ApiBaseUrl"]?.Trim();
         if (string.IsNullOrWhiteSpace(apiBaseUrl))
         {
             Console.Write("Smart Print API base URL: ");
             apiBaseUrl = Console.ReadLine()?.Trim();
-        }
-
-        if (!Uri.TryCreate(apiBaseUrl, UriKind.Absolute, out var apiUri) ||
-            apiUri.Scheme is not ("https" or "http"))
-        {
-            throw new InvalidOperationException("Provide a valid Smart Print API URL using HTTPS, or HTTP only for trusted local development.");
         }
 
         var code = configuration["Agent:EnrollmentCode"]?.Trim();
@@ -37,10 +34,38 @@ public static class AgentPairing
             Console.Write("Pairing code: ");
             code = Console.ReadLine()?.Trim();
         }
-        if (string.IsNullOrWhiteSpace(code))
-        {
-            throw new InvalidOperationException("A pairing code is required.");
-        }
+
+        if (string.IsNullOrWhiteSpace(apiBaseUrl) || string.IsNullOrWhiteSpace(code))
+            throw new InvalidOperationException("A SmartPrint API address and one-time pairing code are required.");
+
+        var credentials = await EnrollAsync(apiBaseUrl, code, CancellationToken.None);
+        Console.WriteLine();
+        Console.WriteLine("This computer is now paired with the shop.");
+        Console.WriteLine($"Agent ID: {credentials.AgentDeviceId}");
+        Console.WriteLine("The agent secret has been stored using Windows DPAPI (LocalMachine scope).");
+        Console.WriteLine("Do not copy or share the secret. Start the QRtoPrint Smart Print Agent service next.");
+    }
+
+    public static async Task<AgentCredentials> EnrollAsync(
+        string apiBaseUrl,
+        string enrollmentCode,
+        CancellationToken cancellationToken,
+        AgentCredentialStore? credentialStore = null)
+    {
+        if (!OperatingSystem.IsWindows())
+            throw new PlatformNotSupportedException("The Smart Print Agent can only be paired on Windows.");
+
+        if (!Uri.TryCreate(apiBaseUrl, UriKind.Absolute, out var apiUri) ||
+            apiUri.Scheme is not ("https" or "http") ||
+            apiUri.AbsolutePath != "/" ||
+            !string.IsNullOrEmpty(apiUri.Query) ||
+            !string.IsNullOrEmpty(apiUri.Fragment) ||
+            !string.IsNullOrEmpty(apiUri.UserInfo))
+            throw new InvalidOperationException("The configured SmartPrint API address must be a canonical HTTP or HTTPS origin.");
+
+        if (enrollmentCode.Length != 32 ||
+            !enrollmentCode.All(value => value is >= 'a' and <= 'z' or >= 'A' and <= 'Z' or >= '0' and <= '9' or '-' or '_'))
+            throw new InvalidOperationException("The one-time enrollment authorization is invalid.");
 
         var fingerprint = GetMachineFingerprint();
         using var client = new HttpClient
@@ -48,30 +73,53 @@ public static class AgentPairing
             BaseAddress = new Uri(apiUri.ToString().TrimEnd('/') + "/"),
             Timeout = TimeSpan.FromSeconds(20)
         };
-        var deviceName = configuration["Agent:DeviceName"]?.Trim();
-        var request = new AgentEnrollmentRequest(code, fingerprint, string.IsNullOrWhiteSpace(deviceName) ? Environment.MachineName : deviceName);
-        using var response = await client.PostAsJsonAsync("api/v1/agent/enroll", request);
+        var request = new AgentEnrollmentRequest(enrollmentCode, fingerprint, Environment.MachineName);
+        using var response = await client.PostAsJsonAsync("api/v1/agent/enroll", request, cancellationToken);
         if (!response.IsSuccessStatusCode)
         {
-            var message = await response.Content.ReadAsStringAsync();
-            throw new InvalidOperationException($"Pairing failed ({(int)response.StatusCode}): {message}");
+            var responseBody = await response.Content.ReadAsStringAsync(cancellationToken);
+            if (response.StatusCode == System.Net.HttpStatusCode.Conflict)
+            {
+                try
+                {
+                    using var errorDocument = JsonDocument.Parse(responseBody);
+                    var error = errorDocument.RootElement;
+                    var code = error.TryGetProperty("code", out var codeValue)
+                        ? codeValue.GetString()
+                        : null;
+                    var message = error.TryGetProperty("message", out var messageValue)
+                        ? messageValue.GetString()
+                        : null;
+
+                    if (!string.IsNullOrWhiteSpace(code))
+                    {
+                        throw new AgentEnrollmentException(
+                            code,
+                            string.IsNullOrWhiteSpace(message)
+                                ? "The shop could not accept this computer enrollment."
+                                : message);
+                    }
+                }
+                catch (JsonException)
+                {
+                    // Fall through to a safe generic HTTP error for an invalid server response.
+                }
+            }
+
+            throw new InvalidOperationException(response.StatusCode switch
+            {
+                System.Net.HttpStatusCode.Unauthorized => "The one-time computer authorization expired or was already used. Please try again.",
+                System.Net.HttpStatusCode.Forbidden => "Your shop account is not permitted to connect another computer.",
+                _ => $"Computer enrollment failed with HTTP {(int)response.StatusCode}. Please try again."
+            });
         }
 
-        var enrolled = await response.Content.ReadFromJsonAsync<AgentEnrollmentResponse>()
+        var enrolled = await response.Content.ReadFromJsonAsync<AgentEnrollmentResponse>(cancellationToken: cancellationToken)
             ?? throw new InvalidOperationException("The server returned an empty pairing response.");
 
-        var credentials = new AgentCredentials(
-            apiUri.ToString().TrimEnd('/'),
-            enrolled.AgentDeviceId,
-            enrolled.AgentSecret,
-            DateTimeOffset.UtcNow);
-        new AgentCredentialStore().Save(credentials);
-
-        Console.WriteLine();
-        Console.WriteLine("This computer is now paired with the shop.");
-        Console.WriteLine($"Agent ID: {enrolled.AgentDeviceId}");
-        Console.WriteLine("The agent secret has been stored using Windows DPAPI (LocalMachine scope).");
-        Console.WriteLine("Do not copy or share the secret. Start the QRtoPrint Smart Print Agent service next.");
+        var credentials = new AgentCredentials(apiUri.ToString().TrimEnd('/'), enrolled.AgentDeviceId, enrolled.AgentSecret, DateTimeOffset.UtcNow);
+        (credentialStore ?? new AgentCredentialStore()).Save(credentials);
+        return credentials;
     }
 
     public static async Task<int> CheckExistingAsync()
@@ -87,8 +135,7 @@ public static class AgentPairing
         {
             credentials = new AgentCredentialStore().Load();
         }
-        catch (Exception exception) when (
-            exception is CryptographicException or IOException or JsonException)
+        catch (Exception exception) when (exception is CryptographicException or IOException or JsonException)
         {
             Console.Error.WriteLine($"The saved SmartPrint pairing could not be read: {exception.Message}");
             return 2;
@@ -132,7 +179,6 @@ public static class AgentPairing
                 Console.WriteLine("The existing SmartPrint pairing is active.");
                 return 0;
             }
-
             if (response.StatusCode is System.Net.HttpStatusCode.Unauthorized or System.Net.HttpStatusCode.Forbidden)
             {
                 Console.Error.WriteLine("The saved SmartPrint pairing is no longer active.");
@@ -140,12 +186,10 @@ public static class AgentPairing
             }
 
             var detail = await response.Content.ReadAsStringAsync();
-            Console.Error.WriteLine(
-                $"The existing SmartPrint pairing could not be verified ({(int)response.StatusCode}): {detail}");
+            Console.Error.WriteLine($"The existing SmartPrint pairing could not be verified ({(int)response.StatusCode}): {detail}");
             return 1;
         }
-        catch (Exception exception) when (
-            exception is HttpRequestException or TaskCanceledException or UriFormatException)
+        catch (Exception exception) when (exception is HttpRequestException or TaskCanceledException or UriFormatException)
         {
             Console.Error.WriteLine($"Could not contact the SmartPrint service to verify this pairing: {exception.Message}");
             return 1;
@@ -154,8 +198,7 @@ public static class AgentPairing
 
     private static string GetMachineFingerprint()
     {
-        var machineGuid = Registry.LocalMachine.OpenSubKey(@"SOFTWARE\Microsoft\Cryptography")
-            ?.GetValue("MachineGuid")?.ToString();
+        var machineGuid = Registry.LocalMachine.OpenSubKey(@"SOFTWARE\Microsoft\Cryptography")?.GetValue("MachineGuid")?.ToString();
         var material = string.IsNullOrWhiteSpace(machineGuid)
             ? $"{Environment.MachineName}|{Environment.OSVersion.VersionString}"
             : machineGuid;

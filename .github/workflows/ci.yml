@@ -24,9 +24,14 @@ jobs:
       - uses: actions/setup-node@v7
         with:
           node-version: 22
-      - run: pnpm install --no-frozen-lockfile
+      - name: Install portal dependencies
+        run: pnpm install --frozen-lockfile
       - run: pnpm typecheck
       - run: pnpm build
+      - name: Typecheck native desktop frontend
+        run: pnpm --filter @qrtoprint/desktop typecheck
+      - name: Build native desktop frontend
+        run: pnpm --filter @qrtoprint/desktop build
       - name: Validate portal Nginx proxy configuration
         run: docker run --rm --add-host api:127.0.0.1 -v "$GITHUB_WORKSPACE/apps/portal/nginx.conf:/etc/nginx/conf.d/default.conf:ro" nginx:alpine nginx -t
 
@@ -34,6 +39,45 @@ jobs:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 10.18.0
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Install desktop dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Compile the native Windows desktop host
+        shell: pwsh
+        run: |
+          pnpm --filter @qrtoprint/desktop build
+          if ($LASTEXITCODE -ne 0) { throw "SmartPrint desktop frontend build failed." }
+          cargo check --locked --manifest-path apps/desktop/src-tauri/Cargo.toml --target x86_64-pc-windows-msvc
+          if ($LASTEXITCODE -ne 0) { throw "SmartPrint native desktop host compilation failed." }
+          cargo test --locked --manifest-path apps/desktop/src-tauri/Cargo.toml --target x86_64-pc-windows-msvc
+          if ($LASTEXITCODE -ne 0) { throw "SmartPrint native desktop host tests failed." }
+      - name: Build native Windows desktop executable
+        shell: pwsh
+        run: |
+          $env:VITE_API_BASE_URL = "https://qr-test.paintpulp.com"
+          pnpm --filter @qrtoprint/desktop exec tauri build --no-bundle --ci
+          if ($LASTEXITCODE -ne 0) { throw "SmartPrint native desktop build failed." }
+          $nativeExe = "apps/desktop/src-tauri/target/release/smartprint-desktop.exe"
+          if (-not (Test-Path -LiteralPath $nativeExe)) { throw "The SmartPrint native desktop executable was not produced." }
+          New-Item -ItemType Directory -Force -Path artifacts/desktop | Out-Null
+          Copy-Item -LiteralPath $nativeExe -Destination "artifacts/desktop/SmartPrint.Desktop.exe"
+          Get-ChildItem -Path "apps/desktop/src-tauri/target/release" -Filter "*.dll" -File |
+            Copy-Item -Destination "artifacts/desktop" -Force
+      - name: Bundle the Microsoft WebView2 Evergreen bootstrapper
+        shell: pwsh
+        run: |
+          $bootstrapper = "artifacts/desktop/MicrosoftEdgeWebView2RuntimeInstallerX64.exe"
+          Invoke-WebRequest -Uri "https://go.microsoft.com/fwlink/p/?LinkId=2124703" -OutFile $bootstrapper -MaximumRedirection 10
+          $signature = Get-AuthenticodeSignature -LiteralPath $bootstrapper
+          if ($signature.Status -ne [System.Management.Automation.SignatureStatus]::Valid -or $signature.SignerCertificate.Subject -notmatch "Microsoft") {
+            throw "The downloaded WebView2 prerequisite did not pass Microsoft Authenticode verification."
+          }
       - name: Validate PowerShell deployment scripts
         shell: pwsh
         run: |
@@ -86,7 +130,7 @@ jobs:
         run: |
           choco install innosetup --no-progress -y
           New-Item -ItemType Directory -Force -Path artifacts/agent-installer | Out-Null
-          & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" /DSmartPrintPublicUrl="https://qr-test.paintpulp.com" scripts/build-windows-installer.iss
+          & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" /DSmartPrintPublicUrl="https://qr-test.paintpulp.com" /DSmartPrintVersion="ci" /DSmartPrintBuildId="${{ github.run_number }}" scripts/build-windows-installer.iss
           if ($LASTEXITCODE -ne 0) { throw "Inno Setup compilation failed." }
       - name: Verify Windows beta installer is unsigned
         shell: pwsh
