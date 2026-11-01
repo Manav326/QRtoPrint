@@ -1,6 +1,6 @@
 import {
-  ArrowRight, ArrowUpRight, Check, ChevronRight, Cloud, FileCheck2, FileText,
-  LockKeyhole, Monitor, Printer, QrCode, ShieldCheck, Smartphone, Store, Wifi
+  ArrowRight, ArrowUpRight, Check, ChevronRight, Cloud, Download, FileCheck2, FileText,
+  LockKeyhole, Monitor, Printer, QrCode, RotateCcw, ShieldCheck, Smartphone, Store, Wifi, X
 } from "lucide-react";
 import { getPublicDownloadPath, usePublicRelease } from "./release-metadata";
 import { useFileDownload } from "./download-manager";
