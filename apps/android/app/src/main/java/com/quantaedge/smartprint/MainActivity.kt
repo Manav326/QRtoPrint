@@ -930,7 +930,7 @@ class MainActivity : AppCompatActivity() {
             11, R.color.qp_muted, false
         ).apply { setPadding(0, dp(2), 0, 0) })
         heading.addView(copy, LinearLayout.LayoutParams(0, -2, 1f))
-        if (!isPicker) heading.addView(button("＋ Folder", false).apply {
+        if (!isPicker) heading.addView(button("New folder", false).apply {
             minHeight = dp(36)
             setOnClickListener {
                 nameDialog("New folder", "") { name ->
@@ -971,7 +971,7 @@ class MainActivity : AppCompatActivity() {
         crumb.addView(text(breadcrumbText, 12, R.color.qp_muted, true),
             LinearLayout.LayoutParams(0, -2, 1f))
         if (path.isNotEmpty()) {
-            val up = button("Back", false).apply { minHeight = dp(34) }
+            val up = button("Up", false).apply { minHeight = dp(34) }
             crumb.addView(up)
             up.setOnClickListener {
                 if (isPicker) pickerPath = parent(pickerPath) else folderPath = parent(folderPath)
@@ -1343,7 +1343,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun renderPdfEditor(file: File, pages: MutableList<PdfPageEdit>) {
         pickerMode = false
-        toolbar.title = "PDF editor"
+        toolbar.title = "Edit PDF"
         toolbar.setNavigationIcon(android.R.drawable.ic_media_previous)
         toolbar.setNavigationOnClickListener { showFiles() }
         navigation.visibility = View.GONE
