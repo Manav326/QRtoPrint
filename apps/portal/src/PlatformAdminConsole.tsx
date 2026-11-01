@@ -390,7 +390,7 @@ function prettyStatus(value: string): string {
 
 
 function sectionFromPath(pathname: string): Section {
-  const path = pathname.replace(/\\/+$/, "") || "/admin";
+  const path = pathname.replace(/\/+$/, "") || "/admin";
   switch (path) {
     case "/admin/tenants": return "Tenants";
     case "/admin/plans": return "Plans";
