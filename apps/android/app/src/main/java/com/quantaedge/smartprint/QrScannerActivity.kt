@@ -287,7 +287,7 @@ class QrScannerActivity : AppCompatActivity() {
             gravity = Gravity.CENTER
             setPadding(dp(26), dp(24), dp(26), dp(24))
         }
-        panel.addView(label("▦", 48, Color.WHITE, false).apply { gravity = Gravity.CENTER })
+        panel.addView(label("▦", 48, getColor(R.color.qp_primary), false).apply { gravity = Gravity.CENTER })
         panel.addView(label("Camera access needed", 20, getColor(R.color.qp_text), true).apply {
             gravity = Gravity.CENTER
             setPadding(0, dp(12), 0, dp(8))
@@ -358,8 +358,12 @@ class QrScannerActivity : AppCompatActivity() {
         text = value
         textSize = size.toFloat()
         gravity = Gravity.CENTER
-        setTextColor(Color.WHITE)
-        setBackgroundColor(0xFF252D40.toInt())
+        setTextColor(getColor(R.color.qp_text))
+        background = android.graphics.drawable.GradientDrawable().apply {
+            setColor(getColor(R.color.qp_card))
+            cornerRadius = dp(14).toFloat()
+            setStroke(dp(1), getColor(R.color.qp_outline))
+        }
         isClickable = true
         isFocusable = true
     }
