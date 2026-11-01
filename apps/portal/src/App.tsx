@@ -1151,7 +1151,6 @@ function ShopConsole({ tokens, onSignOut }: { tokens: AuthTokens; onSignOut: () 
         setToast("This batch has no files left awaiting shop review.");
         return;
       }
-      const waitingIds = new Set(waiting.map(job => job.id));
       setBatchReviewDecisions(current => {
         const next = { ...current };
         for (const job of waiting) {
