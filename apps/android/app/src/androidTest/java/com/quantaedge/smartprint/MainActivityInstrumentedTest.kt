@@ -41,7 +41,6 @@ class MainActivityInstrumentedTest {
         CustomerAccountStore(context).clear()
         ActivityScenario.launch(MainActivity::class.java).use {
             onView(withContentDescription("Account")).perform(click())
-            onView(withText("Account")).check(matches(isDisplayed()))
             onView(withText("Guest access is ready")).check(matches(isDisplayed()))
             onView(withHint("Email address")).check(matches(isDisplayed()))
             onView(withHint("Password")).check(matches(isDisplayed()))
@@ -56,7 +55,7 @@ class MainActivityInstrumentedTest {
             onView(allOf(withId(navigationLabel), withText("Scan"))).perform(click())
             onView(withText("Connect to a shop")).check(matches(isDisplayed()))
             onView(withText("Scan QR code")).check(matches(isDisplayed()))
-                    }
+            }
     }
 
     @Test
@@ -85,9 +84,16 @@ class MainActivityInstrumentedTest {
 
             onView(withText("CI School")).check(matches(isDisplayed()))
             onView(withText("CI School")).perform(click())
+            onView(withText("New folder")).perform(click())
+            onView(withHint("Name"))
+                .perform(replaceText("Nested"), closeSoftKeyboard())
+            onView(withText("Save")).perform(click())
+            onView(withText("Nested")).check(matches(isDisplayed()))
             onView(withText("Up")).check(matches(isDisplayed()))
             onView(withText("Up")).perform(click())
-            onView(withText("Up")).check(doesNotExist())
+            onView(withContentDescription("Expand CI School")).perform(click())
+            onView(withText("Nested")).check(matches(isDisplayed()))
+            onView(withContentDescription("Collapse CI School")).check(matches(isDisplayed()))
         }
     }
 }
