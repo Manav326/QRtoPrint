@@ -358,6 +358,7 @@ public sealed class ShopPaymentProfile
     public string? UpiId { get; set; }
     public string? PayeeName { get; set; }
     public bool CashEnabled { get; set; }
+    public bool InstantPaymentEnabled { get; set; }
     public DateTimeOffset UpdatedUtc { get; set; } = DateTimeOffset.UtcNow;
 }
 
