@@ -108,15 +108,10 @@ begin
   if not SetEnvironmentVariableW('Agent__EnrollmentCode', Trim(PairingPage.Values[0])) then
     RaiseException('Could not prepare the one-time pairing code.');
 
-  if not SetEnvironmentVariableW('Agent__DeviceName', GetComputerNameString()) then
-    RaiseException('Could not prepare this computer name.');
-
   if not Exec(AgentPath, '--pair', ExpandConstant('{app}'), SW_HIDE, ewWaitUntilTerminated, PairExitCode) then
     RaiseException('SmartPrint could not start its secure pairing step. Restart setup and try again.');
 
   SetEnvironmentVariableW('Agent__EnrollmentCode', '');
-  SetEnvironmentVariableW('Agent__DeviceName', '');
-
   if PairExitCode <> 0 then
   begin
     SetEnvironmentVariableW('Agent__ApiBaseUrl', '');
