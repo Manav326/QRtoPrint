@@ -1,17 +1,18 @@
 import { useEffect, useState, type ReactNode } from "react";
 import {
   Activity, Building2, CheckCircle2, ChevronLeft, ChevronRight,
-  Clock3, CreditCard, Layers3, LogOut, Menu, Moon, Monitor, PauseCircle, PlayCircle, Printer, RefreshCw, Search, ShieldCheck,
+  Clock3, CreditCard, Layers3, LogOut, Menu, Moon, Monitor, PauseCircle, PlayCircle, Printer, RefreshCw, Search, Settings2, ShieldCheck,
   Sun
 } from "lucide-react";
 import PlatformPlansSection from "./PlatformPlansSection";
 import PlatformSubscriptionsSection from "./PlatformSubscriptionsSection";
+import PlatformOperationsSection from "./PlatformOperationsSection";
 import {
   getPlatformOverview, getPlatformTenants, getPlatformTenantStatusHistory, updatePlatformTenantStatus, logout,
   type AuthTokens, type PlatformOverview, type PlatformTenantsPage, type PlatformTenant
 } from "./api";
 
-type Section = "Overview" | "Tenants" | "Plans" | "Subscriptions";
+type Section = "Overview" | "Tenants" | "Plans" | "Subscriptions" | "Operations";
 
 export default function PlatformAdminConsole({
   tokens,
@@ -108,12 +109,14 @@ export default function PlatformAdminConsole({
     setSidebarOpen(false);
   }
 
-  const title = section === "Overview" ? "Platform overview" : section === "Tenants" ? "Shop tenants" : section === "Plans" ? "Plans and entitlements" : "Shop subscriptions";
+  const title = section === "Overview" ? "Platform overview" : section === "Tenants" ? "Shop tenants" : section === "Plans" ? "Plans and entitlements" : section === "Subscriptions" ? "Shop subscriptions" : "Operations and retention";
   const subtitle = section === "Overview"
     ? "A cross-platform view of tenant health, subscriptions, devices and recent activity."
     : section === "Tenants"
       ? "Find shops and inspect their current subscription and connected-device footprint."
-      : section === "Plans" ? "Configure versioned SaaS plans, prices and centrally managed capabilities." : "Manage trial and free-plan assignments with a permanent audit trail.";
+      : section === "Plans" ? "Configure versioned SaaS plans, prices and centrally managed capabilities."
+      : section === "Subscriptions" ? "Manage trial and free-plan assignments with a permanent audit trail."
+      : "Configure platform-wide print quotas, retention, cleanup schedules and suspended-shop recovery policy.";
 
   return (
     <div className={`app-shell platform-admin-shell${dark ? "" : " light"}`}>
@@ -142,6 +145,9 @@ export default function PlatformAdminConsole({
           </button>
           <button className={section === "Subscriptions" ? "nav-item active" : "nav-item"} onClick={() => navigate("Subscriptions")}>
             <CreditCard size={17}/> Shop subscriptions
+          </button>
+          <button className={section === "Operations" ? "nav-item active" : "nav-item"} onClick={() => navigate("Operations")}>
+            <Settings2 size={17}/> Operations & retention
           </button>
         </nav>
         <div className="sidebar-bottom">
@@ -179,7 +185,7 @@ export default function PlatformAdminConsole({
               <p>{subtitle}</p>
             </div>
             <div className="platform-heading-actions">
-              <span className="platform-readonly-label"><ShieldCheck size={13}/> {section === "Plans" ? "Plan configuration" : "Read-only monitoring"}</span>
+              <span className="platform-readonly-label"><ShieldCheck size={13}/> {section === "Plans" ? "Plan configuration" : section === "Operations" ? "Platform policy" : "Read-only monitoring"}</span>
               <button className="secondary-button platform-refresh" onClick={() => setRefreshKey(value => value + 1)} disabled={overviewLoading || tenantLoading}>
                 <RefreshCw size={14}/> Refresh data
               </button>
@@ -291,7 +297,6 @@ export default function PlatformAdminConsole({
                             <td><div className="platform-tenant-actions">
                               {tenant.status === "Active" && <>
                                 <button className="secondary-button" onClick={() => void changeTenantStatus(tenant, "Suspended")} disabled={tenantActionId === tenant.id || tenantLoading} title="Block new print activity while preserving recovery"><PauseCircle size={13}/> Suspend</button>
-                                <button className="secondary-button" onClick={() => void changeTenantStatus(tenant, "Inactive")} disabled={tenantActionId === tenant.id || tenantLoading}>Deactivate</button>
                               </>}
                               {tenant.status === "Suspended" && <>
                                 <button className="secondary-button" onClick={() => void changeTenantStatus(tenant, "Active")} disabled={tenantActionId === tenant.id || tenantLoading}><PlayCircle size={13}/> Reactivate</button>
@@ -320,6 +325,7 @@ export default function PlatformAdminConsole({
           )}
           {section === "Plans" && <PlatformPlansSection tokens={tokens}/>}
           {section === "Subscriptions" && <PlatformSubscriptionsSection tokens={tokens}/>}
+          {section === "Operations" && <PlatformOperationsSection tokens={tokens}/>}
         </div>
       </main>
     </div>
