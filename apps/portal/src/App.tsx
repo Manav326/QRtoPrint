@@ -26,6 +26,7 @@ import {
   type UploadedPrintJob
 } from "./api";
 import { enrollLocalAgent, getLocalAgentStatus, isDesktopApp, type DesktopAgentStatus } from "./desktop-bridge";
+import { verifiedPdfExportPath } from "./print-output";
 import { readDarkModePreference, readSidebarCollapsedPreference, saveDarkModePreference, saveSidebarCollapsedPreference } from "./ui-preferences";
 
 type Section = "Overview" | "Print Queue" | "Printers" | "QR Stations" | "Print Agent" | "Pricing" | "Subscription" | "Payments" | "Customers" | "Reports" | "Settings";
@@ -1977,7 +1978,7 @@ function PrintQueuePage({ jobs, printers, agentDevices, searchQuery, loadingBatc
     </div>
     {reviewBatches.length>0&&<div className="batch-review-strip"><div><strong>{reviewBatches.length} batch(es) with files waiting for review</strong><span>Review loads every file in a batch, even when this queue is searched or paginated. All waiting files start accepted.</span></div>{reviewBatches.map(batchId=><button key={batchId} className="secondary-button" disabled={loadingBatchId===batchId||!!loadingBatchId} onClick={()=>onReviewBatch(batchId)}>{loadingBatchId===batchId?<><span className="button-spinner"/>Loading full batch…</>:<>Review batch · {jobs.filter(job=>job.batchId===batchId&&job.status==="AWAITING_SHOP_APPROVAL").length} shown</>}</button>)}</div>}
     {jobs.length===0 ? <EmptyModule icon={<FileText size={24}/>} title="Your queue is clear" text="When a customer uploads a document through one of your QR stations, the job and its current state will appear here."/> :
-      <div className="table-scroll"><table><thead><tr><th>JOB</th><th>DOCUMENT</th><th>PRINT SETTINGS</th><th>QUOTE</th><th>PRINTER / LOCAL QUEUE</th><th>STATUS</th><th>CREATED</th><th>ACTIONS</th></tr></thead><tbody>
+      <div className="table-scroll queue-table-scroll"><table className="queue-jobs-table"><thead><tr><th>JOB</th><th>DOCUMENT</th><th>PRINT SETTINGS</th><th>QUOTE</th><th>PRINTER / LOCAL QUEUE</th><th>STATUS</th><th>CREATED</th><th>ACTIONS</th></tr></thead><tbody>
         {queueBatches.map(batch=>{
           const first=batch.jobs[0];
           const waiting=batch.jobs.filter(job=>job.status==="AWAITING_SHOP_APPROVAL");
@@ -1989,7 +1990,9 @@ function PrintQueuePage({ jobs, printers, agentDevices, searchQuery, loadingBatc
           const totalAmount=payableJobs.reduce((sum,job)=>sum+Math.max(0,job.quotedAmountMinor),0);
           const printersInBatch=Array.from(new Set(batch.jobs.map(job=>job.printerName||"Not assigned")));
           const expanded=expandedBatchKeys.has(batch.key);
-          const label=statusLabels.length===1?prettyStatus(statusLabels[0]):`${statusLabels.length} states`;
+          const allPdfsSaved = batch.jobs.length > 0 && batch.jobs.every(job => !!verifiedPdfExportPath(job));
+          const singleSavedPdfPath = batch.jobs.length === 1 ? verifiedPdfExportPath(first) : null;
+          const label=statusLabels.length===1?(allPdfsSaved?"PDF saved":prettyStatus(statusLabels[0])):`${statusLabels.length} states`;
           const tone=statusLabels.every(status=>status==="COMPLETED"||status==="LOCAL_QUEUE_READY")?"green":statusLabels.some(status=>status==="AWAITING_SHOP_APPROVAL"||status==="AWAITING_CUSTOMER_APPROVAL"||status==="OUTPUT_UNCONFIRMED")?"amber":"blue";
           return <Fragment key={batch.key}>
             <tr className="queue-batch-summary-row">
@@ -1997,7 +2000,15 @@ function PrintQueuePage({ jobs, printers, agentDevices, searchQuery, loadingBatc
               <td><div className="customer-cell"><strong>{folders.length} folder group(s)</strong><span>{folders.slice(0,3).join(" · ")}{folders.length>3?" · +"+(folders.length-3):""}</span></div></td>
               <td><div className="detail-cell"><strong>{totalCopies} copies</strong><span>{settings.length===1?settings[0]:"Mixed settings"}</span></div></td>
               <td className="amount-cell">{totalAmount>0?formatMoney(totalAmount,first.currency):"Not quoted"}</td>
-              <td><div className="queue-printer-cell"><strong>{printersInBatch.length===1?printersInBatch[0]:"Multiple printers"}</strong><small>{waiting.length} awaiting review</small></div></td>
+              <td><div className="queue-printer-cell">
+                {singleSavedPdfPath ? <>
+                  <strong>PDF saved</strong>
+                  <small className="queue-pdf-path">{singleSavedPdfPath}</small>
+                </> : <>
+                  <strong>{printersInBatch.length===1?printersInBatch[0]:"Multiple printers"}</strong>
+                  <small>{waiting.length} awaiting review</small>
+                </>}
+              </div></td>
               <td><Status label={label} tone={tone}/></td>
               <td className="time-cell">{new Date(first.createdUtc).toLocaleString()}</td>
               <td><div className="queue-actions">
@@ -2011,6 +2022,10 @@ function PrintQueuePage({ jobs, printers, agentDevices, searchQuery, loadingBatc
                 <Status label={prettyStatus(job.status)} tone={job.status==="REJECTED"?"red":job.status==="COMPLETED"||job.status==="LOCAL_QUEUE_READY"?"green":job.status==="AWAITING_SHOP_APPROVAL"?"amber":"blue"}/>
                 <strong className="amount-cell">{job.quotedAmountMinor>0?formatMoney(job.quotedAmountMinor,job.currency):"—"}</strong>
               </div>
+              {batch.jobs.length > 1 && verifiedPdfExportPath(job) && <div className="queue-batch-file-output">
+                <span>Saved PDF location</span>
+                <code>{verifiedPdfExportPath(job)}</code>
+              </div>}
               <div className="queue-batch-file-actions">
                 <button className="subtle-button" disabled={busyJobId===job.id} onClick={()=>onPreview(job)}>Preview</button>
                 <button className="subtle-button" disabled={busyJobId===job.id} onClick={()=>onHistory(job)}>History</button>
