@@ -19,7 +19,7 @@ android {
     namespace = "com.thinkwithsujeet.qrtoprint"
     compileSdk = 36
     defaultConfig {
-        applicationId = "com.thinkwithsujeet.qrtoprint"
+        applicationId = "com.quantaedge.smartprint"
         minSdk = 26
         targetSdk = 35
         versionCode = smartPrintVersionCode
