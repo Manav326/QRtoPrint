@@ -161,6 +161,9 @@ function ShopConsole({ tokens, onSignOut }: { tokens: AuthTokens; onSignOut: () 
   const [preview, setPreview] = useState<{ name: string; url: string; mediaType: string; job: ShopPrintJob } | null>(null);
   const [refundJob, setRefundJob] = useState<ShopPrintJob | null>(null);
   const [batchReviewJobs, setBatchReviewJobs] = useState<ShopPrintJob[] | null>(null);
+  const [batchReviewDecisions, setBatchReviewDecisions] = useState<Record<string, boolean>>({});
+  const [batchReviewRetry, setBatchReviewRetry] = useState(false);
+  const [batchReviewRetryIds, setBatchReviewRetryIds] = useState<string[]>([]);
   type ActionDialogState = { title: string; message: string; inputLabel?: string; confirmLabel: string; resolve: (value: string | null) => void };
   const [actionDialog, setActionDialog] = useState<ActionDialogState | null>(null);
   const [actionDialogValue, setActionDialogValue] = useState("");
@@ -1040,26 +1043,68 @@ function ShopConsole({ tokens, onSignOut }: { tokens: AuthTokens; onSignOut: () 
   }
 
   async function applyBatchReview(batchJobs: ShopPrintJob[], acceptedJobIds: string[]) {
-    const accepted=new Set(acceptedJobIds);
-    const acceptJobs=batchJobs.filter(job=>accepted.has(job.id));
-    const rejectJobs=batchJobs.filter(job=>!accepted.has(job.id));
-    if(acceptJobs.length+rejectJobs.length===0)return;
-    if(!(await confirmInApp(`Accept ${acceptJobs.length} file(s) and reject ${rejectJobs.length} file(s)? Accepted files will move to payment. Rejected files will be excluded from printing.`,"Confirm batch review","Apply review")))return;
+    const accepted = new Set(acceptedJobIds);
+    const acceptJobs = batchJobs.filter(job => accepted.has(job.id));
+    const rejectJobs = batchJobs.filter(job => !accepted.has(job.id));
+    if (acceptJobs.length + rejectJobs.length === 0) return;
+    if (!(await confirmInApp(`Accept ${acceptJobs.length} file(s) and reject ${rejectJobs.length} file(s)? Accepted files will move to payment. Rejected files will be excluded from printing.`, "Confirm batch review", "Apply review"))) return;
+
     setBusyJobId("batch-review");
     setError("");
-    const failures:string[]=[];
-    for(const job of acceptJobs){
-      try{await approveShopPrintJob(tokens.accessToken,job.id);}
-      catch(exception){failures.push(`${job.document.originalFileName}: ${exception instanceof Error?exception.message:"Could not accept"}`);}
+    const failedIds = new Set<string>();
+    const failures: string[] = [];
+    for (const job of acceptJobs) {
+      try { await approveShopPrintJob(tokens.accessToken, job.id); }
+      catch (exception) {
+        failedIds.add(job.id);
+        failures.push(`${job.document.originalFileName}: ${exception instanceof Error ? exception.message : "Could not accept"}`);
+      }
     }
-    for(const job of rejectJobs){
-      try{await rejectShopPrintJob(tokens.accessToken,job.id);}
-      catch(exception){failures.push(`${job.document.originalFileName}: ${exception instanceof Error?exception.message:"Could not reject"}`);}
+    for (const job of rejectJobs) {
+      try { await rejectShopPrintJob(tokens.accessToken, job.id); }
+      catch (exception) {
+        failedIds.add(job.id);
+        failures.push(`${job.document.originalFileName}: ${exception instanceof Error ? exception.message : "Could not reject"}`);
+      }
     }
-    setBatchReviewJobs(null);
+
     await reload();
-    if(failures.length)setError(`Some files could not be updated: ${failures.join("; ")}`);
-    else setToast(`Batch review saved: ${acceptJobs.length} accepted and ${rejectJobs.length} rejected. You can review paid files separately to record refunds.`);
+    if (failedIds.size > 0) {
+      let retryJobs: ShopPrintJob[];
+      try {
+        const latest = await getShopPrintJobsPage(tokens.accessToken, 0, 100, queueSearch);
+        retryJobs = latest.filter(job => failedIds.has(job.id) && job.status === "AWAITING_SHOP_APPROVAL");
+      } catch {
+        retryJobs = batchJobs.filter(job => failedIds.has(job.id));
+      }
+      const retryIds = new Set(retryJobs.map(job => job.id));
+      setBatchReviewDecisions(current => {
+        const next = { ...current };
+        for (const job of batchJobs) {
+          if (!retryIds.has(job.id)) delete next[job.id];
+          else next[job.id] = accepted.has(job.id);
+        }
+        return next;
+      });
+      setBatchReviewJobs(retryJobs.length > 0 ? retryJobs : null);
+      setBatchReviewRetry(retryJobs.length > 0);
+      setBatchReviewRetryIds(retryJobs.map(job => job.id));
+      if (retryJobs.length > 0) {
+        setError(`Some files could not be updated: ${failures.join("; ")}. Only files still awaiting review remain open. Their previous accept/reject choices have been kept; retry these files without changing the other decisions.`);
+      } else {
+        setError(`The review requests returned errors, but the refreshed queue shows no failed files still awaiting review. Check the updated statuses before trying another action. Details: ${failures.join("; ")}`);
+      }
+    } else {
+      setBatchReviewJobs(null);
+      setBatchReviewRetry(false);
+      setBatchReviewRetryIds(current => current.filter(id => !batchJobs.some(job => job.id === id)));
+      setBatchReviewDecisions(current => {
+        const next = { ...current };
+        for (const job of batchJobs) delete next[job.id];
+        return next;
+      });
+      setToast(`Batch review saved: ${acceptJobs.length} accepted and ${rejectJobs.length} rejected. You can review paid files separately to record refunds.`);
+    }
     setBusyJobId(null);
   }
 
@@ -1171,7 +1216,7 @@ function ShopConsole({ tokens, onSignOut }: { tokens: AuthTokens; onSignOut: () 
           {active === "Subscription" && subscription && <SubscriptionPage summary={subscription}/>}
           {active === "Payments" && paymentSettings && <PaymentsPage settings={paymentSettings} payments={payments} refunds={refunds} onSave={savePaymentSettings} onVerify={verifyPayment} onReject={rejectPayment} busy={busy} busyJobId={busyJobId}/>}
           {active === "Settings" && profile && <SettingsPage profile={profile} onSave={saveProfile} busy={busy}/>}
-          {active === "Print Queue" && <PrintQueuePage jobs={printJobs} printers={printers} agentDevices={agentDevices} searchQuery={queueSearch} onSearch={searchPrintQueue} onPreview={previewJob} onApprove={approveJob} onReject={rejectJob} onRefund={job=>setRefundJob(job)} onReviewBatch={batchId=>setBatchReviewJobs(printJobs.filter(job=>job.batchId===batchId&&job.status==="AWAITING_SHOP_APPROVAL"))} onHistory={viewJobHistory} onAssignPrinter={assignPrinter} onDispatch={dispatchPrintJob} onConfirmOutput={confirmPrintedOutput} onRetryPdfExport={retryPdfExport} onRefresh={refreshPrintQueue} onLoadOlder={loadOlderQueueJobs} hasMoreJobs={hasMoreQueueJobs} loadingOlderJobs={loadingOlderQueueJobs} busyJobId={busyJobId}/>} 
+          {active === "Print Queue" && <PrintQueuePage jobs={printJobs} printers={printers} agentDevices={agentDevices} searchQuery={queueSearch} onSearch={searchPrintQueue} onPreview={previewJob} onApprove={approveJob} onReject={rejectJob} onRefund={job=>setRefundJob(job)} onReviewBatch={batchId=>{const waiting=printJobs.filter(job=>job.batchId===batchId&&job.status==="AWAITING_SHOP_APPROVAL");setBatchReviewRetry(waiting.some(job=>batchReviewRetryIds.includes(job.id)));setBatchReviewJobs(waiting);}} onHistory={viewJobHistory} onAssignPrinter={assignPrinter} onDispatch={dispatchPrintJob} onConfirmOutput={confirmPrintedOutput} onRetryPdfExport={retryPdfExport} onRefresh={refreshPrintQueue} onLoadOlder={loadOlderQueueJobs} hasMoreJobs={hasMoreQueueJobs} loadingOlderJobs={loadingOlderQueueJobs} busyJobId={busyJobId}/>} 
           {active === "Customers" && <CustomersPage token={tokens.accessToken}/>}
           {active === "Reports" && <ReportsPage token={tokens.accessToken}/>} 
 
@@ -1181,7 +1226,7 @@ function ShopConsole({ tokens, onSignOut }: { tokens: AuthTokens; onSignOut: () 
 
       {modal === "printer" && <PrinterModal busy={busy} onClose={() => setModal(null)} onSubmit={submitPrinter}/>}
       {modal === "station" && <StationModal busy={busy} printers={printers.filter(printer => printer.isActive)} onClose={() => setModal(null)} onSubmit={submitStation}/>}
-            {batchReviewJobs && <BatchReviewModal jobs={batchReviewJobs} busy={busyJobId==="batch-review"} onClose={()=>setBatchReviewJobs(null)} onPreview={previewJob} onApply={acceptedIds=>void applyBatchReview(batchReviewJobs,acceptedIds)}/>}
+            {batchReviewJobs && <BatchReviewModal jobs={batchReviewJobs} busy={busyJobId==="batch-review"} decisions={batchReviewDecisions} retrying={batchReviewRetry} onDecision={(jobId,accepted)=>setBatchReviewDecisions(current=>({...current,[jobId]:accepted}))} onClose={()=>setBatchReviewJobs(null)} onPreview={previewJob} onApply={acceptedIds=>void applyBatchReview(batchReviewJobs,acceptedIds)}/>}
       {preview && <DocumentPreviewModal name={preview.name} url={preview.url} mediaType={preview.mediaType} job={preview.job} onApprove={()=>void approveJob(preview.job)} onReject={()=>void rejectJob(preview.job)} onRefund={()=>setRefundJob(preview.job)} onClose={() => { URL.revokeObjectURL(preview.url); setPreview(null); }}/>} 
       {eventHistory && <JobHistoryModal job={eventHistory.job} events={eventHistory.events} onClose={() => setEventHistory(null)}/>}
       {refundJob && <RefundModal job={refundJob} token={tokens.accessToken} busy={busyJobId===refundJob.id} onClose={()=>setRefundJob(null)} onSubmit={values=>void recordFileRefund(refundJob,values)}/>} 
@@ -1919,34 +1964,36 @@ function PrintQueuePage({ jobs, printers, agentDevices, searchQuery, onSearch, o
 
 
 
-function BatchReviewModal({jobs,busy,onClose,onPreview,onApply}:{
+function BatchReviewModal({jobs,busy,decisions,retrying,onDecision,onClose,onPreview,onApply}:{
   jobs:ShopPrintJob[];
   busy:boolean;
+  decisions:Record<string,boolean>;
+  retrying:boolean;
+  onDecision:(jobId:string,accepted:boolean)=>void;
   onClose:()=>void;
   onPreview:(job:ShopPrintJob)=>void;
   onApply:(acceptedJobIds:string[])=>void;
 }) {
-  const [acceptedIds,setAcceptedIds]=useState<Set<string>>(()=>new Set(jobs.map(job=>job.id)));
-  useEffect(()=>setAcceptedIds(new Set(jobs.map(job=>job.id))),[jobs]);
-  const acceptedCount=jobs.filter(job=>acceptedIds.has(job.id)).length;
+  const acceptedIds=jobs.filter(job=>decisions[job.id]??true).map(job=>job.id);
+  const acceptedCount=acceptedIds.length;
   const rejectedCount=jobs.length-acceptedCount;
-  const acceptedTotal=jobs.filter(job=>acceptedIds.has(job.id)).reduce((sum,job)=>sum+Math.max(0,job.quotedAmountMinor),0);
+  const acceptedTotal=jobs.filter(job=>decisions[job.id]??true).reduce((sum,job)=>sum+Math.max(0,job.quotedAmountMinor),0);
   const folders=Array.from(new Set(jobs.map(job=>job.batchGroupName??"Loose files")));
-  return <Modal title="Review batch" subtitle="All files start accepted. Uncheck only files the shop cannot print; undo any change before applying." onClose={onClose}>
+  return <Modal title={retrying?"Retry batch review":"Review batch"} subtitle={retrying?"Some decisions did not save. Only the files still awaiting review are shown; each keeps its previous accept/reject choice.":"All files start accepted. Uncheck only files the shop cannot print; undo any change before applying."} onClose={onClose}>
     <div className="batch-review-list">{folders.map(folderName=><section className="batch-review-folder" key={folderName}>
       <div className="batch-review-folder-head"><FolderOpen size={15}/><strong>{folderName}</strong><small>{jobs.filter(job=>(job.batchGroupName??"Loose files")===folderName).length} files</small></div>
       {jobs.filter(job=>(job.batchGroupName??"Loose files")===folderName).map((job,index)=>{
-        const accepted=acceptedIds.has(job.id);
+        const accepted=decisions[job.id]??true;
         return <div className={accepted?"batch-review-row accepted":"batch-review-row rejected"} key={job.id}>
-          <label className="batch-review-checkbox"><input type="checkbox" checked={accepted} onChange={event=>setAcceptedIds(current=>{const next=new Set(current);if(event.target.checked)next.add(job.id);else next.delete(job.id);return next;})}/></label>
+          <label className="batch-review-checkbox"><input type="checkbox" checked={accepted} disabled={busy} onChange={event=>onDecision(job.id,event.target.checked)}/></label>
           <span className="batch-review-index">{index+1}</span>
           <div className="batch-review-file"><strong>{job.document.originalFileName}</strong><small>{job.pageCount} pages × {job.copies} · {job.colourMode} · {job.isDuplex?"Double-sided":"Single-sided"} · {formatMoney(job.quotedAmountMinor,job.currency)}</small><Status label={accepted?"Accepted":"Marked for rejection"} tone={accepted?"green":"red"}/></div>
-          <button className="subtle-button" type="button" onClick={()=>onPreview(job)}>Preview</button>
+          <button className="subtle-button" type="button" disabled={busy} onClick={()=>onPreview(job)}>Preview</button>
         </div>;
       })}
     </section>)}</div>
-    <div className="batch-review-summary"><span><strong>{acceptedCount}</strong> accepted</span><span><strong>{rejectedCount}</strong> rejected</span><span><strong>{formatMoney(acceptedTotal,jobs[0]?.currency??"INR")}</strong> accepted value</span><small>Unpaid rejected files are excluded before payment.</small></div>
-    <div className="modal-actions"><button className="secondary-button" onClick={onClose} disabled={busy}>Keep reviewing</button><button className="primary-button" disabled={busy||jobs.length===0} onClick={()=>onApply(Array.from(acceptedIds))}>{busy?<span className="button-spinner"/>:"Apply review"}</button></div>
+    <div className="batch-review-summary"><span><strong>{acceptedCount}</strong> accepted</span><span><strong>{rejectedCount}</strong> rejected</span><span><strong>{formatMoney(acceptedTotal,jobs[0]?.currency??"INR")}</strong> accepted value</span><small>Unpaid rejected files are excluded before payment. Decisions are kept if an individual update needs retrying.</small></div>
+    <div className="modal-actions"><button className="secondary-button" onClick={onClose} disabled={busy}>Keep reviewing</button><button className="primary-button" disabled={busy||jobs.length===0} onClick={()=>onApply(acceptedIds)}>{busy?<span className="button-spinner"/>:"Apply review"}</button></div>
   </Modal>;
 }
 
@@ -2747,7 +2794,7 @@ function CustomerPrintFlow({publicCode,sessionToken,paymentOptions,localAgent,lo
   const [fileSettings,setFileSettings]=useState<Record<string,CustomerFileSettings>>(()=>initialDraft?.fileSettings??{});
   const [printSettingsByJobId,setPrintSettingsByJobId]=useState<Record<string,CustomerSavedPrintSettings>>(()=>initialDraft?.printSettingsByJobId??{});
   const [quotesByJobId,setQuotesByJobId]=useState<Record<string,PrintQuoteResult>>(()=>initialDraft?.quotesByJobId??(initialDraft?.quote&&initialDraft?.uploaded?{[initialDraft.uploaded.job.id]:initialDraft.quote}:{}));
-  const [uploadProgress,setUploadProgress]=useState<{completed:number;total:number}|null>(null);
+  const [uploadProgress,setUploadProgress]=useState<{completed:number;total:number;currentFile:string|null}|null>(null);
   const [quote,setQuote]=useState<PrintQuoteResult|null>(()=>initialDraft?.quote??null);
   const [jobStatus,setJobStatus]=useState<CustomerJobStatus|null>(null);
   const [batchStatuses,setBatchStatuses]=useState<Record<string,CustomerJobStatus>>({});
@@ -2883,10 +2930,11 @@ function CustomerPrintFlow({publicCode,sessionToken,paymentOptions,localAgent,lo
     const savedSettings={...printSettingsByJobId};
     const pending=files.filter(candidate=>!completedFingerprints.has(customerFileFingerprint(candidate)));
     if(pending.length===0){setError(nativeAppMode ? "Files already uploaded. Choose more." : "All selected files are already uploaded. Choose another document or folder.");return;}
-    setBusy(true);setError("");setQuote(null);setQuotesByJobId({});setJobStatus(null);setUploadProgress({completed:0,total:pending.length});
+    setBusy(true);setError("");setQuote(null);setQuotesByJobId({});setJobStatus(null);setUploadProgress({completed:0,total:pending.length,currentFile:pending[0]?.name??null});
     try {
       for(let index=0;index<pending.length;index++){
         const candidate=pending[index];
+        setUploadProgress({completed:index,total:pending.length,currentFile:candidate.name});
         const fingerprint=customerFileFingerprint(candidate);
         const batchGroupName=groupNameForFile(candidate);
         const settings=settingsForFile(candidate);
@@ -2898,7 +2946,7 @@ function CustomerPrintFlow({publicCode,sessionToken,paymentOptions,localAgent,lo
         completedFingerprints.add(fingerprint);
         setUploadedBatch([...results]);
         setUploadedFileFingerprints([...completedFingerprints]);
-        setUploadProgress({completed:index+1,total:pending.length});
+        setUploadProgress({completed:index+1,total:pending.length,currentFile:pending[index+1]?.name??null});
       }
       setPrintSettingsByJobId(savedSettings);
       setUploadedBatch(results);
@@ -3111,6 +3159,28 @@ function CustomerPrintFlow({publicCode,sessionToken,paymentOptions,localAgent,lo
     setError(nestedSkipped? "Nested folders are skipped; only files directly inside each selected folder are included.":unsupportedSkipped? "Unsupported file types were skipped.": "");
   }
 
+  function removeSelectedFile(fingerprint: string) {
+    if (busy) return;
+    const index = files.findIndex(candidate => customerFileFingerprint(candidate) === fingerprint);
+    if (index < 0) return;
+    const nextFiles = files.filter(candidate => customerFileFingerprint(candidate) !== fingerprint);
+    setFiles(nextFiles);
+    setSelectedFileIndex(current => current === index
+      ? Math.min(index, Math.max(0, nextFiles.length - 1))
+      : current > index ? current - 1 : current);
+    setFileGroupNames(current => {
+      const next = { ...current };
+      delete next[fingerprint];
+      return next;
+    });
+    setFileSettings(current => {
+      const next = { ...current };
+      delete next[fingerprint];
+      return next;
+    });
+    setError("");
+  }
+
   const pendingFilesCount=files.filter(candidate=>!uploadedFileFingerprints.includes(customerFileFingerprint(candidate))).length;
   const uploadGroups=Array.from(new Set(files.map(candidate=>groupNameForFile(candidate)))).map(name=>({
     name, files:files.filter(candidate=>groupNameForFile(candidate)===name)
@@ -3175,6 +3245,7 @@ function CustomerPrintFlow({publicCode,sessionToken,paymentOptions,localAgent,lo
               <button type="button" className="customer-folder-file-name" onClick={()=>setSelectedFileIndex(index)}><FileText size={15}/><span><strong>{selected.name}</strong><small>{formatBytes(selected.size)}</small></span></button>
               <label className="customer-folder-copies"><span>Copies</span><input type="number" min="1" max="100" step="1" value={own.copies} onChange={event=>setFileSettings(current=>({...current,[fingerprint]:{...(current[fingerprint]??own),copies:event.target.value}}))} onBlur={event=>setFileSettings(current=>({...current,[fingerprint]:{...(current[fingerprint]??own),copies:normalizeCustomerCopies(event.currentTarget.value)}}))}/></label>
               <button type="button" className={own.custom?"customer-file-custom active":"customer-file-custom"} onClick={()=>setFileSettings(current=>({...current,[fingerprint]:{...(current[fingerprint]??own),custom:!own.custom,colourMode:own.custom?own.colourMode:defaults.colourMode,isDuplex:own.custom?own.isDuplex:defaults.isDuplex}}))}>{own.custom?"Custom":"Folder"}</button>
+              <button type="button" className="customer-file-remove" aria-label={`Remove ${selected.name} from this selection`} title="Remove from this selection" disabled={busy} onClick={()=>removeSelectedFile(fingerprint)}><X size={13}/><span>Remove</span></button>
               {own.custom&&<div className="customer-file-overrides">
                 <div className="customer-choice-row">
                   <button type="button" className={own.colourMode==="Mono"?"customer-choice selected":"customer-choice"} onClick={()=>setFileSettings(current=>({...current,[fingerprint]:{...own,custom:true,colourMode:"Mono"}}))}>B&W</button>
@@ -3193,7 +3264,7 @@ function CustomerPrintFlow({publicCode,sessionToken,paymentOptions,localAgent,lo
     {files.length>0&&<small className="customer-upload-local-note">Folder defaults apply to every file. Set an individual file to Custom for an exception.</small>}
     {previewUrl&&file&&<div className="customer-file-preview"><div className="customer-file-label"><FileText size={15}/><span>Preview · {file.name}</span></div>{file.type==="application/pdf"||/\.pdf$/i.test(file.name)?<iframe src={previewUrl} title={file.name+" preview"}/>:<img src={previewUrl} alt={file.name+" preview"}/>}</div>}
     {files.length>0&&<button className="customer-flow-button" disabled={busy||pendingFilesCount===0||(uploadMode==="LOCAL"&&!localReady)} onClick={()=>void upload()}>{busy?<span className="button-spinner"/>:<><UploadIcon/>{uploadMode==="LOCAL"&&localAgent?"Upload "+pendingFilesCount+" file(s) to shop":"Upload "+pendingFilesCount+" file(s)"}</>}</button>}
-    {uploadProgress&&<div className="customer-upload-progress"><span>{uploadProgress.completed} of {uploadProgress.total} files uploaded</span><div><i style={{width:`${uploadProgress.total?uploadProgress.completed/uploadProgress.total*100:0}%`}}/></div></div>}
+    {uploadProgress&&<div className="customer-upload-progress"><span>{uploadProgress.currentFile?`Uploading ${Math.min(uploadProgress.completed+1,uploadProgress.total)} of ${uploadProgress.total}: ${uploadProgress.currentFile}`:`${uploadProgress.completed} of ${uploadProgress.total} files uploaded`}</span><div><i style={{width:`${uploadProgress.total?uploadProgress.completed/uploadProgress.total*100:0}%`}}/>{uploadProgress.currentFile&&<b aria-hidden="true"/>}</div><small>The count advances when each document finishes uploading.</small></div>}
     {files.length>0&&uploadMode==="LOCAL"&&localAgent&&<small className="customer-upload-local-note">{nativeAppMode?(localReady?"Cloud receives metadata only.":"Check shop Wi-Fi."):localReady?"Your files travel over shop Wi-Fi. The cloud receives only job, quote and payment metadata.":"Tap Check shop Wi-Fi above first to grant the browser permission."}</small>}
     {files.length>0&&uploadMode==="CLOUD"&&localAgent&&<small className="customer-upload-local-note">{nativeAppMode?"Encrypted cloud transfer.":"Cloud-assisted fallback: files are uploaded encrypted to the API before being transferred to the shop computer."}</small>}
     {uploaded&&<>
@@ -3221,6 +3292,7 @@ function CustomerPrintFlow({publicCode,sessionToken,paymentOptions,localAgent,lo
     {quoteEntries.length>0&&<div className="customer-quote-card customer-batch-quote-card">
       <div><span>BATCH QUOTE</span><strong>{formatMoney(batchQuoteTotal,quoteEntries[0].quote!.currency)}</strong><small>{quoteEntries.length} files · {quoteEntries.reduce((sum,entry)=>sum+entry.item.job.pageCount,0)} pages</small></div>
       <div className="customer-batch-quote-lines">{quoteEntries.map(entry=><div key={entry.item.job.id}><span>{entry.item.document.originalFileName}{(batchStatuses[entry.item.job.id]?.status??entry.item.job.status)==="REJECTED"?" · Rejected":""}</span><strong>{(batchStatuses[entry.item.job.id]?.status??entry.item.job.status)==="REJECTED"?"Excluded":formatMoney(entry.quote!.quotedAmountMinor,entry.quote!.currency)}</strong></div>)}</div>
+      <p className="customer-payment-model-note">Each accepted file has its own payment step after shop approval. This batch total is the sum of file quotes, not one combined charge. Select each accepted file above to complete its payment.</p>
     </div>}
     {canSendBatch&&<button className="customer-flow-button" disabled={busy} onClick={()=>void acceptQuote()}>{busy?<span className="button-spinner"/>:"Send batch to shop"}</button>}
       {jobStatus?.status==="QUOTE_EXPIRED"&&<button className="customer-flow-button" disabled={busy} onClick={()=>{setQuote(null);setQuotesByJobId(current=>{const next={...current};if(uploaded)delete next[uploaded.job.id];return next;});setJobStatus(null);setPayment(null);}}>Request a fresh quote</button>}
