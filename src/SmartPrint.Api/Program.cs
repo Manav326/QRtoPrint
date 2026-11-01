@@ -5811,11 +5811,14 @@ publicApi.MapPost("/jobs/{jobId:guid}/quote", async (
         return Results.Problem(statusCode: StatusCodes.Status403Forbidden,
             title: "This shop's trial or subscription period is no longer active.");
 
-    var job = await db.PrintJobs.SingleOrDefaultAsync(
-        item => item.Id == jobId && item.TenantId == session.TenantId &&
-                item.CustomerSessionId == session.Id, ct);
+    await using var transaction = await db.Database.BeginTransactionAsync(ct);
+    var lockedJobs = await db.PrintJobs.FromSqlInterpolated(
+        $"SELECT * FROM \"PrintJobs\" WHERE \"Id\" = {jobId} AND \"TenantId\" = {session.TenantId} AND \"CustomerSessionId\" = {session.Id} FOR UPDATE")
+        .ToListAsync(ct);
+    var job = lockedJobs.SingleOrDefault();
     if (job is null)
     {
+        await transaction.RollbackAsync(ct);
         return Results.NotFound();
     }
 
@@ -5895,6 +5898,7 @@ publicApi.MapPost("/jobs/{jobId:guid}/quote", async (
             CreatedUtc = now
         });
         await db.SaveChangesAsync(ct);
+        await transaction.CommitAsync(ct);
 
         return Results.Ok(new
         {
@@ -6645,21 +6649,26 @@ publicApi.MapPost("/jobs/{jobId:guid}/accept-quote", async (
         return Results.Unauthorized();
     }
 
-    var job = await db.PrintJobs.SingleOrDefaultAsync(
-        item => item.Id == jobId && item.TenantId == session.TenantId &&
-                item.CustomerSessionId == session.Id, ct);
+    await using var transaction = await db.Database.BeginTransactionAsync(ct);
+    var lockedJobs = await db.PrintJobs.FromSqlInterpolated(
+        $"SELECT * FROM \"PrintJobs\" WHERE \"Id\" = {jobId} AND \"TenantId\" = {session.TenantId} AND \"CustomerSessionId\" = {session.Id} FOR UPDATE")
+        .ToListAsync(ct);
+    var job = lockedJobs.SingleOrDefault();
     if (job is null)
     {
+        await transaction.RollbackAsync(ct);
         return Results.NotFound();
     }
 
     if (job.Status == "AWAITING_SHOP_APPROVAL")
     {
+        await transaction.RollbackAsync(ct);
         return Results.Ok(new { job.Id, job.JobNumber, job.Status, job.UpdatedUtc, DuplicateRequest = true });
     }
 
     if (job.Status != "AWAITING_CUSTOMER_APPROVAL")
     {
+        await transaction.RollbackAsync(ct);
         return Results.Conflict(new { code = "quote_not_awaiting_acceptance", message = "This job does not have a quote awaiting your acceptance." });
     }
 
@@ -6679,6 +6688,7 @@ publicApi.MapPost("/jobs/{jobId:guid}/accept-quote", async (
             CreatedUtc = now
         });
         await db.SaveChangesAsync(ct);
+        await transaction.CommitAsync(ct);
         return Results.Conflict(new { code = "quote_expired", message = "This quote has expired. Request a new quote to continue." });
     }
 
@@ -6696,6 +6706,7 @@ publicApi.MapPost("/jobs/{jobId:guid}/accept-quote", async (
         CreatedUtc = now
     });
     await db.SaveChangesAsync(ct);
+    await transaction.CommitAsync(ct);
     return Results.Ok(new { job.Id, job.JobNumber, job.Status, job.Currency, job.QuotedAmountMinor, job.UpdatedUtc });
 });
 
