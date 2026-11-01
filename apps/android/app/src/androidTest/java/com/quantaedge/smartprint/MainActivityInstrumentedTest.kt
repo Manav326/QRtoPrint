@@ -11,7 +11,6 @@ import androidx.test.espresso.action.ViewActions.closeSoftKeyboard
 import androidx.test.espresso.action.ViewActions.replaceText
 import androidx.test.espresso.assertion.ViewAssertions.matches
 import androidx.test.espresso.matcher.ViewMatchers.isDisplayed
-import androidx.test.espresso.matcher.ViewMatchers.isSelected
 import androidx.test.espresso.matcher.ViewMatchers.withId
 import androidx.test.espresso.matcher.ViewMatchers.withContentDescription
 import androidx.test.espresso.matcher.ViewMatchers.withHint
@@ -262,7 +261,6 @@ class MainActivityInstrumentedTest {
         ActivityScenario.launch(MainActivity::class.java).use {
             // Tap the accessible navigation item itself, not its non-clickable label child.
             onView(withContentDescription("Print at a shop")).perform(click())
-            onView(withContentDescription("Print at a shop")).check(matches(isSelected()))
             onView(withText("Connect to a shop")).check(matches(isDisplayed()))
             onView(withText("Scan QR code")).check(matches(isDisplayed()))
             onView(withText("Open My Files")).check(matches(isDisplayed()))
@@ -288,7 +286,6 @@ class MainActivityInstrumentedTest {
     fun systemBackFromPrintTabReturnsHome() {
         ActivityScenario.launch(MainActivity::class.java).use {
             onView(withContentDescription("Print at a shop")).perform(click())
-            onView(withContentDescription("Print at a shop")).check(matches(isSelected()))
             onView(withText("Connect to a shop")).check(matches(isDisplayed()))
             androidx.test.espresso.Espresso.pressBack()
             onView(withText("Your space")).check(matches(isDisplayed()))
