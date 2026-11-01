@@ -10,6 +10,7 @@ public sealed class AgentCredentialStore
 {
     private static readonly byte[] Entropy = Encoding.UTF8.GetBytes("QRtoPrint.Agent.Identity.v1");
     private readonly string identityPath;
+    private readonly object sync = new();
 
     public AgentCredentialStore(string? identityPath = null)
     {
@@ -22,6 +23,14 @@ public sealed class AgentCredentialStore
     }
 
     public AgentCredentials? Load()
+    {
+        lock (sync)
+        {
+            return LoadCore();
+        }
+    }
+
+    private AgentCredentials? LoadCore()
     {
         if (!File.Exists(identityPath))
         {
@@ -43,6 +52,33 @@ public sealed class AgentCredentialStore
 
     public void Delete()
     {
+        lock (sync)
+        {
+            DeleteCore();
+        }
+    }
+
+    public bool DeleteIfMatches(AgentCredentials expectedCredentials)
+    {
+        ArgumentNullException.ThrowIfNull(expectedCredentials);
+        lock (sync)
+        {
+            var current = LoadCore();
+            if (current is null ||
+                current.AgentDeviceId != expectedCredentials.AgentDeviceId ||
+                !string.Equals(current.ApiBaseUrl, expectedCredentials.ApiBaseUrl, StringComparison.Ordinal) ||
+                !SecretsMatch(current.AgentSecret, expectedCredentials.AgentSecret))
+            {
+                return false;
+            }
+
+            DeleteCore();
+            return true;
+        }
+    }
+
+    private void DeleteCore()
+    {
         if (File.Exists(identityPath))
         {
             File.Delete(identityPath);
@@ -55,39 +91,58 @@ public sealed class AgentCredentialStore
         }
     }
 
+    private static bool SecretsMatch(string currentSecret, string expectedSecret)
+    {
+        var currentBytes = Encoding.UTF8.GetBytes(currentSecret);
+        var expectedBytes = Encoding.UTF8.GetBytes(expectedSecret);
+        try
+        {
+            return currentBytes.Length == expectedBytes.Length &&
+                CryptographicOperations.FixedTimeEquals(currentBytes, expectedBytes);
+        }
+        finally
+        {
+            CryptographicOperations.ZeroMemory(currentBytes);
+            CryptographicOperations.ZeroMemory(expectedBytes);
+        }
+    }
+
     public void Save(AgentCredentials credentials)
     {
         ArgumentNullException.ThrowIfNull(credentials);
-        var directory = Path.GetDirectoryName(identityPath)
-            ?? throw new InvalidOperationException("Could not determine the agent identity directory.");
-        Directory.CreateDirectory(directory);
-        SecurePermissions(directory);
-
-        var plainBytes = JsonSerializer.SerializeToUtf8Bytes(credentials);
-        try
+        lock (sync)
         {
-            var protectedBytes = ProtectedData.Protect(plainBytes, Entropy, DataProtectionScope.LocalMachine);
+            var directory = Path.GetDirectoryName(identityPath)
+                ?? throw new InvalidOperationException("Could not determine the agent identity directory.");
+            Directory.CreateDirectory(directory);
+            SecurePermissions(directory);
+
+            var plainBytes = JsonSerializer.SerializeToUtf8Bytes(credentials);
             try
             {
-                var tempPath = identityPath + ".tmp";
-                File.WriteAllBytes(tempPath, protectedBytes);
-                if (File.Exists(identityPath))
+                var protectedBytes = ProtectedData.Protect(plainBytes, Entropy, DataProtectionScope.LocalMachine);
+                try
                 {
-                    File.Replace(tempPath, identityPath, null, ignoreMetadataErrors: true);
+                    var tempPath = identityPath + ".tmp";
+                    File.WriteAllBytes(tempPath, protectedBytes);
+                    if (File.Exists(identityPath))
+                    {
+                        File.Replace(tempPath, identityPath, null, ignoreMetadataErrors: true);
+                    }
+                    else
+                    {
+                        File.Move(tempPath, identityPath);
+                    }
                 }
-                else
+                finally
                 {
-                    File.Move(tempPath, identityPath);
+                    CryptographicOperations.ZeroMemory(protectedBytes);
                 }
             }
             finally
             {
-                CryptographicOperations.ZeroMemory(protectedBytes);
+                CryptographicOperations.ZeroMemory(plainBytes);
             }
-        }
-        finally
-        {
-            CryptographicOperations.ZeroMemory(plainBytes);
         }
     }
 

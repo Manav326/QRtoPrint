@@ -107,8 +107,16 @@ public sealed class Worker(
                     // An invalid/revoked device secret cannot be reused. Removing the
                     // local DPAPI identity allows the owner to start a fresh enrollment;
                     // the API still decides whether the previous shop actually revoked it.
-                    credentialStore.Delete();
-                    logger.LogError("The shop no longer accepts this Agent identity. Local credentials were cleared; connect this computer again from the desktop app after the shop owner authorises it.");
+                    if (credentialStore.DeleteIfMatches(credentials))
+                    {
+                        logger.LogError("The shop no longer accepts this Agent identity. Local credentials were cleared; connect this computer again from the desktop app after the shop owner authorises it.");
+                    }
+                    else
+                    {
+                        // The owner may have completed a new enrollment while this
+                        // old heartbeat was in flight. Never delete that newer identity.
+                        logger.LogInformation("A stale heartbeat was rejected after the local Agent identity changed. The newer pairing was preserved.");
+                    }
                 }
                 else if (heartbeat.StatusCode == HttpStatusCode.Forbidden)
                 {

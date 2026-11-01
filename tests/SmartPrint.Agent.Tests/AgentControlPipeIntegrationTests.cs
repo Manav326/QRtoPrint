@@ -117,6 +117,12 @@ public sealed class AgentControlPipeIntegrationTests
             Assert.Equal(deviceId, savedCredentials!.AgentDeviceId);
             Assert.Equal(agentSecret, savedCredentials.AgentSecret);
             Assert.Equal(apiOrigin, savedCredentials.ApiBaseUrl);
+
+            var staleHeartbeatIdentity = savedCredentials with { AgentSecret = "previous-agent-secret" };
+            Assert.False(credentialStore.DeleteIfMatches(staleHeartbeatIdentity));
+            var preservedCredentials = credentialStore.Load();
+            Assert.NotNull(preservedCredentials);
+            Assert.Equal(agentSecret, preservedCredentials!.AgentSecret);
         }
         finally
         {
