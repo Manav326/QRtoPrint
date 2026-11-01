@@ -42,8 +42,8 @@ const sections: { label: Section; icon: typeof LayoutDashboard }[] = [
 
 export default function App() {
   const [tokens, setTokens] = useState<AuthTokens | null>(() => readStoredTokens());
-  const path = window.location.pathname.replace(/\\/+$/, "") || "/";
-  const stationRoute = path.match(/^\\/s\\/([A-Za-z0-9_-]+)$/);
+  const path = window.location.pathname.replace(/\/+$/, "") || "/";
+  const stationRoute = path.match(/^\/s\/([A-Za-z0-9_-]+)$/);
   const shopAuthRoute = path === "/shop" || path === "/login" || path === "/signup";
 
   if (stationRoute) {
