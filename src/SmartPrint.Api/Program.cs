@@ -5321,6 +5321,25 @@ publicApi.MapPost("/sessions/current/jobs", async (
             return Results.Ok(new { Job = racedJob, Document = racedDocument, DuplicateRequest = true });
         }
 
+        var lockedBatchJobs = await db.PrintJobs.FromSqlInterpolated(
+            $"SELECT * FROM \"PrintJobs\" WHERE \"TenantId\" = {session.TenantId} AND \"CustomerSessionId\" = {session.Id} AND \"BatchId\" = {batchId} FOR UPDATE")
+            .ToListAsync(ct);
+        var checkoutStartedAfterUpload = await db.PrintBatchPayments.AsNoTracking().AnyAsync(item =>
+            item.TenantId == session.TenantId &&
+            item.CustomerSessionId == session.Id &&
+            item.BatchId == batchId &&
+            item.Status != "REJECTED", ct);
+        if (checkoutStartedAfterUpload)
+        {
+            await transaction.RollbackAsync(ct);
+            await storage.DeleteAsync(stored.StorageKey);
+            return Results.Conflict(new
+            {
+                code = "batch_upload_locked_after_payment_start",
+                message = "This batch payment started while the file was uploading. The file was not added; start a new batch for it."
+            });
+        }
+
         var batchJobSizes = await (
             from batchJob in db.PrintJobs.AsNoTracking()
             join batchDocument in db.PrintDocuments.AsNoTracking()
@@ -5580,6 +5599,25 @@ publicApi.MapPost("/sessions/current/local-upload-tickets", async (
     };
     await using var transaction = await db.Database.BeginTransactionAsync(ct);
     await entitlements.AcquireQuotaLockAsync(session.TenantId, TenantQuotaResource.MonthlyPrintJob, ct);
+
+    var lockedBatchJobs = await db.PrintJobs.FromSqlInterpolated(
+        $"SELECT * FROM \"PrintJobs\" WHERE \"TenantId\" = {session.TenantId} AND \"CustomerSessionId\" = {session.Id} AND \"BatchId\" = {batchId} FOR UPDATE")
+        .ToListAsync(ct);
+
+    var checkoutStartedAfterTicketPreflight = await db.PrintBatchPayments.AsNoTracking().AnyAsync(item =>
+        item.TenantId == session.TenantId &&
+        item.CustomerSessionId == session.Id &&
+        item.BatchId == batchId &&
+        item.Status != "REJECTED", ct);
+    if (checkoutStartedAfterTicketPreflight)
+    {
+        await transaction.RollbackAsync(ct);
+        return Results.Conflict(new
+        {
+            code = "batch_upload_locked_after_payment_start",
+            message = "This batch payment started while the file was being prepared. The file was not added; start a new batch for it."
+        });
+    }
 
     var racedTicket = await db.LocalPrintUploadTickets.AsNoTracking()
         .SingleOrDefaultAsync(item => item.TenantId == session.TenantId &&
@@ -5844,6 +5882,22 @@ publicApi.MapPost("/batches/{batchId:guid}/payments", async (
         .OrderBy(item => item.CreatedUtc)
         .ToList();
     if (jobs.Count == 0) return Results.NotFound();
+
+    var pendingLocalUpload = await db.LocalPrintUploadTickets.AsNoTracking().AnyAsync(ticket =>
+        ticket.TenantId == session.TenantId &&
+        ticket.CustomerSessionId == session.Id &&
+        ticket.BatchId == batchId &&
+        ticket.CompletedUtc == null &&
+        ticket.ExpiresUtc > now, ct);
+    if (pendingLocalUpload)
+    {
+        await transaction.RollbackAsync(ct);
+        return Results.Conflict(new
+        {
+            code = "batch_uploads_still_processing",
+            message = "A document is still being transferred to the shop computer. Wait for its upload to finish or expire, then refresh the batch before checkout."
+        });
+    }
 
     var activeBatchPayment = await db.PrintBatchPayments.SingleOrDefaultAsync(
         item => item.TenantId == session.TenantId &&
