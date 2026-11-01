@@ -7,6 +7,7 @@ import {
 import PlatformPlansSection from "./PlatformPlansSection";
 import PlatformSubscriptionsSection from "./PlatformSubscriptionsSection";
 import PlatformOperationsSection from "./PlatformOperationsSection";
+import { adminPathForSection, adminSectionFromPath } from "./portal-routing";
 import {
   getPlatformOverview, getPlatformTenants, getPlatformTenantStatusHistory, updatePlatformTenantStatus, logout,
   type AuthTokens, type PlatformOverview, type PlatformTenantsPage, type PlatformTenant
@@ -21,7 +22,7 @@ export default function PlatformAdminConsole({
   tokens: AuthTokens;
   onSignOut: () => Promise<void>;
 }) {
-  const [section, setSection] = useState<Section>(() => sectionFromPath(window.location.pathname));
+  const [section, setSection] = useState<Section>(() => adminSectionFromPath(window.location.pathname));
 
   useEffect(() => {
     const syncSectionFromPath = () => setSection(sectionFromPath(window.location.pathname));
@@ -116,7 +117,7 @@ export default function PlatformAdminConsole({
   }
 
   function navigate(next: Section) {
-    const nextPath = pathForSection(next);
+    const nextPath = adminPathForSection(next);
     if (window.location.pathname !== nextPath) {
       window.history.pushState({}, "", nextPath);
     }
@@ -388,24 +389,3 @@ function prettyStatus(value: string): string {
   return value.replace(/[_-]+/g, " ").toLowerCase().replace(/\b\w/g, letter => letter.toUpperCase());
 }
 
-
-function sectionFromPath(pathname: string): Section {
-  const path = pathname.replace(/\/+$/, "") || "/admin";
-  switch (path) {
-    case "/admin/tenants": return "Tenants";
-    case "/admin/plans": return "Plans";
-    case "/admin/subscriptions": return "Subscriptions";
-    case "/admin/operations": return "Operations";
-    default: return "Overview";
-  }
-}
-
-function pathForSection(section: Section): string {
-  switch (section) {
-    case "Tenants": return "/admin/tenants";
-    case "Plans": return "/admin/plans";
-    case "Subscriptions": return "/admin/subscriptions";
-    case "Operations": return "/admin/operations";
-    default: return "/admin";
-  }
-}
