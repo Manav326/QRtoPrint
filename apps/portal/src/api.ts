@@ -375,7 +375,7 @@ export function readStoredTokens(scope: AuthScope = currentAuthScope()): AuthTok
 }
 
 export function storeTokens(tokens: AuthTokens | null, scope: AuthScope = currentAuthScope()): Promise<void> {
-  const scopedKey = `qrtoprint.auth.${scope}`;
+  const scopedKey = authStorageKey(scope);
   if (tokens) sessionStorage.setItem(scopedKey, JSON.stringify(tokens));
   else sessionStorage.removeItem(scopedKey);
 
