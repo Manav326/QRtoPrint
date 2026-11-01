@@ -126,8 +126,8 @@ class MainActivityInstrumentedTest {
             onView(withText("Nested")).check(matches(isDisplayed()))
 
             androidx.test.espresso.Espresso.pressBack()
+            onView(withText("Scan here")).check(matches(isDisplayed()))
             onView(withText("Nested")).check(matches(isDisplayed()))
-            onView(withText(folderName)).check(matches(isDisplayed()))
             androidx.test.espresso.Espresso.pressBack()
             onView(withText(folderName)).check(matches(isDisplayed()))
             onView(withText("My Files")).check(matches(isDisplayed()))
