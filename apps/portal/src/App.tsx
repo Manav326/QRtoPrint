@@ -556,6 +556,11 @@ function ShopConsole({ tokens, onSignOut }: { tokens: AuthTokens; onSignOut: () 
     setError("");
     try {
       await revokeAgentDevice(tokens.accessToken, agent.id);
+      if (localAgentStatus?.agentDeviceId === agent.id) {
+        setLocalAgentRevoked(true);
+        setLocalAgentConflict(false);
+        setLocalAgentOwnershipChecking(false);
+      }
       setToast("Agent access revoked.");
       await reload();
     } catch (exception) {

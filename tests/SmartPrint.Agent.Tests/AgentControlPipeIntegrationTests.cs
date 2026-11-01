@@ -150,6 +150,13 @@ public sealed class AgentControlPipeIntegrationTests
             credentialStore.Save(renewedCredentials);
             Assert.False(credentialStore.IsRevoked());
             Assert.Equal(renewedCredentials.AgentDeviceId, credentialStore.Load()!.AgentDeviceId);
+            using (var renewedStatus = await SendPipeRequestAsync("status", null, timeout.Token))
+            {
+                Assert.True(renewedStatus.RootElement.GetProperty("success").GetBoolean());
+                Assert.True(renewedStatus.RootElement.GetProperty("paired").GetBoolean());
+                Assert.Equal(renewedCredentials.AgentDeviceId, renewedStatus.RootElement.GetProperty("agentDeviceId").GetGuid());
+                Assert.Equal("CONNECTED", renewedStatus.RootElement.GetProperty("status").GetString());
+            }
         }
         finally
         {
