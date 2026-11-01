@@ -905,7 +905,8 @@ function customerUploadAttemptStorageKey(sessionToken: string, file: File): stri
   // This lets a re-selected file reuse its in-flight key after a page reload,
   // while a different file gets its own key.
   const relativePath = (file as File & { webkitRelativePath?: string }).webkitRelativePath ?? "";
-  const identity = `${relativePath}\u0000${file.name}\u0000${file.size}\u0000${file.lastModified}\u0000${file.type}`;
+  const nativeGroup = (file as File & { __smartPrintBatchGroup?: string }).__smartPrintBatchGroup ?? "";
+  const identity = `${relativePath || nativeGroup}\u0000${file.name}\u0000${file.size}\u0000${file.lastModified}\u0000${file.type}`;
   let first = 2166136261;
   let second = 5381;
   for (let index = 0; index < identity.length; index++) {
