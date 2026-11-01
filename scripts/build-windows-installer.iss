@@ -6,6 +6,7 @@
 #endif
 
 [Setup]
+SourceDir=..
 AppId={{A7F2E9CA-2C3A-4E58-AE63-26E6B7B0DDF1}
 AppName=SmartPrint by QuantaEdge
 AppVersion={#SmartPrintVersion}
