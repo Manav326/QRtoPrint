@@ -40,6 +40,8 @@ class DocumentViewerInstrumentedTest {
                 onView(withText("Page 1 of 2")).check(matches(isDisplayed()))
                 onView(withContentDescription("Next page")).perform(click())
                 onView(withText("Page 2 of 2")).check(matches(isDisplayed()))
+                it.recreate()
+                onView(withText("Page 2 of 2")).check(matches(isDisplayed()))
                 onView(withContentDescription("Previous page")).perform(click())
                 onView(withText("Page 1 of 2")).check(matches(isDisplayed()))
                 onView(withContentDescription("Back to My Files")).perform(click())
