@@ -116,8 +116,12 @@ class MainActivity : AppCompatActivity() {
         registerFileActions()
         buildLayout()
         showHome()
+        val savedShop = getSharedPreferences("smartprint.customer.last-shop", MODE_PRIVATE)
         portalUrl = savedInstanceState?.getString("portalUrl")
+            ?: savedShop.getString("portalUrl", null)
         portalHost = savedInstanceState?.getString("portalHost")
+            ?: savedShop.getString("portalHost", null)
+            ?: portalUrl?.let { Uri.parse(it).host }
         portalUrl?.let { url ->
             val view = ensureWebView()
             val webState = savedInstanceState?.getBundle("webViewState")
@@ -1635,6 +1639,10 @@ class MainActivity : AppCompatActivity() {
             .setPositiveButton("Continue") { _, _ ->
                 portalHost = link.host
                 portalUrl = link.url
+                getSharedPreferences("smartprint.customer.last-shop", MODE_PRIVATE).edit()
+                    .putString("portalUrl", link.url)
+                    .putString("portalHost", link.host)
+                    .apply()
                 toolbar.menu.findItem(SWITCH_SHOP)?.isVisible = true
                 ensureWebView().loadUrl(link.url)
                 showPrint()
