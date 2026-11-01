@@ -308,3 +308,16 @@ html[data-theme="dark"] .sp-public-footer>div a { color: #a5b0c3; }
   .sp-theme-toggle { margin-left: auto; }
   .sp-shop-entry { min-height: 38px; }
 }
+
+
+/* Dark-mode contrast for secondary landing-page details and navigation. */
+html[data-theme="dark"] .sp-public :where(.sp-eyebrow,.sp-download-note,.sp-download-security-note,.sp-release-pending,.sp-download-footnote,.sp-public-footer>span,.sp-public-nav a,.sp-art-phone-caption,.sp-art-shop-caption,.sp-art-document small,.sp-art-shop-head small,.sp-art-printer small,.sp-proof-strip small,.sp-step-card p,.sp-audience-card>p,.sp-audience-card li,.sp-customer-mini-phone small,.sp-customer-mini-cloud span,.sp-download-platform,.sp-download-card p) {
+  color: #aab6ca;
+}
+html[data-theme="dark"] .sp-public :where(.sp-art-floating,.sp-step-tag,.sp-download-tag,.sp-download-unavailable) { border-color: #46536b; }
+html[data-theme="dark"] .sp-public .sp-download-link-button,
+html[data-theme="dark"] .sp-public .sp-button-primary { color: #fff !important; }
+html[data-theme="dark"] .sp-public .sp-button-quiet { color: #d0c8ff; }
+html[data-theme="dark"] .sp-public .sp-final-cta p,
+html[data-theme="dark"] .sp-public .sp-final-cta h2 { color: #fff; }
+html[data-theme="dark"] .sp-public .sp-connection-section :where(h2,p,span,b,small) { color: inherit; }
