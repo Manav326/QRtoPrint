@@ -48,11 +48,22 @@ async fn get_local_agent_status() -> LocalAgentStatus {
     };
 
     match client.get(AGENT_STATUS_URL).send().await {
-        Ok(response) if response.status().as_u16() == 503 => LocalAgentStatus {
-            service_reachable: true,
-            paired: false,
-            agent_device_id: None,
-            status: "UNPAIRED".into(),
+        Ok(response) if response.status().as_u16() == 503 => {
+            let problem = response.json::<serde_json::Value>().await.ok();
+            let is_unpaired = problem.as_ref()
+                .and_then(|value| value.get("title"))
+                .and_then(serde_json::Value::as_str)
+                == Some("This computer is not paired with a print shop.");
+            if is_unpaired {
+                LocalAgentStatus {
+                    service_reachable: true,
+                    paired: false,
+                    agent_device_id: None,
+                    status: "UNPAIRED".into(),
+                }
+            } else {
+                pipe_agent_status().unwrap_or_else(|_| unavailable_status())
+            }
         },
         Ok(response) if response.status().is_success() => {
             match response.json::<serde_json::Value>().await {

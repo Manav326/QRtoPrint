@@ -145,7 +145,7 @@ public sealed class AgentControlPipeHostedService(
                     new PipeResponse(true, credentials?.AgentDeviceId, null, true, paired, paired ? "CONNECTED" : "UNPAIRED"),
                     PipeJsonOptions));
             }
-            catch (Exception exception) when (exception is CryptographicException or IOException or JsonException)
+            catch (Exception exception) when (exception is CryptographicException or IOException or JsonException or UnauthorizedAccessException)
             {
                 logger.LogWarning("SmartPrint local identity status could not be read ({FailureType}).", exception.GetType().Name);
                 await writer.WriteLineAsync(JsonSerializer.Serialize(

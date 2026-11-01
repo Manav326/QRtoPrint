@@ -145,7 +145,7 @@ public sealed class AgentControlPipeIntegrationTests
         await using var writer = new StreamWriter(pipe, new UTF8Encoding(false), 1024, leaveOpen: true)
         {
             AutoFlush = true,
-            NewLine = "\\n"
+            NewLine = "\n"
         };
 
         var request = JsonSerializer.Serialize(
