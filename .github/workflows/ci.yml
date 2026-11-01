@@ -37,6 +37,19 @@ jobs:
         run: pnpm --filter @qrtoprint/desktop build
       - name: Validate portal Nginx proxy configuration
         run: docker run --rm --add-host api:127.0.0.1 -v "$GITHUB_WORKSPACE/apps/portal/nginx.conf:/etc/nginx/conf.d/default.conf:ro" nginx:alpine nginx -t
+      - name: Validate production Compose configuration
+        env:
+          PUBLIC_BASE_URL: https://example.invalid
+        run: docker compose --env-file .env.example -f compose.yml config --quiet
+      - name: Validate local development Compose configuration
+        env:
+          POSTGRES_DB: qrtoprint
+          POSTGRES_USER: qrtoprint
+          POSTGRES_PASSWORD: local-ci-validation-only
+          AUTH_SIGNING_KEY: YWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFh
+          DOCUMENTS_ENCRYPTION_KEY: YWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWE=
+          PUBLIC_BASE_URL: https://example.invalid
+        run: docker compose -f compose.local.yml config --quiet
 
   api_dotnet:
     runs-on: windows-latest
