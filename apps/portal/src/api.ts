@@ -898,7 +898,7 @@ export interface ShopPrintJob {
 }
 
 export interface UploadedPrintJob {
-  job: { id: string; jobNumber: string; status: string; pageCount: number; copies: number; currency: string; quotedAmountMinor: number; createdUtc: string; batchGroupName?: string | null };
+  job: { id: string; jobNumber: string; status: string; pageCount: number; copies: number; currency: string; quotedAmountMinor: number; createdUtc: string; batchGroupName?: string | null; batchId?: string | null };
   document: { id: string; originalFileName: string; mediaType: string; sizeBytes: number; sha256: string; pageSizesJson: string };
   duplicateRequest: boolean;
 }
@@ -996,11 +996,6 @@ async function uploadCustomerLocalTicketViaCloud(
   grantToken: string,
   batchId?: string
 ): Promise<UploadedPrintJob> {
-  if (batchId && ticket.batchId && ticket.batchId !== batchId) {
-    throw new LocalUploadOutcomeUnknownError(
-      "This file is still attached to its original batch. Restore that batch to continue; SmartPrint will not create a second print request."
-    );
-  }
   const form = new FormData();
   form.append("file", file, file.name);
   return apiRequest<UploadedPrintJob>(
@@ -1129,24 +1124,11 @@ export async function uploadCustomerDocumentLocally(
     throw exception;
   }
 
-  if (batchId && ticket.batchId && ticket.batchId !== batchId) {
-    throw new LocalUploadOutcomeUnknownError(
-      "This upload ticket belongs to the original batch. Restore that batch and retry the same file; do not upload it in a new batch."
-    );
-  }
-
-  if (ticket.agentDeviceId !== localAgent.agentDeviceId) {
-    // Keep the idempotency key and grant: refreshing the station may expose the
-    // endpoint for the Agent already assigned to this original ticket.
-    throw new LocalUploadOutcomeUnknownError(
-      "The shop computer assignment changed after the upload ticket was created. Refresh this QR session and retry the same file in the same batch; the original ticket is retained."
-    );
-  }
-
   const form = new FormData();
   form.append("file", file, file.name);
   let lastError: Error | null = null;
-  for (const value of localAgent.endpoints.slice(0, 8)) {
+  if (ticket.agentDeviceId === localAgent.agentDeviceId) {
+    for (const value of localAgent.endpoints.slice(0, 8)) {
     const endpoint = isPrivateLocalAgentEndpoint(value);
     if (!endpoint) continue;
     const controller = new AbortController();
@@ -1176,7 +1158,11 @@ export async function uploadCustomerDocumentLocally(
 
       sessionStorage.removeItem(keys.idempotency);
       sessionStorage.removeItem(keys.grant);
-      return payload as UploadedPrintJob;
+      const uploaded = payload as UploadedPrintJob;
+      return {
+        ...uploaded,
+        job: { ...uploaded.job, batchId: ticket.batchId ?? uploaded.job.batchId ?? null }
+      };
     } catch (exception) {
       lastError = exception instanceof Error
         ? exception
@@ -1184,6 +1170,9 @@ export async function uploadCustomerDocumentLocally(
     } finally {
       window.clearTimeout(timeout);
     }
+    }
+  } else {
+    lastError = new Error("The local ticket is assigned to a different shop computer; continuing over HTTPS.");
   }
 
   // A LAN response can be lost after the Agent has safely staged the bytes.
@@ -1195,7 +1184,10 @@ export async function uploadCustomerDocumentLocally(
       );
       sessionStorage.removeItem(keys.idempotency);
       sessionStorage.removeItem(keys.grant);
-      return recovered;
+      return {
+        ...recovered,
+        job: { ...recovered.job, batchId: ticket.batchId ?? recovered.job.batchId ?? null }
+      };
     } catch (recoveryError) {
       const detail = recoveryError instanceof ApiError
         ? " HTTPS continuation could not be confirmed ("+recoveryError.message+")."

@@ -3371,7 +3371,7 @@ function CustomerPrintFlow({publicCode,sessionToken,paymentOptions,localAgent,lo
       setError(nativeAppMode ? "Check shop Wi-Fi." : "Check shop Wi-Fi access above before starting a direct local upload.");
       return;
     }
-    const currentBatchId=batchId||crypto.randomUUID();
+    let currentBatchId=batchId||crypto.randomUUID();
     setBatchId(currentBatchId);
     const completedFingerprints=new Set(uploadedFileFingerprints);
     const results=[...uploadedBatch];
@@ -3389,6 +3389,13 @@ function CustomerPrintFlow({publicCode,sessionToken,paymentOptions,localAgent,lo
         const created=uploadMode==="LOCAL"&&localAgent
           ? await uploadCustomerDocumentLocally(sessionToken,candidate,localAgent,currentBatchId,batchGroupName,cloudAssistedPrintingEnabled)
           : await uploadCustomerDocument(sessionToken,candidate,currentBatchId,batchGroupName);
+        if(created.job.batchId&&created.job.batchId!==currentBatchId) {
+          if(results.length>0) {
+            throw new ApiError("This file belongs to an earlier batch. Refresh the original print request before adding more files; SmartPrint will not mix two batches.",409);
+          }
+          currentBatchId=created.job.batchId;
+          setBatchId(currentBatchId);
+        }
         if(!results.some(item=>item.job.id===created.job.id))results.push(created);
         savedSettings[created.job.id]=settings;
         completedFingerprints.add(fingerprint);

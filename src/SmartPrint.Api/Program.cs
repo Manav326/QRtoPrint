@@ -6117,7 +6117,8 @@ publicApi.MapPost("/sessions/current/local-upload-tickets/{ticketId:guid}/cloud-
                 preflightJob.Id, preflightJob.JobNumber, preflightJob.Status,
                 preflightJob.PageCount, preflightJob.Copies, preflightJob.Currency,
                 preflightJob.QuotedAmountMinor, preflightJob.CreatedUtc,
-                preflightJob.BatchGroupName
+                preflightJob.BatchGroupName,
+                preflightJob.BatchId
             },
             Document = new
             {
@@ -6230,7 +6231,8 @@ publicApi.MapPost("/sessions/current/local-upload-tickets/{ticketId:guid}/cloud-
                     existingJob.Id, existingJob.JobNumber, existingJob.Status,
                     existingJob.PageCount, existingJob.Copies, existingJob.Currency,
                     existingJob.QuotedAmountMinor, existingJob.CreatedUtc,
-                    existingJob.BatchGroupName
+                    existingJob.BatchGroupName,
+                    existingJob.BatchId
                 },
                 Document = new
                 {
@@ -6370,7 +6372,7 @@ publicApi.MapPost("/sessions/current/local-upload-tickets/{ticketId:guid}/cloud-
             Job = new
             {
                 job.Id, job.JobNumber, job.Status, job.PageCount, job.Copies,
-                job.Currency, job.QuotedAmountMinor, job.CreatedUtc, job.BatchGroupName
+                job.Currency, job.QuotedAmountMinor, job.CreatedUtc, job.BatchGroupName, job.BatchId
             },
             Document = new
             {
