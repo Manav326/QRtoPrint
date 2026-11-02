@@ -6045,6 +6045,7 @@ publicApi.MapPost("/sessions/current/local-upload-tickets", async (
     {
         ticket.Id,
         ticket.PrintJobId,
+        ticket.BatchId,
         ticket.BatchGroupName,
         ticket.JobNumber,
         ticket.AgentDeviceId,
