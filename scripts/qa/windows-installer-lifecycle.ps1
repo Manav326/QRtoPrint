@@ -13,6 +13,9 @@ $brokenProject = Join-Path $env:RUNNER_TEMP "SmartPrintBrokenAgent"
 $programDataRoot = Join-Path $env:ProgramData "QRtoPrint"
 $identityPath = Join-Path $programDataRoot "agent.identity"
 $queueManifest = Join-Path $programDataRoot "LocalQueue\11111111111141118111111111111111.json"
+$networkPreferencePath = Join-Path $programDataRoot "local-network.preference"
+$expectedIdentityId = "22222222-2222-4222-8222-222222222222"
+$expectedNetworkId = "LIFECYCLE-QA-SHOP-NETWORK"
 $results = [System.Collections.Generic.List[object]]::new()
 $identityHash = $null
 $originalDefaultPrinter = $null
@@ -100,12 +103,32 @@ function Get-ServiceBinaryPath {
     return $service.PathName.Trim().Trim('"')
 }
 
+function Wait-LocalApiReady([int]$TimeoutSeconds = 45) {
+    $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
+    $uri = "http://127.0.0.1:17842/api/v1/local/status"
+    do {
+        try {
+            $status = Invoke-RestMethod -Uri $uri -Method Get -TimeoutSec 3
+            if ($status.status -eq "LOCAL_ENDPOINT_READY" -and
+                $status.agentDeviceId -eq $expectedIdentityId) {
+                return
+            }
+        }
+        catch {
+            # The Windows service can report Running before the LAN listener finishes starting.
+        }
+        Start-Sleep -Seconds 1
+    } while ((Get-Date) -lt $deadline)
+    throw "The Agent service is running, but its local print API did not become ready with the preserved shop identity."
+}
+
 function Assert-ServiceVersion([string]$ExpectedVersion) {
     Wait-Service "Running"
     $path = Get-ServiceBinaryPath
     Assert-True (-not [string]::IsNullOrWhiteSpace($path)) "Windows service registration is missing."
     Assert-True ($path -match [regex]::Escape("\agent\$ExpectedVersion-")) "Service points to the wrong Agent payload: $path"
     Assert-True (Test-Path -LiteralPath $path -PathType Leaf) "The Agent executable configured in the Windows service does not exist: $path"
+    Wait-LocalApiReady
 }
 
 function Invoke-Fixture([string]$Mode) {
@@ -117,6 +140,7 @@ function Assert-PreservedFixtures {
     Assert-True (Test-Path -LiteralPath $identityPath -PathType Leaf) "The machine Agent identity was removed."
     $currentHash = (Get-FileHash -LiteralPath $identityPath -Algorithm SHA256).Hash
     Assert-True ($currentHash -eq $identityHash) "The machine Agent identity changed during install/uninstall."
+    Assert-True (Test-Path -LiteralPath $networkPreferencePath -PathType Leaf) "The shop's saved local-network selection was removed."
     Invoke-Fixture "verify"
     Assert-True (Test-Path -LiteralPath $queueManifest -PathType Leaf) "The protected local print queue manifest was removed."
 }
@@ -200,6 +224,7 @@ try {
     $existingRules = @(Get-NetFirewallRule -ErrorAction SilentlyContinue | Where-Object { $_.DisplayName -like "$firewallPrefix*" })
     Assert-True ($existingRules.Count -eq 0) "Refusing to alter existing SmartPrint firewall rules."
     Assert-True (-not (Test-Path -LiteralPath $identityPath)) "Refusing to overwrite an existing machine Agent identity fixture."
+    Assert-True (-not (Test-Path -LiteralPath $networkPreferencePath)) "Refusing to overwrite an existing shop network preference."
     Assert-True (-not (Test-Path -LiteralPath $queueManifest)) "Refusing to overwrite an existing local print queue fixture."
 
     New-Item -ItemType Directory -Force -Path $fixtureProject | Out-Null
@@ -226,11 +251,13 @@ using Microsoft.Extensions.Logging.Abstractions;
 using SmartPrint.Agent;
 
 const string expectedIdentityId = "22222222-2222-4222-8222-222222222222";
+const string expectedNetworkId = "LIFECYCLE-QA-SHOP-NETWORK";
 const string expectedJobId = "11111111-1111-4111-8111-111111111111";
 const string expectedDocument = "SmartPrint lifecycle queue fixture - preserve me.";
 var mode = args.FirstOrDefault() ?? "verify";
 var credentialStore = new AgentCredentialStore();
 var queueStore = new AgentLocalQueueStore();
+var networkPreferenceStore = new LocalNetworkPreferenceStore();
 
 if (mode == "seed")
 {
@@ -239,6 +266,7 @@ if (mode == "seed")
         Guid.Parse(expectedIdentityId),
         "lifecycle-only-invalid-secret",
         DateTimeOffset.UtcNow));
+    networkPreferenceStore.SetPreferredNetworkId(expectedNetworkId);
     await queueStore.InitializeAsync(CancellationToken.None);
     var bytes = Encoding.UTF8.GetBytes(expectedDocument);
     var job = new AgentClaimedJob(
@@ -271,6 +299,8 @@ else if (mode == "verify")
         throw new InvalidOperationException("The synthetic machine identity was replaced.");
     if (credentials.ApiBaseUrl != "https://127.0.0.1:1")
         throw new InvalidOperationException("The synthetic Agent API address changed.");
+    if (networkPreferenceStore.GetPreferredNetworkId() != expectedNetworkId)
+        throw new InvalidOperationException("The shop's saved local-network selection changed or was removed.");
 
     var entry = queueStore.Find(Guid.Parse(expectedJobId))
         ?? throw new InvalidOperationException("The staged local queue manifest is missing.");
