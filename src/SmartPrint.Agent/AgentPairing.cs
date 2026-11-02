@@ -46,6 +46,29 @@ public static class AgentPairing
         Console.WriteLine("Do not copy or share the secret. Start the QRtoPrint Smart Print Agent service next.");
     }
 
+    public static Uri ValidateApiBaseUrl(string apiBaseUrl)
+    {
+        if (!Uri.TryCreate(apiBaseUrl?.Trim(), UriKind.Absolute, out var apiUri) ||
+            apiUri.Scheme is not ("https" or "http") ||
+            apiUri.AbsolutePath != "/" ||
+            !string.IsNullOrEmpty(apiUri.Query) ||
+            !string.IsNullOrEmpty(apiUri.Fragment) ||
+            !string.IsNullOrEmpty(apiUri.UserInfo))
+        {
+            throw new InvalidOperationException("The configured SmartPrint API address must be a canonical HTTPS origin.");
+        }
+
+        // Clear-text HTTP is acceptable only for an explicitly local development
+        // API. Never send a one-time enrollment code or Agent secret over a shop
+        // Wi-Fi or other non-loopback HTTP connection.
+        if (apiUri.Scheme == Uri.UriSchemeHttp && !apiUri.IsLoopback)
+        {
+            throw new InvalidOperationException("The SmartPrint API must use HTTPS. HTTP is allowed only for localhost development.");
+        }
+
+        return new Uri(apiUri.GetLeftPart(UriPartial.Authority) + "/", UriKind.Absolute);
+    }
+
     public static async Task<AgentCredentials> EnrollAsync(
         string apiBaseUrl,
         string enrollmentCode,
@@ -55,13 +78,7 @@ public static class AgentPairing
         if (!OperatingSystem.IsWindows())
             throw new PlatformNotSupportedException("The Smart Print Agent can only be paired on Windows.");
 
-        if (!Uri.TryCreate(apiBaseUrl, UriKind.Absolute, out var apiUri) ||
-            apiUri.Scheme is not ("https" or "http") ||
-            apiUri.AbsolutePath != "/" ||
-            !string.IsNullOrEmpty(apiUri.Query) ||
-            !string.IsNullOrEmpty(apiUri.Fragment) ||
-            !string.IsNullOrEmpty(apiUri.UserInfo))
-            throw new InvalidOperationException("The configured SmartPrint API address must be a canonical HTTP or HTTPS origin.");
+        var apiUri = ValidateApiBaseUrl(apiBaseUrl);
 
         if (enrollmentCode.Length != 32 ||
             !enrollmentCode.All(value => value is >= 'a' and <= 'z' or >= 'A' and <= 'Z' or >= '0' and <= '9' or '-' or '_'))
@@ -147,10 +164,14 @@ public static class AgentPairing
             return 2;
         }
 
-        if (!Uri.TryCreate(credentials.ApiBaseUrl, UriKind.Absolute, out var apiUri) ||
-            apiUri.Scheme is not ("https" or "http"))
+        Uri apiUri;
+        try
         {
-            Console.Error.WriteLine("The saved SmartPrint API address is invalid.");
+            apiUri = ValidateApiBaseUrl(credentials.ApiBaseUrl);
+        }
+        catch (InvalidOperationException exception)
+        {
+            Console.Error.WriteLine($"The saved SmartPrint API address is not secure: {exception.Message}");
             return 2;
         }
 
