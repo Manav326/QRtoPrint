@@ -209,6 +209,7 @@ public sealed class PostgresMigrationUpgradeTests
             options, tenant.Id, agent.Id, station.Id, session.Id, printer.Id, now);
         await VerifyConcurrentBatchAssignmentsRemainAtomicAsync(
             options, tenant.Id, station.Id, session.Id, printer.Id, now);
+        await VerifyAgentReferencesCannotCrossTenantAsync(options, now);
     }
 
     private static async Task VerifyConcurrentLocalBatchReservationsStayOnOneComputerAsync(
@@ -531,4 +532,110 @@ public sealed class PostgresMigrationUpgradeTests
         Assert.Equal("Quota test Agent", unchangedHistory.PrinterAgentNameSnapshot);
         Assert.Equal(historicalJob.PrinterSnapshotUtc, unchangedHistory.PrinterSnapshotUtc);
     }
+
+    private static async Task VerifyAgentReferencesCannotCrossTenantAsync(
+        DbContextOptions<SmartPrintDbContext> options,
+        DateTimeOffset now)
+    {
+        var tenantA = new Tenant
+        {
+            Slug = $"agent-isolation-a-{Guid.NewGuid():N}",
+            BusinessName = "Agent isolation shop A"
+        };
+        var tenantB = new Tenant
+        {
+            Slug = $"agent-isolation-b-{Guid.NewGuid():N}",
+            BusinessName = "Agent isolation shop B"
+        };
+        var agentA = CreateIsolationAgent(tenantA.Id, "Agent A");
+        var agentB = CreateIsolationAgent(tenantB.Id, "Agent B");
+        var printerA = new PrinterDevice
+        {
+            TenantId = tenantA.Id,
+            AgentDeviceId = agentA.Id,
+            DisplayName = "Shop A printer",
+            Manufacturer = "Test",
+            Model = "Isolation printer",
+            QueueName = "ISOLATION-A",
+            Status = "Ready",
+            LastSeenUtc = now
+        };
+        var stationA = new QrStation
+        {
+            TenantId = tenantA.Id,
+            PrinterDeviceId = printerA.Id,
+            DisplayName = "Shop A station",
+            PublicCodeHash = HashForIsolationTest("station-a"),
+            PublicCodeHint = "SA"
+        };
+        var sessionA = new CustomerPrintSession
+        {
+            TenantId = tenantA.Id,
+            QrStationId = stationA.Id,
+            TokenHash = HashForIsolationTest("session-a"),
+            ExpiresUtc = now.AddMinutes(15)
+        };
+
+        await using (var seed = new SmartPrintDbContext(options))
+        {
+            seed.AddRange(tenantA, tenantB, agentA, agentB, printerA, stationA, sessionA);
+            await seed.SaveChangesAsync();
+        }
+
+        await using (var wrongPrinterContext = new SmartPrintDbContext(options))
+        {
+            wrongPrinterContext.PrinterDevices.Add(new PrinterDevice
+            {
+                TenantId = tenantA.Id,
+                AgentDeviceId = agentB.Id,
+                DisplayName = "Cross-tenant printer",
+                Manufacturer = "Test",
+                Model = "Invalid",
+                QueueName = "CROSS-TENANT-QUEUE"
+            });
+
+            await Assert.ThrowsAsync<DbUpdateException>(
+                () => wrongPrinterContext.SaveChangesAsync());
+        }
+
+        await using (var wrongClaimContext = new SmartPrintDbContext(options))
+        {
+            wrongClaimContext.PrintJobs.Add(new PrintJob
+            {
+                TenantId = tenantA.Id,
+                QrStationId = stationA.Id,
+                CustomerSessionId = sessionA.Id,
+                ClaimedByAgentDeviceId = agentB.Id,
+                PrinterDeviceId = printerA.Id,
+                JobNumber = $"SP-CROSS-{Guid.NewGuid():N}"[..20],
+                IdempotencyKey = $"CROSS-TENANT-{Guid.NewGuid():N}",
+                Status = "LOCAL_QUEUE_CLAIMED",
+                PageCount = 1,
+                Copies = 1,
+                Currency = "INR",
+                QuotedAmountMinor = 100,
+                CreatedUtc = now,
+                UpdatedUtc = now
+            });
+
+            await Assert.ThrowsAsync<DbUpdateException>(
+                () => wrongClaimContext.SaveChangesAsync());
+        }
+    }
+
+    private static AgentDevice CreateIsolationAgent(Guid tenantId, string name) => new()
+    {
+        TenantId = tenantId,
+        DeviceName = name,
+        FingerprintHash = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(
+            System.Text.Encoding.UTF8.GetBytes($"{name}-{Guid.NewGuid():N}"))).ToLowerInvariant(),
+        SecretHash = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(
+            System.Text.Encoding.UTF8.GetBytes($"{name}-secret-{Guid.NewGuid():N}"))).ToLowerInvariant(),
+        Status = "Online"
+    };
+
+    private static string HashForIsolationTest(string value) =>
+        Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(
+            System.Text.Encoding.UTF8.GetBytes($"{value}-{Guid.NewGuid():N}"))).ToLowerInvariant();
+
 }
