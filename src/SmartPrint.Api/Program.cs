@@ -3714,7 +3714,7 @@ agentApi.MapGet("/jobs/{jobId:guid}/document", async (
         await DataTransferRecorder.TryRecordAsync(db, app.Logger, new DataTransferEvent
         {
             TransferId = transferId,
-            AttemptNumber = attemptNumber,
+            AttemptNumber = attemptNumber.Value,
             TenantId = device.TenantId,
             AgentDeviceId = device.Id,
             PrinterDeviceId = document.PrinterDeviceId,
