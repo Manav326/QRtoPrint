@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { canFallbackToCloudFromLocalFailure, resolveCustomerUploadMode } from "../src/local-upload-routing.ts";
+import { canFallbackToCloudFromLocalFailure, isUncompletedLocalUploadTicketExpired, resolveCustomerUploadMode } from "../src/local-upload-routing.ts";
 
 describe("customer upload route selection", () => {
   it("prefers direct Shop Wi-Fi when the paired Agent is available, even when cloud is included", () => {
@@ -40,5 +40,35 @@ describe("local upload fallback safety", () => {
 
   it("does not offer cloud fallback when the shop plan excludes it", () => {
     assert.equal(canFallbackToCloudFromLocalFailure(true, false), false);
+  });
+});
+
+
+describe("local upload ticket lease expiry", () => {
+  const now = Date.parse("2026-11-02T13:00:00.000Z");
+
+  it("allows a fresh uncompleted ticket to keep using its original retry identity", () => {
+    assert.equal(
+      isUncompletedLocalUploadTicketExpired(false, "2026-11-02T13:15:00.000Z", now),
+      false
+    );
+  });
+
+  it("treats an expired uncompleted ticket as safe to replace", () => {
+    assert.equal(
+      isUncompletedLocalUploadTicketExpired(false, "2026-11-02T12:59:59.000Z", now),
+      true
+    );
+  });
+
+  it("never replaces a ticket that completed, even after the LAN lease expired", () => {
+    assert.equal(
+      isUncompletedLocalUploadTicketExpired(true, "2026-11-02T12:59:59.000Z", now),
+      false
+    );
+  });
+
+  it("does not infer expiry from a malformed timestamp", () => {
+    assert.equal(isUncompletedLocalUploadTicketExpired(false, "invalid", now), false);
   });
 });

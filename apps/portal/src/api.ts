@@ -1,3 +1,4 @@
+import { isUncompletedLocalUploadTicketExpired } from "./local-upload-routing";
 import { getLocalAgentStatus, isDesktopApp, writeDesktopSession } from "./desktop-bridge";
 import { authStorageKey } from "./portal-routing";
 export interface AuthTokens {
@@ -1132,8 +1133,7 @@ export async function uploadCustomerDocumentLocally(
     throw exception;
   }
 
-  const ticketExpiresAt = Date.parse(ticket.expiresUtc);
-  if (!ticket.completed && Number.isFinite(ticketExpiresAt) && ticketExpiresAt <= Date.now()) {
+  if (isUncompletedLocalUploadTicketExpired(ticket.completed, ticket.expiresUtc)) {
     // The 15-minute LAN lease has expired and the server confirms no upload was
     // finalized. Release only this dead attempt so the customer can start fresh.
     clearCustomerLocalUploadAttempt(sessionToken, file);

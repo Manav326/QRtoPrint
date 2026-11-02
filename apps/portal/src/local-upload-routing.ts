@@ -29,3 +29,15 @@ export function canFallbackToCloudFromLocalFailure(
   return confirmedPreTicketRejection && cloudAssistedPrintingEnabled;
 }
 
+
+
+/** An expired LAN lease can be replaced only when the ticket never completed. */
+export function isUncompletedLocalUploadTicketExpired(
+  completed: boolean,
+  expiresUtc: string,
+  nowEpochMs = Date.now()
+): boolean {
+  if (completed) return false;
+  const expiresAt = Date.parse(expiresUtc);
+  return Number.isFinite(expiresAt) && expiresAt <= nowEpochMs;
+}
