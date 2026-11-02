@@ -59,7 +59,7 @@ public sealed class DataTransferRetentionWorker(
             .Where(item => item.Status == "STARTED" && item.CreatedUtc < staleAttemptCutoffUtc)
             .ExecuteUpdateAsync(update => update
                 .SetProperty(item => item.Status, "FAILED")
-                .SetProperty(item => item.MeasurementSource, "AGENT_UPLOAD_ATTEMPT_TIMED_OUT"), cancellationToken);
+                .SetProperty(item => item.MeasurementSource, "TRANSFER_ATTEMPT_TIMED_OUT"), cancellationToken);
 
         var cutoffUtc = now.AddDays(-retentionDays);
         long aggregateUpserts = 0;
