@@ -27,6 +27,14 @@ import org.junit.Assert.assertTrue
 
 @RunWith(AndroidJUnit4::class)
 class MainActivityInstrumentedTest {
+    private fun openFilesTab() {
+        // Click the actual BottomNavigationItemView, not its non-clickable label child.
+        // The explicit screen assertion prevents a later "New folder" failure from
+        // hiding a navigation-selection failure.
+        onView(withId(2)).perform(click())
+        onView(withText("New folder")).check(matches(isDisplayed()))
+    }
+
     @Test
     fun appearanceDefaultsToLightAndPersistsAcrossSignOutAndActivityRestart() {
         val context = ApplicationProvider.getApplicationContext<Context>()
@@ -296,7 +304,7 @@ class MainActivityInstrumentedTest {
     fun foldersCanOpenAndExpandInline() {
         val folderName = "CI School " + System.currentTimeMillis()
         ActivityScenario.launch(MainActivity::class.java).use {
-            onView(withContentDescription("My Files")).perform(click())
+            openFilesTab()
             onView(withText("New folder")).perform(click())
             onView(withHint("Name")).perform(replaceText(folderName), closeSoftKeyboard())
             onView(withText("Save")).perform(click())
@@ -321,8 +329,7 @@ class MainActivityInstrumentedTest {
     fun systemBackFromNestedFolderReturnsToItsParent() {
         val folderName = "CI Back Folder " + System.currentTimeMillis()
         ActivityScenario.launch(MainActivity::class.java).use {
-            val label = com.google.android.material.R.id.navigation_bar_item_small_label_view
-            onView(allOf(withId(label), withText("Files"))).perform(click())
+            openFilesTab()
             onView(withText("New folder")).perform(click())
             onView(withHint("Name")).perform(replaceText(folderName), closeSoftKeyboard())
             onView(withText("Save")).perform(click())
