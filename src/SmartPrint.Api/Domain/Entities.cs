@@ -253,7 +253,8 @@ public sealed class PrintJob
     public DateTimeOffset? AgentClaimedUtc { get; set; }
     public DateTimeOffset? LocalQueueReceivedUtc { get; set; }
     public int AgentDispatchAttempts { get; set; }
-    public DateTimeOffset? PrintDispatchLeaseExpiresUtc { get; set; }
+    public int AgentDocumentDownloadAttempts { get; set; }
+    public DateTimeOffset? PrintDispatchLeaseExpiresUtc { get; set;}
     public int PrintDispatchAttempts { get; set; }
     public int? SpoolerJobId { get; set; }
     public string? SpoolerJobName { get; set; }
@@ -314,6 +315,7 @@ public sealed class LocalPrintUploadTicket
     public DateTimeOffset? ClaimedUtc { get; set; }
     public DateTimeOffset? ClaimLeaseExpiresUtc { get; set; }
     public DateTimeOffset? CompletedUtc { get; set; }
+    public int AgentUploadAttempts { get; set; }
 }
 
 
