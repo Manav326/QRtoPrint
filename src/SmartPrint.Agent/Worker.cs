@@ -324,6 +324,8 @@ public sealed class Worker(
         }
 
         runtimeReadiness.SetPrintWorkerRunning(true);
+        try
+        {
         var lastRetentionSweepUtc = DateTimeOffset.MinValue;
         while (!cancellationToken.IsCancellationRequested)
         {
@@ -413,8 +415,12 @@ public sealed class Worker(
 
             runtimeReadiness.MarkPrintWorkCycle();
             await localNetworkManager.WaitForSelectionChangeOrDelayAsync(pollInterval, cancellationToken);
+            }
         }
-        runtimeReadiness.SetPrintWorkerRunning(false);
+        finally
+        {
+            runtimeReadiness.SetPrintWorkerRunning(false);
+        }
     }
 
     private async Task ProcessLocalQueueHandoffAsync(

@@ -20,7 +20,7 @@ export interface DesktopAgentStatus {
   agentDeviceId: string | null;
   status: string;
   apiBaseUrl: string | null;
-  readiness: DesktopAgentReadiness | null;
+  readiness?: DesktopAgentReadiness | null;
 }
 
 export interface DesktopLocalNetworkAdapter {
