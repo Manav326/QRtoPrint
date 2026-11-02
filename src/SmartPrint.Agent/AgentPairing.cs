@@ -139,7 +139,7 @@ public static class AgentPairing
         return credentials;
     }
 
-    public static async Task<int> CheckExistingAsync()
+    public static async Task<int> CheckExistingAsync(string? configuredApiBaseUrl = null)
     {
         if (!OperatingSystem.IsWindows())
         {
@@ -150,9 +150,9 @@ public static class AgentPairing
         AgentCredentials? credentials;
         try
         {
-            credentials = new AgentCredentialStore().Load();
+            credentials = new AgentCredentialStore().LoadForCloudRequests(configuredApiBaseUrl);
         }
-        catch (Exception exception) when (exception is CryptographicException or IOException or JsonException)
+        catch (Exception exception) when (exception is CryptographicException or IOException or JsonException or UnauthorizedAccessException or InvalidOperationException)
         {
             Console.Error.WriteLine($"The saved SmartPrint pairing could not be read: {exception.Message}");
             return 2;
