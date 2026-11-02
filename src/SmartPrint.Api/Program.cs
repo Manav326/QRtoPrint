@@ -5985,11 +5985,15 @@ publicApi.MapPost("/sessions/current/local-upload-tickets", async (
     // The tenant quota transaction lock above serialises ticket reservations,
     // including the first file in an empty batch where no child row exists yet.
     // Local-only document bytes cannot move to a different Windows computer.
+    // A ticket may be recovered over HTTPS for 24 hours after its 15-minute
+    // LAN claim lease expires. Keep its original Agent identity reserved for the
+    // entire recovery window so a batch cannot silently span two shop computers.
+    var localUploadRecoveryCutoff = now.AddHours(-24);
     var existingLocalTicketAgents = await db.LocalPrintUploadTickets.AsNoTracking()
         .Where(item => item.TenantId == session.TenantId &&
                        item.CustomerSessionId == session.Id &&
                        item.BatchId == batchId &&
-                       (item.CompletedUtc != null || item.ExpiresUtc > now))
+                       (item.CompletedUtc != null || item.CreatedUtc >= localUploadRecoveryCutoff))
         .Select(item => (Guid?)item.AgentDeviceId)
         .ToListAsync(ct);
     var existingLocalDocumentAgents = await (
@@ -6028,7 +6032,7 @@ publicApi.MapPost("/sessions/current/local-upload-tickets", async (
                        item.CustomerSessionId == session.Id &&
                        item.BatchId == batchId &&
                        item.CompletedUtc == null &&
-                       item.ExpiresUtc > now)
+                       item.CreatedUtc >= localUploadRecoveryCutoff)
         .Select(item => item.SizeBytes).ToListAsync(ct);
     if (!PrintBatchCapacityRules.CanAdd(
         batchJobSizes.Count + pendingBatchTicketSizes.Count,
