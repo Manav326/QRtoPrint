@@ -49,11 +49,7 @@ public sealed class WindowsPrinterDiscovery(ILogger<WindowsPrinterDiscovery> log
                 }
             }
 
-            discovered = printers
-                .GroupBy(printer => printer.QueueName, StringComparer.OrdinalIgnoreCase)
-                .Select(group => group.First())
-                .OrderBy(printer => printer.QueueName, StringComparer.OrdinalIgnoreCase)
-                .ToArray();
+            discovered = NormalizeDiscoveredQueues(printers);
             return true;
         }
         catch (ManagementException exception)
@@ -84,6 +80,16 @@ public sealed class WindowsPrinterDiscovery(ILogger<WindowsPrinterDiscovery> log
         catch (FormatException) { return 0; }
         catch (InvalidCastException) { return 0; }
     }
+
+    public static IReadOnlyList<DiscoveredPrinter> NormalizeDiscoveredQueues(IEnumerable<DiscoveredPrinter> printers) =>
+        printers
+            .Where(printer => !string.IsNullOrWhiteSpace(printer.QueueName))
+            // Different Windows queues can share a port but still have different drivers or settings.
+            // Keep them separate; collapse only duplicate queue names.
+            .GroupBy(printer => printer.QueueName.Trim(), StringComparer.OrdinalIgnoreCase)
+            .Select(group => group.First())
+            .OrderBy(printer => printer.QueueName, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
 
     public static string ResolvePublishedStatus(string? outputMode, int printerStatus, bool offline) =>
         string.Equals(outputMode, PrinterOutputModeRules.PdfExport, StringComparison.OrdinalIgnoreCase)

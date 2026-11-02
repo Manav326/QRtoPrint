@@ -878,8 +878,8 @@ function ShopConsole({ tokens, onSignOut, dark, onToggleTheme }: { tokens: AuthT
     setBusyJobId(job.id);
     setError("");
     try {
-      await assignShopPrintJobPrinter(tokens.accessToken, job.id, printerDeviceId);
-      setToast("Printer assigned. The paired agent can now transfer this paid job into its protected local queue.");
+      const assignment=await assignShopPrintJobPrinter(tokens.accessToken, job.id, printerDeviceId);
+      setToast(`${assignment.printerName} assigned to ${assignment.assignedJobCount} file(s) in this batch. The paired computer can now receive the documents.`);
       await reload();
     } catch (exception) {
       setError(exception instanceof Error ? exception.message : "Could not assign this printer.");
@@ -1637,9 +1637,28 @@ function Overview({ profile, printers, stations, printJobs, pricing, agentDevice
 function PrintersPage({ printers, busyResourceId, onAdd, onToggle }: { printers: PrinterDevice[]; busyResourceId:string|null; onAdd:()=>void; onToggle:(printer:PrinterDevice)=>void }) {
   return (
     <section className="panel collection-panel">
-      <div className="collection-header"><div><h2>Your printers</h2><p>Manage physical printers and local PDF export destinations. Disabling a printer blocks new assignments; it does not cancel a Windows spooler job already accepted.</p></div><button className="primary-button" onClick={onAdd}><Plus size={16}/> Add printer</button></div>
+      <div className="collection-header"><div><h2>Your printers</h2><p>Each Windows queue stays separate. SmartPrint will never merge printers automatically, even when two queues share a port.</p></div><button className="primary-button" onClick={onAdd}><Plus size={16}/> Add printer</button></div>
       {printers.length===0 ? <EmptyModule icon={<Printer size={24}/>} title="No printers registered yet" text="Add your first printer. It will appear here as awaiting local-agent discovery until the Windows Print Agent reports its capabilities and live status." actionLabel="Add your first printer" onAction={onAdd}/> :
-      <div className="printer-grid">{printers.map(printer=><article className="printer-card" key={printer.id}><div className="printer-card-top"><div className="printer-card-icon"><Printer size={20}/></div><Status label={printer.status} tone={printer.status.toLowerCase()==="ready"?"green":"slate"}/></div><h3>{printer.outputMode==="PDF_EXPORT"?"PDF export · "+printer.displayName:printer.displayName}</h3><p>{printer.outputMode==="PDF_EXPORT"?"Direct local PDF generation · no Windows Save As dialog":printer.manufacturer+" · "+printer.model}</p><div className="printer-meta"><span>{printer.outputMode==="PDF_EXPORT"?"PDF export destination":printer.connectionType}{printer.isDefault?(printer.outputMode==="PDF_EXPORT"?" · Default output destination":" · Default Windows queue"):""}</span><span>{printer.queueName || printer.connectionAddress || "Connection not verified"}</span></div><div className="printer-card-footer"><span className={printer.isActive?"enabled-label":"disabled-label"}>{printer.isActive?"Enabled":"Disabled"}</span><button className="subtle-button" disabled={!!busyResourceId} onClick={()=>onToggle(printer)}>{busyResourceId===printer.id?<span className="button-spinner"/>:printer.isActive?"Disable":"Enable"}</button></div></article>)}</div>}
+      <div className="printer-grid">{printers.map(printer=>{
+        const possibleDuplicates=printer.outputMode!=="PDF_EXPORT"&&printer.agentDeviceId&&printer.connectionAddress
+          ?printers.filter(other=>other.id!==printer.id&&other.outputMode!=="PDF_EXPORT"&&other.agentDeviceId===printer.agentDeviceId&&
+            !!other.connectionAddress&&other.connectionAddress.trim().toLowerCase()===printer.connectionAddress!.trim().toLowerCase())
+          :[];
+        return <article className="printer-card" key={printer.id}>
+          <div className="printer-card-top"><div className="printer-card-icon"><Printer size={20}/></div><Status label={printer.status} tone={printer.status.toLowerCase()==="ready"?"green":"slate"}/></div>
+          <h3>{printer.outputMode==="PDF_EXPORT"?"PDF export · "+printer.displayName:printer.displayName}</h3>
+          <p>{printer.outputMode==="PDF_EXPORT"?"Direct local PDF generation · no Windows Save As dialog":printer.manufacturer+" · "+printer.model}</p>
+          <div className="printer-meta">
+            <span>{printer.outputMode==="PDF_EXPORT"?"PDF export destination":printer.connectionType}{printer.isDefault?(printer.outputMode==="PDF_EXPORT"?" · Default output destination":" · Default Windows queue"):""}</span>
+            <span>{printer.queueName || printer.connectionAddress || "Connection not verified"}</span>
+          </div>
+          {possibleDuplicates.length>0&&<div className="printer-duplicate-warning" role="note">
+            <strong>Possible duplicate printer</strong>
+            <span>{possibleDuplicates.map(item=>item.displayName).join(", ")} uses the same Windows port. SmartPrint keeps both queues separate; confirm whether they are alternate queues for one physical printer.</span>
+          </div>}
+          <div className="printer-card-footer"><span className={printer.isActive?"enabled-label":"disabled-label"}>{printer.isActive?"Enabled":"Disabled"}</span><button className="subtle-button" disabled={!!busyResourceId} onClick={()=>onToggle(printer)}>{busyResourceId===printer.id?<span className="button-spinner"/>:printer.isActive?"Disable":"Enable"}</button></div>
+        </article>;
+      })}</div>}
     </section>
   );
 }
@@ -2112,7 +2131,7 @@ function PrintQueuePage({ jobs, printers, agentDevices, searchQuery, loadingBatc
   const queueBatches=Array.from(batchMap.values());
 
   return <section className="panel queue-panel live-queue-panel">
-    <div className="collection-header"><div><h2>Customer print jobs</h2><p>Preview every file separately. Each file can be accepted or rejected without changing the rest of its upload batch. Refunds are available before handoff to the print computer.</p></div><div className="queue-header-actions"><span className="setup-count">{queueBatches.length} batches shown</span><form className="queue-search-form" onSubmit={event=>{event.preventDefault();void onSearch(searchInput);}}><input aria-label="Search all print jobs" type="search" maxLength={120} placeholder="Job, file or printer" value={searchInput} onChange={event=>setSearchInput(event.target.value)}/><button className="secondary-button" type="submit"><Search size={13}/> Search</button></form><button className="secondary-button queue-refresh-button" onClick={()=>void refreshQueue()} disabled={refreshRunning.current}><Activity size={13}/> Refresh queue</button></div></div>
+    <div className="collection-header"><div><h2>Customer print jobs</h2><p>Review every file separately, but assign one printer to the entire batch. Every accepted file in that batch will use that same printer.</p></div><div className="queue-header-actions"><span className="setup-count">{queueBatches.length} batches shown</span><form className="queue-search-form" onSubmit={event=>{event.preventDefault();void onSearch(searchInput);}}><input aria-label="Search all print jobs" type="search" maxLength={120} placeholder="Job, file or printer" value={searchInput} onChange={event=>setSearchInput(event.target.value)}/><button className="secondary-button" type="submit"><Search size={13}/> Search</button></form><button className="secondary-button queue-refresh-button" onClick={()=>void refreshQueue()} disabled={refreshRunning.current}><Activity size={13}/> Refresh queue</button></div></div>
     <div className="queue-refresh-controls">
       <label className="queue-auto-toggle"><input type="checkbox" checked={autoRefresh} onChange={event=>setAutoRefresh(event.target.checked)}/><span className="queue-toggle-track"/><strong>Auto refresh</strong><small>{autoRefresh?"On":"Off"}</small></label>
       <label className="queue-refresh-interval">Refresh every <input type="number" min={5} max={3600} step={1} value={refreshSeconds} onChange={event=>setRefreshSeconds(Math.max(5,Math.min(3600,Number(event.target.value)||5)))}/> seconds</label>
@@ -2131,7 +2150,28 @@ function PrintQueuePage({ jobs, printers, agentDevices, searchQuery, loadingBatc
           const monoPrintedPages=payableJobs.reduce((sum,job)=>sum+(job.colourMode==="Mono"?job.pageCount*job.copies:0),0);
           const colourPrintedPages=payableJobs.reduce((sum,job)=>sum+(job.colourMode==="Colour"?job.pageCount*job.copies:0),0);
           const totalAmount=payableJobs.reduce((sum,job)=>sum+Math.max(0,job.quotedAmountMinor),0);
-          const printersInBatch=Array.from(new Set(batch.jobs.map(job=>job.printerName||"Not assigned")));
+          const activeBatchJobs=batch.jobs.filter(job=>job.status!=="REJECTED"&&job.status!=="REFUNDED");
+          const assignedPrinterIds=Array.from(new Set(activeBatchJobs.map(job=>job.printerDeviceId).filter((id):id is string=>Boolean(id))));
+          const batchHasUnassignedFiles=activeBatchJobs.some(job=>!job.printerDeviceId);
+          const lockedBatchJobs=activeBatchJobs.filter(job=>
+            ["PRINT_AUTHORISED","PRINT_SUBMITTING","SPOOLER_ACCEPTED","PRINTING","OUTPUT_UNCONFIRMED","COMPLETED"].includes(job.status) ||
+            (job.localQueueReceivedUtc!=null && job.status!=="LOCAL_QUEUE_READY") ||
+            (job.status==="LOCAL_QUEUE_CLAIMED"&&!!job.agentLeaseExpiresUtc&&Date.parse(job.agentLeaseExpiresUtc)>Date.now())
+          );
+          const lockedPrinterIds=Array.from(new Set(lockedBatchJobs.map(job=>job.printerDeviceId).filter((id):id is string=>Boolean(id))));
+          const batchPrinterConflict=lockedPrinterIds.length>1;
+          const batchAssignmentIncomplete=assignedPrinterIds.length!==1||batchHasUnassignedFiles;
+          const currentBatchPrinterId=!batchAssignmentIncomplete&&assignedPrinterIds.length===1?assignedPrinterIds[0]:"";
+          const batchPrinter=printers.find(printer=>printer.id===currentBatchPrinterId);
+          const assignmentJob=batch.jobs.find(job=>
+            job.status==="PAID_AUTHORISED" ||
+            (job.status==="LOCAL_QUEUE_CLAIMED"&&!job.localQueueReceivedUtc&&
+              (!job.agentLeaseExpiresUtc||Date.parse(job.agentLeaseExpiresUtc)<=Date.now())) ||
+            (job.status==="LOCAL_QUEUE_READY"&&!!job.localQueueReceivedUtc&&!job.spoolerJobId&&!job.spoolerJobName)
+          );
+          const availableBatchPrinters=lockedPrinterIds.length===1
+            ?dispatchablePrinters.filter(printer=>printer.id===lockedPrinterIds[0])
+            :dispatchablePrinters;
           const expanded=expandedBatchKeys.has(batch.key);
           const allPdfsSaved = batch.jobs.length > 0 && batch.jobs.every(job => !!verifiedPdfExportPath(job));
           const singleSavedPdfPath = batch.jobs.length === 1 ? verifiedPdfExportPath(first) : null;
@@ -2148,9 +2188,19 @@ function PrintQueuePage({ jobs, printers, agentDevices, searchQuery, loadingBatc
                   <strong>PDF saved</strong>
                   <small className="queue-pdf-path">{singleSavedPdfPath}</small>
                 </> : <>
-                  <strong>{printersInBatch.length===1?printersInBatch[0]:"Multiple printers"}</strong>
-                  <small>{waiting.length} awaiting review</small>
+                  <strong>{batchPrinterConflict?"Conflicting printer assignments":batchAssignmentIncomplete?(assignedPrinterIds.length?"Choose one printer for batch":"Not assigned"):batchPrinter?.displayName||activeBatchJobs.find(job=>job.printerDeviceId===currentBatchPrinterId)?.printerName||"Assigned printer"}</strong>
+                  <small>{lockedPrinterIds.length===1?"Locked to the printer already receiving this batch":waiting.length+" file(s) awaiting review"}</small>
                 </>}
+                {assignmentJob&&<select
+                  aria-label="Assign one printer for all files in batch"
+                  value={currentBatchPrinterId}
+                  disabled={!!busyJobId||batchPrinterConflict||availableBatchPrinters.length===0}
+                  onChange={event=>onAssignPrinter(assignmentJob,event.target.value)}>
+                  <option value="">{availableBatchPrinters.length===0?"No available printer":"Choose one printer for this batch"}</option>
+                  {availableBatchPrinters.map(printer=><option key={printer.id} value={printer.id}>{printer.outputMode==="PDF_EXPORT"?"Save PDF · ":""}{printer.displayName} · {printer.status}</option>)}
+                </select>}
+                {assignmentJob&&<small className="queue-batch-assignment-note">One printer applies to every active file in this batch.</small>}
+                {batchPrinterConflict&&<small className="queue-batch-printer-lock">This batch has already started on more than one printer. New output is blocked; review the affected files.</small>}
               </div></td>
               <td><Status label={label} tone={tone}/></td>
               <td className="time-cell">{formatIstDateTime(first.createdUtc)}</td>
@@ -2165,6 +2215,12 @@ function PrintQueuePage({ jobs, printers, agentDevices, searchQuery, loadingBatc
                 <Status label={prettyStatus(job.status)} tone={job.status==="REJECTED"?"red":job.status==="COMPLETED"||job.status==="LOCAL_QUEUE_READY"?"green":job.status==="AWAITING_SHOP_APPROVAL"?"amber":"blue"}/>
                 <strong className="amount-cell">{job.quotedAmountMinor>0?formatMoney(job.quotedAmountMinor,job.currency):"—"}</strong>
               </div>
+              {job.printerName&&<div className="queue-batch-file-printer">
+                <Printer size={13}/>
+                <strong>{job.outputMode==="PDF_EXPORT"?"PDF export":job.outputConfirmedUtc||job.status==="COMPLETED"?"Printed on":job.spoolerJobId?"Sent to":"Assigned printer"}</strong>
+                <span>{job.printerName}</span>
+                {job.queueName&&job.queueName!==job.printerName&&<small>Windows queue: {job.queueName}</small>}
+              </div>}
               {batch.jobs.length > 1 && verifiedPdfExportPath(job) && <div className="queue-batch-file-output">
                 <span>Saved PDF location</span>
                 <code>{verifiedPdfExportPath(job)}</code>
@@ -2175,10 +2231,6 @@ function PrintQueuePage({ jobs, printers, agentDevices, searchQuery, loadingBatc
                 {job.status==="AWAITING_SHOP_APPROVAL"&&<button className="subtle-button approve-action" disabled={busyJobId===job.id} onClick={()=>onApprove(job)}>Accept</button>}
                 {["AWAITING_SHOP_APPROVAL","AWAITING_PAYMENT"].includes(job.status)&&<button className="subtle-button reject-action" disabled={busyJobId===job.id} onClick={()=>onReject(job)}>Reject file</button>}
                 {(job.status==="PAID_AUTHORISED"||job.status==="REJECTED")&&(job.payment?.status==="VERIFIED"||job.payment?.status==="PARTIALLY_REFUNDED")&&!job.localQueueReceivedUtc&&!job.claimedByAgentDeviceId&&<button className="subtle-button reject-action" disabled={busyJobId===job.id} onClick={()=>onRefund(job)}>{job.status==="REJECTED"?"Refund rejected file":"Review pages / refund"}</button>}
-                {(job.status==="PAID_AUTHORISED"||job.status==="LOCAL_QUEUE_CLAIMED")&&<select aria-label={"Assign printer for "+job.jobNumber} value={job.printerDeviceId||""} disabled={busyJobId===job.id||dispatchablePrinters.length===0||!!job.localQueueReceivedUtc||(job.status==="LOCAL_QUEUE_CLAIMED"&&!!job.agentLeaseExpiresUtc&&new Date(job.agentLeaseExpiresUtc).getTime()>Date.now())} onChange={event=>onAssignPrinter(job,event.target.value)}>
-                  <option value="">{dispatchablePrinters.length===0?"No live agent printer":"Select printer"}</option>
-                  {dispatchablePrinters.map(printer=><option key={printer.id} value={printer.id}>{printer.outputMode==="PDF_EXPORT"?"Save PDF · ":""}{printer.displayName} · {printer.status}</option>)}
-                </select>}
                 {job.status==="LOCAL_QUEUE_READY"&&<button className="subtle-button approve-action" disabled={busyJobId===job.id} onClick={()=>onDispatch(job)}>{job.outputMode==="PDF_EXPORT"?"Save PDF":"Start printing"}</button>}
                 {job.status==="OUTPUT_UNCONFIRMED"&&job.outputMode==="PDF_EXPORT"&&<button className="subtle-button approve-action" disabled={busyJobId===job.id} onClick={()=>onRetryPdfExport(job)}>Save PDF again</button>}
                 {(job.status==="SPOOLER_ACCEPTED"||job.status==="PRINTING"||(job.status==="OUTPUT_UNCONFIRMED"&&job.outputMode!=="PDF_EXPORT"))&&<button className="subtle-button approve-action" disabled={busyJobId===job.id||(job.status!=="OUTPUT_UNCONFIRMED"&&!!spoolerStatusWarning(job.spoolerStatus,job.printerStatus))} onClick={()=>onConfirmOutput(job)}>Confirm output</button>}
@@ -3275,7 +3327,12 @@ function CustomerPrintFlow({publicCode,sessionToken,paymentOptions,localAgent,lo
       setUploadedBatch(results);
       setUploadedFileFingerprints([...completedFingerprints]);
       if(results.length>0)setUploaded(results[0]);
-      setError(exception instanceof ApiError?exception.message:`Upload stopped after ${completedFingerprints.size} file(s). Retry the selected files to continue; completed files will be skipped.`);
+      const localPrinterUnavailable=uploadMode==="LOCAL"&&exception instanceof ApiError&&
+        ["local_print_printer_unavailable","local_upload_printer_unavailable","local_print_agent_unavailable"].includes(exception.code??"");
+      if(localPrinterUnavailable)setUploadMode("CLOUD");
+      setError(localPrinterUnavailable
+        ?"The QR station's printer is unavailable. Cloud-assisted upload is now selected; retry the remaining files and the shop can assign one available printer to the whole batch."
+        :exception instanceof ApiError?exception.message:`Upload stopped after ${completedFingerprints.size} file(s). Retry the selected files to continue; completed files will be skipped.`);
     } finally {setBusy(false);setUploadProgress(null);}
   }
 

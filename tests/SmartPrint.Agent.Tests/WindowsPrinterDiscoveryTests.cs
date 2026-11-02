@@ -32,6 +32,32 @@ public sealed class WindowsPrinterDiscoveryTests
     }
 
     [Fact]
+    public void KeepsDifferentWindowsQueuesSeparateEvenWhenTheyShareAPort()
+    {
+        var first = new DiscoveredPrinter("HP Lobby", "HP Universal", "USB001", "Ready", true);
+        var second = new DiscoveredPrinter("HP Lobby (Copy 1)", "HP Universal", "USB001", "Ready", false);
+
+        var normalized = WindowsPrinterDiscovery.NormalizeDiscoveredQueues([first, second]);
+
+        Assert.Equal(2, normalized.Count);
+        Assert.Equal(new[] { "HP Lobby", "HP Lobby (Copy 1)" }, normalized.Select(item => item.QueueName));
+    }
+
+    [Fact]
+    public void CollapsesOnlyCaseInsensitiveDuplicateQueueNames()
+    {
+        var first = new DiscoveredPrinter("HP Lobby", "HP Universal", "USB001", "Ready", true);
+        var duplicate = new DiscoveredPrinter("hp lobby", "Other driver", "USB002", "Busy", false);
+        var second = new DiscoveredPrinter("HP Back Office", "HP Universal", "USB001", "Ready", false);
+
+        var normalized = WindowsPrinterDiscovery.NormalizeDiscoveredQueues([first, duplicate, second]);
+
+        Assert.Equal(2, normalized.Count);
+        Assert.Contains(normalized, item => item.QueueName == "HP Lobby");
+        Assert.Contains(normalized, item => item.QueueName == "HP Back Office");
+    }
+
+    [Fact]
     public void MicrosoftPrintToPdfIsIdentifiedAsAgentSidePdfExport()
     {
         Assert.Equal(

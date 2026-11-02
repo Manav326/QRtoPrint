@@ -138,3 +138,18 @@ test("QR station poster has a clear three-step hierarchy and scan-first customer
   assert.match(css, /font:\s*500 7\.8pt\/1\.28/);
   assert.match(poster, /aria-hidden="true">↓<\/span>/);
 });
+
+test("one printer is assigned at batch level and every file exposes its actual output printer", () => {
+  const app = read("../src/App.tsx");
+  const css = read("../src/styles.css");
+
+  assert.match(app, /Assign one printer for all files in batch/);
+  assert.match(app, /One printer applies to every active file in this batch/);
+  assert.match(app, /Printed on/);
+  assert.match(app, /Windows queue:/);
+  assert.match(app, /Possible duplicate printer/);
+  assert.match(app, /Cloud-assisted upload is now selected/);
+  assert.doesNotMatch(app, /aria-label=\{"Assign printer for "\+job\.jobNumber\}/);
+  assert.match(css, /\.queue-batch-file-printer/);
+  assert.match(css, /\.printer-duplicate-warning/);
+});

@@ -398,10 +398,11 @@ public sealed class AgentLocalQueueStore
             ?? throw new FileNotFoundException("The pre-staged local upload is missing from the protected queue.");
         if (!string.Equals(entry.Sha256, job.Sha256, StringComparison.OrdinalIgnoreCase) ||
             entry.SizeBytes != job.SizeBytes ||
-            entry.PrinterDeviceId != job.PrinterDeviceId ||
-            !string.Equals(entry.QueueName, job.QueueName, StringComparison.OrdinalIgnoreCase))
+            job.PrinterDeviceId is null ||
+            string.IsNullOrWhiteSpace(job.PrinterName) ||
+            string.IsNullOrWhiteSpace(job.QueueName))
         {
-            throw new InvalidDataException("The paid job no longer matches the local upload, assigned printer or queue.");
+            throw new InvalidDataException("The paid job no longer matches the local upload or has an invalid printer assignment.");
         }
         if (entry.State is not ("LOCAL_UPLOAD_PENDING_PAYMENT" or "LOCAL_UPLOAD_STAGED" or "ACK_PENDING" or "ACKNOWLEDGED"))
         {
@@ -415,7 +416,9 @@ public sealed class AgentLocalQueueStore
         await SaveManifestAsync(entry with
         {
             State = "ACK_PENDING",
+            PrinterDeviceId = job.PrinterDeviceId,
             PrinterName = job.PrinterName,
+            QueueName = job.QueueName,
             PageCount = job.PageCount,
             Copies = job.Copies,
             ColourMode = job.ColourMode,

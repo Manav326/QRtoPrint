@@ -1153,10 +1153,12 @@ export function assignShopPrintJobPrinter(token: string, jobId: string, printerD
   return apiRequest<{
     id: string;
     status: string;
+    batchId?: string | null;
     printerDeviceId: string;
     printerName: string;
     queueName?: string | null;
     agentDeviceId: string;
+    assignedJobCount: number;
     updatedUtc: string;
   }>(`/api/v1/shop/print-jobs/${jobId}/printer`, {
     method: "PATCH",

@@ -2077,40 +2077,62 @@ shop.MapPatch("/print-jobs/{jobId:guid}/printer", async (
     CancellationToken ct) =>
 {
     if (!IsShopOwner(principal) || !TryGetTenantId(principal, out var tenantId))
-    {
         return Results.Forbid();
+
+    await using var transaction = await db.Database.BeginTransactionAsync(ct);
+    var batchInfo = await db.PrintJobs.AsNoTracking()
+        .Where(item => item.Id == jobId && item.TenantId == tenantId)
+        .Select(item => new { item.BatchId })
+        .SingleOrDefaultAsync(ct);
+    if (batchInfo is null)
+    {
+        await transaction.RollbackAsync(ct);
+        return Results.NotFound();
     }
 
-    var job = await db.PrintJobs.SingleOrDefaultAsync(
-        item => item.Id == jobId && item.TenantId == tenantId, ct);
-    if (job is null)
+    List<PrintJob> batchJobs;
+    if (batchInfo.BatchId is Guid batchId)
     {
+        batchJobs = await db.PrintJobs.FromSqlInterpolated(
+            $"SELECT * FROM \"PrintJobs\" WHERE \"TenantId\" = {tenantId} AND \"BatchId\" = {batchId} FOR UPDATE")
+            .ToListAsync(ct);
+    }
+    else
+    {
+        batchJobs = await db.PrintJobs.FromSqlInterpolated(
+            $"SELECT * FROM \"PrintJobs\" WHERE \"TenantId\" = {tenantId} AND \"Id\" = {jobId} FOR UPDATE")
+            .ToListAsync(ct);
+    }
+    var selectedJob = batchJobs.SingleOrDefault(item => item.Id == jobId);
+    if (selectedJob is null)
+    {
+        await transaction.RollbackAsync(ct);
         return Results.NotFound();
     }
 
     var now = DateTimeOffset.UtcNow;
     var hasVerifiedPayment = await db.PrintPayments.AnyAsync(
         payment => payment.TenantId == tenantId &&
-                   payment.PrintJobId == job.Id &&
+                   payment.PrintJobId == selectedJob.Id &&
                    (payment.Status == "VERIFIED" || payment.Status == "PARTIALLY_REFUNDED"), ct);
+    var expiredAgentLease = selectedJob.Status == "LOCAL_QUEUE_CLAIMED" &&
+        (selectedJob.AgentLeaseExpiresUtc == null || selectedJob.AgentLeaseExpiresUtc <= now);
+    var readyQueueCanBeReassigned = selectedJob.Status == "LOCAL_QUEUE_READY" &&
+        selectedJob.LocalQueueReceivedUtc != null &&
+        selectedJob.SpoolerJobId == null &&
+        string.IsNullOrWhiteSpace(selectedJob.SpoolerJobName) &&
+        selectedJob.OutputConfirmedUtc == null;
     var canAssign = hasVerifiedPayment &&
-        (job.Status == "PAID_AUTHORISED" ||
-         (job.Status == "LOCAL_QUEUE_CLAIMED" &&
-          job.LocalQueueReceivedUtc == null &&
-          (job.AgentLeaseExpiresUtc == null || job.AgentLeaseExpiresUtc <= now)));
-    if (!canAssign || job.LocalQueueReceivedUtc != null)
+        (selectedJob.Status == "PAID_AUTHORISED" || expiredAgentLease || readyQueueCanBeReassigned);
+    if (!canAssign)
     {
+        await transaction.RollbackAsync(ct);
         return Results.Conflict(new
         {
             code = "job_not_assignable",
-            message = "A printer can be assigned after payment is verified and before the agent secures the document locally. An expired agent lease may be reassigned."
+            message = "A printer can be assigned after payment is verified and before print output starts. Once printing has started, the whole batch stays on that printer."
         });
     }
-
-    var localDocument = await db.PrintDocuments.AsNoTracking()
-        .Where(item => item.TenantId == tenantId && item.PrintJobId == job.Id)
-        .Select(item => new { item.StorageMode, item.AgentDeviceId })
-        .SingleOrDefaultAsync(ct);
 
     var onlineAfter = now.AddMinutes(-2);
     var printer = await db.PrinterDevices.AsNoTracking()
@@ -2127,11 +2149,19 @@ shop.MapPatch("/print-jobs/{jobId:guid}/printer", async (
                            agent.RevokedUtc == null &&
                            agent.LastSeenUtc != null &&
                            agent.LastSeenUtc >= onlineAfter))
-        .Select(item => new { item.Id, item.DisplayName, item.QueueName, item.AgentDeviceId })
+        .Select(item => new
+        {
+            item.Id,
+            item.DisplayName,
+            item.QueueName,
+            item.AgentDeviceId,
+            item.OutputMode
+        })
         .SingleOrDefaultAsync(ct);
 
     if (printer is null)
     {
+        await transaction.RollbackAsync(ct);
         return Results.Conflict(new
         {
             code = "printer_not_available",
@@ -2139,63 +2169,166 @@ shop.MapPatch("/print-jobs/{jobId:guid}/printer", async (
         });
     }
 
-    if (localDocument?.StorageMode == "LOCAL_AGENT" &&
-        (job.PrinterDeviceId != printer.Id || localDocument.AgentDeviceId != printer.AgentDeviceId))
+    var activeJobs = batchJobs
+        .Where(item => item.Status is not ("REJECTED" or "REFUNDED"))
+        .ToList();
+    var activeJobIds = activeJobs.Select(item => item.Id).ToArray();
+    var documents = await db.PrintDocuments.AsNoTracking()
+        .Where(item => item.TenantId == tenantId && activeJobIds.Contains(item.PrintJobId))
+        .Select(item => new { item.PrintJobId, item.StorageMode, item.AgentDeviceId })
+        .ToListAsync(ct);
+    var documentsByJob = documents.ToDictionary(item => item.PrintJobId);
+    var states = activeJobs.Select(item =>
     {
+        documentsByJob.TryGetValue(item.Id, out var document);
+        var outputLocked = item.Status is "PRINT_AUTHORISED" or "PRINT_SUBMITTING" or
+            "SPOOLER_ACCEPTED" or "PRINTING" or "OUTPUT_UNCONFIRMED" or "COMPLETED";
+        var activeAgentLease = item.Status == "LOCAL_QUEUE_CLAIMED" &&
+            item.AgentLeaseExpiresUtc is DateTimeOffset lease && lease > now;
+        return new BatchPrinterAssignmentState(
+            item.PrinterDeviceId,
+            document?.AgentDeviceId,
+            document?.StorageMode == "LOCAL_AGENT",
+            outputLocked,
+            activeAgentLease);
+    }).ToArray();
+
+    var assignmentConflict = BatchPrinterAssignmentRules.FindConflict(
+        states, printer.Id, printer.AgentDeviceId!.Value);
+    if (assignmentConflict == "local_document_agent_locked")
+    {
+        await transaction.RollbackAsync(ct);
         return Results.Conflict(new
         {
-            code = "local_document_printer_locked",
-            message = "A LAN-only document can only be printed on the same Windows computer and printer it was uploaded to. The customer must upload again for a different printer."
+            code = "local_document_agent_locked",
+            message = "A file in this batch is stored on a different shop computer. All files must stay on that same computer; upload the batch again to move it."
+        });
+    }
+    if (assignmentConflict == "batch_printer_locked")
+    {
+        await transaction.RollbackAsync(ct);
+        return Results.Conflict(new
+        {
+            code = "batch_printer_locked",
+            message = "A file in this batch has already started printing. The whole batch is locked to that printer."
+        });
+    }
+    if (assignmentConflict is not null)
+    {
+        await transaction.RollbackAsync(ct);
+        return Results.Conflict(new
+        {
+            code = assignmentConflict,
+            message = "This batch cannot be assigned to the selected printer. Refresh the queue and try again."
         });
     }
 
-    var previousStatus = job.Status;
-    job.PrinterDeviceId = printer.Id;
-    job.Status = "PAID_AUTHORISED";
-    job.ClaimedByAgentDeviceId = null;
-    job.AgentLeaseExpiresUtc = null;
-    job.AgentClaimedUtc = null;
-    job.LocalQueueReceivedUtc = null;
-    job.UpdatedUtc = now;
-    db.PrintJobEvents.Add(new PrintJobEvent
+    var assigned = 0;
+    foreach (var batchJob in activeJobs)
     {
-        TenantId = tenantId,
-        PrintJobId = job.Id,
-        PreviousStatus = previousStatus,
-        NewStatus = job.Status,
-        ActorType = "ShopUser",
-        ActorId = GetActorId(principal),
-        ReasonCode = previousStatus == "LOCAL_QUEUE_CLAIMED"
-            ? "PRINTER_REASSIGNED_AFTER_EXPIRED_AGENT_LEASE"
-            : "PRINTER_ASSIGNED",
-        CreatedUtc = now
-    });
-    await db.SaveChangesAsync(ct);
+        var needsQueueReset =
+            (batchJob.Status == "LOCAL_QUEUE_READY" && batchJob.PrinterDeviceId != printer.Id) ||
+            (batchJob.Status == "LOCAL_QUEUE_CLAIMED" &&
+             (batchJob.AgentLeaseExpiresUtc == null || batchJob.AgentLeaseExpiresUtc <= now));
+        var printerChanged = batchJob.PrinterDeviceId != printer.Id;
+        if (!printerChanged && !needsQueueReset)
+        {
+            assigned++;
+            continue;
+        }
 
+        var previousStatus = batchJob.Status;
+        batchJob.PrinterDeviceId = printer.Id;
+        if (needsQueueReset)
+        {
+            batchJob.Status = "PAID_AUTHORISED";
+            batchJob.ClaimedByAgentDeviceId = null;
+            batchJob.AgentLeaseExpiresUtc = null;
+            batchJob.AgentClaimedUtc = null;
+            batchJob.LocalQueueReceivedUtc = null;
+        }
+        batchJob.UpdatedUtc = now;
+        db.PrintJobEvents.Add(new PrintJobEvent
+        {
+            TenantId = tenantId,
+            PrintJobId = batchJob.Id,
+            PreviousStatus = previousStatus,
+            NewStatus = batchJob.Status,
+            ActorType = "ShopUser",
+            ActorId = GetActorId(principal),
+            ReasonCode = selectedJob.BatchId is null ? "PRINTER_ASSIGNED" : "BATCH_PRINTER_ASSIGNED",
+            CreatedUtc = now
+        });
+        assigned++;
+    }
+
+    await db.SaveChangesAsync(ct);
+    await transaction.CommitAsync(ct);
     return Results.Ok(new
     {
-        job.Id,
-        job.Status,
-        job.PrinterDeviceId,
+        selectedJob.Id,
+        selectedJob.BatchId,
+        Status = selectedJob.Status,
+        PrinterDeviceId = printer.Id,
         PrinterName = printer.DisplayName,
         QueueName = printer.QueueName,
         AgentDeviceId = printer.AgentDeviceId,
-        job.UpdatedUtc
+        AssignedJobCount = assigned,
+        UpdatedUtc = now
     });
-});
-
-
-shop.MapPost("/print-jobs/{jobId:guid}/dispatch", async (Guid jobId, ClaimsPrincipal principal, SmartPrintDbContext db, CancellationToken ct) =>
+});shop.MapPost("/print-jobs/{jobId:guid}/dispatch", async (Guid jobId, ClaimsPrincipal principal, SmartPrintDbContext db, CancellationToken ct) =>
 {
     if (!IsShopOwner(principal) || !TryGetTenantId(principal, out var tenantId)) return Results.Forbid();
-    var job = await db.PrintJobs.SingleOrDefaultAsync(x => x.Id == jobId && x.TenantId == tenantId, ct);
-    if (job is null) return Results.NotFound();
+
+    await using var transaction = await db.Database.BeginTransactionAsync(ct);
+    var batchInfo = await db.PrintJobs.AsNoTracking()
+        .Where(item => item.Id == jobId && item.TenantId == tenantId)
+        .Select(item => new { item.BatchId })
+        .SingleOrDefaultAsync(ct);
+    if (batchInfo is null)
+    {
+        await transaction.RollbackAsync(ct);
+        return Results.NotFound();
+    }
+
+    List<PrintJob> batchJobs;
+    if (batchInfo.BatchId is Guid batchId)
+    {
+        batchJobs = await db.PrintJobs.FromSqlInterpolated(
+            $"SELECT * FROM \"PrintJobs\" WHERE \"TenantId\" = {tenantId} AND \"BatchId\" = {batchId} FOR UPDATE")
+            .ToListAsync(ct);
+    }
+    else
+    {
+        batchJobs = await db.PrintJobs.FromSqlInterpolated(
+            $"SELECT * FROM \"PrintJobs\" WHERE \"TenantId\" = {tenantId} AND \"Id\" = {jobId} FOR UPDATE")
+            .ToListAsync(ct);
+    }
+    var job = batchJobs.SingleOrDefault(item => item.Id == jobId);
+    if (job is null)
+    {
+        await transaction.RollbackAsync(ct);
+        return Results.NotFound();
+    }
     if (job.Status == "PRINT_AUTHORISED")
         return Results.Ok(new { job.Id, job.Status, job.SpoolerJobName, DuplicateRequest = true });
 
     if (job.Status != "LOCAL_QUEUE_READY" || job.LocalQueueReceivedUtc is null ||
         job.PrinterDeviceId is null || job.ClaimedByAgentDeviceId is null)
         return Results.Conflict(new { code = "job_not_ready_for_print_dispatch", message = "The paid document must be secured by its assigned agent before printing can start." });
+
+    if (batchJobs.Any(other =>
+        other.Id != job.Id &&
+        other.Status != "REJECTED" &&
+        other.Status != "REFUNDED" &&
+        other.PrinterDeviceId != job.PrinterDeviceId))
+    {
+        return Results.Conflict(new
+        {
+            code = "batch_printer_mismatch",
+            message = "Every accepted file in this batch must use the same printer. Assign one printer to the whole batch before starting output."
+        });
+    }
 
     var now = DateTimeOffset.UtcNow;
     var onlineAfter = now.AddMinutes(-2);
@@ -2239,6 +2372,7 @@ shop.MapPost("/print-jobs/{jobId:guid}/dispatch", async (Guid jobId, ClaimsPrinc
         CreatedUtc = now
     });
     await db.SaveChangesAsync(ct);
+    await transaction.CommitAsync(ct);
     return Results.Ok(new
     {
         job.Id, job.JobNumber, job.Status, PrinterName = ready.DisplayName,
@@ -3287,6 +3421,13 @@ agentApi.MapPost("/jobs/claim", async (
                   (payment.Status == "VERIFIED" || payment.Status == "PARTIALLY_REFUNDED") &&
                   (!suspendedAtUtc.HasValue || (payment.VerifiedUtc != null && payment.VerifiedUtc <= suspendedAtUtc.Value))) &&
               availablePrinterIds.Contains(printer.Id) &&
+              (job.BatchId == null || !db.PrintJobs.Any(other =>
+                  other.TenantId == job.TenantId &&
+                  other.BatchId == job.BatchId &&
+                  other.Id != job.Id &&
+                  other.Status != "REJECTED" &&
+                  other.Status != "REFUNDED" &&
+                  other.PrinterDeviceId != job.PrinterDeviceId)) &&
               (job.Status == "PAID_AUTHORISED" ||
                (job.Status == "LOCAL_QUEUE_CLAIMED" &&
                 (job.AgentLeaseExpiresUtc == null || job.AgentLeaseExpiresUtc <= now)))
@@ -3325,6 +3466,13 @@ agentApi.MapPost("/jobs/claim", async (
                           job.TenantId == device.TenantId &&
                           (!suspendedAtUtc.HasValue || job.CreatedUtc < suspendedAtUtc.Value) &&
                           job.PrinterDeviceId == candidate.PrinterDeviceId &&
+                          (job.BatchId == null || !db.PrintJobs.Any(other =>
+                              other.TenantId == job.TenantId &&
+                              other.BatchId == job.BatchId &&
+                              other.Id != job.Id &&
+                              other.Status != "REJECTED" &&
+                              other.Status != "REFUNDED" &&
+                              other.PrinterDeviceId != job.PrinterDeviceId)) &&
                           db.PrinterDevices.Any(printer =>
                               printer.Id == job.PrinterDeviceId &&
                               printer.TenantId == device.TenantId &&
@@ -3639,11 +3787,20 @@ agentApi.MapPost("/local-uploads/{ticketId:guid}/claim", async (
                        item.AgentDeviceId == device.Id &&
                        item.IsActive &&
                        !string.IsNullOrWhiteSpace(item.QueueName))
-        .Select(item => new { item.Id, item.DisplayName, item.QueueName })
+        .Select(item => new { item.Id, item.DisplayName, item.QueueName, item.Status, item.LastSeenUtc, item.OutputMode })
         .SingleOrDefaultAsync(ct);
-    if (stationPrinter is null)
+    var stationPrinterIsAvailable = stationPrinter is not null &&
+        (stationPrinter.OutputMode == "PDF_EXPORT" ||
+         (stationPrinter.LastSeenUtc != null &&
+          stationPrinter.LastSeenUtc >= now.AddMinutes(-2) &&
+          (stationPrinter.Status == "Ready" || stationPrinter.Status == "Busy")));
+    if (!stationPrinterIsAvailable)
     {
-        return Results.Conflict(new { code = "local_upload_printer_unavailable", message = "The QR station's assigned printer is no longer attached to this paired computer." });
+        return Results.Conflict(new
+        {
+            code = "local_upload_printer_unavailable",
+            message = "The QR station's assigned printer is no longer ready. Choose Cloud-assisted upload and ask the shop to assign one available printer to the whole batch."
+        });
     }
 
     ticket.ClaimedUtc ??= now;
@@ -4033,6 +4190,13 @@ agentApi.MapPost("/jobs/print-claim", async (AgentPrintClaimRequest request, Htt
                     job.PrintDispatchLeaseExpiresUtc <= now)) &&
                   job.ClaimedByAgentDeviceId == device.Id && job.LocalQueueReceivedUtc != null &&
                   document.Sha256 == proof.Sha256 && document.SizeBytes == proof.SizeBytes &&
+                  (job.BatchId == null || !db.PrintJobs.Any(other =>
+                      other.TenantId == job.TenantId &&
+                      other.BatchId == job.BatchId &&
+                      other.Id != job.Id &&
+                      other.Status != "REJECTED" &&
+                      other.Status != "REFUNDED" &&
+                      other.PrinterDeviceId != job.PrinterDeviceId)) &&
                   printer.AgentDeviceId == device.Id && printer.IsActive &&
                   printer.QueueName != null && printer.QueueName != "" &&
                   (printer.OutputMode == "PDF_EXPORT" ||
@@ -4055,6 +4219,13 @@ agentApi.MapPost("/jobs/print-claim", async (AgentPrintClaimRequest request, Htt
                            (job.Status == "PRINT_SUBMITTING" && job.PrintDispatchLeaseExpiresUtc != null && job.PrintDispatchLeaseExpiresUtc <= now)) &&
                           job.ClaimedByAgentDeviceId == device.Id &&
             job.LocalQueueReceivedUtc != null &&
+            (job.BatchId == null || !db.PrintJobs.Any(other =>
+                other.TenantId == job.TenantId &&
+                other.BatchId == job.BatchId &&
+                other.Id != job.Id &&
+                other.Status != "REJECTED" &&
+                other.Status != "REFUNDED" &&
+                other.PrinterDeviceId != job.PrinterDeviceId)) &&
             db.PrinterDevices.Any(printer => printer.Id == job.PrinterDeviceId && printer.TenantId == device.TenantId &&
                 printer.AgentDeviceId == device.Id && printer.IsActive && printer.QueueName != null && printer.QueueName != "" &&
                 (printer.OutputMode == "PDF_EXPORT" ||
@@ -4484,6 +4655,7 @@ agentApi.MapPost("/printers/sync", async (
             printer.ConnectionType = "WindowsQueue";
             printer.OutputMode = discovered.OutputMode;
             printer.ConnectionAddress = string.IsNullOrWhiteSpace(discovered.PortName) ? null : discovered.PortName.Trim();
+            printer.IsDefault = discovered.IsDefault;
             updated++;
         }
 
@@ -5317,10 +5489,16 @@ publicApi.MapPost("/sessions/current/jobs", async (
         return Results.UnprocessableEntity(new { code = "document_not_supported", message = exception.Message });
     }
 
+    var stationDefaultPrinterId = await db.QrStations.AsNoTracking()
+        .Where(station => station.Id == session.QrStationId && station.TenantId == session.TenantId)
+        .Select(station => station.PrinterDeviceId)
+        .SingleOrDefaultAsync(ct);
+
     var job = new PrintJob
     {
         TenantId = session.TenantId,
         QrStationId = session.QrStationId,
+        PrinterDeviceId = stationDefaultPrinterId,
         CustomerSessionId = session.Id,
         BatchId = batchId,
         BatchGroupName = batchGroupName,
@@ -5622,6 +5800,9 @@ publicApi.MapPost("/sessions/current/local-upload-tickets", async (
             station.Id,
             PrinterDeviceId = printer.Id,
             AgentDeviceId = agent.Id,
+            printer.Status,
+            printer.LastSeenUtc,
+            printer.OutputMode,
             agent.LocalEndpointsJson
         }
     ).SingleOrDefaultAsync(ct);
@@ -5632,7 +5813,20 @@ publicApi.MapPost("/sessions/current/local-upload-tickets", async (
         return Results.Conflict(new
         {
             code = "local_print_agent_unavailable",
-            message = "This QR station does not have a recently connected Windows Print Agent and printer. Use cloud-assisted upload or ask the shop operator."
+            message = "This QR station does not have a recently connected Windows Print Agent. Use cloud-assisted upload or ask the shop operator."
+        });
+    }
+
+    var stationPrinterIsAvailable = stationPrinter.OutputMode == "PDF_EXPORT" ||
+        (stationPrinter.LastSeenUtc != null &&
+         stationPrinter.LastSeenUtc >= now.AddMinutes(-2) &&
+         (stationPrinter.Status == "Ready" || stationPrinter.Status == "Busy"));
+    if (!stationPrinterIsAvailable)
+    {
+        return Results.Conflict(new
+        {
+            code = "local_print_printer_unavailable",
+            message = "The printer assigned to this QR station is offline, paused or not responding. Choose Cloud-assisted upload; the shop can then assign one available printer to the whole batch."
         });
     }
 
