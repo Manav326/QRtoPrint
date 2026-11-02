@@ -175,13 +175,14 @@ export default function PlatformDataNetworkSection({ tokens }: { tokens: AuthTok
               <small>Metadata-reported file bytes, not encrypted disk occupancy.</small>
             </article>
             <article className="panel platform-data-storage-card">
-              <div className="platform-data-panel-title"><Router size={16}/> Protected Agent queue disk</div>
+              <div className="platform-data-panel-title"><Router size={16}/> Protected Agent queue files</div>
               <strong>{report.storage.agentCount === 0 ? "No Agents" : report.storage.freshAgentCount === 0 ? "Unavailable" : formatGb(report.storage.localQueueDiskBytes)}</strong>
               <span>{formatCount(report.storage.freshAgentCount)} of {formatCount(report.storage.agentCount)} Agents have snapshots newer than {report.storage.snapshotFreshnessMinutes} minutes</span>
               <small>
                 {formatGb(report.storage.localQueueLogicalBytes)} logical documents · {formatGb(report.storage.localOutputFileBytes)} tracked PDF exports
                 {report.storage.storageMeasurementComplete ? " · all paired Agents reporting" : " · stale or missing Agent snapshots excluded"}
               </small>
+              <small>Agent values are reported file lengths, not filesystem-allocated cluster usage; exact physical disk occupancy is not measured.</small>
             </article>
           </div>
 
@@ -193,7 +194,7 @@ export default function PlatformDataNetworkSection({ tokens }: { tokens: AuthTok
               <table className="platform-data-table">
                 <thead>
                   <tr>
-                    <th>Shop</th><th>Cloud ingress</th><th>Cloud egress</th><th>Shop LAN</th><th>Total payload</th><th>Agent queue disk</th><th>Transfer events</th>
+                    <th>Shop</th><th>Cloud ingress</th><th>Cloud egress</th><th>Shop LAN</th><th>Total payload</th><th>Agent queue files</th><th>Transfer events</th>
                   </tr>
                 </thead>
                 <tbody>
