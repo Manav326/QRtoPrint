@@ -50,9 +50,13 @@ export interface PlatformOverview {
 
 export interface PlatformDataNetworkReport {
   generatedUtc: string;
+  requestedFromUtc: string;
   fromUtc: string;
+  measurementStartedUtc: string;
+  coverageComplete: boolean;
   toUtc: string;
   days: number;
+  measurementCoverageDays: number;
   summary: {
     uniqueDocumentCount: number;
     uniqueDocumentBytes: number;
@@ -86,13 +90,32 @@ export interface PlatformDataNetworkReport {
     shopLanBytes: number;
     partialTransferCount: number;
     failedTransferCount: number;
+    agentCount: number;
+    freshAgentCount: number;
+    staleAgentCount: number;
+    missingAgentSnapshotCount: number;
+    localQueueDiskBytes: number;
+    localOutputFileBytes: number;
   }>;
   storage: {
     cloudLogicalDocumentCount: number;
     cloudLogicalDocumentBytes: number;
-    agentLogicalDocumentCount: number;
-    agentLogicalDocumentBytes: number;
+    agentCount: number;
+    freshAgentCount: number;
+    staleAgentCount: number;
+    missingAgentSnapshotCount: number;
+    localQueueDocumentCount: number;
+    localQueueLogicalBytes: number;
+    localQueueDiskBytes: number;
+    localOutputFileCount: number;
+    localOutputFileBytes: number;
+    snapshotFreshnessMinutes: number;
+    storageMeasurementComplete: boolean;
     physicalDiskBytesMeasured: boolean;
+  };
+  retention: {
+    rawEventRetentionDays: number;
+    dailyAggregatesRetained: boolean;
   };
   measurementScope: {
     payloadBytesOnly: boolean;
