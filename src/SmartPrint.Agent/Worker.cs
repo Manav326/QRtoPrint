@@ -21,6 +21,9 @@ public sealed class Worker(
     private int printClaimBatchOffset;
     private readonly TimeSpan pollInterval = TimeSpan.FromSeconds(
         Math.Clamp(configuration.GetValue<int?>("Agent:PollIntervalSeconds") ?? 30, 10, 300));
+    private readonly TimeSpan healthSyncInterval = TimeSpan.FromSeconds(
+        AgentLoopIntervals.ResolveHealthSyncIntervalSeconds(
+            configuration.GetValue<int?>("Agent:HealthSyncIntervalSeconds")));
     private readonly string pdfExportDirectory = ResolvePdfExportDirectory(configuration);
     private readonly object retentionPolicySync = new();
     private TimeSpan completedDocumentRetention = TimeSpan.FromDays(
@@ -69,7 +72,7 @@ public sealed class Worker(
 
             try
             {
-                await Task.Delay(pollInterval, cancellationToken);
+                await Task.Delay(healthSyncInterval, cancellationToken);
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
             {
@@ -232,7 +235,7 @@ public sealed class Worker(
 
             try
             {
-                await Task.Delay(pollInterval, cancellationToken);
+                await Task.Delay(healthSyncInterval, cancellationToken);
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
             {
