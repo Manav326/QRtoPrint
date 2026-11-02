@@ -1,11 +1,27 @@
 using Microsoft.EntityFrameworkCore;
 using SmartPrint.Api.Data;
 using SmartPrint.Api.Domain;
+using SmartPrint.Api.Services;
 
 namespace SmartPrint.Api.Tests;
 
 public sealed class DataTransferEventModelTests
 {
+    [Fact]
+    public void CloudCustomerUploadTransferIdentityIsStableForTheSameIdempotencyKey()
+    {
+        var tenantId = Guid.NewGuid();
+        var sessionId = Guid.NewGuid();
+
+        var first = DataTransferIdentity.ForCustomerUpload(tenantId, sessionId, "same-file-request");
+        var retry = DataTransferIdentity.ForCustomerUpload(tenantId, sessionId, "same-file-request");
+        var separateUpload = DataTransferIdentity.ForCustomerUpload(tenantId, sessionId, "another-file-request");
+
+        Assert.Equal(first, retry);
+        Assert.NotEqual(first, separateUpload);
+        Assert.NotEqual(first, DataTransferIdentity.ForCustomerUpload(Guid.NewGuid(), sessionId, "same-file-request"));
+    }
+
     [Fact]
     public void TransferEventStoresPayloadAndLeavesWireBytesExplicitlyNullable()
     {
