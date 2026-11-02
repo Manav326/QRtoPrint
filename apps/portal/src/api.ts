@@ -67,6 +67,7 @@ export interface PlatformDataNetworkReport {
     transferAttemptCount: number;
     partialTransferCount: number;
     failedTransferCount: number;
+    startedTransferCount: number;
     wireBytesMeasured: boolean;
   };
   channels: Array<{
@@ -90,6 +91,7 @@ export interface PlatformDataNetworkReport {
     shopLanBytes: number;
     partialTransferCount: number;
     failedTransferCount: number;
+    startedTransferCount: number;
     agentCount: number;
     freshAgentCount: number;
     staleAgentCount: number;
