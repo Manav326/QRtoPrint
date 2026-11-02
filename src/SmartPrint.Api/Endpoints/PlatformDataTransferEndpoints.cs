@@ -313,7 +313,7 @@ public static class PlatformDataTransferEndpoints
                     localOutputFileBytes = freshAgentSnapshots.Sum(item => item.LocalOutputFileBytes ?? 0L),
                     snapshotFreshnessMinutes = AgentStorageFreshnessMinutes,
                     storageMeasurementComplete = freshStorageComplete,
-                    physicalDiskBytesMeasured = true
+                    physicalDiskBytesMeasured = false
                 },
                 retention = new
                 {
