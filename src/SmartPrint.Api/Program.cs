@@ -101,6 +101,7 @@ builder.Services.AddScoped<TokenIssuer>();
 builder.Services.AddScoped<TenantEntitlementService>();
 builder.Services.AddSingleton<DocumentStorage>();
 builder.Services.AddHostedService<DocumentRetentionWorker>();
+builder.Services.AddHostedService<DataTransferRetentionWorker>();
 builder.Services.AddRateLimiter(options =>
 {
     options.AddPolicy("authentication", context =>
