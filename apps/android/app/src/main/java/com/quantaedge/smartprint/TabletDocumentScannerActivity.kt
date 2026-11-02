@@ -4,7 +4,6 @@ import android.Manifest
 import android.app.Activity
 import android.content.Intent
 import android.content.pm.PackageManager
-import android.graphics.BitmapFactory
 import android.graphics.Canvas
 import android.graphics.Paint
 import android.graphics.RectF
@@ -473,21 +472,7 @@ class TabletDocumentScannerActivity : AppCompatActivity() {
 
     private fun showPagePreview(page: File, pageNumber: Int) {
         if (!page.isFile) return
-        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-        BitmapFactory.decodeFile(page.absolutePath, bounds)
-        if (bounds.outWidth <= 0 || bounds.outHeight <= 0) {
-            Toast.makeText(this, "This page preview is unavailable.", Toast.LENGTH_SHORT).show()
-            return
-        }
-
-        var sampleSize = 1
-        while (maxOf(bounds.outWidth / sampleSize, bounds.outHeight / sampleSize) > 1600) {
-            sampleSize *= 2
-        }
-        val bitmap = BitmapFactory.decodeFile(
-            page.absolutePath,
-            BitmapFactory.Options().apply { inSampleSize = sampleSize }
-        )
+        val bitmap = ImagePdfComposer.decodePreviewBitmap(page)
         if (bitmap == null) {
             Toast.makeText(this, "This page preview is unavailable.", Toast.LENGTH_SHORT).show()
             return
