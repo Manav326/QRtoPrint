@@ -3662,9 +3662,27 @@ agentApi.MapGet("/jobs/{jobId:guid}/document", async (
     context.Response.ContentLength = document.SizeBytes;
 
     var transferId = jobId;
-    var attemptNumber = (await db.DataTransferEvents.AsNoTracking()
-        .Where(item => item.TransferId == transferId && item.Channel == "CLOUD_AGENT_DOWNLOAD")
-        .MaxAsync(item => (int?)item.AttemptNumber, ct) ?? 0) + 1;
+    var attemptStartedUtc = DateTimeOffset.UtcNow;
+    var attemptUpdated = await db.PrintJobs
+        .Where(item => item.Id == jobId &&
+                       item.TenantId == device.TenantId &&
+                       item.Status == "LOCAL_QUEUE_CLAIMED" &&
+                       item.ClaimedByAgentDeviceId == device.Id &&
+                       item.AgentLeaseExpiresUtc != null &&
+                       item.AgentLeaseExpiresUtc > attemptStartedUtc)
+        .ExecuteUpdateAsync(update => update.SetProperty(
+            item => item.AgentDocumentDownloadAttempts,
+            item => item.AgentDocumentDownloadAttempts + 1), ct);
+    if (attemptUpdated != 1)
+    {
+        content.Dispose();
+        return Results.Conflict(new { code = "agent_document_lease_changed", message = "The document download lease is no longer current. Claim the job again before downloading." });
+    }
+
+    var attemptNumber = await db.PrintJobs.AsNoTracking()
+        .Where(item => item.Id == jobId && item.TenantId == device.TenantId)
+        .Select(item => item.AgentDocumentDownloadAttempts)
+        .SingleAsync(ct);
     var transferStartedUtc = DateTimeOffset.UtcNow;
     long payloadBytesSent = 0;
     var transferStatus = "COMPLETED";
@@ -3841,6 +3859,17 @@ agentApi.MapPost("/local-uploads/{ticketId:guid}/claim", async (
 
     if (ticket.CompletedUtc is not null)
     {
+        var attemptUpdated = await db.LocalPrintUploadTickets
+            .Where(item => item.Id == ticket.Id &&
+                           item.TenantId == device.TenantId &&
+                           item.AgentDeviceId == device.Id &&
+                           item.CompletedUtc != null)
+            .ExecuteUpdateAsync(update => update.SetProperty(
+                item => item.AgentUploadAttempts,
+                item => item.AgentUploadAttempts + 1), ct);
+        if (attemptUpdated != 1) return Results.Conflict();
+        await db.Entry(ticket).ReloadAsync(ct);
+
         var completedJob = await db.PrintJobs.AsNoTracking()
             .SingleOrDefaultAsync(item => item.Id == ticket.PrintJobId && item.TenantId == device.TenantId, ct);
         var completedDocument = await db.PrintDocuments.AsNoTracking()
@@ -3850,6 +3879,7 @@ agentApi.MapPost("/local-uploads/{ticketId:guid}/claim", async (
         return Results.Ok(new
         {
             AlreadyCompleted = true,
+            AttemptNumber = ticket.AgentUploadAttempts,
             UploadResult = new
             {
                 Job = new
@@ -3905,13 +3935,23 @@ agentApi.MapPost("/local-uploads/{ticketId:guid}/claim", async (
         });
     }
 
-    ticket.ClaimedUtc ??= now;
-    ticket.ClaimLeaseExpiresUtc = ticket.ExpiresUtc;
-    await db.SaveChangesAsync(ct);
+    var claimAttemptUpdated = await db.LocalPrintUploadTickets
+        .Where(item => item.Id == ticket.Id &&
+                       item.TenantId == device.TenantId &&
+                       item.AgentDeviceId == device.Id &&
+                       item.CompletedUtc == null &&
+                       item.ExpiresUtc > now)
+        .ExecuteUpdateAsync(update => update
+            .SetProperty(item => item.ClaimedUtc, item => item.ClaimedUtc ?? now)
+            .SetProperty(item => item.ClaimLeaseExpiresUtc, item => item.ExpiresUtc)
+            .SetProperty(item => item.AgentUploadAttempts, item => item.AgentUploadAttempts + 1), ct);
+    if (claimAttemptUpdated != 1) return Results.Conflict();
+    await db.Entry(ticket).ReloadAsync(ct);
 
     return Results.Ok(new
     {
         AlreadyCompleted = false,
+        AttemptNumber = ticket.AgentUploadAttempts,
         ticket.Id,
         ticket.PrintJobId,
         ticket.BatchGroupName,
@@ -3969,6 +4009,17 @@ agentApi.MapPost("/local-uploads/{ticketId:guid}/complete", async (
         return Results.Unauthorized();
     }
 
+    var transferAttemptNumber = request.AttemptNumber > 0 ? request.AttemptNumber : 1;
+    if (request.ReceivedBytes < 0 ||
+        request.ReceivedBytes > ticket.SizeBytes ||
+        (request.ReceivedBytes != 0 && request.ReceivedBytes != ticket.SizeBytes) ||
+        request.DurationMilliseconds is < 0 or > 600_000 ||
+        request.AttemptNumber < 0 ||
+        request.AttemptNumber > ticket.AgentUploadAttempts)
+    {
+        return Results.UnprocessableEntity(new { code = "local_transfer_metrics_invalid", message = "The Agent-reported transfer measurements do not match this upload ticket." });
+    }
+
     if (ticket.CompletedUtc is not null)
     {
         var completedJob = await db.PrintJobs.AsNoTracking()
@@ -3982,7 +4033,7 @@ agentApi.MapPost("/local-uploads/{ticketId:guid}/complete", async (
             await DataTransferRecorder.TryRecordAsync(db, app.Logger, new DataTransferEvent
             {
                 TransferId = ticket.Id,
-                AttemptNumber = 1,
+                AttemptNumber = transferAttemptNumber,
                 TenantId = device.TenantId,
                 AgentDeviceId = device.Id,
                 PrinterDeviceId = ticket.PrinterDeviceId,
@@ -4191,7 +4242,7 @@ agentApi.MapPost("/local-uploads/{ticketId:guid}/complete", async (
         await DataTransferRecorder.TryRecordAsync(db, app.Logger, new DataTransferEvent
         {
             TransferId = ticket.Id,
-            AttemptNumber = 1,
+            AttemptNumber = transferAttemptNumber,
             TenantId = device.TenantId,
             AgentDeviceId = device.Id,
             PrinterDeviceId = ticket.PrinterDeviceId,
