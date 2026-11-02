@@ -6,6 +6,30 @@ namespace SmartPrint.Api.Services;
 
 public static class DataTransferRecorder
 {
+    private static long successfulWriteCount;
+    private static long failedWriteCount;
+    private static long lastFailureUnixMilliseconds;
+
+    public static DateTimeOffset ProcessStartedUtc { get; } = DateTimeOffset.UtcNow;
+    public static long SuccessfulWriteCount => Interlocked.Read(ref successfulWriteCount);
+    public static long FailedWriteCount => Interlocked.Read(ref failedWriteCount);
+    public static DateTimeOffset? LastFailureUtc
+    {
+        get
+        {
+            var value = Interlocked.Read(ref lastFailureUnixMilliseconds);
+            return value == 0 ? null : DateTimeOffset.FromUnixTimeMilliseconds(value);
+        }
+    }
+
+    private static void MarkWriteSuccess() => Interlocked.Increment(ref successfulWriteCount);
+
+    private static void MarkWriteFailure()
+    {
+        Interlocked.Increment(ref failedWriteCount);
+        Interlocked.Exchange(ref lastFailureUnixMilliseconds, DateTimeOffset.UtcNow.ToUnixTimeMilliseconds());
+    }
+
     public static async Task TryRecordAsync(
         SmartPrintDbContext db,
         ILogger logger,
@@ -15,10 +39,12 @@ public static class DataTransferRecorder
         {
             db.DataTransferEvents.Add(transferEvent);
             await db.SaveChangesAsync(CancellationToken.None);
+            MarkWriteSuccess();
         }
         catch (Exception exception)
         {
             db.Entry(transferEvent).State = EntityState.Detached;
+            MarkWriteFailure();
             logger.LogWarning(
                 exception,
                 "Data-transfer telemetry could not be recorded for channel {Channel}; the customer operation remains successful.",
@@ -60,9 +86,11 @@ public static class DataTransferRecorder
             }
 
             await db.SaveChangesAsync(CancellationToken.None);
+            MarkWriteSuccess();
         }
         catch (Exception exception)
         {
+            MarkWriteFailure();
             if (existing is not null)
                 db.Entry(existing).State = EntityState.Unchanged;
             else
