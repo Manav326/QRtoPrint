@@ -757,8 +757,7 @@ class MainActivity : AppCompatActivity() {
         column.addView(heading, linearParams().apply { bottomMargin = dp(16) })
 
         val quickActions = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
+            orientation = LinearLayout.VERTICAL
         }
         quickActions.addView(button("Scan document", true).apply {
             icon = getDrawable(R.drawable.ic_document_scan)
@@ -766,8 +765,8 @@ class MainActivity : AppCompatActivity() {
             iconPadding = dp(8)
             iconGravity = MaterialButton.ICON_GRAVITY_TEXT_START
             setOnClickListener { startDocumentScan() }
-        }, LinearLayout.LayoutParams(0, dp(48), 1f))
-        quickActions.addView(button("Import", false).apply {
+        }, LinearLayout.LayoutParams(-1, dp(48)))
+        quickActions.addView(button("Choose from phone", false).apply {
             icon = getDrawable(R.drawable.ic_file)
             iconTint = ColorStateList.valueOf(getColor(R.color.qp_primary))
             iconPadding = dp(8)
@@ -778,7 +777,7 @@ class MainActivity : AppCompatActivity() {
                 importFiles.launch(arrayOf("*/*"))
                 navigation.selectedItemId = FILES
             }
-        }, LinearLayout.LayoutParams(0, dp(48), 1f).apply { marginStart = dp(9) })
+        }, LinearLayout.LayoutParams(-1, dp(48)).apply { topMargin = dp(9) })
         column.addView(quickActions, linearParams())
 
         val shopCard = card().apply {
