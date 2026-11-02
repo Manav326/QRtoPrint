@@ -75,7 +75,7 @@ public sealed class SmartPrintDbContext(DbContextOptions<SmartPrintDbContext> op
                 table.HasCheckConstraint("CK_PlatformOperationalSettings_Singleton", "\"Id\" = 1");
                 table.HasCheckConstraint("CK_PlatformOperationalSettings_TrialQuota", "\"TrialMaxMonthlyPrintJobs\" BETWEEN 1 AND 10000000");
                 table.HasCheckConstraint("CK_PlatformOperationalSettings_RetentionDays",
-                    "\"CloudCompletedDocumentRetentionDays\" BETWEEN 1 AND 3650 AND \"AgentCompletedDocumentRetentionDays\" BETWEEN 1 AND 3650 AND \"AbandonedDocumentRetentionDays\" BETWEEN 1 AND 3650 AND \"PendingLocalUploadRetentionDays\" BETWEEN 1 AND 3650 AND \"ExpiredUploadTicketRetentionDays\" BETWEEN 1 AND 3650 AND \"EmptyCustomerSessionRetentionDays\" BETWEEN 1 AND 3650 AND \"StaleRefreshTokenRetentionDays\" BETWEEN 1 AND 3650");
+                    "\"CloudCompletedDocumentRetentionDays\" BETWEEN 1 AND 3650 AND \"AgentCompletedDocumentRetentionDays\" BETWEEN 1 AND 3650 AND \"AbandonedDocumentRetentionDays\" BETWEEN 1 AND 3650 AND \"PendingLocalUploadRetentionDays\" BETWEEN 1 AND 3650 AND \"ExpiredUploadTicketRetentionDays\" BETWEEN 1 AND 3650 AND \"EmptyCustomerSessionRetentionDays\" BETWEEN 1 AND 3650 AND \"StaleRefreshTokenRetentionDays\" BETWEEN 1 AND 3650 AND \"DataTransferRawRetentionDays\" BETWEEN 30 AND 3650");
                 table.HasCheckConstraint("CK_PlatformOperationalSettings_SweepHours",
                     "\"ApiRetentionSweepHours\" BETWEEN 1 AND 168 AND \"AgentRetentionSweepHours\" BETWEEN 1 AND 24");
             });
