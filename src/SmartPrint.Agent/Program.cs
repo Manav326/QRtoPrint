@@ -2,7 +2,8 @@ using SmartPrint.Agent;
 
 if (args.Any(argument => argument.Equals("--check-pairing", StringComparison.OrdinalIgnoreCase)))
 {
-    Environment.ExitCode = await AgentPairing.CheckExistingAsync();
+    var pairingBuilder = Host.CreateApplicationBuilder(Array.Empty<string>());
+    Environment.ExitCode = await AgentPairing.CheckExistingAsync(pairingBuilder.Configuration["Agent:ApiBaseUrl"]);
     return;
 }
 
