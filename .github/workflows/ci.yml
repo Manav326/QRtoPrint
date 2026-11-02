@@ -401,8 +401,13 @@ jobs:
             echo "Current Android window focus:"
             adb shell dumpsys window | grep -E 'mCurrentFocus|mFocusedApp' || true
 
+            # Preserve the existing UI suite result but do not let one unrelated
+            # Espresso assertion suppress the separate package-manager lifecycle tests.
+            set +e
             gradle --no-daemon -p apps/android -PsmartPrintServiceUrl="$SMARTPRINT_PUBLIC_BASE_URL" :app:connectedDebugAndroidTest
-            
+            ui_test_status=$?
+            set -e
+
             echo "Building isolated APK N for package-manager lifecycle checks..."
             gradle --no-daemon -p apps/android \
               -PsmartPrintServiceUrl="$SMARTPRINT_PUBLIC_BASE_URL" \
@@ -419,9 +424,22 @@ jobs:
               :app:assembleDebug
             cp apps/android/app/build/outputs/apk/debug/app-debug.apk "$RUNNER_TEMP/smartprint-lifecycle-n1.apk"
 
+            set +e
             bash scripts/qa/android-install-lifecycle.sh \
               "$RUNNER_TEMP/smartprint-lifecycle-n.apk" \
               "$RUNNER_TEMP/smartprint-lifecycle-n1.apk"
+            lifecycle_status=$?
+            set -e
+
+            if [[ "$ui_test_status" -ne 0 ]]; then
+              echo "::error::The pre-existing Android emulator UI suite failed (exit $ui_test_status). Its failure is reported separately from package installation lifecycle checks."
+            fi
+            if [[ "$lifecycle_status" -ne 0 ]]; then
+              echo "::error::Android package installation lifecycle checks failed (exit $lifecycle_status)."
+            fi
+            if [[ "$ui_test_status" -ne 0 || "$lifecycle_status" -ne 0 ]]; then
+              exit 1
+            fi
       - name: Upload Android test reports
         if: always()
         uses: actions/upload-artifact@v7
