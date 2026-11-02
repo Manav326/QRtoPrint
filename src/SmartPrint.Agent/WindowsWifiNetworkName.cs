@@ -64,7 +64,8 @@ internal static class WindowsWifiNetworkName
                 return null;
 
             var ssidLength = Marshal.ReadInt32(data, ConnectionAttributesSsidOffset);
-            if (ssidLength is < 1 or > MaximumSsidBytes || dataSize < Dot11SsidBytesOffset + ssidLength)
+            if (ssidLength is < 1 or > MaximumSsidBytes ||
+                dataSize < (uint)(Dot11SsidBytesOffset + ssidLength))
                 return null;
 
             var bytes = new byte[ssidLength];
