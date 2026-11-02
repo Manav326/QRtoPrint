@@ -1,4 +1,5 @@
 using System.Net;
+using System.Text;
 using System.Net.NetworkInformation;
 using System.Net.Sockets;
 
@@ -56,7 +57,7 @@ public static class LocalNetworkEndpointDiscovery
                 // Include the current SSID in the preference key so a change of Wi-Fi network
                 // requires an explicit owner selection and a fresh phone check.
                 var selectionId = kind == "Wi-Fi"
-                    ? $"{network.Id}|{ssid ?? "SSID-UNAVAILABLE"}"
+                    ? $"{network.Id}|{Convert.ToHexString(Encoding.UTF8.GetBytes(ssid ?? "SSID-UNAVAILABLE"))}"
                     : network.Id;
 
                 networks.Add(new LocalNetworkAdapter(

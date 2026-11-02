@@ -45,6 +45,16 @@ public sealed class LocalNetworkEndpointDiscoveryTests
     }
 
     [Fact]
+    public void KeepsWifiSsidCaseDifferencesAsDifferentSelections()
+    {
+        var shopWifi = new LocalNetworkAdapter("wifi|53686F7057694669", "ShopWifi", "Wi-Fi", "192.168.31.47", 24);
+        var shopWifiLowerCase = new LocalNetworkAdapter("wifi|73686F7077696669", "shopwifi", "Wi-Fi", "192.168.31.47", 24);
+
+        Assert.Equal(shopWifi.Id, LocalNetworkEndpointDiscovery.SelectNetwork([shopWifi, shopWifiLowerCase], shopWifi.Id)!.Id);
+        Assert.Equal(shopWifiLowerCase.Id, LocalNetworkEndpointDiscovery.SelectNetwork([shopWifi, shopWifiLowerCase], shopWifiLowerCase.Id)!.Id);
+    }
+
+    [Fact]
     public void RejectsRequestsThatArriveOnAnotherLocalAdapter()
     {
         var remotePhone = IPAddress.Parse("192.168.31.99");
