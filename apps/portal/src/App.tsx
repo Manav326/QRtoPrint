@@ -644,7 +644,7 @@ function ShopConsole({ tokens, onSignOut, dark, onToggleTheme }: { tokens: AuthT
         // will synchronize the cloud inventory without enrolling a second time.
       }
 
-      setToast("This computer is securely connected. SmartPrint is discovering its printers.");
+      setToast("This computer is connected. SmartPrint is finding its printers.");
       if (!silent) await reload();
     } catch (exception) {
       if (exception instanceof ApiError && exception.status === 401) {
