@@ -101,6 +101,15 @@ export default function PlatformDataNetworkSection({ tokens }: { tokens: AuthTok
             <span>Window: {new Date(report.fromUtc).toLocaleString()} – {new Date(report.toUtc).toLocaleString()}</span>
             <span>Generated {new Date(report.generatedUtc).toLocaleString()}</span>
           </div>
+          {!report.coverageComplete && (
+            <section className="platform-data-measurement-note" role="status">
+              <div className="platform-data-note-icon"><Activity size={17}/></div>
+              <div>
+                <strong>Historical transfer measurement is not complete for this entire period</strong>
+                <p>Measured collection began {new Date(report.measurementStartedUtc).toLocaleString()}. This report includes document and transfer activity only from that date; earlier documents are not backfilled as network traffic.</p>
+              </div>
+            </section>
+          )}
 
           <div className="platform-data-metrics-grid">
             <MetricCard
@@ -149,10 +158,13 @@ export default function PlatformDataNetworkSection({ tokens }: { tokens: AuthTok
               <small>Metadata-reported file bytes, not encrypted disk occupancy.</small>
             </article>
             <article className="panel platform-data-storage-card">
-              <div className="platform-data-panel-title"><Router size={16}/> Shop Agent documents</div>
-              <strong>{formatGb(report.storage.agentLogicalDocumentBytes)}</strong>
-              <span>{formatCount(report.storage.agentLogicalDocumentCount)} active logical source documents</span>
-              <small>Metadata-reported local source bytes; physical Agent disk usage is not yet collected.</small>
+              <div className="platform-data-panel-title"><Router size={16}/> SmartPrint storage on shop computers</div>
+              <strong>{report.storage.agentCount === 0 ? "No Agents" : report.storage.freshAgentCount === 0 ? "Unavailable" : formatGb(report.storage.localQueueDiskBytes)}</strong>
+              <span>{formatCount(report.storage.freshAgentCount)} of {formatCount(report.storage.agentCount)} Agents have snapshots newer than {report.storage.snapshotFreshnessMinutes} minutes</span>
+              <small>
+                {formatGb(report.storage.localQueueLogicalBytes)} logical documents · {formatGb(report.storage.localOutputFileBytes)} tracked PDF exports
+                {report.storage.storageMeasurementComplete ? " · all paired Agents reporting" : " · stale or missing Agent snapshots excluded"}
+              </small>
             </article>
           </div>
 
@@ -164,12 +176,12 @@ export default function PlatformDataNetworkSection({ tokens }: { tokens: AuthTok
               <table className="platform-data-table">
                 <thead>
                   <tr>
-                    <th>Shop</th><th>Cloud ingress</th><th>Cloud egress</th><th>Shop LAN</th><th>Total payload</th><th>Transfer legs</th>
+                    <th>Shop</th><th>Cloud ingress</th><th>Cloud egress</th><th>Shop LAN</th><th>Total payload</th><th>Agent queue disk</th><th>Transfer events</th>
                   </tr>
                 </thead>
                 <tbody>
                   {report.shops.length === 0 ? (
-                    <tr><td colSpan={6} className="platform-data-empty">No measured document transfers in this period.</td></tr>
+                    <tr><td colSpan={7} className="platform-data-empty">No shops are available for this report.</td></tr>
                   ) : report.shops.map(shop => (
                     <tr key={shop.tenantId}>
                       <td><strong>{shop.shopName}</strong><small>{shop.shopStatus}</small></td>
@@ -177,6 +189,10 @@ export default function PlatformDataNetworkSection({ tokens }: { tokens: AuthTok
                       <td>{formatGb(shop.cloudEgressBytes)}</td>
                       <td>{formatGb(shop.shopLanBytes)}</td>
                       <td><strong>{formatGb(shop.measuredPayloadBytes)}</strong></td>
+                      <td>
+                        {shop.agentCount === 0 ? "No Agent" : shop.freshAgentCount === 0 ? "Unavailable" : formatGb(shop.localQueueDiskBytes)}
+                        <small>{shop.freshAgentCount}/{shop.agentCount} fresh snapshots</small>
+                      </td>
                       <td>{formatCount(shop.transferCount)}<small>{shop.partialTransferCount} partial · {shop.failedTransferCount} failed</small></td>
                     </tr>
                   ))}
@@ -209,7 +225,7 @@ export default function PlatformDataNetworkSection({ tokens }: { tokens: AuthTok
             <div className="platform-data-note-icon"><Activity size={17}/></div>
             <div>
               <strong>Payload measurement, not wire billing</strong>
-              <p>GB uses decimal units (1 GB = 1,000,000,000 bytes). Payload bytes represent original document content. HTTP/multipart headers and TLS overhead are not added; provider-billed traffic must be reconciled against infrastructure or proxy metrics. The current dashboard does not estimate paths that are not instrumented.</p>
+              <p>GB uses decimal units (1 GB = 1,000,000,000 bytes). Payload bytes represent original document content. HTTP/multipart headers and TLS overhead are not added; provider-billed traffic must be reconciled against infrastructure or proxy metrics. Raw transfer events are kept for {report.retention.rawEventRetentionDays} days and then folded into durable daily aggregates. The current dashboard does not estimate paths that are not instrumented.</p>
               <div className="platform-data-unmeasured">
                 <span>Not yet measured:</span>
                 {report.measurementScope.unmeasuredPaths.map(item => <small key={item}>{item}</small>)}
