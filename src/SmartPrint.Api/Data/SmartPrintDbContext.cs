@@ -275,6 +275,7 @@ public sealed class SmartPrintDbContext(DbContextOptions<SmartPrintDbContext> op
             entity.HasKey(x => x.Id);
             entity.Property(x => x.TokenHash).HasMaxLength(64).IsRequired();
             entity.Property(x => x.Status).HasMaxLength(24).IsRequired();
+            entity.Property(x => x.CloudUploadAttemptCount).HasDefaultValue(0);
             entity.HasIndex(x => x.TokenHash).IsUnique();
             entity.HasAlternateKey(x => new { x.TenantId, x.Id });
             entity.HasIndex(x => new { x.TenantId, x.ExpiresUtc });
