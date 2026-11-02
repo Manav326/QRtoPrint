@@ -238,6 +238,18 @@ class MainActivityInstrumentedTest {
     }
 
     @Test
+    fun webViewAllowsOnlyTheAppGatedLocalAgentMixedContentException() {
+        ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+            scenario.onActivity { activity ->
+                val webView = MainActivity::class.java.getDeclaredMethod("ensureWebView").apply {
+                    isAccessible = true
+                }.invoke(activity) as WebView
+                assertEquals(WebSettings.MIXED_CONTENT_ALWAYS_ALLOW, webView.settings.mixedContentMode)
+            }
+        }
+    }
+
+    @Test
     fun printPickerOffersBrowsePhoneAlongsideSmartPrintMyFiles() {
         ActivityScenario.launch(MainActivity::class.java).use { scenario ->
             scenario.onActivity { activity ->

@@ -2034,7 +2034,13 @@ class MainActivity : AppCompatActivity() {
             allowFileAccess = false
             javaScriptCanOpenWindowsAutomatically = false
             setSupportMultipleWindows(false)
-            mixedContentMode = WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE
+            // The print page is HTTPS, but the paired Agent intentionally exposes
+            // its private-LAN status/upload API over HTTP. WebView's compatibility
+            // mixed-content mode blocks active fetch() calls to that endpoint.
+            // Cleartext is enabled at the WebView engine only because every HTTP
+            // request is subsequently denied by shouldInterceptRequest unless it
+            // matches the strict private-IP / TCP 17842 / Agent-route allowlist.
+            mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
             safeBrowsingEnabled = true
         }
         CookieManager.getInstance().setAcceptCookie(true)
