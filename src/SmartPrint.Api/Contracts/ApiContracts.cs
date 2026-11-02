@@ -125,7 +125,8 @@ public sealed record LocalPrintUploadCompletionRequest(
     long SizeBytes,
     string Sha256,
     long ReceivedBytes = 0,
-    long DurationMilliseconds = 0);
+    long DurationMilliseconds = 0,
+    int AttemptNumber = 0);
 
 public sealed record AgentJobReceivedRequest(string Sha256, long SizeBytes);
 
