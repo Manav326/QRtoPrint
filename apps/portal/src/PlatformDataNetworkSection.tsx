@@ -175,7 +175,7 @@ export default function PlatformDataNetworkSection({ tokens }: { tokens: AuthTok
               <small>Metadata-reported file bytes, not encrypted disk occupancy.</small>
             </article>
             <article className="panel platform-data-storage-card">
-              <div className="platform-data-panel-title"><Router size={16}/> SmartPrint storage on shop computers</div>
+              <div className="platform-data-panel-title"><Router size={16}/> Protected Agent queue disk</div>
               <strong>{report.storage.agentCount === 0 ? "No Agents" : report.storage.freshAgentCount === 0 ? "Unavailable" : formatGb(report.storage.localQueueDiskBytes)}</strong>
               <span>{formatCount(report.storage.freshAgentCount)} of {formatCount(report.storage.agentCount)} Agents have snapshots newer than {report.storage.snapshotFreshnessMinutes} minutes</span>
               <small>
@@ -187,7 +187,7 @@ export default function PlatformDataNetworkSection({ tokens }: { tokens: AuthTok
 
           <section className="panel platform-data-table-panel">
             <div className="platform-data-table-heading">
-              <div><h3>Shop-by-shop network usage</h3><p>Only shops with recorded document transfer events appear. Showing up to 100 shops, ordered by measured payload.</p></div>
+              <div><h3>Shop-by-shop network usage</h3><p>Showing up to 100 shops, ordered by measured document payload. Shops without recorded transfers remain visible with zero usage.</p></div>
             </div>
             <div className="platform-data-table-scroll">
               <table className="platform-data-table">
@@ -231,7 +231,7 @@ export default function PlatformDataNetworkSection({ tokens }: { tokens: AuthTok
                   <strong>{formatGb(channel.payloadBytes)}</strong>
                   <span>{formatCount(channel.transferCount)} events</span>
                   <small>{channel.durationSampleCount > 0
-                    ? `Avg. ${Math.round(channel.totalDurationMilliseconds / channel.durationSampleCount).toLocaleString("en-IN")} ms`
+                    ? `Avg. handling ${Math.round(channel.totalDurationMilliseconds / channel.durationSampleCount).toLocaleString("en-IN")} ms`
                     : "Duration unavailable"}</small>
                 </div>
               ))}
@@ -242,7 +242,7 @@ export default function PlatformDataNetworkSection({ tokens }: { tokens: AuthTok
             <div className="platform-data-note-icon"><Activity size={17}/></div>
             <div>
               <strong>Payload measurement, not wire billing</strong>
-              <p>GB uses decimal units (1 GB = 1,000,000,000 bytes). Payload bytes represent original document content. Cloud egress measures bytes written to the API response body, not end-to-end Agent acknowledgement. HTTP/multipart headers and TLS overhead are not added; provider-billed traffic must be reconciled against infrastructure or proxy metrics. Raw transfer events are kept for {report.retention.rawEventRetentionDays} days and then folded into durable daily aggregates. The current dashboard does not estimate paths that are not instrumented.</p>
+              <p>GB uses decimal units (1 GB = 1,000,000,000 bytes). Payload bytes represent original document content. Cloud egress measures bytes written to the API response body, not end-to-end Agent acknowledgement. Elapsed handling time includes API/Agent processing and response writes; it is not a network-latency, bandwidth or throughput test. HTTP/multipart headers and TLS overhead are not added; provider-billed traffic must be reconciled against infrastructure or proxy metrics. Raw transfer events are kept for {report.retention.rawEventRetentionDays} days and then folded into durable daily aggregates. The current dashboard does not estimate paths that are not instrumented.</p>
               <div className="platform-data-unmeasured">
                 <span>Not yet measured:</span>
                 {report.measurementScope.unmeasuredPaths.map(item => <small key={item}>{item}</small>)}
