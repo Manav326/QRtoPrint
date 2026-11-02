@@ -4,6 +4,7 @@ import android.Manifest
 import android.app.Activity
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.graphics.BitmapFactory
 import android.graphics.Canvas
 import android.graphics.Paint
 import android.graphics.RectF
@@ -16,7 +17,9 @@ import android.view.Surface
 import android.view.View
 import android.view.ViewGroup
 import android.widget.FrameLayout
+import android.widget.ImageView
 import android.widget.LinearLayout
+import android.widget.ScrollView
 import android.widget.TextView
 import android.widget.Toast
 import androidx.activity.result.ActivityResultLauncher
@@ -57,7 +60,8 @@ class TabletDocumentScannerActivity : AppCompatActivity() {
     private lateinit var captureButton: MaterialButton
     private lateinit var doneButton: MaterialButton
     private lateinit var undoButton: MaterialButton
-    private lateinit var galleryButton: MaterialButton
+    private lateinit var reviewButton: MaterialButton
+    private lateinit var galleryButton
     private lateinit var permissionLauncher: ActivityResultLauncher<String>
     private lateinit var galleryLauncher: ActivityResultLauncher<Array<String>>
     private lateinit var sessionDirectory: File
@@ -170,6 +174,14 @@ class TabletDocumentScannerActivity : AppCompatActivity() {
             textSize = 12f
             setTextColor(android.graphics.Color.WHITE)
         }
+        reviewButton = controlButton("Review", false).apply {
+            contentDescription = "Review captured pages"
+            isEnabled = false
+            setOnClickListener { showPageReview() }
+        }
+        summary.addView(reviewButton, LinearLayout.LayoutParams(dp(82), dp(40)).apply {
+            marginEnd = dp(10)
+        })
         summary.addView(pageCountView)
         bottomPanel.addView(summary, LinearLayout.LayoutParams(-1, -2).apply {
             bottomMargin = dp(10)
@@ -340,6 +352,167 @@ class TabletDocumentScannerActivity : AppCompatActivity() {
         updatePageActions()
     }
 
+    private fun showPageReview() {
+        if (pages.isEmpty() || composing || captureInProgress) return
+
+        val pageList = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(6), dp(4), dp(6), dp(4))
+        }
+        val scroll = ScrollView(this).apply {
+            isFillViewport = false
+            addView(pageList, ViewGroup.LayoutParams(-1, -2))
+            layoutParams = ViewGroup.LayoutParams(-1, dp(360))
+        }
+        val dialog = AlertDialog.Builder(this)
+            .setTitle("Review captured pages")
+            .setView(scroll)
+            .setPositiveButton("Done", null)
+            .create()
+
+        fun renderPages() {
+            pageList.removeAllViews()
+            if (pages.isEmpty()) {
+                pageList.addView(TextView(this).apply {
+                    text = "No pages in this scan. Capture a page or add a photo to continue."
+                    textSize = 14f
+                    setTextColor(android.graphics.Color.WHITE)
+                    setPadding(dp(12), dp(18), dp(12), dp(18))
+                })
+                return
+            }
+
+            pages.toList().forEachIndexed { index, page ->
+                val row = LinearLayout(this).apply {
+                    orientation = LinearLayout.HORIZONTAL
+                    gravity = Gravity.CENTER_VERTICAL
+                    setPadding(dp(8), dp(5), dp(8), dp(5))
+                    background = GradientDrawable().apply {
+                        setColor(0xFF252B33.toInt())
+                        cornerRadius = dp(12).toFloat()
+                    }
+                }
+                row.addView(TextView(this).apply {
+                    text = "Page " + (index + 1)
+                    textSize = 14f
+                    setTextColor(android.graphics.Color.WHITE)
+                    contentDescription = "Page " + (index + 1) + " of " + pages.size
+                }, LinearLayout.LayoutParams(0, -2, 1f))
+
+                row.addView(controlButton("Preview", false).apply {
+                    minWidth = dp(68)
+                    minHeight = dp(44)
+                    contentDescription = "Preview page " + (index + 1)
+                    setOnClickListener { showPagePreview(page, index + 1) }
+                }, LinearLayout.LayoutParams(dp(76), dp(48)).apply {
+                    marginStart = dp(4)
+                })
+
+                row.addView(controlButton("Up", false).apply {
+                    minWidth = dp(40)
+                    minHeight = dp(44)
+                    contentDescription = "Move page " + (index + 1) + " earlier"
+                    isEnabled = index > 0
+                    setOnClickListener {
+                        if (index in 1 until pages.size) {
+                            val selected = pages.removeAt(index)
+                            pages.add(index - 1, selected)
+                            statusView.text = "Page order updated"
+                            updatePageActions()
+                            renderPages()
+                        }
+                    }
+                }, LinearLayout.LayoutParams(dp(48), dp(48)).apply {
+                    marginStart = dp(4)
+                })
+
+                row.addView(controlButton("Down", false).apply {
+                    minWidth = dp(42)
+                    minHeight = dp(44)
+                    contentDescription = "Move page " + (index + 1) + " later"
+                    isEnabled = index < pages.lastIndex
+                    setOnClickListener {
+                        if (index in 0 until pages.lastIndex) {
+                            val selected = pages.removeAt(index)
+                            pages.add(index + 1, selected)
+                            statusView.text = "Page order updated"
+                            updatePageActions()
+                            renderPages()
+                        }
+                    }
+                }, LinearLayout.LayoutParams(dp(54), dp(48)).apply {
+                    marginStart = dp(4)
+                })
+
+                row.addView(controlButton("Remove", false).apply {
+                    minWidth = dp(60)
+                    minHeight = dp(44)
+                    contentDescription = "Remove page " + (index + 1)
+                    backgroundTintList = android.content.res.ColorStateList.valueOf(0xFF71383C.toInt())
+                    setOnClickListener {
+                        if (index in pages.indices) {
+                            pages.removeAt(index).delete()
+                            statusView.text = "Page removed"
+                            updatePageActions()
+                            renderPages()
+                        }
+                    }
+                }, LinearLayout.LayoutParams(dp(70), dp(48)).apply {
+                    marginStart = dp(4)
+                })
+
+                pageList.addView(row, LinearLayout.LayoutParams(-1, -2).apply {
+                    bottomMargin = dp(6)
+                })
+            }
+        }
+
+        renderPages()
+        dialog.show()
+    }
+
+    private fun showPagePreview(page: File, pageNumber: Int) {
+        if (!page.isFile) return
+        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        BitmapFactory.decodeFile(page.absolutePath, bounds)
+        if (bounds.outWidth <= 0 || bounds.outHeight <= 0) {
+            Toast.makeText(this, "This page preview is unavailable.", Toast.LENGTH_SHORT).show()
+            return
+        }
+
+        var sampleSize = 1
+        while (maxOf(bounds.outWidth / sampleSize, bounds.outHeight / sampleSize) > 1600) {
+            sampleSize *= 2
+        }
+        val bitmap = BitmapFactory.decodeFile(
+            page.absolutePath,
+            BitmapFactory.Options().apply { inSampleSize = sampleSize }
+        )
+        if (bitmap == null) {
+            Toast.makeText(this, "This page preview is unavailable.", Toast.LENGTH_SHORT).show()
+            return
+        }
+
+        val preview = ImageView(this).apply {
+            setImageBitmap(bitmap)
+            adjustViewBounds = true
+            maxHeight = dp(520)
+            scaleType = ImageView.ScaleType.FIT_CENTER
+            setPadding(dp(4), dp(6), dp(4), dp(6))
+            contentDescription = "Preview of scanned page " + pageNumber
+        }
+        val dialog = AlertDialog.Builder(this)
+            .setTitle("Page " + pageNumber + " preview")
+            .setView(preview)
+            .setPositiveButton("Close", null)
+            .create()
+        dialog.setOnDismissListener {
+            preview.setImageDrawable(null)
+            if (!bitmap.isRecycled) bitmap.recycle()
+        }
+        dialog.show()
+    }
+
     private fun finishScan() {
         if (pages.isEmpty()) {
             Toast.makeText(this, "Capture or add at least one page first.", Toast.LENGTH_SHORT).show()
@@ -384,6 +557,7 @@ class TabletDocumentScannerActivity : AppCompatActivity() {
         if (!::pageCountView.isInitialized) return
         pageCountView.text = pages.size.toString() + " / " + MAX_PAGE_COUNT + " pages"
         undoButton.isEnabled = pages.isNotEmpty() && !captureInProgress && !composing
+        reviewButton.isEnabled = pages.isNotEmpty() && !captureInProgress && !composing
         galleryButton.isEnabled = !captureInProgress && !composing && pages.size < MAX_PAGE_COUNT
         captureButton.isEnabled = imageCapture != null && !captureInProgress &&
             !composing && pages.size < MAX_PAGE_COUNT
