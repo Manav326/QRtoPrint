@@ -1,6 +1,6 @@
 # Windows Print Agent
 
-This is a Windows Service. It pairs with one shop using a single-use enrollment code, stores the returned credential with Windows DPAPI (LocalMachine), maintains an independent cloud heartbeat, synchronizes Windows-installed printer queue inventory on its own schedule, and processes the protected local print queue in a separate worker loop. Heartbeat and inventory polling default to every 30 seconds.
+This is a Windows Service. It pairs with one shop using a single-use enrollment code, stores the returned credential with Windows DPAPI (LocalMachine), maintains an independent cloud heartbeat, synchronizes Windows-installed printer queue inventory on its own schedule, and processes the protected local print queue in a separate worker loop. Heartbeat and inventory polling default to every 30 seconds and use `Agent:HealthSyncIntervalSeconds` (10–60 seconds). Protected print-work polling uses `Agent:PollIntervalSeconds` (10–300 seconds).
 
 ## Local and production portal URL
 
@@ -49,7 +49,7 @@ All Agent-to-cloud API traffic is HTTPS-only for remote hosts. HTTP is permitted
 - Reports only the selected shop connection's RFC1918 IPv4 endpoint in the authenticated cloud heartbeat. On Windows, the desktop Shop Connection panel displays the connected Wi-Fi name (SSID) when available, lets the owner choose an available adapter, and confirms phone reachability with a five-minute, single-use QR test. The result expires after ten minutes and is not treated as a permanent online signal.
 - The local listener is IPv4-only and checks both the remote phone address and the local destination address against the selected adapter's IPv4 subnet. Requests arriving through another local adapter are rejected even though the listener is bound to all IPv4 interfaces. If the saved Wi-Fi/adapter disappears, the Agent stops advertising a replacement network until the owner selects one.
 - The installer adds an inbound rule for TCP 17842 restricted to the local subnet and the Agent executable. The desktop Shop Connection panel lets the owner select the adapter and verify phone-to-Agent access with a short-lived one-time QR test. The Agent synchronises its current public origin through its authenticated heartbeat.
-- Refreshes agent heartbeat and printer status every 30 seconds (configurable from 10 to 300 seconds).
+- Refreshes the Agent heartbeat and printer inventory every 30 seconds (configurable through `Agent:HealthSyncIntervalSeconds` from 10 to 60 seconds, keeping both fresh within the server's two-minute availability window). Protected print-work polling is independently configurable through `Agent:PollIntervalSeconds` from 10 to 300 seconds.
 - Marks previously discovered queues unavailable when they disappear from that computer's WMI inventory.
 - Stores the agent secret and locally received print documents encrypted using DPAPI LocalMachine. The protected queue directory is restricted to SYSTEM and local Administrators.
 - Claims only paid/authorised jobs assigned to one of this agent's live printer queues. The claim has a three-minute lease and a tenant/agent ownership check.
