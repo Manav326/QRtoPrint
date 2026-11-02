@@ -6270,13 +6270,19 @@ publicApi.MapPost("/sessions/current/local-upload-tickets/{ticketId:guid}/cloud-
                 title: "This document exceeds the maximum size configured for this shop's plan."));
 
         await entitlements.AcquireQuotaLockAsync(ticket.TenantId, TenantQuotaResource.MonthlyPrintJob, ct);
-        var quota = await entitlements.CheckCapacityAsync(ticket.TenantId, TenantQuotaResource.MonthlyPrintJob, ct);
-        if (!quota.Allowed)
-            return await RejectAndCleanAsync(Results.Conflict(new
-            {
-                code = quota.Code, message = quota.Message,
-                current = quota.Current, maximum = quota.Maximum
-            }));
+        var hasExistingMonthlyReservation = LocalUploadRecoveryRules.HasActiveMonthlyQuotaReservation(
+            ticket.CreatedUtc, ticket.ExpiresUtc, ticket.CompletedUtc, DateTimeOffset.UtcNow);
+        if (!hasExistingMonthlyReservation)
+        {
+            var quota = await entitlements.CheckCapacityAsync(
+                ticket.TenantId, TenantQuotaResource.MonthlyPrintJob, ct);
+            if (!quota.Allowed)
+                return await RejectAndCleanAsync(Results.Conflict(new
+                {
+                    code = quota.Code, message = quota.Message,
+                    current = quota.Current, maximum = quota.Maximum
+                }));
+        }
 
         _ = await db.PrintJobs.FromSqlInterpolated(
             $"SELECT * FROM \"PrintJobs\" WHERE \"TenantId\" = {ticket.TenantId} AND \"CustomerSessionId\" = {ticket.CustomerSessionId} AND \"BatchId\" = {ticket.BatchId} FOR UPDATE")

@@ -26,6 +26,38 @@ public sealed class LocalUploadRecoveryRulesTests
             now, now, TimeSpan.Zero));
     }
 
+    [Fact]
+    public void ActiveSameMonthTicketReusesItsMonthlyPrintJobReservation()
+    {
+        var now = new DateTimeOffset(2026, 11, 2, 12, 0, 0, TimeSpan.Zero);
+        Assert.True(LocalUploadRecoveryRules.HasActiveMonthlyQuotaReservation(
+            now.AddMinutes(-5), now.AddMinutes(10), null, now));
+    }
+
+    [Theory]
+    [InlineData(false, 10, true)]
+    [InlineData(false, -1, false)]
+    [InlineData(true, 10, false)]
+    public void ExpiredCompletedOrPriorMonthTicketDoesNotReuseMonthlyReservation(
+        bool priorMonth, int expiryOffsetMinutes, bool expected)
+    {
+        var now = new DateTimeOffset(2026, 11, 2, 12, 0, 0, TimeSpan.Zero);
+        var created = priorMonth
+            ? now.AddDays(-2)
+            : now.AddMinutes(-5);
+        DateTimeOffset? expires = now.AddMinutes(expiryOffsetMinutes);
+        Assert.Equal(expected, LocalUploadRecoveryRules.HasActiveMonthlyQuotaReservation(
+            created, expires.Value, null, now));
+    }
+
+    [Fact]
+    public void CompletedTicketDoesNotReuseMonthlyReservation()
+    {
+        var now = new DateTimeOffset(2026, 11, 2, 12, 0, 0, TimeSpan.Zero);
+        Assert.False(LocalUploadRecoveryRules.HasActiveMonthlyQuotaReservation(
+            now.AddMinutes(-5), now.AddMinutes(10), now.AddMinutes(-1), now));
+    }
+
     [Theory]
     [InlineData(1024, 1024, true)]
     [InlineData(1024, 1023, false)]
