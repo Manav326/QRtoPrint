@@ -38,6 +38,8 @@ public sealed class LocalAgentApiState
         lock (sync)
         {
             ClearPhoneProbeCore();
+            phoneVerifiedNetworkId = null;
+            phoneVerifiedUtc = null;
             phoneProbeHash = hash;
             phoneProbeNetworkId = networkId;
             phoneProbeExpiresUtc = expiresUtc;
