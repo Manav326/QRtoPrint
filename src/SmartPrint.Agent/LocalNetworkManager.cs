@@ -44,6 +44,9 @@ public sealed class LocalNetworkManager(LocalNetworkPreferenceStore preferences,
 
     public LocalPhoneTest StartPhoneTest()
     {
+        if (!state.IsRunning)
+            throw new InvalidOperationException("SmartPrint is still starting. Try again in a moment.");
+
         var snapshot = GetSnapshot();
         var endpoint = snapshot.Endpoints.FirstOrDefault();
         if (snapshot.SelectedNetworkId is null || endpoint is null)
