@@ -38,9 +38,12 @@ test("Android customer station keeps the shared print page and offers native loc
     new URL("../../android/app/src/main/java/com/quantaedge/smartprint/MainActivity.kt", import.meta.url),
     "utf8"
   );
+  const apiSource = readFileSync(new URL("../src/api.ts", import.meta.url), "utf8");
 
   assert.match(appSource, /function CustomerPrintFlow\(/);
   assert.match(appSource, /requestSmartPrintNativeLocalNetworkAccess/);
+  assert.match(appSource, /bridge\.addEventListener\("message",handleReply\)/);
+  assert.match(apiSource, /value\.startsWith\("localNetworkAccess:"\)/);
   assert.match(appSource, /Tap Check Wi-Fi to connect to this shop/);
   assert.match(androidSource, /override fun onShowFileChooser\([\s\S]*?showPicker\(\)/);
   assert.match(androidSource, /text\("SmartPrint My Files"/);

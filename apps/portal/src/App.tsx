@@ -2819,30 +2819,30 @@ async function requestSmartPrintNativeLocalNetworkAccess():Promise<"granted"|"de
   const bridge=(window as Window & {
     SmartPrintNative?: {
       postMessage:(message:string)=>void;
-      onmessage?:((event:MessageEvent)=>void)|null;
+      addEventListener:(type:string,listener:(event:MessageEvent)=>void)=>void;
+      removeEventListener:(type:string,listener:(event:MessageEvent)=>void)=>void;
     };
   }).SmartPrintNative;
-  if(!bridge||typeof bridge.postMessage!=="function")return "unavailable";
+  if(!bridge?.postMessage||!bridge.addEventListener||!bridge.removeEventListener)return "unavailable";
 
   return new Promise(resolve=>{
     let settled=false;
     let timeout:number|undefined;
-    const previousHandler=bridge.onmessage??null;
     const finish=(result:"granted"|"denied"|"not_required"|"unavailable")=>{
       if(settled)return;
       settled=true;
       if(timeout!==undefined)window.clearTimeout(timeout);
-      bridge.onmessage=previousHandler;
+      bridge.removeEventListener("message",handleReply);
       resolve(result);
     };
-    bridge.onmessage=(event:MessageEvent)=>{
+    const handleReply=(event:MessageEvent)=>{
       const value=typeof event.data==="string"?event.data:"";
       if(value==="localNetworkAccess:granted")finish("granted");
       else if(value==="localNetworkAccess:denied")finish("denied");
       else if(value==="localNetworkAccess:not_required")finish("not_required");
-      else previousHandler?.(event);
     };
     timeout=window.setTimeout(()=>finish("unavailable"),30000);
+    bridge.addEventListener("message",handleReply);
     try{bridge.postMessage("requestLocalNetworkAccess");}
     catch{finish("unavailable");}
   });
