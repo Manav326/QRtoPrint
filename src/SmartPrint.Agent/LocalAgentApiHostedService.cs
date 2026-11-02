@@ -71,12 +71,25 @@ public sealed class LocalAgentApiState
         finally { CryptographicOperations.ZeroMemory(candidateHash); }
     }
 
-    public DateTimeOffset? GetPhoneVerifiedUtc(string networkId)
+    public DateTimeOffset? GetPhoneVerifiedUtc(string networkId, DateTimeOffset? now = null)
     {
         lock (sync)
-            return string.Equals(phoneVerifiedNetworkId, networkId, StringComparison.OrdinalIgnoreCase)
-                ? phoneVerifiedUtc
-                : null;
+        {
+            if (!string.Equals(phoneVerifiedNetworkId, networkId, StringComparison.OrdinalIgnoreCase) ||
+                phoneVerifiedUtc is null)
+                return null;
+
+            // A successful scan proves that the phone reached this exact network
+            // recently. It is not a permanent "online" claim.
+            if (phoneVerifiedUtc < (now ?? DateTimeOffset.UtcNow).AddMinutes(-10))
+            {
+                phoneVerifiedNetworkId = null;
+                phoneVerifiedUtc = null;
+                return null;
+            }
+
+            return phoneVerifiedUtc;
+        }
     }
 
     public void ClearPhoneVerification()
