@@ -1,6 +1,6 @@
 # Windows Print Agent
 
-This is a Windows Service. It pairs with one shop using a single-use enrollment code, stores the returned credential with Windows DPAPI (LocalMachine), heartbeats to the Smart Print API, and synchronizes Windows-installed printer queue inventory every 30 seconds.
+This is a Windows Service. It pairs with one shop using a single-use enrollment code, stores the returned credential with Windows DPAPI (LocalMachine), maintains an independent cloud heartbeat, synchronizes Windows-installed printer queue inventory on its own schedule, and processes the protected local print queue in a separate worker loop. Heartbeat and inventory polling default to every 30 seconds.
 
 ## Local and production portal URL
 
@@ -35,7 +35,11 @@ To remove the Windows Service, run scripts\uninstall-agent-service.ps1 from an e
 
 Direct customer document upload over shop Wi-Fi is implemented. The customer portal obtains a one-use upload grant from the API, sends document bytes to this paired Agent, and the Agent validates the hash and document structure before storing the file in its DPAPI-protected local queue. The API retains only job/document metadata, SHA-256, page analysis and quote/payment/dispatch state. The same PrintJob is later authorised by the shop and claimed by this Agent after manual payment verification; the cloud is not asked to download a LOCAL_AGENT document.
 
-The cloud-assisted upload path remains available as a customer-selected fallback. Browser uploads require a secure HTTPS customer portal origin and any Local Network Access permission required by the browser. The Agent limits inbound access to the connected local subnet and does not ask the shop owner to change the Windows network profile. The current HTTPS origin is learned from the Agent's authenticated heartbeat. Do not use an insecure HTTP portal for direct local uploads.
+Cloud-assisted uploads use the shop's HTTPS customer portal and API, and the customer UI selects this path by default when the shop's subscription includes Cloud-assisted Printing. Documents are sent to the cloud service over HTTPS, then handed to the paired Agent over its authenticated HTTPS connection. This is the encrypted-in-transit option.
+
+Shop Wi-Fi direct upload is a separate, opt-in local-network path. The customer portal itself must still be HTTPS, and browsers may require the customer to grant Local Network Access permission. The browser connects to the Agent's private IPv4 endpoint on TCP 17842 using local HTTP. This is intentional: customer phones on arbitrary shop networks do not automatically trust a self-signed certificate issued by an individual Windows PC, and a publicly trusted certificate for a changing private IP would require extra per-shop DNS/router configuration or a public tunnel. The direct local transfer is therefore **not encrypted in transit**. It remains restricted to the selected shop subnet, trusted portal origins, one-use upload grants and the paired Agent identity. The UI labels this mode clearly; customers who require encrypted document transfer should choose Cloud-assisted upload when it is included in the shop's plan.
+
+All Agent-to-cloud API traffic is HTTPS-only for remote hosts. HTTP is permitted only for loopback development. Existing installations with a legacy remote HTTP API address migrate to the HTTPS origin configured by the signed Windows installer before an Agent secret is sent; without a valid HTTPS configuration, cloud requests fail closed. The current canonical HTTPS portal origin and CORS allow-list are refreshed from the Agent's authenticated heartbeat. The Agent does not open port 17842 to the internet and does not ask the shop owner to change the Windows network profile.
 
 - Queries Win32_Printer through WMI for installed queue name, driver, port, status and default queue.
 - Supports multiple installed Windows queues on one paired desktop. SmartPrint keeps distinct queue names separate even when they share a port; the shop workspace flags possible duplicates for owner review rather than merging them automatically.
