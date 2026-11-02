@@ -1,11 +1,12 @@
 import { useEffect, useState, type ReactNode } from "react";
 import {
-  Activity, Building2, CheckCircle2, ChevronLeft, ChevronRight,
+  Activity, ArrowDownUp, Building2, CheckCircle2, ChevronLeft, ChevronRight,
   Clock3, CreditCard, Layers3, LogOut, Menu, Monitor, PauseCircle, PanelLeftClose, PanelLeftOpen, PlayCircle, Printer, RefreshCw, Search, Settings2, ShieldCheck
 } from "lucide-react";
 import PlatformPlansSection from "./PlatformPlansSection";
 import PlatformSubscriptionsSection from "./PlatformSubscriptionsSection";
 import PlatformOperationsSection from "./PlatformOperationsSection";
+import PlatformDataNetworkSection from "./PlatformDataNetworkSection";
 import { adminPathForSection, adminSectionFromPath } from "./portal-routing";
 import {
   getPlatformOverview, getPlatformTenants, getPlatformTenantStatusHistory, updatePlatformTenantStatus, logout,
@@ -15,7 +16,7 @@ import { readSidebarCollapsedPreference, saveSidebarCollapsedPreference } from "
 import ThemeToggleButton from "./ThemeToggleButton";
 import { formatIstDate, formatIstDateTime } from "./date-time";
 
-type Section = "Overview" | "Tenants" | "Plans" | "Subscriptions" | "Operations";
+type Section = "Overview" | "Tenants" | "Plans" | "Subscriptions" | "Operations" | "Data & Network";
 
 export default function PlatformAdminConsole({
   tokens,
@@ -134,14 +135,20 @@ export default function PlatformAdminConsole({
     setSidebarOpen(false);
   }
 
-  const title = section === "Overview" ? "Platform overview" : section === "Tenants" ? "Shop tenants" : section === "Plans" ? "Plans and entitlements" : section === "Subscriptions" ? "Shop subscriptions" : "Operations and retention";
+  const title = section === "Overview" ? "Platform overview"
+    : section === "Tenants" ? "Shop tenants"
+    : section === "Plans" ? "Plans and entitlements"
+    : section === "Subscriptions" ? "Shop subscriptions"
+    : section === "Operations" ? "Operations and retention"
+    : "Data & Network Intelligence";
   const subtitle = section === "Overview"
     ? "A cross-platform view of tenant health, subscriptions, devices and recent activity."
     : section === "Tenants"
       ? "Find shops and inspect their current subscription and connected-device footprint."
       : section === "Plans" ? "Configure versioned SaaS plans, prices and centrally managed capabilities."
       : section === "Subscriptions" ? "Manage trial and free-plan assignments with a permanent audit trail."
-      : "Configure platform-wide print quotas, retention, cleanup schedules and suspended-shop recovery policy.";
+      : section === "Operations" ? "Configure platform-wide print quotas, retention, cleanup schedules and suspended-shop recovery policy."
+      : "Measure original document movement through cloud transfer and shop Wi-Fi paths.";
 
   return (
     <div className={`app-shell platform-admin-shell${dark ? "" : " light"}${sidebarCollapsed ? " sidebar-collapsed" : ""}`}>
@@ -163,6 +170,7 @@ export default function PlatformAdminConsole({
           <button title="Plans & entitlements" aria-current={section === "Plans" ? "page" : undefined} className={section === "Plans" ? "nav-item active" : "nav-item"} onClick={() => navigate("Plans")}><Layers3 size={17}/><span>Plans & entitlements</span></button>
           <button title="Shop subscriptions" aria-current={section === "Subscriptions" ? "page" : undefined} className={section === "Subscriptions" ? "nav-item active" : "nav-item"} onClick={() => navigate("Subscriptions")}><CreditCard size={17}/><span>Shop subscriptions</span></button>
           <button title="Operations & retention" aria-current={section === "Operations" ? "page" : undefined} className={section === "Operations" ? "nav-item active" : "nav-item"} onClick={() => navigate("Operations")}><Settings2 size={17}/><span>Operations & retention</span></button>
+          <button title="Data & Network Intelligence" aria-current={section === "Data & Network" ? "page" : undefined} className={section === "Data & Network" ? "nav-item active" : "nav-item"} onClick={() => navigate("Data & Network")}><ArrowDownUp size={17}/><span>Data & Network</span></button>
         </nav>
         <div className="sidebar-bottom">
           <div className="platform-security-note"><ShieldCheck size={15}/><span>Platform scope is separate from shop accounts and tenant data.</span></div>
@@ -342,6 +350,7 @@ export default function PlatformAdminConsole({
           {section === "Plans" && <PlatformPlansSection tokens={tokens}/>}
           {section === "Subscriptions" && <PlatformSubscriptionsSection tokens={tokens}/>}
           {section === "Operations" && <PlatformOperationsSection tokens={tokens}/>}
+          {section === "Data & Network" && <PlatformDataNetworkSection tokens={tokens}/>}
         </div>
       </main>
     </div>
