@@ -995,8 +995,8 @@ async function uploadCustomerLocalTicketViaCloud(
   ticket: CustomerLocalUploadTicket,
   grantToken: string
 ): Promise<UploadedPrintJob> {
-  const form = new FormData();
-  form.append("file", file, file.name);
+  const form = ticket.completed ? undefined : new FormData();
+  if (form) form.append("file", file, file.name);
   return apiRequest<UploadedPrintJob>(
     `/api/v1/public/sessions/current/local-upload-tickets/${encodeURIComponent(ticket.id)}/cloud-recovery`,
     {
@@ -1122,6 +1122,24 @@ export async function uploadCustomerDocumentLocally(
       );
     }
     throw exception;
+  }
+
+  if (ticket.completed) {
+    // The document/job already exists. Reconcile its canonical status over the
+    // API without retransmitting bytes or requiring Cloud-assisted new uploads.
+    try {
+      const completed = await uploadCustomerLocalTicketViaCloud(
+        sessionToken, file, ticket, grantToken
+      );
+      return {
+        ...completed,
+        job: { ...completed.job, batchId: ticket.batchId ?? completed.job.batchId ?? null }
+      };
+    } catch {
+      throw new LocalUploadOutcomeUnknownError(
+        "SmartPrint has your original upload recorded. The shop connection could not refresh its status just now; retry this same file to restore the existing print request. No new upload or print job has been created."
+      );
+    }
   }
 
   const form = new FormData();
