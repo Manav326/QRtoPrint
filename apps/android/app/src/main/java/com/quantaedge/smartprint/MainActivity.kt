@@ -119,6 +119,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var exportTree: ActivityResultLauncher<Uri?>
     private lateinit var exportArchive: ActivityResultLauncher<String>
     private lateinit var scannerLauncher: ActivityResultLauncher<Intent>
+    private lateinit var customerFileChooserLauncher: ActivityResultLauncher<Intent>
     private lateinit var documentScanLauncher: ActivityResultLauncher<IntentSenderRequest>
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -269,6 +270,16 @@ class MainActivity : AppCompatActivity() {
                 pendingScanNeedsDestination = false
                 pendingScanDestinationPath = ""
             }
+        }
+        customerFileChooserLauncher = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+            val callback = fileCallback ?: return@registerForActivityResult
+            val selected = if (result.resultCode == RESULT_OK) {
+                WebChromeClient.FileChooserParams.parseResult(result.resultCode, result.data)
+            } else null
+            fileCallback = null
+            fileChooserAllowsMultiple = false
+            fileChooserSelectFolders = false
+            callback.onReceiveValue(selected)
         }
         importFiles = registerForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
             if (uris.isNullOrEmpty()) return@registerForActivityResult
@@ -1998,11 +2009,23 @@ class MainActivity : AppCompatActivity() {
                 fileChooserSelectFolders = params.acceptTypes.any { accepted ->
                     accepted.split(',').any { it.trim().equals(FOLDER_PICKER_ACCEPT, ignoreCase = true) }
                 }
-                fileChooserAllowsMultiple = fileChooserSelectFolders ||
-                    params.mode == FileChooserParams.MODE_OPEN_MULTIPLE
-                chooserSelectedFilePaths.clear()
-                chooserSelectedFolderPaths.clear()
-                showPicker()
+                if (fileChooserSelectFolders) {
+                    // Directory upload is an app-supported extension; keep its folder-aware
+                    // selection UI. Ordinary files use Android's system document picker.
+                    fileChooserAllowsMultiple = true
+                    chooserSelectedFilePaths.clear()
+                    chooserSelectedFolderPaths.clear()
+                    showPicker()
+                } else {
+                    fileChooserAllowsMultiple = false
+                    try {
+                        customerFileChooserLauncher.launch(params.createIntent())
+                    } catch (exception: Exception) {
+                        fileCallback?.onReceiveValue(null)
+                        fileCallback = null
+                        toast("Could not open your documents: ${message(exception)}")
+                    }
+                }
                 return true
             }
         }
