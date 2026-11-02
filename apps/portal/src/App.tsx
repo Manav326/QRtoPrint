@@ -3365,11 +3365,14 @@ function CustomerPrintFlow({publicCode,sessionToken,paymentOptions,localAgent,lo
       if(results.length>0)setUploaded(results[0]);
       const localUploadNeedsCloud=uploadMode==="LOCAL"&&exception instanceof ApiError&&
         ["local_print_printer_unavailable","local_upload_printer_unavailable","local_print_agent_unavailable","batch_local_agent_mismatch"].includes(exception.code??"");
-      if(localUploadNeedsCloud)setUploadMode("CLOUD");
+      const canFallbackToCloud=localUploadNeedsCloud&&cloudAssistedPrintingEnabled;
+      if(canFallbackToCloud)setUploadMode("CLOUD");
       setError(localUploadNeedsCloud
-        ?exception instanceof ApiError&&exception.code==="batch_local_agent_mismatch"
-          ?"Some files in this batch are stored on another shop computer. Cloud-assisted upload is now selected; retry the remaining files. The shop can route the complete batch to the computer holding the local files. To move the whole batch to a different computer, start a new batch and upload every file through Cloud-assisted upload."
-          :"The QR station's printer is unavailable. Cloud-assisted upload is now selected; retry the remaining files and the shop can assign one available printer to the whole batch."
+        ?canFallbackToCloud
+          ?exception instanceof ApiError&&exception.code==="batch_local_agent_mismatch"
+            ?"Some files in this batch are stored on another shop computer. Cloud-assisted upload is now selected; retry the remaining files. The shop can route the complete batch to the computer holding those files. To move the whole batch to a different computer, start a new batch and upload every file through Cloud-assisted upload."
+            :"The QR station's printer is unavailable. Cloud-assisted upload is now selected; retry the remaining files and the shop can assign one available printer to the whole batch."
+          :"The shop's local print connection or assigned printer is unavailable. Cloud-assisted uploads are not included in this shop's plan. Ask the shop operator to reconnect the computer or printer."
         :exception instanceof ApiError?exception.message:`Upload stopped after ${completedFingerprints.size} file(s). Retry the selected files to continue; completed files will be skipped.`);
     } finally {setBusy(false);setUploadProgress(null);}
   }
@@ -3753,10 +3756,11 @@ function CustomerPrintFlow({publicCode,sessionToken,paymentOptions,localAgent,lo
 
   return <section className="customer-print-flow">
     <div className="customer-flow-heading"><div><span>STEP 1</span><h2>{nativeAppMode?"Add files":"Add your documents"}</h2></div><span className="upload-limit">PDF, JPG or PNG · Up to 20 files / 50 MB per batch</span></div>
-    {localAgent?.endpoints.length? <div className="customer-upload-modes">
-      <button type="button" className={uploadMode==="LOCAL"?"customer-upload-mode selected":"customer-upload-mode"} onClick={()=>setUploadMode("LOCAL")}><strong>Shop Wi-Fi · local transfer</strong><small>Direct local HTTP · not encrypted in transit</small></button>
-      <button type="button" className={uploadMode==="CLOUD"?"customer-upload-mode selected":"customer-upload-mode"} onClick={()=>setUploadMode("CLOUD")}><strong>Cloud-assisted · HTTPS</strong><small>Encrypted transfer through the API</small></button>
+    {(localAgent?.endpoints.length || cloudAssistedPrintingEnabled) ? <div className="customer-upload-modes">
+      {localAgent?.endpoints.length>0&&<button type="button" className={uploadMode==="LOCAL"?"customer-upload-mode selected":"customer-upload-mode"} onClick={()=>setUploadMode("LOCAL")}><strong>Shop Wi-Fi · local transfer</strong><small>Direct local HTTP · not encrypted in transit</small></button>}
+      {cloudAssistedPrintingEnabled&&<button type="button" className={uploadMode==="CLOUD"?"customer-upload-mode selected":"customer-upload-mode"} onClick={()=>setUploadMode("CLOUD")}><strong>Cloud-assisted · HTTPS</strong><small>Encrypted transfer through the API</small></button>}
     </div>:null}
+    {customerUploadUnavailable&&<div className="customer-upload-local-note" role="status">This shop's print computer is not connected, and cloud-assisted uploads are not included in its plan. Ask the shop operator to reconnect SmartPrint.</div>}
     <div className="customer-upload-picker-grid">
       <label className="customer-upload-zone">
         <input type="file" multiple disabled={batchLockedForPayment} accept=".pdf,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png" onChange={event=>{chooseFiles(Array.from(event.currentTarget.files||[]),consumeSmartPrintNativePickerGroups());event.currentTarget.value="";}}/>
@@ -3815,7 +3819,7 @@ function CustomerPrintFlow({publicCode,sessionToken,paymentOptions,localAgent,lo
     </div>}
     {files.length>0&&<small className="customer-upload-local-note">Folder defaults apply to every file. Set an individual file to Custom for an exception.</small>}
     {previewUrl&&file&&<div className="customer-file-preview"><div className="customer-file-label"><FileText size={15}/><span>Preview · {file.name}</span></div>{file.type==="application/pdf"||/\.pdf$/i.test(file.name)?<iframe src={previewUrl} title={file.name+" preview"}/>:<img src={previewUrl} alt={file.name+" preview"}/>}</div>}
-    {files.length>0&&<button className="customer-flow-button" disabled={busy||pendingFilesCount===0||(uploadMode==="LOCAL"&&!localReady)} onClick={()=>void upload()}>{busy?<span className="button-spinner"/>:<><UploadIcon/>{uploadMode==="LOCAL"&&localAgent?"Upload "+pendingFilesCount+" file(s) to shop":"Upload "+pendingFilesCount+" file(s)"}</>}</button>}
+    {files.length>0&&<button className="customer-flow-button" disabled={busy||customerUploadUnavailable||pendingFilesCount===0||(uploadMode==="LOCAL"&&!localReady)} onClick={()=>void upload()}>{busy?<span className="button-spinner"/>:<><UploadIcon/>{uploadMode==="LOCAL"&&localAgent?"Upload "+pendingFilesCount+" file(s) to shop":"Upload "+pendingFilesCount+" file(s)"}</>}</button>}
     {uploadProgress&&<div className="customer-upload-progress"><span>{uploadProgress.currentFile?`Uploading ${Math.min(uploadProgress.completed+1,uploadProgress.total)} of ${uploadProgress.total}: ${uploadProgress.currentFile}`:`${uploadProgress.completed} of ${uploadProgress.total} files uploaded`}</span><div><i style={{width:`${uploadProgress.total?uploadProgress.completed/uploadProgress.total*100:0}%`}}/>{uploadProgress.currentFile&&<b aria-hidden="true"/>}</div><small>The count advances when each document finishes uploading.</small></div>}
     {files.length>0&&uploadMode==="LOCAL"&&localAgent&&<small className="customer-upload-local-note">{nativeAppMode?(localReady?"Direct shop Wi-Fi transfer uses local HTTP and is not encrypted in transit. Choose Cloud-assisted for HTTPS.":"Check shop Wi-Fi."):localReady?"Direct shop Wi-Fi transfer uses local HTTP and is not encrypted in transit. Choose Cloud-assisted for HTTPS encryption.":"Tap Check shop Wi-Fi above first to grant the browser permission."}</small>}
     {files.length>0&&uploadMode==="CLOUD"&&localAgent&&<small className="customer-upload-local-note">{nativeAppMode?"Encrypted HTTPS cloud transfer.":"HTTPS cloud-assisted transfer: files are encrypted in transit to the API and then transferred securely to the shop computer."}</small>}
