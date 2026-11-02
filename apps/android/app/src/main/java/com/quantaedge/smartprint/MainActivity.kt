@@ -295,11 +295,8 @@ class MainActivity : AppCompatActivity() {
                 showPrint()
             } else {
                 try {
-                    try {
-                        contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                    } catch (_: SecurityException) {
-                        // The selected folder is copied immediately; a persistent grant is not required.
-                    }
+                    // Read the selected tree under its temporary picker grant only; the
+                    // customer's folder permission is not retained after this copy completes.
                     val selection = stageCustomerFolder(uri)
                     fileChooserAllowsMultiple = true
                     chooseFiles(selection.first, selection.second)
