@@ -769,6 +769,18 @@ export async function saveNativeCustomerPrintSession(publicCode: string, token: 
   return (await nativeCustomerBridgeRequest(`saveCustomerPrintSession|${publicCode}|${token}`)) === "OK";
 }
 
+export async function saveNativeCustomerShopProfile(
+  publicCode: string,
+  shop: { displayName: string; logoUrl?: string | null; accentColor?: string | null }
+): Promise<boolean> {
+  const payload = encodeURIComponent(JSON.stringify({
+    displayName: shop.displayName,
+    logoUrl: shop.logoUrl ?? null,
+    accentColor: shop.accentColor ?? null
+  }));
+  return (await nativeCustomerBridgeRequest(`setCustomerShopProfile|${publicCode}|${payload}`)) === "OK";
+}
+
 export async function clearNativeCustomerPrintSession(publicCode: string): Promise<void> {
   await nativeCustomerBridgeRequest(`clearCustomerPrintSession|${publicCode}`);
 }

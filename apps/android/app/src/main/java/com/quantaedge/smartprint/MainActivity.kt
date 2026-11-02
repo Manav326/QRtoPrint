@@ -4,6 +4,8 @@ import android.content.ClipData
 import android.content.ClipDescription
 import android.content.Intent
 import android.database.Cursor
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import android.net.Uri
 import android.os.Bundle
 import android.provider.OpenableColumns
@@ -44,6 +46,8 @@ import androidx.webkit.WebViewCompat
 import androidx.webkit.WebViewFeature
 import com.google.android.material.appbar.MaterialToolbar
 import com.google.android.material.bottomnavigation.BottomNavigationView
+import com.google.android.material.navigation.NavigationBarView
+import com.google.android.material.navigationrail.NavigationRailView
 import com.google.android.material.button.MaterialButton
 import com.google.android.material.card.MaterialCardView
 import com.google.android.material.bottomsheet.BottomSheetDialog
@@ -53,7 +57,9 @@ import com.google.mlkit.vision.documentscanner.GmsDocumentScannerOptions
 import com.google.mlkit.vision.documentscanner.GmsDocumentScanning
 import com.google.mlkit.vision.documentscanner.GmsDocumentScanningResult
 import org.json.JSONArray
+import org.json.JSONObject
 import java.io.ByteArrayInputStream
+import java.io.ByteArrayOutputStream
 import java.io.File
 import java.io.FileInputStream
 import java.text.SimpleDateFormat
@@ -62,6 +68,8 @@ import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.util.Date
 import java.util.Locale
+import java.net.HttpURLConnection
+import java.net.URL
 import java.util.zip.ZipEntry
 import java.util.zip.ZipOutputStream
 
@@ -83,8 +91,11 @@ class MainActivity : AppCompatActivity() {
     private lateinit var customerPrintSessionStore: CustomerPrintSessionStore
     private lateinit var toolbar: MaterialToolbar
     private lateinit var content: FrameLayout
-    private lateinit var navigation: BottomNavigationView
+    private lateinit var navigation: NavigationBarView
     private lateinit var bottomGlass: BlurView
+    private var shopDisplayName: String? = null
+    private var shopLogoUrl: String? = null
+    private var shopAccentColor: String? = null
     private lateinit var accountAction: ImageView
     private var documentViewer: SmartPrintDocumentViewer? = null
     private var viewingDocument: File? = null
@@ -152,6 +163,9 @@ class MainActivity : AppCompatActivity() {
         portalHost = savedInstanceState?.getString("portalHost")
             ?: savedShop.getString("portalHost", null)
             ?: portalUrl?.let { Uri.parse(it).host }
+        shopDisplayName = savedShop.getString("shopDisplayName", null)
+        shopLogoUrl = savedShop.getString("shopLogoUrl", null)
+        shopAccentColor = savedShop.getString("shopAccentColor", null)
         portalUrl?.let { url ->
             val view = ensureWebView()
             val webState = savedInstanceState?.getBundle("webViewState")
@@ -383,13 +397,13 @@ class MainActivity : AppCompatActivity() {
             setTitleTextAppearance(this@MainActivity, R.style.TextAppearance_SmartPrint_Toolbar)
             setBackgroundColor(android.graphics.Color.TRANSPARENT)
             elevation = 0f
-            menu.add(Menu.NONE, SWITCH_SHOP, Menu.NONE, "Switch shop").apply {
-                setIcon(android.R.drawable.ic_menu_camera)
-                setContentDescription("Switch print shop")
-                setTooltipText("Scan another shop QR code")
+            menu.add(Menu.NONE, SWITCH_SHOP, Menu.NONE, "Manage connected shop").apply {
+                setIcon(android.R.drawable.ic_menu_manage)
+                setContentDescription("Manage connected shop")
+                setTooltipText("Open, switch or disconnect this shop")
                 setShowAsAction(android.view.MenuItem.SHOW_AS_ACTION_NEVER)
                 isVisible = false
-                setOnMenuItemClickListener { switchShop(); true }
+                setOnMenuItemClickListener { showShopManager(); true }
             }
             menu.add(Menu.NONE, OPEN_WITH, Menu.NONE, "Open with another app").apply {
                 setShowAsAction(android.view.MenuItem.SHOW_AS_ACTION_NEVER)
@@ -427,7 +441,9 @@ class MainActivity : AppCompatActivity() {
         }
         root.addView(topGlass, FrameLayout.LayoutParams(-1, dp(64), Gravity.TOP))
 
-        navigation = BottomNavigationView(this).apply {
+        val useRail = ResponsiveLayoutPolicy.useNavigationRail(resources.configuration.screenWidthDp)
+        navigation = if (useRail) NavigationRailView(this) else BottomNavigationView(this)
+        navigation.apply {
             menu.add(Menu.NONE, HOME, 0, "Home").apply {
                 setIcon(R.drawable.ic_nav_home); setContentDescription("Home")
             }
@@ -440,14 +456,17 @@ class MainActivity : AppCompatActivity() {
             menu.add(Menu.NONE, ACTIVITY, 3, "Activity").apply {
                 setIcon(R.drawable.ic_nav_activity); setContentDescription("Activity")
             }
-            labelVisibilityMode = BottomNavigationView.LABEL_VISIBILITY_LABELED
-            setItemHorizontalTranslationEnabled(false)
+            labelVisibilityMode = if (useRail || ResponsiveLayoutPolicy.showLabelsOnAllBottomItems(
+                    resources.configuration.screenWidthDp
+                )) NavigationBarView.LABEL_VISIBILITY_LABELED
+                else NavigationBarView.LABEL_VISIBILITY_SELECTED
+            (this as? BottomNavigationView)?.setItemHorizontalTranslationEnabled(false)
             setItemTextAppearanceActive(R.style.TextAppearance_SmartPrint_Navigation)
             setItemTextAppearanceInactive(R.style.TextAppearance_SmartPrint_Navigation)
             itemIconSize = dp(21)
             setItemPaddingTop(dp(4))
             setItemPaddingBottom(dp(4))
-            minimumHeight = dp(64)
+            minimumHeight = dp(if (useRail) 80 else 64)
             backgroundTintList = ColorStateList.valueOf(android.graphics.Color.TRANSPARENT)
             setBackgroundColor(android.graphics.Color.TRANSPARENT)
             itemIconTintList = ColorStateList(
@@ -470,9 +489,15 @@ class MainActivity : AppCompatActivity() {
 
         bottomGlass = BlurView(this).apply {
             foreground = SmartPrintGlass.edge(this@MainActivity)
-            addView(navigation, FrameLayout.LayoutParams(-1, dp(66), Gravity.BOTTOM))
+            if (!useRail) addView(navigation, FrameLayout.LayoutParams(-1, dp(66), Gravity.BOTTOM))
         }
-        root.addView(bottomGlass, FrameLayout.LayoutParams(-1, dp(76), Gravity.BOTTOM))
+        if (useRail) {
+            root.addView(navigation, FrameLayout.LayoutParams(dp(80), -1, Gravity.START or Gravity.TOP).apply {
+                topMargin = dp(64)
+            })
+        } else {
+            root.addView(bottomGlass, FrameLayout.LayoutParams(-1, dp(76), Gravity.BOTTOM))
+        }
 
         ViewCompat.setOnApplyWindowInsetsListener(root) { view, insets ->
             val bars = insets.getInsets(WindowInsetsCompat.Type.systemBars())
@@ -487,9 +512,16 @@ class MainActivity : AppCompatActivity() {
 
     private fun setBottomNavigationVisible(visible: Boolean) {
         val visibility = if (visible) View.VISIBLE else View.GONE
+        val rail = navigation is NavigationRailView
         navigation.visibility = visibility
-        if (::bottomGlass.isInitialized) bottomGlass.visibility = visibility
-        if (::content.isInitialized) content.setPadding(0, dp(64), 0, if (visible) dp(76) else dp(8))
+        if (::bottomGlass.isInitialized) bottomGlass.visibility =
+            if (visible && !rail) View.VISIBLE else View.GONE
+        if (::content.isInitialized) content.setPadding(
+            if (rail) dp(80) else 0,
+            dp(64),
+            0,
+            if (visible && !rail) dp(76) else dp(8)
+        )
     }
 
     private fun resetToolbar(title: String) {
@@ -782,7 +814,7 @@ class MainActivity : AppCompatActivity() {
 
         val shopCard = card().apply {
             strokeWidth = dp(1)
-            setOnClickListener { if (portalUrl != null) showPrint() else showScanPrint() }
+            setOnClickListener { if (portalUrl != null) showShopManager() else showScanPrint() }
         }
         val shopRow = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
@@ -792,24 +824,27 @@ class MainActivity : AppCompatActivity() {
         val shopGlyph = ImageView(this).apply {
             setImageResource(R.drawable.ic_nav_scan_print)
             imageTintList = ColorStateList.valueOf(getColor(R.color.qp_primary))
+            scaleType = ImageView.ScaleType.CENTER_CROP
             setPadding(dp(10), dp(10), dp(10), dp(10))
             background = roundedDrawable(getColor(R.color.qp_soft), dp(13))
+            contentDescription = if (portalUrl == null) "Print at a shop" else "Connected shop logo"
         }
-        shopRow.addView(shopGlyph, LinearLayout.LayoutParams(dp(42), dp(42)))
+        if (portalUrl != null) loadShopLogo(shopGlyph)
+        shopRow.addView(shopGlyph, LinearLayout.LayoutParams(dp(46), dp(46)))
         val shopCopy = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(11), 0, 0, 0)
         }
         shopCopy.addView(text(
-            if (portalUrl == null) "Print at a shop" else "Shop connected",
+            if (portalUrl == null) "Print at a shop" else shopDisplayName ?: "Connected shop",
             14, R.color.qp_text, true
-        ))
+        ).apply { maxLines = 1; ellipsize = android.text.TextUtils.TruncateAt.END })
         shopCopy.addView(text(
-            if (portalUrl == null) "Scan a shop QR" else (portalHost ?: "Print session"),
+            if (portalUrl == null) "Scan a shop QR" else "Connected · tap to manage",
             12, R.color.qp_muted, false
         ).apply { setPadding(0, dp(2), 0, 0) })
         shopRow.addView(shopCopy, LinearLayout.LayoutParams(0, -2, 1f))
-        shopRow.addView(text("›", 25, R.color.qp_muted, false))
+        shopRow.addView(text(if (portalUrl == null) "›" else "⋮", 22, R.color.qp_muted, false))
         shopCard.addView(shopRow)
         column.addView(shopCard, linearParams().apply { topMargin = dp(12); bottomMargin = dp(20) })
 
@@ -1370,7 +1405,7 @@ class MainActivity : AppCompatActivity() {
 
         if (!isPicker && showActions) {
             val more = ImageView(this).apply {
-                setImageResource(android.R.drawable.ic_menu_more)
+                setImageResource(R.drawable.ic_more_vertical)
                 imageTintList = ColorStateList.valueOf(getColor(R.color.qp_muted))
                 contentDescription = "More options for " + file.name
                 setPadding(dp(8), dp(8), dp(8), dp(8))
@@ -1903,6 +1938,8 @@ class MainActivity : AppCompatActivity() {
                                 parts.size == 3 && parts[0] == "saveCustomerPrintSession" && isActiveStationCode(parts[1]) -> {
                                     customerPrintSessionStore.save(parts[1], parts[2]); "OK"
                                 }
+                                parts.size == 3 && parts[0] == "setCustomerShopProfile" && isActiveStationCode(parts[1]) ->
+                                    saveCustomerShopProfile(parts[2])
                                 parts.size == 2 && parts[0] == "clearCustomerPrintSession" && isActiveStationCode(parts[1]) -> {
                                     customerPrintSessionStore.clear(parts[1]); "OK"
                                 }
@@ -2014,6 +2051,100 @@ class MainActivity : AppCompatActivity() {
         return candidate.matches(Regex("^[A-Za-z0-9_-]{32}$")) && candidate == activeCode
     }
 
+    private fun saveCustomerShopProfile(encodedProfile: String): String {
+        val profile = JSONObject(Uri.decode(encodedProfile))
+        val name = profile.optString("displayName").trim().take(100)
+            .ifBlank { "Connected shop" }
+        val logo = profile.optString("logoUrl").trim().takeIf {
+            it.isNotBlank() && it != "null"
+        }?.take(2048)
+        val accent = profile.optString("accentColor").trim().takeIf {
+            it.matches(Regex("^#[0-9A-Fa-f]{6}$"))
+        }
+        getSharedPreferences("smartprint.customer.last-shop", MODE_PRIVATE).edit()
+            .putString("shopDisplayName", name)
+            .putString("shopLogoUrl", logo)
+            .putString("shopAccentColor", accent)
+            .apply()
+        runOnUiThread {
+            shopDisplayName = name
+            shopLogoUrl = logo
+            shopAccentColor = accent
+            if (!isFinishing && !isDestroyed && ::navigation.isInitialized &&
+                navigation.selectedItemId == HOME) showHome()
+        }
+        return "OK"
+    }
+
+    private fun loadShopLogo(imageView: ImageView) {
+        val raw = shopLogoUrl?.takeIf { it.isNotBlank() } ?: return
+        val service = Uri.parse(BuildConfig.SERVICE_BASE_URL)
+        val target = try { URL(URL(BuildConfig.SERVICE_BASE_URL), raw) } catch (_: Exception) { return }
+        val targetUri = Uri.parse(target.toString())
+        if (!targetUri.scheme.equals(service.scheme, true) ||
+            !targetUri.host.equals(service.host, true) ||
+            targetUri.port != service.port || targetUri.userInfo != null) return
+        imageView.tag = raw
+        Thread {
+            val bitmap = try {
+                val connection = target.openConnection() as? HttpURLConnection
+                    ?: return@Thread
+                connection.instanceFollowRedirects = false
+                connection.connectTimeout = 5000
+                connection.readTimeout = 5000
+                connection.setRequestProperty("Accept", "image/png,image/jpeg,image/webp")
+                connection.connect()
+                if (connection.responseCode != 200 ||
+                    (connection.contentLengthLong > 2L * 1024L * 1024L)) {
+                    connection.disconnect()
+                    return@Thread
+                }
+                val bytes = connection.inputStream.use { input ->
+                    val output = ByteArrayOutputStream()
+                    val buffer = ByteArray(8192)
+                    var total = 0
+                    while (true) {
+                        val count = input.read(buffer)
+                        if (count < 0) break
+                        total += count
+                        if (total > 2 * 1024 * 1024) return@use ByteArray(0)
+                        output.write(buffer, 0, count)
+                    }
+                    output.toByteArray()
+                }
+                connection.disconnect()
+                if (bytes.isEmpty()) null else {
+                    val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+                    BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
+                    if (bounds.outWidth <= 0 || bounds.outHeight <= 0) null else {
+                        val sample = maxOf(1, maxOf(bounds.outWidth, bounds.outHeight) / 512)
+                        BitmapFactory.decodeByteArray(
+                            bytes, 0, bytes.size,
+                            BitmapFactory.Options().apply { inSampleSize = sample }
+                        )
+                    }
+                }
+            } catch (_: Exception) { null }
+            if (bitmap != null) runOnUiThread {
+                if (!isFinishing && !isDestroyed && imageView.tag == raw) {
+                    imageView.setPadding(0, 0, 0, 0)
+                    imageView.setImageBitmap(bitmap)
+                } else bitmap.recycle()
+            }
+        }.start()
+    }
+
+    private fun clearShopProfile() {
+        shopDisplayName = null
+        shopLogoUrl = null
+        shopAccentColor = null
+        getSharedPreferences("smartprint.customer.last-shop", MODE_PRIVATE).edit()
+            .remove("shopDisplayName")
+            .remove("shopLogoUrl")
+            .remove("shopAccentColor")
+            .apply()
+    }
+
     private fun allowedAgentLocalEndpoint(uri: Uri, method: String, headers: Map<String, String>): Boolean {
         val preflightMethod = headers.entries.firstOrNull { it.key.equals("Access-Control-Request-Method", ignoreCase = true) }
             ?.value
@@ -2029,11 +2160,71 @@ class MainActivity : AppCompatActivity() {
             uri.host.equals(portalHost, true) &&
             LocalAgentUploadPolicy.isPrivateIpv4Host(uri.host.orEmpty())
 
+    private fun showShopManager() {
+        if (portalUrl == null) {
+            scanQr()
+            return
+        }
+        val shopName = shopDisplayName?.takeIf { it.isNotBlank() } ?: "this shop"
+        showOptionSheet(
+            "Connected to " + shopName,
+            listOf(
+                "Open print station" to { showPrint() },
+                "Switch to another shop" to { switchShop() },
+                "Disconnect this device" to {
+                    showConfirmSheet(
+                        "Disconnect from " + shopName + "?",
+                        "This only removes the shop connection from this device. Shop orders, payments and your saved files are not deleted.",
+                        "Disconnect",
+                        destructive = true
+                    ) { detachShop() }
+                }
+            )
+        )
+    }
+
+    private fun detachShop() {
+        val url = portalUrl
+        val code = url?.let { Uri.parse(it).lastPathSegment }
+            ?.takeIf { it.matches(Regex("^[A-Za-z0-9_-]{32}$")) }
+        if (code != null) customerPrintSessionStore.clear(code)
+
+        val page = webView
+        if (page != null) {
+            page.stopLoading()
+            if (code != null) {
+                val quotedCode = JSONObject.quote(code)
+                page.evaluateJavascript(
+                    "(function(){try{sessionStorage.removeItem('qrtoprint.customer-session');" +
+                        "sessionStorage.removeItem('qrtoprint.customer-session:' + " + quotedCode +
+                        ");}catch(e){}})();"
+                ) {
+                    page.loadUrl("about:blank")
+                    page.clearHistory()
+                }
+            } else {
+                page.loadUrl("about:blank")
+                page.clearHistory()
+            }
+        }
+
+        getSharedPreferences("smartprint.customer.last-shop", MODE_PRIVATE).edit()
+            .remove("portalUrl")
+            .remove("portalHost")
+            .apply()
+        portalUrl = null
+        portalHost = null
+        clearShopProfile()
+        toolbar.menu.findItem(SWITCH_SHOP)?.isVisible = false
+        showHome()
+        toast("Disconnected from this shop on this device. Shop orders and payments are unchanged.")
+    }
+
     private fun switchShop() {
         if (portalUrl == null) { scanQr(); return }
         showConfirmSheet(
             "Switch shop?",
-            "Current orders stay saved.",
+            "Your saved files and completed shop orders stay unchanged.",
             "Scan new shop"
         ) { scanQr() }
     }
@@ -2140,6 +2331,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun confirmShop(link: StationQrLink) {
+        clearShopProfile()
         portalHost = link.host
         portalUrl = link.url
         getSharedPreferences("smartprint.customer.last-shop", MODE_PRIVATE).edit()
@@ -2509,7 +2701,10 @@ class MainActivity : AppCompatActivity() {
         }
     }
     private fun linearParams() = LinearLayout.LayoutParams(-1, -2)
-    private fun frameParams() = FrameLayout.LayoutParams(-1, -1)
+    private fun frameParams(): FrameLayout.LayoutParams {
+        val width = if (resources.configuration.screenWidthDp >= 1200) dp(1120) else -1
+        return FrameLayout.LayoutParams(width, -1, Gravity.TOP or Gravity.CENTER_HORIZONTAL)
+    }
     private fun dp(value: Int) = (value * resources.displayMetrics.density).toInt()
     private fun toast(value: String) = Toast.makeText(this, value, Toast.LENGTH_LONG).show()
     private fun message(e: Exception) = e.message?.takeIf { it.isNotBlank() } ?: "Unexpected error"
