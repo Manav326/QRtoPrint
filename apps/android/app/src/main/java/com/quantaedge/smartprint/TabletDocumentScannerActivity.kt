@@ -61,7 +61,7 @@ class TabletDocumentScannerActivity : AppCompatActivity() {
     private lateinit var doneButton: MaterialButton
     private lateinit var undoButton: MaterialButton
     private lateinit var reviewButton: MaterialButton
-    private lateinit var galleryButton
+    private lateinit var galleryButton: MaterialButton
     private lateinit var permissionLauncher: ActivityResultLauncher<String>
     private lateinit var galleryLauncher: ActivityResultLauncher<Array<String>>
     private lateinit var sessionDirectory: File
