@@ -1885,7 +1885,7 @@ function ShopConnectionPanel({connected}:{connected:boolean}) {
             <div><strong>Scan with a phone on this shop Wi-Fi</strong><p>Open your phone camera, scan this code and open the link. A confirmation will appear on your phone when the connection works.</p><small>This check expires in five minutes.</small></div>
           </div>}
           {verified&&<div className="local-network-result success"><Check size={17}/><span><strong>Phone connection verified</strong><small>Your shop computer can receive customer documents over this connection.</small></span></div>}
-          {expired&&<div className="local-network-result warning"><Clock3 size={17}/><span><strong>Phone check expired</strong><small>Start another check and scan the new code while your phone is on the shop Wi-Fi.</small></span></div>}
+          {expired&&<div className="local-network-result warning"><Clock3 size={17}/><span><strong>Phone not connected yet</strong><small>Make sure the phone is on this same shop Wi-Fi, then start a new check. You can also try another connection above.</small></span></div>}
         </>}
       </>:<div className="local-network-empty"><Wifi size={20}/><div><strong>No shop connection found</strong><p>Connect this computer to the Wi-Fi or network you use at the shop, then refresh.</p></div><button className="secondary-button" type="button" onClick={()=>void refresh()}>Refresh</button></div>}
     </>}
