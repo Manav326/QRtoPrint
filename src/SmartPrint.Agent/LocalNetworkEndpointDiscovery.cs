@@ -95,7 +95,11 @@ public static class LocalNetworkEndpointDiscovery
                 string.Equals(network.Id, preferredNetworkId, StringComparison.OrdinalIgnoreCase));
         }
 
-        return networks.FirstOrDefault();
+        return networks
+            .OrderBy(network => NetworkPriority(network.Kind))
+            .ThenBy(network => network.DisplayName, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(network => network.Id, StringComparer.OrdinalIgnoreCase)
+            .FirstOrDefault();
     }
 
     public static IReadOnlyList<string> Discover(int port = DefaultPort) =>
