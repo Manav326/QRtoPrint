@@ -20,6 +20,19 @@ public sealed class DataTransferEventModelTests
         Assert.Equal("DataTransferEvents", entity!.GetTableName());
         Assert.False(entity.FindProperty(nameof(DataTransferEvent.PayloadBytes))!.IsNullable);
         Assert.True(entity.FindProperty(nameof(DataTransferEvent.NetworkBytes))!.IsNullable);
+        var dailyAggregate = db.Model.FindEntityType(typeof(DataTransferDailyAggregate));
+        Assert.NotNull(dailyAggregate);
+        Assert.Equal("DataTransferDailyAggregates", dailyAggregate!.GetTableName());
+        Assert.Equal(
+            new[]
+            {
+                nameof(DataTransferDailyAggregate.UtcDate),
+                nameof(DataTransferDailyAggregate.TenantId),
+                nameof(DataTransferDailyAggregate.Channel),
+                nameof(DataTransferDailyAggregate.Direction),
+                nameof(DataTransferDailyAggregate.Status)
+            },
+            dailyAggregate.FindPrimaryKey()!.Properties.Select(property => property.Name));
         Assert.Contains(
             entity.GetIndexes(),
             index => index.IsUnique &&
