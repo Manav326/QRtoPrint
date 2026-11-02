@@ -156,7 +156,7 @@ try {
     Assert-True (-not (Test-Path -LiteralPath (Join-Path $env:ProgramFiles "SmartPrint\unins000.exe"))) "Refusing to test on a runner that already has SmartPrint installed."
 
     New-Item -ItemType Directory -Force -Path $fixtureProject | Out-Null
-    @'
+    $fixtureProjectXml = @'
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <OutputType>Exe</OutputType>
@@ -168,8 +168,9 @@ try {
     <ProjectReference Include="__AGENT_PROJECT__" />
   </ItemGroup>
 </Project>
-'@.Replace("__AGENT_PROJECT__", (Join-Path (Get-Location) "src\SmartPrint.Agent\SmartPrint.Agent.csproj")) |
-        Set-Content -LiteralPath (Join-Path $fixtureProject "SmartPrintLifecycleFixture.csproj") -Encoding utf8
+'@
+    $fixtureProjectXml = $fixtureProjectXml.Replace("__AGENT_PROJECT__", (Join-Path (Get-Location) "src\SmartPrint.Agent\SmartPrint.Agent.csproj"))
+    $fixtureProjectXml | Set-Content -LiteralPath (Join-Path $fixtureProject "SmartPrintLifecycleFixture.csproj") -Encoding utf8
 
     @'
 using System.Security.Cryptography;
