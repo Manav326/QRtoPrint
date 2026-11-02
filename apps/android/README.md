@@ -21,7 +21,7 @@ The shop print workflow reuses the existing customer portal and APIs inside the 
 - Create nested folders, import multiple files, or import a directory tree using Android's Storage Access Framework.
 - Export one file or an entire folder tree into a user-selected Android File Manager destination. Multiple selected files export together as a ZIP archive that preserves their original filenames.
 - Open/share files with other Android apps.
-- The customer portal's native picker separates **Select files** and **Choose folders**. File selection shows printable documents while folders are only used for navigation; folder selection shows folder rows only, permits multiple folder selection, and includes supported files directly inside each selected folder (nested subfolders are intentionally not traversed). The picker preserves the current nested-folder location while making selections. Folder names are passed to the portal so each file remains in the correct batch group. The library includes current-folder search, a move destination picker, a document-storage summary and a free-space reserve check.
+- The customer portal's native picker separates **Select files** and **Choose folders**. File selection offers both **SmartPrint My Files** and **Browse phone**. Browse phone uses Android's system document picker and passes selected PDF/JPG/PNG content URIs directly to the existing WebView upload input; files are not copied into the SmartPrint library first. Folder selection remains in SmartPrint My Files, shows folder rows only, permits multiple folder selection, and includes supported files directly inside each selected folder (nested subfolders are intentionally not traversed). The picker preserves the current nested-folder location while making selections. Folder names are passed to the portal so each file remains in the correct batch group. The library includes current-folder search, a move destination picker, a document-storage summary and a free-space reserve check.
 
 ## Print batches and saved PDF editing
 
@@ -50,7 +50,7 @@ The QR station code format is matched to the API's current generator: 24 random 
 
 The CameraX preview feeds frames to bundled ML Kit Barcode Scanning locally. No camera frame is uploaded or retained. Only a decoded QR payload leaves the scanner, and it is accepted only when it matches the HTTPS `/s/{publicCode}` station route.
 
-The embedded customer portal then creates the same station-bound session as the PWA. Cloud-assisted and local Agent upload share the existing API, quote, shop approval, payment and dispatch lifecycle. Local Agent upload is allowed only to private IPv4 addresses on TCP 17842 and its upload path; the customer portal itself remains HTTPS.
+The embedded customer portal then creates the same station-bound session as the PWA. Cloud-assisted and local Agent upload share the existing API, quote, shop approval, payment and dispatch lifecycle. Local Agent upload is allowed only to private IPv4 addresses on TCP 17842 and its upload path; the customer portal itself remains HTTPS. On Android 16, the WebView inherits the host app's local-network access state, so the app requests the transitional Nearby devices permission only when the customer explicitly checks Shop Wi-Fi. Android 17's ACCESS_LOCAL_NETWORK migration is deferred until the app targets API 37.
 
 ## Build
 

@@ -3,8 +3,10 @@ package com.quantaedge.smartprint
 import android.content.ClipData
 import android.content.ClipDescription
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.database.Cursor
 import android.net.Uri
+import android.os.Build
 import android.os.Bundle
 import android.provider.OpenableColumns
 import android.view.Gravity
@@ -33,6 +35,7 @@ import android.widget.Toast
 import androidx.activity.result.ActivityResultLauncher
 import androidx.activity.result.IntentSenderRequest
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.FileProvider
 import androidx.core.view.ViewCompat
@@ -40,6 +43,7 @@ import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import androidx.documentfile.provider.DocumentFile
+import androidx.webkit.JavaScriptReplyProxy
 import androidx.webkit.WebViewCompat
 import androidx.webkit.WebViewFeature
 import com.google.android.material.appbar.MaterialToolbar
@@ -96,6 +100,8 @@ class MainActivity : AppCompatActivity() {
     private var portalUrl: String? = null
     private var portalHost: String? = null
     private var fileCallback: ValueCallback<Array<Uri>>? = null
+    private val pendingLocalNetworkPermissionReplies = mutableListOf<JavaScriptReplyProxy>()
+    private var localNetworkPermissionRequestInProgress = false
     private var exportFile: File? = null
     private var exportFolder: File? = null
     private var archiveFiles: List<File> = emptyList()
@@ -114,6 +120,8 @@ class MainActivity : AppCompatActivity() {
     private var librarySearchQuery = ""
 
     private lateinit var importFiles: ActivityResultLauncher<Array<String>>
+    private lateinit var browsePhoneDocuments: ActivityResultLauncher<Array<String>>
+    private lateinit var localNetworkPermissionLauncher: ActivityResultLauncher<String>
     private lateinit var importTree: ActivityResultLauncher<Uri?>
     private lateinit var exportOne: ActivityResultLauncher<String>
     private lateinit var exportTree: ActivityResultLauncher<Uri?>
@@ -237,6 +245,16 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun registerFileActions() {
+        localNetworkPermissionLauncher = registerForActivityResult(
+            ActivityResultContracts.RequestPermission()
+        ) { granted ->
+            completeLocalNetworkPermissionRequest(granted)
+        }
+        browsePhoneDocuments = registerForActivityResult(
+            ActivityResultContracts.OpenMultipleDocuments()
+        ) { uris ->
+            if (!uris.isNullOrEmpty()) deliverPhoneDocuments(uris)
+        }
         scannerLauncher = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
             if (result.resultCode == RESULT_OK) {
                 val rawValue = result.data?.getStringExtra(QrScannerActivity.EXTRA_RAW_VALUE)
@@ -356,6 +374,61 @@ class MainActivity : AppCompatActivity() {
         documentViewer?.dispose()
         documentViewer = null
         super.onDestroy()
+    }
+
+    private fun completeLocalNetworkPermissionRequest(granted: Boolean) {
+        localNetworkPermissionRequestInProgress = false
+        val response = if (granted) "localNetworkAccess:granted" else "localNetworkAccess:denied"
+        val replies = pendingLocalNetworkPermissionReplies.toList()
+        pendingLocalNetworkPermissionReplies.clear()
+        replies.forEach { reply ->
+            runCatching { reply.postMessage(response) }
+        }
+    }
+
+    private fun requestLocalNetworkAccess(replyProxy: JavaScriptReplyProxy) {
+        val permission = LocalNetworkPermissionPolicy.permissionForDevice(
+            Build.VERSION.SDK_INT,
+            applicationInfo.targetSdkVersion
+        )
+        if (permission == null) {
+            replyProxy.postMessage("localNetworkAccess:not_required")
+            return
+        }
+        if (checkSelfPermission(permission) == PackageManager.PERMISSION_GRANTED) {
+            replyProxy.postMessage("localNetworkAccess:granted")
+            return
+        }
+
+        pendingLocalNetworkPermissionReplies.add(replyProxy)
+        if (localNetworkPermissionRequestInProgress) return
+        localNetworkPermissionRequestInProgress = true
+
+        val preferences = getSharedPreferences("smartprint.local-network", MODE_PRIVATE)
+        val requestedBefore = preferences.getBoolean("nearbyWifiPermissionRequested", false)
+        val shouldExplain = shouldShowRequestPermissionRationale(permission)
+        if (requestedBefore && !shouldExplain) {
+            // Android no longer offers the runtime prompt after repeated denial. The
+            // customer can grant Nearby devices from this app's Android settings.
+            completeLocalNetworkPermissionRequest(false)
+            return
+        }
+
+        val launchPermissionRequest = {
+            preferences.edit().putBoolean("nearbyWifiPermissionRequested", true).apply()
+            localNetworkPermissionLauncher.launch(permission)
+        }
+        if (!requestedBefore || shouldExplain) {
+            AlertDialog.Builder(this)
+                .setTitle("Connect to shop Wi-Fi")
+                .setMessage("Allow SmartPrint to check the shop computer and send selected documents directly over the shop Wi-Fi. Cloud-assisted upload remains available.")
+                .setPositiveButton("Continue") { _, _ -> launchPermissionRequest() }
+                .setNegativeButton("Not now") { _, _ -> completeLocalNetworkPermissionRequest(false) }
+                .setOnCancelListener { completeLocalNetworkPermissionRequest(false) }
+                .show()
+        } else {
+            launchPermissionRequest()
+        }
     }
 
     private fun buildLayout() {
@@ -1098,6 +1171,31 @@ class MainActivity : AppCompatActivity() {
         ).apply { setPadding(0, dp(2), 0, 0) })
         heading.addView(copy, LinearLayout.LayoutParams(0, -2, 1f))
         column.addView(heading, linearParams().apply { bottomMargin = dp(9) })
+        if (isPicker && !fileChooserSelectFolders) {
+            val sourceRow = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                setPadding(dp(2), 0, dp(2), dp(10))
+            }
+            val sourceCopy = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+            }
+            sourceCopy.addView(text("SmartPrint My Files", 13, R.color.qp_text, true))
+            sourceCopy.addView(text("Files already saved in SmartPrint", 11, R.color.qp_muted, false)
+                .apply { setPadding(0, dp(2), 0, 0) })
+            sourceRow.addView(sourceCopy, LinearLayout.LayoutParams(0, -2, 1f))
+            sourceRow.addView(button("Browse phone", false).apply {
+                minHeight = dp(40)
+                setOnClickListener {
+                    try {
+                        browsePhoneDocuments.launch(arrayOf("application/pdf", "image/jpeg", "image/png"))
+                    } catch (e: Exception) {
+                        toast("Phone files could not be opened: " + message(e))
+                    }
+                }
+            }, LinearLayout.LayoutParams(-2, dp(40)).apply { marginStart = dp(8) })
+            column.addView(sourceRow, linearParams().apply { bottomMargin = dp(4) })
+        }
         if (!isPicker) {
             val folderActions = LinearLayout(this).apply {
                 orientation = LinearLayout.HORIZONTAL
@@ -1886,7 +1984,13 @@ class MainActivity : AppCompatActivity() {
                     sourceOrigin.scheme == trustedPage.scheme &&
                     sourceOrigin.host.equals(trustedPage.host, true) &&
                     sourceOrigin.port == trustedPage.port) {
-                    Thread {
+                    if (message.data == "requestLocalNetworkAccess") {
+                        runOnUiThread {
+                            if (!isFinishing && !isDestroyed) requestLocalNetworkAccess(replyProxy)
+                            else runCatching { replyProxy.postMessage("localNetworkAccess:denied") }
+                        }
+                    } else {
+                        Thread {
                         val response = try {
                             val parts = message.data.orEmpty().split("|", limit = 3)
                             when {
@@ -1918,7 +2022,8 @@ class MainActivity : AppCompatActivity() {
                         runOnUiThread {
                             if (!isFinishing && !isDestroyed) replyProxy.postMessage(response)
                         }
-                    }.start()
+                        }.start()
+                    }
                 }
             }
         }
@@ -2247,6 +2352,28 @@ class MainActivity : AppCompatActivity() {
             cancelPicker()
             toast("Could not attach the selected documents: " + message(e))
         }
+    }
+
+    private fun deliverPhoneDocuments(uris: List<Uri>) {
+        val callback = fileCallback ?: return
+        val selected = uris.distinct()
+        if (selected.isEmpty()) return
+        if (selected.size > 20) {
+            toast("Choose up to 20 documents at once.")
+            return
+        }
+        if (!fileChooserAllowsMultiple && selected.size != 1) {
+            toast("This print field accepts one document at a time.")
+            return
+        }
+        fileCallback = null
+        chooserSelectedFilePaths.clear()
+        chooserSelectedFolderPaths.clear()
+        fileChooserAllowsMultiple = false
+        fileChooserSelectFolders = false
+        showPrint()
+        runCatching { callback.onReceiveValue(selected.toTypedArray()) }
+            .onFailure { toast("Could not attach the selected phone documents.") }
     }
 
     private fun cancelPicker() {

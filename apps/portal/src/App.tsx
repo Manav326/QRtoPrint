@@ -2815,6 +2815,39 @@ function buildSecureLocalPortalUrl():string|null {
   }
 }
 
+async function requestSmartPrintNativeLocalNetworkAccess():Promise<"granted"|"denied"|"not_required"|"unavailable"> {
+  const bridge=(window as Window & {
+    SmartPrintNative?: {
+      postMessage:(message:string)=>void;
+      onmessage?:((event:MessageEvent)=>void)|null;
+    };
+  }).SmartPrintNative;
+  if(!bridge||typeof bridge.postMessage!=="function")return "unavailable";
+
+  return new Promise(resolve=>{
+    let settled=false;
+    let timeout:number|undefined;
+    const previousHandler=bridge.onmessage??null;
+    const finish=(result:"granted"|"denied"|"not_required"|"unavailable")=>{
+      if(settled)return;
+      settled=true;
+      if(timeout!==undefined)window.clearTimeout(timeout);
+      bridge.onmessage=previousHandler;
+      resolve(result);
+    };
+    bridge.onmessage=(event:MessageEvent)=>{
+      const value=typeof event.data==="string"?event.data:"";
+      if(value==="localNetworkAccess:granted")finish("granted");
+      else if(value==="localNetworkAccess:denied")finish("denied");
+      else if(value==="localNetworkAccess:not_required")finish("not_required");
+      else previousHandler?.(event);
+    };
+    timeout=window.setTimeout(()=>finish("unavailable"),30000);
+    try{bridge.postMessage("requestLocalNetworkAccess");}
+    catch{finish("unavailable");}
+  });
+}
+
 function CustomerLocalConnection({localAgent,onReady}:{localAgent:CustomerLocalAgent|null;onReady:(ready:boolean)=>void}) {
   const nativeAppMode = navigator.userAgent.includes("SmartPrintAndroid/1");
   const [permissionState,setPermissionState]=useState<PermissionState|"unknown">("unknown");
@@ -2842,6 +2875,16 @@ function CustomerLocalConnection({localAgent,onReady}:{localAgent:CustomerLocalA
     setCheckStatus("checking");
     onReady(false);
     setMessage(nativeAppMode ? "Checking shop Wi-Fi." : "Checking the shop computer. No document is sent by this check.");
+    if(nativeAppMode) {
+      const access=await requestSmartPrintNativeLocalNetworkAccess();
+      if(generation!==checkGeneration.current)return;
+      if(access==="denied") {
+        setCheckStatus("denied");
+        onReady(false);
+        setMessage("Allow SmartPrint to access Nearby devices in Android Settings, then check shop Wi-Fi again. Cloud-assisted upload remains available.");
+        return;
+      }
+    }
 
     let validEndpointCount=0;
     for(const value of localAgent.endpoints.slice(0,8)) {
@@ -2922,14 +2965,13 @@ function CustomerLocalConnection({localAgent,onReady}:{localAgent:CustomerLocalA
       return ()=>{checkGeneration.current++;};
     }
 
-    // A private-LAN/loopback portal talking to another private-LAN Agent
-    // stays within the same or a less-private address space. Chrome does not
-    // need to prompt for local-network permission for this local-to-local path.
-    // Android WebView does not expose Chrome's Local Network Access permission prompt.
-    // Check the paired shop Agent as soon as the customer station session is ready.
+    // Android WebView does not expose Chrome's site-level Local Network Access
+    // prompt. Keep this check user-initiated and let the native app request the
+    // Android 16 transitional permission only when the customer chooses Shop Wi-Fi.
     if(nativeAppMode) {
       setPermissionState("unknown");
-      void checkConnection();
+      setCheckStatus("idle");
+      setMessage("Tap Check Wi-Fi to connect to this shop.");
       return ()=>{checkGeneration.current++;};
     }
 

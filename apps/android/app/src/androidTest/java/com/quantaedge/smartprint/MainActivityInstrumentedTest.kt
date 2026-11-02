@@ -2,7 +2,10 @@ package com.quantaedge.smartprint
 
 import android.content.Context
 import android.graphics.Bitmap
+import android.net.Uri
+import android.webkit.ValueCallback
 import java.io.File
+import java.util.concurrent.atomic.AtomicReference
 import androidx.test.core.app.ActivityScenario
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.espresso.Espresso.onView
@@ -231,6 +234,53 @@ class MainActivityInstrumentedTest {
             onView(allOf(withId(label), withText("Files"))).check(matches(isDisplayed()))
             onView(allOf(withId(label), withText("Print"))).check(matches(isDisplayed()))
             onView(allOf(withId(label), withText("Activity"))).check(matches(isDisplayed()))
+        }
+    }
+
+    @Test
+    fun printPickerOffersBrowsePhoneAlongsideSmartPrintMyFiles() {
+        ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+            scenario.onActivity { activity ->
+                MainActivity::class.java.getDeclaredField("fileChooserAllowsMultiple").apply {
+                    isAccessible = true
+                    setBoolean(activity, true)
+                }
+                MainActivity::class.java.getDeclaredMethod(
+                    "showPicker",
+                    Boolean::class.javaPrimitiveType!!
+                ).apply {
+                    isAccessible = true
+                    invoke(activity, true)
+                }
+            }
+            onView(withText("SmartPrint My Files")).check(matches(isDisplayed()))
+            onView(withText("Browse phone")).check(matches(isDisplayed()))
+        }
+    }
+
+    @Test
+    fun browsePhoneSelectionPassesOriginalContentUrisToTheWebView() {
+        val source = Uri.parse("content://com.android.providers.downloads.documents/document/42")
+        val received = AtomicReference<Array<Uri>?>(null)
+        ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+            scenario.onActivity { activity ->
+                MainActivity::class.java.getDeclaredField("fileCallback").apply {
+                    isAccessible = true
+                    set(activity, ValueCallback<Array<Uri>> { value -> received.set(value) })
+                }
+                MainActivity::class.java.getDeclaredField("fileChooserAllowsMultiple").apply {
+                    isAccessible = true
+                    setBoolean(activity, true)
+                }
+                MainActivity::class.java.getDeclaredMethod(
+                    "deliverPhoneDocuments",
+                    List::class.java
+                ).apply {
+                    isAccessible = true
+                    invoke(activity, listOf(source))
+                }
+            }
+            assertEquals(listOf(source), received.get()?.toList())
         }
     }
 
