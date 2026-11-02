@@ -188,7 +188,7 @@ public sealed class Worker(
     }
 
     private AgentCredentials? LoadSecureCredentials() =>
-        credentialStore.LoadForCloudRequests();
+        credentialStore.LoadForCloudRequests(configuration["Agent:ApiBaseUrl"]);
 
     private IReadOnlyList<string> GetLocalEndpointsForHeartbeat()
     {
