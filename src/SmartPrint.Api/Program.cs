@@ -3794,7 +3794,7 @@ agentApi.MapPost("/local-uploads/{ticketId:guid}/claim", async (
          (stationPrinter.LastSeenUtc != null &&
           stationPrinter.LastSeenUtc >= now.AddMinutes(-2) &&
           (stationPrinter.Status == "Ready" || stationPrinter.Status == "Busy")));
-    if (!stationPrinterIsAvailable)
+    if (stationPrinter is null || !stationPrinterIsAvailable)
     {
         return Results.Conflict(new
         {

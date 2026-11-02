@@ -96,7 +96,7 @@ public sealed class AgentLocalQueueStoreTests
     }
 
     [Fact]
-    public async Task LocalUploadCannotBeClaimedByADifferentPrinter()
+    public async Task LocalUploadCanMoveToAnotherQueueWhenTheServerAuthorisesTheSameComputer()
     {
         var root = CreateTemporaryDirectory();
         try
@@ -107,14 +107,48 @@ public sealed class AgentLocalQueueStoreTests
             var upload = CreateJob(bytes) with { StorageMode = "LOCAL_AGENT" };
             await store.EnqueueLocalUploadAsync(upload, bytes, CancellationToken.None);
 
+            // The API verifies that the new queue belongs to this same Agent before issuing a claim.
             var changedAssignment = upload with
             {
                 PrinterDeviceId = Guid.NewGuid(),
-                QueueName = "Different Windows Queue"
+                PrinterName = "Alternate shop printer",
+                QueueName = "Alternate Windows Queue"
             };
 
+            await store.UpdateFromClaimAsync(changedAssignment, CancellationToken.None);
+
+            var refreshed = store.Find(upload.Id)!;
+            Assert.Equal("ACK_PENDING", refreshed.State);
+            Assert.Equal(changedAssignment.PrinterDeviceId, refreshed.PrinterDeviceId);
+            Assert.Equal("Alternate shop printer", refreshed.PrinterName);
+            Assert.Equal("Alternate Windows Queue", refreshed.QueueName);
+            Assert.True(bytes.AsSpan().SequenceEqual(store.ReadDocument(upload.Id)));
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task LocalUploadClaimRequiresACompletePrinterIdentity()
+    {
+        var root = CreateTemporaryDirectory();
+        try
+        {
+            var store = new AgentLocalQueueStore(root);
+            await store.InitializeAsync(CancellationToken.None);
+            var bytes = "Printer-bound local document"u8.ToArray();
+            var upload = CreateJob(bytes) with { StorageMode = "LOCAL_AGENT" };
+            await store.EnqueueLocalUploadAsync(upload, bytes, CancellationToken.None);
+
             await Assert.ThrowsAsync<InvalidDataException>(() =>
-                store.UpdateFromClaimAsync(changedAssignment, CancellationToken.None));
+                store.UpdateFromClaimAsync(upload with { PrinterDeviceId = null }, CancellationToken.None));
+            await Assert.ThrowsAsync<InvalidDataException>(() =>
+                store.UpdateFromClaimAsync(upload with { PrinterName = string.Empty }, CancellationToken.None));
+            await Assert.ThrowsAsync<InvalidDataException>(() =>
+                store.UpdateFromClaimAsync(upload with { QueueName = null }, CancellationToken.None));
+
             Assert.Equal("LOCAL_UPLOAD_STAGED", store.Find(upload.Id)!.State);
             Assert.True(bytes.AsSpan().SequenceEqual(store.ReadDocument(upload.Id)));
         }
