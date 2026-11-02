@@ -1132,6 +1132,18 @@ export async function uploadCustomerDocumentLocally(
     throw exception;
   }
 
+  const ticketExpiresAt = Date.parse(ticket.expiresUtc);
+  if (!ticket.completed && Number.isFinite(ticketExpiresAt) && ticketExpiresAt <= Date.now()) {
+    // The 15-minute LAN lease has expired and the server confirms no upload was
+    // finalized. Release only this dead attempt so the customer can start fresh.
+    clearCustomerLocalUploadAttempt(sessionToken, file);
+    throw new LocalUploadPreflightError(
+      "The previous shop Wi-Fi upload attempt expired before it was confirmed. Retry the same file to start a fresh upload.",
+      409,
+      "local_upload_ticket_expired"
+    );
+  }
+
   if (ticket.completed) {
     // The document/job already exists. Reconcile its canonical status over the
     // API without retransmitting bytes or requiring Cloud-assisted new uploads.
