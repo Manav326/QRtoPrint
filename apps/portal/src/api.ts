@@ -1139,6 +1139,7 @@ export async function uploadCustomerDocumentLocally(
       const completed = await uploadCustomerLocalTicketViaCloud(
         sessionToken, file, ticket, grantToken
       );
+      clearCustomerLocalUploadAttempt(sessionToken, file);
       return {
         ...completed,
         job: { ...completed.job, batchId: ticket.batchId ?? completed.job.batchId ?? null }
