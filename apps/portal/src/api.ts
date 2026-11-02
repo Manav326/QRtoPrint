@@ -59,6 +59,9 @@ export interface PlatformTenant {
   printerCount: number;
   activePrinterCount: number;
   agentCount: number;
+  onlineAgentCount: number;
+  offlineAgentCount: number;
+  latestAgentHeartbeatUtc: string | null;
   jobsLast30Days: number;
 }
 
