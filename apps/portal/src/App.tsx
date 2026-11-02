@@ -2151,6 +2151,11 @@ function PrintQueuePage({ jobs, printers, agentDevices, searchQuery, loadingBatc
           const colourPrintedPages=payableJobs.reduce((sum,job)=>sum+(job.colourMode==="Colour"?job.pageCount*job.copies:0),0);
           const totalAmount=payableJobs.reduce((sum,job)=>sum+Math.max(0,job.quotedAmountMinor),0);
           const activeBatchJobs=batch.jobs.filter(job=>job.status!=="REJECTED"&&job.status!=="REFUNDED");
+          const localStorageJobs=activeBatchJobs.filter(job=>job.storageMode==="LOCAL_AGENT");
+          const localAgentIds=Array.from(new Set(localStorageJobs.map(job=>job.documentAgentDeviceId).filter((id):id is string=>Boolean(id))));
+          const hasUnidentifiedLocalStorage=localStorageJobs.some(job=>!job.documentAgentDeviceId);
+          const requiredLocalAgentId=localAgentIds.length===1&&!hasUnidentifiedLocalStorage?localAgentIds[0]:null;
+          const localComputerName=localStorageJobs.find(job=>job.documentAgentDeviceName)?.documentAgentDeviceName;
           const assignedPrinterIds=Array.from(new Set(activeBatchJobs.map(job=>job.printerDeviceId).filter((id):id is string=>Boolean(id))));
           const batchHasUnassignedFiles=activeBatchJobs.some(job=>!job.printerDeviceId);
           const lockedBatchJobs=activeBatchJobs.filter(job=>
@@ -2160,6 +2165,10 @@ function PrintQueuePage({ jobs, printers, agentDevices, searchQuery, loadingBatc
           );
           const lockedPrinterIds=Array.from(new Set(lockedBatchJobs.map(job=>job.printerDeviceId).filter((id):id is string=>Boolean(id))));
           const batchPrinterConflict=lockedPrinterIds.length>1;
+          const lockedBatchPrinter=lockedPrinterIds.length===1?printers.find(printer=>printer.id===lockedPrinterIds[0]):undefined;
+          const multipleOrUnknownLocalComputers=localAgentIds.length>1||hasUnidentifiedLocalStorage;
+          const lockedPrinterOnWrongComputer=Boolean(requiredLocalAgentId&&lockedBatchPrinter&&lockedBatchPrinter.agentDeviceId!==requiredLocalAgentId);
+          const localComputerIdentityConflict=multipleOrUnknownLocalComputers||lockedPrinterOnWrongComputer;
           const batchAssignmentIncomplete=assignedPrinterIds.length!==1||batchHasUnassignedFiles;
           const currentBatchPrinterId=!batchAssignmentIncomplete&&assignedPrinterIds.length===1?assignedPrinterIds[0]:"";
           const batchPrinter=printers.find(printer=>printer.id===currentBatchPrinterId);
@@ -2169,9 +2178,13 @@ function PrintQueuePage({ jobs, printers, agentDevices, searchQuery, loadingBatc
               (!job.agentLeaseExpiresUtc||Date.parse(job.agentLeaseExpiresUtc)<=Date.now())) ||
             (job.status==="LOCAL_QUEUE_READY"&&!!job.localQueueReceivedUtc&&!job.spoolerJobId&&!job.spoolerJobName)
           );
-          const availableBatchPrinters=lockedPrinterIds.length===1
-            ?dispatchablePrinters.filter(printer=>printer.id===lockedPrinterIds[0])
-            :dispatchablePrinters;
+          const availableBatchPrinters=localComputerIdentityConflict
+            ?[]
+            :lockedPrinterIds.length===1
+              ?dispatchablePrinters.filter(printer=>printer.id===lockedPrinterIds[0])
+              :requiredLocalAgentId
+                ?dispatchablePrinters.filter(printer=>printer.agentDeviceId===requiredLocalAgentId)
+                :dispatchablePrinters;
           const expanded=expandedBatchKeys.has(batch.key);
           const allPdfsSaved = batch.jobs.length > 0 && batch.jobs.every(job => !!verifiedPdfExportPath(job));
           const singleSavedPdfPath = batch.jobs.length === 1 ? verifiedPdfExportPath(first) : null;
@@ -2197,9 +2210,12 @@ function PrintQueuePage({ jobs, printers, agentDevices, searchQuery, loadingBatc
                   disabled={!!busyJobId||batchPrinterConflict||availableBatchPrinters.length===0}
                   onChange={event=>onAssignPrinter(assignmentJob,event.target.value)}>
                   <option value="">{availableBatchPrinters.length===0?"No available printer":"Choose one printer for this batch"}</option>
-                  {availableBatchPrinters.map(printer=><option key={printer.id} value={printer.id}>{printer.outputMode==="PDF_EXPORT"?"Save PDF · ":""}{printer.displayName} · {printer.status}</option>)}
+                  {availableBatchPrinters.map(printer=><option key={printer.id} value={printer.id}>{printer.outputMode==="PDF_EXPORT"?"Save PDF · ":""}{printer.displayName} · {agentDevices.find(agent=>agent.id===printer.agentDeviceId)?.deviceName||"Shop computer"} · {printer.status}</option>)}
                 </select>}
                 {assignmentJob&&<small className="queue-batch-assignment-note">One printer applies to every active file in this batch.</small>}
+                {requiredLocalAgentId&&!localComputerIdentityConflict&&<small className="queue-batch-assignment-note">Direct-upload files are stored on {localComputerName||"the original shop computer"}. Only printers on that computer are offered. Reconnect it if offline. To switch computers, start a new batch and upload every file through Cloud-assisted upload.</small>}
+                {multipleOrUnknownLocalComputers&&<small className="queue-batch-printer-lock">This batch contains local-only files from different or unidentified computers. Do not start output. Verify whether any pages have printed; then create a new Cloud-assisted batch with every file.</small>}
+                {lockedPrinterOnWrongComputer&&<small className="queue-batch-printer-lock">This batch is locked to a printer on another computer, while some original files remain on {localComputerName||"the original shop computer"}. Do not retry or reroute output. Check which files already printed and have the shop operator reconcile the batch before resubmission.</small>}
                 {batchPrinterConflict&&<small className="queue-batch-printer-lock">This batch has already started on more than one printer. New output is blocked; review the affected files.</small>}
               </div></td>
               <td><Status label={label} tone={tone}/></td>
@@ -2220,7 +2236,11 @@ function PrintQueuePage({ jobs, printers, agentDevices, searchQuery, loadingBatc
                 <strong>{job.outputMode==="PDF_EXPORT"?"PDF export":job.outputConfirmedUtc||job.status==="COMPLETED"?"Printed on":job.spoolerJobId?"Sent to":"Assigned printer"}</strong>
                 <span>{job.printerName}</span>
                 {job.queueName&&job.queueName!==job.printerName&&<small>Windows queue: {job.queueName}</small>}
+                {job.printerAgentName&&<small>Shop computer: {job.printerAgentName}</small>}
+                {job.printerSnapshotUtc&&<small>Print-time identity recorded: {formatIstDateTime(job.printerSnapshotUtc)}</small>}
+                {job.outputConfirmedUtc&&job.outputType!=="PDF_EXPORT"&&<small>Paper output manually confirmed by {job.outputConfirmedByName||"shop operator"} at {formatIstDateTime(job.outputConfirmedUtc)}</small>}
               </div>}
+              {!job.printerName&&job.storageMode==="LOCAL_AGENT"&&job.documentAgentDeviceName&&<div className="queue-batch-file-printer"><Printer size={13}/><strong>Stored on</strong><span>{job.documentAgentDeviceName}</span></div>}
               {batch.jobs.length > 1 && verifiedPdfExportPath(job) && <div className="queue-batch-file-output">
                 <span>Saved PDF location</span>
                 <code>{verifiedPdfExportPath(job)}</code>
@@ -3327,11 +3347,13 @@ function CustomerPrintFlow({publicCode,sessionToken,paymentOptions,localAgent,lo
       setUploadedBatch(results);
       setUploadedFileFingerprints([...completedFingerprints]);
       if(results.length>0)setUploaded(results[0]);
-      const localPrinterUnavailable=uploadMode==="LOCAL"&&exception instanceof ApiError&&
-        ["local_print_printer_unavailable","local_upload_printer_unavailable","local_print_agent_unavailable"].includes(exception.code??"");
-      if(localPrinterUnavailable)setUploadMode("CLOUD");
-      setError(localPrinterUnavailable
-        ?"The QR station's printer is unavailable. Cloud-assisted upload is now selected; retry the remaining files and the shop can assign one available printer to the whole batch."
+      const localUploadNeedsCloud=uploadMode==="LOCAL"&&exception instanceof ApiError&&
+        ["local_print_printer_unavailable","local_upload_printer_unavailable","local_print_agent_unavailable","batch_local_agent_mismatch"].includes(exception.code??"");
+      if(localUploadNeedsCloud)setUploadMode("CLOUD");
+      setError(localUploadNeedsCloud
+        ?exception instanceof ApiError&&exception.code==="batch_local_agent_mismatch"
+          ?"Some files in this batch are stored on another shop computer. Cloud-assisted upload is now selected; retry the remaining files. The shop can route the complete batch to the computer holding the local files. To move the whole batch to a different computer, start a new batch and upload every file through Cloud-assisted upload."
+          :"The QR station's printer is unavailable. Cloud-assisted upload is now selected; retry the remaining files and the shop can assign one available printer to the whole batch."
         :exception instanceof ApiError?exception.message:`Upload stopped after ${completedFingerprints.size} file(s). Retry the selected files to continue; completed files will be skipped.`);
     } finally {setBusy(false);setUploadProgress(null);}
   }
