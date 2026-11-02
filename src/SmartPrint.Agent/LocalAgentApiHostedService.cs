@@ -729,6 +729,7 @@ public sealed class LocalAgentApiHostedService(
         long SizeBytes,
         string Sha256,
         DateTimeOffset ExpiresUtc,
+        int AttemptNumber,
         LocalUploadedPrintResult? UploadResult);
 
     private sealed record LocalUploadCompletionResponse(
