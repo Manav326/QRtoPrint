@@ -21,7 +21,7 @@ The shop print workflow reuses the existing customer portal and APIs inside the 
 - Create nested folders, import multiple files, or import a directory tree using Android's Storage Access Framework.
 - Export one file or an entire folder tree into a user-selected Android File Manager destination. Multiple selected files export together as a ZIP archive that preserves their original filenames.
 - Open/share files with other Android apps.
-- The customer portal's native picker separates **Select files** and **Choose folders**. File selection shows printable documents while folders are only used for navigation; folder selection shows folder rows only, permits multiple folder selection, and includes supported files directly inside each selected folder (nested subfolders are intentionally not traversed). The picker preserves the current nested-folder location while making selections. Folder names are passed to the portal so each file remains in the correct batch group. The library includes current-folder search, a move destination picker, a document-storage summary and a free-space reserve check.
+- The customer portal's native picker separates **Select files** and **Choose folders**. File selection offers both **SmartPrint My Files** and **Browse phone**. Browse phone uses Android's system document picker and passes selected PDF/JPG/PNG content URIs directly to the existing WebView upload input; files are not copied into the SmartPrint library first. Folder selection remains in SmartPrint My Files, shows folder rows only, permits multiple folder selection, and includes supported files directly inside each selected folder (nested subfolders are intentionally not traversed). The picker preserves the current nested-folder location while making selections. Folder names are passed to the portal so each file remains in the correct batch group. The library includes current-folder search, a move destination picker, a document-storage summary and a free-space reserve check.
 
 ## Print batches and saved PDF editing
 
@@ -50,7 +50,7 @@ The QR station code format is matched to the API's current generator: 24 random 
 
 The CameraX preview feeds frames to bundled ML Kit Barcode Scanning locally. No camera frame is uploaded or retained. Only a decoded QR payload leaves the scanner, and it is accepted only when it matches the HTTPS `/s/{publicCode}` station route.
 
-The embedded customer portal then creates the same station-bound session as the PWA. Cloud-assisted and local Agent upload share the existing API, quote, shop approval, payment and dispatch lifecycle. Local Agent upload is allowed only to private IPv4 addresses on TCP 17842 and its upload path; the customer portal itself remains HTTPS.
+The embedded customer portal then creates the same station-bound session as the PWA. Cloud-assisted and local Agent upload share the existing API, quote, shop approval, payment and dispatch lifecycle. Local Agent upload is allowed only to private IPv4 addresses on TCP 17842 and its status/upload routes; the customer portal itself remains HTTPS. Android WebView's compatibility mixed-content mode can block these active HTTP fetches, so the WebView enables mixed-content handling while its request interceptor continues to reject every HTTP URL outside the exact private-Agent allowlist. On Android 16, the WebView inherits the host app's local-network access state, so the app requests the transitional Nearby devices permission only when the customer explicitly checks Shop Wi-Fi. Android 17's ACCESS_LOCAL_NETWORK migration is deferred until the app targets API 37.
 
 ## Build
 
@@ -88,3 +88,11 @@ The CI Android job also launches an Android 15 (API 35) emulator and runs
 - The native PDF combine/editor disclosures explain rasterization and possible quality/searchability loss.
 
 Email verification/password recovery are not exposed as functional controls yet because the current API has no customer reset/verification-token endpoints or email-delivery contract. The account activity API also needs additional fields before the app can show actual paid/refunded/net amounts and original filenames. See docs/ANDROID_CUSTOMER_APP_HARDENING.md for the remaining backend and physical-device gates.
+
+
+### Responsive Android navigation and tablet document scanning
+
+- Phone layouts retain the bottom navigation; very narrow phones show the active label only to prevent labels from wrapping into each other. Windows at 600dp and wider use a labelled navigation rail and a centered reading/work area.
+- The connected-shop card shows the shop display name and, when the API supplies a same-service-origin logo, its logo. **Manage connected shop** provides open, switch and local disconnect actions. Disconnect removes only this device's station token and shop association; it does not delete local documents or shop orders/payments.
+- Phones continue to use the Google Play services document scanner. Tablet windows (600dp+) use the in-app CameraX full-screen preview with compact capture controls, multi-page capture, gallery image import, a page-review list with per-page preview, reorder and remove actions, undo-last-page and PDF composition. The result is saved through the normal My Files storage flow. Camera permission is requested only when the tablet scanner is used.
+- The tablet camera workflow uses a framing guide and full-page captures; automatic edge detection, perspective correction and manual crop/deskew are not part of this initial adaptive path.

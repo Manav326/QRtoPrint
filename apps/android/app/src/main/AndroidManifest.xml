@@ -1,6 +1,12 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <uses-permission android:name="android.permission.INTERNET" />
+    <!-- Android 16 transitional opt-in for local-network protection. Android 17
+         requires ACCESS_LOCAL_NETWORK only after the app targets API 37. -->
+    <uses-permission
+        android:name="android.permission.NEARBY_WIFI_DEVICES"
+        android:usesPermissionFlags="neverForLocation"
+        android:maxSdkVersion="36" />
     <uses-permission android:name="android.permission.CAMERA" />
     <application
         android:allowBackup="false"
@@ -16,8 +22,11 @@
             android:exported="false"
             android:screenOrientation="unspecified" />
         <activity
-            android:name=".MainActivity"
+            android:name=".TabletDocumentScannerActivity"
             android:configChanges="orientation|screenSize|keyboardHidden"
+            android:exported="false" />
+        <activity
+            android:name=".MainActivity"
             android:exported="true"
             android:launchMode="singleTop">
             <intent-filter>

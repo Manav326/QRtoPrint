@@ -2,7 +2,12 @@ package com.quantaedge.smartprint
 
 import android.content.Context
 import android.graphics.Bitmap
+import android.net.Uri
+import android.webkit.ValueCallback
+import android.webkit.WebSettings
+import android.webkit.WebView
 import java.io.File
+import java.util.concurrent.atomic.AtomicReference
 import androidx.test.core.app.ActivityScenario
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.espresso.Espresso.onView
@@ -11,6 +16,8 @@ import androidx.test.espresso.action.ViewActions.closeSoftKeyboard
 import androidx.test.espresso.action.ViewActions.replaceText
 import androidx.test.espresso.assertion.ViewAssertions.matches
 import androidx.test.espresso.matcher.ViewMatchers.isDisplayed
+import androidx.test.espresso.matcher.ViewMatchers.isAssignableFrom
+import com.google.android.material.navigation.NavigationBarItemView
 import androidx.test.espresso.matcher.ViewMatchers.withId
 import androidx.test.espresso.matcher.ViewMatchers.withContentDescription
 import androidx.test.espresso.matcher.ViewMatchers.withHint
@@ -27,11 +34,24 @@ import org.junit.Assert.assertTrue
 
 @RunWith(AndroidJUnit4::class)
 class MainActivityInstrumentedTest {
+    private fun clickNavigationItem(description: String) {
+        onView(allOf(
+            withContentDescription(description),
+            isAssignableFrom(NavigationBarItemView::class.java)
+        )).perform(click())
+    }
+
     private fun openNavigationDestination(itemId: Int, expectedText: String) {
+        val description = when (itemId) {
+            2 -> "My Files"
+            3 -> "Print at a shop"
+            4 -> "Activity"
+            else -> throw IllegalArgumentException("Unknown navigation item: $itemId")
+        }
         var lastFailure: androidx.test.espresso.NoMatchingViewException? = null
         repeat(3) {
             try {
-                onView(withId(itemId)).perform(click())
+                clickNavigationItem(description)
                 onView(withText(expectedText)).check(matches(isDisplayed()))
                 return
             } catch (failure: androidx.test.espresso.NoMatchingViewException) {
@@ -246,6 +266,65 @@ class MainActivityInstrumentedTest {
             onView(allOf(withId(label), withText("Files"))).check(matches(isDisplayed()))
             onView(allOf(withId(label), withText("Print"))).check(matches(isDisplayed()))
             onView(allOf(withId(label), withText("Activity"))).check(matches(isDisplayed()))
+        }
+    }
+
+    @Test
+    fun webViewAllowsOnlyTheAppGatedLocalAgentMixedContentException() {
+        ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+            scenario.onActivity { activity ->
+                val webView = MainActivity::class.java.getDeclaredMethod("ensureWebView").apply {
+                    isAccessible = true
+                }.invoke(activity) as WebView
+                assertEquals(WebSettings.MIXED_CONTENT_ALWAYS_ALLOW, webView.settings.mixedContentMode)
+            }
+        }
+    }
+
+    @Test
+    fun printPickerOffersBrowsePhoneAlongsideSmartPrintMyFiles() {
+        ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+            scenario.onActivity { activity ->
+                MainActivity::class.java.getDeclaredField("fileChooserAllowsMultiple").apply {
+                    isAccessible = true
+                    setBoolean(activity, true)
+                }
+                MainActivity::class.java.getDeclaredMethod(
+                    "showPicker",
+                    Boolean::class.javaPrimitiveType!!
+                ).apply {
+                    isAccessible = true
+                    invoke(activity, true)
+                }
+            }
+            onView(withText("SmartPrint My Files")).check(matches(isDisplayed()))
+            onView(withText("Browse phone")).check(matches(isDisplayed()))
+        }
+    }
+
+    @Test
+    fun browsePhoneSelectionPassesOriginalContentUrisToTheWebView() {
+        val source = Uri.parse("content://com.android.providers.downloads.documents/document/42")
+        val received = AtomicReference<Array<Uri>?>(null)
+        ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+            scenario.onActivity { activity ->
+                MainActivity::class.java.getDeclaredField("fileCallback").apply {
+                    isAccessible = true
+                    set(activity, ValueCallback<Array<Uri>> { value -> received.set(value) })
+                }
+                MainActivity::class.java.getDeclaredField("fileChooserAllowsMultiple").apply {
+                    isAccessible = true
+                    setBoolean(activity, true)
+                }
+                MainActivity::class.java.getDeclaredMethod(
+                    "deliverPhoneDocuments",
+                    List::class.java
+                ).apply {
+                    isAccessible = true
+                    invoke(activity, listOf(source))
+                }
+            }
+            assertEquals(listOf(source), received.get()?.toList())
         }
     }
 
