@@ -1867,14 +1867,16 @@ function ShopConnectionPanel({connected,localApiReady}:{connected:boolean;localA
   const selected=snapshot?.networks.find(network=>network.id===snapshot.selectedNetworkId)??null;
   const hasSelectedNetwork=Boolean(snapshot?.selectedNetworkId && selected);
   const statusTone=verified?"green":hasSelectedNetwork||snapshot?.networks.length?"amber":"slate";
-  const statusLabel=loading?"Checking…":connected&&!localApiReady?"Print service starting":verified?"Phone test passed":hasSelectedNetwork?"Phone check needed":snapshot?.networks.length?"Choose connection":"No connection found";
+  const statusLabel=loading?"Checking…":error&&!snapshot?"Connection unavailable":connected&&!localApiReady?"Print service starting":verified?"Phone test passed":hasSelectedNetwork?"Phone check needed":snapshot?.networks.length?"Choose connection":"No connection found";
 
   return <section className="panel local-network-panel">
     <div className="local-network-heading">
       <div><span className="eyebrow"><span className="eyebrow-line"/>SHOP CONNECTION</span><h2>Customer phone connection</h2><p>Choose the connection customers use at your shop, then check it with a phone.</p></div>
       <Status label={loading?"Checking…":statusLabel} tone={loading?"slate":statusTone}/>
     </div>
-    {loading&&!snapshot?<div className="local-network-loading"><span className="button-spinner"/> Checking available connections…</div>:<>
+    {loading&&!snapshot?<div className="local-network-loading"><span className="button-spinner"/> Checking available connections…</div>:error&&!snapshot
+      ? <div className="local-network-empty"><Wifi size={20}/><div><strong>Could not check this computer</strong><p>SmartPrint is not responding yet. Make sure the desktop app is open, then try again.</p></div><button className="secondary-button" type="button" onClick={()=>void refresh()}>Try again</button></div>
+      : <>
       {snapshot?.networks.length?<>
         <label className="local-network-choice">Shop Wi-Fi or network
           <select value={snapshot.selectedNetworkId??""} onChange={event=>void changeNetwork(event.target.value)} disabled={saving||!connected}>
