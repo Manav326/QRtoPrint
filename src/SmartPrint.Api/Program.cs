@@ -6317,7 +6317,7 @@ publicApi.MapPost("/sessions/current/local-upload-tickets/{ticketId:guid}/cloud-
                            item.BatchId == ticket.BatchId &&
                            item.Id != ticket.Id &&
                            item.CompletedUtc == null &&
-                           item.ExpiresUtc > commitNow)
+                           item.CreatedUtc >= commitNow.AddHours(-maximumRecoveryAgeHours))
             .Select(item => item.SizeBytes).ToListAsync(ct);
         if (!PrintBatchCapacityRules.CanAdd(
             batchJobSizes.Count + pendingBatchTicketSizes.Count,
