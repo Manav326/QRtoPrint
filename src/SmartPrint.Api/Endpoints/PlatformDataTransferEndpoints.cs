@@ -4,6 +4,7 @@ using Microsoft.AspNetCore.Routing;
 using Microsoft.EntityFrameworkCore;
 using SmartPrint.Api.Data;
 using SmartPrint.Api.Domain;
+using SmartPrint.Api.Services;
 
 namespace SmartPrint.Api.Endpoints;
 
@@ -266,6 +267,14 @@ public static class PlatformDataTransferEndpoints
                 toUtc = generatedUtc,
                 days = windowDays,
                 measurementCoverageDays = Math.Max(0, (generatedUtc - effectiveFromUtc).TotalDays),
+                telemetryHealth = new
+                {
+                    scope = "CURRENT_API_PROCESS",
+                    processStartedUtc = DataTransferRecorder.ProcessStartedUtc,
+                    successfulWriteCount = DataTransferRecorder.SuccessfulWriteCount,
+                    failedWriteCount = DataTransferRecorder.FailedWriteCount,
+                    lastFailureUtc = DataTransferRecorder.LastFailureUtc
+                },
                 summary = new
                 {
                     uniqueDocumentCount,
