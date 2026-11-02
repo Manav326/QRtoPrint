@@ -48,6 +48,67 @@ export interface PlatformOverview {
   subscriptionsByStatus: { status: string; count: number }[];
 }
 
+export interface PlatformDataNetworkReport {
+  generatedUtc: string;
+  fromUtc: string;
+  toUtc: string;
+  days: number;
+  summary: {
+    uniqueDocumentCount: number;
+    uniqueDocumentBytes: number;
+    cloudIngressBytes: number;
+    cloudEgressBytes: number;
+    shopLanBytes: number;
+    measuredPayloadBytes: number;
+    transferAttemptCount: number;
+    partialTransferCount: number;
+    failedTransferCount: number;
+    wireBytesMeasured: boolean;
+  };
+  channels: Array<{
+    channel: string;
+    direction: string;
+    status: string;
+    transferCount: number;
+    payloadBytes: number;
+    measuredNetworkBytes: number | null;
+    totalDurationMilliseconds: number;
+    durationSampleCount: number;
+  }>;
+  shops: Array<{
+    tenantId: string;
+    shopName: string;
+    shopStatus: string;
+    transferCount: number;
+    measuredPayloadBytes: number;
+    cloudIngressBytes: number;
+    cloudEgressBytes: number;
+    shopLanBytes: number;
+    partialTransferCount: number;
+    failedTransferCount: number;
+  }>;
+  storage: {
+    cloudLogicalDocumentCount: number;
+    cloudLogicalDocumentBytes: number;
+    agentLogicalDocumentCount: number;
+    agentLogicalDocumentBytes: number;
+    physicalDiskBytesMeasured: boolean;
+  };
+  measurementScope: {
+    payloadBytesOnly: boolean;
+    wireBytesMeasured: boolean;
+    unmeasuredPaths: string[];
+  };
+}
+
+export function getPlatformDataNetwork(token: string, days: 7 | 30 | 90) {
+  return apiRequest<PlatformDataNetworkReport>(
+    `/api/v1/platform/data-network?days=${days}`,
+    {},
+    token
+  );
+}
+
 export interface PlatformTenant {
   id: string;
   slug: string;

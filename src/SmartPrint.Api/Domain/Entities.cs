@@ -315,6 +315,27 @@ public sealed class LocalPrintUploadTicket
 }
 
 
+public sealed class DataTransferEvent
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+    public Guid TransferId { get; set; } = Guid.NewGuid();
+    public int AttemptNumber { get; set; } = 1;
+    public Guid TenantId { get; set; }
+    public Guid? AgentDeviceId { get; set; }
+    public Guid? PrinterDeviceId { get; set; }
+    public Guid? QrStationId { get; set; }
+    public Guid? PrintJobId { get; set; }
+    public Guid? PrintDocumentId { get; set; }
+    public string Channel { get; set; } = string.Empty;
+    public string Direction { get; set; } = string.Empty;
+    public string Status { get; set; } = "COMPLETED";
+    public long PayloadBytes { get; set; }
+    public long? NetworkBytes { get; set; }
+    public long DurationMilliseconds { get; set; }
+    public string MeasurementSource { get; set; } = string.Empty;
+    public DateTimeOffset CreatedUtc { get; set; } = DateTimeOffset.UtcNow;
+}
+
 public sealed class PrintJobEvent
 {
     public Guid Id { get; set; } = Guid.NewGuid();

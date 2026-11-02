@@ -32,6 +32,7 @@ public sealed class SmartPrintDbContext(DbContextOptions<SmartPrintDbContext> op
     public DbSet<PrintDocument> PrintDocuments => Set<PrintDocument>();
     public DbSet<LocalPrintUploadTicket> LocalPrintUploadTickets => Set<LocalPrintUploadTicket>();
     public DbSet<PrintJobEvent> PrintJobEvents => Set<PrintJobEvent>();
+    public DbSet<DataTransferEvent> DataTransferEvents => Set<DataTransferEvent>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -509,6 +510,27 @@ public sealed class SmartPrintDbContext(DbContextOptions<SmartPrintDbContext> op
                 .HasForeignKey(x => new { x.TenantId, x.AgentDeviceId })
                 .HasPrincipalKey(x => new { x.TenantId, x.Id })
                 .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        modelBuilder.Entity<DataTransferEvent>(entity =>
+        {
+            entity.ToTable("DataTransferEvents", table =>
+                table.HasCheckConstraint(
+                    "CK_DataTransferEvents_NonNegativeMetrics",
+                    "\"AttemptNumber\" >= 1 AND \"PayloadBytes\" >= 0 AND (\"NetworkBytes\" IS NULL OR \"NetworkBytes\" >= 0) AND \"DurationMilliseconds\" >= 0"));
+            entity.HasKey(x => x.Id);
+            entity.Property(x => x.Channel).HasMaxLength(64).IsRequired();
+            entity.Property(x => x.Direction).HasMaxLength(24).IsRequired();
+            entity.Property(x => x.Status).HasMaxLength(24).IsRequired();
+            entity.Property(x => x.MeasurementSource).HasMaxLength(80).IsRequired();
+            entity.HasIndex(x => new { x.TransferId, x.AttemptNumber }).IsUnique();
+            entity.HasIndex(x => x.CreatedUtc);
+            entity.HasIndex(x => new { x.TenantId, x.CreatedUtc });
+            entity.HasIndex(x => new { x.Channel, x.CreatedUtc });
+            entity.HasIndex(x => new { x.TenantId, x.Channel, x.CreatedUtc });
+            entity.HasOne<Tenant>().WithMany()
+                .HasForeignKey(x => x.TenantId)
+                .OnDelete(DeleteBehavior.Cascade);
         });
     }
 }

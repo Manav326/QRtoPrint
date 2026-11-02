@@ -541,6 +541,9 @@ public sealed class LocalAgentApiHostedService(
                     return Results.Conflict(new { code = "local_upload_ticket_invalid", message = "The cloud API returned invalid local upload metadata." });
                 }
 
+                long receivedPayloadBytes = 0;
+                long uploadDurationMilliseconds = 0;
+                DateTimeOffset? localUploadStartedUtc = null;
                 byte[] bytes;
                 var existing = localQueueStore.Find(claim.PrintJobId);
                 if (existing is not null)
@@ -553,6 +556,8 @@ public sealed class LocalAgentApiHostedService(
                     }
 
                     bytes = localQueueStore.ReadDocument(claim.PrintJobId);
+                    if (string.Equals(existing.State, "LOCAL_UPLOAD_STAGED", StringComparison.OrdinalIgnoreCase))
+                        receivedPayloadBytes = existing.SizeBytes;
                 }
                 else
                 {
@@ -561,6 +566,7 @@ public sealed class LocalAgentApiHostedService(
                         return Results.BadRequest(new { code = "multipart_form_required", message = "Send the document as multipart/form-data." });
                     }
 
+                    localUploadStartedUtc = DateTimeOffset.UtcNow;
                     var form = await context.Request.ReadFormAsync(ct);
                     if (form.Files.Count != 1 || form.Files[0].Length != claim.SizeBytes)
                     {
@@ -577,6 +583,7 @@ public sealed class LocalAgentApiHostedService(
                         return Results.BadRequest(new { code = "local_upload_incomplete", message = "The document transfer was incomplete. Retry the upload." });
                     }
                     bytes = memory.ToArray();
+                    receivedPayloadBytes = bytes.LongLength;
                     CryptographicOperations.ZeroMemory(memory.GetBuffer().AsSpan(0, (int)memory.Length));
                 }
 
@@ -621,6 +628,9 @@ public sealed class LocalAgentApiHostedService(
                             claim.ExpiresUtc,
                             "LOCAL_AGENT");
                         await localQueueStore.EnqueueLocalUploadAsync(stagedJob, bytes, ct);
+                        uploadDurationMilliseconds = localUploadStartedUtc is { } transferStartedUtc
+                            ? Math.Max(0, (long)(DateTimeOffset.UtcNow - transferStartedUtc).TotalMilliseconds)
+                            : 0;
                     }
 
                     using var completionRequest = new HttpRequestMessage(
@@ -633,7 +643,9 @@ public sealed class LocalAgentApiHostedService(
                             analysis.Extension,
                             analysis.MediaType,
                             claim.SizeBytes,
-                            claim.Sha256))
+                            claim.Sha256,
+                            receivedPayloadBytes,
+                            uploadDurationMilliseconds))
                     };
                     AddAgentHeaders(completionRequest, credentials, uploadGrant);
                     using var completionResponse = await client.SendAsync(completionRequest, ct);

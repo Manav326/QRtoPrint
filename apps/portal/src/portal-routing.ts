@@ -81,14 +81,15 @@ export function shopPathForSection(section: ShopSection): string {
 }
 
 
-export type AdminSection = "Overview" | "Tenants" | "Plans" | "Subscriptions" | "Operations";
+export type AdminSection = "Overview" | "Tenants" | "Plans" | "Subscriptions" | "Operations" | "Data & Network";
 
 const adminSectionPaths: Record<AdminSection, string> = {
   "Overview": "/admin",
   "Tenants": "/admin/tenants",
   "Plans": "/admin/plans",
   "Subscriptions": "/admin/subscriptions",
-  "Operations": "/admin/operations"
+  "Operations": "/admin/operations",
+  "Data & Network": "/admin/data-network"
 };
 
 export function adminSectionFromPath(pathname: string): AdminSection {
