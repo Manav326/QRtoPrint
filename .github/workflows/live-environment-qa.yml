@@ -9,6 +9,11 @@ on:
       - '.github/workflows/live-environment-qa.yml'
       - 'scripts/qa/live-environment.mjs'
       - 'docs/LIVE_ENVIRONMENT_QA.md'
+  workflow_run:
+    workflows:
+      - Publish SmartPrint after green main CI
+    types: [completed]
+    branches: [main]
   workflow_dispatch:
     inputs:
       check_shop_workspace:
@@ -36,6 +41,7 @@ concurrency:
 
 jobs:
   live-environment:
+    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
     name: Live HTTPS, API and browser QA
     runs-on: ubuntu-24.04
     timeout-minutes: 30
@@ -53,6 +59,9 @@ jobs:
     steps:
       - name: Check out the tested revision
         uses: actions/checkout@v7
+        with:
+          # For post-publication runs, test the exact commit whose main pipeline published.
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
 
       - name: Set up Node.js
         uses: actions/setup-node@v7
