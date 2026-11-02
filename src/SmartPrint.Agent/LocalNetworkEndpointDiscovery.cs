@@ -48,7 +48,7 @@ public static class LocalNetworkEndpointDiscovery
                 };
                 var ssid = kind == "Wi-Fi" ? WindowsWifiNetworkName.TryGetCurrentSsid(network.Id) : null;
                 var displayName = !string.IsNullOrWhiteSpace(ssid)
-                    ? ssid
+                    ? ssid.Trim()
                     : string.IsNullOrWhiteSpace(network.Name)
                         ? kind + " network"
                         : network.Name.Trim();

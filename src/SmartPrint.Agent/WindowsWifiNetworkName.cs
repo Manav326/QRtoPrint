@@ -70,7 +70,9 @@ internal static class WindowsWifiNetworkName
 
             var bytes = new byte[ssidLength];
             Marshal.Copy(IntPtr.Add(data, Dot11SsidBytesOffset), bytes, 0, ssidLength);
-            var ssid = Encoding.UTF8.GetString(bytes).Trim();
+            // Preserve the exact SSID bytes for the saved network identity.
+            // The owner-facing display name is trimmed separately by discovery.
+            var ssid = Encoding.UTF8.GetString(bytes);
             return string.IsNullOrWhiteSpace(ssid) || ssid.Any(char.IsControl) ? null : ssid;
         }
         catch (DllNotFoundException)
