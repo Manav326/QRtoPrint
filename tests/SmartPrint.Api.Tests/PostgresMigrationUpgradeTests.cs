@@ -55,6 +55,9 @@ public sealed class PostgresMigrationUpgradeTests
         Assert.Contains(
             "202611020002_AddShopInstantPaymentPreference",
             await db.Database.GetAppliedMigrationsAsync());
+        Assert.Contains(
+            "202611020003_AddPrintJobPrinterIdentitySnapshot",
+            await db.Database.GetAppliedMigrationsAsync());
 
         // Reproduce the local-upload completion transaction at the exact monthly quota boundary.
         settings.TrialMaxMonthlyPrintJobs = 1;
@@ -199,5 +202,69 @@ public sealed class PostgresMigrationUpgradeTests
         Assert.Equal(1L, await entitlements.GetMonthlyPrintJobUsageAsync(
             tenant.Id, CancellationToken.None));
         await transaction.RollbackAsync();
+
+        await VerifyPrinterIdentitySnapshotBackfillAsync(
+            options, tenant.Id, station.Id, session.Id, printer.Id, now);
+    }
+
+    private static async Task VerifyPrinterIdentitySnapshotBackfillAsync(
+        DbContextOptions<SmartPrintDbContext> options,
+        Guid tenantId,
+        Guid stationId,
+        Guid sessionId,
+        Guid printerId,
+        DateTimeOffset now)
+    {
+        var jobId = Guid.NewGuid();
+        var submittedUtc = now.AddMinutes(-2);
+        await using (var seed = new SmartPrintDbContext(options))
+        {
+            seed.PrintJobs.Add(new PrintJob
+            {
+                Id = jobId,
+                TenantId = tenantId,
+                QrStationId = stationId,
+                CustomerSessionId = sessionId,
+                PrinterDeviceId = printerId,
+                JobNumber = $"SP-SNAPSHOT-{Guid.NewGuid():N}"[..23],
+                IdempotencyKey = $"SNAPSHOT-{Guid.NewGuid():N}",
+                Status = "COMPLETED",
+                PageCount = 1,
+                Copies = 1,
+                Currency = "INR",
+                QuotedAmountMinor = 100,
+                SpoolerSubmittedUtc = submittedUtc,
+                OutputConfirmedUtc = now,
+                UpdatedUtc = now
+            });
+            await seed.SaveChangesAsync();
+        }
+
+        await using (var migrationContext = new SmartPrintDbContext(options))
+        {
+            var migrator = migrationContext.GetService<IMigrator>();
+            await migrator.MigrateAsync("202611020002_AddShopInstantPaymentPreference");
+            await migrator.MigrateAsync("202611020003_AddPrintJobPrinterIdentitySnapshot");
+        }
+
+        await using var verification = new SmartPrintDbContext(options);
+        var historicalJob = await verification.PrintJobs.AsNoTracking()
+            .SingleAsync(item => item.Id == jobId);
+        Assert.Equal("Quota test printer", historicalJob.PrinterNameSnapshot);
+        Assert.Equal("Quota-Test-Queue", historicalJob.PrinterQueueNameSnapshot);
+        Assert.Equal("Quota test Agent", historicalJob.PrinterAgentNameSnapshot);
+        Assert.Equal(submittedUtc, historicalJob.PrinterSnapshotUtc);
+
+        var originalPrinter = await verification.PrinterDevices.SingleAsync(item => item.Id == printerId);
+        originalPrinter.DisplayName = "Renamed queue after printing";
+        originalPrinter.QueueName = "Renamed-Windows-Queue";
+        await verification.SaveChangesAsync();
+
+        var unchangedHistory = await verification.PrintJobs.AsNoTracking()
+            .SingleAsync(item => item.Id == jobId);
+        Assert.Equal("Quota test printer", unchangedHistory.PrinterNameSnapshot);
+        Assert.Equal("Quota-Test-Queue", unchangedHistory.PrinterQueueNameSnapshot);
+        Assert.Equal("Quota test Agent", unchangedHistory.PrinterAgentNameSnapshot);
+        Assert.Equal(submittedUtc, unchangedHistory.PrinterSnapshotUtc);
     }
 }

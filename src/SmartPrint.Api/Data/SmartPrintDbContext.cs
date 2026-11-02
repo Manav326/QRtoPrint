@@ -315,6 +315,9 @@ public sealed class SmartPrintDbContext(DbContextOptions<SmartPrintDbContext> op
             entity.Property(x => x.SpoolerJobName).HasMaxLength(180);
             entity.Property(x => x.SpoolerStatus).HasMaxLength(80);
             entity.Property(x => x.OutputType).HasMaxLength(20).IsRequired();
+            entity.Property(x => x.PrinterNameSnapshot).HasMaxLength(160);
+            entity.Property(x => x.PrinterQueueNameSnapshot).HasMaxLength(160);
+            entity.Property(x => x.PrinterAgentNameSnapshot).HasMaxLength(160);
             entity.Property(x => x.OutputFilePath).HasMaxLength(1024);
             entity.Property(x => x.OutputFileName).HasMaxLength(255);
             entity.Property(x => x.OutputSha256).HasMaxLength(64);
