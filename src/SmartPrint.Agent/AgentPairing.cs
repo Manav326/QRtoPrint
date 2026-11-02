@@ -85,7 +85,8 @@ public static class AgentPairing
             throw new InvalidOperationException("The one-time enrollment authorization is invalid.");
 
         var fingerprint = GetMachineFingerprint();
-        using var client = new HttpClient
+        using var enrollmentHandler = new HttpClientHandler { AllowAutoRedirect = false };
+        using var client = new HttpClient(enrollmentHandler)
         {
             BaseAddress = new Uri(apiUri.ToString().TrimEnd('/') + "/"),
             Timeout = TimeSpan.FromSeconds(20)
@@ -177,7 +178,8 @@ public static class AgentPairing
 
         try
         {
-            using var client = new HttpClient
+            using var verificationHandler = new HttpClientHandler { AllowAutoRedirect = false };
+            using var client = new HttpClient(verificationHandler)
             {
                 BaseAddress = new Uri(apiUri.ToString().TrimEnd('/') + "/"),
                 Timeout = TimeSpan.FromSeconds(15)
