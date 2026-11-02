@@ -14,6 +14,7 @@ export interface DesktopLocalNetworkAdapter {
   displayName: string;
   kind: string;
   ipv4Address: string;
+  prefixLength: number;
 }
 
 export interface DesktopLocalNetworkSnapshot {

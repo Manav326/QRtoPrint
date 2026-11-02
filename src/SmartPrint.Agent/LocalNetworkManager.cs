@@ -33,7 +33,7 @@ public sealed class LocalNetworkManager(LocalNetworkPreferenceStore preferences,
             networks,
             selected?.Id,
             endpoints,
-            selected is null ? null : state.GetPhoneVerifiedUtc(selected.Id));
+            selected is null ? null : state.GetPhoneVerifiedUtc(GetPhoneVerificationKey(selected)));
     }
 
     public LocalNetworkSnapshot SelectNetwork(string networkId)
@@ -90,9 +90,13 @@ public sealed class LocalNetworkManager(LocalNetworkPreferenceStore preferences,
         if (snapshot.SelectedNetworkId is null || endpoint is null)
             throw new InvalidOperationException("Connect this computer to the shop Wi-Fi or network, then try again.");
 
-        var (token, expiresUtc) = state.CreatePhoneProbe(snapshot.SelectedNetworkId);
+        var selected = snapshot.Networks.First(network => network.Id == snapshot.SelectedNetworkId);
+        var (token, expiresUtc) = state.CreatePhoneProbe(GetPhoneVerificationKey(selected));
         var startedUtc = DateTimeOffset.UtcNow;
         var url = $"{endpoint}/api/v1/local/connection-check?token={Uri.EscapeDataString(token)}";
         return new LocalPhoneTest(url, startedUtc, expiresUtc);
     }
+
+    private static string GetPhoneVerificationKey(LocalNetworkAdapter network) =>
+        $"{network.Id}|{network.Ipv4Address}/{network.PrefixLength}";
 }

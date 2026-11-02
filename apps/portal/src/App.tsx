@@ -1817,7 +1817,10 @@ function ShopConnectionPanel({connected}:{connected:boolean}) {
   useEffect(()=>{void refresh();},[]);
 
   useEffect(()=>{
-    if(!test)return;
+    if(!test) {
+      const timer=window.setInterval(()=>void refresh(),30000);
+      return ()=>window.clearInterval(timer);
+    }
     let active=true;
     let polling=false;
     const started=Date.parse(test.startedUtc);
@@ -1857,8 +1860,9 @@ function ShopConnectionPanel({connected}:{connected:boolean}) {
   }
 
   const selected=snapshot?.networks.find(network=>network.id===snapshot.selectedNetworkId)??null;
-  const statusTone=verified?"green":snapshot?.endpoints.length?"amber":"slate";
-  const statusLabel=verified?"Phone connected":snapshot?.endpoints.length?"Phone check needed":"No connection found";
+  const hasSelectedNetwork=Boolean(snapshot?.selectedNetworkId && selected);
+  const statusTone=verified?"green":hasSelectedNetwork||snapshot?.networks.length?"amber":"slate";
+  const statusLabel=loading?"Checking…":verified?"Phone test passed":hasSelectedNetwork?"Phone check needed":snapshot?.networks.length?"Choose connection":"No connection found";
 
   return <section className="panel local-network-panel">
     <div className="local-network-heading">
@@ -1867,15 +1871,18 @@ function ShopConnectionPanel({connected}:{connected:boolean}) {
     </div>
     {loading&&!snapshot?<div className="local-network-loading"><span className="button-spinner"/> Checking available connections…</div>:<>
       {snapshot?.networks.length?<>
-        <label className="local-network-choice">Shop connection
+        <label className="local-network-choice">Shop Wi-Fi or network
           <select value={snapshot.selectedNetworkId??""} onChange={event=>void changeNetwork(event.target.value)} disabled={saving||!connected}>
+            <option value="">Choose the connection customers use</option>
             {snapshot.networks.map(network=><option key={network.id} value={network.id}>{network.displayName}{network.kind&&network.displayName.toLowerCase()!==network.kind.toLowerCase()?" · "+network.kind:""}</option>)}
           </select>
         </label>
-        <div className="local-network-selected"><Wifi size={17}/><span><strong>{selected?.displayName??"Selected connection"}</strong><small>{selected?.kind??"Network"} · Used for customer document uploads</small></span><Check size={17}/></div>
+        {selected
+          ? <div className="local-network-selected"><Wifi size={17}/><span><strong>{selected.displayName}</strong><small>{selected.kind} · Used for customer document uploads</small></span><Check size={17}/></div>
+          : <p className="local-network-copy">Your previous connection is not available. Choose the Wi-Fi used by your customers before testing phone access.</p>}
         {!connected?<p className="local-network-copy">Connect this computer to your shop first. The phone check will be available when setup is complete.</p>:<>
           <div className="local-network-actions">
-            <button className="primary-button" type="button" onClick={()=>void beginPhoneTest()} disabled={saving||!!test||!snapshot.endpoints.length}>
+            <button className="primary-button" type="button" onClick={()=>void beginPhoneTest()} disabled={saving||!!test||!hasSelectedNetwork}>
               {saving?<span className="button-spinner"/>:<><QrCode size={16}/> Test with a phone</>}
             </button>
             <button className="secondary-button" type="button" onClick={()=>void refresh()} disabled={saving}><RotateCcw size={15}/> Refresh</button>
@@ -1884,7 +1891,7 @@ function ShopConnectionPanel({connected}:{connected:boolean}) {
             <div className="local-phone-qr"><QRCode value={test.phoneTestUrl} size={190} level="M" bgColor="#ffffff" fgColor="#111827"/></div>
             <div><strong>Scan with a phone on this shop Wi-Fi</strong><p>Open your phone camera, scan this code and open the link. A confirmation will appear on your phone when the connection works.</p><small>This check expires in five minutes.</small></div>
           </div>}
-          {verified&&<div className="local-network-result success"><Check size={17}/><span><strong>Phone connection verified</strong><small>Your shop computer can receive customer documents over this connection.</small></span></div>}
+          {verified&&<div className="local-network-result success"><Check size={17}/><span><strong>Phone test passed</strong><small>A phone reached this shop connection recently. The check expires after ten minutes.</small></span></div>}
           {expired&&<div className="local-network-result warning"><Clock3 size={17}/><span><strong>Phone not connected yet</strong><small>Make sure the phone is on this same shop Wi-Fi, then start a new check. You can also try another connection above.</small></span></div>}
         </>}
       </>:<div className="local-network-empty"><Wifi size={20}/><div><strong>No shop connection found</strong><p>Connect this computer to the Wi-Fi or network you use at the shop, then refresh.</p></div><button className="secondary-button" type="button" onClick={()=>void refresh()}>Refresh</button></div>}

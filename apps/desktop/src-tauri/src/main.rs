@@ -30,6 +30,7 @@ struct LocalNetworkAdapter {
     display_name: String,
     kind: String,
     ipv4_address: String,
+    prefix_length: u8,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
