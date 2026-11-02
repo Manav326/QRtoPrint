@@ -146,7 +146,7 @@ export default function PlatformDataNetworkSection({ tokens }: { tokens: AuthTok
               icon={<Router size={18}/>}
               label="Recorded transfer legs"
               value={formatCount(report.summary.transferAttemptCount)}
-              note={`${formatCount(report.summary.partialTransferCount)} partial · ${formatCount(report.summary.failedTransferCount)} failed`}
+              note={`${formatCount(report.summary.startedTransferCount)} in progress · ${formatCount(report.summary.partialTransferCount)} partial · ${formatCount(report.summary.failedTransferCount)} failed`}
             />
           </div>
 
@@ -193,7 +193,7 @@ export default function PlatformDataNetworkSection({ tokens }: { tokens: AuthTok
                         {shop.agentCount === 0 ? "No Agent" : shop.freshAgentCount === 0 ? "Unavailable" : formatGb(shop.localQueueDiskBytes)}
                         <small>{shop.freshAgentCount}/{shop.agentCount} fresh snapshots</small>
                       </td>
-                      <td>{formatCount(shop.transferCount)}<small>{shop.partialTransferCount} partial · {shop.failedTransferCount} failed</small></td>
+                      <td>{formatCount(shop.transferCount)}<small>{shop.startedTransferCount} started · {shop.partialTransferCount} partial · {shop.failedTransferCount} failed</small></td>
                     </tr>
                   ))}
                 </tbody>
