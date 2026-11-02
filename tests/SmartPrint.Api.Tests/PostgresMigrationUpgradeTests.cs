@@ -520,6 +520,10 @@ public sealed class PostgresMigrationUpgradeTests
             var migrator = migrationContext.GetService<IMigrator>();
             await migrator.MigrateAsync("202611020002_AddShopInstantPaymentPreference");
             await migrator.MigrateAsync("202611020003_AddPrintJobPrinterIdentitySnapshot");
+            // Keep the backfill under test at 0003, then bring the verification context
+            // up to the current EF model before querying PrintJob columns added later.
+            await migrator.MigrateAsync("202611020005_AddTransferUsageReliability");
+            await migrator.MigrateAsync("202611020006_AddCloudUploadAttemptCounter");
         }
 
         await using var verification = new SmartPrintDbContext(options);
