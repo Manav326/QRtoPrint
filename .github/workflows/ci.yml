@@ -402,6 +402,26 @@ jobs:
             adb shell dumpsys window | grep -E 'mCurrentFocus|mFocusedApp' || true
 
             gradle --no-daemon -p apps/android -PsmartPrintServiceUrl="$SMARTPRINT_PUBLIC_BASE_URL" :app:connectedDebugAndroidTest
+            
+            echo "Building isolated APK N for package-manager lifecycle checks..."
+            gradle --no-daemon -p apps/android \
+              -PsmartPrintServiceUrl="$SMARTPRINT_PUBLIC_BASE_URL" \
+              -PsmartPrintVersionCode=9100 \
+              -PsmartPrintVersionName="lifecycle-n" \
+              :app:assembleDebug
+            cp apps/android/app/build/outputs/apk/debug/app-debug.apk "$RUNNER_TEMP/smartprint-lifecycle-n.apk"
+
+            echo "Building isolated APK N+1 with the same runner debug signing identity..."
+            gradle --no-daemon -p apps/android \
+              -PsmartPrintServiceUrl="$SMARTPRINT_PUBLIC_BASE_URL" \
+              -PsmartPrintVersionCode=9101 \
+              -PsmartPrintVersionName="lifecycle-n1" \
+              :app:assembleDebug
+            cp apps/android/app/build/outputs/apk/debug/app-debug.apk "$RUNNER_TEMP/smartprint-lifecycle-n1.apk"
+
+            bash scripts/qa/android-install-lifecycle.sh \
+              "$RUNNER_TEMP/smartprint-lifecycle-n.apk" \
+              "$RUNNER_TEMP/smartprint-lifecycle-n1.apk"
       - name: Upload Android test reports
         if: always()
         uses: actions/upload-artifact@v7
