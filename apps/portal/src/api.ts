@@ -1113,11 +1113,12 @@ export async function uploadCustomerDocumentLocally(
       sessionStorage.removeItem(keys.grant);
       throw new LocalUploadPreflightError(exception.message, exception.status, exception.code);
     }
-    if (exception instanceof ApiError && exception.status === 0) {
-      // The POST may have committed and lost its response. Keep the idempotency
-      // key/grant so a retry asks for the same ticket instead of creating a new job.
+    if (!(exception instanceof ApiError) || exception.status === 0) {
+      // Fetch may fail with TypeError/AbortError rather than an ApiError. The
+      // POST may nevertheless have committed; retain the key and grant so the
+      // Cloud-assisted route can retrieve and resume that exact ticket.
       throw new LocalUploadOutcomeUnknownError(
-        "SmartPrint could not confirm whether the shop created this upload ticket. Reconnect to the same shop Wi-Fi and retry this same file; the original idempotency key is being retained."
+        "SmartPrint lost the response while preparing this upload. The original upload identity is saved; choose Cloud-assisted · HTTPS or retry this file and SmartPrint will resume the same job."
       );
     }
     throw exception;
