@@ -409,19 +409,11 @@ jobs:
             set -e
 
             echo "Building isolated APK N for package-manager lifecycle checks..."
-            gradle --no-daemon -p apps/android \
-              -PsmartPrintServiceUrl="$SMARTPRINT_PUBLIC_BASE_URL" \
-              -PsmartPrintVersionCode=9100 \
-              -PsmartPrintVersionName="lifecycle-n" \
-              :app:assembleDebug
+            gradle --no-daemon -p apps/android -PsmartPrintServiceUrl="$SMARTPRINT_PUBLIC_BASE_URL" -PsmartPrintVersionCode=9100 -PsmartPrintVersionName="lifecycle-n" :app:assembleDebug
             cp apps/android/app/build/outputs/apk/debug/app-debug.apk "$RUNNER_TEMP/smartprint-lifecycle-n.apk"
 
             echo "Building isolated APK N+1 with the same runner debug signing identity..."
-            gradle --no-daemon -p apps/android \
-              -PsmartPrintServiceUrl="$SMARTPRINT_PUBLIC_BASE_URL" \
-              -PsmartPrintVersionCode=9101 \
-              -PsmartPrintVersionName="lifecycle-n1" \
-              :app:assembleDebug
+            gradle --no-daemon -p apps/android -PsmartPrintServiceUrl="$SMARTPRINT_PUBLIC_BASE_URL" -PsmartPrintVersionCode=9101 -PsmartPrintVersionName="lifecycle-n1" :app:assembleDebug
             cp apps/android/app/build/outputs/apk/debug/app-debug.apk "$RUNNER_TEMP/smartprint-lifecycle-n1.apk"
 
             set +e
