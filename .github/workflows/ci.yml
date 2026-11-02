@@ -417,9 +417,7 @@ jobs:
             cp apps/android/app/build/outputs/apk/debug/app-debug.apk "$RUNNER_TEMP/smartprint-lifecycle-n1.apk"
 
             set +e
-            bash scripts/qa/android-install-lifecycle.sh \
-              "$RUNNER_TEMP/smartprint-lifecycle-n.apk" \
-              "$RUNNER_TEMP/smartprint-lifecycle-n1.apk"
+            bash scripts/qa/android-install-lifecycle.sh "$RUNNER_TEMP/smartprint-lifecycle-n.apk" "$RUNNER_TEMP/smartprint-lifecycle-n1.apk"
             lifecycle_status=$?
             set -e
 
