@@ -1,5 +1,6 @@
 using System.ComponentModel;
 using System.IO.Pipes;
+using System.Net.NetworkInformation;
 using System.Runtime.InteropServices;
 using System.Security.AccessControl;
 using System.Security.Cryptography;
@@ -257,7 +258,8 @@ public sealed class AgentControlPipeHostedService(
                     PipeJsonOptions));
             }
             catch (Exception exception) when (
-                exception is IOException or UnauthorizedAccessException or InvalidOperationException or ArgumentException)
+                exception is IOException or UnauthorizedAccessException or InvalidOperationException or ArgumentException or
+                    NetworkInformationException or CryptographicException or JsonException)
             {
                 logger.LogWarning("The shop connection could not be updated ({FailureType}).", exception.GetType().Name);
                 var message = exception is InvalidOperationException or ArgumentException
