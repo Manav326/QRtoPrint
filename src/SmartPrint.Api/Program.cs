@@ -3664,26 +3664,25 @@ agentApi.MapGet("/jobs/{jobId:guid}/document", async (
 
     var transferId = jobId;
     var attemptStartedUtc = DateTimeOffset.UtcNow;
-    var attemptUpdated = await db.PrintJobs
-        .Where(item => item.Id == jobId &&
-                       item.TenantId == device.TenantId &&
-                       item.Status == "LOCAL_QUEUE_CLAIMED" &&
-                       item.ClaimedByAgentDeviceId == device.Id &&
-                       item.AgentLeaseExpiresUtc != null &&
-                       item.AgentLeaseExpiresUtc > attemptStartedUtc)
-        .ExecuteUpdateAsync(update => update.SetProperty(
-            item => item.AgentDocumentDownloadAttempts,
-            item => item.AgentDocumentDownloadAttempts + 1), ct);
-    if (attemptUpdated != 1)
+    var attemptJob = await db.PrintJobs.FromSqlInterpolated($"""
+        UPDATE "PrintJobs"
+        SET "AgentDocumentDownloadAttempts" = "AgentDocumentDownloadAttempts" + 1
+        WHERE "Id" = {jobId}
+          AND "TenantId" = {device.TenantId}
+          AND "Status" = 'LOCAL_QUEUE_CLAIMED'
+          AND "ClaimedByAgentDeviceId" = {device.Id}
+          AND "AgentLeaseExpiresUtc" > {attemptStartedUtc}
+        RETURNING *
+        """)
+        .AsNoTracking()
+        .SingleOrDefaultAsync(ct);
+    if (attemptJob is null)
     {
         content.Dispose();
         return Results.Conflict(new { code = "agent_document_lease_changed", message = "The document download lease is no longer current. Claim the job again before downloading." });
     }
 
-    var attemptNumber = await db.PrintJobs.AsNoTracking()
-        .Where(item => item.Id == jobId && item.TenantId == device.TenantId)
-        .Select(item => item.AgentDocumentDownloadAttempts)
-        .SingleAsync(ct);
+    var attemptNumber = attemptJob.AgentDocumentDownloadAttempts;
     var transferStartedUtc = DateTimeOffset.UtcNow;
     long payloadBytesSent = 0;
     var transferStatus = "COMPLETED";
@@ -3860,16 +3859,19 @@ agentApi.MapPost("/local-uploads/{ticketId:guid}/claim", async (
 
     if (ticket.CompletedUtc is not null)
     {
-        var attemptUpdated = await db.LocalPrintUploadTickets
-            .Where(item => item.Id == ticket.Id &&
-                           item.TenantId == device.TenantId &&
-                           item.AgentDeviceId == device.Id &&
-                           item.CompletedUtc != null)
-            .ExecuteUpdateAsync(update => update.SetProperty(
-                item => item.AgentUploadAttempts,
-                item => item.AgentUploadAttempts + 1), ct);
-        if (attemptUpdated != 1) return Results.Conflict();
-        await db.Entry(ticket).ReloadAsync(ct);
+        var completedAttemptTicket = await db.LocalPrintUploadTickets.FromSqlInterpolated($"""
+            UPDATE "LocalPrintUploadTickets"
+            SET "AgentUploadAttempts" = "AgentUploadAttempts" + 1
+            WHERE "Id" = {ticket.Id}
+              AND "TenantId" = {device.TenantId}
+              AND "AgentDeviceId" = {device.Id}
+              AND "CompletedUtc" IS NOT NULL
+            RETURNING *
+            """)
+            .AsNoTracking()
+            .SingleOrDefaultAsync(ct);
+        if (completedAttemptTicket is null) return Results.Conflict();
+        ticket = completedAttemptTicket;
 
         var completedJob = await db.PrintJobs.AsNoTracking()
             .SingleOrDefaultAsync(item => item.Id == ticket.PrintJobId && item.TenantId == device.TenantId, ct);
@@ -3936,18 +3938,22 @@ agentApi.MapPost("/local-uploads/{ticketId:guid}/claim", async (
         });
     }
 
-    var claimAttemptUpdated = await db.LocalPrintUploadTickets
-        .Where(item => item.Id == ticket.Id &&
-                       item.TenantId == device.TenantId &&
-                       item.AgentDeviceId == device.Id &&
-                       item.CompletedUtc == null &&
-                       item.ExpiresUtc > now)
-        .ExecuteUpdateAsync(update => update
-            .SetProperty(item => item.ClaimedUtc, item => item.ClaimedUtc ?? now)
-            .SetProperty(item => item.ClaimLeaseExpiresUtc, item => item.ExpiresUtc)
-            .SetProperty(item => item.AgentUploadAttempts, item => item.AgentUploadAttempts + 1), ct);
-    if (claimAttemptUpdated != 1) return Results.Conflict();
-    await db.Entry(ticket).ReloadAsync(ct);
+    var claimedAttemptTicket = await db.LocalPrintUploadTickets.FromSqlInterpolated($"""
+        UPDATE "LocalPrintUploadTickets"
+        SET "ClaimedUtc" = COALESCE("ClaimedUtc", {now}),
+            "ClaimLeaseExpiresUtc" = "ExpiresUtc",
+            "AgentUploadAttempts" = "AgentUploadAttempts" + 1
+        WHERE "Id" = {ticket.Id}
+          AND "TenantId" = {device.TenantId}
+          AND "AgentDeviceId" = {device.Id}
+          AND "CompletedUtc" IS NULL
+          AND "ExpiresUtc" > {now}
+        RETURNING *
+        """)
+        .AsNoTracking()
+        .SingleOrDefaultAsync(ct);
+    if (claimedAttemptTicket is null) return Results.Conflict();
+    ticket = claimedAttemptTicket;
 
     return Results.Ok(new
     {
