@@ -2875,15 +2875,14 @@ function CustomerLocalConnection({localAgent,onReady}:{localAgent:CustomerLocalA
     setCheckStatus("checking");
     onReady(false);
     setMessage(nativeAppMode ? "Checking shop Wi-Fi." : "Checking the shop computer. No document is sent by this check.");
+    let nativeLocalNetworkPermissionDenied=false;
     if(nativeAppMode) {
       const access=await requestSmartPrintNativeLocalNetworkAccess();
       if(generation!==checkGeneration.current)return;
-      if(access==="denied") {
-        setCheckStatus("denied");
-        onReady(false);
-        setMessage("Allow SmartPrint to access Nearby devices in Android Settings, then check shop Wi-Fi again. Cloud-assisted upload remains available.");
-        return;
-      }
+      // Android 16 only enforces local-network permission when its protection is
+      // active. A denied Nearby devices prompt must not block a connection on
+      // devices where the OS still grants local access implicitly.
+      nativeLocalNetworkPermissionDenied=access==="denied";
     }
 
     let validEndpointCount=0;
@@ -2943,9 +2942,13 @@ function CustomerLocalConnection({localAgent,onReady}:{localAgent:CustomerLocalA
     if(generation!==checkGeneration.current)return;
     setCheckStatus("unavailable");
     onReady(false);
-    setMessage(nativeAppMode ? "Shop offline · Cloud upload available." : validEndpointCount===0
-      ? "The shop Agent has not announced a usable local address. The regular cloud-assisted upload remains available."
-      : "Could not reach the shop computer. Make sure this phone is connected to the same shop Wi-Fi, then ask the shop operator to check the connection. The regular cloud-assisted upload remains available.");
+    setMessage(nativeAppMode
+      ? nativeLocalNetworkPermissionDenied
+        ? "Could not reach the shop. Check that this phone is on the same Wi-Fi as the shop computer. If Android 16 local-network access is restricted, allow SmartPrint under Android Settings → Permissions → Nearby devices. Cloud-assisted upload remains available."
+        : "Shop offline · Cloud upload available."
+      : validEndpointCount===0
+        ? "The shop Agent has not announced a usable local address. The regular cloud-assisted upload remains available."
+        : "Could not reach the shop computer. Make sure this phone is connected to the same shop Wi-Fi, then ask the shop operator to check the connection. The regular cloud-assisted upload remains available.");
   }
 
   useEffect(()=>{
