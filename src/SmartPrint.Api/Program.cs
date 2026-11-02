@@ -3685,6 +3685,25 @@ agentApi.MapGet("/jobs/{jobId:guid}/document", async (
         return Results.Conflict(new { code = "agent_document_lease_changed", message = "The document download lease is no longer current. Claim the job again before downloading." });
     }
     var transferStartedUtc = DateTimeOffset.UtcNow;
+    await DataTransferRecorder.TryRecordAsync(db, app.Logger, new DataTransferEvent
+    {
+        TransferId = transferId,
+        AttemptNumber = attemptNumber.Value,
+        TenantId = device.TenantId,
+        AgentDeviceId = device.Id,
+        PrinterDeviceId = document.PrinterDeviceId,
+        QrStationId = document.QrStationId,
+        PrintJobId = jobId,
+        PrintDocumentId = document.Id,
+        Channel = "CLOUD_AGENT_DOWNLOAD",
+        Direction = "EGRESS",
+        Status = "STARTED",
+        PayloadBytes = 0,
+        NetworkBytes = null,
+        DurationMilliseconds = 0,
+        MeasurementSource = "API_RESPONSE_BODY_STREAM_STARTED",
+        CreatedUtc = transferStartedUtc
+    });
     long payloadBytesSent = 0;
     var transferStatus = "COMPLETED";
     try
@@ -3711,7 +3730,7 @@ agentApi.MapGet("/jobs/{jobId:guid}/document", async (
     finally
     {
         content.Dispose();
-        await DataTransferRecorder.TryRecordAsync(db, app.Logger, new DataTransferEvent
+        await DataTransferRecorder.TryCompleteAttemptAsync(db, app.Logger, new DataTransferEvent
         {
             TransferId = transferId,
             AttemptNumber = attemptNumber.Value,
@@ -5692,7 +5711,29 @@ publicApi.MapPost("/sessions/current/jobs", async (
         return Results.BadRequest(new { code = "multipart_form_required", message = "Upload the document using multipart/form-data." });
     }
 
+    var transferId = DataTransferIdentity.ForCustomerUpload(session.TenantId, session.Id, idempotencyKey);
+    var cloudUploadAttemptNumber = await db.Database.SqlQuery<int>($"""
+        UPDATE "CustomerPrintSessions"
+        SET "CloudUploadAttemptCount" = "CloudUploadAttemptCount" + 1
+        WHERE "Id" = {session.Id} AND "TenantId" = {session.TenantId}
+        RETURNING "CloudUploadAttemptCount" AS "Value"
+        """).SingleAsync(ct);
     var transferStartedUtc = DateTimeOffset.UtcNow;
+    await DataTransferRecorder.TryRecordAsync(db, app.Logger, new DataTransferEvent
+    {
+        TransferId = transferId,
+        AttemptNumber = cloudUploadAttemptNumber,
+        TenantId = session.TenantId,
+        QrStationId = session.QrStationId,
+        Channel = "CLOUD_CUSTOMER_UPLOAD",
+        Direction = "INGRESS",
+        Status = "STARTED",
+        PayloadBytes = 0,
+        NetworkBytes = null,
+        DurationMilliseconds = 0,
+        MeasurementSource = "CLOUD_MULTIPART_UPLOAD_STARTED",
+        CreatedUtc = transferStartedUtc
+    });
     var form = await context.Request.ReadFormAsync(ct);
     if (form.Files.Count != 1)
     {
@@ -5700,6 +5741,21 @@ publicApi.MapPost("/sessions/current/jobs", async (
     }
 
     var file = form.Files[0];
+    await DataTransferRecorder.TryCompleteAttemptAsync(db, app.Logger, new DataTransferEvent
+    {
+        TransferId = transferId,
+        AttemptNumber = cloudUploadAttemptNumber,
+        TenantId = session.TenantId,
+        QrStationId = session.QrStationId,
+        Channel = "CLOUD_CUSTOMER_UPLOAD",
+        Direction = "INGRESS",
+        Status = "STARTED",
+        PayloadBytes = Math.Max(0, file.Length),
+        NetworkBytes = null,
+        DurationMilliseconds = Math.Max(0, (long)(DateTimeOffset.UtcNow - transferStartedUtc).TotalMilliseconds),
+        MeasurementSource = "CLOUD_MULTIPART_FILE_RECEIVED",
+        CreatedUtc = transferStartedUtc
+    });
     string batchGroupName;
     try
     {
@@ -5916,10 +5972,10 @@ publicApi.MapPost("/sessions/current/jobs", async (
         throw;
     }
 
-    await DataTransferRecorder.TryRecordAsync(db, app.Logger, new DataTransferEvent
+    await DataTransferRecorder.TryCompleteAttemptAsync(db, app.Logger, new DataTransferEvent
     {
-        TransferId = job.Id,
-        AttemptNumber = 1,
+        TransferId = transferId,
+        AttemptNumber = cloudUploadAttemptNumber,
         TenantId = session.TenantId,
         QrStationId = session.QrStationId,
         PrintJobId = job.Id,
