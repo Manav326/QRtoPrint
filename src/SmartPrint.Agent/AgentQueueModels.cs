@@ -34,7 +34,9 @@ public sealed record LocalPrintUploadCompletionRequest(
     string FileExtension,
     string MediaType,
     long SizeBytes,
-    string Sha256);
+    string Sha256,
+    long ReceivedBytes = 0,
+    long DurationMilliseconds = 0);
 
 public sealed record AgentLocalQueueEntry(
     Guid JobId,
