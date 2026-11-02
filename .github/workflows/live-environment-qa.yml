@@ -1,6 +1,14 @@
 name: SmartPrint Live Environment QA
 
 on:
+  # Run the default, non-mutating smoke suite when this QA harness is first merged
+  # or when its implementation changes on main. Use workflow_dispatch for regular checks.
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/live-environment-qa.yml'
+      - 'scripts/qa/live-environment.mjs'
+      - 'docs/LIVE_ENVIRONMENT_QA.md'
   workflow_dispatch:
     inputs:
       check_shop_workspace:
