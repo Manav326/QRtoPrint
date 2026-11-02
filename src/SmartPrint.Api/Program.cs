@@ -4144,6 +4144,7 @@ agentApi.MapPost("/local-uploads/{ticketId:guid}/complete", async (
     });
     await db.SaveChangesAsync(ct);
     await transaction.CommitAsync(ct);
+    await transaction.DisposeAsync();
 
     if (request.ReceivedBytes > 0)
     {
