@@ -6755,7 +6755,15 @@ publicApi.MapPost("/sessions/current/renew", async (
         await db.SaveChangesAsync(ct);
     }
 
-    return Results.Ok(new { session.ExpiresUtc });
+    var stationPrinterId = await db.QrStations.AsNoTracking()
+        .Where(station => station.Id == session.QrStationId &&
+                          station.TenantId == session.TenantId &&
+                          station.IsEnabled)
+        .Select(station => station.PrinterDeviceId)
+        .SingleOrDefaultAsync(ct);
+    var localAgent = await GetLocalAgentInfoAsync(db, session.TenantId, stationPrinterId, now, ct);
+
+    return Results.Ok(new { session.ExpiresUtc, LocalAgent = localAgent });
 }).RequireRateLimiting("qr-session");
 
 publicApi.MapGet("/jobs/{jobId:guid}/status", async (
