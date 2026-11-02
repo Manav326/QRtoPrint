@@ -260,7 +260,7 @@ class MainActivityInstrumentedTest {
     fun scanDestinationUsesFocusedQrEntry() {
         ActivityScenario.launch(MainActivity::class.java).use {
             // Tap the accessible navigation item itself, not its non-clickable label child.
-            onView(withContentDescription("Print at a shop")).perform(click())
+            onView(withId(3)).perform(click())
             onView(withText("Connect to a shop")).check(matches(isDisplayed()))
             onView(withText("Scan QR code")).check(matches(isDisplayed()))
             onView(withText("Open My Files")).check(matches(isDisplayed()))
@@ -273,7 +273,7 @@ class MainActivityInstrumentedTest {
         CustomerAccountStore(context).clear()
         ActivityScenario.launch(MainActivity::class.java).use {
             val label = com.google.android.material.R.id.navigation_bar_item_small_label_view
-            onView(allOf(withId(label), withText("Activity"))).perform(click())
+            onView(withId(4)).perform(click())
             onView(withContentDescription("Account")).perform(click())
             onView(withText("Guest access is ready")).check(matches(isDisplayed()))
             androidx.test.espresso.Espresso.pressBack()
@@ -285,7 +285,7 @@ class MainActivityInstrumentedTest {
     @Test
     fun systemBackFromPrintTabReturnsHome() {
         ActivityScenario.launch(MainActivity::class.java).use {
-            onView(withContentDescription("Print at a shop")).perform(click())
+            onView(withId(3)).perform(click())
             onView(withText("Connect to a shop")).check(matches(isDisplayed()))
             androidx.test.espresso.Espresso.pressBack()
             onView(withText("Your space")).check(matches(isDisplayed()))
