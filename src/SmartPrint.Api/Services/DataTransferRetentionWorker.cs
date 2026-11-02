@@ -53,8 +53,16 @@ public sealed class DataTransferRetentionWorker(
             .Select(item => (int?)item.DataTransferRawRetentionDays)
             .SingleOrDefaultAsync(cancellationToken);
         var retentionDays = Math.Clamp(configuredDays ?? 90, 30, 3650);
-        var cutoffUtc = DateTimeOffset.UtcNow.AddDays(-retentionDays);
-        long movedEvents = 0;
+        var now = DateTimeOffset.UtcNow;
+        var staleAttemptCutoffUtc = now.AddMinutes(-30);
+        await db.DataTransferEvents
+            .Where(item => item.Status == "STARTED" && item.CreatedUtc < staleAttemptCutoffUtc)
+            .ExecuteUpdateAsync(update => update
+                .SetProperty(item => item.Status, "FAILED")
+                .SetProperty(item => item.MeasurementSource, "AGENT_UPLOAD_ATTEMPT_TIMED_OUT"), cancellationToken);
+
+        var cutoffUtc = now.AddDays(-retentionDays);
+        long rolledUpGroups = 0;
 
         while (!cancellationToken.IsCancellationRequested)
         {
@@ -125,9 +133,9 @@ public sealed class DataTransferRetentionWorker(
             if (affected <= 0)
                 break;
 
-            movedEvents += affected;
+            rolledUpGroups += affected;
         }
 
-        return movedEvents;
+        return rolledUpGroups;
     }
 }
