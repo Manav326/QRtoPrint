@@ -764,9 +764,13 @@ async function nativeCustomerBridgeRequest(message: string): Promise<string> {
         bridge.removeEventListener("message", onMessage);
         resolve(value);
       };
-      const onMessage = (event: MessageEvent) => finish(
-        typeof event.data === "string" ? event.data : ""
-      );
+      const onMessage = (event: MessageEvent) => {
+        const value = typeof event.data === "string" ? event.data : "";
+        // Native Wi-Fi permission replies use a reserved prefix and must never be
+        // mistaken for an access token or station-session response.
+        if (value.startsWith("localNetworkAccess:")) return;
+        finish(value);
+      };
       const timeout = window.setTimeout(() => finish(""), 10000);
       bridge.addEventListener("message", onMessage);
       bridge.postMessage(message);
@@ -787,6 +791,18 @@ export function getNativeCustomerPrintSession(publicCode: string): Promise<strin
 
 export async function saveNativeCustomerPrintSession(publicCode: string, token: string): Promise<boolean> {
   return (await nativeCustomerBridgeRequest(`saveCustomerPrintSession|${publicCode}|${token}`)) === "OK";
+}
+
+export async function saveNativeCustomerShopProfile(
+  publicCode: string,
+  shop: { displayName: string; logoUrl?: string | null; accentColor?: string | null }
+): Promise<boolean> {
+  const payload = encodeURIComponent(JSON.stringify({
+    displayName: shop.displayName,
+    logoUrl: shop.logoUrl ?? null,
+    accentColor: shop.accentColor ?? null
+  }));
+  return (await nativeCustomerBridgeRequest(`setCustomerShopProfile|${publicCode}|${payload}`)) === "OK";
 }
 
 export async function clearNativeCustomerPrintSession(publicCode: string): Promise<void> {

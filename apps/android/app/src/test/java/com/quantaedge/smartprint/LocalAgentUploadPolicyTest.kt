@@ -33,13 +33,19 @@ class LocalAgentUploadPolicyTest {
             "http", "192.168.1.4", 17842, "/api/v1/local/status", "GET"
         ))
         assertTrue(LocalAgentUploadPolicy.allows(
-            "http", "192.168.1.4", 17842, "/api/v1/local/uploads/ticket", "POST"
+            "http", "192.168.1.4", 17842, "/api/v1/local/uploads/550e8400-e29b-41d4-a716-446655440000", "POST"
         ))
         assertFalse(LocalAgentUploadPolicy.allows(
             "http", "192.168.1.4", 17842, "/api/v1/local/status", "POST"
         ))
         assertFalse(LocalAgentUploadPolicy.allows(
-            "http", "192.168.1.4", 17842, "/api/v1/local/uploads/ticket", "GET"
+            "http", "192.168.1.4", 17842, "/api/v1/local/uploads/550e8400-e29b-41d4-a716-446655440000", "GET"
+        ))
+        assertFalse(LocalAgentUploadPolicy.allows(
+            "http", "192.168.1.4", 17842, "/api/v1/local/uploads/550e8400-e29b-41d4-a716-446655440000/other", "POST"
+        ))
+        assertFalse(LocalAgentUploadPolicy.allows(
+            "http", "192.168.1.4", 17842, "/api/v1/local/uploads/not-a-ticket", "POST"
         ))
         assertFalse(LocalAgentUploadPolicy.allows(
             "http", "192.168.1.4", 17842, "/health", "GET"
@@ -61,13 +67,13 @@ class LocalAgentUploadPolicyTest {
             "http", "192.168.1.4", 17842, "/api/v1/local/status", "OPTIONS", "GET"
         ))
         assertTrue(LocalAgentUploadPolicy.allows(
-            "http", "192.168.1.4", 17842, "/api/v1/local/uploads/ticket", "OPTIONS", "POST"
+            "http", "192.168.1.4", 17842, "/api/v1/local/uploads/550e8400-e29b-41d4-a716-446655440000", "OPTIONS", "POST"
         ))
         assertFalse(LocalAgentUploadPolicy.allows(
             "http", "192.168.1.4", 17842, "/api/v1/local/status", "OPTIONS", "POST"
         ))
         assertFalse(LocalAgentUploadPolicy.allows(
-            "http", "192.168.1.4", 17842, "/api/v1/local/uploads/ticket", "OPTIONS", "GET"
+            "http", "192.168.1.4", 17842, "/api/v1/local/uploads/550e8400-e29b-41d4-a716-446655440000", "OPTIONS", "GET"
         ))
         assertFalse(LocalAgentUploadPolicy.allows(
             "http", "192.168.1.4", 17842, "/api/v1/local/status", "OPTIONS"

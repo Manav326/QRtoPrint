@@ -20,7 +20,7 @@ import {
   createAgentEnrollmentCode, createCustomerSession, createPrinter, createStation,
   downloadShopDocument, getCustomerJobStatus, getShopAgentDevices, getShopJobEvents, getShopPrinters, getShopPrintJobsPage, getShopPrintBatchJobs, loadShopData,
   logout, readStoredTokens, rejectShopPrintJob, rejectShopPayment, revokeAgentDevice,
-  reportCustomerBatchPayment, reportCustomerUpiPayment, renewCustomerPrintSession, getNativeCustomerPrintSession, saveNativeCustomerPrintSession, clearNativeCustomerPrintSession, resumeCustomerSession, rotateStationCode, startCustomerBatchPayment, startCustomerPayment, storeTokens,
+  reportCustomerBatchPayment, reportCustomerUpiPayment, renewCustomerPrintSession, getNativeCustomerPrintSession, saveNativeCustomerPrintSession, saveNativeCustomerShopProfile, clearNativeCustomerPrintSession, resumeCustomerSession, rotateStationCode, startCustomerBatchPayment, startCustomerPayment, storeTokens,
   updatePrinterActive, updateShopPaymentSettings, updateShopPricing,
   updateShopProfile, updateStationEnabled, uploadCustomerDocument, uploadCustomerDocumentLocally,
   verifyShopPayment, retryShopPdfExport, recordShopPrintRefund, previewShopPrintRefund, type CustomerBatchPayment, type CustomerPayment, type ShopPayment, type ShopPaymentSettings, type ShopRefund,
@@ -2739,6 +2739,7 @@ function CustomerEntry({publicCode,dark,onToggleTheme}:{publicCode:string;dark:b
       // Wait for native encrypted persistence before presenting the connected session.
       // In a regular browser the bridge is absent and this safely becomes a no-op.
       const storedNatively=await saveNativeCustomerPrintSession(publicCode,value.sessionToken);
+      await saveNativeCustomerShopProfile(publicCode,value.shop);
       if(!mounted)return;
       setResult(value);
       if(storedNatively)sessionStorage.removeItem(stationKey);
@@ -2837,6 +2838,39 @@ function buildSecureLocalPortalUrl():string|null {
   }
 }
 
+async function requestSmartPrintNativeLocalNetworkAccess():Promise<"granted"|"denied"|"not_required"|"unavailable"> {
+  const bridge=(window as Window & {
+    SmartPrintNative?: {
+      postMessage:(message:string)=>void;
+      addEventListener:(type:string,listener:(event:MessageEvent)=>void)=>void;
+      removeEventListener:(type:string,listener:(event:MessageEvent)=>void)=>void;
+    };
+  }).SmartPrintNative;
+  if(!bridge?.postMessage||!bridge.addEventListener||!bridge.removeEventListener)return "unavailable";
+
+  return new Promise(resolve=>{
+    let settled=false;
+    let timeout:number|undefined;
+    const finish=(result:"granted"|"denied"|"not_required"|"unavailable")=>{
+      if(settled)return;
+      settled=true;
+      if(timeout!==undefined)window.clearTimeout(timeout);
+      bridge.removeEventListener("message",handleReply);
+      resolve(result);
+    };
+    const handleReply=(event:MessageEvent)=>{
+      const value=typeof event.data==="string"?event.data:"";
+      if(value==="localNetworkAccess:granted")finish("granted");
+      else if(value==="localNetworkAccess:denied")finish("denied");
+      else if(value==="localNetworkAccess:not_required")finish("not_required");
+    };
+    timeout=window.setTimeout(()=>finish("unavailable"),30000);
+    bridge.addEventListener("message",handleReply);
+    try{bridge.postMessage("requestLocalNetworkAccess");}
+    catch{finish("unavailable");}
+  });
+}
+
 function CustomerLocalConnection({localAgent,onReady,onUnavailable,cloudAssistedPrintingEnabled}:{localAgent:CustomerLocalAgent|null;onReady:(ready:boolean)=>void;onUnavailable:()=>void;cloudAssistedPrintingEnabled:boolean}) {
   const nativeAppMode = navigator.userAgent.includes("SmartPrintAndroid/1");
   const [permissionState,setPermissionState]=useState<PermissionState|"unknown">("unknown");
@@ -2865,6 +2899,15 @@ function CustomerLocalConnection({localAgent,onReady,onUnavailable,cloudAssisted
     setCheckStatus("checking");
     onReady(false);
     setMessage(nativeAppMode ? "Checking shop Wi-Fi." : "Checking the shop computer. No document is sent by this check.");
+    let nativeLocalNetworkPermissionDenied=false;
+    if(nativeAppMode) {
+      const access=await requestSmartPrintNativeLocalNetworkAccess();
+      if(generation!==checkGeneration.current)return;
+      // Android 16 only enforces local-network permission when its protection is
+      // active. A denied Nearby devices prompt must not block a connection on
+      // devices where the OS still grants local access implicitly.
+      nativeLocalNetworkPermissionDenied=access==="denied";
+    }
 
     let validEndpointCount=0;
     for(const value of localAgent.endpoints.slice(0,8)) {
@@ -2960,9 +3003,13 @@ function CustomerLocalConnection({localAgent,onReady,onUnavailable,cloudAssisted
     setCheckStatus("unavailable");
     onReady(false);
     if(cloudAssistedPrintingEnabled)onUnavailable();
-    setMessage(nativeAppMode ? "Shop offline · Cloud upload available." : validEndpointCount===0
-      ? "The shop Agent has not announced a usable local address. The regular cloud-assisted upload remains available."
-      : "Could not reach the shop computer. Make sure this phone is connected to the same shop Wi-Fi, then ask the shop operator to check the connection. The regular cloud-assisted upload remains available.");
+    setMessage(nativeAppMode
+      ? nativeLocalNetworkPermissionDenied
+        ? "Could not reach the shop. Check that this phone is on the same Wi-Fi as the shop computer. If Android 16 local-network access is restricted, allow SmartPrint under Android Settings → Permissions → Nearby devices. Cloud-assisted upload remains available."
+        : "Shop offline · Cloud upload available."
+      : validEndpointCount===0
+        ? "The shop Agent has not announced a usable local address. The regular cloud-assisted upload remains available."
+        : "Could not reach the shop computer. Make sure this phone is connected to the same shop Wi-Fi, then ask the shop operator to check the connection. The regular cloud-assisted upload remains available.");
   }
 
   useEffect(()=>{
@@ -2982,14 +3029,13 @@ function CustomerLocalConnection({localAgent,onReady,onUnavailable,cloudAssisted
       return ()=>{checkGeneration.current++;};
     }
 
-    // A private-LAN/loopback portal talking to another private-LAN Agent
-    // stays within the same or a less-private address space. Chrome does not
-    // need to prompt for local-network permission for this local-to-local path.
-    // Android WebView does not expose Chrome's Local Network Access permission prompt.
-    // Check the paired shop Agent as soon as the customer station session is ready.
+    // Android WebView does not expose Chrome's site-level Local Network Access
+    // prompt. Keep this check user-initiated and let the native app request the
+    // Android 16 transitional permission only when the customer chooses Shop Wi-Fi.
     if(nativeAppMode) {
       setPermissionState("unknown");
-      void checkConnection();
+      setCheckStatus("idle");
+      setMessage("Tap Check Wi-Fi to connect to this shop.");
       return ()=>{checkGeneration.current++;};
     }
 
