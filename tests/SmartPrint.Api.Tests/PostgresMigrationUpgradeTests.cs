@@ -64,6 +64,9 @@ public sealed class PostgresMigrationUpgradeTests
         Assert.Contains(
             "202611020005_AddTransferUsageReliability",
             await db.Database.GetAppliedMigrationsAsync());
+        Assert.Contains(
+            "202611020006_AddCloudUploadAttemptCounter",
+            await db.Database.GetAppliedMigrationsAsync());
         Assert.Equal(90, settings.DataTransferRawRetentionDays);
         Assert.True(settings.DataTransferMeasurementStartedUtc <= DateTimeOffset.UtcNow);
 
@@ -146,6 +149,7 @@ public sealed class PostgresMigrationUpgradeTests
         // for that same fingerprint remains unique within this tenant.
         db.AddRange(tenant, agent, revokedAgent, printer, station, session, subscription, ticket);
         await db.SaveChangesAsync();
+        Assert.Equal(0, session.CloudUploadAttemptCount);
 
         // Rollback must remain safe when revoked and replacement records share a fingerprint.
         const string fingerprintIndexSql =
