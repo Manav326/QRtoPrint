@@ -4,6 +4,8 @@ import android.content.Context
 import android.graphics.Bitmap
 import android.net.Uri
 import android.webkit.ValueCallback
+import android.webkit.WebSettings
+import android.webkit.WebView
 import java.io.File
 import java.util.concurrent.atomic.AtomicReference
 import androidx.test.core.app.ActivityScenario
