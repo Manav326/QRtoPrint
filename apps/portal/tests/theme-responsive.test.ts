@@ -107,10 +107,10 @@ test("QR station poster renders one canonical QR in an isolated single-page A5 p
   assert.match(poster, /createPortal\([\s\S]*document\.body/);
   assert.match(poster, /<QRCode value=\{station\.publicUrl\}/);
   assert.equal((poster.match(/<QRCode\b/g) ?? []).length, 1);
-  assert.match(poster, /Scan &amp; send/);
+  assert.match(poster, /Scan, save &amp; send/);
   assert.match(poster, /save it in the app/);
-  assert.match(poster, /Shop reviews/);
-  assert.match(poster, /Print &amp; collect/);
+  assert.match(poster, /We review your files/);
+  assert.match(poster, /Print &amp; pick up/);
   assert.match(poster, /Quanta<span>Edge<\/span>/);
   assert.match(css, /@page\s*\{\s*size:\s*A5 landscape;\s*margin:\s*0;/);
   assert.doesNotMatch(css, /size: 90mm 54mm/);
