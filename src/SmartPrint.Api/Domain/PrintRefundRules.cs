@@ -5,7 +5,7 @@ public static class PrintRefundRules
     public static bool CanRefundBeforePrintHandoff(PrintJob job)
     {
         ArgumentNullException.ThrowIfNull(job);
-        return job.Status == "PAID_AUTHORISED" &&
+        return job.Status is "PAID_AUTHORISED" or "REJECTED" &&
                job.LocalQueueReceivedUtc is null &&
                job.ClaimedByAgentDeviceId is null &&
                job.AgentClaimedUtc is null &&

@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { formatIstDate } from "./date-time";
 import { CalendarClock, CheckCircle2, ChevronLeft, ChevronRight, CreditCard, History, RefreshCw, Search, ShieldCheck, X } from "lucide-react";
 import {
   assignPlatformSubscription,
@@ -58,7 +59,7 @@ function buildAssignmentOptions(plans: PlatformPlan[]): AssignmentOption[] {
 
 function date(value: string | null | undefined) {
   return value
-    ? new Date(value).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })
+    ? formatIstDate(value)
     : "—";
 }
 

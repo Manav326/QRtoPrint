@@ -358,6 +358,7 @@ public sealed class ShopPaymentProfile
     public string? UpiId { get; set; }
     public string? PayeeName { get; set; }
     public bool CashEnabled { get; set; }
+    public bool InstantPaymentEnabled { get; set; }
     public DateTimeOffset UpdatedUtc { get; set; } = DateTimeOffset.UtcNow;
 }
 
@@ -379,11 +380,32 @@ public sealed class PrintRefund
     public DateTimeOffset CreatedUtc { get; set; } = DateTimeOffset.UtcNow;
 }
 
+public sealed class PrintBatchPayment
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+    public Guid TenantId { get; set; }
+    public Guid CustomerSessionId { get; set; }
+    public Guid BatchId { get; set; }
+    public string Method { get; set; } = string.Empty;
+    public string Status { get; set; } = string.Empty;
+    public long AmountMinor { get; set; }
+    public string Currency { get; set; } = "INR";
+    public string? UpiIdSnapshot { get; set; }
+    public string? PayeeNameSnapshot { get; set; }
+    public string? PaymentReference { get; set; }
+    public string? RejectionReason { get; set; }
+    public Guid? VerifiedByUserId { get; set; }
+    public DateTimeOffset? VerifiedUtc { get; set; }
+    public DateTimeOffset CreatedUtc { get; set; } = DateTimeOffset.UtcNow;
+    public DateTimeOffset UpdatedUtc { get; set; } = DateTimeOffset.UtcNow;
+}
+
 public sealed class PrintPayment
 {
     public Guid Id { get; set; } = Guid.NewGuid();
     public Guid TenantId { get; set; }
     public Guid PrintJobId { get; set; }
+    public Guid? BatchPaymentId { get; set; }
     public string Method { get; set; } = string.Empty;
     public string Status { get; set; } = string.Empty;
     public long AmountMinor { get; set; }
