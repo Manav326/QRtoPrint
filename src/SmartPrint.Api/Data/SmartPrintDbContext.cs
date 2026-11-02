@@ -554,3 +554,4 @@ public sealed class SmartPrintDbContext(DbContextOptions<SmartPrintDbContext> op
                 .OnDelete(DeleteBehavior.Cascade);
         });
     }
+}
