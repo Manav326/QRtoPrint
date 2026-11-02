@@ -57,6 +57,13 @@ export interface PlatformDataNetworkReport {
   toUtc: string;
   days: number;
   measurementCoverageDays: number;
+  telemetryHealth: {
+    scope: string;
+    processStartedUtc: string;
+    successfulWriteCount: number;
+    failedWriteCount: number;
+    lastFailureUtc: string | null;
+  };
   summary: {
     uniqueDocumentCount: number;
     uniqueDocumentBytes: number;
