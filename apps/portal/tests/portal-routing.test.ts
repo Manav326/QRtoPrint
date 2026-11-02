@@ -38,7 +38,8 @@ test("Android station uses the shared customer page and only adapts native folde
 
   assert.match(appSource, /return <div className="customer-entry">/);
   assert.doesNotMatch(appSource, /nativeAppMode|smartPrintNativeHeadline|smartPrintNativeStatus|smartPrintNativeBoundary/);
-  assert.equal((appSource.match(/navigator\.userAgent\.includes\("SmartPrintAndroid\/1"\)/g) ?? []).length, 1);
+  assert.equal((appSource.match(/navigator\.userAgent\.includes\("SmartPrintAndroid\/1"\)/g) ?? []).length, 2);
+  assert.match(appSource, /if\(isNativeApp\)\s*\{\s*setPermissionState\("unknown"\);\s*void checkConnection\(\);/);
   assert.match(appSource, /accept=\{usesNativeFolderPicker\?/);
   assert.doesNotMatch(stylesSource, /customer-entry\.smartprint-native/);
 });
