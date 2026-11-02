@@ -3426,7 +3426,7 @@ function CustomerPrintFlow({publicCode,sessionToken,paymentOptions,localAgent,lo
       }
       const uploadError=exception instanceof LocalUploadOutcomeUnknownError
         ? cloudAssistedPrintingEnabled
-          ? "Shop Wi-Fi was interrupted. SmartPrint has kept this file attached to its original job and selected secure Cloud-assisted HTTPS. Tap Retry to continue; it will resume the same upload, not create another print job."
+          ? "Shop Wi-Fi was interrupted. Cloud-assisted upload is now selected for secure HTTPS continuation. SmartPrint has kept this file attached to its original job; tap Retry to resume that same upload without creating another print job."
           : "Shop Wi-Fi was interrupted. SmartPrint has kept this file attached to its original job. Reconnect to the shop computer and tap Retry; the same upload will resume without creating a second print job."
         : confirmedPreTicketRejection
           ? canFallbackToCloud
