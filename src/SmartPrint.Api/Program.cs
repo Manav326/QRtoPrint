@@ -117,7 +117,7 @@ builder.Services.AddRateLimiter(options =>
             _ => new FixedWindowRateLimiterOptions { PermitLimit = 30, Window = TimeSpan.FromMinutes(1), QueueLimit = 0 }));
     options.AddPolicy("document-upload", context =>
         RateLimitPartition.GetFixedWindowLimiter(GetSessionRateLimitPartitionKey(context),
-            _ => new FixedWindowRateLimiterOptions { PermitLimit = 8, Window = TimeSpan.FromMinutes(1), QueueLimit = 0 }));
+            _ => new FixedWindowRateLimiterOptions { PermitLimit = 30, Window = TimeSpan.FromMinutes(1), QueueLimit = 0 }));
 });
 var configuredCorsOrigins = builder.Configuration.GetSection("Cors:AllowedOrigins")
     .Get<string[]>()?
@@ -4141,15 +4141,17 @@ agentApi.MapGet("/local-uploads/{jobId:guid}/status", async (
         .Where(item => item.PrintJobId == jobId &&
                        item.TenantId == device.TenantId &&
                        item.AgentDeviceId == device.Id)
-        .Select(item => new { item.CompletedUtc, item.ExpiresUtc })
+        .Select(item => new { item.CompletedUtc, item.ExpiresUtc, item.Sha256, item.SizeBytes })
         .SingleOrDefaultAsync(ct);
     if (ticket is null) return Results.NotFound();
 
     var documentExists = await db.PrintDocuments.AsNoTracking().AnyAsync(item =>
         item.TenantId == device.TenantId &&
         item.PrintJobId == jobId &&
-        item.StorageMode == "LOCAL_AGENT" &&
-        item.AgentDeviceId == device.Id, ct);
+        item.SizeBytes == ticket.SizeBytes &&
+        item.Sha256 == ticket.Sha256 &&
+        (item.StorageMode == "CLOUD" ||
+         (item.StorageMode == "LOCAL_AGENT" && item.AgentDeviceId == device.Id)), ct);
 
     var safeToDelete = false;
     DateTimeOffset? deleteAfterUtc = null;
@@ -5789,11 +5791,8 @@ publicApi.MapPost("/sessions/current/local-upload-tickets", async (
             return Results.Conflict(new { code = "local_upload_idempotency_conflict", message = "This upload attempt key is already associated with a different document." });
         }
 
-        if (existing.CompletedUtc is null && existing.ExpiresUtc <= now)
-        {
-            return Results.Conflict(new { code = "local_upload_ticket_expired", message = "This local upload attempt expired. Start a new upload attempt." });
-        }
-
+        // Keep the ticket identity after its LAN claim window expires. HTTPS
+        // recovery can still complete this same PrintJob for up to 24 hours.
         return Results.Ok(new
         {
             existing.Id,
@@ -6053,6 +6052,268 @@ publicApi.MapPost("/sessions/current/local-upload-tickets", async (
         Completed = false
     });
 }).RequireRateLimiting("document-upload");
+
+
+publicApi.MapPost("/sessions/current/local-upload-tickets/{ticketId:guid}/cloud-recovery", async (
+    Guid ticketId,
+    HttpContext context,
+    SmartPrintDbContext db,
+    DocumentStorage storage,
+    TenantEntitlementService entitlements,
+    CancellationToken ct) =>
+{
+    const int maximumRecoveryAgeHours = 24;
+    var rawToken = context.Request.Headers["X-Print-Session"].FirstOrDefault();
+    var rawGrant = context.Request.Headers["X-Print-Upload-Grant"].FirstOrDefault();
+    if (string.IsNullOrWhiteSpace(rawToken) ||
+        string.IsNullOrWhiteSpace(rawGrant) ||
+        rawGrant.Length is < 40 or > 128)
+        return Results.Unauthorized();
+
+    var now = DateTimeOffset.UtcNow;
+    var tokenHash = HashOpaqueToken(rawToken);
+    var session = await db.CustomerPrintSessions.AsNoTracking()
+        .Where(item => item.TokenHash == tokenHash && item.Status == "Active" &&
+                       item.RevokedUtc == null && item.ExpiresUtc > now)
+        .Select(item => new { item.Id, item.TenantId })
+        .SingleOrDefaultAsync(ct);
+    if (session is null) return Results.Unauthorized();
+
+    await using var transaction = await db.Database.BeginTransactionAsync(ct);
+    var lockedTickets = await db.LocalPrintUploadTickets.FromSqlInterpolated(
+        $"SELECT * FROM \"LocalPrintUploadTickets\" WHERE \"Id\" = {ticketId} AND \"TenantId\" = {session.TenantId} AND \"CustomerSessionId\" = {session.Id} FOR UPDATE")
+        .ToListAsync(ct);
+    var ticket = lockedTickets.SingleOrDefault();
+    if (ticket is null) return Results.NotFound();
+
+    byte[] suppliedGrantHash;
+    byte[] storedGrantHash;
+    try
+    {
+        suppliedGrantHash = Convert.FromHexString(HashOpaqueToken(rawGrant));
+        storedGrantHash = Convert.FromHexString(ticket.GrantHash);
+    }
+    catch (FormatException)
+    {
+        return Results.Unauthorized();
+    }
+    if (!CryptographicOperations.FixedTimeEquals(suppliedGrantHash, storedGrantHash))
+        return Results.Unauthorized();
+
+    var existingJob = await db.PrintJobs.AsNoTracking()
+        .SingleOrDefaultAsync(item => item.Id == ticket.PrintJobId &&
+                                      item.TenantId == ticket.TenantId &&
+                                      item.CustomerSessionId == ticket.CustomerSessionId, ct);
+    var existingDocument = await db.PrintDocuments.AsNoTracking()
+        .SingleOrDefaultAsync(item => item.TenantId == ticket.TenantId &&
+                                      item.PrintJobId == ticket.PrintJobId, ct);
+    if (existingJob is not null || existingDocument is not null || ticket.CompletedUtc is not null)
+    {
+        if (existingJob is null || existingDocument is null ||
+            existingDocument.SizeBytes != ticket.SizeBytes ||
+            !string.Equals(existingDocument.Sha256, ticket.Sha256, StringComparison.OrdinalIgnoreCase))
+            return Results.Conflict(new
+            {
+                code = "local_upload_recovery_state_conflict",
+                message = "The original shop upload is being reconciled. Refresh this print request; do not upload it again."
+            });
+
+        await transaction.CommitAsync(ct);
+        return Results.Ok(new
+        {
+            Job = new
+            {
+                existingJob.Id, existingJob.JobNumber, existingJob.Status,
+                existingJob.PageCount, existingJob.Copies, existingJob.Currency,
+                existingJob.QuotedAmountMinor, existingJob.CreatedUtc,
+                existingJob.BatchGroupName
+            },
+            Document = new
+            {
+                existingDocument.Id, existingDocument.OriginalFileName,
+                existingDocument.MediaType, existingDocument.SizeBytes,
+                existingDocument.Sha256, existingDocument.PageSizesJson
+            },
+            DuplicateRequest = true
+        });
+    }
+
+    if (ticket.CreatedUtc < now.AddHours(-maximumRecoveryAgeHours))
+        return Results.Conflict(new
+        {
+            code = "local_upload_recovery_expired",
+            message = "This upload attempt is too old to recover. Start a new print request; the original ticket will not be duplicated."
+        });
+
+    if (!context.Request.HasFormContentType)
+        return Results.BadRequest(new { code = "multipart_form_required", message = "Select the same document to continue its secure upload." });
+    var form = await context.Request.ReadFormAsync(ct);
+    if (form.Files.Count != 1)
+        return Results.BadRequest(new { code = "one_file_required", message = "Continue with one original document per print request." });
+    var file = form.Files[0];
+    if (file.Length != ticket.SizeBytes || file.Length is <= 0 or > 20 * 1024 * 1024)
+        return Results.UnprocessableEntity(new { code = "local_upload_recovery_size_mismatch", message = "The selected file does not match the original upload attempt." });
+
+    var subscription = await entitlements.GetForTenantAsync(ticket.TenantId, ct);
+    if (!subscription.IsAccessActive)
+        return Results.Problem(statusCode: StatusCodes.Status403Forbidden,
+            title: "This shop's trial or subscription period is no longer active.");
+    if (!subscription.CloudAssistedPrintingEnabled)
+        return Results.Problem(statusCode: StatusCodes.Status403Forbidden,
+            title: "Secure cloud recovery is not included in this shop's current plan. The original local upload remains available.");
+    if (!PlanEntitlementRules.AllowsDocument(subscription.MaxDocumentBytes, ticket.SizeBytes))
+        return Results.Problem(statusCode: StatusCodes.Status413PayloadTooLarge,
+            title: "This document exceeds the maximum size configured for this shop's plan.");
+
+    await entitlements.AcquireQuotaLockAsync(ticket.TenantId, TenantQuotaResource.MonthlyPrintJob, ct);
+    var quota = await entitlements.CheckCapacityAsync(ticket.TenantId, TenantQuotaResource.MonthlyPrintJob, ct);
+    if (!quota.Allowed)
+        return Results.Conflict(new { code = quota.Code, message = quota.Message, current = quota.Current, maximum = quota.Maximum });
+
+    _ = await db.PrintJobs.FromSqlInterpolated(
+        $"SELECT * FROM \"PrintJobs\" WHERE \"TenantId\" = {ticket.TenantId} AND \"CustomerSessionId\" = {ticket.CustomerSessionId} AND \"BatchId\" = {ticket.BatchId} FOR UPDATE")
+        .ToListAsync(ct);
+    var batchCheckoutLocked = await db.PrintBatchPayments.AsNoTracking().AnyAsync(item =>
+        item.TenantId == ticket.TenantId &&
+        item.CustomerSessionId == ticket.CustomerSessionId &&
+        item.BatchId == ticket.BatchId &&
+        item.Status != "REJECTED", ct);
+    if (batchCheckoutLocked)
+        return Results.Conflict(new
+        {
+            code = "batch_upload_locked_after_payment_start",
+            message = "This batch already has a payment attempt. The original file cannot be added to a second checkout."
+        });
+
+    var batchJobSizes = await (
+        from batchJob in db.PrintJobs.AsNoTracking()
+        join batchDocument in db.PrintDocuments.AsNoTracking()
+            on new { batchJob.TenantId, PrintJobId = batchJob.Id }
+            equals new { batchDocument.TenantId, batchDocument.PrintJobId }
+        where batchJob.TenantId == ticket.TenantId &&
+              batchJob.CustomerSessionId == ticket.CustomerSessionId &&
+              batchJob.BatchId == ticket.BatchId
+        select batchDocument.SizeBytes).ToListAsync(ct);
+    var pendingBatchTicketSizes = await db.LocalPrintUploadTickets.AsNoTracking()
+        .Where(item => item.TenantId == ticket.TenantId &&
+                       item.CustomerSessionId == ticket.CustomerSessionId &&
+                       item.BatchId == ticket.BatchId &&
+                       item.Id != ticket.Id &&
+                       item.CompletedUtc == null)
+        .Select(item => item.SizeBytes).ToListAsync(ct);
+    if (!PrintBatchCapacityRules.CanAdd(
+        batchJobSizes.Count + pendingBatchTicketSizes.Count,
+        checked(batchJobSizes.Sum() + pendingBatchTicketSizes.Sum()),
+        ticket.SizeBytes))
+        return Results.Conflict(new
+        {
+            code = "batch_capacity_exceeded",
+            message = "This original file no longer fits within the batch limit. Contact the shop before creating another print request."
+        });
+
+    var documentId = Guid.NewGuid();
+    StoredDocument stored;
+    try
+    {
+        await using var input = file.OpenReadStream();
+        stored = await storage.ValidateAndStoreAsync(
+            ticket.TenantId, documentId, ticket.OriginalFileName, input, ticket.SizeBytes, ct);
+    }
+    catch (DocumentValidationException exception)
+    {
+        return Results.UnprocessableEntity(new
+        {
+            code = "document_not_supported",
+            message = exception.Message
+        });
+    }
+
+    if (!string.Equals(stored.Sha256, ticket.Sha256, StringComparison.OrdinalIgnoreCase))
+    {
+        await storage.DeleteAsync(stored.StorageKey);
+        return Results.UnprocessableEntity(new
+        {
+            code = "local_upload_recovery_hash_mismatch",
+            message = "The selected file content differs from the original upload. Choose the exact same document to continue."
+        });
+    }
+
+    try
+    {
+        var job = new PrintJob
+        {
+            Id = ticket.PrintJobId,
+            TenantId = ticket.TenantId,
+            QrStationId = ticket.QrStationId,
+            PrinterDeviceId = ticket.PrinterDeviceId,
+            CustomerSessionId = ticket.CustomerSessionId,
+            BatchId = ticket.BatchId,
+            BatchGroupName = ticket.BatchGroupName,
+            JobNumber = ticket.JobNumber,
+            Status = "AWAITING_CONFIGURATION",
+            IdempotencyKey = $"LOCAL-{ticket.Id:N}",
+            PageCount = stored.Analysis.PageCount,
+            Copies = 1,
+            Currency = "INR",
+            QuotedAmountMinor = 0,
+            CreatedUtc = now,
+            UpdatedUtc = now
+        };
+        var document = new PrintDocument
+        {
+            Id = documentId,
+            TenantId = ticket.TenantId,
+            PrintJobId = ticket.PrintJobId,
+            OriginalFileName = ticket.OriginalFileName,
+            MediaType = stored.Analysis.MediaType,
+            FileExtension = stored.Analysis.Extension,
+            SizeBytes = stored.SizeBytes,
+            Sha256 = stored.Sha256,
+            StorageKey = stored.StorageKey,
+            StorageMode = "CLOUD",
+            PageSizesJson = stored.Analysis.PageSizesJson,
+            CreatedUtc = now
+        };
+
+        ticket.CompletedUtc = now;
+        db.PrintJobs.Add(job);
+        db.PrintDocuments.Add(document);
+        db.PrintJobEvents.Add(new PrintJobEvent
+        {
+            TenantId = job.TenantId,
+            PrintJobId = job.Id,
+            PreviousStatus = null,
+            NewStatus = job.Status,
+            ActorType = "Customer",
+            ReasonCode = "LOCAL_UPLOAD_RECOVERED_TO_HTTPS",
+            CreatedUtc = now
+        });
+        await db.SaveChangesAsync(ct);
+        await transaction.CommitAsync(ct);
+
+        return Results.Ok(new
+        {
+            Job = new
+            {
+                job.Id, job.JobNumber, job.Status, job.PageCount, job.Copies,
+                job.Currency, job.QuotedAmountMinor, job.CreatedUtc, job.BatchGroupName
+            },
+            Document = new
+            {
+                document.Id, document.OriginalFileName, document.MediaType,
+                document.SizeBytes, document.Sha256, document.PageSizesJson
+            },
+            DuplicateRequest = false
+        });
+    }
+    catch
+    {
+        await storage.DeleteAsync(stored.StorageKey);
+        throw;
+    }
+})
+.WithMetadata(new RequestSizeLimitAttribute(21 * 1024 * 1024))
+.RequireRateLimiting("document-upload");
 
 publicApi.MapPost("/jobs/{jobId:guid}/quote", async (
     Guid jobId,
