@@ -791,7 +791,10 @@ export async function createCustomerSession(publicCode: string) {
 
 
 export function renewCustomerPrintSession(sessionToken: string) {
-  return apiRequest<{ expiresUtc: string }>("/api/v1/public/sessions/current/renew", {
+  return apiRequest<{
+    expiresUtc: string;
+    localAgent: { agentDeviceId: string; endpoints: string[] } | null;
+  }>("/api/v1/public/sessions/current/renew", {
     method: "POST",
     headers: { "X-Print-Session": sessionToken }
   });

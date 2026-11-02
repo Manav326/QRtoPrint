@@ -1,5 +1,6 @@
 using System.ComponentModel;
 using System.IO.Pipes;
+using System.Net.NetworkInformation;
 using System.Runtime.InteropServices;
 using System.Security.AccessControl;
 using System.Security.Cryptography;
@@ -16,7 +17,8 @@ public sealed class AgentControlPipeHostedService(
     ILogger<AgentControlPipeHostedService> logger,
     IAgentEnrollmentHandler enrollmentHandler,
     AgentCredentialStore credentialStore,
-    LocalAgentApiState localAgentApiState) : BackgroundService
+    LocalAgentApiState localAgentApiState,
+    LocalNetworkManager localNetworkManager) : BackgroundService
 {
     public const string PipeName = "QRtoPrint.SmartPrint.Agent.Control";
     public const string PipePath = @"\\.\pipe\" + PipeName;
@@ -200,7 +202,10 @@ public sealed class AgentControlPipeHostedService(
 
         if (request is null ||
             (!string.Equals(request.Operation, "status", StringComparison.Ordinal) &&
-             !string.Equals(request.Operation, "enroll", StringComparison.Ordinal)))
+             !string.Equals(request.Operation, "enroll", StringComparison.Ordinal) &&
+             !string.Equals(request.Operation, "network-status", StringComparison.Ordinal) &&
+             !string.Equals(request.Operation, "select-network", StringComparison.Ordinal) &&
+             !string.Equals(request.Operation, "start-phone-test", StringComparison.Ordinal)))
         {
             await writer.WriteLineAsync(JsonSerializer.Serialize(new PipeResponse(false, null, "Invalid SmartPrint service operation."), PipeJsonOptions));
             return;
@@ -222,6 +227,48 @@ public sealed class AgentControlPipeHostedService(
                 logger.LogWarning("SmartPrint local identity status could not be read ({FailureType}).", exception.GetType().Name);
                 await writer.WriteLineAsync(JsonSerializer.Serialize(
                     new PipeResponse(false, null, "The local SmartPrint identity could not be read.", true, false, "IDENTITY_UNAVAILABLE", localAgentApiState.IsRunning, configuration["Agent:ApiBaseUrl"]),
+                    PipeJsonOptions));
+            }
+            return;
+        }
+
+        if (request.Operation is "network-status" or "select-network" or "start-phone-test")
+        {
+            try
+            {
+                LocalNetworkSnapshot? snapshot = null;
+                LocalPhoneTest? phoneTest = null;
+                if (request.Operation == "network-status")
+                    snapshot = localNetworkManager.GetSnapshot();
+                else if (request.Operation == "select-network")
+                {
+                    if (credentialStore.Load() is null)
+                        throw new InvalidOperationException("Connect this computer to your shop first.");
+                    if (string.IsNullOrWhiteSpace(request.NetworkId))
+                        throw new InvalidOperationException("Choose a shop connection.");
+                    snapshot = localNetworkManager.SelectNetwork(request.NetworkId);
+                }
+                else
+                {
+                    if (credentialStore.Load() is null)
+                        throw new InvalidOperationException("Connect this computer to your shop first.");
+                    phoneTest = localNetworkManager.StartPhoneTest();
+                }
+
+                await writer.WriteLineAsync(JsonSerializer.Serialize(
+                    new PipeResponse(true, null, null, NetworkSnapshot: snapshot, PhoneTest: phoneTest),
+                    PipeJsonOptions));
+            }
+            catch (Exception exception) when (
+                exception is IOException or UnauthorizedAccessException or InvalidOperationException or ArgumentException or
+                    NetworkInformationException or CryptographicException or JsonException)
+            {
+                logger.LogWarning("The shop connection could not be updated ({FailureType}).", exception.GetType().Name);
+                var message = exception is InvalidOperationException or ArgumentException
+                    ? exception.Message
+                    : "SmartPrint could not update the shop connection. Refresh and try again.";
+                await writer.WriteLineAsync(JsonSerializer.Serialize(
+                    new PipeResponse(false, null, message),
                     PipeJsonOptions));
             }
             return;
@@ -266,7 +313,7 @@ public sealed class AgentControlPipeHostedService(
     private static bool IsBase64UrlCharacter(char value) =>
         value is >= 'a' and <= 'z' or >= 'A' and <= 'Z' or >= '0' and <= '9' or '-' or '_';
 
-    private sealed record PipeRequest(string Operation, string? EnrollmentCode);
+    private sealed record PipeRequest(string Operation, string? EnrollmentCode, string? NetworkId = null);
     private sealed record PipeResponse(
         bool Success,
         Guid? AgentDeviceId,
@@ -276,5 +323,7 @@ public sealed class AgentControlPipeHostedService(
         string? Status = null,
         bool? LocalApiReachable = null,
         string? ApiBaseUrl = null,
-        string? Code = null);
+        string? Code = null,
+        LocalNetworkSnapshot? NetworkSnapshot = null,
+        LocalPhoneTest? PhoneTest = null);
 }

@@ -1,7 +1,7 @@
 import { Fragment, useEffect, useRef, useState, type ReactNode } from "react";
 import {
   Activity, ArrowRight, Check, Clock3, Copy, CreditCard, FileText, FileUp, FolderOpen, LayoutDashboard,
-  LifeBuoy, LogOut, Menu, Monitor, Plus, Printer, QrCode, Search, Settings,
+  LifeBuoy, LogOut, Menu, Monitor, Plus, Printer, QrCode, Search, Settings, Wifi,
   ShieldCheck, Users, Wallet, X, PanelLeftClose, PanelLeftOpen, RotateCcw, Zap
 } from "lucide-react";
 import QRCode from "react-qr-code";
@@ -27,7 +27,10 @@ import {
   type QrStation, type ShopCustomer, type ShopCustomerHistory, type ShopCustomerPage, type ShopPricingProfile, type ShopPrintJob, type ShopProfile, type ShopReportSummary, type ShopSubscriptionSummary,
   type UploadedPrintJob
 } from "./api";
-import { enrollLocalAgent, getLocalAgentStatus, isDesktopApp, type DesktopAgentStatus } from "./desktop-bridge";
+import {
+  enrollLocalAgent, getLocalAgentStatus, getLocalNetworkSnapshot, selectLocalNetwork, startLocalPhoneTest,
+  isDesktopApp, type DesktopAgentStatus, type DesktopLocalNetworkSnapshot, type DesktopLocalPhoneTest
+} from "./desktop-bridge";
 import { verifiedPdfExportPath } from "./print-output";
 import { applyThemePreference, readDarkModePreference, readSidebarCollapsedPreference, saveDarkModePreference, saveSidebarCollapsedPreference } from "./ui-preferences";
 import ThemeToggleButton from "./ThemeToggleButton";
@@ -642,7 +645,7 @@ function ShopConsole({ tokens, onSignOut, dark, onToggleTheme }: { tokens: AuthT
         // will synchronize the cloud inventory without enrolling a second time.
       }
 
-      setToast("This computer is securely connected. SmartPrint is discovering its printers.");
+      setToast("This computer is connected. SmartPrint is finding its printers.");
       if (!silent) await reload();
     } catch (exception) {
       if (exception instanceof ApiError && exception.status === 401) {
@@ -1728,7 +1731,7 @@ function PrintAgentPage({agents,enrollmentCode,busy,onGenerate,onRevoke,desktop,
         <div className="desktop-agent-status">
           <span className={connected ? "desktop-agent-indicator connected" : localAgentConflict ? "desktop-agent-indicator conflict" : "desktop-agent-indicator"} />
           <div><strong>{connected ? "Connected to this shop" : localAgentRevoked ? "Disconnected by the shop owner" : localAgentNeedsRepair ? "Connection needs repair" : localAgentEnrollmentIssue ? (localAgentConflict ? "Existing shop pairing needs revocation" : "Connection needs attention") : localAgentConflict ? "Connected to another shop" : localAgentOwnershipChecking ? "Checking shop registration" : localAgentStatus?.serviceReachable ? "Ready to connect" : "Print service not responding"}</strong>
-            <small>{connected ? (localAgentStatus?.localApiReachable === false ? "Connected to your shop. Cloud printing remains available; local-network uploads are reconnecting automatically." : "Printer discovery and job hand-off are managed by the SmartPrint service.") : localAgentRevoked ? "This computer was revoked and will not reconnect automatically. Select Reconnect this computer when your shop is ready; no pairing code is needed." : localAgentNeedsRepair ? "Windows could not read this computer's saved pairing. Check the paired-computer list below; revoke its old entry if it is still active, then select Repair connection. No code entry is needed." : localAgentEnrollmentIssue ? localAgentEnrollmentIssue.message : localAgentConflict ? "For security, this computer cannot be moved until its previous shop owner revokes it." : localAgentOwnershipChecking ? "SmartPrint is verifying this computer's saved registration with your shop. It will not transfer or re-enroll it while ownership is uncertain." : localAgentStatus?.serviceReachable ? "Your owner session will authorize a one-time connection. No pairing code is shown." : "SmartPrint is starting or reconnecting its background service. It will retry automatically."}</small>
+            <small>{connected ? (localAgentStatus?.localApiReachable === false ? "Connected to your shop. Cloud printing remains available; local-network uploads are reconnecting automatically." : "Printer discovery and job hand-off are managed by the SmartPrint service.") : localAgentRevoked ? "This computer was revoked and will not reconnect automatically. Select Reconnect this computer when your shop is ready; no pairing code is needed." : localAgentNeedsRepair ? "Windows could not read this computer's saved pairing. Check the paired-computer list below; revoke its old entry if it is still active, then select Repair connection. No code entry is needed." : localAgentEnrollmentIssue ? localAgentEnrollmentIssue.message : localAgentConflict ? "This computer is still connected to another shop. Ask its previous owner to disconnect it before connecting it here." : localAgentOwnershipChecking ? "SmartPrint is verifying this computer's saved registration with your shop. It will not transfer or re-enroll it while ownership is uncertain." : localAgentStatus?.serviceReachable ? "Your owner session will authorize a one-time connection. No pairing code is shown." : "SmartPrint is starting or reconnecting its background service. It will retry automatically."}</small>
           </div>
         </div>
         <div className="desktop-agent-actions">
@@ -1751,12 +1754,12 @@ function PrintAgentPage({agents,enrollmentCode,busy,onGenerate,onRevoke,desktop,
               {busy ? <span className="button-spinner"/> : <><Monitor size={15}/>{localAgentStatus?.serviceReachable ? "Connect this computer" : "Retry connection"}</>}
             </button>
           )}
-          <span>Your shop data remains protected by your account and this computer's Windows security.</span>
+          <span>This computer will handle print orders for your shop while connected.</span>
         </div>
       </div> : <>
       <div className="agent-intro">
         <div className="agent-hero-icon"><Monitor size={22}/></div>
-        <div><div className="eyebrow"><span className="eyebrow-line"/>LOCAL PRINT CONNECTIVITY</div><h2>Connect your shop computer</h2><p>Pair the Windows computer where your printers are installed. The agent reports printer inventory and health without exposing the agent secret in the browser.</p></div>
+        <div><div className="eyebrow"><span className="eyebrow-line"/>LOCAL PRINT CONNECTIVITY</div><h2>Connect your shop computer</h2><p>Pair the Windows computer connected to your printers. SmartPrint will keep it ready to receive customer print orders.</p></div>
       </div>
       <div className="agent-steps">
         <div><span>01</span><strong>Generate a pairing code</strong><small>One-time code, valid for 10 minutes.</small></div>
@@ -1773,21 +1776,149 @@ function PrintAgentPage({agents,enrollmentCode,busy,onGenerate,onRevoke,desktop,
           ? <a className="secondary-button" href={windowsInstallerUrl}><Monitor size={14}/> Download Windows installer</a>
           : <span className="subtle-button" aria-disabled="true">{releaseState === "loading" ? "Checking installer availability…" : releaseState === "error" ? "Installer availability temporarily unavailable" : "Windows installer not published"}</span>}
       </div>
-      <div className="agent-security-note"><ShieldCheck size={16}/><span>The pairing code expires after 10 minutes. The agent secret is returned only once and stored on the Windows machine using DPAPI LocalMachine encryption. Revoke a computer here if it is replaced or lost.</span></div>
+      <div className="agent-security-note"><ShieldCheck size={16}/><span>Your setup code works once and expires after 10 minutes. You can disconnect a computer from this page if it is replaced or lost.</span></div>
       <div className="agent-generate-row"><span>Pairing codes are single use. Generating a new one does not revoke already paired computers.</span><button className="primary-button" disabled={busy} onClick={onGenerate}>{busy?<span className="button-spinner"/>:<><Plus size={15}/> Generate pairing code</>}</button></div>
       </>}
     </section>
+    {desktop && <ShopConnectionPanel connected={connected} localApiReady={localAgentStatus?.localApiReachable===true}/>}
+    {!desktop && <section className="panel local-network-hint"><div className="local-network-mark"><Wifi size={20}/></div><div><h2>Shop connection</h2><p>Open SmartPrint on the Windows computer connected to your printers to choose and test the shop Wi-Fi.</p></div></section>}
     <section className="panel agent-device-panel">
       <div className="collection-header"><div><h2>Paired Windows computers</h2><p>Agent connection history and the number of discovered printer queues.</p></div><span className="setup-count">{agents.filter(agent=>!agent.revokedUtc).length} active</span></div>
       {agents.length===0?<div className="agent-empty"><Monitor size={25}/><strong>No Windows computer paired yet</strong><span>Generate a pairing code above and run the agent on the computer connected to your printers.</span></div>:
         <div className="agent-device-list">{agents.map(agent=><article className="agent-device-card" key={agent.id}>
           <div className="agent-device-icon"><Monitor size={19}/></div>
-          <div className="agent-device-copy"><strong>{agent.deviceName}</strong><span>{agent.printerCount} printer {agent.printerCount===1?"queue":"queues"} discovered · Paired {formatIstDate(agent.createdUtc)}</span><small>{agent.lastSeenUtc?("Last contact "+formatIstDateTime(agent.lastSeenUtc)):"No heartbeat received yet"}</small>{agent.localEndpoints?.length?<small>LAN status endpoint: {agent.localEndpoints.join(" · ")}</small>:<small>LAN endpoint not detected · check that the computer is on a private shop network</small>}</div>
+          <div className="agent-device-copy"><strong>{agent.deviceName}</strong><span>{agent.printerCount} printer {agent.printerCount===1?"queue":"queues"} discovered · Paired {formatIstDate(agent.createdUtc)}</span><small>{agent.lastSeenUtc?("Last contact "+formatIstDateTime(agent.lastSeenUtc)):"No heartbeat received yet"}</small>{agent.localEndpoints?.length?<small>Shop connection found · run the phone check on the shop computer</small>:<small>Connect this computer to the shop Wi-Fi to enable phone uploads</small>}</div>
           <Status label={agent.revokedUtc?"Revoked":agent.status} tone={agent.revokedUtc?"red":agent.status==="Online"?"green":"slate"}/>
           {!agent.revokedUtc&&<button className="subtle-button reject-action" disabled={busy} onClick={()=>onRevoke(agent)}>Revoke</button>}
         </article>)}</div>}
     </section>
   </div>;
+}
+
+function ShopConnectionPanel({connected,localApiReady}:{connected:boolean;localApiReady:boolean}) {
+  const [snapshot,setSnapshot]=useState<DesktopLocalNetworkSnapshot|null>(null);
+  const [loading,setLoading]=useState(true);
+  const [saving,setSaving]=useState(false);
+  const [error,setError]=useState("");
+  const [test,setTest]=useState<DesktopLocalPhoneTest|null>(null);
+  const [verified,setVerified]=useState(false);
+  const [expired,setExpired]=useState(false);
+
+  async function refresh() {
+    try {
+      const next=await getLocalNetworkSnapshot();
+      setSnapshot(next);
+      setVerified(Boolean(next.phoneVerifiedUtc));
+      setError("");
+      return next;
+    } catch(exception) {
+      setError(exception instanceof Error?exception.message:"Could not check the shop connection.");
+      return null;
+    } finally { setLoading(false); }
+  }
+
+  useEffect(()=>{void refresh();},[]);
+
+  useEffect(()=>{
+    if(!connected||!localApiReady) {
+      setTest(null);
+      setVerified(false);
+      setExpired(false);
+      return;
+    }
+    void refresh();
+  },[connected,localApiReady]);
+
+  useEffect(()=>{
+    if(!test) {
+      const timer=window.setInterval(()=>void refresh(),30000);
+      return ()=>window.clearInterval(timer);
+    }
+    let active=true;
+    let polling=false;
+    const started=Date.parse(test.startedUtc);
+    const poll=async()=>{
+      if(polling||!active)return;
+      if(Date.now()>=Date.parse(test.expiresUtc)){
+        setExpired(true);
+        setTest(null);
+        return;
+      }
+      polling=true;
+      try {
+        const next=await getLocalNetworkSnapshot();
+        if(!active)return;
+        setSnapshot(next);
+        if(next.phoneVerifiedUtc&&Date.parse(next.phoneVerifiedUtc)>=started){
+          setVerified(true);setTest(null);
+        }
+      }catch{
+        // The QR remains visible while the Agent briefly restarts or reconnects.
+        // Expiry is checked before the pipe call, so a stopped service cannot
+        // leave a disabled test button on screen indefinitely.
+      }finally{polling=false;}
+    };
+    const timer=window.setInterval(()=>void poll(),2000);
+    return ()=>{active=false;window.clearInterval(timer);};
+  },[test?.startedUtc]);
+
+  async function changeNetwork(interfaceId:string) {
+    if(!interfaceId)return;
+    setSaving(true);setError("");setTest(null);setVerified(false);setExpired(false);
+    try {setSnapshot(await selectLocalNetwork(interfaceId));}
+    catch(exception){setError(exception instanceof Error?exception.message:"Could not select this connection.");}
+    finally{setSaving(false);}
+  }
+
+  async function beginPhoneTest() {
+    setSaving(true);setError("");setExpired(false);setVerified(false);
+    try {setTest(await startLocalPhoneTest());}
+    catch(exception){setError(exception instanceof Error?exception.message:"Could not start the phone check.");}
+    finally{setSaving(false);}
+  }
+
+  const selected=snapshot?.networks.find(network=>network.id===snapshot.selectedNetworkId)??null;
+  const hasSelectedNetwork=Boolean(snapshot?.selectedNetworkId && selected);
+  const phoneTestPassed=verified&&localApiReady;
+  const statusTone=phoneTestPassed?"green":hasSelectedNetwork||snapshot?.networks.length?"amber":"slate";
+  const statusLabel=loading?"Checking…":error&&!snapshot?"Connection unavailable":connected&&!localApiReady?"Print service starting":phoneTestPassed?"Phone test passed":hasSelectedNetwork?"Phone check needed":snapshot?.networks.length?"Choose connection":"No connection found";
+
+  return <section className="panel local-network-panel">
+    <div className="local-network-heading">
+      <div><span className="eyebrow"><span className="eyebrow-line"/>SHOP CONNECTION</span><h2>Customer phone connection</h2><p>Choose the connection customers use at your shop, then check it with a phone.</p></div>
+      <Status label={loading?"Checking…":statusLabel} tone={loading?"slate":statusTone}/>
+    </div>
+    {loading&&!snapshot?<div className="local-network-loading"><span className="button-spinner"/> Checking available connections…</div>:error&&!snapshot
+      ? <div className="local-network-empty"><Wifi size={20}/><div><strong>Could not check this computer</strong><p>SmartPrint is not responding yet. Make sure the desktop app is open, then try again.</p></div><button className="secondary-button" type="button" onClick={()=>void refresh()}>Try again</button></div>
+      : <>
+      {snapshot?.networks.length?<>
+        <label className="local-network-choice">Shop Wi-Fi or network
+          <select value={snapshot.selectedNetworkId??""} onChange={event=>void changeNetwork(event.target.value)} disabled={saving||!connected}>
+            <option value="">Choose the connection customers use</option>
+            {snapshot.networks.map(network=><option key={network.id} value={network.id}>{network.displayName}{network.kind&&network.displayName.toLowerCase()!==network.kind.toLowerCase()?" · "+network.kind:""}</option>)}
+          </select>
+        </label>
+        {selected
+          ? <div className="local-network-selected"><Wifi size={17}/><span><strong>{selected.displayName}</strong><small>{selected.kind} · Used for customer document uploads</small></span><Check size={17}/></div>
+          : <p className="local-network-copy">Your previous connection is not available. Choose the Wi-Fi used by your customers before testing phone access.</p>}
+        {!connected?<p className="local-network-copy">Connect this computer to your shop first. The phone check will be available when setup is complete.</p>:!localApiReady?<p className="local-network-copy">SmartPrint is preparing the shop connection. The phone check will be available when the print service is ready.</p>:<>
+          <div className="local-network-actions">
+            <button className="primary-button" type="button" onClick={()=>void beginPhoneTest()} disabled={saving||!!test||!hasSelectedNetwork||!localApiReady}>
+              {saving?<span className="button-spinner"/>:<><QrCode size={16}/> Test with a phone</>}
+            </button>
+            <button className="secondary-button" type="button" onClick={()=>void refresh()} disabled={saving}><RotateCcw size={15}/> Refresh</button>
+          </div>
+          {test&&<div className="local-phone-test">
+            <div className="local-phone-qr"><QRCode value={test.phoneTestUrl} size={190} level="M" bgColor="#ffffff" fgColor="#111827"/></div>
+            <div><strong>Scan with a phone on this shop Wi-Fi</strong><p>Open your phone camera, scan this code and open the link. A confirmation will appear on your phone when the connection works.</p><small>This check expires in five minutes.</small></div>
+          </div>}
+          {phoneTestPassed&&<div className="local-network-result success"><Check size={17}/><span><strong>Phone test passed</strong><small>A phone reached this shop connection recently. The check expires after ten minutes.</small></span></div>}
+          {expired&&<div className="local-network-result warning"><Clock3 size={17}/><span><strong>Phone not connected yet</strong><small>Make sure the phone is on this same shop Wi-Fi, then start a new check. You can also try another connection above.</small></span></div>}
+        </>}
+      </>:<div className="local-network-empty"><Wifi size={20}/><div><strong>No shop connection found</strong><p>Connect this computer to the Wi-Fi or network you use at the shop, then refresh.</p></div><button className="secondary-button" type="button" onClick={()=>void refresh()}>Refresh</button></div>}
+    </>}
+    {error&&<div className="local-network-error" role="alert">{error}</div>}
+  </section>;
 }
 
 function PricingPage({ pricing, onSave, busy }: {
@@ -2537,7 +2668,7 @@ function CustomerEntry({publicCode,dark,onToggleTheme}:{publicCode:string;dark:b
         .then(session=>{
           if(active){
             setResult(current=>current?.sessionToken===result.sessionToken
-              ? {...current,expiresUtc:session.expiresUtc}
+              ? {...current,expiresUtc:session.expiresUtc,localAgent:session.localAgent}
               : current);
           }
         })
@@ -2617,6 +2748,7 @@ function CustomerLocalConnection({localAgent,onReady}:{localAgent:CustomerLocalA
   const [permissionState,setPermissionState]=useState<PermissionState|"unknown">("unknown");
   const [checkStatus,setCheckStatus]=useState<LocalAgentCheckStatus>("idle");
   const [message,setMessage]=useState("");
+  const checkGeneration=useRef(0);
   const securePortalUrl=buildSecureLocalPortalUrl();
   const localOriginDoesNotNeedLnaPermission=isLocalOrLoopbackPortalOrigin(window.location.hostname);
 
@@ -2629,6 +2761,7 @@ function CustomerLocalConnection({localAgent,onReady}:{localAgent:CustomerLocalA
   }
 
   async function checkConnection() {
+    const generation=++checkGeneration.current;
     if(!localAgent)return;
     if(!window.isSecureContext) {
       requireSecureContext();
@@ -2668,6 +2801,7 @@ function CustomerLocalConnection({localAgent,onReady}:{localAgent:CustomerLocalA
           signal:controller.signal,
           targetAddressSpace:"local"
         } as RequestInit & {targetAddressSpace:"local"});
+        if(generation!==checkGeneration.current)return;
         if(!response.ok)continue;
 
         const status=await response.json() as {
@@ -2675,6 +2809,7 @@ function CustomerLocalConnection({localAgent,onReady}:{localAgent:CustomerLocalA
           protocolVersion?:number;
           status?:string;
         };
+        if(generation!==checkGeneration.current)return;
         if(status.agentDeviceId===localAgent.agentDeviceId &&
            status.protocolVersion===1 &&
            status.status==="LOCAL_ENDPOINT_READY") {
@@ -2690,18 +2825,29 @@ function CustomerLocalConnection({localAgent,onReady}:{localAgent:CustomerLocalA
       }
     }
 
+    if(generation!==checkGeneration.current)return;
     setCheckStatus("unavailable");
     onReady(false);
     setMessage(nativeAppMode ? "Shop offline · Cloud upload available." : validEndpointCount===0
       ? "The shop Agent has not announced a usable local address. The regular cloud-assisted upload remains available."
-      : "The shop Agent did not respond. Check that its Windows service is running, this network allows device-to-device traffic, and TCP 17842 is allowed on the laptop's Private firewall profile. The regular cloud-assisted upload remains available.");
+      : "Could not reach the shop computer. Make sure this phone is connected to the same shop Wi-Fi, then ask the shop operator to check the connection. The regular cloud-assisted upload remains available.");
   }
 
   useEffect(()=>{
-    if(!localAgent?.endpoints.length)return;
+    // Invalidate an older request immediately when the shop endpoint list changes.
+    checkGeneration.current++;
+    if(!localAgent?.endpoints.length) {
+      onReady(false);
+      setCheckStatus("idle");
+      setMessage("");
+      return ()=>{checkGeneration.current++;};
+    }
+    onReady(false);
+    setCheckStatus("idle");
+    setMessage("");
     if(!window.isSecureContext) {
       requireSecureContext();
-      return;
+      return ()=>{checkGeneration.current++;};
     }
 
     // A private-LAN/loopback portal talking to another private-LAN Agent
@@ -2709,9 +2855,9 @@ function CustomerLocalConnection({localAgent,onReady}:{localAgent:CustomerLocalA
     // need to prompt for local-network permission for this local-to-local path.
     if(localOriginDoesNotNeedLnaPermission) {
       setPermissionState("unknown");
-      return;
+      return ()=>{checkGeneration.current++;};
     }
-    if(!navigator.permissions?.query)return;
+    if(!navigator.permissions?.query)return ()=>{checkGeneration.current++;};
 
     let active=true;
     let permissionStatus:PermissionStatus|null=null;
@@ -2740,9 +2886,10 @@ function CustomerLocalConnection({localAgent,onReady}:{localAgent:CustomerLocalA
 
     return ()=>{
       active=false;
+      checkGeneration.current++;
       permissionStatus?.removeEventListener("change",updatePermission);
     };
-  },[localAgent?.agentDeviceId,onReady]);
+  },[localAgent?.agentDeviceId,localAgent?.endpoints.join("|"),onReady]);
 
   if(!localAgent?.endpoints.length)return null;
 
@@ -2969,8 +3116,7 @@ function CustomerPrintFlow({publicCode,sessionToken,paymentOptions,localAgent,lo
 
   useEffect(()=>{
     if(!localAgent?.endpoints.length)setUploadMode("CLOUD");
-    else setUploadMode(current=>current==="CLOUD"?"LOCAL":current);
-  },[localAgent?.agentDeviceId]);
+  },[localAgent?.endpoints.join("|")]);
 
   useEffect(()=>{
     if(!paymentOptions.upiEnabled&&paymentOptions.cashEnabled)setPaymentMethod("CASH");

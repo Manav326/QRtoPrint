@@ -34,5 +34,9 @@ class LocalAgentUploadPolicyTest {
         assertFalse(LocalAgentUploadPolicy.allows("http", "192.168.1.4", 80, "/api/v1/local/uploads/ticket"))
         assertFalse(LocalAgentUploadPolicy.allows("http", "192.168.1.4", 17842, "/health"))
         assertFalse(LocalAgentUploadPolicy.allows("http", "example.com", 17842, "/api/v1/local/uploads/ticket"))
+        assertTrue(LocalAgentUploadPolicy.allows("http", "192.168.1.4", 17842, "/api/v1/local/status"))
+        assertTrue(LocalAgentUploadPolicy.allows("http", "192.168.1.4", 17842, "/api/v1/local/connection-check"))
+        assertFalse(LocalAgentUploadPolicy.allows("http", "192.168.1.4", 17842, "/api/v1/local/admin"))
+        assertFalse(LocalAgentUploadPolicy.allows("http", "192.168.1.4", 17842, "/api/v1/local/connection-check/extra"))
     }
 }

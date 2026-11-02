@@ -113,7 +113,7 @@ try {
         throw "Windows did not confirm that the new QRtoPrint service is running."
     }
 
-    $newFirewallRule = New-NetFirewallRule -DisplayName $firewallRuleName -Direction Inbound -Action Allow -Protocol TCP -LocalPort 17842 -Program $resolvedExe -Profile Private -Description "Allows same-private-network devices to reach the QRtoPrint local agent status endpoint."
+    $newFirewallRule = New-NetFirewallRule -DisplayName $firewallRuleName -Direction Inbound -Action Allow -Protocol TCP -LocalPort 17842 -Program $resolvedExe -Profile Any -RemoteAddress LocalSubnet -Description "Allows same-local-subnet devices to reach the QRtoPrint local agent status and upload endpoints."
 
     # The new version is running and reachable. Old version-specific rules are
     # now safe to remove; any cleanup failure must not roll back a healthy Agent.
@@ -135,7 +135,7 @@ try {
 
     Write-Host "Configured the local Agent API CORS origin: $allowedOrigin"
     Write-Host "QRtoPrint Smart Print Agent $AgentVersion is installed and running." -ForegroundColor Green
-    Write-Host "The local status endpoint listens on TCP 17842 for Private network profiles only."
+    Write-Host "The local Agent accepts connections only from devices on the connected local subnet."
     Write-Host "Use Get-Service $serviceName to inspect the service state."
 }
 catch {

@@ -19,7 +19,7 @@ Pair the Agent with the same PUBLIC_BASE_URL. After an authenticated heartbeat, 
 3. Approve the Windows administrator prompt. In the setup wizard, enter the pairing code from the shop workspace. The wizard pairs the computer, installs the Windows Service, configures its local endpoint and starts the service.
 4. Return to **Print Agent** in the shop workspace. Wait for the computer heartbeat and discovered printer queues; do not treat installation alone as proof that a printer is ready.
 
-The installer enables the local status and direct-upload endpoint and opens TCP 17842 through Windows Firewall on Private network profiles only. The authenticated heartbeat keeps the runtime browser CORS origin aligned with PUBLIC_BASE_URL.
+The installer enables the local status and direct-upload endpoint. The Agent allows TCP 17842 only from the connected local subnet, regardless of whether Windows labels that shop connection Public or Private. It does not open the endpoint to the internet. The authenticated heartbeat keeps the runtime browser CORS origin aligned with PUBLIC_BASE_URL.
 
 ### Advanced / developer setup
 
@@ -35,13 +35,14 @@ To remove the Windows Service, run scripts\uninstall-agent-service.ps1 from an e
 
 Direct customer document upload over shop Wi-Fi is implemented. The customer portal obtains a one-use upload grant from the API, sends document bytes to this paired Agent, and the Agent validates the hash and document structure before storing the file in its DPAPI-protected local queue. The API retains only job/document metadata, SHA-256, page analysis and quote/payment/dispatch state. The same PrintJob is later authorised by the shop and claimed by this Agent after manual payment verification; the cloud is not asked to download a LOCAL_AGENT document.
 
-The cloud-assisted upload path remains available as a customer-selected fallback. Browser uploads require a secure HTTPS customer portal origin, any Local Network Access permission required by the browser, and a Windows Private network profile. The current HTTPS origin is learned from the Agent's authenticated heartbeat. Do not use an insecure HTTP portal for direct local uploads.
+The cloud-assisted upload path remains available as a customer-selected fallback. Browser uploads require a secure HTTPS customer portal origin and any Local Network Access permission required by the browser. The Agent limits inbound access to the connected local subnet and does not ask the shop owner to change the Windows network profile. The current HTTPS origin is learned from the Agent's authenticated heartbeat. Do not use an insecure HTTP portal for direct local uploads.
 
 - Queries Win32_Printer through WMI for installed queue name, driver, port, status and default queue.
 - Sends printer inventory to the paired shop tenant using agent-specific authentication headers.
 - Exposes a read-only local status endpoint at `http://<shop-computer-LAN-IP>:17842/api/v1/local/status`. It returns only the paired agent ID, protocol version, readiness state and configured API origin; it does not expose the agent secret, queue or documents. The Windows desktop uses the separate local-only, ACL-protected named pipe for status fallback and enrollment.
-- Reports up to eight RFC1918 IPv4 endpoint addresses in the authenticated cloud heartbeat. The customer session receives endpoints only for its assigned printer's recently online, non-revoked agent.
-- The installer adds a Windows Firewall inbound rule for TCP 17842 on the Private network profile only. Keep shop computers on a trusted Private network profile. The Agent synchronises its current public origin through its authenticated heartbeat.
+- Reports only the selected shop connection's RFC1918 IPv4 endpoint in the authenticated cloud heartbeat. On Windows, the desktop Shop Connection panel displays the connected Wi-Fi name (SSID) when available, lets the owner choose an available adapter, and confirms phone reachability with a five-minute, single-use QR test. The result expires after ten minutes and is not treated as a permanent online signal.
+- The local listener is IPv4-only and checks both the remote phone address and the local destination address against the selected adapter's IPv4 subnet. Requests arriving through another local adapter are rejected even though the listener is bound to all IPv4 interfaces. If the saved Wi-Fi/adapter disappears, the Agent stops advertising a replacement network until the owner selects one.
+- The installer adds an inbound rule for TCP 17842 restricted to the local subnet and the Agent executable. The desktop Shop Connection panel lets the owner select the adapter and verify phone-to-Agent access with a short-lived one-time QR test. The Agent synchronises its current public origin through its authenticated heartbeat.
 - Refreshes agent heartbeat and printer status every 30 seconds (configurable from 10 to 300 seconds).
 - Marks previously discovered queues unavailable when they disappear from that computer's WMI inventory.
 - Stores the agent secret and locally received print documents encrypted using DPAPI LocalMachine. The protected queue directory is restricted to SYSTEM and local Administrators.
