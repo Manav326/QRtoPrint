@@ -2560,15 +2560,14 @@ function CustomerEntry({publicCode,dark,onToggleTheme}:{publicCode:string;dark:b
     };
   },[result?.sessionToken,result?.expiresUtc]);
 
-  const nativeAppMode = navigator.userAgent.includes("SmartPrintAndroid/1");
-  return <div className={nativeAppMode ? "customer-entry smartprint-native" : "customer-entry"}><div className="customer-entry-glow"/>
+  return <div className="customer-entry"><div className="customer-entry-glow"/>
     <header className="customer-entry-brand"><div className="customer-entry-brand-lockup"><div className="brand-mark"><QrCode size={21}/></div><div><div className="brand-name">smart<span>print</span></div><div className="brand-caption">BY QUANTAEDGE</div></div></div><ThemeToggleButton dark={dark} onToggle={onToggleTheme}/></header>
     <main className="customer-entry-card">
-      {loading?<><div className="customer-entry-spinner"><span className="button-spinner"/></div><h1>{nativeAppMode?"Connecting…":"Connecting to your print shop"}</h1>{!nativeAppMode&&<p>Creating a secure, time-limited session for this QR station.</p>}</>:
-      error?<><div className="entry-error-icon"><X size={23}/></div><div className="entry-eyebrow">STATION UNAVAILABLE</div><h1>{nativeAppMode?"Shop unavailable":"This QR station can't be reached"}</h1>{!nativeAppMode&&<p>{error}</p>}<button className="primary-button" onClick={()=>window.location.reload()}>Try again</button></>:
-      result?<><div className="entry-success-icon"><Check size={23}/></div><div className="entry-eyebrow">SECURE SESSION CREATED</div><h1>{nativeAppMode?result.shop.displayName:"Welcome to "+result.shop.displayName}</h1><p>{nativeAppMode?"Shop connected.":"Your phone is connected to this shop's print station."}</p>
-        <div className="entry-printer-card"><div className="entry-printer-icon"><Printer size={20}/></div><div><strong>{result.printer?.displayName||"Shop print counter"}</strong><span>{nativeAppMode?(result.printer?.status||"Printer not selected"):result.printer?result.printer.manufacturer+" · "+result.printer.model:"The shop will select a printer for your job."}</span></div><Status label={result.printer?.status||"Session ready"} tone="blue"/></div>
-        <div className="entry-session-note"><ShieldCheck size={16}/><span>{nativeAppMode?"Secure session · Expires "+formatIstTime(result.expiresUtc):"This session expires at "+formatIstTime(result.expiresUtc)+". Your document access stays limited to this shop session."}</span></div>
+      {loading?<><div className="customer-entry-spinner"><span className="button-spinner"/></div><h1>Connecting to your print shop</h1><p>Creating a secure, time-limited session for this QR station.</p></>:
+      error?<><div className="entry-error-icon"><X size={23}/></div><div className="entry-eyebrow">STATION UNAVAILABLE</div><h1>This QR station can't be reached</h1><p>{error}</p><button className="primary-button" onClick={()=>window.location.reload()}>Try again</button></>:
+      result?<><div className="entry-success-icon"><Check size={23}/></div><div className="entry-eyebrow">SECURE SESSION CREATED</div><h1>{"Welcome to "+result.shop.displayName}</h1><p>Your phone is connected to this shop's print station.</p>
+        <div className="entry-printer-card"><div className="entry-printer-icon"><Printer size={20}/></div><div><strong>{result.printer?.displayName||"Shop print counter"}</strong><span>{result.printer?result.printer.manufacturer+" · "+result.printer.model:"The shop will select a printer for your job."}</span></div><Status label={result.printer?.status||"Session ready"} tone="blue"/></div>
+        <div className="entry-session-note"><ShieldCheck size={16}/><span>{"This session expires at "+formatIstTime(result.expiresUtc)+". Your document access stays limited to this shop session."}</span></div>
         <CustomerLocalConnection localAgent={result.localAgent} onReady={setLocalReady}/>
         <CustomerPrintFlow publicCode={publicCode} sessionToken={result.sessionToken} paymentOptions={result.paymentOptions} localAgent={result.localAgent} localReady={localReady}/>
       </>:null}
@@ -2613,7 +2612,7 @@ function buildSecureLocalPortalUrl():string|null {
 }
 
 function CustomerLocalConnection({localAgent,onReady}:{localAgent:CustomerLocalAgent|null;onReady:(ready:boolean)=>void}) {
-  const nativeAppMode = navigator.userAgent.includes("SmartPrintAndroid/1");
+  const isNativeApp = navigator.userAgent.includes("SmartPrintAndroid/1");
   const [permissionState,setPermissionState]=useState<PermissionState|"unknown">("unknown");
   const [checkStatus,setCheckStatus]=useState<LocalAgentCheckStatus>("idle");
   const [message,setMessage]=useState("");
@@ -2623,7 +2622,7 @@ function CustomerLocalConnection({localAgent,onReady}:{localAgent:CustomerLocalA
   function requireSecureContext() {
     setCheckStatus("insecure");
     onReady(false);
-    setMessage(nativeAppMode ? "Secure HTTPS required." : securePortalUrl
+    setMessage(securePortalUrl
       ? "This shop page is open over HTTP. Chrome blocks local-network requests from insecure pages without showing a permission prompt. Open the secure shop link below; the certificate must be trusted on this phone."
       : "This shop page is not a secure HTTPS context. Open the shop's HTTPS customer portal before checking local printing.");
   }
@@ -2636,7 +2635,7 @@ function CustomerLocalConnection({localAgent,onReady}:{localAgent:CustomerLocalA
     }
     setCheckStatus("checking");
     onReady(false);
-    setMessage(nativeAppMode ? "Checking shop Wi-Fi." : "Checking the shop computer. No document is sent by this check.");
+    setMessage("Checking the shop computer. No document is sent by this check.");
 
     let validEndpointCount=0;
     for(const value of localAgent.endpoints.slice(0,8)) {
@@ -2659,7 +2658,8 @@ function CustomerLocalConnection({localAgent,onReady}:{localAgent:CustomerLocalA
       const controller=new AbortController();
       const timeout=window.setTimeout(()=>controller.abort(),3500);
       try {
-        // Start from the user's click when a browser permission prompt is required.
+        // Browser permission prompts are initiated by this tap. Android WebView uses
+        // the host app's local-network access and may not expose the Permissions API.
         const response=await fetch(`${endpoint.origin}/api/v1/local/status`,{
           method:"GET",
           mode:"cors",
@@ -2680,7 +2680,7 @@ function CustomerLocalConnection({localAgent,onReady}:{localAgent:CustomerLocalA
            status.status==="LOCAL_ENDPOINT_READY") {
           setCheckStatus("connected");
           onReady(true);
-          setMessage(nativeAppMode ? "Shop Wi-Fi ready · Local HTTP is not encrypted." : "This phone can reach the shop computer. Direct uploads use the shop's private Wi-Fi, but this local HTTP connection is not encrypted in transit. Choose cloud-assisted upload for HTTPS transfer.");
+          setMessage("This phone can reach the shop computer. Direct uploads use the shop's private Wi-Fi, but this local HTTP connection is not encrypted in transit. Choose cloud-assisted upload for HTTPS transfer.");
           return;
         }
       } catch {
@@ -2692,7 +2692,7 @@ function CustomerLocalConnection({localAgent,onReady}:{localAgent:CustomerLocalA
 
     setCheckStatus("unavailable");
     onReady(false);
-    setMessage(nativeAppMode ? "Shop offline · Cloud upload available." : validEndpointCount===0
+    setMessage(validEndpointCount===0
       ? "The shop Agent has not announced a usable local address. The regular cloud-assisted upload remains available."
       : "The shop Agent did not respond. Check that its Windows service is running, this network allows device-to-device traffic, and TCP 17842 is allowed on the laptop's Private firewall profile. The regular cloud-assisted upload remains available.");
   }
@@ -2701,6 +2701,15 @@ function CustomerLocalConnection({localAgent,onReady}:{localAgent:CustomerLocalA
     if(!localAgent?.endpoints.length)return;
     if(!window.isSecureContext) {
       requireSecureContext();
+      return;
+    }
+
+    // Android WebView has no Chrome Local Network Access permission prompt.
+    // Check the paired Agent as soon as the station session opens; the browser
+    // retains its user-initiated permission flow below.
+    if(isNativeApp) {
+      setPermissionState("unknown");
+      void checkConnection();
       return;
     }
 
@@ -2721,10 +2730,10 @@ function CustomerLocalConnection({localAgent,onReady}:{localAgent:CustomerLocalA
       if(permissionStatus.state==="denied") {
         setCheckStatus("denied");
         onReady(false);
-        setMessage(nativeAppMode ? "Allow local network access." : "Chrome has blocked Local network access for this public HTTPS site. On Android, open the site information icon beside the address bar → Permissions → Local network access → Allow, then reload this QR page.");
+        setMessage("Chrome has blocked Local network access for this public HTTPS site. On Android, open the site information icon beside the address bar → Permissions → Local network access → Allow, then reload this QR page.");
       } else if(permissionStatus.state==="prompt") {
         setCheckStatus("idle");
-        setMessage(nativeAppMode ? "Tap Check Wi-Fi." : "Tap Check shop Wi-Fi to request local-network access from Chrome.");
+        setMessage("Tap Check shop Wi-Fi to request local-network access from Chrome.");
       }
     };
 
@@ -2747,8 +2756,8 @@ function CustomerLocalConnection({localAgent,onReady}:{localAgent:CustomerLocalA
   if(!localAgent?.endpoints.length)return null;
 
   const label=checkStatus==="checking"?"Checking…":
-    checkStatus==="connected"?(nativeAppMode?"Connected":"Shop computer reachable"):
-    checkStatus==="denied"?(nativeAppMode?"Access blocked":"Browser permission blocked"):
+    checkStatus==="connected"?"Shop computer reachable":
+    checkStatus==="denied"?"Browser permission blocked":
     checkStatus==="insecure"?"HTTPS required":
     checkStatus==="unavailable"?"Not reachable":"Not checked";
   const tone=checkStatus==="connected"?"green":
@@ -2756,19 +2765,19 @@ function CustomerLocalConnection({localAgent,onReady}:{localAgent:CustomerLocalA
 
   return <section className="entry-local-agent">
     <div className="entry-local-agent-head">
-      <div><strong>{nativeAppMode?"Shop Wi-Fi":"Shop Wi-Fi connection"}</strong><span>Optional local connection check</span></div>
+      <div><strong>Shop Wi-Fi connection</strong><span>Optional local connection check</span></div>
       <Status label={label} tone={tone}/>
     </div>
-    {!nativeAppMode&&<p>Check whether this phone can reach the shop's local print computer. This check does not upload your document.</p>}
+    <p>Check whether this phone can reach the shop's local print computer. This check does not upload your document.</p>
     {checkStatus==="insecure"
       ? <div className="entry-local-agent-message">
           <small>{message}</small>
-          {securePortalUrl&&<a className="customer-flow-button" href={securePortalUrl}>{nativeAppMode?"Open HTTPS":"Open secure HTTPS shop page"}</a>}
+          {securePortalUrl&&<a className="customer-flow-button" href={securePortalUrl}>Open secure HTTPS shop page</a>}
         </div>
       : permissionState==="denied"&&!localOriginDoesNotNeedLnaPermission
         ? <small className="entry-local-agent-message">{message}</small>
         : <button type="button" className="customer-flow-button" disabled={checkStatus==="checking"} onClick={()=>void checkConnection()}>
-            {checkStatus==="checking"?"Checking…":checkStatus==="connected"?"Check again":nativeAppMode?"Check Wi-Fi":"Check shop Wi-Fi"}
+            {checkStatus==="checking"?"Checking…":checkStatus==="connected"?"Check again":"Check shop Wi-Fi"}
           </button>}
     {message&&checkStatus!=="insecure"&&!(permissionState==="denied"&&!localOriginDoesNotNeedLnaPermission)&&<small className="entry-local-agent-message">{message}</small>}
   </section>;
@@ -2832,76 +2841,8 @@ function readStoredCustomerDraft(publicCode:string,sessionToken:string):StoredCu
   }
 }
 
-function smartPrintNativeHeadline(status:string):string {
-  switch(status) {
-    case "AWAITING_SHOP_APPROVAL": return "Awaiting shop review";
-    case "AWAITING_PAYMENT": return "Payment required";
-    case "AWAITING_CUSTOMER_PAYMENT": return "Complete UPI payment";
-    case "AWAITING_COUNTER_PAYMENT": return "Pay at counter";
-    case "PAYMENT_REPORTED": return "Verification pending";
-    case "PAYMENT_REJECTED": return "Payment not verified";
-    case "PAID_AUTHORISED": return "Payment verified";
-    case "LOCAL_QUEUE_CLAIMED": return "Transferring to shop";
-    case "LOCAL_QUEUE_READY": return "Queued at shop";
-    case "PRINT_AUTHORISED": return "Printing authorised";
-    case "PRINT_SUBMITTING": return "Sending to printer";
-    case "SPOOLER_ACCEPTED": return "Printer queue accepted";
-    case "PRINTING": return "Printing";
-    case "OUTPUT_UNCONFIRMED": return "Output check pending";
-    case "COMPLETED": return "Ready to collect";
-    case "REJECTED": return "Request declined";
-    case "QUOTE_EXPIRED": return "Quote expired";
-    default: return "Request in progress";
-  }
-}
-
-function smartPrintNativeStatus(status:string):string {
-  switch(status) {
-    case "AWAITING_SHOP_APPROVAL": return "Awaiting shop approval.";
-    case "AWAITING_PAYMENT": return "Quote ready · Payment required.";
-    case "AWAITING_CUSTOMER_PAYMENT": return "Pay shop · Submit UTR.";
-    case "AWAITING_COUNTER_PAYMENT": return "Pay at the counter.";
-    case "PAYMENT_REPORTED": return "UTR sent · Verify pending.";
-    case "PAYMENT_REJECTED": return "Payment not verified.";
-    case "PAID_AUTHORISED": return "Payment verified · Print pending.";
-    case "LOCAL_QUEUE_CLAIMED": return "Transferring to shop.";
-    case "LOCAL_QUEUE_READY": return "Queued · Operator pending.";
-    case "PRINT_AUTHORISED": return "Printing authorised.";
-    case "PRINT_SUBMITTING": return "Sending to printer.";
-    case "SPOOLER_ACCEPTED": return "Queue accepted · Paper unconfirmed.";
-    case "PRINTING": return "Printing in progress.";
-    case "OUTPUT_UNCONFIRMED": return "Shop checking printed pages.";
-    case "COMPLETED": return "Ready for collection.";
-    case "REJECTED": return "Shop rejected request.";
-    case "QUOTE_EXPIRED": return "Quote expired.";
-    default: return "Status updated.";
-  }
-}
-
-function smartPrintNativeBoundary(status:string|undefined,hasQuote:boolean):string {
-  switch(status) {
-    case "AWAITING_SHOP_APPROVAL": return "Shop review · No payment.";
-    case "AWAITING_PAYMENT": return "Pay shop · Verification required.";
-    case "AWAITING_COUNTER_PAYMENT": return "Counter payment · Await confirmation.";
-    case "AWAITING_CUSTOMER_PAYMENT": return "Submit UTR · Shop verifies.";
-    case "PAYMENT_REPORTED": return "UTR pending · Shop verifies.";
-    case "PAID_AUTHORISED": return "Payment verified · Printing not started.";
-    case "LOCAL_QUEUE_CLAIMED": return "Secure transfer · Not printing.";
-    case "LOCAL_QUEUE_READY": return "Queued · Operator approval needed.";
-    case "PRINT_AUTHORISED": return "Shop approved physical printing.";
-    case "PRINT_SUBMITTING": return "Sending to printer.";
-    case "SPOOLER_ACCEPTED": return "Queue accepted · Paper unconfirmed.";
-    case "PRINTING": return "Printing · Output unconfirmed.";
-    case "OUTPUT_UNCONFIRMED": return "Output unconfirmed · Shop checks pages.";
-    case "COMPLETED": return "Output confirmed · Collect print.";
-    case "QUOTE_EXPIRED": return "Quote expired · Request another.";
-    case "REJECTED": return "Request rejected · Ask shop.";
-    default: return hasQuote ? "Quote only · No payment." : "No payment yet.";
-  }
-}
-
 function CustomerPrintFlow({publicCode,sessionToken,paymentOptions,localAgent,localReady}:{publicCode:string;sessionToken:string;paymentOptions:{upiEnabled:boolean;upiId?:string|null;payeeName?:string|null;cashEnabled:boolean;instantPaymentEnabled:boolean};localAgent:CustomerLocalAgent|null;localReady:boolean}) {
-  const nativeAppMode = navigator.userAgent.includes("SmartPrintAndroid/1");
+  const usesNativeFolderPicker = navigator.userAgent.includes("SmartPrintAndroid/1");
   const initialDraft=readStoredCustomerDraft(publicCode,sessionToken);
   const [files,setFiles]=useState<File[]>([]);
   const [selectedFileIndex,setSelectedFileIndex]=useState(0);
@@ -3089,7 +3030,7 @@ function CustomerPrintFlow({publicCode,sessionToken,paymentOptions,localAgent,lo
     }
     if(files.length===0)return;
     if(uploadMode==="LOCAL"&&!localReady) {
-      setError(nativeAppMode ? "Check shop Wi-Fi." : "Check shop Wi-Fi access above before starting a direct local upload.");
+      setError("Check shop Wi-Fi access above before starting a direct local upload.");
       return;
     }
     const currentBatchId=batchId||crypto.randomUUID();
@@ -3098,7 +3039,7 @@ function CustomerPrintFlow({publicCode,sessionToken,paymentOptions,localAgent,lo
     const results=[...uploadedBatch];
     const savedSettings={...printSettingsByJobId};
     const pending=files.filter(candidate=>!completedFingerprints.has(customerFileFingerprint(candidate)));
-    if(pending.length===0){setError(nativeAppMode ? "Files already uploaded. Choose more." : "All selected files are already uploaded. Choose another document or folder.");return;}
+    if(pending.length===0){setError("All selected files are already uploaded. Choose another document or folder.");return;}
     setBusy(true);setError("");setQuote(null);setQuotesByJobId({});setJobStatus(null);setUploadProgress({completed:0,total:pending.length,currentFile:pending[0]?.name??null});
     try {
       for(let index=0;index<pending.length;index++){
@@ -3355,7 +3296,7 @@ function CustomerPrintFlow({publicCode,sessionToken,paymentOptions,localAgent,lo
     const pending=selected.filter(candidate=>!alreadyUploaded.has(customerFileFingerprint(candidate)));
     const totalBytes=uploadedBatch.reduce((sum,item)=>sum+item.document.sizeBytes,0)+pending.reduce((sum,candidate)=>sum+candidate.size,0);
     if(uploadedBatch.length+pending.length>20||totalBytes>50*1024*1024){
-      setError(nativeAppMode ? "20 files · 50 MB max." : "This batch can contain up to 20 files and 50 MB in total.");
+      setError("This batch can contain up to 20 files and 50 MB in total.");
       return;
     }
     setFileGroupNames(current=>{
@@ -3511,7 +3452,7 @@ function CustomerPrintFlow({publicCode,sessionToken,paymentOptions,localAgent,lo
   });
 
   return <section className="customer-print-flow">
-    <div className="customer-flow-heading"><div><span>STEP 1</span><h2>{nativeAppMode?"Add files":"Add your documents"}</h2></div><span className="upload-limit">PDF, JPG or PNG · Up to 20 files / 50 MB per batch</span></div>
+    <div className="customer-flow-heading"><div><span>STEP 1</span><h2>Add your documents</h2></div><span className="upload-limit">PDF, JPG or PNG · Up to 20 files / 50 MB per batch</span></div>
     {localAgent?.endpoints.length? <div className="customer-upload-modes">
       <button type="button" className={uploadMode==="LOCAL"?"customer-upload-mode selected":"customer-upload-mode"} onClick={()=>setUploadMode("LOCAL")}><strong>Shop Wi-Fi</strong><small>Document stays on the shop computer</small></button>
       <button type="button" className={uploadMode==="CLOUD"?"customer-upload-mode selected":"customer-upload-mode"} onClick={()=>setUploadMode("CLOUD")}><strong>Cloud-assisted</strong><small>Encrypted upload through the API</small></button>
@@ -3524,10 +3465,10 @@ function CustomerPrintFlow({publicCode,sessionToken,paymentOptions,localAgent,lo
         <small>Choose up to 20 PDF, JPG or PNG documents at once</small>
       </label>
       <label className="customer-upload-zone folder-upload-zone">
-        <input type="file" multiple disabled={batchLockedForPayment} accept={nativeAppMode?"application/x-smartprint-folder-selection":".pdf,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png"} {...({webkitdirectory:"true",directory:"true"} as any)} onChange={event=>{chooseFiles(Array.from(event.currentTarget.files||[]),consumeSmartPrintNativePickerGroups());event.currentTarget.value="";}}/>
+        <input type="file" multiple disabled={batchLockedForPayment} accept={usesNativeFolderPicker?"application/x-smartprint-folder-selection":".pdf,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png"} {...({webkitdirectory:"true",directory:"true"} as any)} onChange={event=>{chooseFiles(Array.from(event.currentTarget.files||[]),consumeSmartPrintNativePickerGroups());event.currentTarget.value="";}}/>
         <span className="customer-upload-icon"><FolderOpen size={21}/></span>
-        <strong>{nativeAppMode?"Choose folders":"Add a folder"}</strong>
-        <small>{nativeAppMode?"Select multiple folders at once":"Choose one folder; select again to add another to this batch"}</small>
+        <strong>Add a folder</strong>
+        <small>Choose one folder; select again to add another to this batch</small>
       </label>
     </div>
     {files.length>0&&<div className="customer-selected-files">
@@ -3576,8 +3517,8 @@ function CustomerPrintFlow({publicCode,sessionToken,paymentOptions,localAgent,lo
     {previewUrl&&file&&<div className="customer-file-preview"><div className="customer-file-label"><FileText size={15}/><span>Preview · {file.name}</span></div>{file.type==="application/pdf"||/\.pdf$/i.test(file.name)?<iframe src={previewUrl} title={file.name+" preview"}/>:<img src={previewUrl} alt={file.name+" preview"}/>}</div>}
     {files.length>0&&<button className="customer-flow-button" disabled={busy||pendingFilesCount===0||(uploadMode==="LOCAL"&&!localReady)} onClick={()=>void upload()}>{busy?<span className="button-spinner"/>:<><UploadIcon/>{uploadMode==="LOCAL"&&localAgent?"Upload "+pendingFilesCount+" file(s) to shop":"Upload "+pendingFilesCount+" file(s)"}</>}</button>}
     {uploadProgress&&<div className="customer-upload-progress"><span>{uploadProgress.currentFile?`Uploading ${Math.min(uploadProgress.completed+1,uploadProgress.total)} of ${uploadProgress.total}: ${uploadProgress.currentFile}`:`${uploadProgress.completed} of ${uploadProgress.total} files uploaded`}</span><div><i style={{width:`${uploadProgress.total?uploadProgress.completed/uploadProgress.total*100:0}%`}}/>{uploadProgress.currentFile&&<b aria-hidden="true"/>}</div><small>The count advances when each document finishes uploading.</small></div>}
-    {files.length>0&&uploadMode==="LOCAL"&&localAgent&&<small className="customer-upload-local-note">{nativeAppMode?(localReady?"Cloud receives metadata only.":"Check shop Wi-Fi."):localReady?"Your files travel over shop Wi-Fi. The cloud receives only job, quote and payment metadata.":"Tap Check shop Wi-Fi above first to grant the browser permission."}</small>}
-    {files.length>0&&uploadMode==="CLOUD"&&localAgent&&<small className="customer-upload-local-note">{nativeAppMode?"Encrypted cloud transfer.":"Cloud-assisted fallback: files are uploaded encrypted to the API before being transferred to the shop computer."}</small>}
+    {files.length>0&&uploadMode==="LOCAL"&&localAgent&&<small className="customer-upload-local-note">{localReady?"Your files travel over shop Wi-Fi. The cloud receives only job, quote and payment metadata.":"Tap Check shop Wi-Fi above before uploading directly to the shop computer."}</small>}
+    {files.length>0&&uploadMode==="CLOUD"&&localAgent&&<small className="customer-upload-local-note">Cloud-assisted fallback: files are uploaded encrypted to the API before being transferred to the shop computer.</small>}
     {uploaded&&<>
       {uploadedBatch.length>0&&<div className="customer-uploaded-batch">
         <div className="customer-uploaded-batch-head"><strong>Batch · {uploadedBatch.length} files</strong><span>Select a file to view its status. Pay once for all accepted files.</span></div>
@@ -3617,8 +3558,8 @@ function CustomerPrintFlow({publicCode,sessionToken,paymentOptions,localAgent,lo
     {canSendBatch&&<button className="customer-flow-button" disabled={busy} onClick={()=>void acceptQuote()}>{busy?<span className="button-spinner"/>:"Send batch to shop"}</button>}
       {jobStatus?.status==="QUOTE_EXPIRED"&&<button className="customer-flow-button" disabled={busy} onClick={()=>{setQuote(null);setQuotesByJobId(current=>{const next={...current};if(uploaded)delete next[uploaded.job.id];return next;});void getQuote(uploadedBatch.length?uploadedBatch:uploaded?[uploaded]:[]);}}>Request a fresh quote</button>}
     {jobStatus&&<div className="customer-job-state"><div className="customer-job-state-top"><Status label={prettyStatus(jobStatus.status)} tone={jobStatus.status==="REJECTED"?"red":jobStatus.status==="AWAITING_PAYMENT"?"green":"amber"}/><button className="customer-refresh-status" disabled={busy} onClick={()=>void refreshJobStatus()}>{busy?<span className="button-spinner"/>:"Refresh status"}</button></div>
-      <strong>{nativeAppMode?smartPrintNativeHeadline(jobStatus.status):jobStatus.status==="AWAITING_SHOP_APPROVAL"?"Your request is with the shop":jobStatus.status==="AWAITING_PAYMENT"?"Your quote is ready for payment":jobStatus.status==="LOCAL_QUEUE_CLAIMED"?"Your document is reaching the shop":jobStatus.status==="LOCAL_QUEUE_READY"?"Your document is secured at the shop":jobStatus.status==="PRINT_AUTHORISED"?"The shop started printing":jobStatus.status==="PRINT_SUBMITTING"?"Your document is being sent to the printer":jobStatus.status==="SPOOLER_ACCEPTED"?"The printer queue accepted your document":jobStatus.status==="PRINTING"?"Your document is printing":jobStatus.status==="OUTPUT_UNCONFIRMED"?"The shop is checking your print":jobStatus.status==="COMPLETED"?"Your print is ready":jobStatus.status==="PAID_AUTHORISED"?"Your payment is verified":jobStatus.status==="REJECTED"?"The shop could not accept this request":jobStatus.status==="QUOTE_EXPIRED"?"Your quote has expired":"Your request is being reviewed"}</strong>
-      <p>{nativeAppMode ? smartPrintNativeStatus(jobStatus.status) : jobStatus.status==="AWAITING_SHOP_APPROVAL"?"The shop will review your request next. No payment has been collected.":jobStatus.status==="AWAITING_PAYMENT"?"Your quote is ready. Choose one of the payment methods enabled by the shop; the shop must verify payment before authorising the job.":jobStatus.status==="LOCAL_QUEUE_CLAIMED"?"Your paid document is being transferred securely to the shop's Windows computer. It has not been sent to the printer.":jobStatus.status==="LOCAL_QUEUE_READY"?"The document is safely stored in the shop's local queue and is waiting for the print operator. Physical printing has not started.":jobStatus.status==="PRINT_AUTHORISED"?"The shop has authorised printing. The Windows agent will submit the document once.":jobStatus.status==="PRINT_SUBMITTING"?"The Windows agent is submitting your document to the printer.":jobStatus.status==="SPOOLER_ACCEPTED"?"Windows accepted the job into the printer queue. This does not yet confirm paper output.":jobStatus.status==="PRINTING"?"The printer driver reports that the job is printing. The shop will confirm the pages before marking it complete.":jobStatus.status==="OUTPUT_UNCONFIRMED"?"The printer queue could not confirm the final output. The shop operator is checking the pages before any retry.":jobStatus.status==="COMPLETED"?"The shop has checked the physical pages and marked your print ready for collection.":jobStatus.status==="AWAITING_COUNTER_PAYMENT"?"Please pay the shop at the counter. The job is not authorised until the shop confirms receipt.":jobStatus.status==="AWAITING_CUSTOMER_PAYMENT"?"Complete the UPI payment and submit its transaction reference. The shop must independently verify it.":jobStatus.status==="PAYMENT_REPORTED"?"Your UPI reference was sent to the shop. It is not marked paid until the shop verifies the transaction.":jobStatus.status==="PAID_AUTHORISED"?"The shop has verified your payment. The print queue is being prepared; physical printing has not yet started.":jobStatus.status==="PAYMENT_REJECTED"?"The shop could not verify that payment. Check with the shop before trying another method.":jobStatus.status==="REJECTED"?"Please speak with the shop operator if you need help with this request.":jobStatus.status==="QUOTE_EXPIRED"?"This quote is no longer valid. Please ask the shop for a fresh quote.":"Check back for the latest request status."}</p>
+      <strong>{jobStatus.status==="AWAITING_SHOP_APPROVAL"?"Your request is with the shop":jobStatus.status==="AWAITING_PAYMENT"?"Your quote is ready for payment":jobStatus.status==="LOCAL_QUEUE_CLAIMED"?"Your document is reaching the shop":jobStatus.status==="LOCAL_QUEUE_READY"?"Your document is secured at the shop":jobStatus.status==="PRINT_AUTHORISED"?"The shop started printing":jobStatus.status==="PRINT_SUBMITTING"?"Your document is being sent to the printer":jobStatus.status==="SPOOLER_ACCEPTED"?"The printer queue accepted your document":jobStatus.status==="PRINTING"?"Your document is printing":jobStatus.status==="OUTPUT_UNCONFIRMED"?"The shop is checking your print":jobStatus.status==="COMPLETED"?"Your print is ready":jobStatus.status==="PAID_AUTHORISED"?"Your payment is verified":jobStatus.status==="REJECTED"?"The shop could not accept this request":jobStatus.status==="QUOTE_EXPIRED"?"Your quote has expired":"Your request is being reviewed"}</strong>
+      <p>{ jobStatus.status==="AWAITING_SHOP_APPROVAL"?"The shop will review your request next. No payment has been collected.":jobStatus.status==="AWAITING_PAYMENT"?"Your quote is ready. Choose one of the payment methods enabled by the shop; the shop must verify payment before authorising the job.":jobStatus.status==="LOCAL_QUEUE_CLAIMED"?"Your paid document is being transferred securely to the shop's Windows computer. It has not been sent to the printer.":jobStatus.status==="LOCAL_QUEUE_READY"?"The document is safely stored in the shop's local queue and is waiting for the print operator. Physical printing has not started.":jobStatus.status==="PRINT_AUTHORISED"?"The shop has authorised printing. The Windows agent will submit the document once.":jobStatus.status==="PRINT_SUBMITTING"?"The Windows agent is submitting your document to the printer.":jobStatus.status==="SPOOLER_ACCEPTED"?"Windows accepted the job into the printer queue. This does not yet confirm paper output.":jobStatus.status==="PRINTING"?"The printer driver reports that the job is printing. The shop will confirm the pages before marking it complete.":jobStatus.status==="OUTPUT_UNCONFIRMED"?"The printer queue could not confirm the final output. The shop operator is checking the pages before any retry.":jobStatus.status==="COMPLETED"?"The shop has checked the physical pages and marked your print ready for collection.":jobStatus.status==="AWAITING_COUNTER_PAYMENT"?"Please pay the shop at the counter. The job is not authorised until the shop confirms receipt.":jobStatus.status==="AWAITING_CUSTOMER_PAYMENT"?"Complete the UPI payment and submit its transaction reference. The shop must independently verify it.":jobStatus.status==="PAYMENT_REPORTED"?"Your UPI reference was sent to the shop. It is not marked paid until the shop verifies the transaction.":jobStatus.status==="PAID_AUTHORISED"?"The shop has verified your payment. The print queue is being prepared; physical printing has not yet started.":jobStatus.status==="PAYMENT_REJECTED"?"The shop could not verify that payment. Check with the shop before trying another method.":jobStatus.status==="REJECTED"?"Please speak with the shop operator if you need help with this request.":jobStatus.status==="QUOTE_EXPIRED"?"This quote is no longer valid. Please ask the shop for a fresh quote.":"Check back for the latest request status."}</p>
       {payment&&!!payment.refundedAmountMinor&&payment.refundedAmountMinor>0&&<div className="customer-refund-note"><Wallet size={16}/><span><strong>{formatMoney(payment.refundedAmountMinor,payment.currency)} returned</strong> for rejected pages ({rejectedPageList(jobStatus.rejectedPageNumbersJson)}). {formatMoney(Math.max(0,payment.amountMinor-payment.refundedAmountMinor),payment.currency)} remains paid; only accepted pages proceed to printing.</span></div>}
       {!!jobStatus.timeline?.length&&<div className="customer-state-timeline">{jobStatus.timeline.map((event,index)=><div key={index}><i/><span><strong>{prettyStatus(event.newStatus)}</strong><small>{event.actorType==="ShopUser"?"Shop team":event.actorType==="Customer"?"You":"System"} · {formatIstDateTime(event.createdUtc)}</small></span></div>)}</div>}
 
@@ -3626,8 +3567,8 @@ function CustomerPrintFlow({publicCode,sessionToken,paymentOptions,localAgent,lo
         <div className="customer-pay-heading"><span>PAY THE SHOP</span><strong>{formatMoney(jobStatus.quotedAmountMinor,jobStatus.currency)}</strong></div>
         {paymentOptions.upiEnabled&&<button className={paymentMethod==="UPI"?"customer-choice selected":"customer-choice"} onClick={()=>setPaymentMethod("UPI")}>UPI payment</button>}
         {paymentOptions.cashEnabled&&<button className={paymentMethod==="CASH"?"customer-choice selected":"customer-choice"} onClick={()=>setPaymentMethod("CASH")}>Cash at counter</button>}
-        <button className="customer-flow-button" disabled={busy||(!paymentOptions.upiEnabled&&!paymentOptions.cashEnabled)} onClick={()=>void beginPayment(paymentMethod)}>{busy?<span className="button-spinner"/>:nativeAppMode?"Continue":"Continue with "+(paymentMethod==="UPI"?"UPI":"cash at counter")}</button>
-        {!paymentOptions.upiEnabled&&!paymentOptions.cashEnabled&&<p className="customer-flow-error">{nativeAppMode?"No payment method. Ask shop.":"The shop has not configured a payment method yet. Please speak to the shop operator."}</p>}
+        <button className="customer-flow-button" disabled={busy||(!paymentOptions.upiEnabled&&!paymentOptions.cashEnabled)} onClick={()=>void beginPayment(paymentMethod)}>{busy?<span className="button-spinner"/>:"Continue with "+(paymentMethod==="UPI"?"UPI":"cash at counter")}</button>
+        {!paymentOptions.upiEnabled&&!paymentOptions.cashEnabled&&<p className="customer-flow-error">The shop has not configured a payment method yet. Please speak to the shop operator.</p>}
       </div>}
       {legacyIndividualPayment&&payment&&payment.status!=="REJECTED"&&<div className="customer-pay-panel">
         <div className="customer-pay-heading"><span>{payment.method==="UPI"?"UPI PAYMENT":"CASH AT COUNTER"}</span><strong>{formatMoney(Math.max(0,payment.amountMinor-(payment.refundedAmountMinor??0)),payment.currency)}</strong></div>
@@ -3636,14 +3577,14 @@ function CustomerPrintFlow({publicCode,sessionToken,paymentOptions,localAgent,lo
           <strong>{payment.payeeNameSnapshot||paymentOptions.payeeName||"Shop"}</strong>
           <span>{payment.upiIdSnapshot||paymentOptions.upiId}</span>
           <a href={payment.upiUri||"#"} className="customer-flow-button customer-upi-open">Open UPI app</a>
-          <label className="customer-reference-field">{nativeAppMode?"UTR":"UPI transaction reference / UTR"}<input value={paymentReference} maxLength={100} onChange={event=>setPaymentReference(event.target.value)} placeholder={nativeAppMode?"Enter UTR":"Enter UTR after paying"}/></label>
-          <button className="customer-flow-button" disabled={busy||paymentReference.trim().length<4} onClick={()=>void submitPaymentReference()}>{busy?<span className="button-spinner"/>:nativeAppMode?"Submit UTR":"Submit payment reference"}</button>
-          <small className="customer-payment-warning">{nativeAppMode?"UTR isn't proof. Shop verifies.":"Submitting a UTR is not proof of payment. The shop verifies it in its own UPI/bank app."}</small>
+          <label className="customer-reference-field">UPI transaction reference / UTR<input value={paymentReference} maxLength={100} onChange={event=>setPaymentReference(event.target.value)} placeholder="Enter UTR after paying"/></label>
+          <button className="customer-flow-button" disabled={busy||paymentReference.trim().length<4} onClick={()=>void submitPaymentReference()}>{busy?<span className="button-spinner"/>:"Submit payment reference"}</button>
+          <small className="customer-payment-warning">Submitting a UTR is not proof of payment. The shop verifies it in its own UPI/bank app.</small>
         </div>}
-        {payment.method==="CASH"&&payment.status==="CASH_AWAITING_PAYMENT"&&<p>{nativeAppMode?"Pay at counter · Await confirmation.":"Pay at the shop counter. The shop will confirm receipt before authorising the job."}</p>}
-        {payment.status==="CUSTOMER_REPORTED"&&<p>{nativeAppMode?"Reference received · Verification pending.":"Your payment reference was received. The shop still needs to verify the transaction."}</p>}
-        {payment.status==="VERIFIED"&&<p>{nativeAppMode?"Payment verified · Printing pending.":"Payment verified by the shop. The print job is authorised, but not yet physically printed."}</p>}
-        {payment.status==="PARTIALLY_REFUNDED"&&<p>{nativeAppMode?"Partial refund · Accepted pages only.":"A partial return has been recorded. The remaining paid amount is for the pages the shop accepted."}</p>}
+        {payment.method==="CASH"&&payment.status==="CASH_AWAITING_PAYMENT"&&<p>Pay at the shop counter. The shop will confirm receipt before authorising the job.</p>}
+        {payment.status==="CUSTOMER_REPORTED"&&<p>Your payment reference was received. The shop still needs to verify the transaction.</p>}
+        {payment.status==="VERIFIED"&&<p>Payment verified by the shop. The print job is authorised, but not yet physically printed.</p>}
+        {payment.status==="PARTIALLY_REFUNDED"&&<p>A partial return has been recorded. The remaining paid amount is for the pages the shop accepted.</p>}
       </div>}
     </div>}
     {batchCheckoutVisible&&<section className="customer-pay-panel customer-batch-checkout-panel">
@@ -3672,24 +3613,24 @@ function CustomerPrintFlow({publicCode,sessionToken,paymentOptions,localAgent,lo
         {paymentOptions.upiEnabled&&<button className={paymentMethod==="UPI"?"customer-choice selected":"customer-choice"} onClick={()=>setPaymentMethod("UPI")}>UPI payment</button>}
         {paymentOptions.cashEnabled&&<button className={paymentMethod==="CASH"?"customer-choice selected":"customer-choice"} onClick={()=>setPaymentMethod("CASH")}>Cash at counter</button>}
         <button className="customer-flow-button" disabled={busy||(!paymentOptions.upiEnabled&&!paymentOptions.cashEnabled)||batchPayableItems.length===0} onClick={()=>void beginPayment(paymentMethod,true)}>
-          {busy?<span className="button-spinner"/>:nativeAppMode?"Pay accepted files":"Pay accepted files · "+formatMoney(batchPayableTotal,batchCheckoutCurrency)}
+          {busy?<span className="button-spinner"/>:"Pay accepted files · "+formatMoney(batchPayableTotal,batchCheckoutCurrency)}
         </button>
-        {!paymentOptions.upiEnabled&&!paymentOptions.cashEnabled&&<p className="customer-flow-error">{nativeAppMode?"No payment method. Ask shop.":"The shop has not configured a payment method yet. Please speak to the shop operator."}</p>}
+        {!paymentOptions.upiEnabled&&!paymentOptions.cashEnabled&&<p className="customer-flow-error">The shop has not configured a payment method yet. Please speak to the shop operator.</p>}
       </>}
       {batchCheckoutUsesPayment&&batchPaymentAllocationComplete&&batchPayment?.method==="UPI"&&batchPayment.status==="AWAITING_CUSTOMER_PAYMENT"&&<div className="customer-upi-details">
         <div className="customer-upi-qr"><QRCode value={batchPayment.upiUri||"upi://pay?pa="+encodeURIComponent(batchPayment.upiIdSnapshot||"")} size={158}/></div>
         <strong>{batchPayment.payeeNameSnapshot||paymentOptions.payeeName||"Shop"}</strong>
         <span>{batchPayment.upiIdSnapshot||paymentOptions.upiId}</span>
         <a href={batchPayment.upiUri||"#"} className="customer-flow-button customer-upi-open">Open UPI app</a>
-        <label className="customer-reference-field">{nativeAppMode?"UTR":"UPI transaction reference / UTR"}<input value={paymentReference} maxLength={100} onChange={event=>setPaymentReference(event.target.value)} placeholder={nativeAppMode?"Enter UTR":"Enter UTR after paying"}/></label>
-        <button className="customer-flow-button" disabled={busy||paymentReference.trim().length<4} onClick={()=>void submitPaymentReference()}>{busy?<span className="button-spinner"/>:nativeAppMode?"Submit UTR":"Submit batch payment reference"}</button>
-        <small className="customer-payment-warning">{nativeAppMode?"UTR isn't proof. Shop verifies.":"Submitting a UTR is not proof of payment. The shop verifies the full batch amount in its own UPI/bank app."}</small>
+        <label className="customer-reference-field">UPI transaction reference / UTR<input value={paymentReference} maxLength={100} onChange={event=>setPaymentReference(event.target.value)} placeholder="Enter UTR after paying"/></label>
+        <button className="customer-flow-button" disabled={busy||paymentReference.trim().length<4} onClick={()=>void submitPaymentReference()}>{busy?<span className="button-spinner"/>:"Submit batch payment reference"}</button>
+        <small className="customer-payment-warning">Submitting a UTR is not proof of payment. The shop verifies the full batch amount in its own UPI/bank app.</small>
       </div>}
       {batchCheckoutUsesPayment&&batchPaymentAllocationComplete&&batchPayment?.method==="CASH"&&batchPayment.status==="CASH_AWAITING_PAYMENT"&&<p>Pay the displayed batch total at the shop counter. The shop will confirm receipt before authorising the accepted files.</p>}
       {batchCheckoutUsesPayment&&batchPayment?.status==="CUSTOMER_REPORTED"&&<p>Your batch payment reference was received. The shop must verify the full amount before any accepted file is authorised.</p>}
       {batchCheckoutUsesPayment&&batchPayment?.status==="VERIFIED"&&<div className="payment-verified-note"><Check size={14}/> Batch payment verified. Accepted files are authorised for the shop's print queue.</div>}
     </section>}
-    <div className="customer-payment-boundary"><ShieldCheck size={15}/><span>{nativeAppMode ? smartPrintNativeBoundary(jobStatus?.status,Boolean(quote)) : jobStatus?.status==="PAID_AUTHORISED"?"The shop has verified your payment. It still needs to assign and start the local printer.":jobStatus?.status==="PRINT_AUTHORISED"?"The shop has authorised physical printing.":jobStatus?.status==="PRINT_SUBMITTING"?"Your document is being sent to the Windows printer queue.":jobStatus?.status==="SPOOLER_ACCEPTED"?"Windows accepted the job. This is not proof that paper has come out.":jobStatus?.status==="PRINTING"?"The Windows driver reports that printing is in progress.":jobStatus?.status==="OUTPUT_UNCONFIRMED"?"The shop is checking the printer and actual pages before any retry.":jobStatus?.status==="COMPLETED"?"The shop confirmed the requested pages are printed and ready for collection.":jobStatus?.status==="LOCAL_QUEUE_CLAIMED"?"The shop's paired Windows computer is receiving the encrypted document. It is not being printed yet.":jobStatus?.status==="LOCAL_QUEUE_READY"?"The encrypted local copy is verified on the shop computer. Physical printing still requires the print operator.":jobStatus?.status==="AWAITING_PAYMENT"?"Your quote is ready for payment. The shop collects payment directly and must verify it before the job is authorised.":jobStatus?.status==="PAYMENT_REPORTED"?"Your UPI reference is awaiting the shop's independent bank verification; submitting a reference does not confirm payment.":quote?"This quote is calculated by the shop's saved rate card. Accepting it sends a request to the shop; it does not collect payment or start printing.":"Your document is validated before pricing. You will see the shop's calculated price before any payment or print approval."}</span></div>
+    <div className="customer-payment-boundary"><ShieldCheck size={15}/><span>{ jobStatus?.status==="PAID_AUTHORISED"?"The shop has verified your payment. It still needs to assign and start the local printer.":jobStatus?.status==="PRINT_AUTHORISED"?"The shop has authorised physical printing.":jobStatus?.status==="PRINT_SUBMITTING"?"Your document is being sent to the Windows printer queue.":jobStatus?.status==="SPOOLER_ACCEPTED"?"Windows accepted the job. This is not proof that paper has come out.":jobStatus?.status==="PRINTING"?"The Windows driver reports that printing is in progress.":jobStatus?.status==="OUTPUT_UNCONFIRMED"?"The shop is checking the printer and actual pages before any retry.":jobStatus?.status==="COMPLETED"?"The shop confirmed the requested pages are printed and ready for collection.":jobStatus?.status==="LOCAL_QUEUE_CLAIMED"?"The shop's paired Windows computer is receiving the encrypted document. It is not being printed yet.":jobStatus?.status==="LOCAL_QUEUE_READY"?"The encrypted local copy is verified on the shop computer. Physical printing still requires the print operator.":jobStatus?.status==="AWAITING_PAYMENT"?"Your quote is ready for payment. The shop collects payment directly and must verify it before the job is authorised.":jobStatus?.status==="PAYMENT_REPORTED"?"Your UPI reference is awaiting the shop's independent bank verification; submitting a reference does not confirm payment.":quote?"This quote is calculated by the shop's saved rate card. Accepting it sends a request to the shop; it does not collect payment or start printing.":"Your document is validated before pricing. You will see the shop's calculated price before any payment or print approval."}</span></div>
   </section>;
 }
 

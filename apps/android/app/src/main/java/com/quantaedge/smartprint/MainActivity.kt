@@ -119,6 +119,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var exportTree: ActivityResultLauncher<Uri?>
     private lateinit var exportArchive: ActivityResultLauncher<String>
     private lateinit var scannerLauncher: ActivityResultLauncher<Intent>
+    private lateinit var customerFileChooserLauncher: ActivityResultLauncher<Intent>
     private lateinit var documentScanLauncher: ActivityResultLauncher<IntentSenderRequest>
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -269,6 +270,16 @@ class MainActivity : AppCompatActivity() {
                 pendingScanNeedsDestination = false
                 pendingScanDestinationPath = ""
             }
+        }
+        customerFileChooserLauncher = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+            val callback = fileCallback ?: return@registerForActivityResult
+            val selected = if (result.resultCode == RESULT_OK) {
+                WebChromeClient.FileChooserParams.parseResult(result.resultCode, result.data)
+            } else null
+            fileCallback = null
+            fileChooserAllowsMultiple = false
+            fileChooserSelectFolders = false
+            callback.onReceiveValue(selected)
         }
         importFiles = registerForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
             if (uris.isNullOrEmpty()) return@registerForActivityResult
@@ -1941,7 +1952,7 @@ class MainActivity : AppCompatActivity() {
                     "https" -> if (uri.host.equals(portalHost, true)) false else { launchExternal(uri); true }
                     "upi", "tel", "mailto" -> { launchExternal(uri); true }
                     "intent" -> { launchIntent(uri.toString()); true }
-                    "http" -> !(allowedAgentUpload(uri) || allowedLocalDevelopmentEndpoint(uri))
+                    "http" -> !(allowedAgentLocalEndpoint(uri, request.method, request.requestHeaders) || allowedLocalDevelopmentEndpoint(uri))
                     "about" -> false
                     else -> true
                 }
@@ -1949,11 +1960,11 @@ class MainActivity : AppCompatActivity() {
             override fun shouldInterceptRequest(view: WebView, request: WebResourceRequest): WebResourceResponse? {
                 val uri = request.url
                 if (uri.scheme.equals("http", true) &&
-                    !allowedAgentUpload(uri) &&
+                    !allowedAgentLocalEndpoint(uri, request.method, request.requestHeaders) &&
                     !allowedLocalDevelopmentEndpoint(uri)) {
                     return WebResourceResponse(
                         "text/plain", "UTF-8", 403, "Blocked by Smart Print", emptyMap(),
-                        ByteArrayInputStream("Only the selected private-LAN development portal and paired-Agent upload endpoints are allowed over HTTP.".toByteArray())
+                        ByteArrayInputStream("Only the selected private-LAN development portal and paired-Agent status/upload endpoints are allowed over HTTP.".toByteArray())
                     )
                 }
                 return super.shouldInterceptRequest(view, request)
@@ -1998,11 +2009,23 @@ class MainActivity : AppCompatActivity() {
                 fileChooserSelectFolders = params.acceptTypes.any { accepted ->
                     accepted.split(',').any { it.trim().equals(FOLDER_PICKER_ACCEPT, ignoreCase = true) }
                 }
-                fileChooserAllowsMultiple = fileChooserSelectFolders ||
-                    params.mode == FileChooserParams.MODE_OPEN_MULTIPLE
-                chooserSelectedFilePaths.clear()
-                chooserSelectedFolderPaths.clear()
-                showPicker()
+                if (fileChooserSelectFolders) {
+                    // Directory upload is an app-supported extension; keep its folder-aware
+                    // selection UI. Ordinary files use Android's system document picker.
+                    fileChooserAllowsMultiple = true
+                    chooserSelectedFilePaths.clear()
+                    chooserSelectedFolderPaths.clear()
+                    showPicker()
+                } else {
+                    fileChooserAllowsMultiple = false
+                    try {
+                        customerFileChooserLauncher.launch(params.createIntent())
+                    } catch (exception: Exception) {
+                        fileCallback?.onReceiveValue(null)
+                        fileCallback = null
+                        toast("Could not open your documents: ${message(exception)}")
+                    }
+                }
                 return true
             }
         }
@@ -2015,8 +2038,13 @@ class MainActivity : AppCompatActivity() {
         return candidate.matches(Regex("^[A-Za-z0-9_-]{32}$")) && candidate == activeCode
     }
 
-    private fun allowedAgentUpload(uri: Uri): Boolean =
-        LocalAgentUploadPolicy.allows(uri.scheme.orEmpty(), uri.host.orEmpty(), uri.port, uri.path.orEmpty())
+    private fun allowedAgentLocalEndpoint(uri: Uri, method: String, headers: Map<String, String>): Boolean {
+        val preflightMethod = headers.entries.firstOrNull { it.key.equals("Access-Control-Request-Method", ignoreCase = true) }
+            ?.value
+        return LocalAgentUploadPolicy.allows(
+            uri.scheme.orEmpty(), uri.host.orEmpty(), uri.port, uri.path.orEmpty(), method, preflightMethod
+        )
+    }
 
     private fun allowedLocalDevelopmentEndpoint(uri: Uri): Boolean =
         BuildConfig.DEBUG &&
@@ -2136,22 +2164,16 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun confirmShop(link: StationQrLink) {
-        val detail = if (link.url.startsWith("http://")) {
-            "LOCAL TEST · Trusted shop Wi-Fi only"
-        } else {
-            "Secure shop session"
-        }
-        showConfirmSheet("Connect to shop?", detail, "Connect") {
-            portalHost = link.host
-            portalUrl = link.url
-            getSharedPreferences("smartprint.customer.last-shop", MODE_PRIVATE).edit()
-                .putString("portalUrl", link.url)
-                .putString("portalHost", link.host)
-                .apply()
-            toolbar.menu.findItem(SWITCH_SHOP)?.isVisible = true
-            ensureWebView().loadUrl(link.url)
-            showPrint()
-        }
+        portalHost = link.host
+        portalUrl = link.url
+        getSharedPreferences("smartprint.customer.last-shop", MODE_PRIVATE).edit()
+            .putString("portalUrl", link.url)
+            .putString("portalHost", link.host)
+            .apply()
+        toolbar.menu.findItem(SWITCH_SHOP)?.isVisible = true
+        val view = ensureWebView()
+        showPrint()
+        view.loadUrl(link.url)
     }
 
     private fun selectedChooserFiles(): List<File> = chooserSelectedFilePaths.mapNotNull { path ->

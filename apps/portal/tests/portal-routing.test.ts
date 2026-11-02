@@ -32,6 +32,18 @@ test("station route remains separate from admin and shop scopes", () => {
   });
 });
 
+test("Android station uses the shared customer page and only adapts native folder selection", () => {
+  const appSource = readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8");
+  const stylesSource = readFileSync(new URL("../src/styles.css", import.meta.url), "utf8");
+
+  assert.match(appSource, /return <div className="customer-entry">/);
+  assert.doesNotMatch(appSource, /nativeAppMode|smartPrintNativeHeadline|smartPrintNativeStatus|smartPrintNativeBoundary/);
+  assert.equal((appSource.match(/navigator\.userAgent\.includes\("SmartPrintAndroid\/1"\)/g) ?? []).length, 2);
+  assert.match(appSource, /if\(isNativeApp\)\s*\{\s*setPermissionState\("unknown"\);\s*void checkConnection\(\);/);
+  assert.match(appSource, /accept=\{usesNativeFolderPicker\?/);
+  assert.doesNotMatch(stylesSource, /customer-entry\.smartprint-native/);
+});
+
 test("admin and shop browser credentials use independent session keys", () => {
   assert.equal(authStorageKey("admin"), "qrtoprint.auth.admin");
   assert.equal(authStorageKey("shop"), "qrtoprint.auth.shop");
