@@ -2126,6 +2126,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun allowedAgentLocalEndpoint(uri: Uri, method: String, headers: Map<String, String>): Boolean {
+        if (uri.query != null || uri.fragment != null || uri.userInfo != null) return false
         val preflightMethod = headers.entries.firstOrNull { it.key.equals("Access-Control-Request-Method", ignoreCase = true) }
             ?.value
         return LocalAgentUploadPolicy.allows(

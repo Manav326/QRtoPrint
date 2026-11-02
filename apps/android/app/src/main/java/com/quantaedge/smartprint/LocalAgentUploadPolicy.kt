@@ -5,6 +5,10 @@ package com.quantaedge.smartprint
  * The HTTPS customer portal and every other WebView resource stay on HTTPS.
  */
 internal object LocalAgentUploadPolicy {
+    private val uploadTicketPath = Regex(
+        "^/api/v1/local/uploads/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+    )
+
     fun allows(
         scheme: String,
         host: String,
@@ -22,7 +26,7 @@ internal object LocalAgentUploadPolicy {
         return when {
             path == "/api/v1/local/status" ->
                 requestMethod == "GET" || (requestMethod == "OPTIONS" && requestedMethod == "GET")
-            path.startsWith("/api/v1/local/uploads/") ->
+            uploadTicketPath.matches(path) ->
                 requestMethod == "POST" || (requestMethod == "OPTIONS" && requestedMethod == "POST")
             else -> false
         }
