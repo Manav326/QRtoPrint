@@ -54,17 +54,24 @@ public static class PlatformDataTransferEndpoints
             var settings = await db.PlatformOperationalSettings.AsNoTracking()
                 .SingleOrDefaultAsync(item => item.Id == PlatformOperationalSettings.SingletonIdValue, ct);
             var measurementStartedUtc = settings?.DataTransferMeasurementStartedUtc ?? generatedUtc;
-            var effectiveFromUtc = measurementStartedUtc > requestedFromUtc
+            // Daily aggregates cannot be split at an arbitrary clock time. Align a requested
+            // window to UTC midnight, but never report earlier than telemetry collection began.
+            var requestedWindowStartUtc = new DateTimeOffset(
+                new DateTime(
+                    requestedFromUtc.UtcDateTime.Year,
+                    requestedFromUtc.UtcDateTime.Month,
+                    requestedFromUtc.UtcDateTime.Day,
+                    0, 0, 0,
+                    DateTimeKind.Utc));
+            var effectiveFromUtc = measurementStartedUtc > requestedWindowStartUtc
                 ? measurementStartedUtc
-                : requestedFromUtc;
+                : requestedWindowStartUtc;
             var rawRetentionDays = Math.Clamp(settings?.DataTransferRawRetentionDays ?? 90, 30, 3650);
             var storageFreshAfterUtc = generatedUtc.AddMinutes(-AgentStorageFreshnessMinutes);
 
             var events = db.DataTransferEvents.AsNoTracking()
                 .Where(item => item.CreatedUtc >= effectiveFromUtc && item.CreatedUtc < generatedUtc);
             var aggregateStartDate = DateOnly.FromDateTime(effectiveFromUtc.UtcDateTime);
-            if (effectiveFromUtc.TimeOfDay != TimeSpan.Zero)
-                aggregateStartDate = aggregateStartDate.AddDays(1);
             var aggregateEndDate = DateOnly.FromDateTime(generatedUtc.UtcDateTime);
             var aggregates = db.DataTransferDailyAggregates.AsNoTracking()
                 .Where(item => item.UtcDate >= aggregateStartDate && item.UtcDate <= aggregateEndDate);
