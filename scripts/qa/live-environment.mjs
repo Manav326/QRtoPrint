@@ -217,9 +217,10 @@ try {
   await check("Shop registration route", async () => {
     const result = await visit(browser, "signup-route", "/signup", ".auth-screen");
     try {
-      for (const label of ["Shop or business name", "Your name", "Email address", "Password"]) {
+      for (const label of ["Shop or business name", "Your name", "Email address"]) {
         await result.page.getByLabel(label).waitFor({ state: "visible" });
       }
+      await result.page.locator('input[type="password"]').first().waitFor({ state: "visible" });
       return { route: "/signup", registrationSubmitted: false };
     } finally { await result.context.close(); }
   });
