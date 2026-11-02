@@ -1023,8 +1023,8 @@ export async function uploadCustomerDocument(sessionToken: string, file: File, b
     const recovered = await uploadCustomerLocalTicketViaCloud(
       sessionToken, file, ticket, pendingLocalGrant
     );
-    sessionStorage.removeItem(localKeys.idempotency);
-    sessionStorage.removeItem(localKeys.grant);
+    // Keep the ticket identity for this browser session. A refresh after upload
+    // must resolve the same PrintJob rather than silently create a duplicate.
     return recovered;
   }
 
@@ -1153,8 +1153,8 @@ export async function uploadCustomerDocumentLocally(
         continue;
       }
 
-      sessionStorage.removeItem(keys.idempotency);
-      sessionStorage.removeItem(keys.grant);
+      // Retain the ticket and grant in session storage so a refresh or route
+      // switch reconciles this same job instead of generating a duplicate.
       const uploaded = payload as UploadedPrintJob;
       return {
         ...uploaded,
@@ -1175,8 +1175,7 @@ export async function uploadCustomerDocumentLocally(
       const recovered = await uploadCustomerLocalTicketViaCloud(
         sessionToken, file, ticket, grantToken
       );
-      sessionStorage.removeItem(keys.idempotency);
-      sessionStorage.removeItem(keys.grant);
+      // Retain the original ticket identity after success for refresh-safe retry.
       return {
         ...recovered,
         job: { ...recovered.job, batchId: ticket.batchId ?? recovered.job.batchId ?? null }
