@@ -1817,6 +1817,16 @@ function ShopConnectionPanel({connected,localApiReady}:{connected:boolean;localA
   useEffect(()=>{void refresh();},[]);
 
   useEffect(()=>{
+    if(!connected||!localApiReady) {
+      setTest(null);
+      setVerified(false);
+      setExpired(false);
+      return;
+    }
+    void refresh();
+  },[connected,localApiReady]);
+
+  useEffect(()=>{
     if(!test) {
       const timer=window.setInterval(()=>void refresh(),30000);
       return ()=>window.clearInterval(timer);
