@@ -296,7 +296,7 @@ class MainActivityInstrumentedTest {
     fun foldersCanOpenAndExpandInline() {
         val folderName = "CI School " + System.currentTimeMillis()
         ActivityScenario.launch(MainActivity::class.java).use {
-            onView(withContentDescription("Files")).perform(click())
+            onView(withContentDescription("My Files")).perform(click())
             onView(withText("New folder")).perform(click())
             onView(withHint("Name")).perform(replaceText(folderName), closeSoftKeyboard())
             onView(withText("Save")).perform(click())
