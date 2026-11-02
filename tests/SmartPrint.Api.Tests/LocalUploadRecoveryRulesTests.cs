@@ -27,35 +27,31 @@ public sealed class LocalUploadRecoveryRulesTests
     }
 
     [Fact]
-    public void ActiveSameMonthTicketReusesItsMonthlyPrintJobReservation()
+    public void RecoverableSameMonthTicketReusesItsReservationAfterTheLanLeaseExpires()
     {
         var now = new DateTimeOffset(2026, 11, 2, 12, 0, 0, TimeSpan.Zero);
-        Assert.True(LocalUploadRecoveryRules.HasActiveMonthlyQuotaReservation(
-            now.AddMinutes(-5), now.AddMinutes(10), null, now));
+        Assert.True(LocalUploadRecoveryRules.HasExistingMonthlyQuotaReservation(
+            now.AddMinutes(-20), null, now, RecoveryWindow));
     }
 
     [Theory]
-    [InlineData(false, 10, true)]
-    [InlineData(false, -1, false)]
-    [InlineData(true, 10, false)]
-    public void ExpiredCompletedOrPriorMonthTicketDoesNotReuseMonthlyReservation(
-        bool priorMonth, int expiryOffsetMinutes, bool expected)
+    [InlineData(-25, false)]
+    [InlineData(-24 * 60, true)]
+    [InlineData(-24 * 60 - 1, false)]
+    public void OnlyUncompletedSameMonthTicketsInsideRecoveryWindowReuseQuota(
+        int ticketAgeMinutes, bool expected)
     {
         var now = new DateTimeOffset(2026, 11, 2, 12, 0, 0, TimeSpan.Zero);
-        var created = priorMonth
-            ? now.AddDays(-2)
-            : now.AddMinutes(-5);
-        DateTimeOffset? expires = now.AddMinutes(expiryOffsetMinutes);
-        Assert.Equal(expected, LocalUploadRecoveryRules.HasActiveMonthlyQuotaReservation(
-            created, expires.Value, null, now));
+        Assert.Equal(expected, LocalUploadRecoveryRules.HasExistingMonthlyQuotaReservation(
+            now.AddMinutes(ticketAgeMinutes), null, now, RecoveryWindow));
     }
 
     [Fact]
     public void CompletedTicketDoesNotReuseMonthlyReservation()
     {
         var now = new DateTimeOffset(2026, 11, 2, 12, 0, 0, TimeSpan.Zero);
-        Assert.False(LocalUploadRecoveryRules.HasActiveMonthlyQuotaReservation(
-            now.AddMinutes(-5), now.AddMinutes(10), now.AddMinutes(-1), now));
+        Assert.False(LocalUploadRecoveryRules.HasExistingMonthlyQuotaReservation(
+            now.AddMinutes(-5), now.AddMinutes(-1), now, RecoveryWindow));
     }
 
     [Theory]

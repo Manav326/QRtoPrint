@@ -6272,8 +6272,9 @@ publicApi.MapPost("/sessions/current/local-upload-tickets/{ticketId:guid}/cloud-
                 title: "This document exceeds the maximum size configured for this shop's plan."));
 
         await entitlements.AcquireQuotaLockAsync(ticket.TenantId, TenantQuotaResource.MonthlyPrintJob, ct);
-        var hasExistingMonthlyReservation = LocalUploadRecoveryRules.HasActiveMonthlyQuotaReservation(
-            ticket.CreatedUtc, ticket.ExpiresUtc, ticket.CompletedUtc, DateTimeOffset.UtcNow);
+        var hasExistingMonthlyReservation = LocalUploadRecoveryRules.HasExistingMonthlyQuotaReservation(
+            ticket.CreatedUtc, ticket.CompletedUtc, DateTimeOffset.UtcNow,
+            TimeSpan.FromHours(maximumRecoveryAgeHours));
         if (!hasExistingMonthlyReservation)
         {
             var quota = await entitlements.CheckCapacityAsync(
@@ -6315,7 +6316,8 @@ publicApi.MapPost("/sessions/current/local-upload-tickets/{ticketId:guid}/cloud-
                            item.CustomerSessionId == ticket.CustomerSessionId &&
                            item.BatchId == ticket.BatchId &&
                            item.Id != ticket.Id &&
-                           item.CompletedUtc == null)
+                           item.CompletedUtc == null &&
+                           item.ExpiresUtc > commitNow)
             .Select(item => item.SizeBytes).ToListAsync(ct);
         if (!PrintBatchCapacityRules.CanAdd(
             batchJobSizes.Count + pendingBatchTicketSizes.Count,

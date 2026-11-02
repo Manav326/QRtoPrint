@@ -21,17 +21,16 @@ public static class LocalUploadRecoveryRules
     /// An active local ticket in the current billing month already consumes a
     /// monthly print-job reservation. HTTPS recovery reuses that reservation.
     /// </summary>
-    public static bool HasActiveMonthlyQuotaReservation(
+    public static bool HasExistingMonthlyQuotaReservation(
         DateTimeOffset ticketCreatedUtc,
-        DateTimeOffset ticketExpiresUtc,
         DateTimeOffset? ticketCompletedUtc,
-        DateTimeOffset nowUtc)
+        DateTimeOffset nowUtc,
+        TimeSpan maximumRecoveryAge)
     {
         var monthStartUtc = new DateTimeOffset(nowUtc.Year, nowUtc.Month, 1, 0, 0, 0, TimeSpan.Zero);
         return ticketCompletedUtc is null &&
-               ticketExpiresUtc > nowUtc &&
                ticketCreatedUtc >= monthStartUtc &&
-               ticketCreatedUtc <= nowUtc.AddMinutes(5);
+               IsWithinRecoveryWindow(ticketCreatedUtc, nowUtc, maximumRecoveryAge);
     }
 
     public static bool MatchesOriginalDocument(
