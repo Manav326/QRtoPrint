@@ -260,8 +260,11 @@ public sealed class AgentControlPipeHostedService(
                 exception is IOException or UnauthorizedAccessException or InvalidOperationException or ArgumentException)
             {
                 logger.LogWarning("The shop connection could not be updated ({FailureType}).", exception.GetType().Name);
+                var message = exception is InvalidOperationException or ArgumentException
+                    ? exception.Message
+                    : "SmartPrint could not update the shop connection. Refresh and try again.";
                 await writer.WriteLineAsync(JsonSerializer.Serialize(
-                    new PipeResponse(false, null, "SmartPrint could not update the shop connection. Refresh and try again."),
+                    new PipeResponse(false, null, message),
                     PipeJsonOptions));
             }
             return;
