@@ -205,6 +205,7 @@ public sealed class CustomerPrintSession
     public Guid? CustomerUserId { get; set; }
     public string TokenHash { get; set; } = string.Empty;
     public string Status { get; set; } = "Active";
+    public int CloudUploadAttemptCount { get; set; }
     public DateTimeOffset CreatedUtc { get; set; } = DateTimeOffset.UtcNow;
     public DateTimeOffset ExpiresUtc { get; set; } = DateTimeOffset.UtcNow.AddMinutes(15);
     public DateTimeOffset? RevokedUtc { get; set; }
