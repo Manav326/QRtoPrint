@@ -5767,10 +5767,13 @@ publicApi.MapPost("/sessions/current/local-upload-tickets", async (
     var customerSessionTokenHash = HashOpaqueToken(rawToken);
     var session = await db.CustomerPrintSessions.AsNoTracking()
         .Where(item => item.TokenHash == customerSessionTokenHash && item.Status == "Active" &&
-                       item.RevokedUtc == null && item.ExpiresUtc > now)
-        .Select(item => new { item.Id, item.TenantId, item.QrStationId })
+                       item.RevokedUtc == null)
+        .Select(item => new { item.Id, item.TenantId, item.QrStationId, item.ExpiresUtc })
         .SingleOrDefaultAsync(ct);
     if (session is null) return Results.Unauthorized();
+
+    if (session.ExpiresUtc <= now)
+        return Results.Unauthorized();
 
     var grantHash = HashOpaqueToken(request.GrantToken);
     var existing = await db.LocalPrintUploadTickets.AsNoTracking()
@@ -5957,8 +5960,6 @@ publicApi.MapPost("/sessions/current/local-upload-tickets", async (
                 Convert.FromHexString(grantHash));
         if (!sameRequest)
             return Results.Conflict(new { code = "local_upload_idempotency_conflict", message = "This upload attempt key is already associated with a different document." });
-        if (racedTicket.CompletedUtc is null && racedTicket.ExpiresUtc <= now)
-            return Results.Conflict(new { code = "local_upload_ticket_expired", message = "This local upload attempt expired. Start a new upload attempt." });
         return Results.Ok(new
         {
             racedTicket.Id,
