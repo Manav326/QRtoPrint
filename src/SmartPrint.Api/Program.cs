@@ -6173,7 +6173,6 @@ publicApi.MapPost("/sessions/current/local-upload-tickets/{ticketId:guid}/cloud-
         });
     }
 
-    var commitAttempted = false;
     try
     {
         await using var transaction = await db.Database.BeginTransactionAsync(ct);
@@ -6370,7 +6369,6 @@ publicApi.MapPost("/sessions/current/local-upload-tickets/{ticketId:guid}/cloud-
         await db.SaveChangesAsync(ct);
         // Once CommitAsync is attempted, its outcome can be ambiguous. Preserve
         // the encrypted file on that path; the next retry reconciles the same ticket.
-        commitAttempted = true;
         await transaction.CommitAsync(ct);
 
         return Results.Ok(new
