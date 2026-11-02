@@ -30,8 +30,8 @@ class MainActivityInstrumentedTest {
     private fun openNavigationDestination(itemId: Int, expectedText: String) {
         var lastFailure: androidx.test.espresso.NoMatchingViewException? = null
         repeat(3) {
-            onView(withId(itemId)).perform(click())
             try {
+                onView(withId(itemId)).perform(click())
                 onView(withText(expectedText)).check(matches(isDisplayed()))
                 return
             } catch (failure: androidx.test.espresso.NoMatchingViewException) {
@@ -294,8 +294,7 @@ class MainActivityInstrumentedTest {
         val context = ApplicationProvider.getApplicationContext<Context>()
         CustomerAccountStore(context).clear()
         ActivityScenario.launch(MainActivity::class.java).use {
-            val label = com.google.android.material.R.id.navigation_bar_item_small_label_view
-            onView(withId(4)).perform(click())
+            openNavigationDestination(4, "Print history")
             onView(withContentDescription("Account")).perform(click())
             onView(withText("Guest access is ready")).check(matches(isDisplayed()))
             androidx.test.espresso.Espresso.pressBack()
@@ -366,8 +365,7 @@ class MainActivityInstrumentedTest {
     fun fileContextActionsUseBottomSheet() {
         val folderName = "CI Sheet Folder " + System.currentTimeMillis()
         ActivityScenario.launch(MainActivity::class.java).use {
-            val label = com.google.android.material.R.id.navigation_bar_item_small_label_view
-            onView(allOf(withId(label), withText("Files"))).perform(click())
+            openFilesTab()
             onView(withText("New folder")).perform(click())
             onView(withHint("Name")).perform(replaceText(folderName), closeSoftKeyboard())
             onView(withText("Save")).perform(click())
