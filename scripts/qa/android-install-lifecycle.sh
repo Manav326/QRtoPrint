@@ -157,6 +157,9 @@ fi
 adb shell test -f "$EXTERNAL_PATH" || fail "The exported shared-storage fixture disappeared after reinstall."
 echo "PASS: Fresh install starts with empty private data; exported file remains."
 
+# This is the customer app, not a shop-bound device. The production update
+# check protects customer-owned documents only; shop sessions remain scoped by
+# station code so the customer can switch to another shop at any time.
 echo "8/8 Testing two real production-signed releases..."
 curl --fail --location --silent --show-error \
   "https://github.com/Manav326/QRtoPrint/releases/download/v0.1.9/SmartPrint-Android.apk" \
