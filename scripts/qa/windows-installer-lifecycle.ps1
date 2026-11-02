@@ -17,6 +17,10 @@ $results = [System.Collections.Generic.List[object]]::new()
 $identityHash = $null
 $originalDefaultPrinter = $null
 $fixturePrinter = $null
+$installRoot = Join-Path $env:ProgramFiles "SmartPrint"
+$ownsInstall = $false
+$ownsPrinter = $false
+$ownsTask = $false
 
 function Add-Result([string]$Name, [string]$Status, [string]$Detail) {
     $results.Add([pscustomobject]@{ Name = $Name; Status = $Status; Detail = $Detail })
@@ -47,16 +51,17 @@ function Assert-True([bool]$Condition, [string]$Message) {
     if (-not $Condition) { throw $Message }
 }
 
-function Wait-Service([ValidateSet("Running", "Stopped")][string]$State, [int]$TimeoutSeconds = 45) {
+function Wait-Service([ValidateSet("Running", "Stopped", "Absent")][string]$State, [int]$TimeoutSeconds = 45) {
     $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
     do {
         $service = Get-Service -Name $serviceName -ErrorAction SilentlyContinue
-        if ($State -eq "Stopped" -and -not $service) { return }
-        if ($service -and $service.Status.ToString() -eq $State) { return }
+        if ($State -eq "Absent" -and -not $service) { return }
+        if ($State -eq "Stopped" -and $service -and $service.Status -eq "Stopped") { return }
+        if ($State -eq "Running" -and $service -and $service.Status -eq "Running") { return }
         Start-Sleep -Seconds 1
     } while ((Get-Date) -lt $deadline)
     $last = Get-Service -Name $serviceName -ErrorAction SilentlyContinue
-    $lastState = if ($last) { $last.Status } else { "Missing" }
+    $lastState = if ($last) { $last.Status } else { "Absent" }
     throw "Agent service did not reach $State within $TimeoutSeconds seconds. Current state: $lastState."
 }
 
@@ -74,7 +79,7 @@ function Invoke-Setup([string]$Path) {
 }
 
 function Invoke-Uninstall {
-    $uninstaller = Join-Path $env:ProgramFiles "SmartPrint\unins000.exe"
+    $uninstaller = Join-Path $installRoot "unins000.exe"
     if (Test-Path -LiteralPath $uninstaller) {
         $process = Start-Process -FilePath $uninstaller -ArgumentList @(
             "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART"
@@ -83,7 +88,10 @@ function Invoke-Uninstall {
             throw "SmartPrint uninstaller exited with code $($process.ExitCode)."
         }
     }
-    Wait-Service "Stopped"
+    elseif (Get-Service -Name $serviceName -ErrorAction SilentlyContinue) {
+        throw "The Agent service exists but its owned SmartPrint uninstaller is missing; refusing a partial cleanup."
+    }
+    Wait-Service "Absent"
 }
 
 function Get-ServiceBinaryPath {
@@ -114,12 +122,13 @@ function Assert-PreservedFixtures {
 }
 
 function Add-QueueFixture {
-    $source = Get-Printer -Name "Microsoft Print to PDF" -ErrorAction Stop
-    Remove-Printer -Name $testPrinterName -ErrorAction SilentlyContinue
-    Add-Printer -Name $testPrinterName -DriverName $source.DriverName -PortName $source.PortName -ErrorAction Stop
-    $script:fixturePrinter = Get-Printer -Name $testPrinterName -ErrorAction Stop
     $default = Get-CimInstance Win32_Printer | Where-Object { $_.Default } | Select-Object -First 1
     $script:originalDefaultPrinter = if ($default) { $default.Name } else { $null }
+
+    $source = Get-Printer -Name "Microsoft Print to PDF" -ErrorAction Stop
+    Add-Printer -Name $testPrinterName -DriverName $source.DriverName -PortName $source.PortName -ErrorAction Stop
+    $script:ownsPrinter = $true
+    $script:fixturePrinter = Get-Printer -Name $testPrinterName -ErrorAction Stop
 }
 
 function Assert-SystemCanDiscoverFixturePrinter {
@@ -134,7 +143,8 @@ function Assert-SystemCanDiscoverFixturePrinter {
     $action = New-ScheduledTaskAction -Execute $dotnetPath -Argument $arguments
     $principal = New-ScheduledTaskPrincipal -UserId "SYSTEM" -LogonType ServiceAccount -RunLevel Highest
     try {
-        Register-ScheduledTask -TaskName $taskName -Action $action -Principal $principal -Force | Out-Null
+        Register-ScheduledTask -TaskName $taskName -Action $action -Principal $principal | Out-Null
+        $script:ownsTask = $true
         Start-ScheduledTask -TaskName $taskName
         $deadline = (Get-Date).AddSeconds(40)
         while (-not (Test-Path -LiteralPath $resultPath) -and (Get-Date) -lt $deadline) {
@@ -145,7 +155,10 @@ function Assert-SystemCanDiscoverFixturePrinter {
         Assert-True ($result.Trim() -eq "FOUND") "The Agent's LocalSystem printer-discovery result was unexpected: $result"
     }
     finally {
-        Unregister-ScheduledTask -TaskName $taskName -Confirm:$false -ErrorAction SilentlyContinue
+        if ($script:ownsTask) {
+            Unregister-ScheduledTask -TaskName $taskName -Confirm:$false -ErrorAction SilentlyContinue
+            $script:ownsTask = $false
+        }
         Remove-Item -LiteralPath $resultPath -Force -ErrorAction SilentlyContinue
     }
 }
@@ -181,7 +194,13 @@ $v2Installed = $false
 
 try {
     Assert-True (-not (Get-Service -Name $serviceName -ErrorAction SilentlyContinue)) "Refusing to test on a runner that already has the SmartPrint Agent service."
-    Assert-True (-not (Test-Path -LiteralPath (Join-Path $env:ProgramFiles "SmartPrint\unins000.exe"))) "Refusing to test on a runner that already has SmartPrint installed."
+    Assert-True (-not (Test-Path -LiteralPath $installRoot)) "Refusing to test on a runner that already has a SmartPrint installation directory."
+    Assert-True (-not (Get-Printer -Name $testPrinterName -ErrorAction SilentlyContinue)) "Refusing to overwrite an existing printer queue named '$testPrinterName'."
+    Assert-True (-not (Get-ScheduledTask -TaskName "SmartPrintLifecycleSystemPrinterProbe" -ErrorAction SilentlyContinue)) "Refusing to replace an existing lifecycle printer-probe task."
+    $existingRules = @(Get-NetFirewallRule -ErrorAction SilentlyContinue | Where-Object { $_.DisplayName -like "$firewallPrefix*" })
+    Assert-True ($existingRules.Count -eq 0) "Refusing to alter existing SmartPrint firewall rules."
+    Assert-True (-not (Test-Path -LiteralPath $identityPath)) "Refusing to overwrite an existing machine Agent identity fixture."
+    Assert-True (-not (Test-Path -LiteralPath $queueManifest)) "Refusing to overwrite an existing local print queue fixture."
 
     New-Item -ItemType Directory -Force -Path $fixtureProject | Out-Null
     $fixtureProjectXml = @'
@@ -304,6 +323,7 @@ else
 
     if ($seedOk) {
         $firstInstallOk = Invoke-Check "Fresh Windows installation (N)" {
+            $script:ownsInstall = $true
             Invoke-Setup $InstallerV1
             Assert-ServiceVersion "0.1.10"
             Assert-PreservedFixtures
@@ -383,6 +403,7 @@ else
             $restoredHash = (Get-FileHash -LiteralPath $restoredPath -Algorithm SHA256).Hash
             Assert-True ($restoredHash -eq $previousHash) "Rollback changed the previous Agent executable."
             Assert-PreservedFixtures
+            Assert-QueueUntouched
         } | Out-Null
     }
     else {
@@ -414,11 +435,25 @@ catch {
     Add-Result "Lifecycle harness" "FAIL" $_.Exception.Message
 }
 finally {
-    try { Invoke-Uninstall } catch { Write-Warning "Final uninstall cleanup: $($_.Exception.Message)" }
-    Remove-Printer -Name $testPrinterName -ErrorAction SilentlyContinue
-    Get-NetFirewallRule -ErrorAction SilentlyContinue |
-        Where-Object { $_.DisplayName -like "$firewallPrefix*" } |
-        Remove-NetFirewallRule -ErrorAction SilentlyContinue
+    if ($ownsInstall) {
+        try { Invoke-Uninstall } catch { Write-Warning "Final uninstall cleanup: $($_.Exception.Message)" }
+    }
+    if ($ownsTask) {
+        Unregister-ScheduledTask -TaskName "SmartPrintLifecycleSystemPrinterProbe" -Confirm:$false -ErrorAction SilentlyContinue
+        $script:ownsTask = $false
+    }
+    if ($ownsPrinter) {
+        Remove-Printer -Name $testPrinterName -ErrorAction SilentlyContinue
+        $script:ownsPrinter = $false
+    }
+    if ($ownsInstall) {
+        if (-not (Get-Service -Name $serviceName -ErrorAction SilentlyContinue) -and (Test-Path -LiteralPath $installRoot)) {
+            Remove-Item -LiteralPath $installRoot -Recurse -Force -ErrorAction SilentlyContinue
+        }
+        Get-NetFirewallRule -ErrorAction SilentlyContinue |
+            Where-Object { $_.DisplayName -like "$firewallPrefix*" } |
+            Remove-NetFirewallRule -ErrorAction SilentlyContinue
+    }
     Write-StepSummary
 }
 
