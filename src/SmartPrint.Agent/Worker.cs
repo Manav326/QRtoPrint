@@ -76,14 +76,14 @@ public sealed class Worker(
                 exception is CryptographicException or IOException or JsonException or UnauthorizedAccessException)
             {
                 logger.LogError(exception, "The saved Agent identity could not be read. Cloud printing is paused until the owner repairs the local pairing.");
-                await Task.Delay(pollInterval, stoppingToken);
+                await localNetworkManager.WaitForSelectionChangeOrDelayAsync(pollInterval, stoppingToken);
                 continue;
             }
 
             if (credentials is null)
             {
                 logger.LogWarning("This computer is not paired. Run SmartPrint.Agent.exe --pair from an elevated terminal.");
-                await Task.Delay(pollInterval, stoppingToken);
+                await localNetworkManager.WaitForSelectionChangeOrDelayAsync(pollInterval, stoppingToken);
                 continue;
             }
 
@@ -214,7 +214,7 @@ public sealed class Worker(
                 logger.LogError(exception, "Unexpected local agent synchronization error.");
             }
 
-            await Task.Delay(pollInterval, stoppingToken);
+            await localNetworkManager.WaitForSelectionChangeOrDelayAsync(pollInterval, stoppingToken);
         }
     }
 

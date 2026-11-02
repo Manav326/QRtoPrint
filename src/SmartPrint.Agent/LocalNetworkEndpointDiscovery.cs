@@ -4,7 +4,12 @@ using System.Net.Sockets;
 
 namespace SmartPrint.Agent;
 
-public sealed record LocalNetworkAdapter(string Id, string DisplayName, string Kind, string Ipv4Address);
+public sealed record LocalNetworkAdapter(
+    string Id,
+    string DisplayName,
+    string Kind,
+    string Ipv4Address,
+    int PrefixLength);
 
 public static class LocalNetworkEndpointDiscovery
 {
@@ -18,6 +23,7 @@ public static class LocalNetworkEndpointDiscovery
             if (network.OperationalStatus != OperationalStatus.Up ||
                 network.NetworkInterfaceType is NetworkInterfaceType.Loopback or NetworkInterfaceType.Tunnel)
                 continue;
+
             try
             {
                 var properties = network.GetIPProperties();
@@ -27,11 +33,11 @@ public static class LocalNetworkEndpointDiscovery
                     !IPAddress.IsLoopback(gateway.Address));
                 if (!hasIpv4Gateway) continue;
 
-                var address = properties.UnicastAddresses.Select(unicast => unicast.Address)
-                    .Where(IsPrivateIpv4)
-                    .OrderBy(candidate => candidate.ToString(), StringComparer.Ordinal)
+                var addressInfo = properties.UnicastAddresses
+                    .Where(unicast => IsPrivateIpv4(unicast.Address) && unicast.PrefixLength is >= 1 and <= 32)
+                    .OrderBy(unicast => unicast.Address.ToString(), StringComparer.Ordinal)
                     .FirstOrDefault();
-                if (address is null) continue;
+                if (addressInfo is null) continue;
 
                 var kind = network.NetworkInterfaceType switch
                 {
@@ -39,8 +45,26 @@ public static class LocalNetworkEndpointDiscovery
                     NetworkInterfaceType.Ethernet => "Ethernet",
                     _ => "Network"
                 };
-                var displayName = string.IsNullOrWhiteSpace(network.Name) ? kind : network.Name.Trim();
-                networks.Add(new LocalNetworkAdapter(network.Id, displayName, kind, address.ToString()));
+                var ssid = kind == "Wi-Fi" ? WindowsWifiNetworkName.TryGetCurrentSsid(network.Id) : null;
+                var displayName = !string.IsNullOrWhiteSpace(ssid)
+                    ? ssid
+                    : string.IsNullOrWhiteSpace(network.Name)
+                        ? kind + " network"
+                        : network.Name.Trim();
+
+                // A Wi-Fi adapter can move between SSIDs without changing its adapter GUID.
+                // Include the current SSID in the preference key so a change of Wi-Fi network
+                // requires an explicit owner selection and a fresh phone check.
+                var selectionId = kind == "Wi-Fi"
+                    ? $"{network.Id}|{ssid ?? "SSID-UNAVAILABLE"}"
+                    : network.Id;
+
+                networks.Add(new LocalNetworkAdapter(
+                    selectionId,
+                    displayName,
+                    kind,
+                    addressInfo.Address.ToString(),
+                    addressInfo.PrefixLength));
             }
             catch (NetworkInformationException)
             {
@@ -48,31 +72,60 @@ public static class LocalNetworkEndpointDiscovery
             }
         }
 
-        return networks.OrderBy(network => NetworkPriority(network.Kind))
+        return networks
+            .OrderBy(network => NetworkPriority(network.Kind))
             .ThenBy(network => network.DisplayName, StringComparer.OrdinalIgnoreCase)
             .ThenBy(network => network.Id, StringComparer.OrdinalIgnoreCase)
             .ToArray();
     }
 
-    public static LocalNetworkAdapter? SelectNetwork(IEnumerable<LocalNetworkAdapter> availableNetworks, string? preferredNetworkId)
+    public static LocalNetworkAdapter? SelectNetwork(
+        IEnumerable<LocalNetworkAdapter> availableNetworks,
+        string? preferredNetworkId)
     {
         var networks = availableNetworks.ToArray();
         if (!string.IsNullOrWhiteSpace(preferredNetworkId))
         {
-            var preferred = networks.FirstOrDefault(network =>
+            // Do not silently move a shop from its saved Wi-Fi to a guest, hotspot
+            // or other adapter when the selected network disappears.
+            return networks.FirstOrDefault(network =>
                 string.Equals(network.Id, preferredNetworkId, StringComparison.OrdinalIgnoreCase));
-            if (preferred is not null) return preferred;
         }
+
         return networks.FirstOrDefault();
     }
 
-    public static IReadOnlyList<string> Discover(int port = DefaultPort) => DiscoverForNetwork(null, port);
+    public static IReadOnlyList<string> Discover(int port = DefaultPort) =>
+        DiscoverForNetwork(null, port);
 
     public static IReadOnlyList<string> DiscoverForNetwork(string? preferredNetworkId, int port = DefaultPort)
     {
         if (port is < 1 or > 65535) throw new ArgumentOutOfRangeException(nameof(port));
         var selected = SelectNetwork(GetAvailableNetworks(), preferredNetworkId);
         return selected is null ? Array.Empty<string>() : [$"http://{selected.Ipv4Address}:{port}"];
+    }
+
+    public static bool IsAddressOnNetwork(IPAddress remoteAddress, IPAddress localAddress, int prefixLength)
+    {
+        ArgumentNullException.ThrowIfNull(remoteAddress);
+        ArgumentNullException.ThrowIfNull(localAddress);
+
+        if (remoteAddress.IsIPv4MappedToIPv6) remoteAddress = remoteAddress.MapToIPv4();
+        if (remoteAddress.AddressFamily != AddressFamily.InterNetwork ||
+            localAddress.AddressFamily != AddressFamily.InterNetwork ||
+            prefixLength is < 0 or > 32)
+            return false;
+
+        var remote = remoteAddress.GetAddressBytes();
+        var local = localAddress.GetAddressBytes();
+        for (var index = 0; index < 4; index++)
+        {
+            var bits = Math.Clamp(prefixLength - index * 8, 0, 8);
+            var mask = bits == 0 ? 0 : (byte)(0xff << (8 - bits));
+            if ((remote[index] & mask) != (local[index] & mask)) return false;
+        }
+
+        return true;
     }
 
     private static int NetworkPriority(string kind) => kind switch
@@ -84,7 +137,9 @@ public static class LocalNetworkEndpointDiscovery
 
     private static bool IsPrivateIpv4(IPAddress address)
     {
-        if (address.AddressFamily != AddressFamily.InterNetwork || IPAddress.IsLoopback(address)) return false;
+        if (address.AddressFamily != AddressFamily.InterNetwork || IPAddress.IsLoopback(address))
+            return false;
+
         var bytes = address.GetAddressBytes();
         return bytes[0] == 10 ||
                (bytes[0] == 172 && bytes[1] is >= 16 and <= 31) ||

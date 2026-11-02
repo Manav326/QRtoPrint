@@ -1,3 +1,5 @@
+using System.Net;
+
 namespace SmartPrint.Agent;
 
 public sealed record LocalNetworkSnapshot(
@@ -10,13 +12,16 @@ public sealed record LocalPhoneTest(string PhoneTestUrl, DateTimeOffset StartedU
 
 public sealed class LocalNetworkManager(LocalNetworkPreferenceStore preferences, LocalAgentApiState state)
 {
+    private readonly SemaphoreSlim selectionChanged = new(0, 1);
+
     public LocalNetworkSnapshot GetSnapshot()
     {
         var networks = LocalNetworkEndpointDiscovery.GetAvailableNetworks();
         var preferredId = preferences.GetPreferredNetworkId();
         var selected = LocalNetworkEndpointDiscovery.SelectNetwork(networks, preferredId);
 
-        // Remember the first safe default; retain an earlier choice while its adapter is offline.
+        // Persist only the first automatic choice. A saved network that disappears
+        // stays unselected until the owner explicitly chooses another available one.
         if (string.IsNullOrWhiteSpace(preferredId) && selected is not null)
             preferences.SetPreferredNetworkId(selected.Id);
 
@@ -37,9 +42,42 @@ public sealed class LocalNetworkManager(LocalNetworkPreferenceStore preferences,
         if (!networks.Any(network => string.Equals(network.Id, networkId, StringComparison.OrdinalIgnoreCase)))
             throw new InvalidOperationException("That connection is no longer available. Refresh the list and choose again.");
 
-        preferences.SetPreferredNetworkId(networkId);
-        state.ClearPhoneVerification();
+        var currentId = preferences.GetPreferredNetworkId();
+        if (!string.Equals(currentId, networkId, StringComparison.OrdinalIgnoreCase))
+        {
+            preferences.SetPreferredNetworkId(networkId);
+            state.ClearPhoneVerification();
+            SignalSelectionChanged();
+        }
         return GetSnapshot();
+    }
+
+    public bool IsRemoteClientOnSelectedNetwork(IPAddress? remoteAddress)
+    {
+        if (remoteAddress is null) return false;
+        if (IPAddress.IsLoopback(remoteAddress)) return true;
+        if (remoteAddress.IsIPv4MappedToIPv6) remoteAddress = remoteAddress.MapToIPv4();
+        if (remoteAddress.AddressFamily != System.Net.Sockets.AddressFamily.InterNetwork)
+            return false;
+
+        var snapshot = GetSnapshot();
+        var selected = snapshot.Networks.FirstOrDefault(network =>
+            string.Equals(network.Id, snapshot.SelectedNetworkId, StringComparison.OrdinalIgnoreCase));
+        return selected is not null &&
+            IPAddress.TryParse(selected.Ipv4Address, out var localAddress) &&
+            LocalNetworkEndpointDiscovery.IsAddressOnNetwork(remoteAddress, localAddress, selected.PrefixLength);
+    }
+
+    public Task<bool> WaitForSelectionChangeOrDelayAsync(TimeSpan delay, CancellationToken cancellationToken) =>
+        selectionChanged.WaitAsync(delay, cancellationToken);
+
+    private void SignalSelectionChanged()
+    {
+        if (selectionChanged.CurrentCount == 0)
+        {
+            try { selectionChanged.Release(); }
+            catch (SemaphoreFullException) { }
+        }
     }
 
     public LocalPhoneTest StartPhoneTest()

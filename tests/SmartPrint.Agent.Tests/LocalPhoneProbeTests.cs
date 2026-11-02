@@ -15,6 +15,7 @@ public sealed class LocalPhoneProbeTests
         Assert.True(state.TryCompletePhoneProbe(token));
         Assert.NotNull(state.GetPhoneVerifiedUtc("wifi-1"));
         Assert.Null(state.GetPhoneVerifiedUtc("wifi-2"));
+        Assert.Null(state.GetPhoneVerifiedUtc("wifi-1", DateTimeOffset.UtcNow.AddMinutes(11)));
         Assert.False(state.TryCompletePhoneProbe(token));
     }
 

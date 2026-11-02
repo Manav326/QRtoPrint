@@ -1,3 +1,4 @@
+using System.Net;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
@@ -156,7 +157,8 @@ public sealed class LocalAgentApiHostedService(
     IHttpClientFactory httpClientFactory,
     LocalAgentApiState state,
     ILogger<LocalAgentApiHostedService> logger,
-    IHostApplicationLifetime hostLifetime) : IHostedService, IAsyncDisposable
+    IHostApplicationLifetime hostLifetime,
+    LocalNetworkManager localNetworkManager) : IHostedService, IAsyncDisposable
 {
     private WebApplication? application;
     private CancellationTokenSource? retryLifetime;
@@ -241,7 +243,9 @@ public sealed class LocalAgentApiHostedService(
                 ContentRootPath = AppContext.BaseDirectory
             });
             builder.Configuration.AddConfiguration(configuration);
-            builder.WebHost.ConfigureKestrel(options => options.ListenAnyIP(port));
+            // The cloud advertises RFC1918 IPv4 endpoints only; do not also expose
+            // the same unauthenticated local status route on IPv6 interfaces.
+            builder.WebHost.ConfigureKestrel(options => options.Listen(IPAddress.Any, port));
 
             var allowedOrigins = configuration.GetSection("Agent:LocalApi:AllowedOrigins")
                 .Get<string[]>()?
@@ -277,6 +281,16 @@ public sealed class LocalAgentApiHostedService(
             application = app;
             app.Use(async (context, next) =>
             {
+                // Bind every remote request to the shop connection the owner selected.
+                // This prevents a different local adapter/subnet from reaching the
+                // listener merely because Kestrel is bound to all IPv4 interfaces.
+                if (!localNetworkManager.IsRemoteClientOnSelectedNetwork(context.Connection.RemoteIpAddress))
+                {
+                    context.Response.StatusCode = StatusCodes.Status403Forbidden;
+                    context.Response.Headers["Cache-Control"] = "no-store";
+                    return;
+                }
+
                 if (context.Request.Headers.TryGetValue("Origin", out var origin) &&
                     state.IsOriginAllowed(origin.ToString()) &&
                     string.Equals(context.Request.Headers["Access-Control-Request-Private-Network"],
@@ -327,6 +341,7 @@ public sealed class LocalAgentApiHostedService(
             app.MapGet("/api/v1/local/connection-check", (HttpContext context) =>
             {
                 context.Response.Headers["Cache-Control"] = "no-store";
+                context.Response.Headers["Referrer-Policy"] = "no-referrer";
                 context.Response.Headers["X-Content-Type-Options"] = "nosniff";
                 context.Response.Headers["Content-Security-Policy"] = "default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'";
                 if (!state.TryCompletePhoneProbe(context.Request.Query["token"].FirstOrDefault()))
