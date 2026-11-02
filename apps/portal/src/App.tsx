@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useRef, useState, type ReactNode } from "react";
+import { Fragment, useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import {
   Activity, ArrowRight, Check, Clock3, Copy, CreditCard, FileText, FileUp, FolderOpen, LayoutDashboard,
   LifeBuoy, LogOut, Menu, Monitor, Plus, Printer, QrCode, Search, Settings, Wifi,
@@ -2707,7 +2707,16 @@ function CustomerEntry({publicCode,dark,onToggleTheme}:{publicCode:string;dark:b
   const [error,setError]=useState("");
   const [loading,setLoading]=useState(true);
   const [localReady,setLocalReady]=useState(false);
-  useEffect(()=>{setLocalReady(false);},[result?.localAgent?.agentDeviceId]);
+  const [localFallbackSuggested,setLocalFallbackSuggested]=useState(false);
+  const handleLocalReady=useCallback((ready:boolean)=>{
+    setLocalReady(ready);
+    if(ready)setLocalFallbackSuggested(false);
+  },[]);
+  const handleLocalUnavailable=useCallback(()=>setLocalFallbackSuggested(true),[]);
+  useEffect(()=>{
+    setLocalReady(false);
+    setLocalFallbackSuggested(false);
+  },[result?.localAgent?.agentDeviceId]);
   useEffect(()=>{
     let mounted=true;
     const stationKey=`qrtoprint.customer-session:${publicCode}`;
@@ -2785,8 +2794,8 @@ function CustomerEntry({publicCode,dark,onToggleTheme}:{publicCode:string;dark:b
       result?<><div className="entry-success-icon"><Check size={23}/></div><div className="entry-eyebrow">SECURE SESSION CREATED</div><h1>{nativeAppMode?result.shop.displayName:"Welcome to "+result.shop.displayName}</h1><p>{nativeAppMode?"Shop connected.":"Your phone is connected to this shop's print station."}</p>
         <div className="entry-printer-card"><div className="entry-printer-icon"><Printer size={20}/></div><div><strong>{result.printer?.displayName||"Shop print counter"}</strong><span>{nativeAppMode?(result.printer?.status||"Printer not selected"):result.printer?result.printer.manufacturer+" · "+result.printer.model:"The shop will select a printer for your job."}</span></div><Status label={result.printer?.status||"Session ready"} tone="blue"/></div>
         <div className="entry-session-note"><ShieldCheck size={16}/><span>{nativeAppMode?"Secure session · Expires "+formatIstTime(result.expiresUtc):"This session expires at "+formatIstTime(result.expiresUtc)+". Your document access stays limited to this shop session."}</span></div>
-        <CustomerLocalConnection localAgent={result.localAgent} onReady={setLocalReady} cloudAssistedPrintingEnabled={result.cloudAssistedPrintingEnabled}/>
-        <CustomerPrintFlow publicCode={publicCode} sessionToken={result.sessionToken} paymentOptions={result.paymentOptions} localAgent={result.localAgent} localReady={localReady} cloudAssistedPrintingEnabled={result.cloudAssistedPrintingEnabled}/>
+        <CustomerLocalConnection localAgent={result.localAgent} onReady={handleLocalReady} onUnavailable={handleLocalUnavailable} cloudAssistedPrintingEnabled={result.cloudAssistedPrintingEnabled}/>
+        <CustomerPrintFlow publicCode={publicCode} sessionToken={result.sessionToken} paymentOptions={result.paymentOptions} localAgent={result.localAgent} localReady={localReady} localFallbackSuggested={localFallbackSuggested} cloudAssistedPrintingEnabled={result.cloudAssistedPrintingEnabled}/>
       </>:null}
     </main>
     <footer className="customer-entry-footer">© 2026 SmartPrint by QuantaEdge · Secure customer printing</footer>
@@ -2828,7 +2837,7 @@ function buildSecureLocalPortalUrl():string|null {
   }
 }
 
-function CustomerLocalConnection({localAgent,onReady,cloudAssistedPrintingEnabled}:{localAgent:CustomerLocalAgent|null;onReady:(ready:boolean)=>void;cloudAssistedPrintingEnabled:boolean}) {
+function CustomerLocalConnection({localAgent,onReady,onUnavailable,cloudAssistedPrintingEnabled}:{localAgent:CustomerLocalAgent|null;onReady:(ready:boolean)=>void;onUnavailable:()=>void;cloudAssistedPrintingEnabled:boolean}) {
   const nativeAppMode = navigator.userAgent.includes("SmartPrintAndroid/1");
   const [permissionState,setPermissionState]=useState<PermissionState|"unknown">("unknown");
   const [checkStatus,setCheckStatus]=useState<LocalAgentCheckStatus>("idle");
@@ -2840,6 +2849,7 @@ function CustomerLocalConnection({localAgent,onReady,cloudAssistedPrintingEnable
   function requireSecureContext() {
     setCheckStatus("insecure");
     onReady(false);
+    if(cloudAssistedPrintingEnabled)onUnavailable();
     setMessage(nativeAppMode ? "Secure HTTPS required." : securePortalUrl
       ? "This shop page is open over HTTP. Chrome blocks local-network requests from insecure pages without showing a permission prompt. Open the secure shop link below; the certificate must be trusted on this phone."
       : "This shop page is not a secure HTTPS context. Open the shop's HTTPS customer portal before checking local printing.");
@@ -2919,6 +2929,7 @@ function CustomerLocalConnection({localAgent,onReady,cloudAssistedPrintingEnable
           if(status.localUploadReady!==true || status.readiness?.localUploadReady!==true) {
             setCheckStatus("recovering");
             onReady(false);
+            if(cloudAssistedPrintingEnabled)onUnavailable();
             const readiness=status.readiness;
             const blockers=[
               readiness?.queueInitialized!==true?"protected document queue is not ready":null,
@@ -2948,6 +2959,7 @@ function CustomerLocalConnection({localAgent,onReady,cloudAssistedPrintingEnable
     if(generation!==checkGeneration.current)return;
     setCheckStatus("unavailable");
     onReady(false);
+    if(cloudAssistedPrintingEnabled)onUnavailable();
     setMessage(nativeAppMode ? "Shop offline · Cloud upload available." : validEndpointCount===0
       ? "The shop Agent has not announced a usable local address. The regular cloud-assisted upload remains available."
       : "Could not reach the shop computer. Make sure this phone is connected to the same shop Wi-Fi, then ask the shop operator to check the connection. The regular cloud-assisted upload remains available.");
@@ -2995,6 +3007,7 @@ function CustomerLocalConnection({localAgent,onReady,cloudAssistedPrintingEnable
       if(permissionStatus.state==="denied") {
         setCheckStatus("denied");
         onReady(false);
+        if(cloudAssistedPrintingEnabled)onUnavailable();
         setMessage(nativeAppMode ? "Allow local network access." : "Chrome has blocked Local network access for this public HTTPS site. On Android, open the site information icon beside the address bar → Permissions → Local network access → Allow, then reload this QR page.");
       } else if(permissionStatus.state==="prompt") {
         setCheckStatus("idle");
@@ -3017,7 +3030,7 @@ function CustomerLocalConnection({localAgent,onReady,cloudAssistedPrintingEnable
       checkGeneration.current++;
       permissionStatus?.removeEventListener("change",updatePermission);
     };
-  },[localAgent?.agentDeviceId,localAgent?.endpoints.join("|"),onReady]);
+  },[localAgent?.agentDeviceId,localAgent?.endpoints.join("|"),onReady,onUnavailable]);
 
   if(!localAgent?.endpoints.length)return null;
 
@@ -3179,7 +3192,7 @@ function smartPrintNativeBoundary(status:string|undefined,hasQuote:boolean):stri
   }
 }
 
-function CustomerPrintFlow({publicCode,sessionToken,paymentOptions,localAgent,localReady,cloudAssistedPrintingEnabled}:{publicCode:string;sessionToken:string;paymentOptions:{upiEnabled:boolean;upiId?:string|null;payeeName?:string|null;cashEnabled:boolean;instantPaymentEnabled:boolean};localAgent:CustomerLocalAgent|null;localReady:boolean;cloudAssistedPrintingEnabled:boolean}) {
+function CustomerPrintFlow({publicCode,sessionToken,paymentOptions,localAgent,localReady,localFallbackSuggested,cloudAssistedPrintingEnabled}:{publicCode:string;sessionToken:string;paymentOptions:{upiEnabled:boolean;upiId?:string|null;payeeName?:string|null;cashEnabled:boolean;instantPaymentEnabled:boolean};localAgent:CustomerLocalAgent|null;localReady:boolean;localFallbackSuggested:boolean;cloudAssistedPrintingEnabled:boolean}) {
   const nativeAppMode = navigator.userAgent.includes("SmartPrintAndroid/1");
   const initialDraft=readStoredCustomerDraft(publicCode,sessionToken);
   const [files,setFiles]=useState<File[]>([]);
@@ -3257,6 +3270,15 @@ function CustomerPrintFlow({publicCode,sessionToken,paymentOptions,localAgent,lo
       uploadModeManuallySelected
     ));
   },[cloudAssistedPrintingEnabled,localAgent?.endpoints.join("|"),uploadModeManuallySelected]);
+
+  useEffect(()=>{
+    if(uploadModeManuallySelected)return;
+    if(localFallbackSuggested&&cloudAssistedPrintingEnabled) {
+      setUploadMode("CLOUD");
+    } else if(!localFallbackSuggested&&localReady&&localAgent?.endpoints.length) {
+      setUploadMode("LOCAL");
+    }
+  },[localFallbackSuggested,localReady,localAgent?.endpoints.length,cloudAssistedPrintingEnabled,uploadModeManuallySelected]);
 
   const customerUploadUnavailable = !cloudAssistedPrintingEnabled && !localAgent?.endpoints.length;
 
