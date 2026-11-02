@@ -3811,7 +3811,8 @@ agentApi.MapPost("/local-uploads/{ticketId:guid}/claim", async (
                     completedDocument.MediaType,
                     completedDocument.SizeBytes,
                     completedDocument.Sha256,
-                    completedDocument.PageSizesJson
+                    completedDocument.PageSizesJson,
+                    completedDocument.StorageMode
                 },
                 DuplicateRequest = true
             }

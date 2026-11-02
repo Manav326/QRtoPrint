@@ -519,6 +519,13 @@ public sealed class LocalAgentApiHostedService(
                     var completedEntry = localQueueStore.Find(completedJobId);
                     if (completedEntry is null || !File.Exists(completedEntry.DocumentPath))
                     {
+                        if (string.Equals(claim.UploadResult.Document.StorageMode, "CLOUD", StringComparison.OrdinalIgnoreCase))
+                        {
+                            // HTTPS recovery already stored this ticket's exact file
+                            // in cloud storage. The normal paid-job claim can download
+                            // it later; do not ask the customer to upload it again.
+                            return Results.Ok(claim.UploadResult);
+                        }
                         return Results.Conflict(new { code = "local_upload_document_missing", message = "The API has this local upload recorded, but the original document is missing from the protected shop queue. Ask the customer to upload again." });
                     }
                     await localQueueStore.MarkLocalUploadFinalizedAsync(completedJobId, ct);
@@ -727,7 +734,7 @@ public sealed class LocalAgentApiHostedService(
 
     private sealed record LocalUploadedDocument(
         Guid Id, string OriginalFileName, string MediaType, long SizeBytes,
-        string Sha256, string PageSizesJson);
+        string Sha256, string PageSizesJson, string? StorageMode = null);
 
     private sealed record LocalDocumentPreviewAuthorizationResponse(
         string MediaType, string OriginalFileName, long SizeBytes, string Sha256);

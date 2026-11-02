@@ -468,8 +468,12 @@ public sealed class Worker(
                     {
                         throw new FileNotFoundException("The local queue manifest exists but its protected document is missing.", existing.DocumentPath);
                     }
-                    if (job.StorageMode == "LOCAL_AGENT")
+                    if (job.StorageMode == "LOCAL_AGENT" ||
+                        existing.State is "LOCAL_UPLOAD_STAGED" or "LOCAL_UPLOAD_PENDING_PAYMENT")
                     {
+                        // An HTTPS recovery can complete the same ticket while the
+                        // Agent still holds the original protected LAN copy. Promote
+                        // that copy with the paid job's final print settings.
                         await localQueueStore.UpdateFromClaimAsync(job, cancellationToken);
                     }
                 }
