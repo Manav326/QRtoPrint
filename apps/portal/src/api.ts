@@ -786,6 +786,7 @@ export async function createCustomerSession(publicCode: string) {
     printer: { displayName: string; manufacturer: string; model: string; status: string; capabilitiesJson: string } | null;
     paymentOptions: { upiEnabled: boolean; upiId?: string | null; payeeName?: string | null; cashEnabled: boolean; instantPaymentEnabled: boolean };
     localAgent: { agentDeviceId: string; endpoints: string[] } | null;
+    cloudAssistedPrintingEnabled: boolean;
   }>(`/api/v1/public/stations/${encodeURIComponent(publicCode)}/sessions`, {
     method: "POST",
     headers: await nativeCustomerAuthorizationHeaders()
@@ -813,6 +814,7 @@ export function resumeCustomerSession(sessionToken: string, publicCode: string) 
     paymentOptions: { upiEnabled: boolean; upiId?: string | null; payeeName?: string | null; cashEnabled: boolean; instantPaymentEnabled: boolean };
     printer: { displayName: string; manufacturer: string; model: string; status: string; capabilitiesJson: string } | null;
     localAgent: { agentDeviceId: string; endpoints: string[] } | null;
+    cloudAssistedPrintingEnabled: boolean;
   }>("/api/v1/public/sessions/current/resume", {
     method: "POST",
     headers: { "X-Print-Session": sessionToken },
