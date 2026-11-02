@@ -981,6 +981,11 @@ function customerLocalUploadAttemptStorageKeys(sessionToken: string, file: File)
   return { idempotency: key + ".key", grant: key + ".grant" };
 }
 
+export function hasPendingLocalCustomerUploadAttempt(sessionToken: string, file: File): boolean {
+  const keys = customerLocalUploadAttemptStorageKeys(sessionToken, file);
+  return Boolean(sessionStorage.getItem(keys.idempotency) && sessionStorage.getItem(keys.grant));
+}
+
 function createLocalUploadGrantToken(): string {
   const bytes = crypto.getRandomValues(new Uint8Array(32));
   let binary = "";
@@ -1024,6 +1029,7 @@ export async function uploadCustomerDocumentLocally(
   let ticket: {
     id: string;
     printJobId: string;
+    batchId?: string;
     jobNumber: string;
     agentDeviceId: string;
     expiresUtc: string;
@@ -1033,6 +1039,7 @@ export async function uploadCustomerDocumentLocally(
     ticket = await apiRequest<{
       id: string;
       printJobId: string;
+      batchId?: string;
       jobNumber: string;
       agentDeviceId: string;
       expiresUtc: string;
@@ -1060,6 +1067,8 @@ export async function uploadCustomerDocumentLocally(
     if (exception instanceof ApiError && exception.status === 409 &&
         ["local_print_agent_unavailable", "local_print_printer_unavailable", "local_upload_printer_unavailable"].includes(exception.code ?? "")) {
       // These are explicit preflight rejections; the API did not issue a ticket.
+      sessionStorage.removeItem(keys.idempotency);
+      sessionStorage.removeItem(keys.grant);
       throw new LocalUploadPreflightError(exception.message, exception.status, exception.code);
     }
     if (exception instanceof ApiError && exception.status === 0) {
@@ -1072,10 +1081,18 @@ export async function uploadCustomerDocumentLocally(
     throw exception;
   }
 
+  if (batchId && ticket.batchId && ticket.batchId !== batchId) {
+    throw new LocalUploadOutcomeUnknownError(
+      "This upload ticket belongs to the original batch. Restore that batch and retry the same file; do not upload it in a new batch."
+    );
+  }
+
   if (ticket.agentDeviceId !== localAgent.agentDeviceId) {
-    sessionStorage.removeItem(keys.idempotency);
-    sessionStorage.removeItem(keys.grant);
-    throw new ApiError("The assigned shop computer changed. Refresh the QR session and retry.", 409);
+    // Keep the idempotency key and grant: refreshing the station may expose the
+    // endpoint for the Agent already assigned to this original ticket.
+    throw new LocalUploadOutcomeUnknownError(
+      "The shop computer assignment changed after the upload ticket was created. Refresh this QR session and retry the same file in the same batch; the original ticket is retained."
+    );
   }
 
   const form = new FormData();

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { canFallbackToCloudFromLocalFailure, resolveCustomerUploadMode } from "../src/local-upload-routing.ts";
+import { canFallbackToCloudFromLocalFailure, canSelectCloudUpload, resolveCustomerUploadMode } from "../src/local-upload-routing.ts";
 
 describe("customer upload route selection", () => {
   it("prefers direct Shop Wi-Fi when the paired Agent is available, even when cloud is included", () => {
@@ -40,5 +40,15 @@ describe("local upload fallback safety", () => {
 
   it("does not offer cloud fallback when the shop plan excludes it", () => {
     assert.equal(canFallbackToCloudFromLocalFailure(true, false), false);
+  });
+});
+
+describe("cloud selection while local upload is unresolved", () => {
+  it("blocks cloud for a file whose local ticket may still complete", () => {
+    assert.equal(canSelectCloudUpload(true), false);
+  });
+
+  it("allows cloud when there is no unresolved local attempt", () => {
+    assert.equal(canSelectCloudUpload(false), true);
   });
 });

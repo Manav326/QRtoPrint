@@ -28,3 +28,8 @@ export function canFallbackToCloudFromLocalFailure(
 ): boolean {
   return confirmedPreTicketRejection && cloudAssistedPrintingEnabled;
 }
+
+/** Prevent a second cloud PrintJob while an earlier local attempt is unresolved. */
+export function canSelectCloudUpload(hasPendingLocalAttempt: boolean): boolean {
+  return !hasPendingLocalAttempt;
+}
