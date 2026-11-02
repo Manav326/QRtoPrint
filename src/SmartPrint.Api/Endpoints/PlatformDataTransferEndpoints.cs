@@ -29,7 +29,8 @@ public static class PlatformDataTransferEndpoints
         long CloudEgressBytes,
         long ShopLanBytes,
         long PartialTransferCount,
-        long FailedTransferCount);
+        long FailedTransferCount,
+        long StartedTransferCount);
 
     public static RouteGroupBuilder MapPlatformDataTransferEndpoints(this RouteGroupBuilder platform)
     {
@@ -118,7 +119,8 @@ public static class PlatformDataTransferEndpoints
                     group.Where(item => item.Channel == "CLOUD_AGENT_DOWNLOAD").Sum(item => (long?)item.PayloadBytes) ?? 0L,
                     group.Where(item => item.Channel == "SHOP_LAN_CUSTOMER_UPLOAD").Sum(item => (long?)item.PayloadBytes) ?? 0L,
                     group.LongCount(item => item.Status == "PARTIAL"),
-                    group.LongCount(item => item.Status == "FAILED")))
+                    group.LongCount(item => item.Status == "FAILED"),
+                    group.LongCount(item => item.Status == "STARTED")))
                 .ToListAsync(ct);
 
             var aggregateShopTransfers = await aggregates
@@ -131,7 +133,8 @@ public static class PlatformDataTransferEndpoints
                     group.Where(item => item.Channel == "CLOUD_AGENT_DOWNLOAD").Sum(item => (long?)item.PayloadBytes) ?? 0L,
                     group.Where(item => item.Channel == "SHOP_LAN_CUSTOMER_UPLOAD").Sum(item => (long?)item.PayloadBytes) ?? 0L,
                     group.Sum(item => item.Status == "PARTIAL" ? item.TransferCount : 0L),
-                    group.Sum(item => item.Status == "FAILED" ? item.TransferCount : 0L)))
+                    group.Sum(item => item.Status == "FAILED" ? item.TransferCount : 0L),
+                    group.Sum(item => item.Status == "STARTED" ? item.TransferCount : 0L)))
                 .ToListAsync(ct);
 
             var transferByTenant = rawShopTransfers.Concat(aggregateShopTransfers)
@@ -146,7 +149,8 @@ public static class PlatformDataTransferEndpoints
                         group.Sum(item => item.CloudEgressBytes),
                         group.Sum(item => item.ShopLanBytes),
                         group.Sum(item => item.PartialTransferCount),
-                        group.Sum(item => item.FailedTransferCount)));
+                        group.Sum(item => item.FailedTransferCount),
+                        group.Sum(item => item.StartedTransferCount)));
 
             var documentWindow = db.PrintDocuments.AsNoTracking()
                 .Where(item => item.CreatedUtc >= effectiveFromUtc && item.CreatedUtc < generatedUtc);
@@ -228,6 +232,7 @@ public static class PlatformDataTransferEndpoints
                         shopLanBytes = transfer?.ShopLanBytes ?? 0L,
                         partialTransferCount = transfer?.PartialTransferCount ?? 0L,
                         failedTransferCount = transfer?.FailedTransferCount ?? 0L,
+                        startedTransferCount = transfer?.StartedTransferCount ?? 0L,
                         agentCount = local?.totalAgentCount ?? 0L,
                         freshAgentCount = local?.freshAgentCount ?? 0L,
                         staleAgentCount = local?.staleAgentCount ?? 0L,
@@ -270,6 +275,7 @@ public static class PlatformDataTransferEndpoints
                     transferAttemptCount = channels.Sum(item => item.transferCount),
                     partialTransferCount = SumCountForStatus("PARTIAL"),
                     failedTransferCount = SumCountForStatus("FAILED"),
+                    startedTransferCount = SumCountForStatus("STARTED"),
                     wireBytesMeasured = false
                 },
                 channels,
