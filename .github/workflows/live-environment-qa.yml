@@ -1,0 +1,122 @@
+name: SmartPrint Live Environment QA
+
+on:
+  # Run the default, non-mutating smoke suite when this QA harness is first merged
+  # or when its implementation changes on main. Use workflow_dispatch for regular checks.
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/live-environment-qa.yml'
+      - 'scripts/qa/live-environment.mjs'
+      - 'docs/LIVE_ENVIRONMENT_QA.md'
+  workflow_dispatch:
+    inputs:
+      check_shop_workspace:
+        description: Sign in with the dedicated QA shop account and visit every shop section (read-only).
+        required: false
+        type: boolean
+        default: false
+      check_platform_admin:
+        description: Sign in with the dedicated platform QA account and visit every admin section (read-only).
+        required: false
+        type: boolean
+        default: false
+      check_customer_station:
+        description: Open the configured dedicated QR test station and create one short-lived customer session.
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: smartprint-live-qa
+  cancel-in-progress: false
+
+jobs:
+  live-environment:
+    name: Live HTTPS, API and browser QA
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      SMARTPRINT_LIVE_QA_BASE_URL: ${{ vars.SMARTPRINT_LIVE_QA_BASE_URL }}
+      SMARTPRINT_LIVE_QA_STATION_PATH: ${{ secrets.SMARTPRINT_LIVE_QA_STATION_PATH }}
+      SMARTPRINT_LIVE_QA_SHOP_EMAIL: ${{ secrets.SMARTPRINT_LIVE_QA_SHOP_EMAIL }}
+      SMARTPRINT_LIVE_QA_SHOP_PASSWORD: ${{ secrets.SMARTPRINT_LIVE_QA_SHOP_PASSWORD }}
+      SMARTPRINT_LIVE_QA_ADMIN_EMAIL: ${{ secrets.SMARTPRINT_LIVE_QA_ADMIN_EMAIL }}
+      SMARTPRINT_LIVE_QA_ADMIN_PASSWORD: ${{ secrets.SMARTPRINT_LIVE_QA_ADMIN_PASSWORD }}
+      LIVE_QA_CHECK_SHOP_WORKSPACE: ${{ inputs.check_shop_workspace }}
+      LIVE_QA_CHECK_PLATFORM_ADMIN: ${{ inputs.check_platform_admin }}
+      LIVE_QA_CHECK_CUSTOMER_STATION: ${{ inputs.check_customer_station }}
+      LIVE_QA_ARTIFACT_DIR: artifacts/live-environment-qa
+    steps:
+      - name: Check out the tested revision
+        uses: actions/checkout@v7
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+
+      - name: Validate the configured live target and requested test credentials
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --input-type=module <<'NODE'
+          import assert from 'node:assert/strict';
+
+          const raw = (process.env.SMARTPRINT_LIVE_QA_BASE_URL || '').trim();
+          assert.ok(raw, 'Set the repository Actions variable SMARTPRINT_LIVE_QA_BASE_URL before running live QA.');
+
+          let target;
+          try {
+            target = new URL(raw);
+          } catch {
+            throw new Error('SMARTPRINT_LIVE_QA_BASE_URL must be a valid HTTPS origin.');
+          }
+
+          assert.equal(target.protocol, 'https:', 'Live QA only permits HTTPS targets.');
+          assert.ok(target.hostname, 'The live QA target must contain a hostname.');
+          assert.equal(target.username, '', 'Credentials are not permitted in the live QA URL.');
+          assert.equal(target.password, '', 'Credentials are not permitted in the live QA URL.');
+          assert.ok(target.pathname === '/' || target.pathname === '', 'Configure the base origin only; do not include a path.');
+          assert.equal(target.search, '', 'The live QA URL must not contain a query string.');
+          assert.equal(target.hash, '', 'The live QA URL must not contain a fragment.');
+
+          const enabled = name => ['true', '1', 'yes'].includes((process.env[name] || '').toLowerCase());
+          if (enabled('LIVE_QA_CHECK_SHOP_WORKSPACE')) {
+            assert.ok(process.env.SMARTPRINT_LIVE_QA_SHOP_EMAIL, 'The shop check requires SMARTPRINT_LIVE_QA_SHOP_EMAIL.');
+            assert.ok(process.env.SMARTPRINT_LIVE_QA_SHOP_PASSWORD, 'The shop check requires SMARTPRINT_LIVE_QA_SHOP_PASSWORD.');
+          }
+          if (enabled('LIVE_QA_CHECK_PLATFORM_ADMIN')) {
+            assert.ok(process.env.SMARTPRINT_LIVE_QA_ADMIN_EMAIL, 'The admin check requires SMARTPRINT_LIVE_QA_ADMIN_EMAIL.');
+            assert.ok(process.env.SMARTPRINT_LIVE_QA_ADMIN_PASSWORD, 'The admin check requires SMARTPRINT_LIVE_QA_ADMIN_PASSWORD.');
+          }
+          if (enabled('LIVE_QA_CHECK_CUSTOMER_STATION')) {
+            const stationPath = (process.env.SMARTPRINT_LIVE_QA_STATION_PATH || '').trim();
+            assert.match(stationPath, /^\/s\/[A-Za-z0-9_-]+\/?$/, 'The station check requires SMARTPRINT_LIVE_QA_STATION_PATH in the form /s/PUBLIC_CODE. Use a dedicated test station.');
+          }
+
+          console.log('Live QA target validated:', target.origin);
+          console.log('No live orders, payments, refunds, print dispatches or shop configuration changes are enabled by this workflow.');
+          NODE
+
+      - name: Install pinned Playwright Chromium
+        run: |
+          npx --yes --package=playwright@1.56.1 playwright install --with-deps chromium
+
+      - name: Run live environment checks
+        shell: bash
+        run: |
+          set -euo pipefail
+          npx --yes --package=playwright@1.56.1 -c 'PLAYWRIGHT_MODULE_DIR="$(dirname "$(readlink -f "$(command -v playwright)")")" node scripts/qa/live-environment.mjs'
+
+      - name: Publish live QA report and browser evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: smartprint-live-environment-qa-${{ github.run_number }}
+          path: artifacts/live-environment-qa/
+          if-no-files-found: warn
+          retention-days: 30
