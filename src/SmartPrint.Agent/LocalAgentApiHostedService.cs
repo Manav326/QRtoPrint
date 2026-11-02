@@ -321,7 +321,7 @@ public sealed class LocalAgentApiHostedService(
             {
                 try
                 {
-                    var credentials = credentialStore.Load();
+                    var credentials = credentialStore.LoadForCloudRequests();
                     if (credentials is null)
                     {
                         return Results.Json(new
@@ -342,12 +342,14 @@ public sealed class LocalAgentApiHostedService(
                     });
                 }
                 catch (Exception exception) when (
-                    exception is CryptographicException or IOException or JsonException or UnauthorizedAccessException)
+                    exception is CryptographicException or IOException or JsonException or UnauthorizedAccessException or InvalidOperationException)
                 {
                     logger.LogWarning("SmartPrint local identity status is unavailable ({FailureType}).", exception.GetType().Name);
                     return Results.Json(new
                     {
-                        title = "The local agent identity is unavailable.",
+                        title = exception is InvalidOperationException
+                            ? "The saved SmartPrint API address must use HTTPS. Repair the Agent connection."
+                            : "The local agent identity is unavailable.",
                         apiBaseUrl = configuration["Agent:ApiBaseUrl"]
                     }, statusCode: StatusCodes.Status503ServiceUnavailable);
                 }
@@ -374,7 +376,17 @@ public sealed class LocalAgentApiHostedService(
                 HttpContext context,
                 CancellationToken ct) =>
             {
-                var credentials = credentialStore.Load();
+                AgentCredentials? credentials;
+                try
+                {
+                    credentials = credentialStore.LoadForCloudRequests();
+                }
+                catch (InvalidOperationException exception)
+                {
+                    logger.LogWarning("Blocked a local preview because the saved Agent API address is not secure ({FailureType}).", exception.GetType().Name);
+                    return Results.Problem(statusCode: StatusCodes.Status503ServiceUnavailable,
+                        title: "The saved SmartPrint API address must use HTTPS. Repair the Agent connection.");
+                }
                 var grantToken = context.Request.Headers["X-Print-Preview-Grant"].FirstOrDefault();
                 if (credentials is null || string.IsNullOrWhiteSpace(grantToken) || grantToken.Length > 4096)
                     return Results.Unauthorized();
@@ -448,7 +460,17 @@ public sealed class LocalAgentApiHostedService(
                 HttpContext context,
                 CancellationToken ct) =>
             {
-                var credentials = credentialStore.Load();
+                AgentCredentials? credentials;
+                try
+                {
+                    credentials = credentialStore.LoadForCloudRequests();
+                }
+                catch (InvalidOperationException exception)
+                {
+                    logger.LogWarning("Blocked a local upload because the saved Agent API address is not secure ({FailureType}).", exception.GetType().Name);
+                    return Results.Problem(statusCode: StatusCodes.Status503ServiceUnavailable,
+                        title: "The saved SmartPrint API address must use HTTPS. Repair the Agent connection.");
+                }
                 var uploadGrant = context.Request.Headers["X-Print-Upload-Grant"].FirstOrDefault();
                 if (credentials is null || string.IsNullOrWhiteSpace(uploadGrant))
                 {
