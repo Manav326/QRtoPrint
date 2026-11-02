@@ -218,7 +218,7 @@ class MainActivityInstrumentedTest {
             onView(withText("Your space")).check(matches(isDisplayed()))
             onView(withText("Recent")).check(matches(isDisplayed()))
             onView(withText("Scan document")).check(matches(isDisplayed()))
-            onView(withText("Import")).check(matches(isDisplayed()))
+            onView(withText("Choose from phone")).check(matches(isDisplayed()))
             val label = com.google.android.material.R.id.navigation_bar_item_small_label_view
             onView(allOf(withId(label), withText("Files"))).check(matches(isDisplayed()))
             onView(allOf(withId(label), withText("Print"))).check(matches(isDisplayed()))
