@@ -28,8 +28,15 @@ require_file() {
 
 private_file_matches() {
   local actual
-  actual="$(adb shell run-as "$PACKAGE" sh -c "cat $PRIVATE_PATH" | tr -d '\r')"
+  actual="$(adb exec-out run-as "$PACKAGE" cat "$PRIVATE_PATH" | tr -d '\r')"
   [[ "$actual" == "$SENTINEL" ]] || fail "The app-private document was not preserved intact."
+}
+
+write_private_file() {
+  local encoded
+  encoded="$(printf '%s' "$SENTINEL" | base64 | tr -d '\n')"
+  # Keep the redirection inside the app-UID shell, not adb's outer shell.
+  adb shell "run-as $PACKAGE sh -c 'printf %s $encoded | base64 -d > $PRIVATE_PATH'"
 }
 
 apk_version_code() {
@@ -60,9 +67,11 @@ adb uninstall "$PACKAGE" >/dev/null 2>&1 || true
 echo "1/8 Installing lifecycle APK N..."
 adb install "$DEBUG_V1"
 adb shell run-as "$PACKAGE" mkdir -p files/documents/Lifecycle
-adb shell run-as "$PACKAGE" sh -c "printf '%s' '$SENTINEL' > $PRIVATE_PATH"
+write_private_file
+EXTERNAL_FIXTURE="$RUNNER_TEMP/smartprint-lifecycle-exported-document.txt"
+printf '%s' 'Exported files should remain after app removal.' > "$EXTERNAL_FIXTURE"
 adb shell mkdir -p "$EXTERNAL_DIR"
-adb shell "printf '%s' 'Exported files should remain after app removal.' > $EXTERNAL_PATH"
+adb push "$EXTERNAL_FIXTURE" "$EXTERNAL_PATH" >/dev/null
 private_file_matches
 echo "PASS: Fresh install created app-private and exported-file fixtures."
 
