@@ -101,7 +101,7 @@ function Assert-ServiceVersion([string]$ExpectedVersion) {
 }
 
 function Invoke-Fixture([string]$Mode) {
-    & dotnet run --project $fixtureProject --configuration Release -- $Mode
+    & dotnet run --project $fixtureProject --configuration Release -- $Mode | ForEach-Object { Write-Host $_ }
     if ($LASTEXITCODE -ne 0) { throw "Lifecycle fixture '$Mode' failed with exit code $LASTEXITCODE." }
 }
 
