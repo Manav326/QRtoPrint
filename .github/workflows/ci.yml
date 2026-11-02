@@ -384,46 +384,7 @@ jobs:
           profile: pixel_2
           emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
           disable-animations: true
-          script: |
-            set -euo pipefail
-            echo "Waking and unlocking the Android emulator before Espresso tests..."
-            adb wait-for-device
-            adb shell input keyevent KEYCODE_WAKEUP
-            adb shell wm dismiss-keyguard || true
-            adb shell locksettings set-disabled true || true
-            adb shell settings put global stay_on_while_plugged_in 7
-            adb shell settings put system screen_off_timeout 2147483647
-            adb shell input keyevent KEYCODE_HOME
-            sleep 2
-
-            echo "Checking emulator power state..."
-            adb shell dumpsys power | grep -E 'mWakefulness=Awake|Display Power: state=ON'
-            echo "Current Android window focus:"
-            adb shell dumpsys window | grep -E 'mCurrentFocus|mFocusedApp' || true
-
-            # Preserve the existing UI suite result but do not let one unrelated
-            # Espresso assertion suppress the separate package-manager lifecycle tests.
-            set +e
-            gradle --no-daemon -p apps/android -PsmartPrintServiceUrl="$SMARTPRINT_PUBLIC_BASE_URL" :app:connectedDebugAndroidTest
-            ui_test_status=$?
-            set -e
-
-            echo "Building isolated APK N for package-manager lifecycle checks..."
-            gradle --no-daemon -p apps/android -PsmartPrintServiceUrl="$SMARTPRINT_PUBLIC_BASE_URL" -PsmartPrintVersionCode=9100 -PsmartPrintVersionName="lifecycle-n" :app:assembleDebug
-            cp apps/android/app/build/outputs/apk/debug/app-debug.apk "$RUNNER_TEMP/smartprint-lifecycle-n.apk"
-
-            echo "Building isolated APK N+1 with the same runner debug signing identity..."
-            gradle --no-daemon -p apps/android -PsmartPrintServiceUrl="$SMARTPRINT_PUBLIC_BASE_URL" -PsmartPrintVersionCode=9101 -PsmartPrintVersionName="lifecycle-n1" :app:assembleDebug
-            cp apps/android/app/build/outputs/apk/debug/app-debug.apk "$RUNNER_TEMP/smartprint-lifecycle-n1.apk"
-
-            set +e
-            bash scripts/qa/android-install-lifecycle.sh "$RUNNER_TEMP/smartprint-lifecycle-n.apk" "$RUNNER_TEMP/smartprint-lifecycle-n1.apk"
-            lifecycle_status=$?
-            set -e
-
-            test "$ui_test_status" -eq 0 || echo "::error::The pre-existing Android emulator UI suite failed (exit $ui_test_status). Its failure is reported separately from package installation lifecycle checks."
-            test "$lifecycle_status" -eq 0 || echo "::error::Android package installation lifecycle checks failed (exit $lifecycle_status)."
-            test "$ui_test_status" -eq 0 && test "$lifecycle_status" -eq 0
+          script: bash scripts/qa/android-emulator-ci.sh
       - name: Upload Android test reports
         if: always()
         uses: actions/upload-artifact@v7
