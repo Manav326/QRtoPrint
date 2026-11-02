@@ -2809,7 +2809,7 @@ function CustomerLocalConnection({localAgent,onReady}:{localAgent:CustomerLocalA
     onReady(false);
     setMessage(nativeAppMode ? "Shop offline · Cloud upload available." : validEndpointCount===0
       ? "The shop Agent has not announced a usable local address. The regular cloud-assisted upload remains available."
-      : "The shop Agent did not respond. Check that its Windows service is running, this network allows device-to-device traffic, and TCP 17842 is allowed on the laptop's Private firewall profile. The regular cloud-assisted upload remains available.");
+      : "Could not reach the shop computer. Make sure this phone is connected to the same shop Wi-Fi, then ask the shop operator to check the connection. The regular cloud-assisted upload remains available.");
   }
 
   useEffect(()=>{
