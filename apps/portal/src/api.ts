@@ -993,8 +993,7 @@ async function uploadCustomerLocalTicketViaCloud(
   sessionToken: string,
   file: File,
   ticket: CustomerLocalUploadTicket,
-  grantToken: string,
-  batchId?: string
+  grantToken: string
 ): Promise<UploadedPrintJob> {
   const form = new FormData();
   form.append("file", file, file.name);
@@ -1022,7 +1021,7 @@ export async function uploadCustomerDocument(sessionToken: string, file: File, b
       sessionToken, file, batchId, batchGroupName, pendingLocalIdempotency, pendingLocalGrant
     );
     const recovered = await uploadCustomerLocalTicketViaCloud(
-      sessionToken, file, ticket, pendingLocalGrant, batchId
+      sessionToken, file, ticket, pendingLocalGrant
     );
     sessionStorage.removeItem(localKeys.idempotency);
     sessionStorage.removeItem(localKeys.grant);
@@ -1126,7 +1125,6 @@ export async function uploadCustomerDocumentLocally(
 
   const form = new FormData();
   form.append("file", file, file.name);
-  let lastError: Error | null = null;
   if (ticket.agentDeviceId === localAgent.agentDeviceId) {
     for (const value of localAgent.endpoints.slice(0, 8)) {
     const endpoint = isPrivateLocalAgentEndpoint(value);
@@ -1151,8 +1149,7 @@ export async function uploadCustomerDocumentLocally(
         try { payload = JSON.parse(raw); } catch { payload = raw; }
       }
       if (!response.ok) {
-        const body = payload as { title?: string; detail?: string; message?: string } | null;
-        lastError = new ApiError(body?.detail || body?.message || body?.title || `Local upload failed (${response.status}).`, response.status);
+        // Continue to the next advertised shop address before using HTTPS recovery.
         continue;
       }
 
@@ -1163,16 +1160,12 @@ export async function uploadCustomerDocumentLocally(
         ...uploaded,
         job: { ...uploaded.job, batchId: ticket.batchId ?? uploaded.job.batchId ?? null }
       };
-    } catch (exception) {
-      lastError = exception instanceof Error
-        ? exception
-        : new Error("Could not connect to the shop's local print computer.");
+    } catch {
+      // Try the next advertised shop address, then continue over HTTPS if enabled.
     } finally {
       window.clearTimeout(timeout);
     }
     }
-  } else {
-    lastError = new Error("The local ticket is assigned to a different shop computer; continuing over HTTPS.");
   }
 
   // A LAN response can be lost after the Agent has safely staged the bytes.
@@ -1180,7 +1173,7 @@ export async function uploadCustomerDocumentLocally(
   if (cloudAssistedPrintingEnabled) {
     try {
       const recovered = await uploadCustomerLocalTicketViaCloud(
-        sessionToken, file, ticket, grantToken, batchId
+        sessionToken, file, ticket, grantToken
       );
       sessionStorage.removeItem(keys.idempotency);
       sessionStorage.removeItem(keys.grant);
