@@ -98,7 +98,7 @@ public sealed class AgentRuntimeReadiness
                 discoveredPrinterCount,
                 lastPrintWorkCycleUtc,
                 lastFailureCode,
-                workerReady && agentIdentityReady && heartbeatFresh && inventoryFresh && discoveredPrinterCount > 0);
+                workerReady && agentIdentityReady && heartbeatFresh && inventoryFresh);
         }
     }
 
