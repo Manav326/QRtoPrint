@@ -62,6 +62,8 @@ public static class PlatformDataTransferEndpoints
             var events = db.DataTransferEvents.AsNoTracking()
                 .Where(item => item.CreatedUtc >= effectiveFromUtc && item.CreatedUtc < generatedUtc);
             var aggregateStartDate = DateOnly.FromDateTime(effectiveFromUtc.UtcDateTime);
+            if (effectiveFromUtc.TimeOfDay != TimeSpan.Zero)
+                aggregateStartDate = aggregateStartDate.AddDays(1);
             var aggregateEndDate = DateOnly.FromDateTime(generatedUtc.UtcDateTime);
             var aggregates = db.DataTransferDailyAggregates.AsNoTracking()
                 .Where(item => item.UtcDate >= aggregateStartDate && item.UtcDate <= aggregateEndDate);
