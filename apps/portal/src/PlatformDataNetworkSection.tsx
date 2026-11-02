@@ -22,10 +22,6 @@ function formatGb(bytes: number): string {
   })} GB`;
 }
 
-function formatBytes(bytes: number): string {
-  return `${formatCount(bytes)} bytes`;
-}
-
 function channelLabel(channel: string): string {
   switch (channel) {
     case "CLOUD_CUSTOMER_UPLOAD": return "Customer → Cloud";
