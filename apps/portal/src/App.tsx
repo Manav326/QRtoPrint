@@ -1826,6 +1826,11 @@ function ShopConnectionPanel({connected}:{connected:boolean}) {
     const started=Date.parse(test.startedUtc);
     const poll=async()=>{
       if(polling||!active)return;
+      if(Date.now()>=Date.parse(test.expiresUtc)){
+        setExpired(true);
+        setTest(null);
+        return;
+      }
       polling=true;
       try {
         const next=await getLocalNetworkSnapshot();
@@ -1833,11 +1838,11 @@ function ShopConnectionPanel({connected}:{connected:boolean}) {
         setSnapshot(next);
         if(next.phoneVerifiedUtc&&Date.parse(next.phoneVerifiedUtc)>=started){
           setVerified(true);setTest(null);
-        }else if(Date.now()>=Date.parse(test.expiresUtc)){
-          setExpired(true);setTest(null);
         }
       }catch{
-        // Keep the QR visible while the Agent briefly restarts or reconnects.
+        // The QR remains visible while the Agent briefly restarts or reconnects.
+        // Expiry is checked before the pipe call, so a stopped service cannot
+        // leave a disabled test button on screen indefinitely.
       }finally{polling=false;}
     };
     const timer=window.setInterval(()=>void poll(),2000);
