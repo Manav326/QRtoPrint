@@ -5772,9 +5772,6 @@ publicApi.MapPost("/sessions/current/local-upload-tickets", async (
         .SingleOrDefaultAsync(ct);
     if (session is null) return Results.Unauthorized();
 
-    if (session.ExpiresUtc <= now)
-        return Results.Unauthorized();
-
     var grantHash = HashOpaqueToken(request.GrantToken);
     var existing = await db.LocalPrintUploadTickets.AsNoTracking()
         .SingleOrDefaultAsync(item =>
@@ -5808,6 +5805,10 @@ publicApi.MapPost("/sessions/current/local-upload-tickets", async (
             Completed = existing.CompletedUtc != null
         });
     }
+
+    // An expired QR session may replay only a previously created ticket.
+    // It cannot reserve new work or append files to an expired session.
+    if (session.ExpiresUtc <= now) return Results.Unauthorized();
 
     var batchCheckoutLocked = await db.PrintBatchPayments.AsNoTracking().AnyAsync(item =>
         item.TenantId == session.TenantId &&
