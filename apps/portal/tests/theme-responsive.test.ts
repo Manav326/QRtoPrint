@@ -139,17 +139,25 @@ test("QR station poster has a clear three-step hierarchy and scan-first customer
   assert.match(poster, /aria-hidden="true">↓<\/span>/);
 });
 
-test("one printer is assigned at batch level and every file exposes its actual output printer", () => {
+test("batch routing enforces local-computer ownership and preserves print-time audit identity", () => {
   const app = read("../src/App.tsx");
+  const api = read("../src/api.ts");
   const css = read("../src/styles.css");
 
   assert.match(app, /Assign one printer for all files in batch/);
   assert.match(app, /One printer applies to every active file in this batch/);
-  assert.match(app, /Printed on/);
-  assert.match(app, /Windows queue:/);
-  assert.match(app, /Possible duplicate printer/);
+  assert.match(app, /requiredLocalAgentId/);
+  assert.match(app, /localComputerIdentityConflict/);
+  assert.match(app, /lockedPrinterOnWrongComputer/);
+  assert.match(app, /Shop computer:/);
+  assert.match(app, /Paper output manually confirmed by/);
+  assert.match(app, /batch_local_agent_mismatch/);
   assert.match(app, /Cloud-assisted upload is now selected/);
   assert.doesNotMatch(app, /aria-label=\{"Assign printer for "\+job\.jobNumber\}/);
+  assert.match(api, /printerAgentName\?: string \| null/);
+  assert.match(api, /outputConfirmedByName\?: string \| null/);
+  assert.match(api, /documentAgentDeviceId\?: string \| null/);
   assert.match(css, /\.queue-batch-file-printer/);
   assert.match(css, /\.printer-duplicate-warning/);
+  assert.match(css, /\.queue-batch-assignment-note\{font-size:12px/);
 });

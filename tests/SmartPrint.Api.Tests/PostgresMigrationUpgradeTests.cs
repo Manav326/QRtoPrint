@@ -55,6 +55,9 @@ public sealed class PostgresMigrationUpgradeTests
         Assert.Contains(
             "202611020002_AddShopInstantPaymentPreference",
             await db.Database.GetAppliedMigrationsAsync());
+        Assert.Contains(
+            "202611020003_AddPrintJobPrinterIdentitySnapshot",
+            await db.Database.GetAppliedMigrationsAsync());
 
         // Reproduce the local-upload completion transaction at the exact monthly quota boundary.
         settings.TrialMaxMonthlyPrintJobs = 1;
@@ -199,5 +202,333 @@ public sealed class PostgresMigrationUpgradeTests
         Assert.Equal(1L, await entitlements.GetMonthlyPrintJobUsageAsync(
             tenant.Id, CancellationToken.None));
         await transaction.RollbackAsync();
+
+        await VerifyPrinterIdentitySnapshotBackfillAsync(
+            options, tenant.Id, station.Id, session.Id, printer.Id, now);
+        await VerifyConcurrentLocalBatchReservationsStayOnOneComputerAsync(
+            options, tenant.Id, agent.Id, station.Id, session.Id, printer.Id, now);
+        await VerifyConcurrentBatchAssignmentsRemainAtomicAsync(
+            options, tenant.Id, station.Id, session.Id, printer.Id, now);
+    }
+
+    private static async Task VerifyConcurrentLocalBatchReservationsStayOnOneComputerAsync(
+        DbContextOptions<SmartPrintDbContext> options,
+        Guid tenantId,
+        Guid firstAgentId,
+        Guid stationId,
+        Guid sessionId,
+        Guid firstPrinterId,
+        DateTimeOffset now)
+    {
+        var batchId = Guid.NewGuid();
+        var secondAgentId = Guid.NewGuid();
+        var secondPrinterId = Guid.NewGuid();
+        var localJobId = Guid.NewGuid();
+
+        await using (var setup = new SmartPrintDbContext(options))
+        {
+            setup.AgentDevices.Add(new AgentDevice
+            {
+                Id = secondAgentId,
+                TenantId = tenantId,
+                DeviceName = "Second shop computer",
+                FingerprintHash = Guid.NewGuid().ToString("N").PadLeft(64, 'a'),
+                SecretHash = Guid.NewGuid().ToString("N").PadLeft(64, 'b')
+            });
+            setup.PrinterDevices.Add(new PrinterDevice
+            {
+                Id = secondPrinterId,
+                TenantId = tenantId,
+                AgentDeviceId = secondAgentId,
+                DisplayName = "Second computer printer",
+                Manufacturer = "Test",
+                Model = "Concurrent queue",
+                ConnectionType = "WindowsQueue",
+                QueueName = $"SECOND-{Guid.NewGuid():N}"[..24],
+                Status = "Ready",
+                IsActive = true,
+                LastSeenUtc = now
+            });
+            await setup.SaveChangesAsync();
+        }
+
+        await using var firstContext = new SmartPrintDbContext(options);
+        await using var firstTransaction = await firstContext.Database.BeginTransactionAsync();
+        await new TenantEntitlementService(firstContext).AcquireQuotaLockAsync(
+            tenantId, TenantQuotaResource.MonthlyPrintJob, CancellationToken.None);
+
+        firstContext.PrintJobs.Add(new PrintJob
+        {
+            Id = localJobId,
+            TenantId = tenantId,
+            QrStationId = stationId,
+            CustomerSessionId = sessionId,
+            BatchId = batchId,
+            PrinterDeviceId = firstPrinterId,
+            JobNumber = $"SP-LOCAL-{Guid.NewGuid():N}"[..22],
+            IdempotencyKey = $"LOCAL-BATCH-{Guid.NewGuid():N}",
+            Status = "AWAITING_CONFIGURATION",
+            PageCount = 1,
+            Copies = 1,
+            Currency = "INR",
+            QuotedAmountMinor = 0,
+            CreatedUtc = now,
+            UpdatedUtc = now
+        });
+        firstContext.PrintDocuments.Add(new PrintDocument
+        {
+            TenantId = tenantId,
+            PrintJobId = localJobId,
+            OriginalFileName = "local-batch-test.pdf",
+            MediaType = "application/pdf",
+            FileExtension = ".pdf",
+            SizeBytes = 128,
+            Sha256 = Guid.NewGuid().ToString("N").PadLeft(64, 'c'),
+            StorageKey = $"integration/{localJobId:N}",
+            StorageMode = "LOCAL_AGENT",
+            AgentDeviceId = firstAgentId,
+            CreatedUtc = now
+        });
+        firstContext.LocalPrintUploadTickets.Add(new LocalPrintUploadTicket
+        {
+            TenantId = tenantId,
+            CustomerSessionId = sessionId,
+            BatchId = batchId,
+            QrStationId = stationId,
+            PrinterDeviceId = firstPrinterId,
+            AgentDeviceId = firstAgentId,
+            PrintJobId = localJobId,
+            JobNumber = $"SP-TICKET-{Guid.NewGuid():N}"[..24],
+            IdempotencyKey = $"LOCAL-TICKET-{Guid.NewGuid():N}",
+            GrantHash = Guid.NewGuid().ToString("N").PadLeft(64, 'd'),
+            OriginalFileName = "local-batch-test.pdf",
+            MediaType = "application/pdf",
+            FileExtension = ".pdf",
+            SizeBytes = 128,
+            Sha256 = Guid.NewGuid().ToString("N").PadLeft(64, 'e'),
+            CreatedUtc = now,
+            ExpiresUtc = now.AddMinutes(10)
+        });
+        await firstContext.SaveChangesAsync();
+
+        var secondStarted = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var secondDecision = new TaskCompletionSource<string?>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var secondTask = Task.Run(async () =>
+        {
+            await using var secondContext = new SmartPrintDbContext(options);
+            await using var secondTransaction = await secondContext.Database.BeginTransactionAsync();
+            secondStarted.TrySetResult(true);
+            await new TenantEntitlementService(secondContext).AcquireQuotaLockAsync(
+                tenantId, TenantQuotaResource.MonthlyPrintJob, CancellationToken.None);
+
+            var ticketAgents = await secondContext.LocalPrintUploadTickets.AsNoTracking()
+                .Where(item => item.TenantId == tenantId &&
+                               item.CustomerSessionId == sessionId &&
+                               item.BatchId == batchId &&
+                               (item.CompletedUtc != null || item.ExpiresUtc > now))
+                .Select(item => (Guid?)item.AgentDeviceId)
+                .ToListAsync();
+            var documentAgents = await (
+                from batchJob in secondContext.PrintJobs.AsNoTracking()
+                join batchDocument in secondContext.PrintDocuments.AsNoTracking()
+                    on new { batchJob.TenantId, PrintJobId = batchJob.Id }
+                    equals new { batchDocument.TenantId, batchDocument.PrintJobId }
+                where batchJob.TenantId == tenantId &&
+                      batchJob.CustomerSessionId == sessionId &&
+                      batchJob.BatchId == batchId &&
+                      batchDocument.StorageMode == "LOCAL_AGENT"
+                select batchDocument.AgentDeviceId).ToListAsync();
+
+            var conflict = BatchLocalUploadRules.FindAgentConflict(
+                ticketAgents.Concat(documentAgents),
+                secondAgentId);
+            secondDecision.TrySetResult(conflict);
+            await secondTransaction.CommitAsync();
+        });
+
+        await secondStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        await Task.Delay(TimeSpan.FromMilliseconds(250));
+        Assert.False(
+            secondDecision.Task.IsCompleted,
+            "A second local upload reservation must wait for the first tenant quota transaction.");
+
+        await firstTransaction.CommitAsync();
+        var observedConflict = await secondDecision.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        await secondTask.WaitAsync(TimeSpan.FromSeconds(10));
+        Assert.Equal("batch_local_agent_mismatch", observedConflict);
+    }
+
+    private static async Task VerifyConcurrentBatchAssignmentsRemainAtomicAsync(
+        DbContextOptions<SmartPrintDbContext> options,
+        Guid tenantId,
+        Guid stationId,
+        Guid sessionId,
+        Guid firstPrinterId,
+        DateTimeOffset now)
+    {
+        var batchId = Guid.NewGuid();
+        var secondPrinterId = Guid.NewGuid();
+        await using (var setup = new SmartPrintDbContext(options))
+        {
+            var firstPrinter = await setup.PrinterDevices.AsNoTracking()
+                .SingleAsync(item => item.Id == firstPrinterId);
+            setup.PrinterDevices.Add(new PrinterDevice
+            {
+                Id = secondPrinterId,
+                TenantId = tenantId,
+                AgentDeviceId = firstPrinter.AgentDeviceId,
+                DisplayName = "Concurrent alternate queue",
+                Manufacturer = "Test",
+                Model = "Same computer alternate queue",
+                ConnectionType = "WindowsQueue",
+                QueueName = $"ALT-{Guid.NewGuid():N}"[..22],
+                Status = "Ready",
+                IsActive = true,
+                LastSeenUtc = now
+            });
+            setup.PrintJobs.AddRange(
+                CreateConcurrentBatchJob(tenantId, stationId, sessionId, firstPrinterId, batchId, "A", now),
+                CreateConcurrentBatchJob(tenantId, stationId, sessionId, firstPrinterId, batchId, "B", now));
+            await setup.SaveChangesAsync();
+        }
+
+        await using var firstContext = new SmartPrintDbContext(options);
+        await using var firstTransaction = await firstContext.Database.BeginTransactionAsync();
+        var firstLockedRows = await firstContext.PrintJobs.FromSqlInterpolated(
+            $"SELECT * FROM \"PrintJobs\" WHERE \"TenantId\" = {tenantId} AND \"BatchId\" = {batchId} FOR UPDATE")
+            .ToListAsync();
+        Assert.Equal(2, firstLockedRows.Count);
+        foreach (var row in firstLockedRows)
+            row.PrinterDeviceId = secondPrinterId;
+        await firstContext.SaveChangesAsync();
+
+        var secondStarted = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var secondObserved = new TaskCompletionSource<Guid?[]>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var secondTask = Task.Run(async () =>
+        {
+            await using var secondContext = new SmartPrintDbContext(options);
+            await using var secondTransaction = await secondContext.Database.BeginTransactionAsync();
+            secondStarted.TrySetResult(true);
+            var rows = await secondContext.PrintJobs.FromSqlInterpolated(
+                $"SELECT * FROM \"PrintJobs\" WHERE \"TenantId\" = {tenantId} AND \"BatchId\" = {batchId} FOR UPDATE")
+                .ToListAsync();
+            secondObserved.TrySetResult(rows.Select(row => row.PrinterDeviceId).ToArray());
+            Assert.Equal(2, rows.Count);
+            foreach (var row in rows)
+                row.PrinterDeviceId = firstPrinterId;
+            await secondContext.SaveChangesAsync();
+            await secondTransaction.CommitAsync();
+        });
+
+        await secondStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        await Task.Delay(TimeSpan.FromMilliseconds(250));
+        Assert.False(
+            secondObserved.Task.IsCompleted,
+            "A second whole-batch assignment must wait for the first transaction's row locks.");
+
+        await firstTransaction.CommitAsync();
+        var observedAssignments = await secondObserved.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        await secondTask.WaitAsync(TimeSpan.FromSeconds(10));
+        Assert.Equal(2, observedAssignments.Length);
+        Assert.All(observedAssignments, printerId => Assert.Equal(secondPrinterId, printerId));
+
+        await using var verification = new SmartPrintDbContext(options);
+        var finalAssignments = await verification.PrintJobs.AsNoTracking()
+            .Where(item => item.TenantId == tenantId && item.BatchId == batchId)
+            .Select(item => item.PrinterDeviceId)
+            .ToListAsync();
+        Assert.Equal(2, finalAssignments.Count);
+        Assert.All(finalAssignments, printerId => Assert.Equal(firstPrinterId, printerId));
+    }
+
+    private static PrintJob CreateConcurrentBatchJob(
+        Guid tenantId,
+        Guid stationId,
+        Guid sessionId,
+        Guid printerId,
+        Guid batchId,
+        string suffix,
+        DateTimeOffset now)
+    {
+        return new PrintJob
+        {
+            TenantId = tenantId,
+            QrStationId = stationId,
+            CustomerSessionId = sessionId,
+            BatchId = batchId,
+            PrinterDeviceId = printerId,
+            JobNumber = $"SP-RACE-{Guid.NewGuid():N}"[..20],
+            IdempotencyKey = $"BATCH-RACE-{batchId:N}-{suffix}",
+            Status = "PAID_AUTHORISED",
+            PageCount = 1,
+            Copies = 1,
+            Currency = "INR",
+            QuotedAmountMinor = 100,
+            CreatedUtc = now,
+            UpdatedUtc = now
+        };
+    }
+
+    private static async Task VerifyPrinterIdentitySnapshotBackfillAsync(
+        DbContextOptions<SmartPrintDbContext> options,
+        Guid tenantId,
+        Guid stationId,
+        Guid sessionId,
+        Guid printerId,
+        DateTimeOffset now)
+    {
+        var jobId = Guid.NewGuid();
+        var submittedUtc = now.AddMinutes(-2);
+        await using (var seed = new SmartPrintDbContext(options))
+        {
+            seed.PrintJobs.Add(new PrintJob
+            {
+                Id = jobId,
+                TenantId = tenantId,
+                QrStationId = stationId,
+                CustomerSessionId = sessionId,
+                PrinterDeviceId = printerId,
+                JobNumber = $"SP-SNAPSHOT-{Guid.NewGuid():N}"[..23],
+                IdempotencyKey = $"SNAPSHOT-{Guid.NewGuid():N}",
+                Status = "COMPLETED",
+                PageCount = 1,
+                Copies = 1,
+                Currency = "INR",
+                QuotedAmountMinor = 100,
+                SpoolerSubmittedUtc = submittedUtc,
+                OutputConfirmedUtc = now,
+                UpdatedUtc = now
+            });
+            await seed.SaveChangesAsync();
+        }
+
+        await using (var migrationContext = new SmartPrintDbContext(options))
+        {
+            var migrator = migrationContext.GetService<IMigrator>();
+            await migrator.MigrateAsync("202611020002_AddShopInstantPaymentPreference");
+            await migrator.MigrateAsync("202611020003_AddPrintJobPrinterIdentitySnapshot");
+        }
+
+        await using var verification = new SmartPrintDbContext(options);
+        var historicalJob = await verification.PrintJobs.AsNoTracking()
+            .SingleAsync(item => item.Id == jobId);
+        Assert.Equal("Quota test printer", historicalJob.PrinterNameSnapshot);
+        Assert.Equal("Quota-Test-Queue", historicalJob.PrinterQueueNameSnapshot);
+        Assert.Equal("Quota test Agent", historicalJob.PrinterAgentNameSnapshot);
+        // Compare against the timestamp read back from PostgreSQL, whose storage
+        // precision is microseconds rather than .NET's 100-nanosecond ticks.
+        Assert.Equal(historicalJob.SpoolerSubmittedUtc, historicalJob.PrinterSnapshotUtc);
+
+        var originalPrinter = await verification.PrinterDevices.SingleAsync(item => item.Id == printerId);
+        originalPrinter.DisplayName = "Renamed queue after printing";
+        originalPrinter.QueueName = "Renamed-Windows-Queue";
+        await verification.SaveChangesAsync();
+
+        var unchangedHistory = await verification.PrintJobs.AsNoTracking()
+            .SingleAsync(item => item.Id == jobId);
+        Assert.Equal("Quota test printer", unchangedHistory.PrinterNameSnapshot);
+        Assert.Equal("Quota-Test-Queue", unchangedHistory.PrinterQueueNameSnapshot);
+        Assert.Equal("Quota test Agent", unchangedHistory.PrinterAgentNameSnapshot);
+        Assert.Equal(historicalJob.PrinterSnapshotUtc, unchangedHistory.PrinterSnapshotUtc);
     }
 }

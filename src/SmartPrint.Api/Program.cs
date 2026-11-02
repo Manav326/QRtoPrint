@@ -1848,14 +1848,23 @@ shop.MapGet("/print-jobs", async (
             job.QuoteExpiresUtc,
             job.CreatedUtc,
             job.PrinterDeviceId,
-            PrinterName = db.PrinterDevices
+            PrinterName = job.PrinterNameSnapshot ?? db.PrinterDevices
                 .Where(printer => printer.TenantId == tenantId && printer.Id == job.PrinterDeviceId)
                 .Select(printer => printer.DisplayName)
                 .FirstOrDefault(),
-            QueueName = db.PrinterDevices
+            QueueName = job.PrinterQueueNameSnapshot ?? db.PrinterDevices
                 .Where(printer => printer.TenantId == tenantId && printer.Id == job.PrinterDeviceId)
                 .Select(printer => printer.QueueName)
                 .FirstOrDefault(),
+            PrinterAgentName = job.PrinterAgentNameSnapshot ?? db.AgentDevices
+                .Where(agent => agent.TenantId == tenantId &&
+                    agent.Id == db.PrinterDevices
+                        .Where(printer => printer.TenantId == tenantId && printer.Id == job.PrinterDeviceId)
+                        .Select(printer => printer.AgentDeviceId)
+                        .FirstOrDefault())
+                .Select(agent => agent.DeviceName)
+                .FirstOrDefault(),
+            job.PrinterSnapshotUtc,
             job.ClaimedByAgentDeviceId,
             job.AgentLeaseExpiresUtc,
             job.LocalQueueReceivedUtc,
@@ -1866,6 +1875,18 @@ shop.MapGet("/print-jobs", async (
             job.SpoolerSubmittedUtc,
             job.SpoolerObservedUtc,
             job.OutputConfirmedUtc,
+            OutputConfirmedByName = db.PrintJobEvents.AsNoTracking()
+                .Where(item => item.TenantId == tenantId &&
+                               item.PrintJobId == job.Id &&
+                               item.ReasonCode == "SHOP_OPERATOR_CONFIRMED_PHYSICAL_OUTPUT")
+                .OrderByDescending(item => item.CreatedUtc)
+                .Select(item => db.Users
+                    .Where(user => user.TenantId == tenantId &&
+                                   item.ActorId != null &&
+                                   user.Id == item.ActorId.Value)
+                    .Select(user => user.DisplayName)
+                    .FirstOrDefault())
+                .FirstOrDefault(),
             job.FailureCode,
             OutputMode = db.PrinterDevices
                 .Where(printer => printer.TenantId == tenantId && printer.Id == job.PrinterDeviceId)
@@ -1877,6 +1898,12 @@ shop.MapGet("/print-jobs", async (
             job.OutputSha256,
             job.OutputSizeBytes,
             job.OutputCompletedUtc,
+            StorageMode = document.StorageMode,
+            DocumentAgentDeviceId = document.AgentDeviceId,
+            DocumentAgentDeviceName = db.AgentDevices
+                .Where(agent => agent.TenantId == tenantId && agent.Id == document.AgentDeviceId)
+                .Select(agent => agent.DeviceName)
+                .FirstOrDefault(),
             Payment = db.PrintPayments.AsNoTracking()
                 .Where(payment => payment.TenantId == job.TenantId && payment.PrintJobId == job.Id)
                 .OrderByDescending(payment => payment.CreatedUtc)
@@ -2344,7 +2371,7 @@ shop.MapPatch("/print-jobs/{jobId:guid}/printer", async (
                (printer.LastSeenUtc != null && printer.LastSeenUtc >= onlineAfter &&
                 (printer.Status == "Ready" || printer.Status == "Busy"))) &&
               agent.RevokedUtc == null && agent.LastSeenUtc != null && agent.LastSeenUtc >= onlineAfter
-        select new { printer.DisplayName, printer.QueueName, printer.OutputMode, AgentId = agent.Id }
+        select new { printer.DisplayName, printer.QueueName, printer.OutputMode, AgentId = agent.Id, AgentName = agent.DeviceName }
     ).SingleOrDefaultAsync(ct);
     var verified = await db.PrintPayments.AnyAsync(x => x.TenantId == tenantId && x.PrintJobId == job.Id &&
         (x.Status == "VERIFIED" || x.Status == "PARTIALLY_REFUNDED"), ct);
@@ -2354,6 +2381,10 @@ shop.MapPatch("/print-jobs/{jobId:guid}/printer", async (
     var previous = job.Status;
     job.Status = "PRINT_AUTHORISED";
     job.OutputType = ready.OutputMode;
+    job.PrinterNameSnapshot = ready.DisplayName;
+    job.PrinterQueueNameSnapshot = ready.QueueName;
+    job.PrinterAgentNameSnapshot = ready.AgentName;
+    job.PrinterSnapshotUtc = now;
     job.SpoolerJobName = ready.OutputMode == "PDF_EXPORT"
         ? $"PDF-EXPORT-{job.JobNumber}-{job.Id:N}"
         : $"SmartPrint-{job.JobNumber}-{job.Id:N}";
@@ -5935,6 +5966,39 @@ publicApi.MapPost("/sessions/current/local-upload-tickets", async (
     {
         await transaction.RollbackAsync(ct);
         return Results.Conflict(new { code = quota.Code, message = quota.Message, current = quota.Current, maximum = quota.Maximum });
+    }
+
+    // The tenant quota transaction lock above serialises ticket reservations,
+    // including the first file in an empty batch where no child row exists yet.
+    // Local-only document bytes cannot move to a different Windows computer.
+    var existingLocalTicketAgents = await db.LocalPrintUploadTickets.AsNoTracking()
+        .Where(item => item.TenantId == session.TenantId &&
+                       item.CustomerSessionId == session.Id &&
+                       item.BatchId == batchId &&
+                       (item.CompletedUtc != null || item.ExpiresUtc > now))
+        .Select(item => (Guid?)item.AgentDeviceId)
+        .ToListAsync(ct);
+    var existingLocalDocumentAgents = await (
+        from batchJob in db.PrintJobs.AsNoTracking()
+        join batchDocument in db.PrintDocuments.AsNoTracking()
+            on new { batchJob.TenantId, PrintJobId = batchJob.Id }
+            equals new { batchDocument.TenantId, batchDocument.PrintJobId }
+        where batchJob.TenantId == session.TenantId &&
+              batchJob.CustomerSessionId == session.Id &&
+              batchJob.BatchId == batchId &&
+              batchDocument.StorageMode == "LOCAL_AGENT"
+        select batchDocument.AgentDeviceId).ToListAsync(ct);
+    var localAgentConflict = BatchLocalUploadRules.FindAgentConflict(
+        existingLocalTicketAgents.Concat(existingLocalDocumentAgents),
+        stationPrinter.AgentDeviceId);
+    if (localAgentConflict is not null)
+    {
+        await transaction.RollbackAsync(ct);
+        return Results.Conflict(new
+        {
+            code = localAgentConflict,
+            message = "Some files in this batch are already stored on another shop computer. Continue with Cloud-assisted upload for the remaining files; the shop can route the batch to the computer holding those files. To use a different computer, start a new batch and upload every file through Cloud-assisted upload."
+        });
     }
 
     var batchJobSizes = await (

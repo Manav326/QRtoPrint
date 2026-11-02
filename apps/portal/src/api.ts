@@ -847,6 +847,12 @@ export interface ShopPrintJob {
   printerDeviceId?: string | null;
   printerName?: string | null;
   queueName?: string | null;
+  printerAgentName?: string | null;
+  printerSnapshotUtc?: string | null;
+  outputConfirmedByName?: string | null;
+  storageMode?: "LOCAL_AGENT" | "CLOUD" | string;
+  documentAgentDeviceId?: string | null;
+  documentAgentDeviceName?: string | null;
   printerStatus?: string | null;
   claimedByAgentDeviceId?: string | null;
   agentLeaseExpiresUtc?: string | null;
