@@ -16,6 +16,11 @@ KEYSTORE="$RUNNER_TEMP/smartprint-lifecycle-mismatch.jks"
 MISMATCH_APK="$RUNNER_TEMP/smartprint-lifecycle-mismatch.apk"
 PROD_V1="$RUNNER_TEMP/smartprint-production-v0.1.9.apk"
 PROD_V2="$RUNNER_TEMP/smartprint-production-v0.1.10.apk"
+PROD_PRIVATE_PATH="files/documents/Lifecycle/production-release-sentinel.txt"
+PROD_PRIVATE_SENTINEL="SmartPrint production customer document survives signed release updates."
+LAST_SHOP_PREF_PATH="shared_prefs/smartprint.customer.last-shop.xml"
+LAST_SHOP_URL="https://shop-lifecycle.example.invalid"
+LAST_SHOP_HOST="shop-lifecycle.example.invalid"
 
 fail() {
   echo "::error::$1"
@@ -32,11 +37,33 @@ private_file_matches() {
   [[ "$actual" == "$SENTINEL" ]] || fail "The app-private document was not preserved intact."
 }
 
-write_private_file() {
+write_private_value() {
+  local path="$1"
+  local value="$2"
   local encoded
-  encoded="$(printf '%s' "$SENTINEL" | base64 | tr -d '\n')"
+  encoded="$(printf '%s' "$value" | base64 | tr -d '\n')"
   # Keep the redirection inside the app-UID shell, not adb's outer shell.
-  adb shell "run-as $PACKAGE sh -c 'printf %s $encoded | base64 -d > $PRIVATE_PATH'"
+  adb shell "run-as $PACKAGE sh -c 'printf %s $encoded | base64 -d > $path'"
+}
+
+write_private_file() {
+  write_private_value "$PRIVATE_PATH" "$SENTINEL"
+}
+
+private_value_matches() {
+  local path="$1"
+  local expected="$2"
+  local actual
+  actual="$(adb exec-out run-as "$PACKAGE" cat "$path" | tr -d '\r')"
+  [[ "$actual" == "$expected" ]] || fail "The app-private data was not preserved intact: $path"
+}
+
+last_shop_preference_matches() {
+  local actual
+  actual="$(adb exec-out run-as "$PACKAGE" cat "$LAST_SHOP_PREF_PATH" | tr -d '\r')"
+  grep -Fq "$LAST_SHOP_URL" <<<"$actual" &&
+    grep -Fq "$LAST_SHOP_HOST" <<<"$actual" ||
+    fail "The saved customer shop connection was not preserved."
 }
 
 apk_version_code() {
@@ -162,12 +189,24 @@ prod_code_v2="$(apk_version_code "$PROD_V2")"
 
 adb uninstall "$PACKAGE" >/dev/null 2>&1 || true
 adb install "$PROD_V1"
+adb shell run-as "$PACKAGE" mkdir -p files/documents/Lifecycle shared_prefs
+write_private_value "$PROD_PRIVATE_PATH" "$PROD_PRIVATE_SENTINEL"
+LAST_SHOP_PREF_XML="<?xml version='1.0' encoding='utf-8' standalone='yes' ?><map><string name='portalUrl'>$LAST_SHOP_URL</string><string name='portalHost'>$LAST_SHOP_HOST</string></map>"
+write_private_value "$LAST_SHOP_PREF_PATH" "$LAST_SHOP_PREF_XML"
+private_value_matches "$PROD_PRIVATE_PATH" "$PROD_PRIVATE_SENTINEL"
+last_shop_preference_matches
+
 adb install -r "$PROD_V1"
+private_value_matches "$PROD_PRIVATE_PATH" "$PROD_PRIVATE_SENTINEL"
+last_shop_preference_matches
 adb install -r "$PROD_V2"
+private_value_matches "$PROD_PRIVATE_PATH" "$PROD_PRIVATE_SENTINEL"
+last_shop_preference_matches
 installed_code="$(adb shell dumpsys package "$PACKAGE" | sed -nE 's/.*versionCode=([0-9]+).*/\1/p' | head -n 1 | tr -d '\r')"
 [[ "$installed_code" == "$prod_code_v2" ]] ||
   fail "Production APK upgrade did not leave v0.1.10 installed."
 echo "PASS: Published production APKs v0.1.9 -> v0.1.10 installed in place."
+echo "PASS: Customer document and saved-shop preference survived the production-signed update."
 echo "PASS: Both production APKs have the same certificate SHA-256: $prod_cert_v1"
 echo "PASS: Production versionCodes increased from $prod_code_v1 to $prod_code_v2."
 
