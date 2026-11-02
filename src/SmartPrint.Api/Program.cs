@@ -269,6 +269,7 @@ var platform = app.MapGroup("/api/v1/platform")
 platform.MapSubscriptionPlanEndpoints();
 platform.MapPlatformSubscriptionEndpoints();
 platform.MapPlatformOperationalSettingsEndpoints();
+platform.MapPlatformDataTransferEndpoints();
 
 platform.MapGet("/overview", async (SmartPrintDbContext db, CancellationToken ct) =>
 {
@@ -3607,12 +3608,15 @@ agentApi.MapGet("/jobs/{jobId:guid}/document", async (
               job.AgentLeaseExpiresUtc > now
         select new
         {
+            printDocument.Id,
             printDocument.StorageKey,
             printDocument.StorageMode,
             printDocument.MediaType,
             printDocument.Sha256,
             printDocument.SizeBytes,
-            printDocument.OriginalFileName
+            printDocument.OriginalFileName,
+            job.QrStationId,
+            job.PrinterDeviceId
         })
         .SingleOrDefaultAsync(ct);
 
@@ -3641,7 +3645,58 @@ agentApi.MapGet("/jobs/{jobId:guid}/document", async (
     context.Response.Headers["X-Document-SHA256"] = document.Sha256;
     context.Response.Headers["X-Document-Size"] = document.SizeBytes.ToString(System.Globalization.CultureInfo.InvariantCulture);
     context.Response.Headers["X-Document-Name"] = Uri.EscapeDataString(document.OriginalFileName);
-    return Results.File(content, document.MediaType, enableRangeProcessing: false);
+    context.Response.StatusCode = StatusCodes.Status200OK;
+    context.Response.ContentType = document.MediaType;
+    context.Response.ContentLength = document.SizeBytes;
+
+    var transferStartedUtc = DateTimeOffset.UtcNow;
+    long payloadBytesSent = 0;
+    var transferStatus = "COMPLETED";
+    try
+    {
+        var buffer = new byte[64 * 1024];
+        int read;
+        while ((read = await content.ReadAsync(buffer.AsMemory(), ct)) > 0)
+        {
+            await context.Response.Body.WriteAsync(buffer.AsMemory(0, read), ct);
+            payloadBytesSent += read;
+        }
+        await context.Response.Body.FlushAsync(ct);
+        if (payloadBytesSent != document.SizeBytes)
+            transferStatus = payloadBytesSent > 0 ? "PARTIAL" : "FAILED";
+    }
+    catch (OperationCanceledException) when (ct.IsCancellationRequested)
+    {
+        transferStatus = payloadBytesSent > 0 ? "PARTIAL" : "FAILED";
+    }
+    catch (IOException)
+    {
+        transferStatus = payloadBytesSent > 0 ? "PARTIAL" : "FAILED";
+    }
+    finally
+    {
+        content.Dispose();
+        await DataTransferRecorder.TryRecordAsync(db, app.Logger, new DataTransferEvent
+        {
+            TransferId = Guid.NewGuid(),
+            AttemptNumber = 1,
+            TenantId = device.TenantId,
+            AgentDeviceId = device.Id,
+            PrinterDeviceId = document.PrinterDeviceId,
+            QrStationId = document.QrStationId,
+            PrintJobId = jobId,
+            PrintDocumentId = document.Id,
+            Channel = "CLOUD_AGENT_DOWNLOAD",
+            Direction = "EGRESS",
+            Status = transferStatus,
+            PayloadBytes = payloadBytesSent,
+            NetworkBytes = null,
+            DurationMilliseconds = Math.Max(0, (long)(DateTimeOffset.UtcNow - transferStartedUtc).TotalMilliseconds),
+            MeasurementSource = "API_RESPONSE_BODY_WRITES",
+            CreatedUtc = DateTimeOffset.UtcNow
+        });
+    }
+    return Results.Empty;
 });
 
 agentApi.MapPost("/jobs/{jobId:guid}/received", async (
@@ -3942,6 +3997,10 @@ agentApi.MapPost("/local-uploads/{ticketId:guid}/complete", async (
         !string.Equals(request.FileExtension, ticket.FileExtension, StringComparison.OrdinalIgnoreCase) ||
         !string.Equals(request.MediaType, ticket.MediaType, StringComparison.OrdinalIgnoreCase) ||
         request.SizeBytes != ticket.SizeBytes ||
+        request.ReceivedBytes < 0 ||
+        request.ReceivedBytes > ticket.SizeBytes ||
+        (request.ReceivedBytes != 0 && request.ReceivedBytes != ticket.SizeBytes) ||
+        request.DurationMilliseconds is < 0 or > 600_000 ||
         !string.Equals(sha, ticket.Sha256, StringComparison.OrdinalIgnoreCase))
     {
         return Results.UnprocessableEntity(new { code = "local_document_validation_mismatch", message = "The local agent's file analysis does not match the document the customer authorised for upload." });
@@ -4085,6 +4144,29 @@ agentApi.MapPost("/local-uploads/{ticketId:guid}/complete", async (
     });
     await db.SaveChangesAsync(ct);
     await transaction.CommitAsync(ct);
+
+    if (request.ReceivedBytes > 0)
+    {
+        await DataTransferRecorder.TryRecordAsync(db, app.Logger, new DataTransferEvent
+        {
+            TransferId = ticket.Id,
+            AttemptNumber = 1,
+            TenantId = device.TenantId,
+            AgentDeviceId = device.Id,
+            PrinterDeviceId = ticket.PrinterDeviceId,
+            QrStationId = ticket.QrStationId,
+            PrintJobId = job.Id,
+            PrintDocumentId = printDocument.Id,
+            Channel = "SHOP_LAN_CUSTOMER_UPLOAD",
+            Direction = "LAN_INBOUND",
+            Status = "COMPLETED",
+            PayloadBytes = request.ReceivedBytes,
+            NetworkBytes = null,
+            DurationMilliseconds = request.DurationMilliseconds,
+            MeasurementSource = "PAIRED_AGENT_RECEIVED_DOCUMENT",
+            CreatedUtc = DateTimeOffset.UtcNow
+        });
+    }
 
     return Results.Ok(new
     {
@@ -5448,6 +5530,7 @@ publicApi.MapPost("/sessions/current/jobs", async (
         return Results.BadRequest(new { code = "multipart_form_required", message = "Upload the document using multipart/form-data." });
     }
 
+    var transferStartedUtc = DateTimeOffset.UtcNow;
     var form = await context.Request.ReadFormAsync(ct);
     if (form.Files.Count != 1)
     {
@@ -5670,6 +5753,24 @@ publicApi.MapPost("/sessions/current/jobs", async (
         await storage.DeleteAsync(stored.StorageKey);
         throw;
     }
+
+    await DataTransferRecorder.TryRecordAsync(db, app.Logger, new DataTransferEvent
+    {
+        TransferId = document.Id,
+        AttemptNumber = 1,
+        TenantId = session.TenantId,
+        QrStationId = session.QrStationId,
+        PrintJobId = job.Id,
+        PrintDocumentId = document.Id,
+        Channel = "CLOUD_CUSTOMER_UPLOAD",
+        Direction = "INGRESS",
+        Status = "COMPLETED",
+        PayloadBytes = document.SizeBytes,
+        NetworkBytes = null,
+        DurationMilliseconds = Math.Max(0, (long)(DateTimeOffset.UtcNow - transferStartedUtc).TotalMilliseconds),
+        MeasurementSource = "VALIDATED_DOCUMENT_PAYLOAD",
+        CreatedUtc = DateTimeOffset.UtcNow
+    });
 
     return Results.Created($"/api/v1/public/jobs/{job.Id}", new
     {
