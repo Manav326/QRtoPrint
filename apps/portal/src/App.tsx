@@ -1,8 +1,8 @@
 import { Fragment, useEffect, useRef, useState, type ReactNode } from "react";
 import {
   Activity, ArrowRight, Check, Clock3, Copy, CreditCard, FileText, FileUp, FolderOpen, LayoutDashboard,
-  LifeBuoy, LogOut, Menu, Moon, Monitor, Plus, Printer, QrCode, Search, Settings,
-  ShieldCheck, Sun, Users, Wallet, X, PanelLeftClose, PanelLeftOpen, RotateCcw, Zap
+  LifeBuoy, LogOut, Menu, Monitor, Plus, Printer, QrCode, Search, Settings,
+  ShieldCheck, Users, Wallet, X, PanelLeftClose, PanelLeftOpen, RotateCcw, Zap
 } from "lucide-react";
 import QRCode from "react-qr-code";
 import { shouldBlockBatchCheckoutForExpiredQuote } from "./batch-checkout-state";
