@@ -95,3 +95,46 @@ test("workspace styles retain one authoritative appearance palette", () => {
   assert.ok(desktop.includes("--muted: #aab6ca;"));
   assert.ok(desktop.includes("--faint: #8996aa;"));
 });
+
+
+test("QR station poster renders one canonical QR in an isolated single-page A5 print surface", () => {
+  const app = read("../src/App.tsx");
+  const poster = read("../src/QrStationPrintDocument.tsx");
+  const css = read("../src/styles.css");
+
+  assert.match(app, /<QrStationPrintDocument station=\{stations\.find\(station => station\.id === printingStationId\)/);
+  assert.match(app, /querySelectorAll<HTMLImageElement>\("\.qr-print-document img"\)/);
+  assert.match(poster, /createPortal\([\s\S]*document\.body/);
+  assert.match(poster, /<QRCode value=\{station\.publicUrl\}/);
+  assert.equal((poster.match(/<QRCode\b/g) ?? []).length, 1);
+  assert.match(poster, /Scan, save &amp; send/);
+  assert.match(poster, /save it in the app/);
+  assert.match(poster, /We review your files/);
+  assert.match(poster, /Print &amp; pick up/);
+  assert.match(poster, /Quanta<span>Edge<\/span>/);
+  assert.match(css, /@page\s*\{\s*size:\s*A5 landscape;\s*margin:\s*0;/);
+  assert.doesNotMatch(css, /size: 90mm 54mm/);
+  assert.match(css, /body > #root\s*\{\s*display:\s*none\s*!important;/);
+  assert.match(css, /body > \.qr-print-document\s*\{[^}]*width:\s*210mm[^}]*height:\s*148mm/s);
+  assert.match(css, /\.qr-print-code-frame svg\s*\{[^}]*width:\s*66mm[^}]*height:\s*66mm/s);
+});
+
+
+test("QR station poster has a clear three-step hierarchy and scan-first customer call to action", () => {
+  const poster = read("../src/QrStationPrintDocument.tsx");
+  const css = read("../src/styles.css");
+
+  assert.match(poster, /YOUR PRINTING, MADE SIMPLE/);
+  assert.match(poster, /Scan, save &amp; send/);
+  assert.match(poster, /We review your files/);
+  assert.match(poster, /Print &amp; pick up/);
+  assert.match(poster, /START HERE/);
+  assert.match(poster, /SCAN TO PRINT/);
+  assert.match(poster, /quantaedge-logo\.svg/);
+  assert.match(css, /qr-print-step-scan/);
+  assert.match(css, /qr-print-step-review/);
+  assert.match(css, /qr-print-step-collect/);
+  assert.match(css, /qr-print-scan-panel\s*\{/);
+  assert.match(css, /font:\s*500 7\.8pt\/1\.28/);
+  assert.match(poster, /aria-hidden="true">↓<\/span>/);
+});
