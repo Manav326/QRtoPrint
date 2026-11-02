@@ -1,5 +1,6 @@
 import { useState, type FormEvent } from "react";
 import { ArrowLeft, ArrowRight, Eye, EyeOff, LockKeyhole, Mail, Printer, ShieldCheck } from "lucide-react";
+import ThemeToggleButton from "./ThemeToggleButton";
 import {
   isPlatformAdminSession,
   signIn,
@@ -8,9 +9,13 @@ import {
 } from "./api";
 
 export default function PlatformAdminAuthScreen({
-  onAuthenticated
+  onAuthenticated,
+  dark,
+  onToggleTheme
 }: {
   onAuthenticated: (tokens: AuthTokens) => void;
+  dark: boolean;
+  onToggleTheme: () => void;
 }) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -45,6 +50,7 @@ export default function PlatformAdminAuthScreen({
           <div><div className="brand-name">smart<span>print</span></div><div className="brand-caption">PLATFORM ADMINISTRATION</div></div>
         </div>
         <div className="auth-top-actions">
+          <ThemeToggleButton dark={dark} onToggle={onToggleTheme}/>
           <a className="auth-home-link" href="/"><ArrowLeft size={14}/> Back to website</a>
           <span className="auth-top-note"><ShieldCheck size={15}/> Restricted platform access</span>
         </div>

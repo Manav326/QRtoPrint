@@ -72,6 +72,7 @@ class QrScannerActivity : AppCompatActivity() {
     private var torchEnabled = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        SmartPrintThemePreference.apply(this)
         super.onCreate(savedInstanceState)
         WindowCompat.setDecorFitsSystemWindows(window, false)
         window.statusBarColor = getColor(R.color.qp_surface)

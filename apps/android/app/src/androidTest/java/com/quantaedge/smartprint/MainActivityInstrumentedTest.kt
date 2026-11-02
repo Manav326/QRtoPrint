@@ -1,6 +1,8 @@
 package com.quantaedge.smartprint
 
 import android.content.Context
+import android.graphics.Bitmap
+import java.io.File
 import androidx.test.core.app.ActivityScenario
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.espresso.Espresso.onView
@@ -21,9 +23,195 @@ import eightbitlab.com.blurview.BlurView
 import android.view.View
 import android.view.ViewGroup
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 
 @RunWith(AndroidJUnit4::class)
 class MainActivityInstrumentedTest {
+    @Test
+    fun appearanceDefaultsToLightAndPersistsAcrossSignOutAndActivityRestart() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        context.getSharedPreferences(
+            SmartPrintThemePreference.PREFERENCES_NAME,
+            Context.MODE_PRIVATE
+        ).edit().clear().commit()
+        SmartPrintThemePreference.apply(context)
+        assertEquals(SmartPrintTheme.LIGHT, SmartPrintThemePreference.read(context))
+
+        try {
+            ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+                scenario.onActivity { activity ->
+                    val nightMode = activity.resources.configuration.uiMode and
+                        android.content.res.Configuration.UI_MODE_NIGHT_MASK
+                    assertEquals(android.content.res.Configuration.UI_MODE_NIGHT_NO, nightMode)
+                }
+                onView(withContentDescription("Account")).perform(click())
+                onView(withText("Appearance")).check(matches(isDisplayed()))
+                onView(withText("Light theme")).check(matches(isDisplayed()))
+                onView(withText("Dark theme")).perform(click())
+            }
+
+            assertEquals(SmartPrintTheme.DARK, SmartPrintThemePreference.read(context))
+            // The app's customer sign-out clears authentication only, not UI preferences.
+            CustomerAccountStore(context).clear()
+            assertEquals(SmartPrintTheme.DARK, SmartPrintThemePreference.read(context))
+
+            ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+                scenario.onActivity { activity ->
+                    val nightMode = activity.resources.configuration.uiMode and
+                        android.content.res.Configuration.UI_MODE_NIGHT_MASK
+                    assertEquals(android.content.res.Configuration.UI_MODE_NIGHT_YES, nightMode)
+                }
+            }
+        } finally {
+            SmartPrintThemePreference.save(context, SmartPrintTheme.LIGHT)
+        }
+    }
+
+
+    @Test
+    fun readableTextRolesMeetContrastInLightAndDarkThemes() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        fun luminance(color: Int): Double {
+            fun channel(value: Int): Double {
+                val normalized = value / 255.0
+                return if (normalized <= 0.04045) normalized / 12.92
+                else Math.pow((normalized + 0.055) / 1.055, 2.4)
+            }
+            return 0.2126 * channel(android.graphics.Color.red(color)) +
+                0.7152 * channel(android.graphics.Color.green(color)) +
+                0.0722 * channel(android.graphics.Color.blue(color))
+        }
+        fun contrast(foreground: Int, background: Int): Double {
+            val first = luminance(foreground)
+            val second = luminance(background)
+            return (maxOf(first, second) + 0.05) / (minOf(first, second) + 0.05)
+        }
+
+        try {
+            SmartPrintThemePreference.save(context, SmartPrintTheme.LIGHT)
+            ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+                scenario.onActivity { activity ->
+                    val surface = activity.getColor(R.color.qp_surface)
+                    assertTrue("Light primary text contrast", contrast(activity.getColor(R.color.qp_text), surface) >= 4.5)
+                    assertTrue("Light muted text contrast", contrast(activity.getColor(R.color.qp_muted), surface) >= 4.5)
+                    assertTrue("Light primary button contrast", contrast(activity.getColor(R.color.qp_primary_content), activity.getColor(R.color.qp_primary)) >= 4.5)
+                    assertTrue("Light danger button contrast", contrast(activity.getColor(R.color.qp_danger_content), activity.getColor(R.color.qp_danger)) >= 4.5)
+                    assertTrue("Light hero secondary text contrast", contrast(activity.getColor(R.color.qp_hero_muted), activity.getColor(R.color.qp_hero)) >= 4.5)
+                }
+            }
+
+            SmartPrintThemePreference.save(context, SmartPrintTheme.DARK)
+            ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+                scenario.onActivity { activity ->
+                    val surface = activity.getColor(R.color.qp_surface)
+                    assertTrue("Dark primary text contrast", contrast(activity.getColor(R.color.qp_text), surface) >= 4.5)
+                    assertTrue("Dark muted text contrast", contrast(activity.getColor(R.color.qp_muted), surface) >= 4.5)
+                    assertTrue("Dark primary button contrast", contrast(activity.getColor(R.color.qp_primary_content), activity.getColor(R.color.qp_primary)) >= 4.5)
+                    assertTrue("Dark danger button contrast", contrast(activity.getColor(R.color.qp_danger_content), activity.getColor(R.color.qp_danger)) >= 4.5)
+                    assertTrue("Dark hero secondary text contrast", contrast(activity.getColor(R.color.qp_hero_muted), activity.getColor(R.color.qp_hero)) >= 4.5)
+                }
+            }
+        } finally {
+            SmartPrintThemePreference.save(context, SmartPrintTheme.LIGHT)
+        }
+    }
+
+
+    @Test
+    fun qrScannerUsesTheSavedLightAndDarkThemeForItsNativeChrome() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+
+        fun verifyTheme(theme: SmartPrintTheme, expectedNightMode: Int, useLightSystemBars: Boolean) {
+            SmartPrintThemePreference.save(context, theme)
+            ActivityScenario.launch(QrScannerActivity::class.java).use { scenario ->
+                scenario.onActivity { activity ->
+                    val nightMode = activity.resources.configuration.uiMode and
+                        android.content.res.Configuration.UI_MODE_NIGHT_MASK
+                    assertEquals(expectedNightMode, nightMode)
+
+                    // Android 15 may report transparent raw bar colours after enforcing edge-to-edge.
+                    // Verify the content backdrop behind those bars and the system icon contrast flags.
+                    val content = activity.findViewById<ViewGroup>(android.R.id.content)
+                    val scannerRoot = content.getChildAt(0)
+                    val backdrop = scannerRoot.background as? android.graphics.drawable.LayerDrawable
+                    assertTrue("Scanner background must extend behind edge-to-edge system bars", backdrop != null)
+                    val surface = backdrop!!.getDrawable(0) as? android.graphics.drawable.GradientDrawable
+                    assertTrue("Scanner backdrop must start with the themed surface", surface != null)
+                    assertEquals(activity.getColor(R.color.qp_surface), surface!!.colors?.firstOrNull())
+
+                    val bars = androidx.core.view.WindowInsetsControllerCompat(
+                        activity.window,
+                        activity.window.decorView
+                    )
+                    assertEquals(useLightSystemBars, bars.isAppearanceLightStatusBars)
+                    assertEquals(useLightSystemBars, bars.isAppearanceLightNavigationBars)
+                }
+            }
+        }
+
+        try {
+            // The theme/backdrop contract is independent of camera access. Avoid
+            // granting/revoking a runtime permission from inside the instrumentation
+            // process; Android terminates the app UID when runtime grants change.
+            verifyTheme(SmartPrintTheme.LIGHT, android.content.res.Configuration.UI_MODE_NIGHT_NO, true)
+            verifyTheme(SmartPrintTheme.DARK, android.content.res.Configuration.UI_MODE_NIGHT_YES, false)
+        } finally {
+            SmartPrintThemePreference.save(context, SmartPrintTheme.LIGHT)
+        }
+    }
+
+    @Test
+    fun documentViewerUsesThemeAwareTextForItsPageCounter() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val firstImage = File(context.cacheDir, "smartprint-theme-viewer-first.png")
+        val secondImage = File(context.cacheDir, "smartprint-theme-viewer-second.png")
+        fun writeImage(file: File) {
+            val bitmap = Bitmap.createBitmap(16, 16, Bitmap.Config.ARGB_8888)
+            try {
+                file.outputStream().use { stream ->
+                    assertTrue(bitmap.compress(Bitmap.CompressFormat.PNG, 100, stream))
+                }
+            } finally {
+                bitmap.recycle()
+            }
+        }
+        writeImage(firstImage)
+        writeImage(secondImage)
+
+        fun verify(theme: SmartPrintTheme) {
+            SmartPrintThemePreference.save(context, theme)
+            ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+                scenario.onActivity { activity ->
+                    val viewer = SmartPrintDocumentViewer(
+                        activity,
+                        firstImage,
+                        listOf(firstImage, secondImage),
+                        0
+                    ) {}
+                    try {
+                        val counterField = SmartPrintDocumentViewer::class.java
+                            .getDeclaredField("pageCounter")
+                            .apply { isAccessible = true }
+                        val counter = counterField.get(viewer) as android.widget.TextView
+                        assertEquals("Photo 1 of 2", counter.text.toString())
+                        assertEquals(activity.getColor(R.color.qp_text), counter.currentTextColor)
+                    } finally {
+                        viewer.dispose()
+                    }
+                }
+            }
+        }
+
+        try {
+            verify(SmartPrintTheme.LIGHT)
+            verify(SmartPrintTheme.DARK)
+        } finally {
+            SmartPrintThemePreference.save(context, SmartPrintTheme.LIGHT)
+            firstImage.delete()
+            secondImage.delete()
+        }
+    }
+
     @Test
     fun rendersCompactSmartPrintHomeAndFourDestinations() {
         ActivityScenario.launch(MainActivity::class.java).use {
@@ -71,8 +259,8 @@ class MainActivityInstrumentedTest {
     @Test
     fun scanDestinationUsesFocusedQrEntry() {
         ActivityScenario.launch(MainActivity::class.java).use {
-            val label = com.google.android.material.R.id.navigation_bar_item_small_label_view
-            onView(allOf(withId(label), withText("Print"))).perform(click())
+            // Tap the accessible navigation item itself, not its non-clickable label child.
+            onView(withContentDescription("Print at a shop")).perform(click())
             onView(withText("Connect to a shop")).check(matches(isDisplayed()))
             onView(withText("Scan QR code")).check(matches(isDisplayed()))
             onView(withText("Open My Files")).check(matches(isDisplayed()))
@@ -97,8 +285,7 @@ class MainActivityInstrumentedTest {
     @Test
     fun systemBackFromPrintTabReturnsHome() {
         ActivityScenario.launch(MainActivity::class.java).use {
-            val label = com.google.android.material.R.id.navigation_bar_item_small_label_view
-            onView(allOf(withId(label), withText("Print"))).perform(click())
+            onView(withContentDescription("Print at a shop")).perform(click())
             onView(withText("Connect to a shop")).check(matches(isDisplayed()))
             androidx.test.espresso.Espresso.pressBack()
             onView(withText("Your space")).check(matches(isDisplayed()))
@@ -177,6 +364,9 @@ class MainActivityInstrumentedTest {
 class QrScannerPermissionInstrumentedTest {
     @Test
     fun explainsCameraPermissionBeforeStartingTheScanner() {
+        // The CI emulator installs this app with runtime permissions denied.
+        // Do not change a package permission from the instrumentation process:
+        // Android kills the app UID when a runtime permission grant changes.
         ActivityScenario.launch(QrScannerActivity::class.java).use {
             onView(withText("Camera access needed")).check(matches(isDisplayed()))
             onView(withText("Allow camera for QR scanning."))
