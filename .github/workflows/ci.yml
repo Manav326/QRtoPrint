@@ -232,9 +232,12 @@ jobs:
   windows_installer:
     needs: [agent_dotnet, windows_desktop]
     runs-on: windows-latest
-    timeout-minutes: 20
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v7
+      - uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: 10.0.x
       - name: Download Windows Agent package
         uses: actions/download-artifact@v8
         with:
@@ -245,7 +248,7 @@ jobs:
         with:
           name: qrtoprint-desktop-win-x64
           path: artifacts/desktop
-      - name: Build guided Windows setup
+      - name: Build two versioned SmartPrint installers
         shell: pwsh
         run: |
           choco install innosetup --no-progress -y
@@ -253,24 +256,39 @@ jobs:
           if ([string]::IsNullOrWhiteSpace($env:SMARTPRINT_PUBLIC_BASE_URL)) {
             throw "Configure the SMARTPRINT_PUBLIC_BASE_URL Actions variable before building the installer."
           }
-          & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" "/DSmartPrintPublicUrl=$env:SMARTPRINT_PUBLIC_BASE_URL" /DSmartPrintVersion="ci" /DSmartPrintBuildId="${{ github.run_number }}" scripts/build-windows-installer.iss
-          if ($LASTEXITCODE -ne 0) { throw "Inno Setup compilation failed." }
-      - name: Verify Windows beta installer is unsigned
+          $iscc = "C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
+          $buildId = $env:GITHUB_RUN_NUMBER
+          & $iscc "/DSmartPrintPublicUrl=$env:SMARTPRINT_PUBLIC_BASE_URL" /DSmartPrintVersion="0.1.10" "/DSmartPrintBuildId=$buildId-lifecycle-n" scripts/build-windows-installer.iss
+          if ($LASTEXITCODE -ne 0) { throw "Version N installer compilation failed." }
+          Copy-Item "artifacts/agent-installer/SmartPrint-Windows-Setup.exe" "artifacts/agent-installer/SmartPrint-Windows-v1.exe" -Force
+          & $iscc "/DSmartPrintPublicUrl=$env:SMARTPRINT_PUBLIC_BASE_URL" /DSmartPrintVersion="0.1.11" "/DSmartPrintBuildId=$buildId-lifecycle-n1" scripts/build-windows-installer.iss
+          if ($LASTEXITCODE -ne 0) { throw "Version N+1 installer compilation failed." }
+          Copy-Item "artifacts/agent-installer/SmartPrint-Windows-Setup.exe" "artifacts/agent-installer/SmartPrint-Windows-v2.exe" -Force
+      - name: Verify both Windows beta installers are unsigned
         shell: pwsh
         run: |
-          $installer = "artifacts/agent-installer/SmartPrint-Windows-Setup.exe"
-          $signature = Get-AuthenticodeSignature -LiteralPath $installer
-          if ($signature.Status -ne [System.Management.Automation.SignatureStatus]::NotSigned) {
-            throw "The Windows validation artifact must be intentionally unsigned for the beta distribution channel."
+          foreach ($installer in @(
+            "artifacts/agent-installer/SmartPrint-Windows-v1.exe",
+            "artifacts/agent-installer/SmartPrint-Windows-v2.exe"
+          )) {
+            $signature = Get-AuthenticodeSignature -LiteralPath $installer
+            if ($signature.Status -ne [System.Management.Automation.SignatureStatus]::NotSigned) {
+              throw "The Windows beta installer must remain intentionally unsigned: $installer"
+            }
           }
+      - name: Exercise Windows install, reinstall, upgrade, rollback and uninstall lifecycle
+        shell: pwsh
+        run: |
+          ./scripts/qa/windows-installer-lifecycle.ps1 -InstallerV1 "artifacts/agent-installer/SmartPrint-Windows-v1.exe" -InstallerV2 "artifacts/agent-installer/SmartPrint-Windows-v2.exe"
       - name: Upload Windows installer validation artifact
         uses: actions/upload-artifact@v7
         with:
           name: qrtoprint-windows-setup-validation
-          path: artifacts/agent-installer/SmartPrint-Windows-Setup.exe
+          path: |
+            artifacts/agent-installer/SmartPrint-Windows-v1.exe
+            artifacts/agent-installer/SmartPrint-Windows-v2.exe
           if-no-files-found: error
           retention-days: 30
-
   # Keep the original "dotnet" required-check name stable while the
   # independent API, Agent, desktop and installer jobs execute in parallel.
   dotnet:
