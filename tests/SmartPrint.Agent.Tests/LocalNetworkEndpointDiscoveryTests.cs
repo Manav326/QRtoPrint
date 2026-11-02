@@ -54,6 +54,21 @@ public sealed class LocalNetworkEndpointDiscoveryTests
         Assert.Equal(shopWifiLowerCase.Id, LocalNetworkEndpointDiscovery.SelectNetwork([shopWifi, shopWifiLowerCase], shopWifiLowerCase.Id)!.Id);
     }
 
+    [Theory]
+    [InlineData("192.168.31.47", 24, true)]
+    [InlineData("10.0.0.12", 16, true)]
+    [InlineData("169.254.1.8", 16, false)]
+    [InlineData("8.8.8.8", 24, false)]
+    [InlineData("192.168.31.47", 0, false)]
+    [InlineData("192.168.31.47", 33, false)]
+    public void AcceptsPrivateShopAddressesWithoutRequiringAnInternetGateway(
+        string address, int prefixLength, bool expected)
+    {
+        Assert.Equal(
+            expected,
+            LocalNetworkEndpointDiscovery.IsUsableShopAddress(IPAddress.Parse(address), prefixLength));
+    }
+
     [Fact]
     public void RejectsRequestsThatArriveOnAnotherLocalAdapter()
     {

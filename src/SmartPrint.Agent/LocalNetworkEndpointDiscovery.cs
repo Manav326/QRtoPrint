@@ -33,7 +33,7 @@ public static class LocalNetworkEndpointDiscovery
                 // gateway. Include isolated shop Wi-Fi/LANs with static private
                 // addresses; the one-time phone test proves actual reachability.
                 var addressInfo = properties.UnicastAddresses
-                    .Where(unicast => IsPrivateIpv4(unicast.Address) && unicast.PrefixLength is >= 1 and <= 32)
+                    .Where(unicast => IsUsableShopAddress(unicast.Address, unicast.PrefixLength))
                     .OrderBy(unicast => unicast.Address.ToString(), StringComparer.Ordinal)
                     .FirstOrDefault();
                 if (addressInfo is null) continue;
@@ -108,6 +108,12 @@ public static class LocalNetworkEndpointDiscovery
         if (port is < 1 or > 65535) throw new ArgumentOutOfRangeException(nameof(port));
         var selected = SelectNetwork(GetAvailableNetworks(), preferredNetworkId);
         return selected is null ? Array.Empty<string>() : [$"http://{selected.Ipv4Address}:{port}"];
+    }
+
+    public static bool IsUsableShopAddress(IPAddress address, int prefixLength)
+    {
+        ArgumentNullException.ThrowIfNull(address);
+        return prefixLength is >= 1 and <= 32 && IsPrivateIpv4(address);
     }
 
     public static bool IsAddressOnNetwork(IPAddress remoteAddress, IPAddress localAddress, int prefixLength)
