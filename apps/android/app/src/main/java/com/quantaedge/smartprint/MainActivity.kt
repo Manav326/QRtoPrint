@@ -56,12 +56,14 @@ import org.json.JSONArray
 import java.io.ByteArrayInputStream
 import java.io.File
 import java.io.FileInputStream
+import java.io.FileOutputStream
 import java.text.SimpleDateFormat
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.util.Date
 import java.util.Locale
+import java.util.UUID
 import java.util.zip.ZipEntry
 import java.util.zip.ZipOutputStream
 
@@ -120,6 +122,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var exportArchive: ActivityResultLauncher<String>
     private lateinit var scannerLauncher: ActivityResultLauncher<Intent>
     private lateinit var customerFileChooserLauncher: ActivityResultLauncher<Intent>
+    private lateinit var customerFolderChooserLauncher: ActivityResultLauncher<Uri?>
     private lateinit var documentScanLauncher: ActivityResultLauncher<IntentSenderRequest>
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -136,6 +139,7 @@ class MainActivity : AppCompatActivity() {
             isAppearanceLightNavigationBars = lightSystemBars
         }
         store = LocalDocumentStore(filesDir)
+        cleanCustomerFolderUploadCache()
         customerAccountStore = CustomerAccountStore(this)
         customerPrintSessionStore = CustomerPrintSessionStore(this)
         pendingScanNeedsDestination = savedInstanceState?.getBoolean("pendingScanNeedsDestination") ?: false
@@ -280,6 +284,34 @@ class MainActivity : AppCompatActivity() {
             fileChooserAllowsMultiple = false
             fileChooserSelectFolders = false
             callback.onReceiveValue(selected)
+        }
+        customerFolderChooserLauncher = registerForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
+            val callback = fileCallback ?: return@registerForActivityResult
+            if (uri == null) {
+                fileCallback = null
+                fileChooserAllowsMultiple = false
+                fileChooserSelectFolders = false
+                callback.onReceiveValue(null)
+                showPrint()
+            } else {
+                try {
+                    try {
+                        contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                    } catch (_: SecurityException) {
+                        // The selected folder is copied immediately; a persistent grant is not required.
+                    }
+                    val selection = stageCustomerFolder(uri)
+                    fileChooserAllowsMultiple = true
+                    chooseFiles(selection.first, selection.second)
+                } catch (exception: Exception) {
+                    fileCallback = null
+                    fileChooserAllowsMultiple = false
+                    fileChooserSelectFolders = false
+                    callback.onReceiveValue(null)
+                    showPrint()
+                    toast("Could not add this folder: ${message(exception)}")
+                }
+            }
         }
         importFiles = registerForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
             if (uris.isNullOrEmpty()) return@registerForActivityResult
@@ -2010,12 +2042,17 @@ class MainActivity : AppCompatActivity() {
                     accepted.split(',').any { it.trim().equals(FOLDER_PICKER_ACCEPT, ignoreCase = true) }
                 }
                 if (fileChooserSelectFolders) {
-                    // Directory upload is an app-supported extension; keep its folder-aware
-                    // selection UI. Ordinary files use Android's system document picker.
+                    // Match browser directory selection with Android's system folder provider.
                     fileChooserAllowsMultiple = true
-                    chooserSelectedFilePaths.clear()
-                    chooserSelectedFolderPaths.clear()
-                    showPicker()
+                    try {
+                        customerFolderChooserLauncher.launch(null)
+                    } catch (exception: Exception) {
+                        fileCallback?.onReceiveValue(null)
+                        fileCallback = null
+                        fileChooserAllowsMultiple = false
+                        fileChooserSelectFolders = false
+                        toast("Could not open your folders: ${message(exception)}")
+                    }
                 } else {
                     fileChooserAllowsMultiple = false
                     try {
@@ -2174,6 +2211,103 @@ class MainActivity : AppCompatActivity() {
         val view = ensureWebView()
         showPrint()
         view.loadUrl(link.url)
+    }
+
+    private fun customerFolderUploadCache(): File =
+        File(cacheDir, "customer-folder-uploads")
+
+    private fun cleanCustomerFolderUploadCache() {
+        val cutoff = System.currentTimeMillis() - 24L * 60L * 60L * 1000L
+        customerFolderUploadCache().listFiles()?.forEach { directory ->
+            if (directory.lastModified() < cutoff) directory.deleteRecursively()
+        }
+    }
+
+    /**
+     * Copies only printable files from the system-selected folder into an app-private,
+     * short-lived staging directory. This lets WebView receive FileProvider URIs while
+     * keeping the customer's original storage provider untouched.
+     */
+    private fun stageCustomerFolder(uri: Uri): Pair<List<File>, List<String>> {
+        val root = DocumentFile.fromTreeUri(this, uri) ?: error("The selected folder is unavailable.")
+        require(root.isDirectory) { "Select a folder." }
+
+        val stagingRoot = customerFolderUploadCache()
+        check(stagingRoot.exists() || stagingRoot.mkdirs()) { "Temporary document storage is unavailable." }
+        val staging = File(stagingRoot, UUID.randomUUID().toString())
+        check(staging.mkdir()) { "Temporary document storage could not be created." }
+
+        val files = mutableListOf<File>()
+        val groupNames = mutableListOf<String>()
+        val budget = FolderTransferBudget(MAX_TREE_FILES, MAX_TREE_DEPTH)
+        var totalBytes = 0L
+
+        fun copyPrintableFiles(directory: DocumentFile, relativePath: String, depth: Int) {
+            for (child in directory.listFiles()) {
+                check(budget.tryTake(depth)) {
+                    "This folder contains too many items. Choose a smaller folder."
+                }
+                if (child.isDirectory) {
+                    check(depth < MAX_TREE_DEPTH) {
+                        "This folder is nested too deeply to upload safely."
+                    }
+                    val safeDirectoryName = DocumentNamePolicy.safeName(child.name ?: "Folder")
+                    val childPath = if (relativePath.isBlank()) safeDirectoryName else "$relativePath/$safeDirectoryName"
+                    copyPrintableFiles(child, childPath, depth + 1)
+                    continue
+                }
+                if (!child.isFile) continue
+
+                val name = DocumentNamePolicy.safeName(child.name ?: "Document")
+                val extension = name.substringAfterLast('.', "").lowercase(Locale.ROOT)
+                if (extension !in setOf("pdf", "jpg", "jpeg", "png")) continue
+                check(files.size < PrintBatchSelectionPolicy.MAX_FILES) {
+                    "A print batch can contain up to ${PrintBatchSelectionPolicy.MAX_FILES} files."
+                }
+
+                val target = File(staging, "document-${files.size + 1}-$name")
+                var fileBytes = 0L
+                val input = contentResolver.openInputStream(child.uri)
+                    ?: error("Could not read $name from the selected folder.")
+                input.use { source ->
+                    FileOutputStream(target).use { output ->
+                        val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
+                        while (true) {
+                            val count = source.read(buffer)
+                            if (count < 0) break
+                            fileBytes += count
+                            check(fileBytes <= DocumentNamePolicy.MAX_PRINT_BYTES) {
+                                "$name exceeds the 20 MB per-file limit."
+                            }
+                            check(totalBytes <= PrintBatchSelectionPolicy.MAX_TOTAL_BYTES - fileBytes) {
+                                "A print batch can contain up to 50 MB in total."
+                            }
+                            output.write(buffer, 0, count)
+                        }
+                        output.fd.sync()
+                    }
+                }
+                check(DocumentNamePolicy.isPrintable(name, fileBytes)) {
+                    "$name is empty or is not a supported PDF/JPG/PNG document."
+                }
+
+                totalBytes += fileBytes
+                files += target
+                val topLevelFolder = relativePath.split('/').firstOrNull()?.takeIf { it.isNotBlank() }
+                groupNames += topLevelFolder ?: "Loose files"
+            }
+        }
+
+        try {
+            copyPrintableFiles(root, "", 0)
+            check(files.isNotEmpty()) {
+                "No printable PDF, JPG or PNG files were found in this folder."
+            }
+            return files to groupNames
+        } catch (exception: Exception) {
+            staging.deleteRecursively()
+            throw exception
+        }
     }
 
     private fun selectedChooserFiles(): List<File> = chooserSelectedFilePaths.mapNotNull { path ->
