@@ -50,7 +50,7 @@ public sealed class AgentCredentialStore
 
             // Validate before any request can attach the Agent secret. Older
             // installations may have a remote HTTP origin saved; migrate that
-            // identity only to the HTTPS origin configured by the signed installer.
+            // identity only to the HTTPS origin configured by the Windows installer.
             Uri apiUri;
             try
             {
