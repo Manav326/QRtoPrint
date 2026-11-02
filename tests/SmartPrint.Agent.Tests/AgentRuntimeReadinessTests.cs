@@ -61,7 +61,7 @@ public sealed class AgentRuntimeReadinessTests
     }
 
     [Fact]
-    public void LocalUploadRequiresAtLeastOneDiscoveredPrinter()
+    public void LocalUploadReadinessAllowsVirtualOutputWhenWindowsInventoryIsEmpty()
     {
         var now = DateTimeOffset.UtcNow;
         var readiness = new AgentRuntimeReadiness();
@@ -73,9 +73,8 @@ public sealed class AgentRuntimeReadinessTests
         var snapshot = readiness.GetSnapshot(now);
 
         Assert.True(snapshot.PrinterInventoryFresh);
-        Assert.False(snapshot.LocalUploadReady);
+        Assert.True(snapshot.LocalUploadReady);
     }
-}
 
     [Theory]
     [InlineData("not_paired")]
@@ -97,3 +96,4 @@ public sealed class AgentRuntimeReadinessTests
 
         Assert.False(readiness.GetSnapshot(now).LocalUploadReady);
     }
+}
