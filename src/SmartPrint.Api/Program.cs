@@ -6074,7 +6074,7 @@ publicApi.MapPost("/sessions/current/local-upload-tickets/{ticketId:guid}/cloud-
     var tokenHash = HashOpaqueToken(rawToken);
     var session = await db.CustomerPrintSessions.AsNoTracking()
         .Where(item => item.TokenHash == tokenHash && item.Status == "Active" &&
-                       item.RevokedUtc == null && item.ExpiresUtc > now)
+                       item.RevokedUtc == null)
         .Select(item => new { item.Id, item.TenantId })
         .SingleOrDefaultAsync(ct);
     if (session is null) return Results.Unauthorized();
@@ -6102,8 +6102,9 @@ publicApi.MapPost("/sessions/current/local-upload-tickets/{ticketId:guid}/cloud-
     if (preflightJob is not null || preflightDocument is not null || preflightTicket.CompletedUtc is not null)
     {
         if (preflightJob is null || preflightDocument is null ||
-            preflightDocument.SizeBytes != preflightTicket.SizeBytes ||
-            !string.Equals(preflightDocument.Sha256, preflightTicket.Sha256, StringComparison.OrdinalIgnoreCase))
+            !LocalUploadRecoveryRules.MatchesOriginalDocument(
+                preflightTicket.SizeBytes, preflightTicket.Sha256,
+                preflightDocument.SizeBytes, preflightDocument.Sha256))
             return Results.Conflict(new
             {
                 code = "local_upload_recovery_state_conflict",
@@ -6130,7 +6131,8 @@ publicApi.MapPost("/sessions/current/local-upload-tickets/{ticketId:guid}/cloud-
         });
     }
 
-    if (preflightTicket.CreatedUtc < now.AddHours(-maximumRecoveryAgeHours))
+    if (!LocalUploadRecoveryRules.IsWithinRecoveryWindow(preflightTicket.CreatedUtc, now,
+        TimeSpan.FromHours(maximumRecoveryAgeHours)))
         return Results.Conflict(new
         {
             code = "local_upload_recovery_expired",
@@ -6159,7 +6161,9 @@ publicApi.MapPost("/sessions/current/local-upload-tickets/{ticketId:guid}/cloud-
         return Results.UnprocessableEntity(new { code = "document_not_supported", message = exception.Message });
     }
 
-    if (!string.Equals(stored.Sha256, preflightTicket.Sha256, StringComparison.OrdinalIgnoreCase))
+    if (!LocalUploadRecoveryRules.MatchesOriginalDocument(
+        preflightTicket.SizeBytes, preflightTicket.Sha256,
+        stored.SizeBytes, stored.Sha256))
     {
         await storage.DeleteAsync(stored.StorageKey);
         return Results.UnprocessableEntity(new
@@ -6189,7 +6193,7 @@ publicApi.MapPost("/sessions/current/local-upload-tickets/{ticketId:guid}/cloud-
         var stillActive = await db.CustomerPrintSessions.AsNoTracking().AnyAsync(item =>
             item.Id == session.Id && item.TenantId == session.TenantId &&
             item.TokenHash == tokenHash && item.Status == "Active" &&
-            item.RevokedUtc == null && item.ExpiresUtc > DateTimeOffset.UtcNow, ct);
+            item.RevokedUtc == null, ct);
         if (!stillActive) return await RejectAndCleanAsync(Results.Unauthorized());
 
         byte[] lockedGrantHash;
@@ -6216,8 +6220,9 @@ publicApi.MapPost("/sessions/current/local-upload-tickets/{ticketId:guid}/cloud-
             await transaction.RollbackAsync(ct);
             await storage.DeleteAsync(stored.StorageKey);
             if (existingJob is null || existingDocument is null ||
-                existingDocument.SizeBytes != ticket.SizeBytes ||
-                !string.Equals(existingDocument.Sha256, ticket.Sha256, StringComparison.OrdinalIgnoreCase))
+                !LocalUploadRecoveryRules.MatchesOriginalDocument(
+                    ticket.SizeBytes, ticket.Sha256,
+                    existingDocument.SizeBytes, existingDocument.Sha256))
                 return Results.Conflict(new
                 {
                     code = "local_upload_recovery_state_conflict",
@@ -6245,7 +6250,8 @@ publicApi.MapPost("/sessions/current/local-upload-tickets/{ticketId:guid}/cloud-
         }
 
         var commitNow = DateTimeOffset.UtcNow;
-        if (ticket.CreatedUtc < commitNow.AddHours(-maximumRecoveryAgeHours))
+        if (!LocalUploadRecoveryRules.IsWithinRecoveryWindow(ticket.CreatedUtc, commitNow,
+            TimeSpan.FromHours(maximumRecoveryAgeHours)))
             return await RejectAndCleanAsync(Results.Conflict(new
             {
                 code = "local_upload_recovery_expired",
@@ -6384,8 +6390,22 @@ publicApi.MapPost("/sessions/current/local-upload-tickets/{ticketId:guid}/cloud-
     }
     catch
     {
-        if (!commitAttempted)
-            await storage.DeleteAsync(stored.StorageKey);
+        // A database commit can fail after the server commits but before the
+        // response reaches this process. Only delete the encrypted blob after
+        // a fresh DB read proves no committed document references it.
+        try
+        {
+            var documentCommitted = await db.PrintDocuments.AsNoTracking().AnyAsync(item =>
+                item.Id == documentId &&
+                item.TenantId == preflightTicket.TenantId &&
+                item.StorageKey == stored.StorageKey, CancellationToken.None);
+            if (!documentCommitted)
+                await storage.DeleteAsync(stored.StorageKey);
+        }
+        catch
+        {
+            // Preserve the encrypted file whenever commit state cannot be proven.
+        }
         throw;
     }
 })
