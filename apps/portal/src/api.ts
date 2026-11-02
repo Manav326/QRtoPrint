@@ -1023,8 +1023,10 @@ export async function uploadCustomerDocument(sessionToken: string, file: File, b
     const recovered = await uploadCustomerLocalTicketViaCloud(
       sessionToken, file, ticket, pendingLocalGrant
     );
-    // Keep the ticket identity for this browser session. A refresh after upload
-    // must resolve the same PrintJob rather than silently create a duplicate.
+    // Release the retry-only grant after a confirmed recovery. The customer
+    // draft stores the canonical job, and a later intentional reprint needs a
+    // fresh ticket. Ambiguous failures leave the grant untouched.
+    clearCustomerLocalUploadAttempt(sessionToken, file);
     return recovered;
   }
 
@@ -1054,6 +1056,12 @@ type CustomerLocalAgentApi = { agentDeviceId: string; endpoints: string[] };
 function customerLocalUploadAttemptStorageKeys(sessionToken: string, file: File) {
   const key = customerUploadAttemptStorageKey(sessionToken, file) + ".local";
   return { idempotency: key + ".key", grant: key + ".grant" };
+}
+
+function clearCustomerLocalUploadAttempt(sessionToken: string, file: File): void {
+  const keys = customerLocalUploadAttemptStorageKeys(sessionToken, file);
+  sessionStorage.removeItem(keys.idempotency);
+  sessionStorage.removeItem(keys.grant);
 }
 
 export function hasPendingLocalCustomerUploadAttempt(sessionToken: string, file: File): boolean {
@@ -1175,6 +1183,8 @@ export async function uploadCustomerDocumentLocally(
       // Retain the ticket and grant in session storage so a refresh or route
       // switch reconciles this same job instead of generating a duplicate.
       const uploaded = payload as UploadedPrintJob;
+      if (!uploaded?.job?.id || !uploaded?.document?.id) continue;
+      clearCustomerLocalUploadAttempt(sessionToken, file);
       return {
         ...uploaded,
         job: { ...uploaded.job, batchId: ticket.batchId ?? uploaded.job.batchId ?? null }
@@ -1194,7 +1204,7 @@ export async function uploadCustomerDocumentLocally(
       const recovered = await uploadCustomerLocalTicketViaCloud(
         sessionToken, file, ticket, grantToken
       );
-      // Retain the original ticket identity after success for refresh-safe retry.
+      clearCustomerLocalUploadAttempt(sessionToken, file);
       return {
         ...recovered,
         job: { ...recovered.job, batchId: ticket.batchId ?? recovered.job.batchId ?? null }
