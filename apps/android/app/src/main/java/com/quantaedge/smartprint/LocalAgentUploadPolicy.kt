@@ -1,17 +1,32 @@
 package com.quantaedge.smartprint
 
 /**
- * Cleartext is permitted only for the paired shop Agent's private IPv4 upload
- * route and its two read-only connection-check routes. Other WebView resources stay on HTTPS.
+ * Cleartext is permitted only for the paired shop Agent's private IPv4 status and upload endpoints.
+ * The HTTPS customer portal and every other WebView resource stay on HTTPS.
  */
 internal object LocalAgentUploadPolicy {
-    fun allows(scheme: String, host: String, port: Int, path: String): Boolean =
-        scheme.equals("http", ignoreCase = true) &&
-            port == 17842 &&
-            (path.startsWith("/api/v1/local/uploads/") ||
-                path == "/api/v1/local/status" ||
-                path == "/api/v1/local/connection-check") &&
-            isPrivateIpv4Host(host)
+    fun allows(
+        scheme: String,
+        host: String,
+        port: Int,
+        path: String,
+        method: String,
+        preflightMethod: String? = null
+    ): Boolean {
+        if (!scheme.equals("http", ignoreCase = true) ||
+            port != 17842 ||
+            !isPrivateIpv4Host(host)) return false
+
+        val requestMethod = method.uppercase()
+        val requestedMethod = preflightMethod?.uppercase()
+        return when {
+            path == "/api/v1/local/status" ->
+                requestMethod == "GET" || (requestMethod == "OPTIONS" && requestedMethod == "GET")
+            path.startsWith("/api/v1/local/uploads/") ->
+                requestMethod == "POST" || (requestMethod == "OPTIONS" && requestedMethod == "POST")
+            else -> false
+        }
+    }
 
     fun isPrivateIpv4Host(host: String): Boolean {
         val segments = host.split('.')

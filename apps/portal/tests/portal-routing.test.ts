@@ -32,6 +32,20 @@ test("station route remains separate from admin and shop scopes", () => {
   });
 });
 
+test("Android customer station automatically checks the paired Agent and keeps phone imports inside My Files", () => {
+  const appSource = readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8");
+  const androidSource = readFileSync(
+    new URL("../../android/app/src/main/java/com/quantaedge/smartprint/MainActivity.kt", import.meta.url),
+    "utf8"
+  );
+
+  assert.match(appSource, /if\(nativeAppMode\)\s*\{\s*setPermissionState\("unknown"\);\s*void checkConnection\(\);/);
+  assert.match(appSource, /function CustomerPrintFlow\(/);
+  assert.match(androidSource, /override fun onShowFileChooser\([\s\S]*?showPicker\(\)/);
+  assert.match(androidSource, /button\("Choose from phone"/);
+  assert.match(androidSource, /importFiles\.launch\(arrayOf\("\*\/\*"\)\)/);
+});
+
 test("admin and shop browser credentials use independent session keys", () => {
   assert.equal(authStorageKey("admin"), "qrtoprint.auth.admin");
   assert.equal(authStorageKey("shop"), "qrtoprint.auth.shop");
