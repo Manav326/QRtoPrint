@@ -27,12 +27,27 @@ import org.junit.Assert.assertTrue
 
 @RunWith(AndroidJUnit4::class)
 class MainActivityInstrumentedTest {
+    private fun openNavigationDestination(itemId: Int, expectedText: String) {
+        var lastFailure: androidx.test.espresso.NoMatchingViewException? = null
+        repeat(3) {
+            try {
+                onView(withId(itemId)).perform(click())
+                onView(withText(expectedText)).check(matches(isDisplayed()))
+                return
+            } catch (failure: androidx.test.espresso.NoMatchingViewException) {
+                lastFailure = failure
+                // The hosted emulator can occasionally turn a delayed tap into a
+                // long-press while the app is rendering its blur-backed navigation.
+                // Retry the real menu tap; keep the destination assertion mandatory.
+                Thread.sleep(250)
+            }
+        }
+        throw lastFailure ?: AssertionError("Navigation did not open: $expectedText")
+    }
+
     private fun openFilesTab() {
-        // Click the actual BottomNavigationItemView, not its non-clickable label child.
-        // The explicit screen assertion prevents a later "New folder" failure from
-        // hiding a navigation-selection failure.
-        onView(withId(2)).perform(click())
-        onView(withText("New folder")).check(matches(isDisplayed()))
+        // Target the actual menu item, then verify that the Files screen is visible.
+        openNavigationDestination(2, "New folder")
     }
 
     @Test
@@ -267,9 +282,8 @@ class MainActivityInstrumentedTest {
     @Test
     fun scanDestinationUsesFocusedQrEntry() {
         ActivityScenario.launch(MainActivity::class.java).use {
-            // Tap the accessible navigation item itself, not its non-clickable label child.
-            onView(withId(3)).perform(click())
-            onView(withText("Connect to a shop")).check(matches(isDisplayed()))
+            // Verify the customer route after a real bottom-navigation tap.
+            openNavigationDestination(3, "Connect to a shop")
             onView(withText("Scan QR code")).check(matches(isDisplayed()))
             onView(withText("Open My Files")).check(matches(isDisplayed()))
         }
@@ -280,8 +294,7 @@ class MainActivityInstrumentedTest {
         val context = ApplicationProvider.getApplicationContext<Context>()
         CustomerAccountStore(context).clear()
         ActivityScenario.launch(MainActivity::class.java).use {
-            val label = com.google.android.material.R.id.navigation_bar_item_small_label_view
-            onView(withId(4)).perform(click())
+            openNavigationDestination(4, "Print history")
             onView(withContentDescription("Account")).perform(click())
             onView(withText("Guest access is ready")).check(matches(isDisplayed()))
             androidx.test.espresso.Espresso.pressBack()
@@ -293,8 +306,7 @@ class MainActivityInstrumentedTest {
     @Test
     fun systemBackFromPrintTabReturnsHome() {
         ActivityScenario.launch(MainActivity::class.java).use {
-            onView(withId(3)).perform(click())
-            onView(withText("Connect to a shop")).check(matches(isDisplayed()))
+            openNavigationDestination(3, "Connect to a shop")
             androidx.test.espresso.Espresso.pressBack()
             onView(withText("Your space")).check(matches(isDisplayed()))
         }
@@ -353,8 +365,7 @@ class MainActivityInstrumentedTest {
     fun fileContextActionsUseBottomSheet() {
         val folderName = "CI Sheet Folder " + System.currentTimeMillis()
         ActivityScenario.launch(MainActivity::class.java).use {
-            val label = com.google.android.material.R.id.navigation_bar_item_small_label_view
-            onView(allOf(withId(label), withText("Files"))).perform(click())
+            openFilesTab()
             onView(withText("New folder")).perform(click())
             onView(withHint("Name")).perform(replaceText(folderName), closeSoftKeyboard())
             onView(withText("Save")).perform(click())

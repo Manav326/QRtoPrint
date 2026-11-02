@@ -108,7 +108,8 @@ public sealed class AgentControlPipeIntegrationTests
             new AgentEnrollmentHandler(credentialStore),
             credentialStore,
             localApiState,
-            localNetworkManager);
+            localNetworkManager,
+            new AgentRuntimeReadiness());
 
         try
         {

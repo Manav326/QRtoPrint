@@ -187,8 +187,8 @@ public sealed class TenantEntitlementService(SmartPrintDbContext db)
             item => item.TenantId == tenantId &&
                     item.CreatedUtc >= periodStart &&
                     item.CreatedUtc < periodEnd &&
+                    item.CreatedUtc >= now.AddHours(-24) &&
                     item.CompletedUtc == null &&
-                    item.ExpiresUtc > now &&
                     !db.PrintJobs.Any(job => job.TenantId == item.TenantId && job.Id == item.PrintJobId),
             cancellationToken);
         return checked(createdJobs + unmaterializedLocalReservations);

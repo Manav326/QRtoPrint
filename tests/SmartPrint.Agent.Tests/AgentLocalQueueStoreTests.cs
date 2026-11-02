@@ -499,6 +499,52 @@ public sealed class AgentLocalQueueStoreTests
         }
     }
 
+    [Fact]
+    public async Task CloudRecoveredTicketPromotesTheOriginalLocalCopyAfterPayment()
+    {
+        var root = CreateTemporaryDirectory();
+        try
+        {
+            var store = new AgentLocalQueueStore(root);
+            await store.InitializeAsync(CancellationToken.None);
+            var bytes = "Original shop Wi-Fi copy retained for HTTPS recovery"u8.ToArray();
+            var stagedJob = CreateJob(bytes) with { StorageMode = "LOCAL_AGENT" };
+            var staged = await store.EnqueueLocalUploadAsync(stagedJob, bytes, CancellationToken.None);
+
+            await store.MarkLocalUploadFinalizedAsync(stagedJob.Id, CancellationToken.None);
+            Assert.Equal("LOCAL_UPLOAD_PENDING_PAYMENT", store.Find(stagedJob.Id)!.State);
+
+            // Cloud recovery stored this ticket's canonical document, but the Agent
+            // still has the same hash-verified source. Promote it after paid claim.
+            var paidClaim = stagedJob with
+            {
+                StorageMode = "CLOUD",
+                Status = "LOCAL_QUEUE_CLAIMED",
+                Copies = 2,
+                ColourMode = "Colour",
+                IsDuplex = true,
+                QuotedAmountMinor = 500
+            };
+            await store.UpdateFromClaimAsync(paidClaim, CancellationToken.None);
+
+            var acknowledged = store.Find(stagedJob.Id)!;
+            Assert.Equal("ACK_PENDING", acknowledged.State);
+            Assert.Equal(2, acknowledged.Copies);
+            Assert.Equal("Colour", acknowledged.ColourMode);
+            Assert.True(acknowledged.IsDuplex);
+
+            await store.MarkAcknowledgedAsync(stagedJob.Id, CancellationToken.None);
+            Assert.Equal("ACKNOWLEDGED", store.Find(stagedJob.Id)!.State);
+            Assert.Single(store.GetAcknowledgedJobs());
+            Assert.True(bytes.AsSpan().SequenceEqual(store.ReadDocument(stagedJob.Id)));
+            Assert.True(File.Exists(staged.DocumentPath));
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
     private static AgentClaimedJob CreateJob(byte[] content)
     {
         var hash = Convert.ToHexString(SHA256.HashData(content)).ToLowerInvariant();

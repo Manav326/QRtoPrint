@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useRef, useState, type ReactNode } from "react";
+import { Fragment, useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import {
   Activity, ArrowRight, Check, Clock3, Copy, CreditCard, FileText, FileUp, FolderOpen, LayoutDashboard,
   LifeBuoy, LogOut, Menu, Monitor, Plus, Printer, QrCode, Search, Settings, Wifi,
@@ -6,6 +6,7 @@ import {
 } from "lucide-react";
 import QRCode from "react-qr-code";
 import { shouldBlockBatchCheckoutForExpiredQuote } from "./batch-checkout-state";
+import { canFallbackToCloudFromLocalFailure, resolveCustomerUploadMode } from "./local-upload-routing";
 import AuthScreen from "./AuthScreen";
 import PublicLandingPage from "./PublicLandingPage";
 import QrStationPrintDocument from "./QrStationPrintDocument";
@@ -14,7 +15,7 @@ import PlatformAdminConsole from "./PlatformAdminConsole";
 import PlatformAdminAuthScreen from "./PlatformAdminAuthScreen";
 import { resolvePortalRoute, shopPathForSection, shopSectionFromPath } from "./portal-routing";
 import {
-  ApiError, isPlatformAdminSession, acceptCustomerQuote, applyShopPrintBatchReview, approveShopPrintJob, assignShopPrintJobPrinter, calculateCustomerQuote, getShopCustomerHistory, getShopCustomers, getShopReportSummary,
+  ApiError, LocalUploadOutcomeUnknownError, LocalUploadPreflightError, isPlatformAdminSession, acceptCustomerQuote, applyShopPrintBatchReview, approveShopPrintJob, assignShopPrintJobPrinter, calculateCustomerQuote, getShopCustomerHistory, getShopCustomers, getShopReportSummary,
   confirmShopPrintOutput, dispatchShopPrintJob,
   createAgentEnrollmentCode, createCustomerSession, createPrinter, createStation,
   downloadShopDocument, getCustomerJobStatus, getShopAgentDevices, getShopJobEvents, getShopPrinters, getShopPrintJobsPage, getShopPrintBatchJobs, loadShopData,
@@ -1802,7 +1803,7 @@ function PrintAgentPage({agents,enrollmentCode,busy,onGenerate,onRevoke,desktop,
     {desktop && <ShopConnectionPanel connected={connected} localApiReady={localAgentStatus?.localApiReachable===true}/>}
     {!desktop && <section className="panel local-network-hint"><div className="local-network-mark"><Wifi size={20}/></div><div><h2>Shop connection</h2><p>Open SmartPrint on the Windows computer connected to your printers to choose and test the shop Wi-Fi.</p></div></section>}
     <section className="panel agent-device-panel">
-      <div className="collection-header"><div><h2>Paired Windows computers</h2><p>Agent connection history and the number of discovered printer queues.</p></div><span className="setup-count">{agents.filter(agent=>!agent.revokedUtc).length} active</span></div>
+      <div className="collection-header"><div><h2>Paired Windows computers</h2><p>Agent connection history and the number of discovered printer queues.</p></div><span className="setup-count">{agents.filter(agent=>!agent.revokedUtc).length} paired</span></div>
       {agents.length===0?<div className="agent-empty"><Monitor size={25}/><strong>No Windows computer paired yet</strong><span>Generate a pairing code above and run the agent on the computer connected to your printers.</span></div>:
         <div className="agent-device-list">{agents.map(agent=><article className="agent-device-card" key={agent.id}>
           <div className="agent-device-icon"><Monitor size={19}/></div>
@@ -1816,6 +1817,7 @@ function PrintAgentPage({agents,enrollmentCode,busy,onGenerate,onRevoke,desktop,
 
 function ShopConnectionPanel({connected,localApiReady}:{connected:boolean;localApiReady:boolean}) {
   const [snapshot,setSnapshot]=useState<DesktopLocalNetworkSnapshot|null>(null);
+  const [agentStatus,setAgentStatus]=useState<DesktopAgentStatus|null>(null);
   const [loading,setLoading]=useState(true);
   const [saving,setSaving]=useState(false);
   const [error,setError]=useState("");
@@ -1825,8 +1827,9 @@ function ShopConnectionPanel({connected,localApiReady}:{connected:boolean;localA
 
   async function refresh() {
     try {
-      const next=await getLocalNetworkSnapshot();
+      const [next,status]=await Promise.all([getLocalNetworkSnapshot(),getLocalAgentStatus()]);
       setSnapshot(next);
+      setAgentStatus(status);
       setVerified(Boolean(next.phoneVerifiedUtc));
       setError("");
       return next;
@@ -1899,8 +1902,10 @@ function ShopConnectionPanel({connected,localApiReady}:{connected:boolean;localA
   const selected=snapshot?.networks.find(network=>network.id===snapshot.selectedNetworkId)??null;
   const hasSelectedNetwork=Boolean(snapshot?.selectedNetworkId && selected);
   const phoneTestPassed=verified&&localApiReady;
-  const statusTone=phoneTestPassed?"green":hasSelectedNetwork||snapshot?.networks.length?"amber":"slate";
-  const statusLabel=loading?"Checking…":error&&!snapshot?"Connection unavailable":connected&&!localApiReady?"Print service starting":phoneTestPassed?"Phone test passed":hasSelectedNetwork?"Phone check needed":snapshot?.networks.length?"Choose connection":"No connection found";
+  const readiness=agentStatus?.readiness??null;
+  const pipelineReady=readiness?.localUploadReady===true;
+  const statusTone=phoneTestPassed&&pipelineReady?"green":hasSelectedNetwork||snapshot?.networks.length?"amber":"slate";
+  const statusLabel=loading?"Checking…":error&&!snapshot?"Connection unavailable":connected&&!localApiReady?"Print service starting":localApiReady&&!readiness?"Agent update needed":localApiReady&&!pipelineReady?"Print pipeline recovering":phoneTestPassed?"Phone test passed":hasSelectedNetwork?"Phone check needed":snapshot?.networks.length?"Choose connection":"No connection found";
 
   return <section className="panel local-network-panel">
     <div className="local-network-heading">
@@ -1932,6 +1937,14 @@ function ShopConnectionPanel({connected,localApiReady}:{connected:boolean;localA
             <div><strong>Scan with a phone on this shop Wi-Fi</strong><p>Open your phone camera, scan this code and open the link. A confirmation will appear on your phone when the connection works.</p><small>This check expires in five minutes.</small></div>
           </div>}
           {phoneTestPassed&&<div className="local-network-result success"><Check size={17}/><span><strong>Phone test passed</strong><small>A phone reached this shop connection recently. The check expires after ten minutes.</small></span></div>}
+          {localApiReady&&readiness?.localUploadReady===true&&<div className="local-network-result success"><Check size={17}/><span><strong>Local print pipeline ready</strong><small>Protected queue, print worker, cloud heartbeat and printer inventory are healthy. The assigned printer is checked separately for each QR station upload.</small></span></div>}
+          {localApiReady&&!readiness&&<div className="local-network-result warning"><Clock3 size={17}/><span><strong>Agent update required</strong><small>This Agent version does not report queue and print-worker readiness. Update the Windows Print Agent to verify local upload readiness.</small></span></div>}
+          {localApiReady&&readiness&&!readiness.localUploadReady&&<div className="local-network-result warning"><Clock3 size={17}/><span><strong>Print pipeline recovering</strong><small>{[
+            readiness.queueInitialized?"":"Protected document queue is not ready",
+            readiness.printWorkerRunning?"":"Print worker is not running",
+            readiness.heartbeatFresh?"":"Cloud heartbeat is stale",
+            readiness.printerInventoryFresh?"":"Printer inventory is stale"
+          ].filter(Boolean).join(" · ")} {readiness.lastFailureCode?"(Last issue: "+readiness.lastFailureCode+") ":""}Retry after the shop computer/Agent has recovered.</small></span></div>}
           {expired&&<div className="local-network-result warning"><Clock3 size={17}/><span><strong>Phone not connected yet</strong><small>Make sure the phone is on this same shop Wi-Fi, then start a new check. You can also try another connection above.</small></span></div>}
         </>}
       </>:<div className="local-network-empty"><Wifi size={20}/><div><strong>No shop connection found</strong><p>Connect this computer to the Wi-Fi or network you use at the shop, then refresh.</p></div><button className="secondary-button" type="button" onClick={()=>void refresh()}>Refresh</button></div>}
@@ -2694,7 +2707,16 @@ function CustomerEntry({publicCode,dark,onToggleTheme}:{publicCode:string;dark:b
   const [error,setError]=useState("");
   const [loading,setLoading]=useState(true);
   const [localReady,setLocalReady]=useState(false);
-  useEffect(()=>{setLocalReady(false);},[result?.localAgent?.agentDeviceId]);
+  const [localFallbackSuggested,setLocalFallbackSuggested]=useState(false);
+  const handleLocalReady=useCallback((ready:boolean)=>{
+    setLocalReady(ready);
+    if(ready)setLocalFallbackSuggested(false);
+  },[]);
+  const handleLocalUnavailable=useCallback(()=>setLocalFallbackSuggested(true),[]);
+  useEffect(()=>{
+    setLocalReady(false);
+    setLocalFallbackSuggested(false);
+  },[result?.localAgent?.agentDeviceId]);
   useEffect(()=>{
     let mounted=true;
     const stationKey=`qrtoprint.customer-session:${publicCode}`;
@@ -2772,8 +2794,8 @@ function CustomerEntry({publicCode,dark,onToggleTheme}:{publicCode:string;dark:b
       result?<><div className="entry-success-icon"><Check size={23}/></div><div className="entry-eyebrow">SECURE SESSION CREATED</div><h1>{nativeAppMode?result.shop.displayName:"Welcome to "+result.shop.displayName}</h1><p>{nativeAppMode?"Shop connected.":"Your phone is connected to this shop's print station."}</p>
         <div className="entry-printer-card"><div className="entry-printer-icon"><Printer size={20}/></div><div><strong>{result.printer?.displayName||"Shop print counter"}</strong><span>{nativeAppMode?(result.printer?.status||"Printer not selected"):result.printer?result.printer.manufacturer+" · "+result.printer.model:"The shop will select a printer for your job."}</span></div><Status label={result.printer?.status||"Session ready"} tone="blue"/></div>
         <div className="entry-session-note"><ShieldCheck size={16}/><span>{nativeAppMode?"Secure session · Expires "+formatIstTime(result.expiresUtc):"This session expires at "+formatIstTime(result.expiresUtc)+". Your document access stays limited to this shop session."}</span></div>
-        <CustomerLocalConnection localAgent={result.localAgent} onReady={setLocalReady}/>
-        <CustomerPrintFlow publicCode={publicCode} sessionToken={result.sessionToken} paymentOptions={result.paymentOptions} localAgent={result.localAgent} localReady={localReady}/>
+        <CustomerLocalConnection localAgent={result.localAgent} onReady={handleLocalReady} onUnavailable={handleLocalUnavailable} cloudAssistedPrintingEnabled={result.cloudAssistedPrintingEnabled}/>
+        <CustomerPrintFlow publicCode={publicCode} sessionToken={result.sessionToken} paymentOptions={result.paymentOptions} localAgent={result.localAgent} localReady={localReady} localFallbackSuggested={localFallbackSuggested} cloudAssistedPrintingEnabled={result.cloudAssistedPrintingEnabled}/>
       </>:null}
     </main>
     <footer className="customer-entry-footer">© 2026 SmartPrint by QuantaEdge · Secure customer printing</footer>
@@ -2782,7 +2804,7 @@ function CustomerEntry({publicCode,dark,onToggleTheme}:{publicCode:string;dark:b
 
 
 type CustomerLocalAgent = NonNullable<Awaited<ReturnType<typeof createCustomerSession>>["localAgent"]>;
-type LocalAgentCheckStatus = "idle" | "checking" | "connected" | "unavailable" | "denied" | "insecure";
+type LocalAgentCheckStatus = "idle" | "checking" | "connected" | "unverified" | "recovering" | "unavailable" | "denied" | "insecure";
 
 function isPrivateIpv4Hostname(hostname:string):boolean {
   const octets=hostname.split(".").map(Number);
@@ -2815,7 +2837,7 @@ function buildSecureLocalPortalUrl():string|null {
   }
 }
 
-function CustomerLocalConnection({localAgent,onReady}:{localAgent:CustomerLocalAgent|null;onReady:(ready:boolean)=>void}) {
+function CustomerLocalConnection({localAgent,onReady,onUnavailable,cloudAssistedPrintingEnabled}:{localAgent:CustomerLocalAgent|null;onReady:(ready:boolean)=>void;onUnavailable:()=>void;cloudAssistedPrintingEnabled:boolean}) {
   const nativeAppMode = navigator.userAgent.includes("SmartPrintAndroid/1");
   const [permissionState,setPermissionState]=useState<PermissionState|"unknown">("unknown");
   const [checkStatus,setCheckStatus]=useState<LocalAgentCheckStatus>("idle");
@@ -2827,6 +2849,7 @@ function CustomerLocalConnection({localAgent,onReady}:{localAgent:CustomerLocalA
   function requireSecureContext() {
     setCheckStatus("insecure");
     onReady(false);
+    if(cloudAssistedPrintingEnabled)onUnavailable();
     setMessage(nativeAppMode ? "Secure HTTPS required." : securePortalUrl
       ? "This shop page is open over HTTP. Chrome blocks local-network requests from insecure pages without showing a permission prompt. Open the secure shop link below; the certificate must be trusted on this phone."
       : "This shop page is not a secure HTTPS context. Open the shop's HTTPS customer portal before checking local printing.");
@@ -2880,11 +2903,47 @@ function CustomerLocalConnection({localAgent,onReady}:{localAgent:CustomerLocalA
           agentDeviceId?:string;
           protocolVersion?:number;
           status?:string;
+          localUploadReady?:boolean;
+          readiness?: {
+            queueInitialized?:boolean;
+            printWorkerRunning?:boolean;
+            heartbeatFresh?:boolean;
+            printerInventoryFresh?:boolean;
+            discoveredPrinterCount?:number;
+            localUploadReady?:boolean;
+          };
         };
         if(generation!==checkGeneration.current)return;
         if(status.agentDeviceId===localAgent.agentDeviceId &&
            status.protocolVersion===1 &&
            status.status==="LOCAL_ENDPOINT_READY") {
+          if(!status.readiness) {
+            // Existing installed Agents do not yet publish the detailed readiness
+            // payload. Keep their working local route available; the ticket API
+            // and Agent must still validate the assigned printer and queue.
+            setCheckStatus("unverified");
+            onReady(true);
+            setMessage("This shop computer is reachable, but its Agent has not reported detailed queue health yet. SmartPrint will verify the assigned printer and upload with the shop before confirming the file.");
+            return;
+          }
+          if(status.localUploadReady!==true || status.readiness?.localUploadReady!==true) {
+            setCheckStatus("recovering");
+            onReady(false);
+            if(cloudAssistedPrintingEnabled)onUnavailable();
+            const readiness=status.readiness;
+            const blockers=[
+              readiness?.queueInitialized!==true?"protected document queue is not ready":null,
+              readiness?.printWorkerRunning!==true?"print worker is not running":null,
+              readiness?.heartbeatFresh!==true?"cloud heartbeat is not fresh":null,
+              readiness?.printerInventoryFresh!==true?"printer inventory is not fresh":null
+            ].filter((value):value is string=>value!==null);
+            const detail=blockers.length?blockers.join(", "):"the Agent has not reported full pipeline readiness";
+            setMessage("The shop computer is reachable, but local printing is recovering ("+detail+"). "+
+              (cloudAssistedPrintingEnabled
+                ? "Choose Cloud-assisted upload while the shop operator restores the local print pipeline."
+                : "Ask the shop operator to restore the Agent and printer connection, then check again."));
+            return;
+          }
           setCheckStatus("connected");
           onReady(true);
           setMessage(nativeAppMode ? "Shop Wi-Fi ready · Local HTTP is not encrypted." : "This phone can reach the shop computer. Direct uploads use the shop's private Wi-Fi, but this local HTTP connection is not encrypted in transit. Choose cloud-assisted upload for HTTPS transfer.");
@@ -2900,6 +2959,7 @@ function CustomerLocalConnection({localAgent,onReady}:{localAgent:CustomerLocalA
     if(generation!==checkGeneration.current)return;
     setCheckStatus("unavailable");
     onReady(false);
+    if(cloudAssistedPrintingEnabled)onUnavailable();
     setMessage(nativeAppMode ? "Shop offline · Cloud upload available." : validEndpointCount===0
       ? "The shop Agent has not announced a usable local address. The regular cloud-assisted upload remains available."
       : "Could not reach the shop computer. Make sure this phone is connected to the same shop Wi-Fi, then ask the shop operator to check the connection. The regular cloud-assisted upload remains available.");
@@ -2947,6 +3007,7 @@ function CustomerLocalConnection({localAgent,onReady}:{localAgent:CustomerLocalA
       if(permissionStatus.state==="denied") {
         setCheckStatus("denied");
         onReady(false);
+        if(cloudAssistedPrintingEnabled)onUnavailable();
         setMessage(nativeAppMode ? "Allow local network access." : "Chrome has blocked Local network access for this public HTTPS site. On Android, open the site information icon beside the address bar → Permissions → Local network access → Allow, then reload this QR page.");
       } else if(permissionStatus.state==="prompt") {
         setCheckStatus("idle");
@@ -2969,16 +3030,20 @@ function CustomerLocalConnection({localAgent,onReady}:{localAgent:CustomerLocalA
       checkGeneration.current++;
       permissionStatus?.removeEventListener("change",updatePermission);
     };
-  },[localAgent?.agentDeviceId,localAgent?.endpoints.join("|"),onReady]);
+  },[localAgent?.agentDeviceId,localAgent?.endpoints.join("|"),onReady,onUnavailable]);
 
   if(!localAgent?.endpoints.length)return null;
 
   const label=checkStatus==="checking"?"Checking…":
     checkStatus==="connected"?(nativeAppMode?"Connected":"Shop computer reachable"):
+    checkStatus==="unverified"?"Connected · health details unavailable":
+    checkStatus==="recovering"?"Print pipeline recovering":
     checkStatus==="denied"?(nativeAppMode?"Access blocked":"Browser permission blocked"):
     checkStatus==="insecure"?"HTTPS required":
     checkStatus==="unavailable"?"Not reachable":"Not checked";
   const tone=checkStatus==="connected"?"green":
+    checkStatus==="unverified"?"amber":
+    checkStatus==="recovering"?"amber":
     checkStatus==="unavailable"||checkStatus==="denied"?"red":"blue";
 
   return <section className="entry-local-agent">
@@ -3127,7 +3192,7 @@ function smartPrintNativeBoundary(status:string|undefined,hasQuote:boolean):stri
   }
 }
 
-function CustomerPrintFlow({publicCode,sessionToken,paymentOptions,localAgent,localReady}:{publicCode:string;sessionToken:string;paymentOptions:{upiEnabled:boolean;upiId?:string|null;payeeName?:string|null;cashEnabled:boolean;instantPaymentEnabled:boolean};localAgent:CustomerLocalAgent|null;localReady:boolean}) {
+function CustomerPrintFlow({publicCode,sessionToken,paymentOptions,localAgent,localReady,localFallbackSuggested,cloudAssistedPrintingEnabled}:{publicCode:string;sessionToken:string;paymentOptions:{upiEnabled:boolean;upiId?:string|null;payeeName?:string|null;cashEnabled:boolean;instantPaymentEnabled:boolean};localAgent:CustomerLocalAgent|null;localReady:boolean;localFallbackSuggested:boolean;cloudAssistedPrintingEnabled:boolean}) {
   const nativeAppMode = navigator.userAgent.includes("SmartPrintAndroid/1");
   const initialDraft=readStoredCustomerDraft(publicCode,sessionToken);
   const [files,setFiles]=useState<File[]>([]);
@@ -3192,11 +3257,30 @@ function CustomerPrintFlow({publicCode,sessionToken,paymentOptions,localAgent,lo
   const [paymentMethod,setPaymentMethod]=useState<"UPI"|"CASH">(paymentOptions.upiEnabled?"UPI":"CASH");
   const [busy,setBusy]=useState(false);
   const [error,setError]=useState("");
-  const [uploadMode,setUploadMode]=useState<"LOCAL"|"CLOUD">(localAgent?.endpoints.length?"LOCAL":"CLOUD");
+  const [uploadMode,setUploadMode]=useState<"LOCAL"|"CLOUD">(
+    localAgent?.endpoints.length ? "LOCAL" : "CLOUD"
+  );
+  const [uploadModeManuallySelected,setUploadModeManuallySelected]=useState(false);
 
   useEffect(()=>{
-    if(!localAgent?.endpoints.length)setUploadMode("CLOUD");
-  },[localAgent?.endpoints.join("|")]);
+    setUploadMode(current=>resolveCustomerUploadMode(
+      current,
+      Boolean(localAgent?.endpoints?.length),
+      cloudAssistedPrintingEnabled,
+      uploadModeManuallySelected
+    ));
+  },[cloudAssistedPrintingEnabled,localAgent?.endpoints.join("|"),uploadModeManuallySelected]);
+
+  useEffect(()=>{
+    if(uploadModeManuallySelected)return;
+    if(localFallbackSuggested&&cloudAssistedPrintingEnabled) {
+      setUploadMode("CLOUD");
+    } else if(!localFallbackSuggested&&localReady&&localAgent?.endpoints.length) {
+      setUploadMode("LOCAL");
+    }
+  },[localFallbackSuggested,localReady,localAgent?.endpoints.length,cloudAssistedPrintingEnabled,uploadModeManuallySelected]);
+
+  const customerUploadUnavailable = !cloudAssistedPrintingEnabled && !localAgent?.endpoints.length;
 
   useEffect(()=>{
     if(!paymentOptions.upiEnabled&&paymentOptions.cashEnabled)setPaymentMethod("CASH");
@@ -3318,7 +3402,7 @@ function CustomerPrintFlow({publicCode,sessionToken,paymentOptions,localAgent,lo
       setError(nativeAppMode ? "Check shop Wi-Fi." : "Check shop Wi-Fi access above before starting a direct local upload.");
       return;
     }
-    const currentBatchId=batchId||crypto.randomUUID();
+    let currentBatchId=batchId||crypto.randomUUID();
     setBatchId(currentBatchId);
     const completedFingerprints=new Set(uploadedFileFingerprints);
     const results=[...uploadedBatch];
@@ -3334,8 +3418,15 @@ function CustomerPrintFlow({publicCode,sessionToken,paymentOptions,localAgent,lo
         const batchGroupName=groupNameForFile(candidate);
         const settings=settingsForFile(candidate);
         const created=uploadMode==="LOCAL"&&localAgent
-          ? await uploadCustomerDocumentLocally(sessionToken,candidate,localAgent,currentBatchId,batchGroupName)
+          ? await uploadCustomerDocumentLocally(sessionToken,candidate,localAgent,currentBatchId,batchGroupName,cloudAssistedPrintingEnabled)
           : await uploadCustomerDocument(sessionToken,candidate,currentBatchId,batchGroupName);
+        if(created.job.batchId&&created.job.batchId!==currentBatchId) {
+          if(results.length>0) {
+            throw new ApiError("This file belongs to an earlier batch. Refresh the original print request before adding more files; SmartPrint will not mix two batches.",409);
+          }
+          currentBatchId=created.job.batchId;
+          setBatchId(currentBatchId);
+        }
         if(!results.some(item=>item.job.id===created.job.id))results.push(created);
         savedSettings[created.job.id]=settings;
         completedFingerprints.add(fingerprint);
@@ -3355,14 +3446,34 @@ function CustomerPrintFlow({publicCode,sessionToken,paymentOptions,localAgent,lo
       setUploadedBatch(results);
       setUploadedFileFingerprints([...completedFingerprints]);
       if(results.length>0)setUploaded(results[0]);
-      const localUploadNeedsCloud=uploadMode==="LOCAL"&&exception instanceof ApiError&&
-        ["local_print_printer_unavailable","local_upload_printer_unavailable","local_print_agent_unavailable","batch_local_agent_mismatch"].includes(exception.code??"");
-      if(localUploadNeedsCloud)setUploadMode("CLOUD");
-      setError(localUploadNeedsCloud
-        ?exception instanceof ApiError&&exception.code==="batch_local_agent_mismatch"
-          ?"Some files in this batch are stored on another shop computer. Cloud-assisted upload is now selected; retry the remaining files. The shop can route the complete batch to the computer holding the local files. To move the whole batch to a different computer, start a new batch and upload every file through Cloud-assisted upload."
-          :"The QR station's printer is unavailable. Cloud-assisted upload is now selected; retry the remaining files and the shop can assign one available printer to the whole batch."
-        :exception instanceof ApiError?exception.message:`Upload stopped after ${completedFingerprints.size} file(s). Retry the selected files to continue; completed files will be skipped.`);
+      const confirmedPreTicketRejection=uploadMode==="LOCAL"&&exception instanceof LocalUploadPreflightError;
+      const canFallbackToCloud=canFallbackToCloudFromLocalFailure(confirmedPreTicketRejection,cloudAssistedPrintingEnabled);
+      if(canFallbackToCloud){setUploadModeManuallySelected(true);setUploadMode("CLOUD");}
+      if(exception instanceof LocalUploadOutcomeUnknownError&&uploadMode==="LOCAL"&&cloudAssistedPrintingEnabled) {
+        // Local ticket and grant are preserved. The next retry will resume that
+        // same PrintJob over HTTPS rather than creating a second cloud upload.
+        setUploadModeManuallySelected(true);
+        setUploadMode("CLOUD");
+      }
+      const uploadError=exception instanceof LocalUploadOutcomeUnknownError
+        ? cloudAssistedPrintingEnabled
+          ? "Shop Wi-Fi was interrupted. Cloud-assisted upload is now selected for secure HTTPS continuation. SmartPrint has kept this file attached to its original job; tap Retry to resume that same upload without creating another print job."
+          : "Shop Wi-Fi was interrupted. SmartPrint has kept this file attached to its original job. Reconnect to the shop computer and tap Retry; the same upload will resume without creating a second print job."
+        : confirmedPreTicketRejection
+          ? exception instanceof LocalUploadPreflightError && exception.code==="local_upload_ticket_expired"
+            ? canFallbackToCloud
+              ? "The earlier shop Wi-Fi attempt expired before a job was created. Cloud-assisted HTTPS is now selected; tap Retry to start a fresh transfer."
+              : "The earlier shop Wi-Fi attempt expired before a job was created. Reconnect to the shop computer, check Wi-Fi, then tap Retry to start a fresh transfer."
+            : exception instanceof LocalUploadPreflightError && exception.code==="batch_local_agent_mismatch"
+              ? canFallbackToCloud
+                ? "Some files in this batch are stored on another shop computer. Cloud-assisted upload is now selected; retry the remaining files in this same batch. The shop can route the complete batch to the computer holding the existing files."
+                : "Some files in this batch are on another shop computer. Cloud-assisted upload is not included in this shop's plan. Ask the shop to restore the original computer before retrying the same batch."
+              : canFallbackToCloud
+                ? "The API rejected local upload before creating a ticket. Cloud-assisted HTTPS upload is now selected; retry the remaining files in this same batch."
+                : "The shop cannot accept a local upload right now, and Cloud-assisted upload is not included in its plan. Ask the shop operator to restore the local Agent/printer connection, then retry the same batch."
+          : exception instanceof ApiError ? exception.message
+          : "Upload stopped after "+completedFingerprints.size+" file(s). Retry the selected files to continue; completed files will be skipped.";
+      setError(uploadError);
     } finally {setBusy(false);setUploadProgress(null);}
   }
 
@@ -3745,10 +3856,11 @@ function CustomerPrintFlow({publicCode,sessionToken,paymentOptions,localAgent,lo
 
   return <section className="customer-print-flow">
     <div className="customer-flow-heading"><div><span>STEP 1</span><h2>{nativeAppMode?"Add files":"Add your documents"}</h2></div><span className="upload-limit">PDF, JPG or PNG · Up to 20 files / 50 MB per batch</span></div>
-    {localAgent?.endpoints.length? <div className="customer-upload-modes">
-      <button type="button" className={uploadMode==="LOCAL"?"customer-upload-mode selected":"customer-upload-mode"} onClick={()=>setUploadMode("LOCAL")}><strong>Shop Wi-Fi</strong><small>Document stays on the shop computer</small></button>
-      <button type="button" className={uploadMode==="CLOUD"?"customer-upload-mode selected":"customer-upload-mode"} onClick={()=>setUploadMode("CLOUD")}><strong>Cloud-assisted</strong><small>Encrypted upload through the API</small></button>
+    {(localAgent?.endpoints.length || cloudAssistedPrintingEnabled) ? <div className="customer-upload-modes">
+      {Boolean(localAgent?.endpoints?.length)&&<button type="button" className={uploadMode==="LOCAL"?"customer-upload-mode selected":"customer-upload-mode"} onClick={()=>{setUploadModeManuallySelected(true);setUploadMode("LOCAL");}}><strong>Shop Wi-Fi · local transfer</strong><small>Direct local HTTP · not encrypted in transit</small></button>}
+      {cloudAssistedPrintingEnabled&&<button type="button" className={uploadMode==="CLOUD"?"customer-upload-mode selected":"customer-upload-mode"} onClick={()=>{setUploadModeManuallySelected(true);setUploadMode("CLOUD");}}><strong>Cloud-assisted · HTTPS</strong><small>Secure transfer through the API · resumes interrupted local uploads</small></button>}
     </div>:null}
+    {customerUploadUnavailable&&<div className="customer-upload-local-note" role="status">This shop's print computer is not connected, and cloud-assisted uploads are not included in its plan. Ask the shop operator to reconnect SmartPrint.</div>}
     <div className="customer-upload-picker-grid">
       <label className="customer-upload-zone">
         <input type="file" multiple disabled={batchLockedForPayment} accept=".pdf,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png" onChange={event=>{chooseFiles(Array.from(event.currentTarget.files||[]),consumeSmartPrintNativePickerGroups());event.currentTarget.value="";}}/>
@@ -3807,10 +3919,10 @@ function CustomerPrintFlow({publicCode,sessionToken,paymentOptions,localAgent,lo
     </div>}
     {files.length>0&&<small className="customer-upload-local-note">Folder defaults apply to every file. Set an individual file to Custom for an exception.</small>}
     {previewUrl&&file&&<div className="customer-file-preview"><div className="customer-file-label"><FileText size={15}/><span>Preview · {file.name}</span></div>{file.type==="application/pdf"||/\.pdf$/i.test(file.name)?<iframe src={previewUrl} title={file.name+" preview"}/>:<img src={previewUrl} alt={file.name+" preview"}/>}</div>}
-    {files.length>0&&<button className="customer-flow-button" disabled={busy||pendingFilesCount===0||(uploadMode==="LOCAL"&&!localReady)} onClick={()=>void upload()}>{busy?<span className="button-spinner"/>:<><UploadIcon/>{uploadMode==="LOCAL"&&localAgent?"Upload "+pendingFilesCount+" file(s) to shop":"Upload "+pendingFilesCount+" file(s)"}</>}</button>}
+    {files.length>0&&<button className="customer-flow-button" disabled={busy||customerUploadUnavailable||pendingFilesCount===0||(uploadMode==="LOCAL"&&!localReady)} onClick={()=>void upload()}>{busy?<span className="button-spinner"/>:<><UploadIcon/>{uploadMode==="LOCAL"&&localAgent?"Upload "+pendingFilesCount+" file(s) to shop":"Upload "+pendingFilesCount+" file(s)"}</>}</button>}
     {uploadProgress&&<div className="customer-upload-progress"><span>{uploadProgress.currentFile?`Uploading ${Math.min(uploadProgress.completed+1,uploadProgress.total)} of ${uploadProgress.total}: ${uploadProgress.currentFile}`:`${uploadProgress.completed} of ${uploadProgress.total} files uploaded`}</span><div><i style={{width:`${uploadProgress.total?uploadProgress.completed/uploadProgress.total*100:0}%`}}/>{uploadProgress.currentFile&&<b aria-hidden="true"/>}</div><small>The count advances when each document finishes uploading.</small></div>}
-    {files.length>0&&uploadMode==="LOCAL"&&localAgent&&<small className="customer-upload-local-note">{nativeAppMode?(localReady?"Cloud receives metadata only.":"Check shop Wi-Fi."):localReady?"Your files travel over shop Wi-Fi. The cloud receives only job, quote and payment metadata.":"Tap Check shop Wi-Fi above first to grant the browser permission."}</small>}
-    {files.length>0&&uploadMode==="CLOUD"&&localAgent&&<small className="customer-upload-local-note">{nativeAppMode?"Encrypted cloud transfer.":"Cloud-assisted fallback: files are uploaded encrypted to the API before being transferred to the shop computer."}</small>}
+    {files.length>0&&uploadMode==="LOCAL"&&localAgent&&<small className="customer-upload-local-note">{nativeAppMode?(localReady?"Direct shop Wi-Fi transfer uses local HTTP and is not encrypted in transit. Choose Cloud-assisted for HTTPS.":"Check shop Wi-Fi."):localReady?"Direct shop Wi-Fi transfer uses local HTTP and is not encrypted in transit. Choose Cloud-assisted for HTTPS encryption.":"Tap Check shop Wi-Fi above first to grant the browser permission."}</small>}
+    {files.length>0&&uploadMode==="CLOUD"&&localAgent&&<small className="customer-upload-local-note">{nativeAppMode?"Encrypted HTTPS cloud transfer.":"HTTPS cloud-assisted transfer: files are encrypted in transit to the API and then transferred securely to the shop computer."}</small>}
     {uploaded&&<>
       {uploadedBatch.length>0&&<div className="customer-uploaded-batch">
         <div className="customer-uploaded-batch-head"><strong>Batch · {uploadedBatch.length} files</strong><span>Select a file to view its status. Pay once for all accepted files.</span></div>

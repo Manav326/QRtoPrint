@@ -1,3 +1,4 @@
+import { isUncompletedLocalUploadTicketExpired } from "./local-upload-routing";
 import { getLocalAgentStatus, isDesktopApp, writeDesktopSession } from "./desktop-bridge";
 import { authStorageKey } from "./portal-routing";
 export interface AuthTokens {
@@ -59,6 +60,9 @@ export interface PlatformTenant {
   printerCount: number;
   activePrinterCount: number;
   agentCount: number;
+  onlineAgentCount: number;
+  offlineAgentCount: number;
+  latestAgentHeartbeatUtc: string | null;
   jobsLast30Days: number;
 }
 
@@ -166,6 +170,22 @@ export class ApiError extends Error {
   ) {
     super(message);
     this.name = "ApiError";
+  }
+}
+
+/** An explicit API rejection received before a local upload ticket was created. */
+export class LocalUploadPreflightError extends ApiError {
+  constructor(message: string, status: number, code: string | null) {
+    super(message, status, code);
+    this.name = "LocalUploadPreflightError";
+  }
+}
+
+/** The Agent may have stored this file; the customer must retry the same ticket. */
+export class LocalUploadOutcomeUnknownError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "LocalUploadOutcomeUnknownError";
   }
 }
 
@@ -783,6 +803,7 @@ export async function createCustomerSession(publicCode: string) {
     printer: { displayName: string; manufacturer: string; model: string; status: string; capabilitiesJson: string } | null;
     paymentOptions: { upiEnabled: boolean; upiId?: string | null; payeeName?: string | null; cashEnabled: boolean; instantPaymentEnabled: boolean };
     localAgent: { agentDeviceId: string; endpoints: string[] } | null;
+    cloudAssistedPrintingEnabled: boolean;
   }>(`/api/v1/public/stations/${encodeURIComponent(publicCode)}/sessions`, {
     method: "POST",
     headers: await nativeCustomerAuthorizationHeaders()
@@ -810,6 +831,7 @@ export function resumeCustomerSession(sessionToken: string, publicCode: string) 
     paymentOptions: { upiEnabled: boolean; upiId?: string | null; payeeName?: string | null; cashEnabled: boolean; instantPaymentEnabled: boolean };
     printer: { displayName: string; manufacturer: string; model: string; status: string; capabilitiesJson: string } | null;
     localAgent: { agentDeviceId: string; endpoints: string[] } | null;
+    cloudAssistedPrintingEnabled: boolean;
   }>("/api/v1/public/sessions/current/resume", {
     method: "POST",
     headers: { "X-Print-Session": sessionToken },
@@ -877,7 +899,7 @@ export interface ShopPrintJob {
 }
 
 export interface UploadedPrintJob {
-  job: { id: string; jobNumber: string; status: string; pageCount: number; copies: number; currency: string; quotedAmountMinor: number; createdUtc: string; batchGroupName?: string | null };
+  job: { id: string; jobNumber: string; status: string; pageCount: number; copies: number; currency: string; quotedAmountMinor: number; createdUtc: string; batchGroupName?: string | null; batchId?: string | null };
   document: { id: string; originalFileName: string; mediaType: string; sizeBytes: number; sha256: string; pageSizesJson: string };
   duplicateRequest: boolean;
 }
@@ -931,7 +953,84 @@ function customerUploadAttemptStorageKey(sessionToken: string, file: File): stri
   return `qrtoprint.customer-upload-attempt.${sessionToken.slice(0, 16)}.${fingerprint}`;
 }
 
+type CustomerLocalUploadTicket = {
+  id: string;
+  printJobId: string;
+  batchId?: string;
+  jobNumber: string;
+  agentDeviceId: string;
+  expiresUtc: string;
+  completed: boolean;
+};
+
+async function requestCustomerLocalUploadTicket(
+  sessionToken: string,
+  file: File,
+  batchId: string | undefined,
+  batchGroupName: string | undefined,
+  idempotencyKey: string,
+  grantToken: string
+): Promise<CustomerLocalUploadTicket> {
+  const digest = await crypto.subtle.digest("SHA-256", await file.arrayBuffer());
+  const sha256 = Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, "0")).join("");
+  return apiRequest<CustomerLocalUploadTicket>("/api/v1/public/sessions/current/local-upload-tickets", {
+    method: "POST",
+    headers: {
+      "X-Print-Session": sessionToken,
+      "Idempotency-Key": idempotencyKey
+    },
+    body: JSON.stringify({
+      originalFileName: file.name,
+      sizeBytes: file.size,
+      sha256,
+      grantToken,
+      batchId: batchId ?? null,
+      batchGroupName: batchGroupName ?? null
+    })
+  });
+}
+
+async function uploadCustomerLocalTicketViaCloud(
+  sessionToken: string,
+  file: File,
+  ticket: CustomerLocalUploadTicket,
+  grantToken: string
+): Promise<UploadedPrintJob> {
+  const form = ticket.completed ? undefined : new FormData();
+  if (form) form.append("file", file, file.name);
+  return apiRequest<UploadedPrintJob>(
+    `/api/v1/public/sessions/current/local-upload-tickets/${encodeURIComponent(ticket.id)}/cloud-recovery`,
+    {
+      method: "POST",
+      headers: {
+        "X-Print-Session": sessionToken,
+        "X-Print-Upload-Grant": grantToken
+      },
+      body: form
+    }
+  );
+}
+
 export async function uploadCustomerDocument(sessionToken: string, file: File, batchId?: string, batchGroupName?: string) {
+  const localKeys = customerLocalUploadAttemptStorageKeys(sessionToken, file);
+  const pendingLocalIdempotency = sessionStorage.getItem(localKeys.idempotency);
+  const pendingLocalGrant = sessionStorage.getItem(localKeys.grant);
+  if (pendingLocalIdempotency && pendingLocalGrant) {
+    // The local request may have reached the Agent. Recover that exact ticket
+    // using HTTPS, retaining its PrintJob ID and one-use grant.
+    const ticket = await requestCustomerLocalUploadTicket(
+      sessionToken, file, batchId, batchGroupName, pendingLocalIdempotency, pendingLocalGrant
+    );
+    const recovered = await uploadCustomerLocalTicketViaCloud(
+      sessionToken, file, ticket, pendingLocalGrant
+    );
+    // Release the retry-only grant after a confirmed recovery. The customer
+    // draft stores the canonical job, and a later intentional reprint needs a
+    // fresh ticket. Ambiguous failures leave the grant untouched.
+    clearCustomerLocalUploadAttempt(sessionToken, file);
+    return recovered;
+  }
+
   const storageKey = customerUploadAttemptStorageKey(sessionToken, file);
   const idempotencyKey = sessionStorage.getItem(storageKey) || crypto.randomUUID();
   sessionStorage.setItem(storageKey, idempotencyKey);
@@ -958,6 +1057,17 @@ type CustomerLocalAgentApi = { agentDeviceId: string; endpoints: string[] };
 function customerLocalUploadAttemptStorageKeys(sessionToken: string, file: File) {
   const key = customerUploadAttemptStorageKey(sessionToken, file) + ".local";
   return { idempotency: key + ".key", grant: key + ".grant" };
+}
+
+function clearCustomerLocalUploadAttempt(sessionToken: string, file: File): void {
+  const keys = customerLocalUploadAttemptStorageKeys(sessionToken, file);
+  sessionStorage.removeItem(keys.idempotency);
+  sessionStorage.removeItem(keys.grant);
+}
+
+export function hasPendingLocalCustomerUploadAttempt(sessionToken: string, file: File): boolean {
+  const keys = customerLocalUploadAttemptStorageKeys(sessionToken, file);
+  return Boolean(sessionStorage.getItem(keys.idempotency) && sessionStorage.getItem(keys.grant));
 }
 
 function createLocalUploadGrantToken(): string {
@@ -990,7 +1100,8 @@ export async function uploadCustomerDocumentLocally(
   file: File,
   localAgent: CustomerLocalAgentApi,
   batchId?: string,
-  batchGroupName?: string
+  batchGroupName?: string,
+  cloudAssistedPrintingEnabled = false
 ): Promise<UploadedPrintJob> {
   const keys = customerLocalUploadAttemptStorageKeys(sessionToken, file);
   const idempotencyKey = sessionStorage.getItem(keys.idempotency) || crypto.randomUUID();
@@ -998,57 +1109,64 @@ export async function uploadCustomerDocumentLocally(
   sessionStorage.setItem(keys.idempotency, idempotencyKey);
   sessionStorage.setItem(keys.grant, grantToken);
 
-  const digest = await crypto.subtle.digest("SHA-256", await file.arrayBuffer());
-  const sha256 = Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, "0")).join("");
-  let ticket: {
-    id: string;
-    printJobId: string;
-    jobNumber: string;
-    agentDeviceId: string;
-    expiresUtc: string;
-    completed: boolean;
-  };
+  let ticket: CustomerLocalUploadTicket;
   try {
-    ticket = await apiRequest<{
-      id: string;
-      printJobId: string;
-      jobNumber: string;
-      agentDeviceId: string;
-      expiresUtc: string;
-      completed: boolean;
-    }>("/api/v1/public/sessions/current/local-upload-tickets", {
-      method: "POST",
-      headers: {
-        "X-Print-Session": sessionToken,
-        "Idempotency-Key": idempotencyKey
-      },
-      body: JSON.stringify({
-        originalFileName: file.name,
-        sizeBytes: file.size,
-        sha256,
-        grantToken,
-        batchId: batchId ?? null,
-        batchGroupName: batchGroupName ?? null
-      })
-    });
+    ticket = await requestCustomerLocalUploadTicket(
+      sessionToken, file, batchId, batchGroupName, idempotencyKey, grantToken
+    );
   } catch (exception) {
-    if (exception instanceof ApiError && exception.status === 409 && /expired/i.test(exception.message)) {
+    if (exception instanceof ApiError && exception.status === 409 &&
+        ["local_print_agent_unavailable", "local_print_printer_unavailable", "local_upload_printer_unavailable", "batch_local_agent_mismatch"].includes(exception.code ?? "")) {
+      // These are explicit preflight rejections; the API did not issue a ticket.
       sessionStorage.removeItem(keys.idempotency);
       sessionStorage.removeItem(keys.grant);
+      throw new LocalUploadPreflightError(exception.message, exception.status, exception.code);
+    }
+    if (!(exception instanceof ApiError) || exception.status === 0) {
+      // Fetch may fail with TypeError/AbortError rather than an ApiError. The
+      // POST may nevertheless have committed; retain the key and grant so the
+      // Cloud-assisted route can retrieve and resume that exact ticket.
+      throw new LocalUploadOutcomeUnknownError(
+        "SmartPrint lost the response while preparing this upload. The original upload identity is saved; choose Cloud-assisted · HTTPS or retry this file and SmartPrint will resume the same job."
+      );
     }
     throw exception;
   }
 
-  if (ticket.agentDeviceId !== localAgent.agentDeviceId) {
-    sessionStorage.removeItem(keys.idempotency);
-    sessionStorage.removeItem(keys.grant);
-    throw new ApiError("The assigned shop computer changed. Refresh the QR session and retry.", 409);
+  if (isUncompletedLocalUploadTicketExpired(ticket.completed, ticket.expiresUtc)) {
+    // The 15-minute LAN lease has expired and the server confirms no upload was
+    // finalized. Release only this dead attempt so the customer can start fresh.
+    clearCustomerLocalUploadAttempt(sessionToken, file);
+    throw new LocalUploadPreflightError(
+      "The previous shop Wi-Fi upload attempt expired before it was confirmed. Retry the same file to start a fresh upload.",
+      409,
+      "local_upload_ticket_expired"
+    );
+  }
+
+  if (ticket.completed) {
+    // The document/job already exists. Reconcile its canonical status over the
+    // API without retransmitting bytes or requiring Cloud-assisted new uploads.
+    try {
+      const completed = await uploadCustomerLocalTicketViaCloud(
+        sessionToken, file, ticket, grantToken
+      );
+      clearCustomerLocalUploadAttempt(sessionToken, file);
+      return {
+        ...completed,
+        job: { ...completed.job, batchId: ticket.batchId ?? completed.job.batchId ?? null }
+      };
+    } catch {
+      throw new LocalUploadOutcomeUnknownError(
+        "SmartPrint has your original upload recorded. The shop connection could not refresh its status just now; retry this same file to restore the existing print request. No new upload or print job has been created."
+      );
+    }
   }
 
   const form = new FormData();
   form.append("file", file, file.name);
-  let lastError: Error | null = null;
-  for (const value of localAgent.endpoints.slice(0, 8)) {
+  if (ticket.agentDeviceId === localAgent.agentDeviceId) {
+    for (const value of localAgent.endpoints.slice(0, 8)) {
     const endpoint = isPrivateLocalAgentEndpoint(value);
     if (!endpoint) continue;
     const controller = new AbortController();
@@ -1071,29 +1189,53 @@ export async function uploadCustomerDocumentLocally(
         try { payload = JSON.parse(raw); } catch { payload = raw; }
       }
       if (!response.ok) {
-        const body = payload as { title?: string; detail?: string; message?: string } | null;
-        lastError = new ApiError(body?.detail || body?.message || body?.title || `Local upload failed (${response.status}).`, response.status);
+        // Continue to the next advertised shop address before using HTTPS recovery.
         continue;
       }
 
-      sessionStorage.removeItem(keys.idempotency);
-      sessionStorage.removeItem(keys.grant);
-      return payload as UploadedPrintJob;
-    } catch (exception) {
-      lastError = exception instanceof Error
-        ? exception
-        : new Error("Could not connect to the shop's local print computer.");
+      // A confirmed response is now represented by the canonical job in the
+      // customer batch draft. The retry-only grant can be released safely.
+      const uploaded = payload as UploadedPrintJob;
+      if (!uploaded?.job?.id || !uploaded?.document?.id) continue;
+      clearCustomerLocalUploadAttempt(sessionToken, file);
+      return {
+        ...uploaded,
+        job: { ...uploaded.job, batchId: ticket.batchId ?? uploaded.job.batchId ?? null }
+      };
+    } catch {
+      // Try the next advertised shop address, then continue over HTTPS if enabled.
     } finally {
       window.clearTimeout(timeout);
     }
+    }
   }
 
-  if (lastError instanceof ApiError && lastError.status === 409 &&
-      /expired/i.test(lastError.message)) {
-    sessionStorage.removeItem(keys.idempotency);
-    sessionStorage.removeItem(keys.grant);
+  // A LAN response can be lost after the Agent has safely staged the bytes.
+  // HTTPS recovery reconciles this exact ticket and can never create another PrintJob.
+  if (cloudAssistedPrintingEnabled) {
+    try {
+      const recovered = await uploadCustomerLocalTicketViaCloud(
+        sessionToken, file, ticket, grantToken
+      );
+      clearCustomerLocalUploadAttempt(sessionToken, file);
+      return {
+        ...recovered,
+        job: { ...recovered.job, batchId: ticket.batchId ?? recovered.job.batchId ?? null }
+      };
+    } catch (recoveryError) {
+      const detail = recoveryError instanceof ApiError
+        ? " HTTPS continuation could not be confirmed ("+recoveryError.message+")."
+        : " HTTPS continuation could not be confirmed.";
+      throw new LocalUploadOutcomeUnknownError(
+        "The shop Wi-Fi connection was interrupted."+detail+
+        " SmartPrint retained the original upload ticket and is ready to resume the same file. Select Cloud-assisted · HTTPS or retry this file in the same batch; no second print job will be created."
+      );
+    }
   }
-  throw lastError ?? new ApiError("No reachable private shop computer was found. Connect to the shop Wi-Fi and try again.", 0);
+
+  throw new LocalUploadOutcomeUnknownError(
+    "The shop Wi-Fi transfer could not be confirmed. SmartPrint retained the original upload ticket. Reconnect to the shop computer and retry the same file in this batch."
+  );
 }
 
 export function calculateCustomerQuote(sessionToken: string, jobId: string, values: {

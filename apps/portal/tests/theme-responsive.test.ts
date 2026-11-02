@@ -151,8 +151,10 @@ test("batch routing enforces local-computer ownership and preserves print-time a
   assert.match(app, /lockedPrinterOnWrongComputer/);
   assert.match(app, /Shop computer:/);
   assert.match(app, /Paper output manually confirmed by/);
-  assert.match(app, /batch_local_agent_mismatch/);
   assert.match(app, /Cloud-assisted upload is now selected/);
+  assert.match(app, /attached to its original job/);
+  assert.match(app, /resume that same upload without creating another print job/);
+  assert.match(api, /local-upload-tickets.*cloud-recovery/);
   assert.doesNotMatch(app, /aria-label=\{"Assign printer for "\+job\.jobNumber\}/);
   assert.match(api, /printerAgentName\?: string \| null/);
   assert.match(api, /outputConfirmedByName\?: string \| null/);

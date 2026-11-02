@@ -171,7 +171,8 @@ public sealed class LocalAgentApiHostedService(
     LocalAgentApiState state,
     ILogger<LocalAgentApiHostedService> logger,
     IHostApplicationLifetime hostLifetime,
-    LocalNetworkManager localNetworkManager) : IHostedService, IAsyncDisposable
+    LocalNetworkManager localNetworkManager,
+    AgentRuntimeReadiness runtimeReadiness) : IHostedService, IAsyncDisposable
 {
     private WebApplication? application;
     private CancellationTokenSource? retryLifetime;
@@ -321,7 +322,7 @@ public sealed class LocalAgentApiHostedService(
             {
                 try
                 {
-                    var credentials = credentialStore.Load();
+                    var credentials = credentialStore.LoadForCloudRequests(configuration["Agent:ApiBaseUrl"]);
                     if (credentials is null)
                     {
                         return Results.Json(new
@@ -329,26 +330,35 @@ public sealed class LocalAgentApiHostedService(
                             title = credentialStore.IsRevoked()
                                 ? "This computer's SmartPrint pairing was revoked by its shop owner."
                                 : "This computer is not paired with a print shop.",
-                            apiBaseUrl = configuration["Agent:ApiBaseUrl"]
+                            apiBaseUrl = configuration["Agent:ApiBaseUrl"],
+                            readiness = runtimeReadiness.GetSnapshot(),
+                            localUploadReady = false
                         }, statusCode: StatusCodes.Status503ServiceUnavailable);
                     }
 
+                    var readiness = runtimeReadiness.GetSnapshot();
                     return Results.Ok(new
                     {
                         agentDeviceId = credentials.AgentDeviceId,
                         protocolVersion = 1,
                         status = "LOCAL_ENDPOINT_READY",
-                        apiBaseUrl = credentials.ApiBaseUrl
+                        apiBaseUrl = credentials.ApiBaseUrl,
+                        readiness,
+                        localUploadReady = readiness.LocalUploadReady
                     });
                 }
                 catch (Exception exception) when (
-                    exception is CryptographicException or IOException or JsonException or UnauthorizedAccessException)
+                    exception is CryptographicException or IOException or JsonException or UnauthorizedAccessException or InvalidOperationException)
                 {
                     logger.LogWarning("SmartPrint local identity status is unavailable ({FailureType}).", exception.GetType().Name);
                     return Results.Json(new
                     {
-                        title = "The local agent identity is unavailable.",
-                        apiBaseUrl = configuration["Agent:ApiBaseUrl"]
+                        title = exception is InvalidOperationException
+                            ? "The saved SmartPrint API address must use HTTPS. Repair the Agent connection."
+                            : "The local agent identity is unavailable.",
+                        apiBaseUrl = configuration["Agent:ApiBaseUrl"],
+                        readiness = runtimeReadiness.GetSnapshot(),
+                        localUploadReady = false
                     }, statusCode: StatusCodes.Status503ServiceUnavailable);
                 }
             }).RequireCors("CustomerPortal");
@@ -374,7 +384,17 @@ public sealed class LocalAgentApiHostedService(
                 HttpContext context,
                 CancellationToken ct) =>
             {
-                var credentials = credentialStore.Load();
+                AgentCredentials? credentials;
+                try
+                {
+                    credentials = credentialStore.LoadForCloudRequests(configuration["Agent:ApiBaseUrl"]);
+                }
+                catch (InvalidOperationException exception)
+                {
+                    logger.LogWarning("Blocked a local preview because the saved Agent API address is not secure ({FailureType}).", exception.GetType().Name);
+                    return Results.Problem(statusCode: StatusCodes.Status503ServiceUnavailable,
+                        title: "The saved SmartPrint API address must use HTTPS. Repair the Agent connection.");
+                }
                 var grantToken = context.Request.Headers["X-Print-Preview-Grant"].FirstOrDefault();
                 if (credentials is null || string.IsNullOrWhiteSpace(grantToken) || grantToken.Length > 4096)
                     return Results.Unauthorized();
@@ -448,7 +468,17 @@ public sealed class LocalAgentApiHostedService(
                 HttpContext context,
                 CancellationToken ct) =>
             {
-                var credentials = credentialStore.Load();
+                AgentCredentials? credentials;
+                try
+                {
+                    credentials = credentialStore.LoadForCloudRequests(configuration["Agent:ApiBaseUrl"]);
+                }
+                catch (InvalidOperationException exception)
+                {
+                    logger.LogWarning("Blocked a local upload because the saved Agent API address is not secure ({FailureType}).", exception.GetType().Name);
+                    return Results.Problem(statusCode: StatusCodes.Status503ServiceUnavailable,
+                        title: "The saved SmartPrint API address must use HTTPS. Repair the Agent connection.");
+                }
                 var uploadGrant = context.Request.Headers["X-Print-Upload-Grant"].FirstOrDefault();
                 if (credentials is null || string.IsNullOrWhiteSpace(uploadGrant))
                 {
@@ -489,6 +519,13 @@ public sealed class LocalAgentApiHostedService(
                     var completedEntry = localQueueStore.Find(completedJobId);
                     if (completedEntry is null || !File.Exists(completedEntry.DocumentPath))
                     {
+                        if (string.Equals(claim.UploadResult.Document.StorageMode, "CLOUD", StringComparison.OrdinalIgnoreCase))
+                        {
+                            // HTTPS recovery already stored this ticket's exact file
+                            // in cloud storage. The normal paid-job claim can download
+                            // it later; do not ask the customer to upload it again.
+                            return Results.Ok(claim.UploadResult);
+                        }
                         return Results.Conflict(new { code = "local_upload_document_missing", message = "The API has this local upload recorded, but the original document is missing from the protected shop queue. Ask the customer to upload again." });
                     }
                     await localQueueStore.MarkLocalUploadFinalizedAsync(completedJobId, ct);
@@ -697,7 +734,7 @@ public sealed class LocalAgentApiHostedService(
 
     private sealed record LocalUploadedDocument(
         Guid Id, string OriginalFileName, string MediaType, long SizeBytes,
-        string Sha256, string PageSizesJson);
+        string Sha256, string PageSizesJson, string? StorageMode = null);
 
     private sealed record LocalDocumentPreviewAuthorizationResponse(
         string MediaType, string OriginalFileName, long SizeBytes, string Sha256);
