@@ -1777,7 +1777,7 @@ function PrintAgentPage({agents,enrollmentCode,busy,onGenerate,onRevoke,desktop,
       <div className="agent-generate-row"><span>Pairing codes are single use. Generating a new one does not revoke already paired computers.</span><button className="primary-button" disabled={busy} onClick={onGenerate}>{busy?<span className="button-spinner"/>:<><Plus size={15}/> Generate pairing code</>}</button></div>
       </>}
     </section>
-    {desktop && <ShopConnectionPanel connected={connected}/>}
+    {desktop && <ShopConnectionPanel connected={connected} localApiReady={localAgentStatus?.localApiReachable===true}/>}
     {!desktop && <section className="panel local-network-hint"><div className="local-network-mark"><Wifi size={20}/></div><div><h2>Shop connection</h2><p>Open SmartPrint on the Windows computer connected to your printers to choose and test the shop Wi-Fi.</p></div></section>}
     <section className="panel agent-device-panel">
       <div className="collection-header"><div><h2>Paired Windows computers</h2><p>Agent connection history and the number of discovered printer queues.</p></div><span className="setup-count">{agents.filter(agent=>!agent.revokedUtc).length} active</span></div>
@@ -1792,7 +1792,7 @@ function PrintAgentPage({agents,enrollmentCode,busy,onGenerate,onRevoke,desktop,
   </div>;
 }
 
-function ShopConnectionPanel({connected}:{connected:boolean}) {
+function ShopConnectionPanel({connected,localApiReady}:{connected:boolean;localApiReady:boolean}) {
   const [snapshot,setSnapshot]=useState<DesktopLocalNetworkSnapshot|null>(null);
   const [loading,setLoading]=useState(true);
   const [saving,setSaving]=useState(false);
@@ -1867,7 +1867,7 @@ function ShopConnectionPanel({connected}:{connected:boolean}) {
   const selected=snapshot?.networks.find(network=>network.id===snapshot.selectedNetworkId)??null;
   const hasSelectedNetwork=Boolean(snapshot?.selectedNetworkId && selected);
   const statusTone=verified?"green":hasSelectedNetwork||snapshot?.networks.length?"amber":"slate";
-  const statusLabel=loading?"Checking…":verified?"Phone test passed":hasSelectedNetwork?"Phone check needed":snapshot?.networks.length?"Choose connection":"No connection found";
+  const statusLabel=loading?"Checking…":connected&&!localApiReady?"Print service starting":verified?"Phone test passed":hasSelectedNetwork?"Phone check needed":snapshot?.networks.length?"Choose connection":"No connection found";
 
   return <section className="panel local-network-panel">
     <div className="local-network-heading">
@@ -1885,9 +1885,9 @@ function ShopConnectionPanel({connected}:{connected:boolean}) {
         {selected
           ? <div className="local-network-selected"><Wifi size={17}/><span><strong>{selected.displayName}</strong><small>{selected.kind} · Used for customer document uploads</small></span><Check size={17}/></div>
           : <p className="local-network-copy">Your previous connection is not available. Choose the Wi-Fi used by your customers before testing phone access.</p>}
-        {!connected?<p className="local-network-copy">Connect this computer to your shop first. The phone check will be available when setup is complete.</p>:<>
+        {!connected?<p className="local-network-copy">Connect this computer to your shop first. The phone check will be available when setup is complete.</p>:!localApiReady?<p className="local-network-copy">SmartPrint is preparing the shop connection. The phone check will be available when the print service is ready.</p>:<>
           <div className="local-network-actions">
-            <button className="primary-button" type="button" onClick={()=>void beginPhoneTest()} disabled={saving||!!test||!hasSelectedNetwork}>
+            <button className="primary-button" type="button" onClick={()=>void beginPhoneTest()} disabled={saving||!!test||!hasSelectedNetwork||!localApiReady}>
               {saving?<span className="button-spinner"/>:<><QrCode size={16}/> Test with a phone</>}
             </button>
             <button className="secondary-button" type="button" onClick={()=>void refresh()} disabled={saving}><RotateCcw size={15}/> Refresh</button>
