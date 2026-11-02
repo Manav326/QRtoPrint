@@ -96,7 +96,7 @@ public sealed class AgentLocalQueueStoreTests
     }
 
     [Fact]
-    public async Task LocalUploadCannotBeClaimedByADifferentPrinter()
+    public async Task LocalUploadCanBeReassignedToAnotherPrinterQueueOnItsAgent()
     {
         var root = CreateTemporaryDirectory();
         try
@@ -113,9 +113,12 @@ public sealed class AgentLocalQueueStoreTests
                 QueueName = "Different Windows Queue"
             };
 
-            await Assert.ThrowsAsync<InvalidDataException>(() =>
-                store.UpdateFromClaimAsync(changedAssignment, CancellationToken.None));
-            Assert.Equal("LOCAL_UPLOAD_STAGED", store.Find(upload.Id)!.State);
+            await store.UpdateFromClaimAsync(changedAssignment, CancellationToken.None);
+
+            var updated = store.Find(upload.Id)!;
+            Assert.Equal("ACK_PENDING", updated.State);
+            Assert.Equal(changedAssignment.PrinterDeviceId, updated.PrinterDeviceId);
+            Assert.Equal(changedAssignment.QueueName, updated.QueueName);
             Assert.True(bytes.AsSpan().SequenceEqual(store.ReadDocument(upload.Id)));
         }
         finally

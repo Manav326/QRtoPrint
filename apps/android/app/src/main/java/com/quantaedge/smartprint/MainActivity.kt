@@ -757,8 +757,7 @@ class MainActivity : AppCompatActivity() {
         column.addView(heading, linearParams().apply { bottomMargin = dp(16) })
 
         val quickActions = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
+            orientation = LinearLayout.VERTICAL
         }
         quickActions.addView(button("Scan document", true).apply {
             icon = getDrawable(R.drawable.ic_document_scan)
@@ -766,8 +765,8 @@ class MainActivity : AppCompatActivity() {
             iconPadding = dp(8)
             iconGravity = MaterialButton.ICON_GRAVITY_TEXT_START
             setOnClickListener { startDocumentScan() }
-        }, LinearLayout.LayoutParams(0, dp(48), 1f))
-        quickActions.addView(button("Import", false).apply {
+        }, LinearLayout.LayoutParams(-1, dp(48)))
+        quickActions.addView(button("Choose from phone", false).apply {
             icon = getDrawable(R.drawable.ic_file)
             iconTint = ColorStateList.valueOf(getColor(R.color.qp_primary))
             iconPadding = dp(8)
@@ -778,7 +777,7 @@ class MainActivity : AppCompatActivity() {
                 importFiles.launch(arrayOf("*/*"))
                 navigation.selectedItemId = FILES
             }
-        }, LinearLayout.LayoutParams(0, dp(48), 1f).apply { marginStart = dp(9) })
+        }, LinearLayout.LayoutParams(-1, dp(48)).apply { topMargin = dp(9) })
         column.addView(quickActions, linearParams())
 
         val shopCard = card().apply {
@@ -1941,7 +1940,7 @@ class MainActivity : AppCompatActivity() {
                     "https" -> if (uri.host.equals(portalHost, true)) false else { launchExternal(uri); true }
                     "upi", "tel", "mailto" -> { launchExternal(uri); true }
                     "intent" -> { launchIntent(uri.toString()); true }
-                    "http" -> !(allowedAgentUpload(uri) || allowedLocalDevelopmentEndpoint(uri))
+                    "http" -> !(allowedAgentLocalEndpoint(uri, request.method, request.requestHeaders) || allowedLocalDevelopmentEndpoint(uri))
                     "about" -> false
                     else -> true
                 }
@@ -1949,11 +1948,11 @@ class MainActivity : AppCompatActivity() {
             override fun shouldInterceptRequest(view: WebView, request: WebResourceRequest): WebResourceResponse? {
                 val uri = request.url
                 if (uri.scheme.equals("http", true) &&
-                    !allowedAgentUpload(uri) &&
+                    !allowedAgentLocalEndpoint(uri, request.method, request.requestHeaders) &&
                     !allowedLocalDevelopmentEndpoint(uri)) {
                     return WebResourceResponse(
                         "text/plain", "UTF-8", 403, "Blocked by Smart Print", emptyMap(),
-                        ByteArrayInputStream("Only the selected private-LAN development portal and paired-Agent upload endpoints are allowed over HTTP.".toByteArray())
+                        ByteArrayInputStream("Only the selected private-LAN development portal and paired-Agent status/upload endpoints are allowed over HTTP.".toByteArray())
                     )
                 }
                 return super.shouldInterceptRequest(view, request)
@@ -2015,8 +2014,13 @@ class MainActivity : AppCompatActivity() {
         return candidate.matches(Regex("^[A-Za-z0-9_-]{32}$")) && candidate == activeCode
     }
 
-    private fun allowedAgentUpload(uri: Uri): Boolean =
-        LocalAgentUploadPolicy.allows(uri.scheme.orEmpty(), uri.host.orEmpty(), uri.port, uri.path.orEmpty())
+    private fun allowedAgentLocalEndpoint(uri: Uri, method: String, headers: Map<String, String>): Boolean {
+        val preflightMethod = headers.entries.firstOrNull { it.key.equals("Access-Control-Request-Method", ignoreCase = true) }
+            ?.value
+        return LocalAgentUploadPolicy.allows(
+            uri.scheme.orEmpty(), uri.host.orEmpty(), uri.port, uri.path.orEmpty(), method, preflightMethod
+        )
+    }
 
     private fun allowedLocalDevelopmentEndpoint(uri: Uri): Boolean =
         BuildConfig.DEBUG &&
@@ -2136,22 +2140,16 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun confirmShop(link: StationQrLink) {
-        val detail = if (link.url.startsWith("http://")) {
-            "LOCAL TEST · Trusted shop Wi-Fi only"
-        } else {
-            "Secure shop session"
-        }
-        showConfirmSheet("Connect to shop?", detail, "Connect") {
-            portalHost = link.host
-            portalUrl = link.url
-            getSharedPreferences("smartprint.customer.last-shop", MODE_PRIVATE).edit()
-                .putString("portalUrl", link.url)
-                .putString("portalHost", link.host)
-                .apply()
-            toolbar.menu.findItem(SWITCH_SHOP)?.isVisible = true
-            ensureWebView().loadUrl(link.url)
-            showPrint()
-        }
+        portalHost = link.host
+        portalUrl = link.url
+        getSharedPreferences("smartprint.customer.last-shop", MODE_PRIVATE).edit()
+            .putString("portalUrl", link.url)
+            .putString("portalHost", link.host)
+            .apply()
+        toolbar.menu.findItem(SWITCH_SHOP)?.isVisible = true
+        val view = ensureWebView()
+        showPrint()
+        view.loadUrl(link.url)
     }
 
     private fun selectedChooserFiles(): List<File> = chooserSelectedFilePaths.mapNotNull { path ->

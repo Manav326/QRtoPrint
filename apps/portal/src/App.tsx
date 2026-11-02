@@ -2905,6 +2905,14 @@ function CustomerLocalConnection({localAgent,onReady}:{localAgent:CustomerLocalA
     // A private-LAN/loopback portal talking to another private-LAN Agent
     // stays within the same or a less-private address space. Chrome does not
     // need to prompt for local-network permission for this local-to-local path.
+    // Android WebView does not expose Chrome's Local Network Access permission prompt.
+    // Check the paired shop Agent as soon as the customer station session is ready.
+    if(nativeAppMode) {
+      setPermissionState("unknown");
+      void checkConnection();
+      return ()=>{checkGeneration.current++;};
+    }
+
     if(localOriginDoesNotNeedLnaPermission) {
       setPermissionState("unknown");
       return ()=>{checkGeneration.current++;};
