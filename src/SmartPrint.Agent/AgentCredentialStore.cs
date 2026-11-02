@@ -41,6 +41,27 @@ public sealed class AgentCredentialStore
         }
     }
 
+    public AgentCredentials? LoadForCloudRequests()
+    {
+        lock (sync)
+        {
+            var credentials = LoadCore();
+            if (credentials is null) return null;
+
+            // Validate before any request can attach the Agent secret. This also
+            // prevents older installations from continuing to use remote HTTP.
+            var apiUri = AgentPairing.ValidateApiBaseUrl(credentials.ApiBaseUrl);
+            var normalizedOrigin = apiUri.GetLeftPart(UriPartial.Authority);
+            if (!string.Equals(credentials.ApiBaseUrl.TrimEnd('/'), normalizedOrigin, StringComparison.OrdinalIgnoreCase))
+            {
+                credentials = credentials with { ApiBaseUrl = normalizedOrigin };
+                Save(credentials);
+            }
+
+            return credentials;
+        }
+    }
+
     private AgentCredentials? LoadCore()
     {
         if (!File.Exists(identityPath))
