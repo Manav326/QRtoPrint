@@ -6079,66 +6079,57 @@ publicApi.MapPost("/sessions/current/local-upload-tickets/{ticketId:guid}/cloud-
         .SingleOrDefaultAsync(ct);
     if (session is null) return Results.Unauthorized();
 
-    await using var transaction = await db.Database.BeginTransactionAsync(ct);
-    var lockedTickets = await db.LocalPrintUploadTickets.FromSqlInterpolated(
-        $"SELECT * FROM \"LocalPrintUploadTickets\" WHERE \"Id\" = {ticketId} AND \"TenantId\" = {session.TenantId} AND \"CustomerSessionId\" = {session.Id} FOR UPDATE")
-        .ToListAsync(ct);
-    var ticket = lockedTickets.SingleOrDefault();
-    if (ticket is null) return Results.NotFound();
+    // Preflight without holding a database lock while the customer's file is
+    // uploaded over HTTPS. A second check under row lock below resolves races.
+    var preflightTicket = await db.LocalPrintUploadTickets.AsNoTracking()
+        .SingleOrDefaultAsync(item => item.Id == ticketId &&
+                                      item.TenantId == session.TenantId &&
+                                      item.CustomerSessionId == session.Id, ct);
+    if (preflightTicket is null) return Results.NotFound();
 
-    byte[] suppliedGrantHash;
-    byte[] storedGrantHash;
-    try
-    {
-        suppliedGrantHash = Convert.FromHexString(HashOpaqueToken(rawGrant));
-        storedGrantHash = Convert.FromHexString(ticket.GrantHash);
-    }
-    catch (FormatException)
-    {
-        return Results.Unauthorized();
-    }
-    if (!CryptographicOperations.FixedTimeEquals(suppliedGrantHash, storedGrantHash))
+    var suppliedGrantHash = Convert.FromHexString(HashOpaqueToken(rawGrant));
+    var preflightGrantHash = Convert.FromHexString(preflightTicket.GrantHash);
+    if (!CryptographicOperations.FixedTimeEquals(suppliedGrantHash, preflightGrantHash))
         return Results.Unauthorized();
 
-    var existingJob = await db.PrintJobs.AsNoTracking()
-        .SingleOrDefaultAsync(item => item.Id == ticket.PrintJobId &&
-                                      item.TenantId == ticket.TenantId &&
-                                      item.CustomerSessionId == ticket.CustomerSessionId, ct);
-    var existingDocument = await db.PrintDocuments.AsNoTracking()
-        .SingleOrDefaultAsync(item => item.TenantId == ticket.TenantId &&
-                                      item.PrintJobId == ticket.PrintJobId, ct);
-    if (existingJob is not null || existingDocument is not null || ticket.CompletedUtc is not null)
+    var preflightJob = await db.PrintJobs.AsNoTracking()
+        .SingleOrDefaultAsync(item => item.Id == preflightTicket.PrintJobId &&
+                                      item.TenantId == preflightTicket.TenantId &&
+                                      item.CustomerSessionId == preflightTicket.CustomerSessionId, ct);
+    var preflightDocument = await db.PrintDocuments.AsNoTracking()
+        .SingleOrDefaultAsync(item => item.TenantId == preflightTicket.TenantId &&
+                                      item.PrintJobId == preflightTicket.PrintJobId, ct);
+    if (preflightJob is not null || preflightDocument is not null || preflightTicket.CompletedUtc is not null)
     {
-        if (existingJob is null || existingDocument is null ||
-            existingDocument.SizeBytes != ticket.SizeBytes ||
-            !string.Equals(existingDocument.Sha256, ticket.Sha256, StringComparison.OrdinalIgnoreCase))
+        if (preflightJob is null || preflightDocument is null ||
+            preflightDocument.SizeBytes != preflightTicket.SizeBytes ||
+            !string.Equals(preflightDocument.Sha256, preflightTicket.Sha256, StringComparison.OrdinalIgnoreCase))
             return Results.Conflict(new
             {
                 code = "local_upload_recovery_state_conflict",
                 message = "The original shop upload is being reconciled. Refresh this print request; do not upload it again."
             });
 
-        await transaction.CommitAsync(ct);
         return Results.Ok(new
         {
             Job = new
             {
-                existingJob.Id, existingJob.JobNumber, existingJob.Status,
-                existingJob.PageCount, existingJob.Copies, existingJob.Currency,
-                existingJob.QuotedAmountMinor, existingJob.CreatedUtc,
-                existingJob.BatchGroupName
+                preflightJob.Id, preflightJob.JobNumber, preflightJob.Status,
+                preflightJob.PageCount, preflightJob.Copies, preflightJob.Currency,
+                preflightJob.QuotedAmountMinor, preflightJob.CreatedUtc,
+                preflightJob.BatchGroupName
             },
             Document = new
             {
-                existingDocument.Id, existingDocument.OriginalFileName,
-                existingDocument.MediaType, existingDocument.SizeBytes,
-                existingDocument.Sha256, existingDocument.PageSizesJson
+                preflightDocument.Id, preflightDocument.OriginalFileName,
+                preflightDocument.MediaType, preflightDocument.SizeBytes,
+                preflightDocument.Sha256, preflightDocument.PageSizesJson
             },
             DuplicateRequest = true
         });
     }
 
-    if (ticket.CreatedUtc < now.AddHours(-maximumRecoveryAgeHours))
+    if (preflightTicket.CreatedUtc < now.AddHours(-maximumRecoveryAgeHours))
         return Results.Conflict(new
         {
             code = "local_upload_recovery_expired",
@@ -6151,65 +6142,8 @@ publicApi.MapPost("/sessions/current/local-upload-tickets/{ticketId:guid}/cloud-
     if (form.Files.Count != 1)
         return Results.BadRequest(new { code = "one_file_required", message = "Continue with one original document per print request." });
     var file = form.Files[0];
-    if (file.Length != ticket.SizeBytes || file.Length is <= 0 or > 20 * 1024 * 1024)
+    if (file.Length != preflightTicket.SizeBytes || file.Length is <= 0 or > 20 * 1024 * 1024)
         return Results.UnprocessableEntity(new { code = "local_upload_recovery_size_mismatch", message = "The selected file does not match the original upload attempt." });
-
-    var subscription = await entitlements.GetForTenantAsync(ticket.TenantId, ct);
-    if (!subscription.IsAccessActive)
-        return Results.Problem(statusCode: StatusCodes.Status403Forbidden,
-            title: "This shop's trial or subscription period is no longer active.");
-    if (!subscription.CloudAssistedPrintingEnabled)
-        return Results.Problem(statusCode: StatusCodes.Status403Forbidden,
-            title: "Secure cloud recovery is not included in this shop's current plan. The original local upload remains available.");
-    if (!PlanEntitlementRules.AllowsDocument(subscription.MaxDocumentBytes, ticket.SizeBytes))
-        return Results.Problem(statusCode: StatusCodes.Status413PayloadTooLarge,
-            title: "This document exceeds the maximum size configured for this shop's plan.");
-
-    await entitlements.AcquireQuotaLockAsync(ticket.TenantId, TenantQuotaResource.MonthlyPrintJob, ct);
-    var quota = await entitlements.CheckCapacityAsync(ticket.TenantId, TenantQuotaResource.MonthlyPrintJob, ct);
-    if (!quota.Allowed)
-        return Results.Conflict(new { code = quota.Code, message = quota.Message, current = quota.Current, maximum = quota.Maximum });
-
-    _ = await db.PrintJobs.FromSqlInterpolated(
-        $"SELECT * FROM \"PrintJobs\" WHERE \"TenantId\" = {ticket.TenantId} AND \"CustomerSessionId\" = {ticket.CustomerSessionId} AND \"BatchId\" = {ticket.BatchId} FOR UPDATE")
-        .ToListAsync(ct);
-    var batchCheckoutLocked = await db.PrintBatchPayments.AsNoTracking().AnyAsync(item =>
-        item.TenantId == ticket.TenantId &&
-        item.CustomerSessionId == ticket.CustomerSessionId &&
-        item.BatchId == ticket.BatchId &&
-        item.Status != "REJECTED", ct);
-    if (batchCheckoutLocked)
-        return Results.Conflict(new
-        {
-            code = "batch_upload_locked_after_payment_start",
-            message = "This batch already has a payment attempt. The original file cannot be added to a second checkout."
-        });
-
-    var batchJobSizes = await (
-        from batchJob in db.PrintJobs.AsNoTracking()
-        join batchDocument in db.PrintDocuments.AsNoTracking()
-            on new { batchJob.TenantId, PrintJobId = batchJob.Id }
-            equals new { batchDocument.TenantId, batchDocument.PrintJobId }
-        where batchJob.TenantId == ticket.TenantId &&
-              batchJob.CustomerSessionId == ticket.CustomerSessionId &&
-              batchJob.BatchId == ticket.BatchId
-        select batchDocument.SizeBytes).ToListAsync(ct);
-    var pendingBatchTicketSizes = await db.LocalPrintUploadTickets.AsNoTracking()
-        .Where(item => item.TenantId == ticket.TenantId &&
-                       item.CustomerSessionId == ticket.CustomerSessionId &&
-                       item.BatchId == ticket.BatchId &&
-                       item.Id != ticket.Id &&
-                       item.CompletedUtc == null)
-        .Select(item => item.SizeBytes).ToListAsync(ct);
-    if (!PrintBatchCapacityRules.CanAdd(
-        batchJobSizes.Count + pendingBatchTicketSizes.Count,
-        checked(batchJobSizes.Sum() + pendingBatchTicketSizes.Sum()),
-        ticket.SizeBytes))
-        return Results.Conflict(new
-        {
-            code = "batch_capacity_exceeded",
-            message = "This original file no longer fits within the batch limit. Contact the shop before creating another print request."
-        });
 
     var documentId = Guid.NewGuid();
     StoredDocument stored;
@@ -6217,18 +6151,14 @@ publicApi.MapPost("/sessions/current/local-upload-tickets/{ticketId:guid}/cloud-
     {
         await using var input = file.OpenReadStream();
         stored = await storage.ValidateAndStoreAsync(
-            ticket.TenantId, documentId, ticket.OriginalFileName, input, ticket.SizeBytes, ct);
+            preflightTicket.TenantId, documentId, preflightTicket.OriginalFileName, input, preflightTicket.SizeBytes, ct);
     }
     catch (DocumentValidationException exception)
     {
-        return Results.UnprocessableEntity(new
-        {
-            code = "document_not_supported",
-            message = exception.Message
-        });
+        return Results.UnprocessableEntity(new { code = "document_not_supported", message = exception.Message });
     }
 
-    if (!string.Equals(stored.Sha256, ticket.Sha256, StringComparison.OrdinalIgnoreCase))
+    if (!string.Equals(stored.Sha256, preflightTicket.Sha256, StringComparison.OrdinalIgnoreCase))
     {
         await storage.DeleteAsync(stored.StorageKey);
         return Results.UnprocessableEntity(new
@@ -6238,8 +6168,149 @@ publicApi.MapPost("/sessions/current/local-upload-tickets/{ticketId:guid}/cloud-
         });
     }
 
+    var commitAttempted = false;
     try
     {
+        await using var transaction = await db.Database.BeginTransactionAsync(ct);
+        async Task<IResult> RejectAndCleanAsync(IResult response)
+        {
+            await transaction.RollbackAsync(ct);
+            await storage.DeleteAsync(stored.StorageKey);
+            return response;
+        }
+
+        var lockedTickets = await db.LocalPrintUploadTickets.FromSqlInterpolated(
+            $"SELECT * FROM \"LocalPrintUploadTickets\" WHERE \"Id\" = {ticketId} AND \"TenantId\" = {session.TenantId} AND \"CustomerSessionId\" = {session.Id} FOR UPDATE")
+            .ToListAsync(ct);
+        var ticket = lockedTickets.SingleOrDefault();
+        if (ticket is null) return await RejectAndCleanAsync(Results.NotFound());
+
+        var stillActive = await db.CustomerPrintSessions.AsNoTracking().AnyAsync(item =>
+            item.Id == session.Id && item.TenantId == session.TenantId &&
+            item.TokenHash == tokenHash && item.Status == "Active" &&
+            item.RevokedUtc == null && item.ExpiresUtc > DateTimeOffset.UtcNow, ct);
+        if (!stillActive) return await RejectAndCleanAsync(Results.Unauthorized());
+
+        byte[] lockedGrantHash;
+        try
+        {
+            lockedGrantHash = Convert.FromHexString(ticket.GrantHash);
+        }
+        catch (FormatException)
+        {
+            return await RejectAndCleanAsync(Results.Unauthorized());
+        }
+        if (!CryptographicOperations.FixedTimeEquals(suppliedGrantHash, lockedGrantHash))
+            return await RejectAndCleanAsync(Results.Unauthorized());
+
+        var existingJob = await db.PrintJobs.AsNoTracking()
+            .SingleOrDefaultAsync(item => item.Id == ticket.PrintJobId &&
+                                          item.TenantId == ticket.TenantId &&
+                                          item.CustomerSessionId == ticket.CustomerSessionId, ct);
+        var existingDocument = await db.PrintDocuments.AsNoTracking()
+            .SingleOrDefaultAsync(item => item.TenantId == ticket.TenantId &&
+                                          item.PrintJobId == ticket.PrintJobId, ct);
+        if (existingJob is not null || existingDocument is not null || ticket.CompletedUtc is not null)
+        {
+            await transaction.RollbackAsync(ct);
+            await storage.DeleteAsync(stored.StorageKey);
+            if (existingJob is null || existingDocument is null ||
+                existingDocument.SizeBytes != ticket.SizeBytes ||
+                !string.Equals(existingDocument.Sha256, ticket.Sha256, StringComparison.OrdinalIgnoreCase))
+                return Results.Conflict(new
+                {
+                    code = "local_upload_recovery_state_conflict",
+                    message = "The original shop upload is being reconciled. Refresh this print request; do not upload it again."
+                });
+
+            return Results.Ok(new
+            {
+                Job = new
+                {
+                    existingJob.Id, existingJob.JobNumber, existingJob.Status,
+                    existingJob.PageCount, existingJob.Copies, existingJob.Currency,
+                    existingJob.QuotedAmountMinor, existingJob.CreatedUtc,
+                    existingJob.BatchGroupName
+                },
+                Document = new
+                {
+                    existingDocument.Id, existingDocument.OriginalFileName,
+                    existingDocument.MediaType, existingDocument.SizeBytes,
+                    existingDocument.Sha256, existingDocument.PageSizesJson
+                },
+                DuplicateRequest = true
+            });
+        }
+
+        var commitNow = DateTimeOffset.UtcNow;
+        if (ticket.CreatedUtc < commitNow.AddHours(-maximumRecoveryAgeHours))
+            return await RejectAndCleanAsync(Results.Conflict(new
+            {
+                code = "local_upload_recovery_expired",
+                message = "This upload attempt is too old to recover. Start a new print request; the original ticket will not be duplicated."
+            }));
+
+        var subscription = await entitlements.GetForTenantAsync(ticket.TenantId, ct);
+        if (!subscription.IsAccessActive)
+            return await RejectAndCleanAsync(Results.Problem(statusCode: StatusCodes.Status403Forbidden,
+                title: "This shop's trial or subscription period is no longer active."));
+        if (!subscription.CloudAssistedPrintingEnabled)
+            return await RejectAndCleanAsync(Results.Problem(statusCode: StatusCodes.Status403Forbidden,
+                title: "Secure cloud recovery is not included in this shop's current plan. The original local upload remains available."));
+        if (!PlanEntitlementRules.AllowsDocument(subscription.MaxDocumentBytes, ticket.SizeBytes))
+            return await RejectAndCleanAsync(Results.Problem(statusCode: StatusCodes.Status413PayloadTooLarge,
+                title: "This document exceeds the maximum size configured for this shop's plan."));
+
+        await entitlements.AcquireQuotaLockAsync(ticket.TenantId, TenantQuotaResource.MonthlyPrintJob, ct);
+        var quota = await entitlements.CheckCapacityAsync(ticket.TenantId, TenantQuotaResource.MonthlyPrintJob, ct);
+        if (!quota.Allowed)
+            return await RejectAndCleanAsync(Results.Conflict(new
+            {
+                code = quota.Code, message = quota.Message,
+                current = quota.Current, maximum = quota.Maximum
+            }));
+
+        _ = await db.PrintJobs.FromSqlInterpolated(
+            $"SELECT * FROM \"PrintJobs\" WHERE \"TenantId\" = {ticket.TenantId} AND \"CustomerSessionId\" = {ticket.CustomerSessionId} AND \"BatchId\" = {ticket.BatchId} FOR UPDATE")
+            .ToListAsync(ct);
+        var batchCheckoutLocked = await db.PrintBatchPayments.AsNoTracking().AnyAsync(item =>
+            item.TenantId == ticket.TenantId &&
+            item.CustomerSessionId == ticket.CustomerSessionId &&
+            item.BatchId == ticket.BatchId &&
+            item.Status != "REJECTED", ct);
+        if (batchCheckoutLocked)
+            return await RejectAndCleanAsync(Results.Conflict(new
+            {
+                code = "batch_upload_locked_after_payment_start",
+                message = "This batch already has a payment attempt. The original file cannot be added to a second checkout."
+            }));
+
+        var batchJobSizes = await (
+            from batchJob in db.PrintJobs.AsNoTracking()
+            join batchDocument in db.PrintDocuments.AsNoTracking()
+                on new { batchJob.TenantId, PrintJobId = batchJob.Id }
+                equals new { batchDocument.TenantId, batchDocument.PrintJobId }
+            where batchJob.TenantId == ticket.TenantId &&
+                  batchJob.CustomerSessionId == ticket.CustomerSessionId &&
+                  batchJob.BatchId == ticket.BatchId
+            select batchDocument.SizeBytes).ToListAsync(ct);
+        var pendingBatchTicketSizes = await db.LocalPrintUploadTickets.AsNoTracking()
+            .Where(item => item.TenantId == ticket.TenantId &&
+                           item.CustomerSessionId == ticket.CustomerSessionId &&
+                           item.BatchId == ticket.BatchId &&
+                           item.Id != ticket.Id &&
+                           item.CompletedUtc == null)
+            .Select(item => item.SizeBytes).ToListAsync(ct);
+        if (!PrintBatchCapacityRules.CanAdd(
+            batchJobSizes.Count + pendingBatchTicketSizes.Count,
+            checked(batchJobSizes.Sum() + pendingBatchTicketSizes.Sum()),
+            ticket.SizeBytes))
+            return await RejectAndCleanAsync(Results.Conflict(new
+            {
+                code = "batch_capacity_exceeded",
+                message = "This original file no longer fits within the batch limit. Contact the shop before creating another print request."
+            }));
+
         var job = new PrintJob
         {
             Id = ticket.PrintJobId,
@@ -6256,8 +6327,8 @@ publicApi.MapPost("/sessions/current/local-upload-tickets/{ticketId:guid}/cloud-
             Copies = 1,
             Currency = "INR",
             QuotedAmountMinor = 0,
-            CreatedUtc = now,
-            UpdatedUtc = now
+            CreatedUtc = commitNow,
+            UpdatedUtc = commitNow
         };
         var document = new PrintDocument
         {
@@ -6272,10 +6343,10 @@ publicApi.MapPost("/sessions/current/local-upload-tickets/{ticketId:guid}/cloud-
             StorageKey = stored.StorageKey,
             StorageMode = "CLOUD",
             PageSizesJson = stored.Analysis.PageSizesJson,
-            CreatedUtc = now
+            CreatedUtc = commitNow
         };
 
-        ticket.CompletedUtc = now;
+        ticket.CompletedUtc = commitNow;
         db.PrintJobs.Add(job);
         db.PrintDocuments.Add(document);
         db.PrintJobEvents.Add(new PrintJobEvent
@@ -6286,9 +6357,12 @@ publicApi.MapPost("/sessions/current/local-upload-tickets/{ticketId:guid}/cloud-
             NewStatus = job.Status,
             ActorType = "Customer",
             ReasonCode = "LOCAL_UPLOAD_RECOVERED_TO_HTTPS",
-            CreatedUtc = now
+            CreatedUtc = commitNow
         });
         await db.SaveChangesAsync(ct);
+        // Once CommitAsync is attempted, its outcome can be ambiguous. Preserve
+        // the encrypted file on that path; the next retry reconciles the same ticket.
+        commitAttempted = true;
         await transaction.CommitAsync(ct);
 
         return Results.Ok(new
@@ -6308,7 +6382,8 @@ publicApi.MapPost("/sessions/current/local-upload-tickets/{ticketId:guid}/cloud-
     }
     catch
     {
-        await storage.DeleteAsync(stored.StorageKey);
+        if (!commitAttempted)
+            await storage.DeleteAsync(stored.StorageKey);
         throw;
     }
 })
