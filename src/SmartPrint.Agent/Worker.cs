@@ -1,5 +1,6 @@
 using System.ComponentModel;
 using System.Net;
+using System.Net.NetworkInformation;
 using System.Net.Http.Json;
 using System.Security.Cryptography;
 using System.Text.Json;
