@@ -19,7 +19,7 @@ import {
   createAgentEnrollmentCode, createCustomerSession, createPrinter, createStation,
   downloadShopDocument, getCustomerJobStatus, getShopAgentDevices, getShopJobEvents, getShopPrinters, getShopPrintJobsPage, getShopPrintBatchJobs, loadShopData,
   logout, readStoredTokens, rejectShopPrintJob, rejectShopPayment, revokeAgentDevice,
-  reportCustomerBatchPayment, reportCustomerUpiPayment, renewCustomerPrintSession, getNativeCustomerPrintSession, saveNativeCustomerPrintSession, clearNativeCustomerPrintSession, resumeCustomerSession, rotateStationCode, startCustomerBatchPayment, startCustomerPayment, storeTokens,
+  reportCustomerBatchPayment, reportCustomerUpiPayment, renewCustomerPrintSession, getNativeCustomerPrintSession, saveNativeCustomerPrintSession, saveNativeCustomerShopProfile, clearNativeCustomerPrintSession, resumeCustomerSession, rotateStationCode, startCustomerBatchPayment, startCustomerPayment, storeTokens,
   updatePrinterActive, updateShopPaymentSettings, updateShopPricing,
   updateShopProfile, updateStationEnabled, uploadCustomerDocument, uploadCustomerDocumentLocally,
   verifyShopPayment, retryShopPdfExport, recordShopPrintRefund, previewShopPrintRefund, type CustomerBatchPayment, type CustomerPayment, type ShopPayment, type ShopPaymentSettings, type ShopRefund,
@@ -2717,6 +2717,7 @@ function CustomerEntry({publicCode,dark,onToggleTheme}:{publicCode:string;dark:b
       // Wait for native encrypted persistence before presenting the connected session.
       // In a regular browser the bridge is absent and this safely becomes a no-op.
       const storedNatively=await saveNativeCustomerPrintSession(publicCode,value.sessionToken);
+      await saveNativeCustomerShopProfile(publicCode,value.shop);
       if(!mounted)return;
       setResult(value);
       if(storedNatively)sessionStorage.removeItem(stationKey);
