@@ -36,7 +36,7 @@ object ImagePdfComposer {
         try {
             images.forEachIndexed { index, image ->
                 val bitmap = decodePreviewBitmap(image, MAX_DECODE_DIMENSION)
-                    ?: error("Could not read .")
+                    ?: error("Could not read selected image.")
                 try {
                     val pageWidth = if (bitmap.width > bitmap.height) 842 else 595
                     val pageHeight = if (bitmap.width > bitmap.height) 595 else 842

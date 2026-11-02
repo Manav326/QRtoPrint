@@ -8,7 +8,6 @@ import androidx.exifinterface.media.ExifInterface
 import androidx.test.core.app.ApplicationProvider
 import android.content.Context
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.io.File
@@ -63,9 +62,7 @@ class ImagePdfComposerInstrumentedTest {
                 saveAttributes()
             }
 
-            val preview = ImagePdfComposer.decodePreviewBitmap(source)
-            assertNotNull(preview)
-            preview!!
+            val preview = checkNotNull(ImagePdfComposer.decodePreviewBitmap(source))
             try {
                 assertEquals(480, preview.width)
                 assertEquals(360, preview.height)
