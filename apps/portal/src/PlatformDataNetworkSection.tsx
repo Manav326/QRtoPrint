@@ -111,6 +111,23 @@ export default function PlatformDataNetworkSection({ tokens }: { tokens: AuthTok
             </section>
           )}
 
+          <section className="platform-data-measurement-note" role="status">
+            <div className="platform-data-note-icon"><Activity size={17}/></div>
+            <div>
+              <strong>{report.telemetryHealth.failedWriteCount === 0
+                ? "No telemetry write failures observed"
+                : `${formatCount(report.telemetryHealth.failedWriteCount)} telemetry write failures observed`}</strong>
+              <p>This health counter is local to the API instance serving this request and resets when that process restarts. It has recorded {formatCount(report.telemetryHealth.successfulWriteCount)} successful writes since {new Date(report.telemetryHealth.processStartedUtc).toLocaleString()}.
+                {report.telemetryHealth.lastFailureUtc
+                  ? ` Last failure: ${new Date(report.telemetryHealth.lastFailureUtc).toLocaleString()}.`
+                  : ""}
+                {report.telemetryHealth.failedWriteCount > 0
+                  ? " Some transfer totals may be under-reported; check API logs and database health."
+                  : ""}
+              </p>
+            </div>
+          </section>
+
           <div className="platform-data-metrics-grid">
             <MetricCard
               icon={<Database size={18}/>}
@@ -122,13 +139,13 @@ export default function PlatformDataNetworkSection({ tokens }: { tokens: AuthTok
               icon={<ArrowUpFromLine size={18}/>}
               label="Cloud ingress"
               value={formatGb(report.summary.cloudIngressBytes)}
-              note="Customer upload payload accepted by cloud storage"
+              note="Customer document payload received by the cloud API; accepted, in-progress and failed attempts are separated by status"
             />
             <MetricCard
               icon={<ArrowDownToLine size={18}/>}
               label="Cloud egress"
               value={formatGb(report.summary.cloudEgressBytes)}
-              note="Cloud document payload sent to shop Agents"
+              note="Bytes written to the Agent download HTTP response; receiver-side delivery is not confirmed"
             />
             <MetricCard
               icon={<Wifi size={18}/>}
@@ -225,7 +242,7 @@ export default function PlatformDataNetworkSection({ tokens }: { tokens: AuthTok
             <div className="platform-data-note-icon"><Activity size={17}/></div>
             <div>
               <strong>Payload measurement, not wire billing</strong>
-              <p>GB uses decimal units (1 GB = 1,000,000,000 bytes). Payload bytes represent original document content. HTTP/multipart headers and TLS overhead are not added; provider-billed traffic must be reconciled against infrastructure or proxy metrics. Raw transfer events are kept for {report.retention.rawEventRetentionDays} days and then folded into durable daily aggregates. The current dashboard does not estimate paths that are not instrumented.</p>
+              <p>GB uses decimal units (1 GB = 1,000,000,000 bytes). Payload bytes represent original document content. Cloud egress measures bytes written to the API response body, not end-to-end Agent acknowledgement. HTTP/multipart headers and TLS overhead are not added; provider-billed traffic must be reconciled against infrastructure or proxy metrics. Raw transfer events are kept for {report.retention.rawEventRetentionDays} days and then folded into durable daily aggregates. The current dashboard does not estimate paths that are not instrumented.</p>
               <div className="platform-data-unmeasured">
                 <span>Not yet measured:</span>
                 {report.measurementScope.unmeasuredPaths.map(item => <small key={item}>{item}</small>)}
