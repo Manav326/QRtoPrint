@@ -215,14 +215,14 @@ public sealed class AgentControlPipeHostedService(
         {
             try
             {
-                var credentials = credentialStore.Load();
+                var credentials = credentialStore.LoadForCloudRequests(configuration["Agent:ApiBaseUrl"]);
                 var paired = credentials is not null;
                 var status = paired ? "CONNECTED" : credentialStore.IsRevoked() ? "REVOKED" : "UNPAIRED";
                 await writer.WriteLineAsync(JsonSerializer.Serialize(
                     new PipeResponse(true, credentials?.AgentDeviceId, null, true, paired, status, localAgentApiState.IsRunning, credentials?.ApiBaseUrl ?? configuration["Agent:ApiBaseUrl"]),
                     PipeJsonOptions));
             }
-            catch (Exception exception) when (exception is CryptographicException or IOException or JsonException or UnauthorizedAccessException)
+            catch (Exception exception) when (exception is CryptographicException or IOException or JsonException or UnauthorizedAccessException or InvalidOperationException)
             {
                 logger.LogWarning("SmartPrint local identity status could not be read ({FailureType}).", exception.GetType().Name);
                 await writer.WriteLineAsync(JsonSerializer.Serialize(
