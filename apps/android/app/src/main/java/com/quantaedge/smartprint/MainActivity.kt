@@ -2265,7 +2265,7 @@ class MainActivity : AppCompatActivity() {
                     "A print batch can contain up to ${PrintBatchSelectionPolicy.MAX_FILES} files."
                 }
 
-                val target = File(staging, "document-${files.size + 1}-$name")
+                val target = uniqueCustomerFolderFile(staging, name)
                 var fileBytes = 0L
                 val input = contentResolver.openInputStream(child.uri)
                     ?: error("Could not read $name from the selected folder.")
@@ -2308,6 +2308,20 @@ class MainActivity : AppCompatActivity() {
             staging.deleteRecursively()
             throw exception
         }
+    }
+
+    private fun uniqueCustomerFolderFile(directory: File, name: String): File {
+        val extensionAt = name.lastIndexOf('.')
+        val base = if (extensionAt > 0) name.substring(0, extensionAt) else name
+        val extension = if (extensionAt > 0) name.substring(extensionAt) else ""
+        var candidate = File(directory, name)
+        var index = 2
+        while (candidate.exists()) {
+            candidate = File(directory, "$base ($index)$extension")
+            index++
+            check(index < 10_000) { "Too many duplicate document names in this folder." }
+        }
+        return candidate
     }
 
     private fun selectedChooserFiles(): List<File> = chooserSelectedFilePaths.mapNotNull { path ->
