@@ -1,3 +1,4 @@
+using Microsoft.Extensions.Logging.Abstractions;
 using SmartPrint.Agent;
 
 namespace SmartPrint.Agent.Tests;
@@ -63,5 +64,25 @@ public sealed class WindowsPrinterDiscoveryTests
         Assert.Equal(
             PrinterOutputModeRules.PdfExport,
             PrinterOutputModeRules.Detect("Microsoft Print to PDF", "Microsoft Print To PDF"));
+    }
+
+    [Fact]
+    public void DiscoversTwoSeparateWindowsQueuesOnTheSamePort()
+    {
+        if (!string.Equals(
+                Environment.GetEnvironmentVariable("SMARTPRINT_RUN_MULTI_QUEUE_INTEGRATION"),
+                "1",
+                StringComparison.Ordinal))
+            return;
+
+        Assert.True(OperatingSystem.IsWindows(), "The live Windows queue discovery check requires Windows.");
+        var discovery = new WindowsPrinterDiscovery(NullLogger<WindowsPrinterDiscovery>.Instance);
+        Assert.True(discovery.TryDiscover(out var discovered), "Windows WMI printer discovery failed.");
+
+        var primary = Assert.Single(discovered.Where(item => item.QueueName == "Microsoft Print to PDF"));
+        var secondary = Assert.Single(discovered.Where(item => item.QueueName == "SmartPrint CI Secondary Queue"));
+        Assert.NotEqual(primary.QueueName, secondary.QueueName);
+        Assert.Equal(primary.DriverName, secondary.DriverName);
+        Assert.Equal(primary.PortName, secondary.PortName);
     }
 }
