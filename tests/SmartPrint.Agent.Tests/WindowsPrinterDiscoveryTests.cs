@@ -79,8 +79,8 @@ public sealed class WindowsPrinterDiscoveryTests
         var discovery = new WindowsPrinterDiscovery(NullLogger<WindowsPrinterDiscovery>.Instance);
         Assert.True(discovery.TryDiscover(out var discovered), "Windows WMI printer discovery failed.");
 
-        var primary = Assert.Single(discovered.Where(item => item.QueueName == "Microsoft Print to PDF"));
-        var secondary = Assert.Single(discovered.Where(item => item.QueueName == "SmartPrint CI Secondary Queue"));
+        var primary = Assert.Single(discovered, item => item.QueueName == "Microsoft Print to PDF");
+        var secondary = Assert.Single(discovered, item => item.QueueName == "SmartPrint CI Secondary Queue");
         Assert.NotEqual(primary.QueueName, secondary.QueueName);
         Assert.Equal(primary.DriverName, secondary.DriverName);
         Assert.Equal(primary.PortName, secondary.PortName);
