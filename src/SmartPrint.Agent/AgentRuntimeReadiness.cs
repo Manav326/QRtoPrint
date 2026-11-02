@@ -11,6 +11,7 @@ public sealed class AgentRuntimeReadiness
     private readonly object sync = new();
     private bool queueInitialized;
     private bool printWorkerRunning;
+    private bool agentIdentityReady;
     private DateTimeOffset? lastHeartbeatUtc;
     private DateTimeOffset? lastPrinterInventoryUtc;
     private DateTimeOffset? lastPrintWorkCycleUtc;
@@ -39,15 +40,23 @@ public sealed class AgentRuntimeReadiness
         lock (sync)
         {
             lastHeartbeatUtc = atUtc ?? DateTimeOffset.UtcNow;
+            agentIdentityReady = true;
             if (lastFailureCode?.StartsWith("heartbeat_", StringComparison.Ordinal) == true ||
-                lastFailureCode == "identity_unavailable")
+                lastFailureCode == "identity_unavailable" ||
+                lastFailureCode == "not_paired")
                 lastFailureCode = null;
         }
     }
 
     public void MarkHeartbeatFailure(string failureCode)
     {
-        lock (sync) lastFailureCode = failureCode;
+        lock (sync)
+        {
+            lastFailureCode = failureCode;
+            if (failureCode is "identity_unavailable" or "not_paired" or
+                "heartbeat_unauthorized" or "heartbeat_forbidden")
+                agentIdentityReady = false;
+        }
     }
 
     public void MarkPrinterInventorySuccess(int printerCount, DateTimeOffset? atUtc = null)
@@ -89,7 +98,7 @@ public sealed class AgentRuntimeReadiness
                 discoveredPrinterCount,
                 lastPrintWorkCycleUtc,
                 lastFailureCode,
-                workerReady && heartbeatFresh && inventoryFresh && discoveredPrinterCount > 0);
+                workerReady && agentIdentityReady && heartbeatFresh && inventoryFresh && discoveredPrinterCount > 0);
         }
     }
 
