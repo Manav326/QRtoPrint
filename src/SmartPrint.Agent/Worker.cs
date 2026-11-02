@@ -198,7 +198,7 @@ public sealed class Worker(
             return localNetworkManager.GetSnapshot().Endpoints;
         }
         catch (Exception exception) when (
-            exception is NetworkInformationException or InvalidOperationException or IOException)
+            exception is NetworkInformationException or InvalidOperationException or IOException or UnauthorizedAccessException or System.Security.SecurityException)
         {
             logger.LogWarning("The selected shop network could not be read ({FailureType}); the Agent heartbeat will continue without a local endpoint.", exception.GetType().Name);
             return Array.Empty<string>();
