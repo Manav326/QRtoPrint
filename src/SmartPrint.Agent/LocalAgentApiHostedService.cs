@@ -506,6 +506,7 @@ public sealed class LocalAgentApiHostedService(
 
                 long receivedPayloadBytes = 0;
                 long uploadDurationMilliseconds = 0;
+                DateTimeOffset? localUploadStartedUtc = null;
                 byte[] bytes;
                 var existing = localQueueStore.Find(claim.PrintJobId);
                 if (existing is not null)
@@ -528,7 +529,7 @@ public sealed class LocalAgentApiHostedService(
                         return Results.BadRequest(new { code = "multipart_form_required", message = "Send the document as multipart/form-data." });
                     }
 
-                    var localUploadStartedUtc = DateTimeOffset.UtcNow;
+                    localUploadStartedUtc = DateTimeOffset.UtcNow;
                     var form = await context.Request.ReadFormAsync(ct);
                     if (form.Files.Count != 1 || form.Files[0].Length != claim.SizeBytes)
                     {
@@ -590,8 +591,9 @@ public sealed class LocalAgentApiHostedService(
                             "LOCAL_AGENT");
                         await localQueueStore.EnqueueLocalUploadAsync(stagedJob, bytes, ct);
                         receivedPayloadBytes = bytes.LongLength;
-                        uploadDurationMilliseconds = Math.Max(0,
-                            (long)(DateTimeOffset.UtcNow - localUploadStartedUtc).TotalMilliseconds);
+                        uploadDurationMilliseconds = localUploadStartedUtc is { } transferStartedUtc
+                            ? Math.Max(0, (long)(DateTimeOffset.UtcNow - transferStartedUtc).TotalMilliseconds)
+                            : 0;
                     }
 
                     using var completionRequest = new HttpRequestMessage(
