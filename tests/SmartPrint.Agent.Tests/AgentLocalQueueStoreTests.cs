@@ -545,6 +545,37 @@ public sealed class AgentLocalQueueStoreTests
         }
     }
 
+    [Fact]
+    public async Task StorageSnapshotMeasuresExistingProtectedQueueFiles()
+    {
+        var root = CreateTemporaryDirectory();
+        var outputRoot = Path.Combine(root, "pdf-exports");
+        Directory.CreateDirectory(outputRoot);
+        try
+        {
+            var store = new AgentLocalQueueStore(Path.Combine(root, "queue"));
+            await store.InitializeAsync(CancellationToken.None);
+            var bytes = "Measured protected queue document"u8.ToArray();
+            var job = CreateJob(bytes);
+            var entry = await store.EnqueueAsync(job, bytes, CancellationToken.None);
+
+            var snapshot = store.GetStorageSnapshot(outputRoot);
+
+            Assert.Equal(1, snapshot.DocumentCount);
+            Assert.Equal(bytes.LongLength, snapshot.LogicalDocumentBytes);
+            Assert.True(snapshot.QueueDiskBytes > bytes.LongLength);
+            Assert.Equal(0, snapshot.OutputFileCount);
+            Assert.Equal(0, snapshot.OutputFileBytes);
+            Assert.True(File.Exists(entry.DocumentPath));
+            Assert.True(snapshot.MeasuredUtc <= DateTimeOffset.UtcNow);
+            Assert.True(snapshot.MeasuredUtc >= DateTimeOffset.UtcNow.AddMinutes(-1));
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
     private static AgentClaimedJob CreateJob(byte[] content)
     {
         var hash = Convert.ToHexString(SHA256.HashData(content)).ToLowerInvariant();
