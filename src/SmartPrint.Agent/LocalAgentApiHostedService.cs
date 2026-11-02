@@ -556,8 +556,33 @@ public sealed class LocalAgentApiHostedService(
                     }
 
                     bytes = localQueueStore.ReadDocument(claim.PrintJobId);
-                    if (string.Equals(existing.State, "LOCAL_UPLOAD_STAGED", StringComparison.OrdinalIgnoreCase))
-                        receivedPayloadBytes = existing.SizeBytes;
+                    if (string.Equals(existing.State, "LOCAL_UPLOAD_STAGED", StringComparison.OrdinalIgnoreCase) &&
+                        context.Request.HasFormContentType)
+                    {
+                        localUploadStartedUtc = DateTimeOffset.UtcNow;
+                        var retryForm = await context.Request.ReadFormAsync(ct);
+                        if (retryForm.Files.Count != 1 || retryForm.Files[0].Length != claim.SizeBytes)
+                        {
+                            return Results.Problem(statusCode: StatusCodes.Status413PayloadTooLarge,
+                                title: "The retried document size does not match the original upload ticket.");
+                        }
+
+                        await using var retryStream = retryForm.Files[0].OpenReadStream();
+                        using var retrySha = SHA256.Create();
+                        var retryHash = Convert.ToHexString(await retrySha.ComputeHashAsync(retryStream, ct)).ToLowerInvariant();
+                        if (!string.Equals(retryHash, claim.Sha256, StringComparison.OrdinalIgnoreCase))
+                        {
+                            return Results.UnprocessableEntity(new
+                            {
+                                code = "local_upload_retry_integrity_mismatch",
+                                message = "The retried document does not match the original shop upload."
+                            });
+                        }
+
+                        receivedPayloadBytes = retryForm.Files[0].Length;
+                        uploadDurationMilliseconds = Math.Max(0,
+                            (long)(DateTimeOffset.UtcNow - localUploadStartedUtc.Value).TotalMilliseconds);
+                    }
                 }
                 else
                 {
@@ -645,7 +670,8 @@ public sealed class LocalAgentApiHostedService(
                             claim.SizeBytes,
                             claim.Sha256,
                             receivedPayloadBytes,
-                            uploadDurationMilliseconds))
+                            uploadDurationMilliseconds,
+                            claim.AttemptNumber))
                     };
                     AddAgentHeaders(completionRequest, credentials, uploadGrant);
                     using var completionResponse = await client.SendAsync(completionRequest, ct);
