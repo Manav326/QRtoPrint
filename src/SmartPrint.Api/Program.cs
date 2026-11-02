@@ -3664,25 +3664,26 @@ agentApi.MapGet("/jobs/{jobId:guid}/document", async (
 
     var transferId = jobId;
     var attemptStartedUtc = DateTimeOffset.UtcNow;
-    var attemptJob = await db.PrintJobs.FromSqlInterpolated($"""
-        UPDATE "PrintJobs"
-        SET "AgentDocumentDownloadAttempts" = "AgentDocumentDownloadAttempts" + 1
-        WHERE "Id" = {jobId}
-          AND "TenantId" = {device.TenantId}
-          AND "Status" = 'LOCAL_QUEUE_CLAIMED'
-          AND "ClaimedByAgentDeviceId" = {device.Id}
-          AND "AgentLeaseExpiresUtc" > {attemptStartedUtc}
-        RETURNING *
+    var attemptNumber = await db.Database.SqlQuery<int?>($"""
+        WITH updated AS (
+            UPDATE "PrintJobs"
+            SET "AgentDocumentDownloadAttempts" = "AgentDocumentDownloadAttempts" + 1
+            WHERE "Id" = {jobId}
+              AND "TenantId" = {device.TenantId}
+              AND "Status" = 'LOCAL_QUEUE_CLAIMED'
+              AND "ClaimedByAgentDeviceId" = {device.Id}
+              AND "AgentLeaseExpiresUtc" > {attemptStartedUtc}
+            RETURNING "AgentDocumentDownloadAttempts"
+        )
+        SELECT "AgentDocumentDownloadAttempts" AS "Value"
+        FROM updated
         """)
-        .AsNoTracking()
         .SingleOrDefaultAsync(ct);
-    if (attemptJob is null)
+    if (attemptNumber is null)
     {
         content.Dispose();
         return Results.Conflict(new { code = "agent_document_lease_changed", message = "The document download lease is no longer current. Claim the job again before downloading." });
     }
-
-    var attemptNumber = attemptJob.AgentDocumentDownloadAttempts;
     var transferStartedUtc = DateTimeOffset.UtcNow;
     long payloadBytesSent = 0;
     var transferStatus = "COMPLETED";
@@ -3859,19 +3860,22 @@ agentApi.MapPost("/local-uploads/{ticketId:guid}/claim", async (
 
     if (ticket.CompletedUtc is not null)
     {
-        var completedAttemptTicket = await db.LocalPrintUploadTickets.FromSqlInterpolated($"""
-            UPDATE "LocalPrintUploadTickets"
-            SET "AgentUploadAttempts" = "AgentUploadAttempts" + 1
-            WHERE "Id" = {ticket.Id}
-              AND "TenantId" = {device.TenantId}
-              AND "AgentDeviceId" = {device.Id}
-              AND "CompletedUtc" IS NOT NULL
-            RETURNING *
+        var completedAttemptNumber = await db.Database.SqlQuery<int?>($"""
+            WITH updated AS (
+                UPDATE "LocalPrintUploadTickets"
+                SET "AgentUploadAttempts" = "AgentUploadAttempts" + 1
+                WHERE "Id" = {ticket.Id}
+                  AND "TenantId" = {device.TenantId}
+                  AND "AgentDeviceId" = {device.Id}
+                  AND "CompletedUtc" IS NOT NULL
+                RETURNING "AgentUploadAttempts"
+            )
+            SELECT "AgentUploadAttempts" AS "Value"
+            FROM updated
             """)
-            .AsNoTracking()
             .SingleOrDefaultAsync(ct);
-        if (completedAttemptTicket is null) return Results.Conflict();
-        ticket = completedAttemptTicket;
+        if (completedAttemptNumber is null) return Results.Conflict();
+        ticket.AgentUploadAttempts = completedAttemptNumber.Value;
 
         var completedJob = await db.PrintJobs.AsNoTracking()
             .SingleOrDefaultAsync(item => item.Id == ticket.PrintJobId && item.TenantId == device.TenantId, ct);
@@ -3938,22 +3942,25 @@ agentApi.MapPost("/local-uploads/{ticketId:guid}/claim", async (
         });
     }
 
-    var claimedAttemptTicket = await db.LocalPrintUploadTickets.FromSqlInterpolated($"""
-        UPDATE "LocalPrintUploadTickets"
-        SET "ClaimedUtc" = COALESCE("ClaimedUtc", {now}),
-            "ClaimLeaseExpiresUtc" = "ExpiresUtc",
-            "AgentUploadAttempts" = "AgentUploadAttempts" + 1
-        WHERE "Id" = {ticket.Id}
-          AND "TenantId" = {device.TenantId}
-          AND "AgentDeviceId" = {device.Id}
-          AND "CompletedUtc" IS NULL
-          AND "ExpiresUtc" > {now}
-        RETURNING *
+    var claimedAttemptNumber = await db.Database.SqlQuery<int?>($"""
+        WITH updated AS (
+            UPDATE "LocalPrintUploadTickets"
+            SET "ClaimedUtc" = COALESCE("ClaimedUtc", {now}),
+                "ClaimLeaseExpiresUtc" = "ExpiresUtc",
+                "AgentUploadAttempts" = "AgentUploadAttempts" + 1
+            WHERE "Id" = {ticket.Id}
+              AND "TenantId" = {device.TenantId}
+              AND "AgentDeviceId" = {device.Id}
+              AND "CompletedUtc" IS NULL
+              AND "ExpiresUtc" > {now}
+            RETURNING "AgentUploadAttempts"
+        )
+        SELECT "AgentUploadAttempts" AS "Value"
+        FROM updated
         """)
-        .AsNoTracking()
         .SingleOrDefaultAsync(ct);
-    if (claimedAttemptTicket is null) return Results.Conflict();
-    ticket = claimedAttemptTicket;
+    if (claimedAttemptNumber is null) return Results.Conflict();
+    ticket.AgentUploadAttempts = claimedAttemptNumber.Value;
 
     return Results.Ok(new
     {
