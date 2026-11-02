@@ -23,6 +23,12 @@ builder.Services.AddWindowsService(options =>
 builder.Services.AddHttpClient("cloud", client =>
 {
     client.Timeout = TimeSpan.FromSeconds(20);
+})
+.ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler
+{
+    // Agent requests carry credentials in custom headers. Do not allow an API
+    // redirect to forward those headers to another host or origin.
+    AllowAutoRedirect = false
 });
 builder.Services.AddSingleton<AgentCredentialStore>();
 builder.Services.AddSingleton<IAgentEnrollmentHandler, AgentEnrollmentHandler>();
