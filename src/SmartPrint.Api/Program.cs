@@ -3789,12 +3789,11 @@ agentApi.MapPost("/local-uploads/{ticketId:guid}/claim", async (
                        !string.IsNullOrWhiteSpace(item.QueueName))
         .Select(item => new { item.Id, item.DisplayName, item.QueueName, item.Status, item.LastSeenUtc, item.OutputMode })
         .SingleOrDefaultAsync(ct);
-    var stationPrinterIsAvailable = stationPrinter is not null &&
-        (stationPrinter.OutputMode == "PDF_EXPORT" ||
-         (stationPrinter.LastSeenUtc != null &&
-          stationPrinter.LastSeenUtc >= now.AddMinutes(-2) &&
-          (stationPrinter.Status == "Ready" || stationPrinter.Status == "Busy")));
-    if (!stationPrinterIsAvailable)
+    if (stationPrinter is null ||
+        (stationPrinter.OutputMode != "PDF_EXPORT" &&
+         (stationPrinter.LastSeenUtc is null ||
+          stationPrinter.LastSeenUtc < now.AddMinutes(-2) ||
+          (stationPrinter.Status != "Ready" && stationPrinter.Status != "Busy"))))
     {
         return Results.Conflict(new
         {
