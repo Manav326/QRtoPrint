@@ -1,6 +1,6 @@
 # SmartPrint live environment QA
 
-The manually triggered GitHub Actions workflow is:
+The GitHub Actions workflow is manually triggerable and runs a safe smoke pass when the QA harness files are first merged to main or changed on main:
 
 - Workflow file: .github/workflows/live-environment-qa.yml
 - Runner script: scripts/qa/live-environment.mjs
@@ -33,6 +33,8 @@ Create these only for the optional suites you intend to run. Use dedicated QA id
 The station secret must point to a disposable, enabled QA station. Opening that station creates one time-limited customer QR session. It does not upload a document or create a print job.
 
 ## Running the workflow
+
+A non-mutating default smoke run is automatically started when this harness first lands on main. For repeat checks, use **Actions → SmartPrint Live Environment QA → Run workflow**.
 
 1. Set SMARTPRINT_LIVE_QA_BASE_URL in repository Actions variables.
 2. Optionally configure the dedicated QA account/station secrets above.
