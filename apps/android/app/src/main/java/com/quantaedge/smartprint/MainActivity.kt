@@ -131,6 +131,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var exportArchive: ActivityResultLauncher<String>
     private lateinit var scannerLauncher: ActivityResultLauncher<Intent>
     private lateinit var documentScanLauncher: ActivityResultLauncher<IntentSenderRequest>
+    private lateinit var tabletDocumentScanLauncher: ActivityResultLauncher<Intent>
 
     override fun onCreate(savedInstanceState: Bundle?) {
         // Restore the explicit app preference before AppCompat inflates theme-aware UI.
@@ -278,6 +279,31 @@ class MainActivity : AppCompatActivity() {
                     pendingScanNeedsDestination = false
                     pendingScanDestinationPath = ""
                     toast("Could not save the scan: ${message(e)}")
+                }
+            } else {
+                pendingScanNeedsDestination = false
+                pendingScanDestinationPath = ""
+            }
+        }
+        tabletDocumentScanLauncher = registerForActivityResult(
+            ActivityResultContracts.StartActivityForResult()
+        ) { result ->
+            if (result.resultCode == RESULT_OK) {
+                val rawPath = result.data?.getStringExtra(TabletDocumentScannerActivity.EXTRA_PDF_PATH)
+                val pdf = rawPath?.let { runCatching { File(it).canonicalFile }.getOrNull() }
+                    ?.takeIf { candidate ->
+                        val safeRoot = File(cacheDir, "tablet-scans").canonicalFile.path + File.separator
+                        candidate.isFile && candidate.path.startsWith(safeRoot) &&
+                            candidate.extension.equals("pdf", true)
+                    }
+                if (pdf == null) {
+                    pendingScanNeedsDestination = false
+                    pendingScanDestinationPath = ""
+                    toast("The tablet scanner did not return a valid PDF.")
+                } else if (pendingScanNeedsDestination) {
+                    showCameraScanDestinationPicker(pdf)
+                } else {
+                    saveCameraScan(pdf, pendingScanDestinationPath)
                 }
             } else {
                 pendingScanNeedsDestination = false
@@ -2237,6 +2263,10 @@ class MainActivity : AppCompatActivity() {
     private fun startDocumentScan(destinationPath: String? = null) {
         pendingScanNeedsDestination = destinationPath == null
         pendingScanDestinationPath = destinationPath.orEmpty()
+        if (ResponsiveLayoutPolicy.useCameraXDocumentScanner(resources.configuration.screenWidthDp)) {
+            tabletDocumentScanLauncher.launch(Intent(this, TabletDocumentScannerActivity::class.java))
+            return
+        }
         val options = GmsDocumentScannerOptions.Builder()
             .setGalleryImportAllowed(true)
             .setPageLimit(50)
@@ -2328,6 +2358,94 @@ class MainActivity : AppCompatActivity() {
             toast("Could not save the scan: ${message(error)}")
             showScanDestinationPicker(scan)
         }
+    }
+
+    private fun showCameraScanDestinationPicker(pdf: File) {
+        val (dialog, root) = sheetRoot(
+            "Save scanned document",
+            "Choose where this multi-page scan should stay in My Files."
+        )
+        root.addView(button("My Files", true).apply {
+            minHeight = dp(46)
+            setOnClickListener { dialog.dismiss(); saveCameraScan(pdf, "") }
+        }, linearParams().apply { bottomMargin = dp(7) })
+        root.addView(button("Create a new folder", false).apply {
+            minHeight = dp(42)
+            setOnClickListener {
+                nameDialog("New folder for this scan", "") { name ->
+                    try {
+                        val folder = store.createFolder("", name)
+                        dialog.dismiss()
+                        saveCameraScan(pdf, store.pathOf(folder))
+                    } catch (error: Exception) {
+                        toast("Folder not created: " + message(error))
+                    }
+                }
+            }
+        }, linearParams().apply { bottomMargin = dp(8) })
+        val folders = store.root.walkTopDown()
+            .filter { it.isDirectory && it.canonicalPath != store.root.canonicalPath }
+            .sortedBy { runCatching { store.pathOf(it).lowercase(Locale.ROOT) }.getOrDefault(it.name.lowercase(Locale.ROOT)) }
+            .toList()
+        if (folders.isNotEmpty()) {
+            root.addView(text("Existing folders", 12, R.color.qp_muted, true)
+                .apply { setPadding(dp(2), dp(4), 0, dp(7)) })
+            val scroll = ScrollView(this)
+            val list = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+            folders.forEach { folder ->
+                val path = store.pathOf(folder)
+                val label = "My Files  ›  " + path.replace("/", "  ›  ")
+                list.addView(button(label, false).apply {
+                    minHeight = dp(44)
+                    gravity = Gravity.START or Gravity.CENTER_VERTICAL
+                    setOnClickListener { dialog.dismiss(); saveCameraScan(pdf, path) }
+                }, linearParams().apply { bottomMargin = dp(5) })
+            }
+            scroll.addView(list)
+            root.addView(scroll, LinearLayout.LayoutParams(-1, dp(220)))
+        }
+        root.addView(button("Discard scan", false).apply {
+            minHeight = dp(40)
+            setOnClickListener {
+                dialog.dismiss()
+                discardCameraScan(pdf)
+                pendingScanNeedsDestination = false
+                pendingScanDestinationPath = ""
+                toast("Scan discarded.")
+            }
+        }, linearParams().apply { topMargin = dp(8) })
+        dialog.show()
+    }
+
+    private fun saveCameraScan(pdf: File, destinationPath: String) {
+        try {
+            val destination = store.folder(destinationPath)
+            val safeRoot = File(cacheDir, "tablet-scans").canonicalFile.path + File.separator
+            val source = pdf.canonicalFile
+            require(source.path.startsWith(safeRoot) && source.isFile) {
+                "The temporary scan file is no longer available."
+            }
+            val saved = FileInputStream(source).use {
+                store.importFile(it, "Scanned document.pdf", destinationPath)
+            }
+            discardCameraScan(source)
+            pendingScanNeedsDestination = false
+            pendingScanDestinationPath = ""
+            folderPath = store.pathOf(destination)
+            showFiles()
+            val location = if (destinationPath.isBlank()) "My Files"
+                else "My Files / " + destinationPath.replace("/", " / ")
+            toast("Saved " + saved.name + " in " + location + ".")
+        } catch (error: Exception) {
+            toast("Could not save the scan: " + message(error))
+            showCameraScanDestinationPicker(pdf)
+        }
+    }
+
+    private fun discardCameraScan(pdf: File) {
+        val safeRoot = File(cacheDir, "tablet-scans").canonicalFile.path + File.separator
+        val parent = runCatching { pdf.canonicalFile.parentFile }.getOrNull() ?: return
+        if (parent.path.startsWith(safeRoot)) parent.deleteRecursively()
     }
 
     private fun confirmShop(link: StationQrLink) {
