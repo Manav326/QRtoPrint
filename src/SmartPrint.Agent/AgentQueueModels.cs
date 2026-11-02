@@ -38,6 +38,14 @@ public sealed record LocalPrintUploadCompletionRequest(
     long ReceivedBytes = 0,
     long DurationMilliseconds = 0);
 
+public sealed record AgentQueueStorageSnapshot(
+    long DocumentCount,
+    long LogicalDocumentBytes,
+    long QueueDiskBytes,
+    long OutputFileCount,
+    long OutputFileBytes,
+    DateTimeOffset MeasuredUtc);
+
 public sealed record AgentLocalQueueEntry(
     Guid JobId,
     string JobNumber,

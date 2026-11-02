@@ -104,6 +104,16 @@ public sealed class Worker(
             return;
         }
 
+        AgentQueueStorageSnapshot? storageSnapshot = null;
+        try
+        {
+            storageSnapshot = localQueueStore.GetStorageSnapshot(pdfExportDirectory);
+        }
+        catch (Exception exception)
+        {
+            logger.LogWarning(exception, "Could not measure the protected local queue storage; heartbeat will continue without a storage snapshot.");
+        }
+
         using var client = httpClientFactory.CreateClient("cloud");
         client.BaseAddress = new Uri(credentials.ApiBaseUrl.TrimEnd('/') + "/");
         using var heartbeat = await SendAgentRequestAsync(
@@ -114,7 +124,8 @@ public sealed class Worker(
             {
                 version = typeof(Worker).Assembly.GetName().Version?.ToString() ?? "1.0.0",
                 operatingSystem = Environment.OSVersion.VersionString,
-                localEndpoints = GetLocalEndpointsForHeartbeat()
+                localEndpoints = GetLocalEndpointsForHeartbeat(),
+                storageSnapshot
             },
             cancellationToken);
 

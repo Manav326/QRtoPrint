@@ -33,6 +33,7 @@ public sealed class SmartPrintDbContext(DbContextOptions<SmartPrintDbContext> op
     public DbSet<LocalPrintUploadTicket> LocalPrintUploadTickets => Set<LocalPrintUploadTicket>();
     public DbSet<PrintJobEvent> PrintJobEvents => Set<PrintJobEvent>();
     public DbSet<DataTransferEvent> DataTransferEvents => Set<DataTransferEvent>();
+    public DbSet<DataTransferDailyAggregate> DataTransferDailyAggregates => Set<DataTransferDailyAggregate>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -532,5 +533,22 @@ public sealed class SmartPrintDbContext(DbContextOptions<SmartPrintDbContext> op
                 .HasForeignKey(x => x.TenantId)
                 .OnDelete(DeleteBehavior.Cascade);
         });
+
+        modelBuilder.Entity<DataTransferDailyAggregate>(entity =>
+        {
+            entity.ToTable("DataTransferDailyAggregates", table =>
+                table.HasCheckConstraint(
+                    "CK_DataTransferDailyAggregates_NonNegativeMetrics",
+                    "\"TransferCount\" >= 0 AND \"PayloadBytes\" >= 0 AND (\"NetworkBytes\" IS NULL OR \"NetworkBytes\" >= 0) AND \"TotalDurationMilliseconds\" >= 0 AND \"DurationSampleCount\" >= 0"));
+            entity.HasKey(x => new { x.UtcDate, x.TenantId, x.Channel, x.Direction, x.Status });
+            entity.Property(x => x.UtcDate).HasColumnType("date");
+            entity.Property(x => x.Channel).HasMaxLength(64).IsRequired();
+            entity.Property(x => x.Direction).HasMaxLength(24).IsRequired();
+            entity.Property(x => x.Status).HasMaxLength(24).IsRequired();
+            entity.HasIndex(x => x.UtcDate);
+            entity.HasIndex(x => new { x.TenantId, x.UtcDate });
+            entity.HasOne<Tenant>().WithMany()
+                .HasForeignKey(x => x.TenantId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
     }
-}

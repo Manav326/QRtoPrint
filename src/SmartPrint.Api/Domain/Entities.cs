@@ -45,6 +45,8 @@ public sealed class PlatformOperationalSettings
     public int StaleRefreshTokenRetentionDays { get; set; } = 30;
     public int ApiRetentionSweepHours { get; set; } = 24;
     public int AgentRetentionSweepHours { get; set; } = 6;
+    public int DataTransferRawRetentionDays { get; set; } = 90;
+    public DateTimeOffset DataTransferMeasurementStartedUtc { get; set; } = DateTimeOffset.UtcNow;
     public bool AllowPaidJobClaimsWhenSuspended { get; set; } = true;
     public Guid? UpdatedByUserId { get; set; }
     public DateTimeOffset UpdatedUtc { get; set; } = DateTimeOffset.UtcNow;
@@ -336,6 +338,20 @@ public sealed class DataTransferEvent
     public DateTimeOffset CreatedUtc { get; set; } = DateTimeOffset.UtcNow;
 }
 
+public sealed class DataTransferDailyAggregate
+{
+    public DateOnly UtcDate { get; set; }
+    public Guid TenantId { get; set; }
+    public string Channel { get; set; } = string.Empty;
+    public string Direction { get; set; } = string.Empty;
+    public string Status { get; set; } = string.Empty;
+    public long TransferCount { get; set; }
+    public long PayloadBytes { get; set; }
+    public long? NetworkBytes { get; set; }
+    public long TotalDurationMilliseconds { get; set; }
+    public long DurationSampleCount { get; set; }
+}
+
 public sealed class PrintJobEvent
 {
     public Guid Id { get; set; } = Guid.NewGuid();
@@ -362,6 +378,12 @@ public sealed class AgentDevice
     public DateTimeOffset CreatedUtc { get; set; } = DateTimeOffset.UtcNow;
     public DateTimeOffset? LastSeenUtc { get; set; }
     public DateTimeOffset? RevokedUtc { get; set; }
+    public long? LocalQueueDocumentCount { get; set; }
+    public long? LocalQueueLogicalBytes { get; set; }
+    public long? LocalQueueDiskBytes { get; set; }
+    public long? LocalOutputFileCount { get; set; }
+    public long? LocalOutputFileBytes { get; set; }
+    public DateTimeOffset? LocalStorageMeasuredUtc { get; set; }
 }
 
 public sealed class AgentEnrollmentCode
