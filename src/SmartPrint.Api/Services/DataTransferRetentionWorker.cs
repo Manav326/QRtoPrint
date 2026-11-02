@@ -24,12 +24,12 @@ public sealed class DataTransferRetentionWorker(
     {
         try
         {
-            var moved = await SweepOnceAsync(cancellationToken);
-            if (moved > 0)
+            var aggregateUpserts = await SweepOnceAsync(cancellationToken);
+            if (aggregateUpserts > 0)
             {
                 logger.LogInformation(
-                    "Rolled {EventCount} raw document-transfer events into durable daily aggregates.",
-                    moved);
+                    "Rolled {AggregateUpsertCount} durable daily aggregate upserts for expired transfer events.",
+                    aggregateUpserts);
             }
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
@@ -62,7 +62,7 @@ public sealed class DataTransferRetentionWorker(
                 .SetProperty(item => item.MeasurementSource, "AGENT_UPLOAD_ATTEMPT_TIMED_OUT"), cancellationToken);
 
         var cutoffUtc = now.AddDays(-retentionDays);
-        long rolledUpGroups = 0;
+        long aggregateUpserts = 0;
 
         while (!cancellationToken.IsCancellationRequested)
         {
@@ -133,9 +133,9 @@ public sealed class DataTransferRetentionWorker(
             if (affected <= 0)
                 break;
 
-            rolledUpGroups += affected;
+            aggregateUpserts += affected;
         }
 
-        return rolledUpGroups;
+        return aggregateUpserts;
     }
 }
