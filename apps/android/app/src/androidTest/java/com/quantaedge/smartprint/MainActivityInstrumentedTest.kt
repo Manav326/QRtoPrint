@@ -36,7 +36,7 @@ class MainActivityInstrumentedTest {
         // Click the actual BottomNavigationItemView, not its non-clickable label child.
         // The explicit screen assertion prevents a later "New folder" failure from
         // hiding a navigation-selection failure.
-        onView(withId(2)).perform(click())
+        onView(withContentDescription("My Files")).perform(click())
         onView(withText("New folder")).check(matches(isDisplayed()))
     }
 
@@ -332,7 +332,7 @@ class MainActivityInstrumentedTest {
     fun scanDestinationUsesFocusedQrEntry() {
         ActivityScenario.launch(MainActivity::class.java).use {
             // Tap the accessible navigation item itself, not its non-clickable label child.
-            onView(withId(3)).perform(click())
+            onView(withContentDescription("Print at a shop")).perform(click())
             onView(withText("Connect to a shop")).check(matches(isDisplayed()))
             onView(withText("Scan QR code")).check(matches(isDisplayed()))
             onView(withText("Open My Files")).check(matches(isDisplayed()))
@@ -345,7 +345,7 @@ class MainActivityInstrumentedTest {
         CustomerAccountStore(context).clear()
         ActivityScenario.launch(MainActivity::class.java).use {
             val label = com.google.android.material.R.id.navigation_bar_item_small_label_view
-            onView(withId(4)).perform(click())
+            onView(withContentDescription("Activity")).perform(click())
             onView(withContentDescription("Account")).perform(click())
             onView(withText("Guest access is ready")).check(matches(isDisplayed()))
             androidx.test.espresso.Espresso.pressBack()
@@ -357,7 +357,7 @@ class MainActivityInstrumentedTest {
     @Test
     fun systemBackFromPrintTabReturnsHome() {
         ActivityScenario.launch(MainActivity::class.java).use {
-            onView(withId(3)).perform(click())
+            onView(withContentDescription("Print at a shop")).perform(click())
             onView(withText("Connect to a shop")).check(matches(isDisplayed()))
             androidx.test.espresso.Espresso.pressBack()
             onView(withText("Your space")).check(matches(isDisplayed()))
