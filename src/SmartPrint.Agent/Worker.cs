@@ -187,24 +187,8 @@ public sealed class Worker(
         }
     }
 
-    private AgentCredentials? LoadSecureCredentials()
-    {
-        var credentials = credentialStore.Load();
-        if (credentials is null) return null;
-
-        // Reject legacy remote HTTP pairings before any request can attach the
-        // Agent secret. Only HTTPS is accepted for remote API hosts; loopback
-        // HTTP remains available for explicitly local development.
-        var validatedApiUri = AgentPairing.ValidateApiBaseUrl(credentials.ApiBaseUrl);
-        var normalizedApiOrigin = validatedApiUri.GetLeftPart(UriPartial.Authority);
-        if (!string.Equals(credentials.ApiBaseUrl.TrimEnd('/'), normalizedApiOrigin, StringComparison.OrdinalIgnoreCase))
-        {
-            credentials = credentials with { ApiBaseUrl = normalizedApiOrigin };
-            credentialStore.Save(credentials);
-        }
-
-        return credentials;
-    }
+    private AgentCredentials? LoadSecureCredentials() =>
+        credentialStore.LoadForCloudRequests();
 
     private IReadOnlyList<string> GetLocalEndpointsForHeartbeat()
     {
