@@ -2735,6 +2735,7 @@ function CustomerLocalConnection({localAgent,onReady}:{localAgent:CustomerLocalA
   const [permissionState,setPermissionState]=useState<PermissionState|"unknown">("unknown");
   const [checkStatus,setCheckStatus]=useState<LocalAgentCheckStatus>("idle");
   const [message,setMessage]=useState("");
+  const checkGeneration=useRef(0);
   const securePortalUrl=buildSecureLocalPortalUrl();
   const localOriginDoesNotNeedLnaPermission=isLocalOrLoopbackPortalOrigin(window.location.hostname);
 
@@ -2747,6 +2748,7 @@ function CustomerLocalConnection({localAgent,onReady}:{localAgent:CustomerLocalA
   }
 
   async function checkConnection() {
+    const generation=++checkGeneration.current;
     if(!localAgent)return;
     if(!window.isSecureContext) {
       requireSecureContext();
@@ -2786,6 +2788,7 @@ function CustomerLocalConnection({localAgent,onReady}:{localAgent:CustomerLocalA
           signal:controller.signal,
           targetAddressSpace:"local"
         } as RequestInit & {targetAddressSpace:"local"});
+        if(generation!==checkGeneration.current)return;
         if(!response.ok)continue;
 
         const status=await response.json() as {
@@ -2793,6 +2796,7 @@ function CustomerLocalConnection({localAgent,onReady}:{localAgent:CustomerLocalA
           protocolVersion?:number;
           status?:string;
         };
+        if(generation!==checkGeneration.current)return;
         if(status.agentDeviceId===localAgent.agentDeviceId &&
            status.protocolVersion===1 &&
            status.status==="LOCAL_ENDPOINT_READY") {
@@ -2808,6 +2812,7 @@ function CustomerLocalConnection({localAgent,onReady}:{localAgent:CustomerLocalA
       }
     }
 
+    if(generation!==checkGeneration.current)return;
     setCheckStatus("unavailable");
     onReady(false);
     setMessage(nativeAppMode ? "Shop offline · Cloud upload available." : validEndpointCount===0
@@ -2816,6 +2821,8 @@ function CustomerLocalConnection({localAgent,onReady}:{localAgent:CustomerLocalA
   }
 
   useEffect(()=>{
+    // Invalidate an older request immediately when the shop endpoint list changes.
+    checkGeneration.current++;
     if(!localAgent?.endpoints.length) {
       onReady(false);
       setCheckStatus("idle");
