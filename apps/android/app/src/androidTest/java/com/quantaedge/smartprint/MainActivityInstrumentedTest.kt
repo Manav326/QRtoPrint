@@ -16,6 +16,8 @@ import androidx.test.espresso.action.ViewActions.closeSoftKeyboard
 import androidx.test.espresso.action.ViewActions.replaceText
 import androidx.test.espresso.assertion.ViewAssertions.matches
 import androidx.test.espresso.matcher.ViewMatchers.isDisplayed
+import androidx.test.espresso.matcher.ViewMatchers.isAssignableFrom
+import com.google.android.material.navigation.NavigationBarItemView
 import androidx.test.espresso.matcher.ViewMatchers.withId
 import androidx.test.espresso.matcher.ViewMatchers.withContentDescription
 import androidx.test.espresso.matcher.ViewMatchers.withHint
@@ -32,11 +34,18 @@ import org.junit.Assert.assertTrue
 
 @RunWith(AndroidJUnit4::class)
 class MainActivityInstrumentedTest {
+    private fun clickNavigationItem(description: String) {
+        onView(allOf(
+            withContentDescription(description),
+            isAssignableFrom(NavigationBarItemView::class.java)
+        )).perform(click())
+    }
+
     private fun openFilesTab() {
         // Click the actual BottomNavigationItemView, not its non-clickable label child.
         // The explicit screen assertion prevents a later "New folder" failure from
         // hiding a navigation-selection failure.
-        onView(withContentDescription("My Files")).perform(click())
+        clickNavigationItem("My Files")
         onView(withText("New folder")).check(matches(isDisplayed()))
     }
 
@@ -332,7 +341,7 @@ class MainActivityInstrumentedTest {
     fun scanDestinationUsesFocusedQrEntry() {
         ActivityScenario.launch(MainActivity::class.java).use {
             // Tap the accessible navigation item itself, not its non-clickable label child.
-            onView(withContentDescription("Print at a shop")).perform(click())
+            clickNavigationItem("Print at a shop")
             onView(withText("Connect to a shop")).check(matches(isDisplayed()))
             onView(withText("Scan QR code")).check(matches(isDisplayed()))
             onView(withText("Open My Files")).check(matches(isDisplayed()))
@@ -345,7 +354,7 @@ class MainActivityInstrumentedTest {
         CustomerAccountStore(context).clear()
         ActivityScenario.launch(MainActivity::class.java).use {
             val label = com.google.android.material.R.id.navigation_bar_item_small_label_view
-            onView(withContentDescription("Activity")).perform(click())
+            clickNavigationItem("Activity")
             onView(withContentDescription("Account")).perform(click())
             onView(withText("Guest access is ready")).check(matches(isDisplayed()))
             androidx.test.espresso.Espresso.pressBack()
@@ -357,7 +366,7 @@ class MainActivityInstrumentedTest {
     @Test
     fun systemBackFromPrintTabReturnsHome() {
         ActivityScenario.launch(MainActivity::class.java).use {
-            onView(withContentDescription("Print at a shop")).perform(click())
+            clickNavigationItem("Print at a shop")
             onView(withText("Connect to a shop")).check(matches(isDisplayed()))
             androidx.test.espresso.Espresso.pressBack()
             onView(withText("Your space")).check(matches(isDisplayed()))
