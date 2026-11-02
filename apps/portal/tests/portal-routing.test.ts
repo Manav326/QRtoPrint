@@ -32,18 +32,22 @@ test("station route remains separate from admin and shop scopes", () => {
   });
 });
 
-test("Android customer station automatically checks the paired Agent and keeps phone imports inside My Files", () => {
+test("Android customer station keeps the shared print page and offers native local-network permission and phone files", () => {
   const appSource = readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8");
   const androidSource = readFileSync(
     new URL("../../android/app/src/main/java/com/quantaedge/smartprint/MainActivity.kt", import.meta.url),
     "utf8"
   );
 
-  assert.match(appSource, /if\(nativeAppMode\)\s*\{\s*setPermissionState\("unknown"\);\s*void checkConnection\(\);/);
   assert.match(appSource, /function CustomerPrintFlow\(/);
+  assert.match(appSource, /requestSmartPrintNativeLocalNetworkAccess/);
+  assert.match(appSource, /Tap Check Wi-Fi to connect to this shop/);
   assert.match(androidSource, /override fun onShowFileChooser\([\s\S]*?showPicker\(\)/);
-  assert.match(androidSource, /button\("Choose from phone"/);
-  assert.match(androidSource, /importFiles\.launch\(arrayOf\("\*\/\*"\)\)/);
+  assert.match(androidSource, /text\("SmartPrint My Files"/);
+  assert.match(androidSource, /button\("Browse phone"/);
+  assert.match(androidSource, /deliverPhoneDocuments\(uris: List<Uri>\)/);
+  assert.match(androidSource, /callback\.onReceiveValue\(selected\.toTypedArray\(\)\)/);
+  assert.match(androidSource, /requestLocalNetworkAccess\(replyProxy: JavaScriptReplyProxy\)/);
 });
 
 test("admin and shop browser credentials use independent session keys", () => {
