@@ -72,7 +72,28 @@ public sealed class AgentRuntimeReadinessTests
 
         var snapshot = readiness.GetSnapshot(now);
 
-        Assert.False(snapshot.PrinterInventoryFresh is false);
+        Assert.True(snapshot.PrinterInventoryFresh);
         Assert.False(snapshot.LocalUploadReady);
     }
 }
+
+    [Theory]
+    [InlineData("not_paired")]
+    [InlineData("identity_unavailable")]
+    [InlineData("heartbeat_unauthorized")]
+    [InlineData("heartbeat_forbidden")]
+    public void CriticalAgentIdentityFailureImmediatelyDisablesLocalUpload(string failureCode)
+    {
+        var now = DateTimeOffset.UtcNow;
+        var readiness = new AgentRuntimeReadiness();
+        readiness.SetQueueInitialized(true);
+        readiness.SetPrintWorkerRunning(true);
+        readiness.MarkHeartbeatSuccess(now);
+        readiness.MarkPrinterInventorySuccess(1, now);
+
+        Assert.True(readiness.GetSnapshot(now).LocalUploadReady);
+
+        readiness.MarkHeartbeatFailure(failureCode);
+
+        Assert.False(readiness.GetSnapshot(now).LocalUploadReady);
+    }
