@@ -41,16 +41,28 @@ public sealed class AgentCredentialStore
         }
     }
 
-    public AgentCredentials? LoadForCloudRequests()
+    public AgentCredentials? LoadForCloudRequests(string? configuredApiBaseUrl = null)
     {
         lock (sync)
         {
             var credentials = LoadCore();
             if (credentials is null) return null;
 
-            // Validate before any request can attach the Agent secret. This also
-            // prevents older installations from continuing to use remote HTTP.
-            var apiUri = AgentPairing.ValidateApiBaseUrl(credentials.ApiBaseUrl);
+            // Validate before any request can attach the Agent secret. Older
+            // installations may have a remote HTTP origin saved; migrate that
+            // identity only to the HTTPS origin configured by the signed installer.
+            Uri apiUri;
+            try
+            {
+                apiUri = AgentPairing.ValidateApiBaseUrl(credentials.ApiBaseUrl);
+            }
+            catch (InvalidOperationException) when (!string.IsNullOrWhiteSpace(configuredApiBaseUrl))
+            {
+                apiUri = AgentPairing.ValidateApiBaseUrl(configuredApiBaseUrl);
+                if (apiUri.Scheme != Uri.UriSchemeHttps && !apiUri.IsLoopback)
+                    throw;
+            }
+
             var normalizedOrigin = apiUri.GetLeftPart(UriPartial.Authority);
             if (!string.Equals(credentials.ApiBaseUrl.TrimEnd('/'), normalizedOrigin, StringComparison.OrdinalIgnoreCase))
             {
