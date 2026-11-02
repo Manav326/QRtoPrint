@@ -6,6 +6,7 @@ import {
 } from "lucide-react";
 import QRCode from "react-qr-code";
 import { shouldBlockBatchCheckoutForExpiredQuote } from "./batch-checkout-state";
+import { resolveCustomerUploadMode } from "./local-upload-routing";
 import AuthScreen from "./AuthScreen";
 import PublicLandingPage from "./PublicLandingPage";
 import QrStationPrintDocument from "./QrStationPrintDocument";
@@ -3193,17 +3194,18 @@ function CustomerPrintFlow({publicCode,sessionToken,paymentOptions,localAgent,lo
   const [busy,setBusy]=useState(false);
   const [error,setError]=useState("");
   const [uploadMode,setUploadMode]=useState<"LOCAL"|"CLOUD">(
-    cloudAssistedPrintingEnabled ? "CLOUD" : (localAgent?.endpoints.length ? "LOCAL" : "CLOUD")
+    localAgent?.endpoints.length ? "LOCAL" : "CLOUD"
   );
+  const [uploadModeManuallySelected,setUploadModeManuallySelected]=useState(false);
 
   useEffect(()=>{
-    const hasLocalEndpoint=Boolean(localAgent?.endpoints?.length);
-    if(uploadMode==="LOCAL"&&!hasLocalEndpoint) {
-      setUploadMode("CLOUD");
-    } else if(uploadMode==="CLOUD"&&!cloudAssistedPrintingEnabled&&hasLocalEndpoint) {
-      setUploadMode("LOCAL");
-    }
-  },[cloudAssistedPrintingEnabled,localAgent?.endpoints.join("|"),uploadMode]);
+    setUploadMode(current=>resolveCustomerUploadMode(
+      current,
+      Boolean(localAgent?.endpoints?.length),
+      cloudAssistedPrintingEnabled,
+      uploadModeManuallySelected
+    ));
+  },[cloudAssistedPrintingEnabled,localAgent?.endpoints.join("|"),uploadModeManuallySelected]);
 
   const customerUploadUnavailable = !cloudAssistedPrintingEnabled && !localAgent?.endpoints.length;
 
@@ -3367,7 +3369,7 @@ function CustomerPrintFlow({publicCode,sessionToken,paymentOptions,localAgent,lo
       const localUploadNeedsCloud=uploadMode==="LOCAL"&&exception instanceof ApiError&&
         ["local_print_printer_unavailable","local_upload_printer_unavailable","local_print_agent_unavailable","batch_local_agent_mismatch"].includes(exception.code??"");
       const canFallbackToCloud=localUploadNeedsCloud&&cloudAssistedPrintingEnabled;
-      if(canFallbackToCloud)setUploadMode("CLOUD");
+      if(canFallbackToCloud){setUploadModeManuallySelected(true);setUploadMode("CLOUD");}
       setError(localUploadNeedsCloud
         ?canFallbackToCloud
           ?exception instanceof ApiError&&exception.code==="batch_local_agent_mismatch"
@@ -3758,8 +3760,8 @@ function CustomerPrintFlow({publicCode,sessionToken,paymentOptions,localAgent,lo
   return <section className="customer-print-flow">
     <div className="customer-flow-heading"><div><span>STEP 1</span><h2>{nativeAppMode?"Add files":"Add your documents"}</h2></div><span className="upload-limit">PDF, JPG or PNG · Up to 20 files / 50 MB per batch</span></div>
     {(localAgent?.endpoints.length || cloudAssistedPrintingEnabled) ? <div className="customer-upload-modes">
-      {Boolean(localAgent?.endpoints?.length)&&<button type="button" className={uploadMode==="LOCAL"?"customer-upload-mode selected":"customer-upload-mode"} onClick={()=>setUploadMode("LOCAL")}><strong>Shop Wi-Fi · local transfer</strong><small>Direct local HTTP · not encrypted in transit</small></button>}
-      {cloudAssistedPrintingEnabled&&<button type="button" className={uploadMode==="CLOUD"?"customer-upload-mode selected":"customer-upload-mode"} onClick={()=>setUploadMode("CLOUD")}><strong>Cloud-assisted · HTTPS</strong><small>Encrypted transfer through the API</small></button>}
+      {Boolean(localAgent?.endpoints?.length)&&<button type="button" className={uploadMode==="LOCAL"?"customer-upload-mode selected":"customer-upload-mode"} onClick={()=>{setUploadModeManuallySelected(true);setUploadMode("LOCAL");}}><strong>Shop Wi-Fi · local transfer</strong><small>Direct local HTTP · not encrypted in transit</small></button>}
+      {cloudAssistedPrintingEnabled&&<button type="button" className={uploadMode==="CLOUD"?"customer-upload-mode selected":"customer-upload-mode"} onClick={()=>{setUploadModeManuallySelected(true);setUploadMode("CLOUD");}}><strong>Cloud-assisted · HTTPS</strong><small>Encrypted transfer through the API</small></button>}
     </div>:null}
     {customerUploadUnavailable&&<div className="customer-upload-local-note" role="status">This shop's print computer is not connected, and cloud-assisted uploads are not included in its plan. Ask the shop operator to reconnect SmartPrint.</div>}
     <div className="customer-upload-picker-grid">
