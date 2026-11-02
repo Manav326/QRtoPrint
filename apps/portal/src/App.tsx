@@ -2827,14 +2827,14 @@ function CustomerLocalConnection({localAgent,onReady}:{localAgent:CustomerLocalA
       onReady(false);
       setCheckStatus("idle");
       setMessage("");
-      return;
+      return ()=>{checkGeneration.current++;};
     }
     onReady(false);
     setCheckStatus("idle");
     setMessage("");
     if(!window.isSecureContext) {
       requireSecureContext();
-      return;
+      return ()=>{checkGeneration.current++;};
     }
 
     // A private-LAN/loopback portal talking to another private-LAN Agent
@@ -2842,9 +2842,9 @@ function CustomerLocalConnection({localAgent,onReady}:{localAgent:CustomerLocalA
     // need to prompt for local-network permission for this local-to-local path.
     if(localOriginDoesNotNeedLnaPermission) {
       setPermissionState("unknown");
-      return;
+      return ()=>{checkGeneration.current++;};
     }
-    if(!navigator.permissions?.query)return;
+    if(!navigator.permissions?.query)return ()=>{checkGeneration.current++;};
 
     let active=true;
     let permissionStatus:PermissionStatus|null=null;
@@ -2873,6 +2873,7 @@ function CustomerLocalConnection({localAgent,onReady}:{localAgent:CustomerLocalA
 
     return ()=>{
       active=false;
+      checkGeneration.current++;
       permissionStatus?.removeEventListener("change",updatePermission);
     };
   },[localAgent?.agentDeviceId,localAgent?.endpoints.join("|"),onReady]);
