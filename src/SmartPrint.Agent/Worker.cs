@@ -14,6 +14,7 @@ public sealed class Worker(
     AgentLocalQueueStore localQueueStore,
     WindowsPrintExecutor printExecutor,
     LocalAgentApiState localAgentApiState,
+    LocalNetworkManager localNetworkManager,
     IConfiguration configuration) : BackgroundService
 {
     private int printClaimBatchOffset;
@@ -99,7 +100,7 @@ public sealed class Worker(
                         version = typeof(Worker).Assembly.GetName().Version?.ToString() ?? "1.0.0",
                         operatingSystem = Environment.OSVersion.VersionString,
                         localEndpoints = localAgentApiState.IsRunning
-                            ? LocalNetworkEndpointDiscovery.Discover()
+                            ? localNetworkManager.GetSnapshot().Endpoints
                             : Array.Empty<string>()
                     },
                     stoppingToken);

@@ -1,4 +1,5 @@
 using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
 using System.Net.Http.Json;
 using Microsoft.AspNetCore.Mvc;
@@ -17,8 +18,81 @@ public sealed class LocalAgentApiState
     private readonly object sync = new();
     private HashSet<string> configuredOrigins = new(StringComparer.OrdinalIgnoreCase);
     private HashSet<string> trustedPortalOrigins = new(StringComparer.OrdinalIgnoreCase);
+    private byte[]? phoneProbeHash;
+    private string? phoneProbeNetworkId;
+    private DateTimeOffset phoneProbeExpiresUtc;
+    private string? phoneVerifiedNetworkId;
+    private DateTimeOffset? phoneVerifiedUtc;
 
     public bool IsRunning { get; internal set; }
+
+    public (string Token, DateTimeOffset ExpiresUtc) CreatePhoneProbe(string networkId)
+    {
+        if (string.IsNullOrWhiteSpace(networkId) || networkId.Length > 256)
+            throw new ArgumentException("Select an available shop connection.", nameof(networkId));
+        var bytes = RandomNumberGenerator.GetBytes(32);
+        var token = Convert.ToBase64String(bytes).TrimEnd('=').Replace('+', '-').Replace('/', '_');
+        CryptographicOperations.ZeroMemory(bytes);
+        var hash = SHA256.HashData(Encoding.UTF8.GetBytes(token));
+        var expiresUtc = DateTimeOffset.UtcNow.AddMinutes(5);
+        lock (sync)
+        {
+            ClearPhoneProbeCore();
+            phoneProbeHash = hash;
+            phoneProbeNetworkId = networkId;
+            phoneProbeExpiresUtc = expiresUtc;
+        }
+        return (token, expiresUtc);
+    }
+
+    public bool TryCompletePhoneProbe(string? token)
+    {
+        if (string.IsNullOrWhiteSpace(token) || token.Length > 128) return false;
+        var candidateHash = SHA256.HashData(Encoding.UTF8.GetBytes(token));
+        try
+        {
+            lock (sync)
+            {
+                if (phoneProbeHash is null || phoneProbeNetworkId is null || DateTimeOffset.UtcNow > phoneProbeExpiresUtc)
+                {
+                    ClearPhoneProbeCore();
+                    return false;
+                }
+                if (!CryptographicOperations.FixedTimeEquals(phoneProbeHash, candidateHash)) return false;
+                phoneVerifiedNetworkId = phoneProbeNetworkId;
+                phoneVerifiedUtc = DateTimeOffset.UtcNow;
+                ClearPhoneProbeCore();
+                return true;
+            }
+        }
+        finally { CryptographicOperations.ZeroMemory(candidateHash); }
+    }
+
+    public DateTimeOffset? GetPhoneVerifiedUtc(string networkId)
+    {
+        lock (sync)
+            return string.Equals(phoneVerifiedNetworkId, networkId, StringComparison.OrdinalIgnoreCase)
+                ? phoneVerifiedUtc
+                : null;
+    }
+
+    public void ClearPhoneVerification()
+    {
+        lock (sync)
+        {
+            phoneVerifiedNetworkId = null;
+            phoneVerifiedUtc = null;
+            ClearPhoneProbeCore();
+        }
+    }
+
+    private void ClearPhoneProbeCore()
+    {
+        if (phoneProbeHash is not null) CryptographicOperations.ZeroMemory(phoneProbeHash);
+        phoneProbeHash = null;
+        phoneProbeNetworkId = null;
+        phoneProbeExpiresUtc = DateTimeOffset.MinValue;
+    }
 
     public void SetConfiguredOrigins(IEnumerable<string> origins)
     {
@@ -247,6 +321,21 @@ public sealed class LocalAgentApiHostedService(
                     }, statusCode: StatusCodes.Status503ServiceUnavailable);
                 }
             }).RequireCors("CustomerPortal");
+
+            app.MapGet("/api/v1/local/connection-check", (HttpContext context) =>
+            {
+                context.Response.Headers["Cache-Control"] = "no-store";
+                context.Response.Headers["X-Content-Type-Options"] = "nosniff";
+                context.Response.Headers["Content-Security-Policy"] = "default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'";
+                if (!state.TryCompletePhoneProbe(context.Request.Query["token"].FirstOrDefault()))
+                    return Results.Content(
+                        "<!doctype html><html lang=\"en\"><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><title>SmartPrint</title><body><main><h1>Test link expired</h1><p>Return to SmartPrint on the shop computer and start a new phone check.</p></main></body></html>",
+                        "text/html; charset=utf-8", statusCode: StatusCodes.Status410Gone);
+
+                return Results.Content(
+                    "<!doctype html><html lang=\"en\"><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><title>SmartPrint connection verified</title><style>body{font-family:system-ui,sans-serif;background:#f4f7fb;color:#17243b;display:grid;min-height:90vh;place-items:center;margin:0;padding:24px}main{background:white;border-radius:20px;padding:32px;max-width:420px;text-align:center;box-shadow:0 12px 40px #18233a18}h1{font-size:25px}p{line-height:1.55;color:#526178}.mark{width:56px;height:56px;border-radius:50%;background:#e4f7ef;color:#128052;display:grid;place-items:center;margin:0 auto 18px;font-size:30px}</style><main><div class=\"mark\">✓</div><h1>Connection verified</h1><p>This phone can reach your shop computer. You can close this page and return to SmartPrint.</p></main></html>",
+                    "text/html; charset=utf-8");
+            });
 
             app.MapGet("/api/v1/local/documents/{jobId:guid}/preview", async (
                 Guid jobId,

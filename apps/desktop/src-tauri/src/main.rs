@@ -25,6 +25,32 @@ struct LocalAgentStatus {
 
 #[derive(Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
+struct LocalNetworkAdapter {
+    id: String,
+    display_name: String,
+    kind: String,
+    ipv4_address: String,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct LocalNetworkSnapshot {
+    networks: Vec<LocalNetworkAdapter>,
+    selected_network_id: Option<String>,
+    endpoints: Vec<String>,
+    phone_verified_utc: Option<String>,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct LocalPhoneTest {
+    phone_test_url: String,
+    started_utc: String,
+    expires_utc: String,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
 struct AgentPipeResponse {
     success: bool,
     agent_device_id: Option<String>,
@@ -35,6 +61,8 @@ struct AgentPipeResponse {
     local_api_reachable: Option<bool>,
     api_base_url: Option<String>,
     code: Option<String>,
+    network_snapshot: Option<LocalNetworkSnapshot>,
+    phone_test: Option<LocalPhoneTest>,
 }
 
 #[derive(Debug, Serialize)]
@@ -43,6 +71,8 @@ struct AgentPipeRequest<'a> {
     operation: &'static str,
     #[serde(skip_serializing_if = "Option::is_none")]
     enrollment_code: Option<&'a str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    network_id: Option<&'a str>,
 }
 
 #[tauri::command]
@@ -152,6 +182,7 @@ fn pipe_agent_status() -> Result<LocalAgentStatus, String> {
     let response = send_agent_pipe_request(&AgentPipeRequest {
         operation: "status",
         enrollment_code: None,
+        network_id: None,
     })?;
     if response.service_reachable != Some(true) {
         return Err(response.message.unwrap_or_else(|| "The SmartPrint background service is not responding.".into()));
@@ -174,6 +205,63 @@ fn pipe_agent_status() -> Result<LocalAgentStatus, String> {
 }
 
 #[tauri::command]
+fn get_local_network_snapshot() -> Result<LocalNetworkSnapshot, String> {
+    #[cfg(windows)]
+    {
+        let response = send_agent_pipe_request(&AgentPipeRequest {
+            operation: "network-status",
+            enrollment_code: None,
+            network_id: None,
+        })?;
+        if !response.success {
+            return Err(response.message.unwrap_or_else(|| "Could not read the shop connection.".into()));
+        }
+        return response.network_snapshot.ok_or_else(|| "The shop connection details were unavailable.".into());
+    }
+    #[cfg(not(windows))]
+    { Err("Shop connection settings are available on Windows only.".into()) }
+}
+
+#[tauri::command]
+fn select_local_network(interface_id: String) -> Result<LocalNetworkSnapshot, String> {
+    if interface_id.is_empty() || interface_id.len() > 256 {
+        return Err("Choose an available shop connection.".into());
+    }
+    #[cfg(windows)]
+    {
+        let response = send_agent_pipe_request(&AgentPipeRequest {
+            operation: "select-network",
+            enrollment_code: None,
+            network_id: Some(&interface_id),
+        })?;
+        if !response.success {
+            return Err(response.message.unwrap_or_else(|| "Could not select that shop connection.".into()));
+        }
+        return response.network_snapshot.ok_or_else(|| "The selected shop connection was unavailable.".into());
+    }
+    #[cfg(not(windows))]
+    { let _ = interface_id; Err("Shop connection settings are available on Windows only.".into()) }
+}
+
+#[tauri::command]
+fn start_local_phone_test() -> Result<LocalPhoneTest, String> {
+    #[cfg(windows)]
+    {
+        let response = send_agent_pipe_request(&AgentPipeRequest {
+            operation: "start-phone-test",
+            enrollment_code: None,
+            network_id: None,
+        })?;
+        if !response.success {
+            return Err(response.message.unwrap_or_else(|| "Could not start the phone connection test.".into()));
+        }
+        return response.phone_test.ok_or_else(|| "The phone connection test could not be started.".into());
+    }
+    #[cfg(not(windows))]
+    { Err("Phone connection tests are available on Windows only.".into()) }
+}
+
+#[tauri::command]
 async fn enroll_local_agent(enrollment_code: String) -> Result<AgentPipeResponse, String> {
     if enrollment_code.len() != 32 ||
         !enrollment_code.bytes().all(|byte| byte.is_ascii_alphanumeric() || byte == b'-' || byte == b'_') {
@@ -185,6 +273,7 @@ async fn enroll_local_agent(enrollment_code: String) -> Result<AgentPipeResponse
         let response = send_agent_pipe_request(&AgentPipeRequest {
             operation: "enroll",
             enrollment_code: Some(&enrollment_code),
+            network_id: None,
         })?;
         if !response.success && response.code.is_none() {
             return Err(response.message.clone().unwrap_or_else(|| "This computer could not be connected to the shop.".into()));
@@ -303,6 +392,9 @@ fn main() {
     tauri::Builder::default()
         .invoke_handler(tauri::generate_handler![
             get_local_agent_status,
+            get_local_network_snapshot,
+            select_local_network,
+            start_local_phone_test,
             enroll_local_agent,
             read_secure_session,
             write_secure_session

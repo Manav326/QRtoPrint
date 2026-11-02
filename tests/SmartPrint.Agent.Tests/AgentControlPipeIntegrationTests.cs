@@ -99,12 +99,16 @@ public sealed class AgentControlPipeIntegrationTests
                 ["Agent:ApiBaseUrl"] = apiOrigin
             })
             .Build();
+        var localApiState = new LocalAgentApiState();
+        var networkPreferenceStore = new LocalNetworkPreferenceStore(Path.Combine(identityDirectory, "local-network.preference"));
+        var localNetworkManager = new LocalNetworkManager(networkPreferenceStore, localApiState);
         var service = new AgentControlPipeHostedService(
             configuration,
             NullLogger<AgentControlPipeHostedService>.Instance,
             new AgentEnrollmentHandler(credentialStore),
             credentialStore,
-            new LocalAgentApiState());
+            localApiState,
+            localNetworkManager);
 
         try
         {

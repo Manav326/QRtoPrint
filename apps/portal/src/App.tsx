@@ -1,7 +1,7 @@
 import { Fragment, useEffect, useRef, useState, type ReactNode } from "react";
 import {
   Activity, ArrowRight, Check, Clock3, Copy, CreditCard, FileText, FileUp, FolderOpen, LayoutDashboard,
-  LifeBuoy, LogOut, Menu, Monitor, Plus, Printer, QrCode, Search, Settings,
+  LifeBuoy, LogOut, Menu, Monitor, Plus, Printer, QrCode, Search, Settings, Wifi,
   ShieldCheck, Users, Wallet, X, PanelLeftClose, PanelLeftOpen, RotateCcw, Zap
 } from "lucide-react";
 import QRCode from "react-qr-code";
@@ -26,7 +26,10 @@ import {
   type QrStation, type ShopCustomer, type ShopCustomerHistory, type ShopCustomerPage, type ShopPricingProfile, type ShopPrintJob, type ShopProfile, type ShopReportSummary, type ShopSubscriptionSummary,
   type UploadedPrintJob
 } from "./api";
-import { enrollLocalAgent, getLocalAgentStatus, isDesktopApp, type DesktopAgentStatus } from "./desktop-bridge";
+import {
+  enrollLocalAgent, getLocalAgentStatus, getLocalNetworkSnapshot, selectLocalNetwork, startLocalPhoneTest,
+  isDesktopApp, type DesktopAgentStatus, type DesktopLocalNetworkSnapshot, type DesktopLocalPhoneTest
+} from "./desktop-bridge";
 import { verifiedPdfExportPath } from "./print-output";
 import { applyThemePreference, readDarkModePreference, readSidebarCollapsedPreference, saveDarkModePreference, saveSidebarCollapsedPreference } from "./ui-preferences";
 import ThemeToggleButton from "./ThemeToggleButton";
@@ -1774,17 +1777,120 @@ function PrintAgentPage({agents,enrollmentCode,busy,onGenerate,onRevoke,desktop,
       <div className="agent-generate-row"><span>Pairing codes are single use. Generating a new one does not revoke already paired computers.</span><button className="primary-button" disabled={busy} onClick={onGenerate}>{busy?<span className="button-spinner"/>:<><Plus size={15}/> Generate pairing code</>}</button></div>
       </>}
     </section>
+    {desktop && <ShopConnectionPanel connected={connected}/>}
+    {!desktop && <section className="panel local-network-hint"><div className="local-network-mark"><Wifi size={20}/></div><div><h2>Shop connection</h2><p>Open SmartPrint on the Windows computer connected to your printers to choose and test the shop Wi-Fi.</p></div></section>}
     <section className="panel agent-device-panel">
       <div className="collection-header"><div><h2>Paired Windows computers</h2><p>Agent connection history and the number of discovered printer queues.</p></div><span className="setup-count">{agents.filter(agent=>!agent.revokedUtc).length} active</span></div>
       {agents.length===0?<div className="agent-empty"><Monitor size={25}/><strong>No Windows computer paired yet</strong><span>Generate a pairing code above and run the agent on the computer connected to your printers.</span></div>:
         <div className="agent-device-list">{agents.map(agent=><article className="agent-device-card" key={agent.id}>
           <div className="agent-device-icon"><Monitor size={19}/></div>
-          <div className="agent-device-copy"><strong>{agent.deviceName}</strong><span>{agent.printerCount} printer {agent.printerCount===1?"queue":"queues"} discovered · Paired {formatIstDate(agent.createdUtc)}</span><small>{agent.lastSeenUtc?("Last contact "+formatIstDateTime(agent.lastSeenUtc)):"No heartbeat received yet"}</small>{agent.localEndpoints?.length?<small>LAN status endpoint: {agent.localEndpoints.join(" · ")}</small>:<small>LAN endpoint not detected · check that the computer is on a private shop network</small>}</div>
+          <div className="agent-device-copy"><strong>{agent.deviceName}</strong><span>{agent.printerCount} printer {agent.printerCount===1?"queue":"queues"} discovered · Paired {formatIstDate(agent.createdUtc)}</span><small>{agent.lastSeenUtc?("Last contact "+formatIstDateTime(agent.lastSeenUtc)):"No heartbeat received yet"}</small>{agent.localEndpoints?.length?<small>Shop connection found · run the phone check on the shop computer</small>:<small>Connect this computer to the shop Wi-Fi to enable phone uploads</small>}</div>
           <Status label={agent.revokedUtc?"Revoked":agent.status} tone={agent.revokedUtc?"red":agent.status==="Online"?"green":"slate"}/>
           {!agent.revokedUtc&&<button className="subtle-button reject-action" disabled={busy} onClick={()=>onRevoke(agent)}>Revoke</button>}
         </article>)}</div>}
     </section>
   </div>;
+}
+
+function ShopConnectionPanel({connected}:{connected:boolean}) {
+  const [snapshot,setSnapshot]=useState<DesktopLocalNetworkSnapshot|null>(null);
+  const [loading,setLoading]=useState(true);
+  const [saving,setSaving]=useState(false);
+  const [error,setError]=useState("");
+  const [test,setTest]=useState<DesktopLocalPhoneTest|null>(null);
+  const [verified,setVerified]=useState(false);
+  const [expired,setExpired]=useState(false);
+
+  async function refresh() {
+    try {
+      const next=await getLocalNetworkSnapshot();
+      setSnapshot(next);
+      setVerified(Boolean(next.phoneVerifiedUtc));
+      setError("");
+      return next;
+    } catch(exception) {
+      setError(exception instanceof Error?exception.message:"Could not check the shop connection.");
+      return null;
+    } finally { setLoading(false); }
+  }
+
+  useEffect(()=>{void refresh();},[]);
+
+  useEffect(()=>{
+    if(!test)return;
+    let active=true;
+    let polling=false;
+    const started=Date.parse(test.startedUtc);
+    const poll=async()=>{
+      if(polling||!active)return;
+      polling=true;
+      try {
+        const next=await getLocalNetworkSnapshot();
+        if(!active)return;
+        setSnapshot(next);
+        if(next.phoneVerifiedUtc&&Date.parse(next.phoneVerifiedUtc)>=started){
+          setVerified(true);setTest(null);
+        }else if(Date.now()>=Date.parse(test.expiresUtc)){
+          setExpired(true);setTest(null);
+        }
+      }catch{
+        // Keep the QR visible while the Agent briefly restarts or reconnects.
+      }finally{polling=false;}
+    };
+    const timer=window.setInterval(()=>void poll(),2000);
+    return ()=>{active=false;window.clearInterval(timer);};
+  },[test?.startedUtc]);
+
+  async function changeNetwork(interfaceId:string) {
+    if(!interfaceId)return;
+    setSaving(true);setError("");setTest(null);setVerified(false);setExpired(false);
+    try {setSnapshot(await selectLocalNetwork(interfaceId));}
+    catch(exception){setError(exception instanceof Error?exception.message:"Could not select this connection.");}
+    finally{setSaving(false);}
+  }
+
+  async function beginPhoneTest() {
+    setSaving(true);setError("");setExpired(false);setVerified(false);
+    try {setTest(await startLocalPhoneTest());}
+    catch(exception){setError(exception instanceof Error?exception.message:"Could not start the phone check.");}
+    finally{setSaving(false);}
+  }
+
+  const selected=snapshot?.networks.find(network=>network.id===snapshot.selectedNetworkId)??null;
+  const statusTone=verified?"green":snapshot?.endpoints.length?"amber":"slate";
+  const statusLabel=verified?"Phone connected":snapshot?.endpoints.length?"Phone check needed":"No connection found";
+
+  return <section className="panel local-network-panel">
+    <div className="local-network-heading">
+      <div><span className="eyebrow"><span className="eyebrow-line"/>SHOP CONNECTION</span><h2>Customer phone connection</h2><p>Choose the connection customers use at your shop, then check it with a phone.</p></div>
+      <Status label={loading?"Checking…":statusLabel} tone={loading?"slate":statusTone}/>
+    </div>
+    {loading&&!snapshot?<div className="local-network-loading"><span className="button-spinner"/> Checking available connections…</div>:<>
+      {snapshot?.networks.length?<>
+        <label className="local-network-choice">Shop connection
+          <select value={snapshot.selectedNetworkId??""} onChange={event=>void changeNetwork(event.target.value)} disabled={saving||!connected}>
+            {snapshot.networks.map(network=><option key={network.id} value={network.id}>{network.displayName}{network.kind&&network.displayName.toLowerCase()!==network.kind.toLowerCase()?" · "+network.kind:""}</option>)}
+          </select>
+        </label>
+        <div className="local-network-selected"><Wifi size={17}/><span><strong>{selected?.displayName??"Selected connection"}</strong><small>{selected?.kind??"Network"} · Used for customer document uploads</small></span><Check size={17}/></div>
+        {!connected?<p className="local-network-copy">Connect this computer to your shop first. The phone check will be available when setup is complete.</p>:<>
+          <div className="local-network-actions">
+            <button className="primary-button" type="button" onClick={()=>void beginPhoneTest()} disabled={saving||!!test||!snapshot.endpoints.length}>
+              {saving?<span className="button-spinner"/>:<><QrCode size={16}/> Test with a phone</>}
+            </button>
+            <button className="secondary-button" type="button" onClick={()=>void refresh()} disabled={saving}><RotateCcw size={15}/> Refresh</button>
+          </div>
+          {test&&<div className="local-phone-test">
+            <div className="local-phone-qr"><QRCode value={test.phoneTestUrl} size={190} level="M" bgColor="#ffffff" fgColor="#111827"/></div>
+            <div><strong>Scan with a phone on this shop Wi-Fi</strong><p>Open your phone camera, scan this code and open the link. A confirmation will appear on your phone when the connection works.</p><small>This check expires in five minutes.</small></div>
+          </div>}
+          {verified&&<div className="local-network-result success"><Check size={17}/><span><strong>Phone connection verified</strong><small>Your shop computer can receive customer documents over this connection.</small></span></div>}
+          {expired&&<div className="local-network-result warning"><Clock3 size={17}/><span><strong>Phone check expired</strong><small>Start another check and scan the new code while your phone is on the shop Wi-Fi.</small></span></div>}
+        </>}
+      </>:<div className="local-network-empty"><Wifi size={20}/><div><strong>No shop connection found</strong><p>Connect this computer to the Wi-Fi or network you use at the shop, then refresh.</p></div><button className="secondary-button" type="button" onClick={()=>void refresh()}>Refresh</button></div>}
+    </>}
+    {error&&<div className="local-network-error" role="alert">{error}</div>}
+  </section>;
 }
 
 function PricingPage({ pricing, onSave, busy }: {
