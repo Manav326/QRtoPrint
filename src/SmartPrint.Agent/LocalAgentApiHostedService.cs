@@ -321,7 +321,7 @@ public sealed class LocalAgentApiHostedService(
             {
                 try
                 {
-                    var credentials = credentialStore.LoadForCloudRequests();
+                    var credentials = credentialStore.LoadForCloudRequests(configuration["Agent:ApiBaseUrl"]);
                     if (credentials is null)
                     {
                         return Results.Json(new
@@ -379,7 +379,7 @@ public sealed class LocalAgentApiHostedService(
                 AgentCredentials? credentials;
                 try
                 {
-                    credentials = credentialStore.LoadForCloudRequests();
+                    credentials = credentialStore.LoadForCloudRequests(configuration["Agent:ApiBaseUrl"]);
                 }
                 catch (InvalidOperationException exception)
                 {
@@ -463,7 +463,7 @@ public sealed class LocalAgentApiHostedService(
                 AgentCredentials? credentials;
                 try
                 {
-                    credentials = credentialStore.LoadForCloudRequests();
+                    credentials = credentialStore.LoadForCloudRequests(configuration["Agent:ApiBaseUrl"]);
                 }
                 catch (InvalidOperationException exception)
                 {
