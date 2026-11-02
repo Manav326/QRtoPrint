@@ -1097,7 +1097,8 @@ export async function uploadCustomerDocumentLocally(
   file: File,
   localAgent: CustomerLocalAgentApi,
   batchId?: string,
-  batchGroupName?: string
+  batchGroupName?: string,
+  cloudAssistedPrintingEnabled = false
 ): Promise<UploadedPrintJob> {
   const keys = customerLocalUploadAttemptStorageKeys(sessionToken, file);
   const idempotencyKey = sessionStorage.getItem(keys.idempotency) || crypto.randomUUID();
@@ -1185,8 +1186,29 @@ export async function uploadCustomerDocumentLocally(
     }
   }
 
+  // A LAN response can be lost after the Agent has safely staged the bytes.
+  // HTTPS recovery reconciles this exact ticket and can never create another PrintJob.
+  if (cloudAssistedPrintingEnabled) {
+    try {
+      const recovered = await uploadCustomerLocalTicketViaCloud(
+        sessionToken, file, ticket, grantToken, batchId
+      );
+      sessionStorage.removeItem(keys.idempotency);
+      sessionStorage.removeItem(keys.grant);
+      return recovered;
+    } catch (recoveryError) {
+      const detail = recoveryError instanceof ApiError
+        ? " HTTPS continuation could not be confirmed ("+recoveryError.message+")."
+        : " HTTPS continuation could not be confirmed.";
+      throw new LocalUploadOutcomeUnknownError(
+        "The shop Wi-Fi connection was interrupted."+detail+
+        " SmartPrint retained the original upload ticket and is ready to resume the same file. Select Cloud-assisted · HTTPS or retry this file in the same batch; no second print job will be created."
+      );
+    }
+  }
+
   throw new LocalUploadOutcomeUnknownError(
-    "The shop Wi-Fi transfer could not be confirmed. This file is still bound to its original upload ticket; retry the same file in the same batch or continue with Cloud-assisted HTTPS."
+    "The shop Wi-Fi transfer could not be confirmed. SmartPrint retained the original upload ticket. Reconnect to the shop computer and retry the same file in this batch."
   );
 }
 
