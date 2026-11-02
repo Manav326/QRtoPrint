@@ -1181,8 +1181,8 @@ export async function uploadCustomerDocumentLocally(
         continue;
       }
 
-      // Retain the ticket and grant in session storage so a refresh or route
-      // switch reconciles this same job instead of generating a duplicate.
+      // A confirmed response is now represented by the canonical job in the
+      // customer batch draft. The retry-only grant can be released safely.
       const uploaded = payload as UploadedPrintJob;
       if (!uploaded?.job?.id || !uploaded?.document?.id) continue;
       clearCustomerLocalUploadAttempt(sessionToken, file);
