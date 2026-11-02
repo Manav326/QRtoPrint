@@ -7170,6 +7170,7 @@ publicApi.MapPost("/sessions/current/resume", async (
     ResumeCustomerSessionRequest request,
     HttpContext context,
     SmartPrintDbContext db,
+    TenantEntitlementService entitlements,
     CancellationToken ct) =>
 {
     var rawToken = context.Request.Headers["X-Print-Session"].FirstOrDefault();
@@ -7226,6 +7227,7 @@ publicApi.MapPost("/sessions/current/resume", async (
             .Select(item => new { item.DisplayName, item.Manufacturer, item.Model, item.Status, item.CapabilitiesJson })
             .SingleOrDefaultAsync(ct)
         : null;
+    var customerEntitlements = await entitlements.GetForTenantAsync(station.TenantId, ct);
 
     return Results.Ok(new
     {
@@ -7236,7 +7238,8 @@ publicApi.MapPost("/sessions/current/resume", async (
         Shop = shopProfile,
         PaymentOptions = paymentOptions,
         Printer = printer,
-        LocalAgent = await GetLocalAgentInfoAsync(db, station.TenantId, station.PrinterDeviceId, now, ct)
+        LocalAgent = await GetLocalAgentInfoAsync(db, station.TenantId, station.PrinterDeviceId, now, ct),
+        CloudAssistedPrintingEnabled = customerEntitlements.CloudAssistedPrintingEnabled
     });
 }).RequireRateLimiting("qr-session");
 
@@ -7244,6 +7247,7 @@ publicApi.MapPost("/stations/{publicCode}/sessions", async (
     string publicCode,
     HttpContext context,
     SmartPrintDbContext db,
+    TenantEntitlementService entitlements,
     CancellationToken ct) =>
 {
     var codeHash = HashOpaqueToken(publicCode);
@@ -7267,6 +7271,7 @@ publicApi.MapPost("/stations/{publicCode}/sessions", async (
     };
     db.CustomerPrintSessions.Add(session);
     await db.SaveChangesAsync(ct);
+    var customerEntitlements = await entitlements.GetForTenantAsync(station.TenantId, ct);
     return Results.Created("/api/v1/public/sessions/current", new
     {
         session.Id,
@@ -7289,6 +7294,7 @@ publicApi.MapPost("/stations/{publicCode}/sessions", async (
             })
             .SingleAsync(ct),
         LocalAgent = await GetLocalAgentInfoAsync(db, station.TenantId, station.PrinterDeviceId, now, ct),
+        CloudAssistedPrintingEnabled = customerEntitlements.CloudAssistedPrintingEnabled,
         Printer = station.PrinterDeviceId is Guid printerId
             ? await db.PrinterDevices.AsNoTracking()
                 .Where(printer => printer.Id == printerId && printer.TenantId == station.TenantId && printer.IsActive)
