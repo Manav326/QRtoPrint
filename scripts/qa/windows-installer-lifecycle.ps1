@@ -122,6 +122,34 @@ function Add-QueueFixture {
     $script:originalDefaultPrinter = if ($default) { $default.Name } else { $null }
 }
 
+function Assert-SystemCanDiscoverFixturePrinter {
+    $taskName = "SmartPrintLifecycleSystemPrinterProbe"
+    $resultPath = Join-Path $env:RUNNER_TEMP "smartprint-system-printer-probe.txt"
+    $assemblyPath = Join-Path $fixtureProject "bin\Release\net10.0-windows\SmartPrintLifecycleFixture.dll"
+    $dotnetPath = (Get-Command dotnet -ErrorAction Stop).Source
+    Assert-True (Test-Path -LiteralPath $assemblyPath) "The Agent discovery fixture assembly was not built."
+
+    Remove-Item -LiteralPath $resultPath -Force -ErrorAction SilentlyContinue
+    $arguments = '"' + $assemblyPath + '" discover-printer "' + $resultPath + '" "' + $testPrinterName + '"'
+    $action = New-ScheduledTaskAction -Execute $dotnetPath -Argument $arguments
+    $principal = New-ScheduledTaskPrincipal -UserId "SYSTEM" -LogonType ServiceAccount -RunLevel Highest
+    try {
+        Register-ScheduledTask -TaskName $taskName -Action $action -Principal $principal -Force | Out-Null
+        Start-ScheduledTask -TaskName $taskName
+        $deadline = (Get-Date).AddSeconds(40)
+        while (-not (Test-Path -LiteralPath $resultPath) -and (Get-Date) -lt $deadline) {
+            Start-Sleep -Milliseconds 500
+        }
+        Assert-True (Test-Path -LiteralPath $resultPath) "The LocalSystem printer-discovery task did not produce a result."
+        $result = Get-Content -LiteralPath $resultPath -Raw
+        Assert-True ($result.Trim() -eq "FOUND") "The Agent's LocalSystem printer-discovery result was unexpected: $result"
+    }
+    finally {
+        Unregister-ScheduledTask -TaskName $taskName -Confirm:$false -ErrorAction SilentlyContinue
+        Remove-Item -LiteralPath $resultPath -Force -ErrorAction SilentlyContinue
+    }
+}
+
 function Assert-QueueUntouched {
     $printer = Get-Printer -Name $testPrinterName -ErrorAction SilentlyContinue
     Assert-True ($null -ne $printer) "SmartPrint installation/uninstallation removed an existing Windows printer queue."
@@ -175,6 +203,7 @@ try {
     @'
 using System.Security.Cryptography;
 using System.Text;
+using Microsoft.Extensions.Logging.Abstractions;
 using SmartPrint.Agent;
 
 const string expectedIdentityId = "22222222-2222-4222-8222-222222222222";
@@ -245,6 +274,19 @@ else if (mode == "verify")
     }
     Console.WriteLine("Verified the same DPAPI identity and decrypted local queue document.");
 }
+else if (mode == "discover-printer")
+{
+    if (args.Length < 3)
+        throw new ArgumentException("discover-printer requires an output path and expected queue name.");
+    var discovery = new WindowsPrinterDiscovery(NullLogger<WindowsPrinterDiscovery>.Instance);
+    if (!discovery.TryDiscover(out var printers))
+        throw new InvalidOperationException("The Agent's Windows WMI printer discovery failed under LocalSystem.");
+    var expectedQueue = args[2];
+    if (!printers.Any(printer => string.Equals(printer.QueueName, expectedQueue, StringComparison.OrdinalIgnoreCase)))
+        throw new InvalidOperationException($"The Agent's LocalSystem discovery did not find machine-wide printer queue '{expectedQueue}'.");
+    await File.WriteAllTextAsync(args[1], "FOUND");
+    Console.WriteLine($"LocalSystem Agent discovery found '{expectedQueue}'.");
+}
 else
 {
     throw new ArgumentException($"Unknown fixture mode: {mode}");
@@ -257,6 +299,7 @@ else
         $script:identityHash = (Get-FileHash -LiteralPath $identityPath -Algorithm SHA256).Hash
         Assert-True (Test-Path -LiteralPath $queueManifest) "The staged queue manifest was not created."
         Add-QueueFixture
+        Assert-SystemCanDiscoverFixturePrinter
     }
 
     if ($seedOk) {
