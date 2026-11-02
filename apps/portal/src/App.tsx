@@ -2655,7 +2655,7 @@ function CustomerEntry({publicCode,dark,onToggleTheme}:{publicCode:string;dark:b
         .then(session=>{
           if(active){
             setResult(current=>current?.sessionToken===result.sessionToken
-              ? {...current,expiresUtc:session.expiresUtc}
+              ? {...current,expiresUtc:session.expiresUtc,localAgent:session.localAgent}
               : current);
           }
         })
@@ -2816,7 +2816,15 @@ function CustomerLocalConnection({localAgent,onReady}:{localAgent:CustomerLocalA
   }
 
   useEffect(()=>{
-    if(!localAgent?.endpoints.length)return;
+    if(!localAgent?.endpoints.length) {
+      onReady(false);
+      setCheckStatus("idle");
+      setMessage("");
+      return;
+    }
+    onReady(false);
+    setCheckStatus("idle");
+    setMessage("");
     if(!window.isSecureContext) {
       requireSecureContext();
       return;
@@ -2860,7 +2868,7 @@ function CustomerLocalConnection({localAgent,onReady}:{localAgent:CustomerLocalA
       active=false;
       permissionStatus?.removeEventListener("change",updatePermission);
     };
-  },[localAgent?.agentDeviceId,onReady]);
+  },[localAgent?.agentDeviceId,localAgent?.endpoints.join("|"),onReady]);
 
   if(!localAgent?.endpoints.length)return null;
 
@@ -3087,7 +3095,10 @@ function CustomerPrintFlow({publicCode,sessionToken,paymentOptions,localAgent,lo
 
   useEffect(()=>{
     if(!localAgent?.endpoints.length)setUploadMode("CLOUD");
-    else setUploadMode(current=>current==="CLOUD"?"LOCAL":current);
+  },[localAgent?.endpoints.join("|")]);
+
+  useEffect(()=>{
+    if(localAgent?.endpoints.length)setUploadMode(current=>current==="CLOUD"?"LOCAL":current);
   },[localAgent?.agentDeviceId]);
 
   useEffect(()=>{
