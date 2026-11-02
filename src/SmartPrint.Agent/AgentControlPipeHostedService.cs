@@ -242,6 +242,8 @@ public sealed class AgentControlPipeHostedService(
                     snapshot = localNetworkManager.GetSnapshot();
                 else if (request.Operation == "select-network")
                 {
+                    if (credentialStore.Load() is null)
+                        throw new InvalidOperationException("Connect this computer to your shop first.");
                     if (string.IsNullOrWhiteSpace(request.NetworkId))
                         throw new InvalidOperationException("Choose a shop connection.");
                     snapshot = localNetworkManager.SelectNetwork(request.NetworkId);
