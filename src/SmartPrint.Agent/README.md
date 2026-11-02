@@ -40,7 +40,7 @@ The cloud-assisted upload path remains available as a customer-selected fallback
 - Queries Win32_Printer through WMI for installed queue name, driver, port, status and default queue.
 - Sends printer inventory to the paired shop tenant using agent-specific authentication headers.
 - Exposes a read-only local status endpoint at `http://<shop-computer-LAN-IP>:17842/api/v1/local/status`. It returns only the paired agent ID, protocol version, readiness state and configured API origin; it does not expose the agent secret, queue or documents. The Windows desktop uses the separate local-only, ACL-protected named pipe for status fallback and enrollment.
-- Reports up to eight RFC1918 IPv4 endpoint addresses in the authenticated cloud heartbeat. The customer session receives endpoints only for its assigned printer's recently online, non-revoked agent.
+- Reports only the selected shop adapter's RFC1918 IPv4 endpoint in the authenticated cloud heartbeat. The desktop Shop Connection panel shows available adapters and confirms real phone reachability using a short-lived one-time QR check. The customer session receives endpoints only for its assigned printer's recently online, non-revoked agent.
 - The installer adds an inbound rule for TCP 17842 restricted to the local subnet and the Agent executable. The desktop Shop Connection panel lets the owner select the adapter and verify phone-to-Agent access with a short-lived one-time QR test. The Agent synchronises its current public origin through its authenticated heartbeat.
 - Refreshes agent heartbeat and printer status every 30 seconds (configurable from 10 to 300 seconds).
 - Marks previously discovered queues unavailable when they disappear from that computer's WMI inventory.
