@@ -297,7 +297,9 @@ public sealed class LocalAgentApiHostedService(
                 // Bind every remote request to the shop connection the owner selected.
                 // This prevents a different local adapter/subnet from reaching the
                 // listener merely because Kestrel is bound to all IPv4 interfaces.
-                if (!localNetworkManager.IsRemoteClientOnSelectedNetwork(context.Connection.RemoteIpAddress))
+                if (!localNetworkManager.IsRemoteClientOnSelectedNetwork(
+                        context.Connection.RemoteIpAddress,
+                        context.Connection.LocalIpAddress))
                 {
                     context.Response.StatusCode = StatusCodes.Status403Forbidden;
                     context.Response.Headers["Cache-Control"] = "no-store";

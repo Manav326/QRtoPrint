@@ -52,20 +52,25 @@ public sealed class LocalNetworkManager(LocalNetworkPreferenceStore preferences,
         return GetSnapshot();
     }
 
-    public bool IsRemoteClientOnSelectedNetwork(IPAddress? remoteAddress)
+    public bool IsRemoteClientOnSelectedNetwork(IPAddress? remoteAddress, IPAddress? localAddress)
     {
-        if (remoteAddress is null) return false;
-        if (IPAddress.IsLoopback(remoteAddress)) return true;
+        if (remoteAddress is null || localAddress is null) return false;
+        if (IPAddress.IsLoopback(remoteAddress))
+            return IPAddress.IsLoopback(localAddress);
+
         if (remoteAddress.IsIPv4MappedToIPv6) remoteAddress = remoteAddress.MapToIPv4();
-        if (remoteAddress.AddressFamily != System.Net.Sockets.AddressFamily.InterNetwork)
+        if (localAddress.IsIPv4MappedToIPv6) localAddress = localAddress.MapToIPv4();
+        if (remoteAddress.AddressFamily != System.Net.Sockets.AddressFamily.InterNetwork ||
+            localAddress.AddressFamily != System.Net.Sockets.AddressFamily.InterNetwork)
             return false;
 
         var snapshot = GetSnapshot();
         var selected = snapshot.Networks.FirstOrDefault(network =>
             string.Equals(network.Id, snapshot.SelectedNetworkId, StringComparison.OrdinalIgnoreCase));
         return selected is not null &&
-            IPAddress.TryParse(selected.Ipv4Address, out var localAddress) &&
-            LocalNetworkEndpointDiscovery.IsAddressOnNetwork(remoteAddress, localAddress, selected.PrefixLength);
+            IPAddress.TryParse(selected.Ipv4Address, out var selectedAddress) &&
+            LocalNetworkEndpointDiscovery.IsConnectionOnSelectedInterface(
+                remoteAddress, localAddress, selectedAddress, selected.PrefixLength);
     }
 
     public Task<bool> WaitForSelectionChangeOrDelayAsync(TimeSpan delay, CancellationToken cancellationToken) =>

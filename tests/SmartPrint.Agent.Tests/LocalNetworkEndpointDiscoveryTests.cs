@@ -44,6 +44,19 @@ public sealed class LocalNetworkEndpointDiscoveryTests
         Assert.Equal("wifi|ShopWifi", LocalNetworkEndpointDiscovery.SelectNetwork(networks, null)!.Id);
     }
 
+    [Fact]
+    public void RejectsRequestsThatArriveOnAnotherLocalAdapter()
+    {
+        var remotePhone = IPAddress.Parse("192.168.31.99");
+        var selectedShopIp = IPAddress.Parse("192.168.31.47");
+        var otherAdapterIp = IPAddress.Parse("10.0.0.12");
+
+        Assert.True(LocalNetworkEndpointDiscovery.IsConnectionOnSelectedInterface(
+            remotePhone, selectedShopIp, selectedShopIp, 24));
+        Assert.False(LocalNetworkEndpointDiscovery.IsConnectionOnSelectedInterface(
+            remotePhone, otherAdapterIp, selectedShopIp, 24));
+    }
+
     [Theory]
     [InlineData("192.168.31.99", "192.168.31.47", 24, true)]
     [InlineData("192.168.32.99", "192.168.31.47", 24, false)]

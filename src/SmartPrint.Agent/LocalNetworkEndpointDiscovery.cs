@@ -128,6 +128,25 @@ public static class LocalNetworkEndpointDiscovery
         return true;
     }
 
+    public static bool IsConnectionOnSelectedInterface(
+        IPAddress remoteAddress,
+        IPAddress localEndpointAddress,
+        IPAddress selectedAddress,
+        int prefixLength)
+    {
+        ArgumentNullException.ThrowIfNull(remoteAddress);
+        ArgumentNullException.ThrowIfNull(localEndpointAddress);
+        ArgumentNullException.ThrowIfNull(selectedAddress);
+
+        if (localEndpointAddress.IsIPv4MappedToIPv6)
+            localEndpointAddress = localEndpointAddress.MapToIPv4();
+        if (selectedAddress.IsIPv4MappedToIPv6)
+            selectedAddress = selectedAddress.MapToIPv4();
+
+        return localEndpointAddress.Equals(selectedAddress) &&
+            IsAddressOnNetwork(remoteAddress, selectedAddress, prefixLength);
+    }
+
     private static int NetworkPriority(string kind) => kind switch
     {
         "Wi-Fi" => 0,
