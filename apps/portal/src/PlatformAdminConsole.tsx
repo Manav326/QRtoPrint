@@ -307,7 +307,7 @@ export default function PlatformAdminConsole({
                             <td><div className="platform-shop-cell"><div className="platform-shop-icon"><Building2 size={15}/></div><div><strong>{tenant.businessName}</strong><small>{tenant.slug}</small></div></div></td>
                             <td><span className={`platform-tenant-badge ${toneForStatus(tenant.status)}`}>{prettyStatus(tenant.status)}</span></td>
                             <td><div className="platform-subscription-cell"><strong>{tenant.planCode || "Unassigned"}</strong><small>{tenant.subscriptionStatus ? prettyStatus(tenant.subscriptionStatus) : "No subscription"}</small>{tenant.subscriptionPeriodEndUtc && <small>Until {formatIstDate(tenant.subscriptionPeriodEndUtc)}</small>}</div></td>
-                            <td><div className="platform-device-cell"><strong>{tenant.activePrinterCount} / {tenant.printerCount} printers</strong><small>{tenant.agentCount} paired agents</small></div></td>
+                            <td><div className="platform-device-cell"><strong>{tenant.activePrinterCount} / {tenant.printerCount} printers</strong><small>{tenant.agentCount} paired · {tenant.onlineAgentCount} online · {tenant.offlineAgentCount} offline</small><small>{tenant.latestAgentHeartbeatUtc ? "Last contact " + formatIstDateTime(tenant.latestAgentHeartbeatUtc) : "No Agent heartbeat received"}</small></div></td>
                             <td><strong className="platform-numeric">{tenant.jobsLast30Days.toLocaleString("en-IN")}</strong></td>
                             <td><span className="platform-date">{formatIstDate(tenant.createdUtc)}</span></td>
                             <td><div className="platform-tenant-actions">
