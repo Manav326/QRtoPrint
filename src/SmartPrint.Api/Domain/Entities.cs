@@ -225,6 +225,10 @@ public sealed class PrintJob
     public Guid TenantId { get; set; }
     public Guid QrStationId { get; set; }
     public Guid? PrinterDeviceId { get; set; }
+    public string? PrinterNameSnapshot { get; set; }
+    public string? PrinterQueueNameSnapshot { get; set; }
+    public string? PrinterAgentNameSnapshot { get; set; }
+    public DateTimeOffset? PrinterSnapshotUtc { get; set; }
     public Guid? ClaimedByAgentDeviceId { get; set; }
     public Guid CustomerSessionId { get; set; }
     public Guid? BatchId { get; set; }

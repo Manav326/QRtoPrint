@@ -65,8 +65,10 @@ public sealed class WindowsPrintExecutorTests
 
 public sealed class WindowsPrintToPdfSpoolerIntegrationTests
 {
-    [Fact]
-    public async Task SubmitsRealGdiJobThroughMicrosoftPrintToPdfAndVerifiesDriverOutput()
+    [Theory]
+    [InlineData("Microsoft Print to PDF")]
+    [InlineData("SmartPrint CI Secondary Queue")]
+    public async Task SubmitsRealGdiJobThroughTheSelectedWindowsQueueAndVerifiesDriverOutput(string queueName)
     {
         // The workflow opts in only after proving the Microsoft queue and driver exist.
         // Local unit-test runs remain hardware-independent unless explicitly opted in.
@@ -77,8 +79,13 @@ public sealed class WindowsPrintToPdfSpoolerIntegrationTests
             return;
 
         Assert.True(OperatingSystem.IsWindows(), "The Windows spooler integration test requires a Windows runner.");
+        if (queueName == "SmartPrint CI Secondary Queue" &&
+            !string.Equals(
+                Environment.GetEnvironmentVariable("SMARTPRINT_RUN_MULTI_QUEUE_INTEGRATION"),
+                "1",
+                StringComparison.Ordinal))
+            return;
 
-        const string queueName = "Microsoft Print to PDF";
         using var bitmap = new SkiaSharp.SKBitmap(180, 240);
         bitmap.Erase(SkiaSharp.SKColors.White);
         using (var canvas = new SkiaSharp.SKCanvas(bitmap))
@@ -90,7 +97,8 @@ public sealed class WindowsPrintToPdfSpoolerIntegrationTests
         var outputDirectory = Path.Combine(
             Path.GetTempPath(),
             "smartprint-real-spooler-" + Guid.NewGuid().ToString("N"));
-        var outputPath = Path.Combine(outputDirectory, "microsoft-print-to-pdf-spooler-output.pdf");
+        var outputName = queueName.Replace(' ', '-').ToLowerInvariant();
+        var outputPath = Path.Combine(outputDirectory, $"{outputName}-spooler-output.pdf");
         var entry = new AgentLocalQueueEntry(
             Guid.NewGuid(), "SP-REAL-SPOOLER-TEST", Guid.NewGuid(), queueName, queueName,
             "real-spooler-test.png", "image/png",
