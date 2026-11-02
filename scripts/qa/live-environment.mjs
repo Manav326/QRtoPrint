@@ -120,7 +120,7 @@ async function workspace(browser, label, email, password, sections, authSelector
     assert.ok(response && response.status() === 200, label + " login route failed.");
     await page.locator(authSelector).waitFor({ state: "visible", timeout: 15000 });
     await page.getByLabel("Email address").fill(email);
-    await page.getByLabel("Password").fill(password);
+    await page.locator('input[type="password"]').first().fill(password);
     const buttonName = label === "shop-workspace" ? /Sign in to workspace/i : /Sign in to administration/i;
     await page.getByRole("button", { name: buttonName }).click();
     try {
@@ -202,7 +202,7 @@ try {
     const result = await visit(browser, "shop-login", "/shop", ".auth-screen");
     try {
       await result.page.getByLabel("Email address").waitFor({ state: "visible" });
-      await result.page.getByLabel("Password").waitFor({ state: "visible" });
+      await result.page.locator('input[type="password"]').first().waitFor({ state: "visible" });
       await result.page.getByRole("button", { name: /Sign in to workspace/i }).waitFor({ state: "visible" });
       return { form: "visible" };
     } finally { await result.context.close(); }
@@ -227,7 +227,7 @@ try {
     const result = await visit(browser, "platform-admin-login", "/admin", ".platform-admin-auth-screen");
     try {
       await result.page.getByLabel("Email address").waitFor({ state: "visible" });
-      await result.page.getByLabel("Password").waitFor({ state: "visible" });
+      await result.page.locator('input[type="password"]').first().waitFor({ state: "visible" });
       await result.page.getByRole("button", { name: /Sign in to administration/i }).waitFor({ state: "visible" });
       return { route: "/admin", restrictedForm: "visible" };
     } finally { await result.context.close(); }
