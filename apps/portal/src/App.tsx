@@ -3197,12 +3197,13 @@ function CustomerPrintFlow({publicCode,sessionToken,paymentOptions,localAgent,lo
   );
 
   useEffect(()=>{
-    if(cloudAssistedPrintingEnabled) {
+    const hasLocalEndpoint=Boolean(localAgent?.endpoints?.length);
+    if(uploadMode==="LOCAL"&&!hasLocalEndpoint) {
       setUploadMode("CLOUD");
-    } else {
-      setUploadMode(localAgent?.endpoints.length ? "LOCAL" : "CLOUD");
+    } else if(uploadMode==="CLOUD"&&!cloudAssistedPrintingEnabled&&hasLocalEndpoint) {
+      setUploadMode("LOCAL");
     }
-  },[cloudAssistedPrintingEnabled,localAgent?.endpoints.join("|")]);
+  },[cloudAssistedPrintingEnabled,localAgent?.endpoints.join("|"),uploadMode]);
 
   const customerUploadUnavailable = !cloudAssistedPrintingEnabled && !localAgent?.endpoints.length;
 
