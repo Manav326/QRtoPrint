@@ -5988,7 +5988,7 @@ publicApi.MapPost("/sessions/current/local-upload-tickets", async (
     // A ticket may be recovered over HTTPS for 24 hours after its 15-minute
     // LAN claim lease expires. Keep its original Agent identity reserved for the
     // entire recovery window so a batch cannot silently span two shop computers.
-    var localUploadRecoveryCutoff = now.AddHours(-24);
+    var localUploadRecoveryCutoff = now.AddHours(-LocalUploadRecoveryRules.MaximumRecoveryAgeHours);
     var existingLocalTicketAgents = await db.LocalPrintUploadTickets.AsNoTracking()
         .Where(item => item.TenantId == session.TenantId &&
                        item.CustomerSessionId == session.Id &&
@@ -6070,7 +6070,7 @@ publicApi.MapPost("/sessions/current/local-upload-tickets/{ticketId:guid}/cloud-
     TenantEntitlementService entitlements,
     CancellationToken ct) =>
 {
-    const int maximumRecoveryAgeHours = 24;
+    const int maximumRecoveryAgeHours = LocalUploadRecoveryRules.MaximumRecoveryAgeHours;
     var rawToken = context.Request.Headers["X-Print-Session"].FirstOrDefault();
     var rawGrant = context.Request.Headers["X-Print-Upload-Grant"].FirstOrDefault();
     if (string.IsNullOrWhiteSpace(rawToken) ||

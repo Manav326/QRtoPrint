@@ -7,6 +7,8 @@ namespace SmartPrint.Api.Domain;
 /// </summary>
 public static class LocalUploadRecoveryRules
 {
+    public const int MaximumRecoveryAgeHours = 24;
+
     public static bool IsWithinRecoveryWindow(
         DateTimeOffset ticketCreatedUtc,
         DateTimeOffset nowUtc,
