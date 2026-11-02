@@ -27,7 +27,6 @@ import org.hamcrest.Matchers.allOf
 import org.junit.Test
 import org.junit.runner.RunWith
 import eightbitlab.com.blurview.BlurView
-import com.google.android.material.navigation.NavigationBarItemView
 import android.view.View
 import android.view.ViewGroup
 import org.junit.Assert.assertEquals
