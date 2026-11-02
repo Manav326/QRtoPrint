@@ -3757,7 +3757,7 @@ function CustomerPrintFlow({publicCode,sessionToken,paymentOptions,localAgent,lo
   return <section className="customer-print-flow">
     <div className="customer-flow-heading"><div><span>STEP 1</span><h2>{nativeAppMode?"Add files":"Add your documents"}</h2></div><span className="upload-limit">PDF, JPG or PNG · Up to 20 files / 50 MB per batch</span></div>
     {(localAgent?.endpoints.length || cloudAssistedPrintingEnabled) ? <div className="customer-upload-modes">
-      {localAgent?.endpoints.length>0&&<button type="button" className={uploadMode==="LOCAL"?"customer-upload-mode selected":"customer-upload-mode"} onClick={()=>setUploadMode("LOCAL")}><strong>Shop Wi-Fi · local transfer</strong><small>Direct local HTTP · not encrypted in transit</small></button>}
+      {Boolean(localAgent?.endpoints?.length)&&<button type="button" className={uploadMode==="LOCAL"?"customer-upload-mode selected":"customer-upload-mode"} onClick={()=>setUploadMode("LOCAL")}><strong>Shop Wi-Fi · local transfer</strong><small>Direct local HTTP · not encrypted in transit</small></button>}
       {cloudAssistedPrintingEnabled&&<button type="button" className={uploadMode==="CLOUD"?"customer-upload-mode selected":"customer-upload-mode"} onClick={()=>setUploadMode("CLOUD")}><strong>Cloud-assisted · HTTPS</strong><small>Encrypted transfer through the API</small></button>}
     </div>:null}
     {customerUploadUnavailable&&<div className="customer-upload-local-note" role="status">This shop's print computer is not connected, and cloud-assisted uploads are not included in its plan. Ask the shop operator to reconnect SmartPrint.</div>}
