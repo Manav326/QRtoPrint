@@ -952,7 +952,88 @@ function customerUploadAttemptStorageKey(sessionToken: string, file: File): stri
   return `qrtoprint.customer-upload-attempt.${sessionToken.slice(0, 16)}.${fingerprint}`;
 }
 
+type CustomerLocalUploadTicket = {
+  id: string;
+  printJobId: string;
+  batchId?: string;
+  jobNumber: string;
+  agentDeviceId: string;
+  expiresUtc: string;
+  completed: boolean;
+};
+
+async function requestCustomerLocalUploadTicket(
+  sessionToken: string,
+  file: File,
+  batchId: string | undefined,
+  batchGroupName: string | undefined,
+  idempotencyKey: string,
+  grantToken: string
+): Promise<CustomerLocalUploadTicket> {
+  const digest = await crypto.subtle.digest("SHA-256", await file.arrayBuffer());
+  const sha256 = Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, "0")).join("");
+  return apiRequest<CustomerLocalUploadTicket>("/api/v1/public/sessions/current/local-upload-tickets", {
+    method: "POST",
+    headers: {
+      "X-Print-Session": sessionToken,
+      "Idempotency-Key": idempotencyKey
+    },
+    body: JSON.stringify({
+      originalFileName: file.name,
+      sizeBytes: file.size,
+      sha256,
+      grantToken,
+      batchId: batchId ?? null,
+      batchGroupName: batchGroupName ?? null
+    })
+  });
+}
+
+async function uploadCustomerLocalTicketViaCloud(
+  sessionToken: string,
+  file: File,
+  ticket: CustomerLocalUploadTicket,
+  grantToken: string,
+  batchId?: string
+): Promise<UploadedPrintJob> {
+  if (batchId && ticket.batchId && ticket.batchId !== batchId) {
+    throw new LocalUploadOutcomeUnknownError(
+      "This file is still attached to its original batch. Restore that batch to continue; SmartPrint will not create a second print request."
+    );
+  }
+  const form = new FormData();
+  form.append("file", file, file.name);
+  return apiRequest<UploadedPrintJob>(
+    `/api/v1/public/sessions/current/local-upload-tickets/${encodeURIComponent(ticket.id)}/cloud-recovery`,
+    {
+      method: "POST",
+      headers: {
+        "X-Print-Session": sessionToken,
+        "X-Print-Upload-Grant": grantToken
+      },
+      body: form
+    }
+  );
+}
+
 export async function uploadCustomerDocument(sessionToken: string, file: File, batchId?: string, batchGroupName?: string) {
+  const localKeys = customerLocalUploadAttemptStorageKeys(sessionToken, file);
+  const pendingLocalIdempotency = sessionStorage.getItem(localKeys.idempotency);
+  const pendingLocalGrant = sessionStorage.getItem(localKeys.grant);
+  if (pendingLocalIdempotency && pendingLocalGrant) {
+    // The local request may have reached the Agent. Recover that exact ticket
+    // using HTTPS, retaining its PrintJob ID and one-use grant.
+    const ticket = await requestCustomerLocalUploadTicket(
+      sessionToken, file, batchId, batchGroupName, pendingLocalIdempotency, pendingLocalGrant
+    );
+    const recovered = await uploadCustomerLocalTicketViaCloud(
+      sessionToken, file, ticket, pendingLocalGrant, batchId
+    );
+    sessionStorage.removeItem(localKeys.idempotency);
+    sessionStorage.removeItem(localKeys.grant);
+    return recovered;
+  }
+
   const storageKey = customerUploadAttemptStorageKey(sessionToken, file);
   const idempotencyKey = sessionStorage.getItem(storageKey) || crypto.randomUUID();
   sessionStorage.setItem(storageKey, idempotencyKey);
@@ -1024,46 +1105,12 @@ export async function uploadCustomerDocumentLocally(
   sessionStorage.setItem(keys.idempotency, idempotencyKey);
   sessionStorage.setItem(keys.grant, grantToken);
 
-  const digest = await crypto.subtle.digest("SHA-256", await file.arrayBuffer());
-  const sha256 = Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, "0")).join("");
-  let ticket: {
-    id: string;
-    printJobId: string;
-    batchId?: string;
-    jobNumber: string;
-    agentDeviceId: string;
-    expiresUtc: string;
-    completed: boolean;
-  };
+  let ticket: CustomerLocalUploadTicket;
   try {
-    ticket = await apiRequest<{
-      id: string;
-      printJobId: string;
-      batchId?: string;
-      jobNumber: string;
-      agentDeviceId: string;
-      expiresUtc: string;
-      completed: boolean;
-    }>("/api/v1/public/sessions/current/local-upload-tickets", {
-      method: "POST",
-      headers: {
-        "X-Print-Session": sessionToken,
-        "Idempotency-Key": idempotencyKey
-      },
-      body: JSON.stringify({
-        originalFileName: file.name,
-        sizeBytes: file.size,
-        sha256,
-        grantToken,
-        batchId: batchId ?? null,
-        batchGroupName: batchGroupName ?? null
-      })
-    });
+    ticket = await requestCustomerLocalUploadTicket(
+      sessionToken, file, batchId, batchGroupName, idempotencyKey, grantToken
+    );
   } catch (exception) {
-    if (exception instanceof ApiError && exception.status === 409 && /expired/i.test(exception.message)) {
-      sessionStorage.removeItem(keys.idempotency);
-      sessionStorage.removeItem(keys.grant);
-    }
     if (exception instanceof ApiError && exception.status === 409 &&
         ["local_print_agent_unavailable", "local_print_printer_unavailable", "local_upload_printer_unavailable"].includes(exception.code ?? "")) {
       // These are explicit preflight rejections; the API did not issue a ticket.
@@ -1138,17 +1185,8 @@ export async function uploadCustomerDocumentLocally(
     }
   }
 
-  if (lastError instanceof ApiError && lastError.status === 409 &&
-      /expired/i.test(lastError.message)) {
-    sessionStorage.removeItem(keys.idempotency);
-    sessionStorage.removeItem(keys.grant);
-    throw lastError;
-  }
-
-  // After a ticket exists, even a timeout or HTTP error can mean the Agent has
-  // already persisted the document. Never create a cloud job automatically.
   throw new LocalUploadOutcomeUnknownError(
-    "The local transfer could not be confirmed. The shop may already have stored this file. Reconnect to the same shop Wi-Fi and retry this same file in the same batch; SmartPrint will reuse its original ticket and grant."
+    "The shop Wi-Fi transfer could not be confirmed. This file is still bound to its original upload ticket; retry the same file in the same batch or continue with Cloud-assisted HTTPS."
   );
 }
 
