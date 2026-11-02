@@ -6,7 +6,7 @@ import {
 } from "lucide-react";
 import QRCode from "react-qr-code";
 import { shouldBlockBatchCheckoutForExpiredQuote } from "./batch-checkout-state";
-import { canFallbackToCloudFromLocalFailure, canSelectCloudUpload, resolveCustomerUploadMode } from "./local-upload-routing";
+import { canFallbackToCloudFromLocalFailure, resolveCustomerUploadMode } from "./local-upload-routing";
 import AuthScreen from "./AuthScreen";
 import PublicLandingPage from "./PublicLandingPage";
 import QrStationPrintDocument from "./QrStationPrintDocument";
@@ -15,7 +15,7 @@ import PlatformAdminConsole from "./PlatformAdminConsole";
 import PlatformAdminAuthScreen from "./PlatformAdminAuthScreen";
 import { resolvePortalRoute, shopPathForSection, shopSectionFromPath } from "./portal-routing";
 import {
-  ApiError, LocalUploadOutcomeUnknownError, LocalUploadPreflightError, hasPendingLocalCustomerUploadAttempt, isPlatformAdminSession, acceptCustomerQuote, applyShopPrintBatchReview, approveShopPrintJob, assignShopPrintJobPrinter, calculateCustomerQuote, getShopCustomerHistory, getShopCustomers, getShopReportSummary,
+  ApiError, LocalUploadOutcomeUnknownError, LocalUploadPreflightError, isPlatformAdminSession, acceptCustomerQuote, applyShopPrintBatchReview, approveShopPrintJob, assignShopPrintJobPrinter, calculateCustomerQuote, getShopCustomerHistory, getShopCustomers, getShopReportSummary,
   confirmShopPrintOutput, dispatchShopPrintJob,
   createAgentEnrollmentCode, createCustomerSession, createPrinter, createStation,
   downloadShopDocument, getCustomerJobStatus, getShopAgentDevices, getShopJobEvents, getShopPrinters, getShopPrintJobsPage, getShopPrintBatchJobs, loadShopData,
@@ -3367,10 +3367,6 @@ function CustomerPrintFlow({publicCode,sessionToken,paymentOptions,localAgent,lo
       return;
     }
     if(files.length===0)return;
-    if(uploadMode==="CLOUD"&&files.some(candidate=>hasPendingLocalCustomerUploadAttempt(sessionToken,candidate))) {
-      setError("A selected file still has an unresolved local upload ticket. Reconnect to the same shop Wi-Fi and retry it locally first; Cloud-assisted upload is blocked for this file to prevent a duplicate print job.");
-      return;
-    }
     if(uploadMode==="LOCAL"&&!localReady) {
       setError(nativeAppMode ? "Check shop Wi-Fi." : "Check shop Wi-Fi access above before starting a direct local upload.");
       return;
@@ -3391,7 +3387,7 @@ function CustomerPrintFlow({publicCode,sessionToken,paymentOptions,localAgent,lo
         const batchGroupName=groupNameForFile(candidate);
         const settings=settingsForFile(candidate);
         const created=uploadMode==="LOCAL"&&localAgent
-          ? await uploadCustomerDocumentLocally(sessionToken,candidate,localAgent,currentBatchId,batchGroupName)
+          ? await uploadCustomerDocumentLocally(sessionToken,candidate,localAgent,currentBatchId,batchGroupName,cloudAssistedPrintingEnabled)
           : await uploadCustomerDocument(sessionToken,candidate,currentBatchId,batchGroupName);
         if(!results.some(item=>item.job.id===created.job.id))results.push(created);
         savedSettings[created.job.id]=settings;
@@ -3415,8 +3411,16 @@ function CustomerPrintFlow({publicCode,sessionToken,paymentOptions,localAgent,lo
       const confirmedPreTicketRejection=uploadMode==="LOCAL"&&exception instanceof LocalUploadPreflightError;
       const canFallbackToCloud=canFallbackToCloudFromLocalFailure(confirmedPreTicketRejection,cloudAssistedPrintingEnabled);
       if(canFallbackToCloud){setUploadModeManuallySelected(true);setUploadMode("CLOUD");}
+      if(exception instanceof LocalUploadOutcomeUnknownError&&uploadMode==="LOCAL"&&cloudAssistedPrintingEnabled) {
+        // Local ticket and grant are preserved. The next retry will resume that
+        // same PrintJob over HTTPS rather than creating a second cloud upload.
+        setUploadModeManuallySelected(true);
+        setUploadMode("CLOUD");
+      }
       const uploadError=exception instanceof LocalUploadOutcomeUnknownError
-        ? "The shop connection dropped before this file could be confirmed. The file may already be stored at the shop. Reconnect to the same shop Wi-Fi and retry this same file in this batch; SmartPrint will reuse its original upload ticket and grant, preventing a second print job. Do not start a new batch for this file."
+        ? cloudAssistedPrintingEnabled
+          ? "Shop Wi-Fi was interrupted. SmartPrint has kept this file attached to its original job and selected secure Cloud-assisted HTTPS. Tap Retry to continue; it will resume the same upload, not create another print job."
+          : "Shop Wi-Fi was interrupted. SmartPrint has kept this file attached to its original job. Reconnect to the shop computer and tap Retry; the same upload will resume without creating a second print job."
         : confirmedPreTicketRejection
           ? canFallbackToCloud
             ? "The API rejected local upload before creating a ticket. Cloud-assisted HTTPS upload is now selected; retry the remaining files in this same batch."
@@ -3704,7 +3708,6 @@ function CustomerPrintFlow({publicCode,sessionToken,paymentOptions,localAgent,lo
   }
 
   const pendingFilesCount=files.filter(candidate=>!uploadedFileFingerprints.includes(customerFileFingerprint(candidate))).length;
-  const hasPendingLocalRecovery=files.some(candidate=>hasPendingLocalCustomerUploadAttempt(sessionToken,candidate));
   const uploadGroups=Array.from(new Set(files.map(candidate=>groupNameForFile(candidate)))).map(name=>({
     name, files:files.filter(candidate=>groupNameForFile(candidate)===name)
   }));
@@ -3809,7 +3812,7 @@ function CustomerPrintFlow({publicCode,sessionToken,paymentOptions,localAgent,lo
     <div className="customer-flow-heading"><div><span>STEP 1</span><h2>{nativeAppMode?"Add files":"Add your documents"}</h2></div><span className="upload-limit">PDF, JPG or PNG · Up to 20 files / 50 MB per batch</span></div>
     {(localAgent?.endpoints.length || cloudAssistedPrintingEnabled) ? <div className="customer-upload-modes">
       {Boolean(localAgent?.endpoints?.length)&&<button type="button" className={uploadMode==="LOCAL"?"customer-upload-mode selected":"customer-upload-mode"} onClick={()=>{setUploadModeManuallySelected(true);setUploadMode("LOCAL");}}><strong>Shop Wi-Fi · local transfer</strong><small>Direct local HTTP · not encrypted in transit</small></button>}
-      {cloudAssistedPrintingEnabled&&<button type="button" disabled={!canSelectCloudUpload(hasPendingLocalRecovery)} className={uploadMode==="CLOUD"?"customer-upload-mode selected":"customer-upload-mode"} onClick={()=>{setUploadModeManuallySelected(true);setUploadMode("CLOUD");}}><strong>Cloud-assisted · HTTPS</strong><small>{hasPendingLocalRecovery?"Unavailable until local upload is reconciled":"Encrypted transfer through the API"}</small></button>}
+      {cloudAssistedPrintingEnabled&&<button type="button" className={uploadMode==="CLOUD"?"customer-upload-mode selected":"customer-upload-mode"} onClick={()=>{setUploadModeManuallySelected(true);setUploadMode("CLOUD");}}><strong>Cloud-assisted · HTTPS</strong><small>Secure transfer through the API · resumes interrupted local uploads</small></button>}
     </div>:null}
     {customerUploadUnavailable&&<div className="customer-upload-local-note" role="status">This shop's print computer is not connected, and cloud-assisted uploads are not included in its plan. Ask the shop operator to reconnect SmartPrint.</div>}
     <div className="customer-upload-picker-grid">
