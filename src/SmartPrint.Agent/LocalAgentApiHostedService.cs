@@ -171,7 +171,8 @@ public sealed class LocalAgentApiHostedService(
     LocalAgentApiState state,
     ILogger<LocalAgentApiHostedService> logger,
     IHostApplicationLifetime hostLifetime,
-    LocalNetworkManager localNetworkManager) : IHostedService, IAsyncDisposable
+    LocalNetworkManager localNetworkManager,
+    AgentRuntimeReadiness runtimeReadiness) : IHostedService, IAsyncDisposable
 {
     private WebApplication? application;
     private CancellationTokenSource? retryLifetime;
@@ -329,16 +330,21 @@ public sealed class LocalAgentApiHostedService(
                             title = credentialStore.IsRevoked()
                                 ? "This computer's SmartPrint pairing was revoked by its shop owner."
                                 : "This computer is not paired with a print shop.",
-                            apiBaseUrl = configuration["Agent:ApiBaseUrl"]
+                            apiBaseUrl = configuration["Agent:ApiBaseUrl"],
+                            readiness = runtimeReadiness.GetSnapshot(),
+                            localUploadReady = false
                         }, statusCode: StatusCodes.Status503ServiceUnavailable);
                     }
 
+                    var readiness = runtimeReadiness.GetSnapshot();
                     return Results.Ok(new
                     {
                         agentDeviceId = credentials.AgentDeviceId,
                         protocolVersion = 1,
                         status = "LOCAL_ENDPOINT_READY",
-                        apiBaseUrl = credentials.ApiBaseUrl
+                        apiBaseUrl = credentials.ApiBaseUrl,
+                        readiness,
+                        localUploadReady = readiness.LocalUploadReady
                     });
                 }
                 catch (Exception exception) when (
@@ -350,7 +356,9 @@ public sealed class LocalAgentApiHostedService(
                         title = exception is InvalidOperationException
                             ? "The saved SmartPrint API address must use HTTPS. Repair the Agent connection."
                             : "The local agent identity is unavailable.",
-                        apiBaseUrl = configuration["Agent:ApiBaseUrl"]
+                        apiBaseUrl = configuration["Agent:ApiBaseUrl"],
+                        readiness = runtimeReadiness.GetSnapshot(),
+                        localUploadReady = false
                     }, statusCode: StatusCodes.Status503ServiceUnavailable);
                 }
             }).RequireCors("CustomerPortal");

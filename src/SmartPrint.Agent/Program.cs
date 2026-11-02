@@ -36,6 +36,7 @@ builder.Services.AddSingleton<WindowsPrinterDiscovery>();
 builder.Services.AddSingleton<AgentLocalQueueStore>();
 builder.Services.AddSingleton<WindowsPrintExecutor>();
 builder.Services.AddSingleton<LocalAgentApiState>();
+builder.Services.AddSingleton<AgentRuntimeReadiness>();
 builder.Services.AddSingleton<LocalNetworkPreferenceStore>();
 builder.Services.AddSingleton<LocalNetworkManager>();
 builder.Services.AddHostedService<LocalAgentApiHostedService>();

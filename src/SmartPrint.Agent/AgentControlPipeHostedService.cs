@@ -18,7 +18,8 @@ public sealed class AgentControlPipeHostedService(
     IAgentEnrollmentHandler enrollmentHandler,
     AgentCredentialStore credentialStore,
     LocalAgentApiState localAgentApiState,
-    LocalNetworkManager localNetworkManager) : BackgroundService
+    LocalNetworkManager localNetworkManager,
+    AgentRuntimeReadiness runtimeReadiness) : BackgroundService
 {
     public const string PipeName = "QRtoPrint.SmartPrint.Agent.Control";
     public const string PipePath = @"\\.\pipe\" + PipeName;
@@ -219,14 +220,14 @@ public sealed class AgentControlPipeHostedService(
                 var paired = credentials is not null;
                 var status = paired ? "CONNECTED" : credentialStore.IsRevoked() ? "REVOKED" : "UNPAIRED";
                 await writer.WriteLineAsync(JsonSerializer.Serialize(
-                    new PipeResponse(true, credentials?.AgentDeviceId, null, true, paired, status, localAgentApiState.IsRunning, credentials?.ApiBaseUrl ?? configuration["Agent:ApiBaseUrl"]),
+                    new PipeResponse(true, credentials?.AgentDeviceId, null, true, paired, status, localAgentApiState.IsRunning, credentials?.ApiBaseUrl ?? configuration["Agent:ApiBaseUrl"], Readiness: runtimeReadiness.GetSnapshot()),
                     PipeJsonOptions));
             }
             catch (Exception exception) when (exception is CryptographicException or IOException or JsonException or UnauthorizedAccessException or InvalidOperationException)
             {
                 logger.LogWarning("SmartPrint local identity status could not be read ({FailureType}).", exception.GetType().Name);
                 await writer.WriteLineAsync(JsonSerializer.Serialize(
-                    new PipeResponse(false, null, "The local SmartPrint identity could not be read.", true, false, "IDENTITY_UNAVAILABLE", localAgentApiState.IsRunning, configuration["Agent:ApiBaseUrl"]),
+                    new PipeResponse(false, null, "The local SmartPrint identity could not be read.", true, false, "IDENTITY_UNAVAILABLE", localAgentApiState.IsRunning, configuration["Agent:ApiBaseUrl"], Readiness: runtimeReadiness.GetSnapshot()),
                     PipeJsonOptions));
             }
             return;
@@ -325,5 +326,6 @@ public sealed class AgentControlPipeHostedService(
         string? ApiBaseUrl = null,
         string? Code = null,
         LocalNetworkSnapshot? NetworkSnapshot = null,
-        LocalPhoneTest? PhoneTest = null);
+        LocalPhoneTest? PhoneTest = null,
+        AgentRuntimeReadinessSnapshot? Readiness = null);
 }

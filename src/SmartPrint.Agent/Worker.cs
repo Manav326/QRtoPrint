@@ -16,6 +16,7 @@ public sealed class Worker(
     WindowsPrintExecutor printExecutor,
     LocalAgentApiState localAgentApiState,
     LocalNetworkManager localNetworkManager,
+    AgentRuntimeReadiness runtimeReadiness,
     IConfiguration configuration) : BackgroundService
 {
     private int printClaimBatchOffset;
@@ -91,12 +92,14 @@ public sealed class Worker(
         catch (Exception exception) when (
             exception is CryptographicException or IOException or JsonException or UnauthorizedAccessException or InvalidOperationException)
         {
+            runtimeReadiness.MarkHeartbeatFailure("identity_unavailable");
             logger.LogError(exception, "The saved Agent identity could not be read. Cloud presence is paused until the owner repairs the local pairing.");
             return;
         }
 
         if (credentials is null)
         {
+            runtimeReadiness.MarkHeartbeatFailure("not_paired");
             logger.LogWarning("This computer is not paired. Connect it from the SmartPrint desktop app.");
             return;
         }
@@ -117,6 +120,7 @@ public sealed class Worker(
 
         if (heartbeat.StatusCode == HttpStatusCode.Unauthorized)
         {
+            runtimeReadiness.MarkHeartbeatFailure("heartbeat_unauthorized");
             // An invalid/revoked device secret cannot be reused. Remove only the
             // identity that sent this heartbeat; a newer concurrent pairing survives.
             if (credentialStore.DeleteIfMatches(credentials))
@@ -132,6 +136,7 @@ public sealed class Worker(
 
         if (heartbeat.StatusCode == HttpStatusCode.Forbidden)
         {
+            runtimeReadiness.MarkHeartbeatFailure("heartbeat_forbidden");
             // A forbidden response may mean the shop is suspended. Retain the
             // identity to avoid accidentally moving this computer to another shop.
             logger.LogWarning("The current shop does not permit this Agent to sync. The saved device identity was retained.");
@@ -140,10 +145,12 @@ public sealed class Worker(
 
         if (!heartbeat.IsSuccessStatusCode)
         {
+            runtimeReadiness.MarkHeartbeatFailure($"heartbeat_http_{(int)heartbeat.StatusCode}");
             logger.LogWarning("Agent heartbeat failed with HTTP {StatusCode}.", (int)heartbeat.StatusCode);
             return;
         }
 
+        runtimeReadiness.MarkHeartbeatSuccess();
         var serverConfiguration = await heartbeat.Content.ReadFromJsonAsync<AgentHeartbeatResponse>(
             cancellationToken: cancellationToken);
         if (serverConfiguration is null)
@@ -254,13 +261,19 @@ public sealed class Worker(
         catch (Exception exception) when (
             exception is CryptographicException or IOException or JsonException or UnauthorizedAccessException or InvalidOperationException)
         {
+            runtimeReadiness.MarkPrinterInventoryFailure("printer_identity_unavailable");
             logger.LogError(exception, "The saved Agent identity could not be read. Printer synchronization is paused.");
             return;
         }
 
-        if (credentials is null) return;
+        if (credentials is null)
+        {
+            runtimeReadiness.MarkPrinterInventoryFailure("printer_agent_unpaired");
+            return;
+        }
         if (!printerDiscovery.TryDiscover(out var printers))
         {
+            runtimeReadiness.MarkPrinterInventoryFailure("printer_discovery_failed");
             logger.LogWarning("Skipping this printer inventory sync because Windows discovery failed; the server's last known queues are retained.");
             return;
         }
@@ -276,10 +289,12 @@ public sealed class Worker(
 
         if (sync.IsSuccessStatusCode)
         {
+            runtimeReadiness.MarkPrinterInventorySuccess(printers.Count);
             logger.LogInformation("Synchronized {PrinterCount} Windows printer queues with the shop.", printers.Count);
         }
         else
         {
+            runtimeReadiness.MarkPrinterInventoryFailure($"printer_sync_http_{(int)sync.StatusCode}");
             logger.LogWarning("Printer inventory synchronization failed with HTTP {StatusCode}; the last successful inventory is retained.", (int)sync.StatusCode);
         }
     }
@@ -292,6 +307,7 @@ public sealed class Worker(
             try
             {
                 await localQueueStore.InitializeAsync(cancellationToken);
+                runtimeReadiness.SetQueueInitialized(true);
                 break;
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
@@ -300,12 +316,14 @@ public sealed class Worker(
             }
             catch (Exception exception)
             {
+                runtimeReadiness.SetQueueInitialized(false, "queue_initialization_failed");
                 logger.LogCritical(exception, "The protected local queue could not be initialized. Print handoff is paused and will retry automatically.");
                 await Task.Delay(retryDelay, cancellationToken);
                 retryDelay = TimeSpan.FromSeconds(Math.Min(retryDelay.TotalSeconds * 2, 60));
             }
         }
 
+        runtimeReadiness.SetPrintWorkerRunning(true);
         var lastRetentionSweepUtc = DateTimeOffset.MinValue;
         while (!cancellationToken.IsCancellationRequested)
         {
@@ -393,8 +411,10 @@ public sealed class Worker(
                 logger.LogError(exception, "Unexpected local print work error.");
             }
 
+            runtimeReadiness.MarkPrintWorkCycle();
             await localNetworkManager.WaitForSelectionChangeOrDelayAsync(pollInterval, cancellationToken);
         }
+        runtimeReadiness.SetPrintWorkerRunning(false);
     }
 
     private async Task ProcessLocalQueueHandoffAsync(
