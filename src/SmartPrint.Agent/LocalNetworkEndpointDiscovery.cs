@@ -28,12 +28,10 @@ public static class LocalNetworkEndpointDiscovery
             try
             {
                 var properties = network.GetIPProperties();
-                var hasIpv4Gateway = properties.GatewayAddresses.Any(gateway =>
-                    gateway.Address.AddressFamily == AddressFamily.InterNetwork &&
-                    !gateway.Address.Equals(IPAddress.Any) &&
-                    !IPAddress.IsLoopback(gateway.Address));
-                if (!hasIpv4Gateway) continue;
 
+                // Same-subnet phone-to-PC communication does not need an Internet
+                // gateway. Include isolated shop Wi-Fi/LANs with static private
+                // addresses; the one-time phone test proves actual reachability.
                 var addressInfo = properties.UnicastAddresses
                     .Where(unicast => IsPrivateIpv4(unicast.Address) && unicast.PrefixLength is >= 1 and <= 32)
                     .OrderBy(unicast => unicast.Address.ToString(), StringComparer.Ordinal)
