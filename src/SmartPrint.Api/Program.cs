@@ -3705,7 +3705,7 @@ agentApi.MapGet("/jobs/{jobId:guid}/document", async (
         CreatedUtc = transferStartedUtc
     });
     long payloadBytesSent = 0;
-    var transferStatus = "COMPLETED";
+    var transferStatus = "FAILED";
     try
     {
         var buffer = new byte[64 * 1024];
@@ -3716,8 +3716,9 @@ agentApi.MapGet("/jobs/{jobId:guid}/document", async (
             payloadBytesSent += read;
         }
         await context.Response.Body.FlushAsync(ct);
-        if (payloadBytesSent != document.SizeBytes)
-            transferStatus = payloadBytesSent > 0 ? "PARTIAL" : "FAILED";
+        transferStatus = payloadBytesSent == document.SizeBytes
+            ? "COMPLETED"
+            : payloadBytesSent > 0 ? "PARTIAL" : "FAILED";
     }
     catch (OperationCanceledException) when (ct.IsCancellationRequested)
     {
