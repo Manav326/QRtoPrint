@@ -253,7 +253,9 @@ public sealed class PostgresMigrationUpgradeTests
         Assert.Equal("Quota test printer", historicalJob.PrinterNameSnapshot);
         Assert.Equal("Quota-Test-Queue", historicalJob.PrinterQueueNameSnapshot);
         Assert.Equal("Quota test Agent", historicalJob.PrinterAgentNameSnapshot);
-        Assert.Equal(submittedUtc, historicalJob.PrinterSnapshotUtc);
+        // Compare against the timestamp read back from PostgreSQL, whose storage
+        // precision is microseconds rather than .NET's 100-nanosecond ticks.
+        Assert.Equal(historicalJob.SpoolerSubmittedUtc, historicalJob.PrinterSnapshotUtc);
 
         var originalPrinter = await verification.PrinterDevices.SingleAsync(item => item.Id == printerId);
         originalPrinter.DisplayName = "Renamed queue after printing";
@@ -265,6 +267,6 @@ public sealed class PostgresMigrationUpgradeTests
         Assert.Equal("Quota test printer", unchangedHistory.PrinterNameSnapshot);
         Assert.Equal("Quota-Test-Queue", unchangedHistory.PrinterQueueNameSnapshot);
         Assert.Equal("Quota test Agent", unchangedHistory.PrinterAgentNameSnapshot);
-        Assert.Equal(submittedUtc, unchangedHistory.PrinterSnapshotUtc);
+        Assert.Equal(historicalJob.PrinterSnapshotUtc, unchangedHistory.PrinterSnapshotUtc);
     }
 }
