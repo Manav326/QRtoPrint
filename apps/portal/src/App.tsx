@@ -2609,6 +2609,7 @@ function buildSecureLocalPortalUrl():string|null {
 }
 
 function CustomerLocalConnection({localAgent,onReady}:{localAgent:CustomerLocalAgent|null;onReady:(ready:boolean)=>void}) {
+  const isNativeApp = navigator.userAgent.includes("SmartPrintAndroid/1");
   const [permissionState,setPermissionState]=useState<PermissionState|"unknown">("unknown");
   const [checkStatus,setCheckStatus]=useState<LocalAgentCheckStatus>("idle");
   const [message,setMessage]=useState("");
@@ -2697,6 +2698,15 @@ function CustomerLocalConnection({localAgent,onReady}:{localAgent:CustomerLocalA
     if(!localAgent?.endpoints.length)return;
     if(!window.isSecureContext) {
       requireSecureContext();
+      return;
+    }
+
+    // Android WebView has no Chrome Local Network Access permission prompt.
+    // Check the paired Agent as soon as the station session opens; the browser
+    // retains its user-initiated permission flow below.
+    if(isNativeApp) {
+      setPermissionState("unknown");
+      void checkConnection();
       return;
     }
 
