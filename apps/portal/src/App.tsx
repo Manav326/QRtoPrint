@@ -3106,10 +3106,6 @@ function CustomerPrintFlow({publicCode,sessionToken,paymentOptions,localAgent,lo
   },[localAgent?.endpoints.join("|")]);
 
   useEffect(()=>{
-    if(localAgent?.endpoints.length)setUploadMode(current=>current==="CLOUD"?"LOCAL":current);
-  },[localAgent?.agentDeviceId]);
-
-  useEffect(()=>{
     if(!paymentOptions.upiEnabled&&paymentOptions.cashEnabled)setPaymentMethod("CASH");
     else if(paymentOptions.upiEnabled)setPaymentMethod("UPI");
   },[paymentOptions.upiEnabled,paymentOptions.cashEnabled]);
