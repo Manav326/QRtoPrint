@@ -21,42 +21,308 @@ public sealed class Worker(
     private readonly TimeSpan pollInterval = TimeSpan.FromSeconds(
         Math.Clamp(configuration.GetValue<int?>("Agent:PollIntervalSeconds") ?? 30, 10, 300));
     private readonly string pdfExportDirectory = ResolvePdfExportDirectory(configuration);
-    private readonly TimeSpan configuredCompletedDocumentRetention = TimeSpan.FromDays(
+    private readonly object retentionPolicySync = new();
+    private TimeSpan completedDocumentRetention = TimeSpan.FromDays(
         Math.Clamp(configuration.GetValue<int?>("Agent:CompletedDocumentRetentionDays") ?? 30, 1, 3650));
-    private readonly int configuredRetentionSweepHours =
-        Math.Clamp(configuration.GetValue<int?>("Agent:RetentionSweepHours") ?? 6, 1, 24);
+    private TimeSpan retentionSweepInterval = TimeSpan.FromHours(
+        Math.Clamp(configuration.GetValue<int?>("Agent:RetentionSweepHours") ?? 6, 1, 24));
+    private bool hasReceivedPlatformRetentionPolicy;
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         logger.LogInformation("QRtoPrint Smart Print Agent started.");
+
+        // Keep cloud presence independent from document storage, printer enumeration,
+        // queue handoff and potentially slow Windows spooler operations. Each loop has
+        // its own retry boundary so one local failure cannot silently stop heartbeats.
+        await Task.WhenAll(
+            RunHeartbeatLoopAsync(stoppingToken),
+            RunPrinterInventoryLoopAsync(stoppingToken),
+            RunPrintWorkLoopAsync(stoppingToken));
+    }
+
+    private async Task RunHeartbeatLoopAsync(CancellationToken cancellationToken)
+    {
+        while (!cancellationToken.IsCancellationRequested)
+        {
+            try
+            {
+                await SendHeartbeatAsync(cancellationToken);
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                break;
+            }
+            catch (HttpRequestException exception)
+            {
+                logger.LogWarning(exception, "Smart Print API is unavailable. The Agent will retry its heartbeat.");
+            }
+            catch (TaskCanceledException) when (!cancellationToken.IsCancellationRequested)
+            {
+                logger.LogWarning("Smart Print heartbeat timed out. The Agent will retry.");
+            }
+            catch (Exception exception)
+            {
+                logger.LogError(exception, "Unexpected Agent heartbeat error.");
+            }
+
+            try
+            {
+                await Task.Delay(pollInterval, cancellationToken);
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                break;
+            }
+        }
+    }
+
+    private async Task SendHeartbeatAsync(CancellationToken cancellationToken)
+    {
+        AgentCredentials? credentials;
         try
         {
-            await localQueueStore.InitializeAsync(stoppingToken);
+            credentials = credentialStore.Load();
         }
-        catch (Exception exception)
+        catch (Exception exception) when (
+            exception is CryptographicException or IOException or JsonException or UnauthorizedAccessException)
         {
-            logger.LogCritical(exception, "The protected local queue could not be initialized. Job handoff is disabled.");
+            logger.LogError(exception, "The saved Agent identity could not be read. Cloud presence is paused until the owner repairs the local pairing.");
             return;
         }
 
+        if (credentials is null)
+        {
+            logger.LogWarning("This computer is not paired. Connect it from the SmartPrint desktop app.");
+            return;
+        }
+
+        using var client = httpClientFactory.CreateClient("cloud");
+        client.BaseAddress = new Uri(credentials.ApiBaseUrl.TrimEnd('/') + "/");
+        using var heartbeat = await SendAgentRequestAsync(
+            client,
+            credentials,
+            "api/v1/agent/heartbeat",
+            new
+            {
+                version = typeof(Worker).Assembly.GetName().Version?.ToString() ?? "1.0.0",
+                operatingSystem = Environment.OSVersion.VersionString,
+                localEndpoints = GetLocalEndpointsForHeartbeat()
+            },
+            cancellationToken);
+
+        if (heartbeat.StatusCode == HttpStatusCode.Unauthorized)
+        {
+            // An invalid/revoked device secret cannot be reused. Remove only the
+            // identity that sent this heartbeat; a newer concurrent pairing survives.
+            if (credentialStore.DeleteIfMatches(credentials))
+            {
+                logger.LogError("The shop no longer accepts this Agent identity. Local credentials were cleared; connect this computer again after the shop owner authorises it.");
+            }
+            else
+            {
+                logger.LogInformation("A stale heartbeat was rejected after the local Agent identity changed. The newer pairing was preserved.");
+            }
+            return;
+        }
+
+        if (heartbeat.StatusCode == HttpStatusCode.Forbidden)
+        {
+            // A forbidden response may mean the shop is suspended. Retain the
+            // identity to avoid accidentally moving this computer to another shop.
+            logger.LogWarning("The current shop does not permit this Agent to sync. The saved device identity was retained.");
+            return;
+        }
+
+        if (!heartbeat.IsSuccessStatusCode)
+        {
+            logger.LogWarning("Agent heartbeat failed with HTTP {StatusCode}.", (int)heartbeat.StatusCode);
+            return;
+        }
+
+        var serverConfiguration = await heartbeat.Content.ReadFromJsonAsync<AgentHeartbeatResponse>(
+            cancellationToken: cancellationToken);
+        if (serverConfiguration is null)
+        {
+            logger.LogWarning("The Agent heartbeat response was empty; the previous runtime configuration is retained.");
+            return;
+        }
+
+        if (serverConfiguration.AgentCompletedDocumentRetentionDays is int retentionDays &&
+            serverConfiguration.AgentRetentionSweepHours is int sweepHours)
+        {
+            lock (retentionPolicySync)
+            {
+                completedDocumentRetention = TimeSpan.FromDays(Math.Clamp(retentionDays, 1, 3650));
+                retentionSweepInterval = TimeSpan.FromHours(Math.Clamp(sweepHours, 1, 24));
+                hasReceivedPlatformRetentionPolicy = true;
+            }
+        }
+
+        if (Uri.TryCreate(serverConfiguration.PublicBaseUrl, UriKind.Absolute, out var configuredBaseUri) &&
+            configuredBaseUri.Scheme == Uri.UriSchemeHttps &&
+            configuredBaseUri.AbsolutePath == "/" &&
+            string.IsNullOrEmpty(configuredBaseUri.Query) &&
+            string.IsNullOrEmpty(configuredBaseUri.Fragment) &&
+            string.IsNullOrEmpty(configuredBaseUri.UserInfo))
+        {
+            var currentBaseUrl = configuredBaseUri.GetLeftPart(UriPartial.Authority);
+            if (!string.Equals(credentials.ApiBaseUrl.TrimEnd('/'), currentBaseUrl, StringComparison.OrdinalIgnoreCase))
+            {
+                credentials = credentials with { ApiBaseUrl = currentBaseUrl };
+                credentialStore.Save(credentials);
+                logger.LogInformation("Updated the Agent API destination from the canonical HTTPS public URL.");
+            }
+        }
+
+        var trustedOrigins = serverConfiguration.AllowedPortalOrigins;
+        if (trustedOrigins is { Count: > 0 })
+        {
+            localAgentApiState.SetTrustedPortalOrigins(trustedOrigins);
+        }
+        else
+        {
+            localAgentApiState.SetTrustedPortalOrigins([serverConfiguration.PublicBaseUrl ?? string.Empty]);
+        }
+    }
+
+    private IReadOnlyList<string> GetLocalEndpointsForHeartbeat()
+    {
+        if (!localAgentApiState.IsRunning) return Array.Empty<string>();
+        try
+        {
+            return localNetworkManager.GetSnapshot().Endpoints;
+        }
+        catch (Exception exception) when (
+            exception is NetworkInformationException or InvalidOperationException or IOException)
+        {
+            logger.LogWarning("The selected shop network could not be read ({FailureType}); the Agent heartbeat will continue without a local endpoint.", exception.GetType().Name);
+            return Array.Empty<string>();
+        }
+    }
+
+    private async Task RunPrinterInventoryLoopAsync(CancellationToken cancellationToken)
+    {
+        while (!cancellationToken.IsCancellationRequested)
+        {
+            try
+            {
+                await SyncPrinterInventoryAsync(cancellationToken);
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                break;
+            }
+            catch (HttpRequestException exception)
+            {
+                logger.LogWarning(exception, "The Agent could not synchronize printer inventory; the previous server inventory is retained.");
+            }
+            catch (TaskCanceledException) when (!cancellationToken.IsCancellationRequested)
+            {
+                logger.LogWarning("Printer inventory synchronization timed out; the previous server inventory is retained.");
+            }
+            catch (Exception exception)
+            {
+                logger.LogError(exception, "Unexpected printer inventory synchronization error.");
+            }
+
+            try
+            {
+                await Task.Delay(pollInterval, cancellationToken);
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                break;
+            }
+        }
+    }
+
+    private async Task SyncPrinterInventoryAsync(CancellationToken cancellationToken)
+    {
+        AgentCredentials? credentials;
+        try
+        {
+            credentials = credentialStore.Load();
+        }
+        catch (Exception exception) when (
+            exception is CryptographicException or IOException or JsonException or UnauthorizedAccessException)
+        {
+            logger.LogError(exception, "The saved Agent identity could not be read. Printer synchronization is paused.");
+            return;
+        }
+
+        if (credentials is null) return;
+        if (!printerDiscovery.TryDiscover(out var printers))
+        {
+            logger.LogWarning("Skipping this printer inventory sync because Windows discovery failed; the server's last known queues are retained.");
+            return;
+        }
+
+        using var client = httpClientFactory.CreateClient("cloud");
+        client.BaseAddress = new Uri(credentials.ApiBaseUrl.TrimEnd('/') + "/");
+        using var sync = await SendAgentRequestAsync(
+            client,
+            credentials,
+            "api/v1/agent/printers/sync",
+            new { printers },
+            cancellationToken);
+
+        if (sync.IsSuccessStatusCode)
+        {
+            logger.LogInformation("Synchronized {PrinterCount} Windows printer queues with the shop.", printers.Count);
+        }
+        else
+        {
+            logger.LogWarning("Printer inventory synchronization failed with HTTP {StatusCode}; the last successful inventory is retained.", (int)sync.StatusCode);
+        }
+    }
+
+    private async Task RunPrintWorkLoopAsync(CancellationToken cancellationToken)
+    {
+        var retryDelay = TimeSpan.FromSeconds(5);
+        while (!cancellationToken.IsCancellationRequested)
+        {
+            try
+            {
+                await localQueueStore.InitializeAsync(cancellationToken);
+                break;
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                return;
+            }
+            catch (Exception exception)
+            {
+                logger.LogCritical(exception, "The protected local queue could not be initialized. Print handoff is paused and will retry automatically.");
+                await Task.Delay(retryDelay, cancellationToken);
+                retryDelay = TimeSpan.FromSeconds(Math.Min(retryDelay.TotalSeconds * 2, 60));
+            }
+        }
+
         var lastRetentionSweepUtc = DateTimeOffset.MinValue;
-        var completedDocumentRetention = configuredCompletedDocumentRetention;
-        var retentionSweepInterval = TimeSpan.FromHours(configuredRetentionSweepHours);
-        var hasReceivedPlatformRetentionPolicy = false;
-        while (!stoppingToken.IsCancellationRequested)
+        while (!cancellationToken.IsCancellationRequested)
         {
             var sweepNow = DateTimeOffset.UtcNow;
-            if (hasReceivedPlatformRetentionPolicy &&
-                sweepNow - lastRetentionSweepUtc >= retentionSweepInterval)
+            TimeSpan completedRetention;
+            TimeSpan sweepInterval;
+            bool hasPolicy;
+            lock (retentionPolicySync)
+            {
+                completedRetention = completedDocumentRetention;
+                sweepInterval = retentionSweepInterval;
+                hasPolicy = hasReceivedPlatformRetentionPolicy;
+            }
+
+            if (hasPolicy && sweepNow - lastRetentionSweepUtc >= sweepInterval)
             {
                 try
                 {
                     var removed = await localQueueStore.PruneRetainedEntriesAsync(
-                        sweepNow, completedDocumentRetention, pdfExportDirectory, stoppingToken);
+                        sweepNow, completedRetention, pdfExportDirectory, cancellationToken);
                     if (removed > 0)
                         logger.LogInformation("Removed {RemovedCount} expired or retained local document entries.", removed);
                 }
-                catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+                catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
                 {
                     break;
                 }
@@ -75,149 +341,54 @@ public sealed class Worker(
             catch (Exception exception) when (
                 exception is CryptographicException or IOException or JsonException or UnauthorizedAccessException)
             {
-                logger.LogError(exception, "The saved Agent identity could not be read. Cloud printing is paused until the owner repairs the local pairing.");
-                await localNetworkManager.WaitForSelectionChangeOrDelayAsync(pollInterval, stoppingToken);
+                logger.LogError(exception, "The saved Agent identity could not be read. Print processing is paused until the owner repairs the local pairing.");
+                await localNetworkManager.WaitForSelectionChangeOrDelayAsync(pollInterval, cancellationToken);
                 continue;
             }
 
             if (credentials is null)
             {
-                logger.LogWarning("This computer is not paired. Run SmartPrint.Agent.exe --pair from an elevated terminal.");
-                await localNetworkManager.WaitForSelectionChangeOrDelayAsync(pollInterval, stoppingToken);
+                await localNetworkManager.WaitForSelectionChangeOrDelayAsync(pollInterval, cancellationToken);
                 continue;
             }
 
             try
             {
-                var client = httpClientFactory.CreateClient("cloud");
+                using var client = httpClientFactory.CreateClient("cloud");
                 client.BaseAddress = new Uri(credentials.ApiBaseUrl.TrimEnd('/') + "/");
-                using var heartbeat = await SendAgentRequestAsync(
-                    client,
-                    credentials,
-                    "api/v1/agent/heartbeat",
-                    new
-                    {
-                        version = typeof(Worker).Assembly.GetName().Version?.ToString() ?? "1.0.0",
-                        operatingSystem = Environment.OSVersion.VersionString,
-                        localEndpoints = localAgentApiState.IsRunning
-                            ? localNetworkManager.GetSnapshot().Endpoints
-                            : Array.Empty<string>()
-                    },
-                    stoppingToken);
 
-                if (heartbeat.StatusCode == HttpStatusCode.Unauthorized)
-                {
-                    // An invalid/revoked device secret cannot be reused. Removing the
-                    // local DPAPI identity allows the owner to start a fresh enrollment;
-                    // the API still decides whether the previous shop actually revoked it.
-                    if (credentialStore.DeleteIfMatches(credentials))
-                    {
-                        logger.LogError("The shop no longer accepts this Agent identity. Local credentials were cleared; connect this computer again from the desktop app after the shop owner authorises it.");
-                    }
-                    else
-                    {
-                        // The owner may have completed a new enrollment while this
-                        // old heartbeat was in flight. Never delete that newer identity.
-                        logger.LogInformation("A stale heartbeat was rejected after the local Agent identity changed. The newer pairing was preserved.");
-                    }
-                }
-                else if (heartbeat.StatusCode == HttpStatusCode.Forbidden)
-                {
-                    // A forbidden response may also mean the shop is suspended. Keep
-                    // the identity so this cannot become an accidental cross-shop move.
-                    logger.LogWarning("The current shop does not permit this Agent to sync. The saved device identity was retained.");
-                }
-                else if (heartbeat.IsSuccessStatusCode)
-                {
-                    var serverConfiguration = await heartbeat.Content.ReadFromJsonAsync<AgentHeartbeatResponse>(cancellationToken: stoppingToken);
-                    if (serverConfiguration?.AgentCompletedDocumentRetentionDays is int retentionDays &&
-                        serverConfiguration.AgentRetentionSweepHours is int sweepHours)
-                    {
-                        completedDocumentRetention = TimeSpan.FromDays(Math.Clamp(retentionDays, 1, 3650));
-                        retentionSweepInterval = TimeSpan.FromHours(Math.Clamp(sweepHours, 1, 24));
-                        hasReceivedPlatformRetentionPolicy = true;
-                    }
-                    if (Uri.TryCreate(serverConfiguration?.PublicBaseUrl, UriKind.Absolute, out var configuredBaseUri) &&
-                        configuredBaseUri.Scheme == Uri.UriSchemeHttps && configuredBaseUri.AbsolutePath == "/" &&
-                        string.IsNullOrEmpty(configuredBaseUri.Query) && string.IsNullOrEmpty(configuredBaseUri.Fragment) && string.IsNullOrEmpty(configuredBaseUri.UserInfo))
-                    {
-                        var currentBaseUrl = configuredBaseUri.GetLeftPart(UriPartial.Authority);
-                        if (!string.Equals(credentials.ApiBaseUrl.TrimEnd('/'), currentBaseUrl, StringComparison.OrdinalIgnoreCase))
-                        {
-                            credentials = credentials with { ApiBaseUrl = currentBaseUrl };
-                            credentialStore.Save(credentials);
-                            client.Dispose();
-                            client = httpClientFactory.CreateClient("cloud");
-                            client.BaseAddress = new Uri(currentBaseUrl.TrimEnd('/') + "/");
-                            logger.LogInformation("Updated Agent API destination and CORS origin from the canonical public URL.");
-                        }
-                    }
-                    var trustedOrigins = serverConfiguration?.AllowedPortalOrigins;
-                    if (trustedOrigins is { Count: > 0 })
-                    {
-                        localAgentApiState.SetTrustedPortalOrigins(trustedOrigins);
-                    }
-                    else if (!string.IsNullOrWhiteSpace(serverConfiguration?.PublicBaseUrl))
-                    {
-                        localAgentApiState.SetTrustedPortalOrigins([serverConfiguration.PublicBaseUrl]);
-                    }
-
-                    if (printerDiscovery.TryDiscover(out var printers))
-                    {
-                        using var sync = await SendAgentRequestAsync(
-                            client,
-                            credentials,
-                            "api/v1/agent/printers/sync",
-                            new { printers },
-                            stoppingToken);
-
-                        if (sync.IsSuccessStatusCode)
-                        {
-                            logger.LogInformation("Synchronized {PrinterCount} Windows printer queues with the shop.", printers.Count);
-                        }
-                        else
-                        {
-                            logger.LogWarning("Printer inventory synchronization failed with HTTP {StatusCode}; the last successful inventory is retained.", (int)sync.StatusCode);
-                        }
-                    }
-                    else
-                    {
-                        logger.LogWarning("Skipping this printer inventory sync because Windows discovery failed; the server's last known printers are retained.");
-                    }
-
-                    // A transient printer enumeration/sync failure must not stop payment-
-                    // authorised jobs already secured by this Agent from being reconciled.
-                    await ProcessLocalQueueHandoffAsync(client, credentials, stoppingToken);
-                    await ReconcileLegacyPdfQueueJobsAsync(client, credentials, stoppingToken);
-                    await ReconcileInterruptedPdfExportsAsync(client, credentials, stoppingToken);
-                    await RetryPendingPdfExportReceiptsAsync(client, credentials, stoppingToken);
-                    await ReconcileInterruptedSubmissionsAsync(client, credentials, stoppingToken);
-                    await RetrySpoolerReceiptsAsync(client, credentials, stoppingToken);
-                    await ProcessAuthorizedPrintJobsAsync(client, credentials, stoppingToken);
-                    await MonitorSpoolerJobsAsync(client, credentials, stoppingToken);
-                }
-                else
-                {
-                    logger.LogWarning("Agent heartbeat failed with HTTP {StatusCode}.", (int)heartbeat.StatusCode);
-                }
+                // These operations can take longer than a heartbeat interval. They
+                // intentionally run separately so an upload or spooler wait cannot
+                // make a healthy Agent appear offline.
+                await ProcessLocalQueueHandoffAsync(client, credentials, cancellationToken);
+                await ReconcileLegacyPdfQueueJobsAsync(client, credentials, cancellationToken);
+                await ReconcileInterruptedPdfExportsAsync(client, credentials, cancellationToken);
+                await RetryPendingPdfExportReceiptsAsync(client, credentials, cancellationToken);
+                await ReconcileInterruptedSubmissionsAsync(client, credentials, cancellationToken);
+                await RetrySpoolerReceiptsAsync(client, credentials, cancellationToken);
+                await ProcessAuthorizedPrintJobsAsync(client, credentials, cancellationToken);
+                await MonitorSpoolerJobsAsync(client, credentials, cancellationToken);
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                break;
             }
             catch (HttpRequestException exception)
             {
-                logger.LogWarning(exception, "Smart Print API is unavailable. The agent will retry without modifying printer queues.");
+                logger.LogWarning(exception, "Smart Print API is unavailable. The Agent will retry print handoff without modifying printer queues.");
             }
-            catch (TaskCanceledException) when (!stoppingToken.IsCancellationRequested)
+            catch (TaskCanceledException) when (!cancellationToken.IsCancellationRequested)
             {
-                logger.LogWarning("Smart Print API request timed out. The agent will retry.");
+                logger.LogWarning("A print handoff API request timed out. The Agent will retry.");
             }
             catch (Exception exception)
             {
-                logger.LogError(exception, "Unexpected local agent synchronization error.");
+                logger.LogError(exception, "Unexpected local print work error.");
             }
 
-            await localNetworkManager.WaitForSelectionChangeOrDelayAsync(pollInterval, stoppingToken);
+            await localNetworkManager.WaitForSelectionChangeOrDelayAsync(pollInterval, cancellationToken);
         }
     }
-
 
     private async Task ProcessLocalQueueHandoffAsync(
         HttpClient client,
