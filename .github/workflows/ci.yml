@@ -421,15 +421,9 @@ jobs:
             lifecycle_status=$?
             set -e
 
-            if [[ "$ui_test_status" -ne 0 ]]; then
-              echo "::error::The pre-existing Android emulator UI suite failed (exit $ui_test_status). Its failure is reported separately from package installation lifecycle checks."
-            fi
-            if [[ "$lifecycle_status" -ne 0 ]]; then
-              echo "::error::Android package installation lifecycle checks failed (exit $lifecycle_status)."
-            fi
-            if [[ "$ui_test_status" -ne 0 || "$lifecycle_status" -ne 0 ]]; then
-              exit 1
-            fi
+            test "$ui_test_status" -eq 0 || echo "::error::The pre-existing Android emulator UI suite failed (exit $ui_test_status). Its failure is reported separately from package installation lifecycle checks."
+            test "$lifecycle_status" -eq 0 || echo "::error::Android package installation lifecycle checks failed (exit $lifecycle_status)."
+            test "$ui_test_status" -eq 0 && test "$lifecycle_status" -eq 0
       - name: Upload Android test reports
         if: always()
         uses: actions/upload-artifact@v7
