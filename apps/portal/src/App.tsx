@@ -1937,14 +1937,13 @@ function ShopConnectionPanel({connected,localApiReady}:{connected:boolean;localA
             <div><strong>Scan with a phone on this shop Wi-Fi</strong><p>Open your phone camera, scan this code and open the link. A confirmation will appear on your phone when the connection works.</p><small>This check expires in five minutes.</small></div>
           </div>}
           {phoneTestPassed&&<div className="local-network-result success"><Check size={17}/><span><strong>Phone test passed</strong><small>A phone reached this shop connection recently. The check expires after ten minutes.</small></span></div>}
-          {localApiReady&&readiness?.localUploadReady===true&&<div className="local-network-result success"><Check size={17}/><span><strong>Local print pipeline ready</strong><small>Protected queue, print worker, cloud heartbeat and printer inventory are healthy. {readiness.discoveredPrinterCount} printer queue(s) discovered.</small></span></div>}
+          {localApiReady&&readiness?.localUploadReady===true&&<div className="local-network-result success"><Check size={17}/><span><strong>Local print pipeline ready</strong><small>Protected queue, print worker, cloud heartbeat and printer inventory are healthy. The assigned printer is checked separately for each QR station upload.</small></span></div>}
           {localApiReady&&!readiness&&<div className="local-network-result warning"><Clock3 size={17}/><span><strong>Agent update required</strong><small>This Agent version does not report queue and print-worker readiness. Update the Windows Print Agent to verify local upload readiness.</small></span></div>}
           {localApiReady&&readiness&&!readiness.localUploadReady&&<div className="local-network-result warning"><Clock3 size={17}/><span><strong>Print pipeline recovering</strong><small>{[
             readiness.queueInitialized?"":"Protected document queue is not ready",
             readiness.printWorkerRunning?"":"Print worker is not running",
             readiness.heartbeatFresh?"":"Cloud heartbeat is stale",
-            readiness.printerInventoryFresh?"":"Printer inventory is stale",
-            readiness.discoveredPrinterCount>0?"":"No printer queues are discovered"
+            readiness.printerInventoryFresh?"":"Printer inventory is stale"
           ].filter(Boolean).join(" · ")} {readiness.lastFailureCode?"(Last issue: "+readiness.lastFailureCode+") ":""}Retry after the shop computer/Agent has recovered.</small></span></div>}
           {expired&&<div className="local-network-result warning"><Clock3 size={17}/><span><strong>Phone not connected yet</strong><small>Make sure the phone is on this same shop Wi-Fi, then start a new check. You can also try another connection above.</small></span></div>}
         </>}
@@ -2796,7 +2795,7 @@ function CustomerEntry({publicCode,dark,onToggleTheme}:{publicCode:string;dark:b
 
 
 type CustomerLocalAgent = NonNullable<Awaited<ReturnType<typeof createCustomerSession>>["localAgent"]>;
-type LocalAgentCheckStatus = "idle" | "checking" | "connected" | "recovering" | "unavailable" | "denied" | "insecure";
+type LocalAgentCheckStatus = "idle" | "checking" | "connected" | "unverified" | "recovering" | "unavailable" | "denied" | "insecure";
 
 function isPrivateIpv4Hostname(hostname:string):boolean {
   const octets=hostname.split(".").map(Number);
@@ -2908,6 +2907,15 @@ function CustomerLocalConnection({localAgent,onReady,cloudAssistedPrintingEnable
         if(status.agentDeviceId===localAgent.agentDeviceId &&
            status.protocolVersion===1 &&
            status.status==="LOCAL_ENDPOINT_READY") {
+          if(!status.readiness) {
+            // Existing installed Agents do not yet publish the detailed readiness
+            // payload. Keep their working local route available; the ticket API
+            // and Agent must still validate the assigned printer and queue.
+            setCheckStatus("unverified");
+            onReady(true);
+            setMessage("This shop computer is reachable, but its Agent has not reported detailed queue health yet. SmartPrint will verify the assigned printer and upload with the shop before confirming the file.");
+            return;
+          }
           if(status.localUploadReady!==true || status.readiness?.localUploadReady!==true) {
             setCheckStatus("recovering");
             onReady(false);
@@ -2916,8 +2924,7 @@ function CustomerLocalConnection({localAgent,onReady,cloudAssistedPrintingEnable
               readiness?.queueInitialized!==true?"protected document queue is not ready":null,
               readiness?.printWorkerRunning!==true?"print worker is not running":null,
               readiness?.heartbeatFresh!==true?"cloud heartbeat is not fresh":null,
-              readiness?.printerInventoryFresh!==true?"printer inventory is not fresh":null,
-              readiness?.discoveredPrinterCount===0?"no printer queues are discovered":null
+              readiness?.printerInventoryFresh!==true?"printer inventory is not fresh":null
             ].filter((value):value is string=>value!==null);
             const detail=blockers.length?blockers.join(", "):"the Agent has not reported full pipeline readiness";
             setMessage("The shop computer is reachable, but local printing is recovering ("+detail+"). "+
@@ -3016,11 +3023,13 @@ function CustomerLocalConnection({localAgent,onReady,cloudAssistedPrintingEnable
 
   const label=checkStatus==="checking"?"Checking…":
     checkStatus==="connected"?(nativeAppMode?"Connected":"Shop computer reachable"):
+    checkStatus==="unverified"?"Connected · health details unavailable":
     checkStatus==="recovering"?"Print pipeline recovering":
     checkStatus==="denied"?(nativeAppMode?"Access blocked":"Browser permission blocked"):
     checkStatus==="insecure"?"HTTPS required":
     checkStatus==="unavailable"?"Not reachable":"Not checked";
   const tone=checkStatus==="connected"?"green":
+    checkStatus==="unverified"?"amber":
     checkStatus==="recovering"?"amber":
     checkStatus==="unavailable"||checkStatus==="denied"?"red":"blue";
 
