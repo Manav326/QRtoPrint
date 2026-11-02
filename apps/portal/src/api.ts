@@ -172,6 +172,22 @@ export class ApiError extends Error {
   }
 }
 
+/** An explicit API rejection received before a local upload ticket was created. */
+export class LocalUploadPreflightError extends ApiError {
+  constructor(message: string, status: number, code: string | null) {
+    super(message, status, code);
+    this.name = "LocalUploadPreflightError";
+  }
+}
+
+/** The Agent may have stored this file; the customer must retry the same ticket. */
+export class LocalUploadOutcomeUnknownError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "LocalUploadOutcomeUnknownError";
+  }
+}
+
 const defaultApiBase = (import.meta.env.VITE_API_BASE_URL || "").replace(/\/$/, "");
 let apiBase = defaultApiBase;
 let desktopApiBaseRefresh: Promise<void> | null = null;
@@ -1041,6 +1057,18 @@ export async function uploadCustomerDocumentLocally(
       sessionStorage.removeItem(keys.idempotency);
       sessionStorage.removeItem(keys.grant);
     }
+    if (exception instanceof ApiError && exception.status === 409 &&
+        ["local_print_agent_unavailable", "local_print_printer_unavailable", "local_upload_printer_unavailable"].includes(exception.code ?? "")) {
+      // These are explicit preflight rejections; the API did not issue a ticket.
+      throw new LocalUploadPreflightError(exception.message, exception.status, exception.code);
+    }
+    if (exception instanceof ApiError && exception.status === 0) {
+      // The POST may have committed and lost its response. Keep the idempotency
+      // key/grant so a retry asks for the same ticket instead of creating a new job.
+      throw new LocalUploadOutcomeUnknownError(
+        "SmartPrint could not confirm whether the shop created this upload ticket. Reconnect to the same shop Wi-Fi and retry this same file; the original idempotency key is being retained."
+      );
+    }
     throw exception;
   }
 
@@ -1097,8 +1125,14 @@ export async function uploadCustomerDocumentLocally(
       /expired/i.test(lastError.message)) {
     sessionStorage.removeItem(keys.idempotency);
     sessionStorage.removeItem(keys.grant);
+    throw lastError;
   }
-  throw lastError ?? new ApiError("No reachable private shop computer was found. Connect to the shop Wi-Fi and try again.", 0);
+
+  // After a ticket exists, even a timeout or HTTP error can mean the Agent has
+  // already persisted the document. Never create a cloud job automatically.
+  throw new LocalUploadOutcomeUnknownError(
+    "The local transfer could not be confirmed. The shop may already have stored this file. Reconnect to the same shop Wi-Fi and retry this same file in the same batch; SmartPrint will reuse its original ticket and grant."
+  );
 }
 
 export function calculateCustomerQuote(sessionToken: string, jobId: string, values: {

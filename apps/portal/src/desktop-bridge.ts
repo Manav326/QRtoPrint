@@ -1,5 +1,18 @@
 import { invoke } from "@tauri-apps/api/core";
 
+export interface DesktopAgentReadiness {
+  queueInitialized: boolean;
+  printWorkerRunning: boolean;
+  lastHeartbeatUtc: string | null;
+  heartbeatFresh: boolean;
+  lastPrinterInventoryUtc: string | null;
+  printerInventoryFresh: boolean;
+  discoveredPrinterCount: number;
+  lastPrintWorkCycleUtc: string | null;
+  lastFailureCode: string | null;
+  localUploadReady: boolean;
+}
+
 export interface DesktopAgentStatus {
   serviceReachable: boolean;
   localApiReachable: boolean;
@@ -7,6 +20,7 @@ export interface DesktopAgentStatus {
   agentDeviceId: string | null;
   status: string;
   apiBaseUrl: string | null;
+  readiness: DesktopAgentReadiness | null;
 }
 
 export interface DesktopLocalNetworkAdapter {

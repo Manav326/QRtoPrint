@@ -12,6 +12,38 @@ fn agent_pipe_path() -> String {
 }
 const SESSION_TARGET: &str = "QRtoPrint.SmartPrint.Session";
 
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase", default)]
+struct AgentRuntimeReadiness {
+    queue_initialized: bool,
+    print_worker_running: bool,
+    last_heartbeat_utc: Option<String>,
+    heartbeat_fresh: bool,
+    last_printer_inventory_utc: Option<String>,
+    printer_inventory_fresh: bool,
+    discovered_printer_count: usize,
+    last_print_work_cycle_utc: Option<String>,
+    last_failure_code: Option<String>,
+    local_upload_ready: bool,
+}
+
+impl Default for AgentRuntimeReadiness {
+    fn default() -> Self {
+        Self {
+            queue_initialized: false,
+            print_worker_running: false,
+            last_heartbeat_utc: None,
+            heartbeat_fresh: false,
+            last_printer_inventory_utc: None,
+            printer_inventory_fresh: false,
+            discovered_printer_count: 0,
+            last_print_work_cycle_utc: None,
+            last_failure_code: None,
+            local_upload_ready: false,
+        }
+    }
+}
+
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct LocalAgentStatus {
@@ -21,6 +53,7 @@ struct LocalAgentStatus {
     agent_device_id: Option<String>,
     status: String,
     api_base_url: Option<String>,
+    readiness: Option<AgentRuntimeReadiness>,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -64,6 +97,7 @@ struct AgentPipeResponse {
     code: Option<String>,
     network_snapshot: Option<LocalNetworkSnapshot>,
     phone_test: Option<LocalPhoneTest>,
+    readiness: Option<AgentRuntimeReadiness>,
 }
 
 #[derive(Debug, Serialize)]
@@ -93,6 +127,9 @@ async fn get_local_agent_status() -> LocalAgentStatus {
                 .and_then(|value| value.get("apiBaseUrl"))
                 .and_then(serde_json::Value::as_str)
                 .map(str::to_owned);
+            let readiness = problem.as_ref()
+                .and_then(|value| value.get("readiness"))
+                .and_then(|value| serde_json::from_value::<AgentRuntimeReadiness>(value.clone()).ok());
             if title == Some("This computer's SmartPrint pairing was revoked by its shop owner.") {
                 LocalAgentStatus {
                     service_reachable: true,
@@ -101,6 +138,7 @@ async fn get_local_agent_status() -> LocalAgentStatus {
                     agent_device_id: None,
                     status: "REVOKED".into(),
                     api_base_url,
+                    readiness: readiness.clone(),
                 }
             } else if title == Some("This computer is not paired with a print shop.") {
                 LocalAgentStatus {
@@ -110,6 +148,7 @@ async fn get_local_agent_status() -> LocalAgentStatus {
                     agent_device_id: None,
                     status: "UNPAIRED".into(),
                     api_base_url,
+                    readiness: readiness.clone(),
                 }
             } else {
                 pipe_agent_status().unwrap_or_else(|_| unavailable_status())
@@ -121,6 +160,8 @@ async fn get_local_agent_status() -> LocalAgentStatus {
                     let id = payload.get("agentDeviceId")
                         .and_then(serde_json::Value::as_str)
                         .map(str::to_owned);
+                    let readiness = payload.get("readiness")
+                        .and_then(|value| serde_json::from_value::<AgentRuntimeReadiness>(value.clone()).ok());
                     LocalAgentStatus {
                         service_reachable: true,
                         local_api_reachable: true,
@@ -133,6 +174,7 @@ async fn get_local_agent_status() -> LocalAgentStatus {
                         api_base_url: payload.get("apiBaseUrl")
                             .and_then(serde_json::Value::as_str)
                             .map(str::to_owned),
+                        readiness,
                     }
                 }
                 Err(_) => pipe_agent_status().unwrap_or_else(|_| unavailable_status()),
@@ -150,6 +192,7 @@ fn unavailable_status() -> LocalAgentStatus {
         agent_device_id: None,
         status: "SERVICE_UNAVAILABLE".into(),
         api_base_url: None,
+        readiness: None,
     }
 }
 
@@ -197,6 +240,7 @@ fn pipe_agent_status() -> Result<LocalAgentStatus, String> {
         agent_device_id: response.agent_device_id,
         status: response.status.unwrap_or_else(|| if paired { "CONNECTED" } else { "UNPAIRED" }.into()),
         api_base_url: response.api_base_url,
+        readiness: response.readiness,
     })
 }
 

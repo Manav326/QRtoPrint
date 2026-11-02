@@ -15,3 +15,16 @@ export function resolveCustomerUploadMode(
   if (current === "CLOUD" && !cloudAssistedPrintingEnabled && hasLocalEndpoint) return "LOCAL";
   return current;
 }
+
+
+/**
+ * A local ticket may already have been claimed or its document may already be
+ * stored on the Agent when a transfer response is lost. Cloud fallback is safe
+ * only when the API explicitly rejected the ticket before creating it.
+ */
+export function canFallbackToCloudFromLocalFailure(
+  confirmedPreTicketRejection: boolean,
+  cloudAssistedPrintingEnabled: boolean
+): boolean {
+  return confirmedPreTicketRejection && cloudAssistedPrintingEnabled;
+}
