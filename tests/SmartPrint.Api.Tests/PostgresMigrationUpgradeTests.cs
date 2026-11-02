@@ -61,6 +61,11 @@ public sealed class PostgresMigrationUpgradeTests
         Assert.Contains(
             "202611020004_AddDataTransferEvents",
             await db.Database.GetAppliedMigrationsAsync());
+        Assert.Contains(
+            "202611020005_AddTransferUsageReliability",
+            await db.Database.GetAppliedMigrationsAsync());
+        Assert.Equal(90, settings.DataTransferRawRetentionDays);
+        Assert.True(settings.DataTransferMeasurementStartedUtc <= DateTimeOffset.UtcNow);
 
         // Reproduce the local-upload completion transaction at the exact monthly quota boundary.
         settings.TrialMaxMonthlyPrintJobs = 1;
