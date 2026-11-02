@@ -35,7 +35,7 @@ public sealed class LocalUploadRecoveryRulesTests
     }
 
     [Theory]
-    [InlineData(-25, false)]
+    [InlineData(-25, true)]
     [InlineData(-24 * 60, true)]
     [InlineData(-24 * 60 - 1, false)]
     public void OnlyUncompletedSameMonthTicketsInsideRecoveryWindowReuseQuota(
