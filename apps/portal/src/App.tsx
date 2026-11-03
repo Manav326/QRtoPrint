@@ -22,7 +22,7 @@ import {
   logout, readStoredTokens, rejectShopPrintJob, rejectShopPayment, revokeAgentDevice,
   reportCustomerBatchPayment, reportCustomerUpiPayment, renewCustomerPrintSession, getNativeCustomerPrintSession, saveNativeCustomerPrintSession, saveNativeCustomerShopProfile, clearNativeCustomerPrintSession, resumeCustomerSession, rotateStationCode, startCustomerBatchPayment, startCustomerPayment, storeTokens,
   updatePrinterActive, updateShopPaymentSettings, updateShopPricing,
-  updateShopProfile, updateStationEnabled, uploadCustomerDocument, uploadCustomerDocumentLocally,
+  updateShopOwnerAccount, updateShopProfile, updateStationEnabled, uploadCustomerDocument, uploadCustomerDocumentLocally,
   verifyShopPayment, retryShopPdfExport, recordShopPrintRefund, previewShopPrintRefund, type CustomerBatchPayment, type CustomerPayment, type ShopPayment, type ShopPaymentSettings, type ShopRefund,
   type AgentDevice, type AuthTokens, type CustomerJobStatus, type PrinterDevice, type PrintQuoteResult, type ShopJobEvent,
   type QrStation, type ShopCustomer, type ShopCustomerHistory, type ShopCustomerPage, type ShopPricingProfile, type ShopPrintJob, type ShopProfile, type ShopReportSummary, type ShopSubscriptionSummary,
@@ -147,6 +147,7 @@ function ShopConsole({ tokens, onSignOut, dark, onToggleTheme }: { tokens: AuthT
   const [sidebarCollapsed, setSidebarCollapsed] = useState(readSidebarCollapsedPreference);
   const [accountMenuOpen, setAccountMenuOpen] = useState(false);
   const [helpOpen, setHelpOpen] = useState(false);
+  const [ownerAccountOpen, setOwnerAccountOpen] = useState(false);
   const accountMenuRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (!accountMenuOpen) return;
@@ -1055,6 +1056,24 @@ function ShopConsole({ tokens, onSignOut, dark, onToggleTheme }: { tokens: AuthT
     }
   }
 
+  async function saveOwnerAccount(values: { ownerName: string; email: string; currentPassword?: string }) {
+    setBusy(true);
+    try {
+      const updated = await updateShopOwnerAccount(tokens.accessToken, values);
+      setProfile(current => current ? {
+        ...current,
+        ownerName: updated.ownerName,
+        ownerEmail: updated.ownerEmail
+      } : current);
+      setOwnerAccountOpen(false);
+      setToast(updated.emailChanged
+        ? "Personal details saved. Your new email is now your sign-in address."
+        : "Personal details updated.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function savePricing(values: {
     monoPerSideMinor: number;
     colourPerSideMinor: number;
@@ -1325,8 +1344,11 @@ function ShopConsole({ tokens, onSignOut, dark, onToggleTheme }: { tokens: AuthT
                     </div>
                   </div>
                   <div className="account-menu-divider"/>
+                  <button type="button" className="account-menu-item" onClick={() => { setAccountMenuOpen(false); setOwnerAccountOpen(true); }}>
+                    <UserRound size={16}/>Personal details
+                  </button>
                   <button type="button" className="account-menu-item" onClick={() => navAction("Settings")}>
-                    <UserRound size={16}/>Shop profile &amp; branding
+                    <Settings size={16}/>Shop profile &amp; branding
                   </button>
                   <button type="button" className="account-menu-item" onClick={() => navAction("Subscription")}>
                     <ShieldCheck size={16}/>Trial &amp; subscription
@@ -1369,6 +1391,7 @@ function ShopConsole({ tokens, onSignOut, dark, onToggleTheme }: { tokens: AuthT
         </div>
       </main>
 
+      {ownerAccountOpen && profile && <ShopOwnerAccountModal profile={profile} busy={busy} onClose={() => setOwnerAccountOpen(false)} onSave={saveOwnerAccount}/>}
       {helpOpen && <HelpSupportModal onClose={() => setHelpOpen(false)} onNavigate={section => { setHelpOpen(false); navAction(section); }}/>}
       {modal === "printer" && <PrinterModal busy={busy} onClose={() => setModal(null)} onSubmit={submitPrinter}/>}
       {modal === "station" && <StationModal busy={busy} printers={printers.filter(printer => printer.isActive)} onClose={() => setModal(null)} onSubmit={submitStation}/>}
@@ -2590,6 +2613,70 @@ function SettingsPage({ profile, onSave, busy }: { profile:ShopProfile; onSave:(
   </section>;
 }
 
+
+
+function ShopOwnerAccountModal({ profile, busy, onClose, onSave }: {
+  profile: ShopProfile;
+  busy: boolean;
+  onClose: () => void;
+  onSave: (values: { ownerName: string; email: string; currentPassword?: string }) => Promise<void>;
+}) {
+  const [ownerName, setOwnerName] = useState(profile.ownerName);
+  const [email, setEmail] = useState(profile.ownerEmail);
+  const [currentPassword, setCurrentPassword] = useState("");
+  const [saveError, setSaveError] = useState("");
+  useEffect(() => {
+    setOwnerName(profile.ownerName);
+    setEmail(profile.ownerEmail);
+  }, [profile.ownerName, profile.ownerEmail]);
+
+  const emailChanged = email.trim().toLowerCase() !== profile.ownerEmail.trim().toLowerCase();
+  return (
+    <Modal title="Personal details" subtitle="Update the name and sign-in email for your shop owner account." onClose={onClose}>
+      <form className="modal-form account-edit-form" onSubmit={async event => {
+        event.preventDefault();
+        setSaveError("");
+        try {
+          await onSave({
+            ownerName: ownerName.trim(),
+            email: email.trim(),
+            currentPassword: emailChanged ? currentPassword : undefined
+          });
+          onClose();
+        } catch (exception) {
+          setSaveError(exception instanceof Error ? exception.message : "Could not update your personal details.");
+        }
+      }}>
+        <label>Your name
+          <input value={ownerName} onChange={event => setOwnerName(event.target.value)}
+            autoComplete="name" maxLength={160} required/>
+        </label>
+        <label>Sign-in email
+          <input type="email" value={email} onChange={event => setEmail(event.target.value)}
+            autoComplete="email" maxLength={256} required/>
+        </label>
+        {emailChanged && <>
+          <div className="modal-note account-email-change-note">
+            <ShieldCheck size={16}/>
+            <span>This address becomes your sign-in email immediately. Make sure it is correct. Your current password is required to confirm the change.</span>
+          </div>
+          <label>Current password
+            <input type="password" value={currentPassword}
+              onChange={event => setCurrentPassword(event.target.value)}
+              autoComplete="current-password" required/>
+          </label>
+        </>}
+        {saveError && <div className="inline-error account-edit-error" role="alert">{saveError}</div>}
+        <div className="modal-actions">
+          <button type="button" className="secondary-button" onClick={onClose} disabled={busy}>Cancel</button>
+          <button className="primary-button" disabled={busy || !ownerName.trim() || !email.trim() || (emailChanged && !currentPassword)}>
+            {busy ? <span className="button-spinner"/> : "Save personal details"}
+          </button>
+        </div>
+      </form>
+    </Modal>
+  );
+}
 
 function HelpSupportModal({ onClose, onNavigate }: { onClose: () => void; onNavigate: (section: Section) => void }) {
   const topics: { section: Section; title: string; description: string; icon: typeof FileText }[] = [
