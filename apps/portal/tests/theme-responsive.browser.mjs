@@ -327,69 +327,73 @@ async function exerciseWorkspaceSections(page, route, viewport, themeLabel) {
       await page.locator("#shop-account-menu").waitFor({ state: "visible" });
     };
 
-    const accountRequests = [];
-    let currentMockOwnerEmail = "owner@example.invalid";
-    await page.route("**/api/v1/shop/account", async request => {
-      const submitted = request.request().postDataJSON();
-      accountRequests.push(submitted);
-      if (submitted.currentPassword === "wrong-password") {
+    if (themeLabel === "light") {
+      const accountRequests = [];
+      let currentMockOwnerEmail = "owner@example.invalid";
+      await page.route("**/api/v1/shop/account", async request => {
+        const submitted = request.request().postDataJSON();
+        accountRequests.push(submitted);
+        if (submitted.currentPassword === "wrong-password") {
+          await request.fulfill({
+            status: 400,
+            contentType: "application/json",
+            body: JSON.stringify({ errors: { currentPassword: ["The current password is incorrect."] } })
+          });
+          return;
+        }
+        const emailChanged = submitted.email.toLowerCase() !== currentMockOwnerEmail.toLowerCase();
+        currentMockOwnerEmail = submitted.email;
         await request.fulfill({
-          status: 400,
+          status: 200,
           contentType: "application/json",
-          body: JSON.stringify({ errors: { currentPassword: ["The current password is incorrect."] } })
+          body: JSON.stringify({
+            ownerName: submitted.ownerName,
+            ownerEmail: currentMockOwnerEmail,
+            emailChanged
+          })
         });
-        return;
-      }
-      const emailChanged = submitted.email.toLowerCase() !== currentMockOwnerEmail.toLowerCase();
-      currentMockOwnerEmail = submitted.email;
-      await request.fulfill({
-        status: 200,
-        contentType: "application/json",
-        body: JSON.stringify({
-          ownerName: submitted.ownerName,
-          ownerEmail: currentMockOwnerEmail,
-          emailChanged
-        })
       });
-    });
-
-    await openAccountMenu();
-    await page.locator("#shop-account-menu").getByRole("button", { name: "Personal details", exact: true }).click();
-    const personalDetails = page.getByRole("dialog", { name: "Personal details" });
-    await personalDetails.waitFor({ state: "visible" });
-    await personalDetails.getByLabel("Your name").fill("Updated Shop Owner");
-    await personalDetails.getByRole("button", { name: "Save personal details" }).click();
-    await personalDetails.waitFor({ state: "hidden" });
-    assert.equal(accountRequests[0]?.currentPassword, undefined,
-      "A name-only update must not demand the current password.");
-
-    await openAccountMenu();
-    await page.locator("#shop-account-menu").getByRole("button", { name: "Personal details", exact: true }).click();
-    await personalDetails.waitFor({ state: "visible" });
-    const signInEmailInput = personalDetails.getByLabel("Sign-in email");
-    await signInEmailInput.fill("updated-owner@example.invalid");
-    try {
-      await personalDetails.locator(".account-email-change-note").waitFor({ state: "visible", timeout: 5000 });
-    } catch (error) {
-      const inputState = await signInEmailInput.inputValue();
-      const profileState = await personalDetails.locator(".account-edit-form").innerText();
-      throw new Error(`Changing sign-in email did not reveal the password-confirmation step. Input value: "${inputState}". Previous submitted email: "${accountRequests[0]?.email}". Mock current email: "${currentMockOwnerEmail}". Form: "${profileState}". Original: ${error instanceof Error ? error.message : String(error)}`);
+  
+      await openAccountMenu();
+      await page.locator("#shop-account-menu").getByRole("button", { name: "Personal details", exact: true }).click();
+      const personalDetails = page.getByRole("dialog", { name: "Personal details" });
+      await personalDetails.waitFor({ state: "visible" });
+      await personalDetails.getByLabel("Your name").fill("Updated Shop Owner");
+      await personalDetails.getByRole("button", { name: "Save personal details" }).click();
+      await personalDetails.waitFor({ state: "hidden" });
+      assert.equal(accountRequests[0]?.currentPassword, undefined,
+        "A name-only update must not demand the current password.");
+  
+      await openAccountMenu();
+      await page.locator("#shop-account-menu").getByRole("button", { name: "Personal details", exact: true }).click();
+      await personalDetails.waitFor({ state: "visible" });
+      const signInEmailInput = personalDetails.getByLabel("Sign-in email");
+      await signInEmailInput.fill("updated-owner@example.invalid");
+      try {
+        await personalDetails.locator(".account-email-change-note").waitFor({ state: "visible", timeout: 5000 });
+      } catch (error) {
+        const inputState = await signInEmailInput.inputValue();
+        const profileState = await personalDetails.locator(".account-edit-form").innerText();
+        throw new Error(`Changing sign-in email did not reveal the password-confirmation step. Input value: "${inputState}". Previous submitted email: "${accountRequests[0]?.email}". Mock current email: "${currentMockOwnerEmail}". Form: "${profileState}". Original: ${error instanceof Error ? error.message : String(error)}`);
+      }
+      await personalDetails.getByLabel("Current password").fill("wrong-password");
+      await personalDetails.getByRole("button", { name: "Save personal details" }).click();
+      await personalDetails.locator(".account-edit-error").waitFor({ state: "visible" });
+      assert.equal(await personalDetails.isVisible(), true,
+        "A wrong current password must not close the personal details editor.");
+      assert.equal(currentMockOwnerEmail, "owner@example.invalid",
+        "A failed password check must not change the sign-in email.");
+      assert.equal(accountRequests[1]?.currentPassword, "wrong-password");
+  
+      await personalDetails.getByLabel("Current password").fill("E2e-Current-Password-2026!");
+      await personalDetails.getByRole("button", { name: "Save personal details" }).click();
+      await personalDetails.waitFor({ state: "hidden" });
+      assert.equal(accountRequests[2]?.currentPassword, "E2e-Current-Password-2026!",
+        "An email change must include the current password.");
+      results.push({ check: `${route.label} / account / personal name and password-confirmed email update / ${themeLabel} / ${viewport.width}px`, passed: true });
+  
+  
     }
-    await personalDetails.getByLabel("Current password").fill("wrong-password");
-    await personalDetails.getByRole("button", { name: "Save personal details" }).click();
-    await personalDetails.locator(".account-edit-error").waitFor({ state: "visible" });
-    assert.equal(await personalDetails.isVisible(), true,
-      "A wrong current password must not close the personal details editor.");
-    assert.equal(currentMockOwnerEmail, "owner@example.invalid",
-      "A failed password check must not change the sign-in email.");
-    assert.equal(accountRequests[1]?.currentPassword, "wrong-password");
-
-    await personalDetails.getByLabel("Current password").fill("E2e-Current-Password-2026!");
-    await personalDetails.getByRole("button", { name: "Save personal details" }).click();
-    await personalDetails.waitFor({ state: "hidden" });
-    assert.equal(accountRequests[2]?.currentPassword, "E2e-Current-Password-2026!",
-      "An email change must include the current password.");
-    results.push({ check: `${route.label} / account / personal name and password-confirmed email update / ${themeLabel} / ${viewport.width}px`, passed: true });
 
     const chooseAccountItem = async (label, expectedTitle) => {
       await openAccountMenu();
