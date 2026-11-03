@@ -3156,6 +3156,15 @@ function consumeSmartPrintNativePickerGroups():string[]|undefined {
 }
 type CustomerSavedPrintSettings = { copies: number; colourMode: "Mono" | "Colour"; isDuplex: boolean };
 type CustomerPhotoSettings = { sizeCode: string; photoCount: number };
+function customerPhotoSizeLabel(sizeCode?:string|null):string {
+  switch(sizeCode){
+    case "35x45": return "35 × 45 mm";
+    case "25x35": return "25 × 35 mm";
+    case "2x2": return "2 × 2 in";
+    case "4x6": return "4 × 6 in";
+    default: return "photo";
+  }
+}
 
 type StoredCustomerDraft = {
   sessionMarker: string;
@@ -3952,16 +3961,21 @@ function CustomerPrintFlow({publicCode,sessionToken,paymentOptions,localAgent,lo
   );
   const batchQuoteTotal=acceptedQuoteEntries.reduce((total,entry)=>
     total+(entry.quote?.quotedAmountMinor??0),0);
-  const batchOriginalPages=quoteEntries.reduce((total,entry)=>
-    total+(entry.quote?.pageCount??entry.item.job.pageCount),0);
-  const batchMonoPrintedPages=acceptedQuoteEntries.reduce((total,entry)=>
+  const batchDocumentSourcePages=quoteEntries.reduce((total,entry)=>
+    total+(entry.quote?.printKind==="PHOTO"?0:(entry.quote?.pageCount??entry.item.job.pageCount)),0);
+  const acceptedDocumentEntries=acceptedQuoteEntries.filter(entry=>entry.quote?.printKind!=="PHOTO");
+  const acceptedPhotoEntries=acceptedQuoteEntries.filter(entry=>entry.quote?.printKind==="PHOTO");
+  const batchPhotoCount=acceptedPhotoEntries.reduce((total,entry)=>total+(entry.quote?.photoCount??0),0);
+  const batchPhotoAmount=acceptedPhotoEntries.reduce((total,entry)=>total+(entry.quote?.quotedAmountMinor??0),0);
+  const batchMonoPrintedPages=acceptedDocumentEntries.reduce((total,entry)=>
     total+(entry.quote?.colourMode==="Mono"?(entry.quote!.pageCount*entry.quote!.copies):0),0);
-  const batchColourPrintedPages=acceptedQuoteEntries.reduce((total,entry)=>
+  const batchColourPrintedPages=acceptedDocumentEntries.reduce((total,entry)=>
     total+(entry.quote?.colourMode==="Colour"?(entry.quote!.pageCount*entry.quote!.copies):0),0);
-  const batchPrintedPages=batchMonoPrintedPages+batchColourPrintedPages;
-  const batchMonoAmount=acceptedQuoteEntries.reduce((total,entry)=>
+  const batchPrintedPages=batchMonoPrintedPages+batchColourPrintedPages+
+    acceptedPhotoEntries.reduce((total,entry)=>total+(entry.quote?.pageCount??0),0);
+  const batchMonoAmount=acceptedDocumentEntries.reduce((total,entry)=>
     total+(entry.quote?.colourMode==="Mono"?(entry.quote!.quotedAmountMinor??0):0),0);
-  const batchColourAmount=acceptedQuoteEntries.reduce((total,entry)=>
+  const batchColourAmount=acceptedDocumentEntries.reduce((total,entry)=>
     total+(entry.quote?.colourMode==="Colour"?(entry.quote!.quotedAmountMinor??0):0),0);
   const quoteEligibleItems=quoteItems.filter(item=>!["REJECTED","REFUNDED"].includes(statusForBatchItem(item)));
   const canSendBatch=quoteEligibleItems.length>0&&
@@ -4085,15 +4099,16 @@ function CustomerPrintFlow({publicCode,sessionToken,paymentOptions,localAgent,lo
     </>}
     {error&&<div className="customer-flow-error" role="alert">{error}</div>}
     {quoteEntries.length>0&&<div className="customer-quote-card customer-batch-quote-card">
-      <div><span>BATCH QUOTE</span><strong>{formatMoney(batchQuoteTotal,quoteEntries[0].quote!.currency)}</strong><small>{quoteEntries.length} files · {batchOriginalPages} source pages · {batchPrintedPages} printed pages</small></div>
-      <div className="customer-batch-quote-lines">{quoteEntries.map(entry=><div key={entry.item.job.id}><span>{entry.item.document.originalFileName}{["REJECTED","REFUNDED"].includes(statusForBatchItem(entry.item))?" · Rejected":""}</span><strong>{["REJECTED","REFUNDED"].includes(statusForBatchItem(entry.item))?"Excluded":formatMoney(entry.quote!.quotedAmountMinor,entry.quote!.currency)}</strong></div>)}</div>
+      <div><span>BATCH QUOTE</span><strong>{formatMoney(batchQuoteTotal,quoteEntries[0].quote!.currency)}</strong><small>{quoteEntries.length} files · {batchDocumentSourcePages} document pages · {batchPhotoCount} photos · {batchPrintedPages} output pages/sheets</small></div>
+      <div className="customer-batch-quote-lines">{quoteEntries.map(entry=><div key={entry.item.job.id}><span>{entry.item.document.originalFileName}{["REJECTED","REFUNDED"].includes(statusForBatchItem(entry.item))?" · Rejected":""}<small>{entry.quote!.printKind==="PHOTO"?(entry.quote!.photoCount??0)+" × "+customerPhotoSizeLabel(entry.quote!.photoSizeCode)+" · "+formatMoney(entry.quote!.photoUnitPriceMinor??0,entry.quote!.currency)+" per photo":entry.quote!.pageCount+" pages × "+entry.quote!.copies+" copies"}</small></span><strong>{["REJECTED","REFUNDED"].includes(statusForBatchItem(entry.item))?"Excluded":formatMoney(entry.quote!.quotedAmountMinor,entry.quote!.currency)}</strong></div>)}</div>
       <div className="customer-batch-print-breakdown">
-        <div><span>B&W · {batchMonoPrintedPages} printed pages</span><strong>{formatMoney(batchMonoAmount,quoteEntries[0].quote!.currency)}</strong></div>
-        <div><span>Colour · {batchColourPrintedPages} printed pages</span><strong>{formatMoney(batchColourAmount,quoteEntries[0].quote!.currency)}</strong></div>
-        <div className="customer-batch-print-total"><span>Total printed pages</span><strong>{batchPrintedPages}</strong></div>
+        {batchMonoPrintedPages>0&&<div><span>B&W · {batchMonoPrintedPages} document pages</span><strong>{formatMoney(batchMonoAmount,quoteEntries[0].quote!.currency)}</strong></div>}
+        {batchColourPrintedPages>0&&<div><span>Colour · {batchColourPrintedPages} document pages</span><strong>{formatMoney(batchColourAmount,quoteEntries[0].quote!.currency)}</strong></div>}
+        {batchPhotoCount>0&&<div><span>Photo printing · {batchPhotoCount} finished photos</span><strong>{formatMoney(batchPhotoAmount,quoteEntries[0].quote!.currency)}</strong></div>}
+        <div className="customer-batch-print-total"><span>Total output pages/sheets</span><strong>{batchPrintedPages}</strong></div>
         <div className="customer-batch-print-total"><span>Total payable</span><strong>{formatMoney(batchQuoteTotal,quoteEntries[0].quote!.currency)}</strong></div>
       </div>
-      <p className="customer-payment-model-note">Printed pages = source pages × copies for each file. Amounts use the shop's saved B&W/Colour rate card. Rejected files are excluded. After review, pay once for all accepted files.</p>
+      <p className="customer-payment-model-note">Document pages use the shop's B&W/Colour rate card. Photo sheets use the saved per-photo rate for the selected size, shown on each line. Rejected files are excluded. After review, pay once for all accepted files.</p>
     </div>}
     {canSendBatch&&<button className="customer-flow-button" disabled={busy} onClick={()=>void acceptQuote()}>{busy?<span className="button-spinner"/>:"Send batch to shop"}</button>}
       {jobStatus?.status==="QUOTE_EXPIRED"&&<button className="customer-flow-button" disabled={busy} onClick={()=>{setQuote(null);setQuotesByJobId(current=>{const next={...current};if(uploaded)delete next[uploaded.job.id];return next;});void getQuote(uploadedBatch.length?uploadedBatch:uploaded?[uploaded]:[]);}}>Request a fresh quote</button>}

@@ -945,6 +945,10 @@ export interface PrintQuoteResult {
   colourMode: string;
   paperSize: string;
   isDuplex: boolean;
+  printKind?: "DOCUMENT" | "PHOTO";
+  photoSizeCode?: string | null;
+  photoCount?: number;
+  photoUnitPriceMinor?: number;
   currency: string;
   quotedAmountMinor: number;
   amountMajor: number;
