@@ -68,6 +68,34 @@ public sealed class WindowsPrinterDiscoveryTests
     }
 
     [Fact]
+    public void WindowsDriverCapabilityDiscoveryReturnsStructuredReportForInstalledPdfPrinter()
+    {
+        if (!OperatingSystem.IsWindows())
+            return;
+
+        var json = WindowsPrinterCapabilityDiscovery.DiscoverJson("Microsoft Print to PDF");
+        using var document = JsonDocument.Parse(json);
+        var root = document.RootElement;
+
+        Assert.Equal(JsonValueKind.Object, root.ValueKind);
+        Assert.Equal(1, root.GetProperty("schemaVersion").GetInt32());
+        Assert.Equal("WINDOWS_DRIVER", root.GetProperty("source").GetString());
+        Assert.True(root.GetProperty("discoveredAtUtc").ValueKind is JsonValueKind.String);
+        Assert.True(root.GetProperty("orientation").ValueKind is JsonValueKind.Object);
+        Assert.True(root.GetProperty("paperSizes").ValueKind is JsonValueKind.Array);
+        Assert.True(root.GetProperty("mediaTypes").ValueKind is JsonValueKind.Array);
+        Assert.True(root.GetProperty("resolutions").ValueKind is JsonValueKind.Array);
+
+        var paperSizes = root.GetProperty("paperSizes");
+        Assert.NotEmpty(paperSizes.EnumerateArray());
+        foreach (var paper in paperSizes.EnumerateArray())
+        {
+            Assert.True(paper.GetProperty("code").GetInt32() > 0);
+            Assert.False(string.IsNullOrWhiteSpace(paper.GetProperty("name").GetString()));
+        }
+    }
+
+    [Fact]
     public void PrinterInventorySyncSerializesDriverCapabilitiesAsWebJson()
     {
         const string capabilityReport = """{"schemaVersion":1,"color":true,"duplex":false,"paperSizes":[{"code":9,"name":"A4"}]}""";
