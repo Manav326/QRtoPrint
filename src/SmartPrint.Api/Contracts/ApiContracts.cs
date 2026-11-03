@@ -105,6 +105,7 @@ public sealed record CreateLocalPrintUploadTicketRequest(
     string? BatchName = null);
 
 public sealed record RecordPrintRefundRequest(
+    string RefundMethod,
     string? RefundReference,
     string Reason,
     bool ConfirmedSent,
