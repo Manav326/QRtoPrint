@@ -20,6 +20,6 @@
         <item name="android:fontFamily">sans</item>
         <item name="android:textSize">9sp</item>
         <item name="android:letterSpacing">0.06</item>
-        <item name="android:textStyle">medium</item>
+        <item name="android:textStyle">bold</item>
     </style>
 </resources>
