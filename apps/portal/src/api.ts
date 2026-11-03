@@ -115,6 +115,7 @@ export interface ShopProfile {
   slug: string;
   businessName: string;
   ownerName: string;
+  ownerEmail: string;
   status: string;
   displayName: string;
   logoUrl?: string | null;
@@ -735,6 +736,23 @@ export function updatePrinterActive(token: string, printerId: string, isActive: 
 
 export function updateShopProfile(token: string, values: { displayName: string; logoUrl: string | null; accentColor: string }) {
   return apiRequest<Partial<ShopProfile>>("/api/v1/shop/profile", {
+    method: "PUT",
+    body: JSON.stringify(values)
+  }, token);
+}
+
+export interface ShopOwnerAccountUpdate {
+  ownerName: string;
+  ownerEmail: string;
+  emailChanged: boolean;
+}
+
+export function updateShopOwnerAccount(token: string, values: {
+  ownerName: string;
+  email: string;
+  currentPassword?: string;
+}) {
+  return apiRequest<ShopOwnerAccountUpdate>("/api/v1/shop/account", {
     method: "PUT",
     body: JSON.stringify(values)
   }, token);

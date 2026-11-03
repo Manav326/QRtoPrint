@@ -1100,9 +1100,21 @@ shop.MapGet("/subscription", async (
     });
 });
 
-shop.MapGet("/profile", async (ClaimsPrincipal principal, SmartPrintDbContext db, CancellationToken ct) =>
+shop.MapGet("/profile", async (
+    ClaimsPrincipal principal,
+    SmartPrintDbContext db,
+    UserManager<AppUser> userManager,
+    CancellationToken ct) =>
 {
-    if (!TryGetTenantId(principal, out var tenantId))
+    if (!principal.FindAll("shop_role").Any(claim => claim.Value == "ShopOwner") ||
+        !TryGetTenantId(principal, out var tenantId) ||
+        !Guid.TryParse(principal.FindFirstValue(JwtRegisteredClaimNames.Sub), out var userId))
+    {
+        return Results.Forbid();
+    }
+
+    var owner = await userManager.FindByIdAsync(userId.ToString());
+    if (owner is null || owner.TenantId != tenantId)
     {
         return Results.Forbid();
     }
@@ -1117,7 +1129,8 @@ shop.MapGet("/profile", async (ClaimsPrincipal principal, SmartPrintDbContext db
             tenant.Slug,
             tenant.BusinessName,
             tenant.Status,
-            OwnerName = principal.FindFirstValue("display_name") ?? "Shop owner",
+            OwnerName = owner.DisplayName,
+            OwnerEmail = owner.Email ?? string.Empty,
             profile.DisplayName,
             profile.LogoUrl,
             profile.AccentColor,
@@ -1126,6 +1139,99 @@ shop.MapGet("/profile", async (ClaimsPrincipal principal, SmartPrintDbContext db
             profile.WhiteLabelEnabled
         });
 });
+
+shop.MapPut("/account", async (
+    ShopOwnerAccountRequest request,
+    ClaimsPrincipal principal,
+    SmartPrintDbContext db,
+    UserManager<AppUser> userManager,
+    SignInManager<AppUser> signInManager,
+    CancellationToken ct) =>
+{
+    if (!IsShopOwner(principal) || !TryGetTenantId(principal, out var tenantId) ||
+        !Guid.TryParse(principal.FindFirstValue(JwtRegisteredClaimNames.Sub), out var userId))
+    {
+        return Results.Forbid();
+    }
+
+    if (!ShopOwnerAccountRules.TryNormalizeOwnerName(request.OwnerName, out var ownerName) ||
+        !ShopOwnerAccountRules.TryNormalizeEmail(request.Email, out var email))
+    {
+        return Results.ValidationProblem(new Dictionary<string, string[]>
+        {
+            ["account"] = ["Enter a name between 1 and 160 characters and a valid email address."]
+        });
+    }
+
+    var user = await userManager.FindByIdAsync(userId.ToString());
+    if (user is null || user.TenantId != tenantId)
+    {
+        return Results.Forbid();
+    }
+
+    var emailChanged = ShopOwnerAccountRules.EmailChanged(user.Email, email);
+    if (emailChanged)
+    {
+        if (string.IsNullOrWhiteSpace(request.CurrentPassword))
+        {
+            return Results.ValidationProblem(new Dictionary<string, string[]>
+            {
+                ["currentPassword"] = ["Enter your current password to change your sign-in email."]
+            });
+        }
+
+        var passwordCheck = await signInManager.CheckPasswordSignInAsync(
+            user, request.CurrentPassword, lockoutOnFailure: true);
+        if (passwordCheck.IsLockedOut)
+        {
+            return Results.Problem(statusCode: StatusCodes.Status423Locked,
+                title: "This account is temporarily locked after repeated password attempts. Try again later.");
+        }
+
+        if (!passwordCheck.Succeeded)
+        {
+            return Results.ValidationProblem(new Dictionary<string, string[]>
+            {
+                ["currentPassword"] = ["The current password is incorrect."]
+            });
+        }
+
+        var existingUser = await userManager.FindByEmailAsync(email);
+        if (existingUser is not null && existingUser.Id != user.Id)
+        {
+            return Results.Conflict(new
+            {
+                code = "email_already_registered",
+                message = "That email address is already used by another account."
+            });
+        }
+    }
+
+    await using var transaction = await db.Database.BeginTransactionAsync(ct);
+    user.DisplayName = ownerName;
+    if (emailChanged)
+    {
+        user.Email = email;
+        user.UserName = email;
+    }
+
+    var update = await userManager.UpdateAsync(user);
+    if (!update.Succeeded)
+    {
+        await transaction.RollbackAsync(ct);
+        return Results.ValidationProblem(update.Errors
+            .GroupBy(error => error.Code)
+            .ToDictionary(group => group.Key, group => group.Select(error => error.Description).ToArray()));
+    }
+
+    await transaction.CommitAsync(ct);
+    return Results.Ok(new
+    {
+        OwnerName = user.DisplayName,
+        OwnerEmail = user.Email ?? string.Empty,
+        EmailChanged = emailChanged
+    });
+}).RequireRateLimiting("authentication");
 
 shop.MapPut("/profile", async (
     ShopProfileRequest request,
