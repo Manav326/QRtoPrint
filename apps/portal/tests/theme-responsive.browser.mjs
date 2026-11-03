@@ -373,7 +373,7 @@ async function exerciseWorkspaceSections(page, route, viewport, themeLabel) {
     } catch (error) {
       const inputState = await signInEmailInput.inputValue();
       const profileState = await personalDetails.locator(".account-edit-form").innerText();
-      throw new Error(`Changing sign-in email did not reveal the password-confirmation step. Input value: "${inputState}". Form: "${profileState}". Original: ${error instanceof Error ? error.message : String(error)}`);
+      throw new Error(`Changing sign-in email did not reveal the password-confirmation step. Input value: "${inputState}". Previous submitted email: "${accountRequests[0]?.email}". Mock current email: "${currentMockOwnerEmail}". Form: "${profileState}". Original: ${error instanceof Error ? error.message : String(error)}`);
     }
     await personalDetails.getByLabel("Current password").fill("wrong-password");
     await personalDetails.getByRole("button", { name: "Save personal details" }).click();
