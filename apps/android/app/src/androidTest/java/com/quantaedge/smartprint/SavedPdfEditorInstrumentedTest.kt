@@ -48,7 +48,8 @@ class SavedPdfEditorInstrumentedTest {
                 onView(withContentDescription("More options for CI-editor-document.pdf")).perform(scrollTo(), click())
                 onView(withText("Edit PDF")).perform(click())
 
-                onView(withText("Edit PDF")).check(matches(isDisplayed()))
+                onView(withText("smartprint")).check(matches(isDisplayed()))
+                onView(withText(org.hamcrest.Matchers.containsString("EDIT PDF"))).check(matches(isDisplayed()))
                 onView(withText("Page 1")).check(matches(isDisplayed()))
                 onView(withContentDescription("Rotate page 1")).perform(scrollTo(), click())
                 onView(withText("90°")).perform(scrollTo()).check(matches(isDisplayed()))
