@@ -2619,3 +2619,250 @@ html[data-theme="dark"] .customer-entry .customer-batch-name-field input { borde
 html[data-theme="dark"] .customer-entry.smartprint-native .customer-batch-name-field > span { color:var(--native-text); }
 html[data-theme="dark"] .customer-entry.smartprint-native .customer-batch-name-field > span small { color:var(--native-muted); }
 html[data-theme="dark"] .customer-entry.smartprint-native .customer-batch-name-field input { border-color:var(--native-border); background:var(--native-surface-2); color:var(--native-text); }
+
+
+/* Shop-owner workspace refinement: grouped navigation, account controls and fluid content. */
+.app-shell > .main-panel {
+  flex: 1 1 0%;
+  width: 0;
+  min-width: 0;
+  max-width: none;
+}
+.app-shell > .main-panel > .content-wrap {
+  width: 100%;
+  max-width: 1920px;
+  min-width: 0;
+  margin-inline: auto;
+  padding: 30px clamp(24px, 3vw, 48px) 26px;
+}
+.app-shell > .main-panel > .content-wrap > * {
+  width: 100%;
+  min-width: 0;
+}
+.app-shell .primary-nav {
+  gap: 15px;
+  padding: 0 2px 10px;
+}
+.app-shell .nav-group,
+.app-shell .nav-group-items {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.app-shell .nav-group { gap: 4px; }
+.app-shell .nav-group-items { gap: 3px; }
+.app-shell .nav-label {
+  padding: 0 12px 6px;
+  line-height: 1.35;
+  letter-spacing: 1.25px;
+}
+.app-shell .nav-item {
+  min-height: 38px;
+  height: 38px;
+}
+.app-shell .customers-workspace { width: 100%; max-width: none; }
+.app-shell .customers-search {
+  max-width: none;
+  min-width: 220px;
+  flex: 1 1 320px;
+}
+
+/* The account popover is the single home for owner-level destinations. */
+.account-menu {
+  position: relative;
+  z-index: 55;
+  flex: 0 0 auto;
+  margin-left: 2px;
+}
+.account-menu-trigger {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-height: 38px;
+  max-width: 220px;
+  padding: 4px 9px 4px 5px;
+  border: 1px solid var(--border);
+  border-radius: 11px;
+  background: var(--surface-2);
+  color: var(--text);
+  font: inherit;
+  cursor: pointer;
+}
+.account-menu-trigger:hover,
+.account-menu-trigger[aria-expanded="true"] {
+  border-color: var(--accent);
+  background: var(--surface);
+}
+.account-avatar {
+  display: grid;
+  place-items: center;
+  width: 31px;
+  height: 31px;
+  flex: 0 0 31px;
+  border-radius: 50%;
+  background: #34435e;
+  color: #e4ebfa;
+  font-size: 10px;
+  font-weight: 750;
+}
+.account-menu-trigger-copy,
+.account-menu-heading > div {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  text-align: left;
+}
+.account-menu-trigger-copy strong {
+  overflow: hidden;
+  color: var(--text);
+  font-size: 11px;
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.account-menu-trigger-copy small,
+.account-menu-heading span {
+  color: var(--muted);
+  font-size: 10px;
+}
+.account-menu-trigger > svg {
+  flex: 0 0 auto;
+  color: var(--muted);
+}
+.account-menu-popover {
+  position: absolute;
+  top: calc(100% + 9px);
+  right: 0;
+  z-index: 80;
+  width: 276px;
+  max-width: calc(100vw - 24px);
+  padding: 9px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--surface);
+  box-shadow: 0 18px 48px rgba(10, 20, 40, .2);
+}
+.account-menu-heading {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 9px 12px;
+}
+.account-menu-heading strong {
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 700;
+}
+.account-menu-divider {
+  height: 1px;
+  margin: 5px 3px;
+  background: var(--border-soft);
+}
+.account-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-height: 41px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 9px;
+  background: transparent;
+  color: var(--text);
+  font: 600 12px "DM Sans", sans-serif;
+  text-align: left;
+  cursor: pointer;
+}
+.account-menu-item > svg {
+  flex: 0 0 auto;
+  color: var(--muted);
+}
+.account-menu-item:hover,
+.account-menu-item:focus-visible {
+  background: var(--surface-2);
+}
+.account-menu-signout,
+.account-menu-signout > svg {
+  color: var(--red);
+}
+
+/* Help stays contextual: quick links open the existing tools, not duplicate settings. */
+.help-topic-list {
+  display: grid;
+  gap: 8px;
+  padding: 3px 0 8px;
+}
+.help-topic {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 11px;
+  background: var(--surface-2);
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+}
+.help-topic:hover,
+.help-topic:focus-visible {
+  border-color: var(--accent);
+  background: var(--surface);
+}
+.help-topic-icon {
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  flex: 0 0 36px;
+  border-radius: 10px;
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+.help-topic-copy {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+.help-topic-copy strong { color: var(--text); font-size: 12px; }
+.help-topic-copy small { color: var(--muted); font-size: 10px; line-height: 1.45; }
+.help-topic > svg { flex: 0 0 auto; color: var(--muted); }
+.help-modal-note {
+  margin: 4px 2px 0;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.55;
+}
+
+@media (max-width: 1150px) {
+  .account-menu-trigger-copy { display: none; }
+  .account-menu-trigger { gap: 5px; padding-right: 6px; }
+  .app-shell > .main-panel > .content-wrap { padding-inline: 24px; }
+}
+@media (max-width: 850px) {
+  .app-shell > .main-panel {
+    flex: 1 1 auto;
+    width: 100%;
+  }
+  .app-shell > .main-panel > .content-wrap { padding: 25px 18px 20px; }
+  .account-menu-trigger-copy { display: none; }
+  .account-menu-trigger { min-height: 36px; }
+  .account-menu-popover { right: 0; }
+}
+@media (max-width: 600px) {
+  .app-shell > .main-panel > .content-wrap { padding: 22px 13px 16px; }
+  .app-shell .customers-toolbar { align-items: stretch; }
+  .app-shell .customers-search {
+    max-width: none;
+    min-width: 0;
+    flex-basis: 100%;
+    height: 36px;
+  }
+  .account-menu-trigger { min-height: 34px; padding: 3px 5px; }
+  .account-avatar { width: 28px; height: 28px; flex-basis: 28px; }
+}
