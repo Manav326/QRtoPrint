@@ -1030,9 +1030,9 @@ async function requestCustomerLocalUploadTicket(
       batchId: batchId ?? null,
       batchGroupName: batchGroupName ?? null,
       batchName: batchName?.trim() || null
-      batchGroupName: batchGroupName ?? null
     })
   });
+}
 
 async function uploadCustomerLocalTicketViaCloud(
   sessionToken: string,
@@ -1056,17 +1056,17 @@ async function uploadCustomerLocalTicketViaCloud(
 }
 
 export async function uploadCustomerDocument(sessionToken: string, file: File, batchId?: string, batchGroupName?: string, batchName?: string) {
-export async function uploadCustomerDocument(sessionToken: string, file: File, batchId?: string, batchGroupName?: string) {
   const localKeys = customerLocalUploadAttemptStorageKeys(sessionToken, file);
   const pendingLocalIdempotency = sessionStorage.getItem(localKeys.idempotency);
   const pendingLocalGrant = sessionStorage.getItem(localKeys.grant);
   if (pendingLocalIdempotency && pendingLocalGrant) {
     // The local request may have reached the Agent. Recover that exact ticket
     // using HTTPS, retaining its PrintJob ID and one-use grant.
-      sessionToken, file, batchId, batchGroupName, batchName, pendingLocalIdempotency, pendingLocalGrant
     const ticket = await requestCustomerLocalUploadTicket(
-      sessionToken, file, batchId, batchGroupName, pendingLocalIdempotency, pendingLocalGrant
+      sessionToken, file, batchId, batchGroupName, batchName, pendingLocalIdempotency, pendingLocalGrant
     );
+    const recovered = await uploadCustomerLocalTicketViaCloud(
+      sessionToken, file, ticket, pendingLocalGrant
     );
     // Release the retry-only grant after a confirmed recovery. The customer
     // draft stores the canonical job, and a later intentional reprint needs a
@@ -1159,9 +1159,9 @@ export async function uploadCustomerDocumentLocally(
   try {
     ticket = await requestCustomerLocalUploadTicket(
       sessionToken, file, batchId, batchGroupName, batchName, idempotencyKey, grantToken
-      sessionToken, file, batchId, batchGroupName, idempotencyKey, grantToken
     );
   } catch (exception) {
+    if (exception instanceof ApiError && exception.status === 409 &&
         ["local_print_agent_unavailable", "local_print_printer_unavailable", "local_upload_printer_unavailable", "batch_local_agent_mismatch"].includes(exception.code ?? "")) {
       // These are explicit preflight rejections; the API did not issue a ticket.
       sessionStorage.removeItem(keys.idempotency);
@@ -1206,9 +1206,9 @@ export async function uploadCustomerDocumentLocally(
           batchGroupName: ticket.batchGroupName ?? completed.job.batchGroupName ?? null,
           batchName: ticket.batchName ?? completed.job.batchName ?? null
         }
-        job: { ...completed.job, batchId: ticket.batchId ?? completed.job.batchId ?? null }
       };
     } catch {
+      throw new LocalUploadOutcomeUnknownError(
         "SmartPrint has your original upload recorded. The shop connection could not refresh its status just now; retry this same file to restore the existing print request. No new upload or print job has been created."
       );
     }
@@ -1257,9 +1257,9 @@ export async function uploadCustomerDocumentLocally(
           batchGroupName: ticket.batchGroupName ?? uploaded.job.batchGroupName ?? null,
           batchName: ticket.batchName ?? uploaded.job.batchName ?? null
         }
-        job: { ...uploaded.job, batchId: ticket.batchId ?? uploaded.job.batchId ?? null }
       };
     } catch {
+      // Try the next advertised shop address, then continue over HTTPS if enabled.
     } finally {
       window.clearTimeout(timeout);
     }
@@ -1282,9 +1282,9 @@ export async function uploadCustomerDocumentLocally(
           batchGroupName: ticket.batchGroupName ?? recovered.job.batchGroupName ?? null,
           batchName: ticket.batchName ?? recovered.job.batchName ?? null
         }
-        job: { ...recovered.job, batchId: ticket.batchId ?? recovered.job.batchId ?? null }
       };
     } catch (recoveryError) {
+      const detail = recoveryError instanceof ApiError
         ? " HTTPS continuation could not be confirmed ("+recoveryError.message+")."
         : " HTTPS continuation could not be confirmed.";
       throw new LocalUploadOutcomeUnknownError(
