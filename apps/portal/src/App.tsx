@@ -1,7 +1,7 @@
 import { Fragment, useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import {
   Activity, ArrowRight, Check, Clock3, Copy, CreditCard, FileText, FileUp, FolderOpen, LayoutDashboard,
-  LifeBuoy, LogOut, Menu, Monitor, Plus, Printer, QrCode, Search, Settings, Wifi,
+  ChevronDown, LifeBuoy, LogOut, Menu, Monitor, Plus, Printer, QrCode, Search, Settings, UserRound, Wifi,
   ShieldCheck, Users, Wallet, X, PanelLeftClose, PanelLeftOpen, RotateCcw, Zap
 } from "lucide-react";
 import QRCode from "react-qr-code";
@@ -52,6 +52,13 @@ const sections: { label: Section; icon: typeof LayoutDashboard }[] = [
   { label: "Customers", icon: Users },
   { label: "Reports", icon: Activity },
   { label: "Settings", icon: Settings }
+];
+
+const sectionGroups: { label: string; items: Section[] }[] = [
+  { label: "DAILY WORK", items: ["Overview", "Print Queue", "Customers"] },
+  { label: "DEVICES & CONNECTIVITY", items: ["Printers", "QR Stations", "Print Agent"] },
+  { label: "BUSINESS", items: ["Pricing", "Payments"] },
+  { label: "INSIGHTS", items: ["Reports"] }
 ];
 
 export default function App() {
@@ -135,8 +142,27 @@ function ShopConsole({ tokens, onSignOut, dark, onToggleTheme }: { tokens: AuthT
     window.addEventListener("popstate", syncSectionFromPath);
     return () => window.removeEventListener("popstate", syncSectionFromPath);
   }, []);
+
+  useEffect(() => {
+    if (!accountMenuOpen) return;
+    const closeOnOutsidePointer = (event: PointerEvent) => {
+      if (!accountMenuRef.current?.contains(event.target as Node)) setAccountMenuOpen(false);
+    };
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setAccountMenuOpen(false);
+    };
+    document.addEventListener("pointerdown", closeOnOutsidePointer);
+    window.addEventListener("keydown", closeOnEscape);
+    return () => {
+      document.removeEventListener("pointerdown", closeOnOutsidePointer);
+      window.removeEventListener("keydown", closeOnEscape);
+    };
+  }, [accountMenuOpen]);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(readSidebarCollapsedPreference);
+  const [accountMenuOpen, setAccountMenuOpen] = useState(false);
+  const [helpOpen, setHelpOpen] = useState(false);
+  const accountMenuRef = useRef<HTMLDivElement>(null);
   const reloadInFlight = useRef(false);
   const desktopAgentSyncTimer = useRef<number | null>(null);
   const desktopAgentSyncInFlight = useRef(false);
@@ -1209,8 +1235,11 @@ function ShopConsole({ tokens, onSignOut, dark, onToggleTheme }: { tokens: AuthT
     }
     setActive(section);
     setSidebarOpen(false);
+    setAccountMenuOpen(false);
     setError("");
   };
+
+  const activePageTitle = active === "Settings" ? "Shop profile" : active;
 
   if (loading && !profile) {
     return <div className={dark ? "app-shell dark boot-screen" : "app-shell light boot-screen"}><div className="boot-card"><div className="brand-mark"><QrCode size={22}/></div><div className="boot-title">Preparing your workspace</div><div className="boot-subtitle">Connecting securely to your shop…</div><div className="button-spinner boot-spinner"/></div></div>;
@@ -1229,23 +1258,27 @@ function ShopConsole({ tokens, onSignOut, dark, onToggleTheme }: { tokens: AuthT
           <div className="workspace-copy"><strong>{profile?.displayName || "Your shop"}</strong><span>{profile?.businessName || "Shop workspace"}</span></div>
           <span className="tenant-status-dot" title="Tenant workspace active"/>
         </div>
-        <div className="nav-label">SHOP WORKSPACE</div>
         <nav className="primary-nav" aria-label="Shop navigation">
-          {sections.map(({ label, icon: Icon }) => (
-            <button key={label} title={label} aria-label={label} className={active === label ? "nav-item active" : "nav-item"} onClick={() => navAction(label)}>
-              <Icon size={18} strokeWidth={1.8}/><span>{label}</span>
-            </button>
+          {sectionGroups.map(({ label: groupLabel, items }) => (
+            <div className="nav-group" key={groupLabel}>
+              <div className="nav-label">{groupLabel}</div>
+              <div className="nav-group-items">
+                {items.map(label => {
+                  const section = sections.find(item => item.label === label);
+                  if (!section) return null;
+                  const Icon = section.icon;
+                  return (
+                    <button key={label} title={label} aria-label={label}
+                      className={active === label ? "nav-item active" : "nav-item"}
+                      onClick={() => navAction(label)}>
+                      <Icon size={18} strokeWidth={1.8}/><span>{label}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
           ))}
         </nav>
-        <div className="sidebar-bottom">
-          <button type="button" className="plan-card" onClick={() => navAction("Subscription")}><div className="plan-icon"><ShieldCheck size={17}/></div><div><strong>{subscription?.plan?.name || (subscription?.subscription.planCode === "TRIAL" ? "Trial plan" : "Subscription")}</strong><span>{subscription ? `${subscription.subscription.status} · ends ${formatIstDate(subscription.subscription.periodEndUtc)}` : "View plan and usage"}</span></div><ArrowRight size={14}/></button>
-          <button className="nav-item support-link" onClick={() => navAction("Settings")}><LifeBuoy size={18}/><span>Help & support</span></button>
-          <div className="profile-row">
-            <div className="profile-avatar">{initials(profile?.ownerName || "Shop Owner")}</div>
-            <div className="profile-copy"><strong>{profile?.ownerName || "Shop owner"}</strong><span>Shop owner</span></div>
-            <button className="icon-button signout-button" aria-label="Sign out" title="Sign out" onClick={signOut}><LogOut size={16}/></button>
-          </div>
-        </div>
       </aside>
       {sidebarOpen && <button className="mobile-scrim" aria-label="Close navigation overlay" onClick={() => setSidebarOpen(false)}/>}
 
@@ -1254,7 +1287,7 @@ function ShopConsole({ tokens, onSignOut, dark, onToggleTheme }: { tokens: AuthT
           <div className="topbar-left">
             <button className="icon-button sidebar-toggle" aria-label={sidebarCollapsed ? "Expand navigation" : "Collapse navigation"} title={sidebarCollapsed ? "Expand navigation" : "Collapse navigation"} onClick={toggleSidebarCollapsed}>{sidebarCollapsed ? <PanelLeftOpen size={18}/> : <PanelLeftClose size={18}/>}</button>
             <button className="icon-button mobile-menu" aria-label="Open navigation" onClick={() => setSidebarOpen(true)}><Menu size={20}/></button>
-            <div className="breadcrumb"><span>Shop workspace</span><span className="crumb-slash">/</span><strong>{active}</strong></div>
+            <div className="breadcrumb"><span>Shop workspace</span><span className="crumb-slash">/</span><strong>{activePageTitle}</strong></div>
           </div>
           <div className="topbar-actions">
             <div className="connection-pill" role="status" aria-live="polite" title={cloudStatus === "connected" ? "The latest shop data refresh succeeded." : cloudStatus === "checking" ? "Checking your shop connection." : "The latest shop data refresh could not reach the cloud service."}>
@@ -1269,12 +1302,51 @@ function ShopConsole({ tokens, onSignOut, dark, onToggleTheme }: { tokens: AuthT
             </div>
             <div className="topbar-divider"/>
             <span className="topbar-product-tag"><span className="mode-indicator"/> {isDesktopApp() ? "Desktop workspace" : "Shop console"}</span>
+            <div className="account-menu" ref={accountMenuRef}>
+              <button type="button" className="account-menu-trigger"
+                aria-label={`Account options for ${profile?.ownerName || "shop owner"}`}
+                aria-expanded={accountMenuOpen} aria-controls="shop-account-menu"
+                title="Account and shop settings"
+                onClick={() => setAccountMenuOpen(value => !value)}>
+                <span className="account-avatar">{initials(profile?.ownerName || "Shop owner")}</span>
+                <span className="account-menu-trigger-copy">
+                  <strong>{profile?.ownerName || "Shop owner"}</strong>
+                  <small>Account</small>
+                </span>
+                <ChevronDown size={14} aria-hidden="true"/>
+              </button>
+              {accountMenuOpen && (
+                <div className="account-menu-popover" id="shop-account-menu" aria-label="Account options">
+                  <div className="account-menu-heading">
+                    <span className="account-avatar">{initials(profile?.ownerName || "Shop owner")}</span>
+                    <div>
+                      <strong>{profile?.ownerName || "Shop owner"}</strong>
+                      <span>{profile?.businessName || "Your shop"}</span>
+                    </div>
+                  </div>
+                  <div className="account-menu-divider"/>
+                  <button type="button" className="account-menu-item" onClick={() => navAction("Settings")}>
+                    <UserRound size={16}/>Shop profile &amp; branding
+                  </button>
+                  <button type="button" className="account-menu-item" onClick={() => navAction("Subscription")}>
+                    <ShieldCheck size={16}/>Trial &amp; subscription
+                  </button>
+                  <button type="button" className="account-menu-item" onClick={() => { setAccountMenuOpen(false); setHelpOpen(true); }}>
+                    <LifeBuoy size={16}/>Help &amp; support
+                  </button>
+                  <div className="account-menu-divider"/>
+                  <button type="button" className="account-menu-item account-menu-signout" onClick={() => { setAccountMenuOpen(false); void signOut(); }}>
+                    <LogOut size={16}/>Sign out
+                  </button>
+                </div>
+              )}
+            </div>
           </div>
         </header>
 
         <div className="content-wrap">
           <div className="page-heading">
-            <div><div className="eyebrow"><span className="eyebrow-line"/>SHOP WORKSPACE</div><h1>{active === "Overview" ? `Welcome, ${(profile?.ownerName || "there").split(" ")[0]}` : active}</h1><p>{active === "Overview" ? "Your shop setup and operations, all in one place." : pageDescription(active)}</p></div>
+            <div><div className="eyebrow"><span className="eyebrow-line"/>SHOP WORKSPACE</div><h1>{active === "Overview" ? `Welcome, ${(profile?.ownerName || "there").split(" ")[0]}` : activePageTitle}</h1><p>{active === "Overview" ? "Your shop setup and operations, all in one place." : pageDescription(active)}</p></div>
             <div className="heading-actions"><span className="date-chip"><Clock3 size={15}/>{today}</span>{active === "Printers" && <button className="primary-button" onClick={() => setModal("printer")}><Plus size={16}/> Add printer</button>}{active === "QR Stations" && <button className="primary-button" onClick={() => setModal("station")}><Plus size={16}/> Create QR station</button>}</div>
           </div>
 
@@ -1297,6 +1369,7 @@ function ShopConsole({ tokens, onSignOut, dark, onToggleTheme }: { tokens: AuthT
         </div>
       </main>
 
+      {helpOpen && <HelpSupportModal onClose={() => setHelpOpen(false)} onNavigate={section => { setHelpOpen(false); navAction(section); }}/>}
       {modal === "printer" && <PrinterModal busy={busy} onClose={() => setModal(null)} onSubmit={submitPrinter}/>}
       {modal === "station" && <StationModal busy={busy} printers={printers.filter(printer => printer.isActive)} onClose={() => setModal(null)} onSubmit={submitStation}/>}
             {batchReviewJobs && <BatchReviewModal jobs={batchReviewJobs} busy={busyJobId==="batch-review"} decisions={batchReviewDecisions} retrying={batchReviewRetry} onDecision={(jobId,accepted)=>setBatchReviewDecisions(current=>({...current,[jobId]:accepted}))} onClose={()=>setBatchReviewJobs(null)} onPreview={job=>void previewJob(job,true)} onApply={acceptedIds=>void applyBatchReview(batchReviewJobs,acceptedIds)}/>} 
@@ -2505,7 +2578,7 @@ function SettingsPage({ profile, onSave, busy }: { profile:ShopProfile; onSave:(
   const [logoUrl,setLogoUrl]=useState(profile.logoUrl || "");
   const [accentColor,setAccentColor]=useState(profile.accentColor || "#7662E8");
   useEffect(()=>{setDisplayName(profile.displayName);setLogoUrl(profile.logoUrl||"");setAccentColor(profile.accentColor||"#7662E8");},[profile]);
-  return <section className="panel settings-panel"><div className="settings-intro"><div className="settings-icon"><Settings size={20}/></div><div><h2>Shop identity</h2><p>These details appear to customers when they connect through your QR stations.</p></div></div>
+  return <section className="panel settings-panel"><div className="settings-intro"><div className="settings-icon"><Settings size={20}/></div><div><h2>Shop profile &amp; branding</h2><p>Update the shop name and brand customers see when they connect through your QR stations.</p></div></div>
     <form className="settings-form" onSubmit={event=>{event.preventDefault();onSave({displayName:displayName.trim(),logoUrl:logoUrl.trim()||null,accentColor});}}>
       <label>Customer-facing shop name<input value={displayName} onChange={e=>setDisplayName(e.target.value)} required maxLength={180}/></label>
       <label>Logo URL <span className="field-hint">Optional · secure HTTPS image URL</span><input type="url" value={logoUrl} onChange={e=>setLogoUrl(e.target.value)} placeholder="https://example.com/logo.png"/></label>
@@ -2515,6 +2588,32 @@ function SettingsPage({ profile, onSave, busy }: { profile:ShopProfile; onSave:(
     </form>
     <div className="settings-meta"><span>Shop slug</span><strong>{profile.slug}</strong><span>Currency</span><strong>{profile.currency}</strong><span>Time zone</span><strong>{profile.timeZone}</strong></div>
   </section>;
+}
+
+
+function HelpSupportModal({ onClose, onNavigate }: { onClose: () => void; onNavigate: (section: Section) => void }) {
+  const topics: { section: Section; title: string; description: string; icon: typeof FileText }[] = [
+    { section: "Print Queue", title: "Print jobs and approvals", description: "Review incoming jobs, decisions, print status and refunds.", icon: FileText },
+    { section: "Printers", title: "Printers and connections", description: "Check printer setup, availability and device details.", icon: Printer },
+    { section: "Print Agent", title: "Shop computer and Print Agent", description: "Pair or reconnect the Windows computer that runs printing.", icon: Monitor },
+    { section: "QR Stations", title: "QR stations", description: "Manage counter QR codes and their assigned printers.", icon: QrCode },
+    { section: "Pricing", title: "Pricing", description: "Review the rates customers see before they submit a job.", icon: Wallet }
+  ];
+
+  return (
+    <Modal title="Help & support" subtitle="Choose the part of your shop workspace you need help with." onClose={onClose}>
+      <div className="help-topic-list">
+        {topics.map(({ section, title, description, icon: Icon }) => (
+          <button type="button" className="help-topic" key={section} onClick={() => onNavigate(section)}>
+            <span className="help-topic-icon"><Icon size={17}/></span>
+            <span className="help-topic-copy"><strong>{title}</strong><small>{description}</small></span>
+            <ArrowRight size={16}/>
+          </button>
+        ))}
+      </div>
+      <p className="help-modal-note">These shortcuts open the existing shop tools. They do not change your settings or print jobs.</p>
+    </Modal>
+  );
 }
 
 function PrinterModal({ busy, onClose, onSubmit }: {
@@ -2680,7 +2779,7 @@ function pageDescription(section:Section) {
     "Payments":"Configure your shop's payment methods and verify customer print payments.",
     "Customers":"View customer activity and print history.",
     "Reports":"Understand print volume, shop revenue and performance.",
-    "Settings":"Configure your shop identity and preferences."
+    "Settings":"Update the shop name and branding customers see when they connect."
   };
   return descriptions[section];
 }
