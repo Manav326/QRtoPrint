@@ -1739,7 +1739,7 @@ class MainActivity : AppCompatActivity() {
         }
         row.setOnClickListener {
             when {
-                !isPicker && showActions && librarySelectionMode -> {
+                !isPicker && showActions && librarySelectionMode && file.isFile -> {
                     val path = file.canonicalPath
                     if (!selectedFilePaths.add(path)) selectedFilePaths.remove(path)
                     refreshLibrary()
@@ -1757,7 +1757,7 @@ class MainActivity : AppCompatActivity() {
                 else -> openDocument(file)
             }
         }
-        if (!isPicker && showActions && file.isDirectory) {
+        if (!isPicker && showActions && file.isDirectory && !librarySelectionMode) {
             row.setOnLongClickListener { showEntryMenu(row, file); true }
         } else if (!isPicker && showActions && !librarySelectionMode) {
             row.setOnLongClickListener {
