@@ -930,7 +930,7 @@ export interface ShopPrintJob {
 }
 
 export interface UploadedPrintJob {
-  job: { id: string; jobNumber: string; status: string; pageCount: number; copies: number; currency: string; quotedAmountMinor: number; createdUtc: string; batchGroupName?: string | null; batchId?: string | null };
+  job: { id: string; jobNumber: string; status: string; pageCount: number; copies: number; currency: string; quotedAmountMinor: number; createdUtc: string; batchGroupName?: string | null; batchId?: string | null; printKind?: string; photoSizeCode?: string | null; photoCount?: number; photoUnitPriceMinorSnapshot?: number };
   document: { id: string; originalFileName: string; mediaType: string; sizeBytes: number; sha256: string; pageSizesJson: string };
   duplicateRequest: boolean;
 }
@@ -959,6 +959,10 @@ export function updateShopPricing(token: string, values: {
   monoDuplexPerSheetMinor: number;
   colourDuplexPerSheetMinor: number;
   minimumChargeMinor: number;
+  photo35x45Minor: number;
+  photo25x35Minor: number;
+  photo2x2Minor: number;
+  photo4x6Minor: number;
 }) {
   return apiRequest<ShopPricingProfile>("/api/v1/shop/pricing", {
     method: "PUT",
