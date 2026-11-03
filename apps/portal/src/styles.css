@@ -2605,3 +2605,11 @@ html[data-theme="light"] .auth-screen {
   .local-phone-qr { align-self: center; }
   .local-network-empty { align-items: flex-start; flex-wrap: wrap; }
 }
+
+
+.customer-batch-name-field { display:grid; gap:8px; margin:14px 0; min-width:0; }
+.customer-batch-name-field > span { display:flex; flex-wrap:wrap; align-items:baseline; gap:6px; color:var(--text); font-size:13px; font-weight:650; }
+.customer-batch-name-field > span small { color:var(--muted); font-size:12px; font-weight:450; }
+.customer-batch-name-field input { box-sizing:border-box; width:100%; min-width:0; min-height:44px; border:1px solid var(--border); border-radius:12px; background:var(--surface-2); color:var(--text); padding:10px 12px; font:inherit; }
+.customer-batch-name-field input:focus-visible { outline:2px solid var(--accent); outline-offset:2px; }
+.customer-batch-name-field input:disabled { opacity:.72; }

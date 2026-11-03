@@ -233,6 +233,7 @@ public sealed class PrintJob
     public Guid CustomerSessionId { get; set; }
     public Guid? BatchId { get; set; }
     public string? BatchGroupName { get; set; }
+    public string? BatchName { get; set; }
     public string RejectedPageNumbersJson { get; set; } = "[]";
     public string PageRefundAllocationsJson { get; set; } = "[]";
     public string JobNumber { get; set; } = string.Empty;
@@ -295,6 +296,7 @@ public sealed class LocalPrintUploadTicket
     public Guid CustomerSessionId { get; set; }
     public Guid? BatchId { get; set; }
     public string? BatchGroupName { get; set; }
+    public string? BatchName { get; set; }
     public Guid QrStationId { get; set; }
     public Guid PrinterDeviceId { get; set; }
     public Guid AgentDeviceId { get; set; }

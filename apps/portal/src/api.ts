@@ -870,6 +870,7 @@ export interface ShopPrintJob {
   id: string;
   batchId?: string | null;
   batchGroupName?: string | null;
+  batchName?: string | null;
   rejectedPageNumbersJson?: string;
   jobNumber: string;
   status: string;
@@ -915,7 +916,7 @@ export interface ShopPrintJob {
 }
 
 export interface UploadedPrintJob {
-  job: { id: string; jobNumber: string; status: string; pageCount: number; copies: number; currency: string; quotedAmountMinor: number; createdUtc: string; batchGroupName?: string | null; batchId?: string | null };
+  job: { id: string; jobNumber: string; status: string; pageCount: number; copies: number; currency: string; quotedAmountMinor: number; createdUtc: string; batchGroupName?: string | null; batchName?: string | null; batchId?: string | null };
   document: { id: string; originalFileName: string; mediaType: string; sizeBytes: number; sha256: string; pageSizesJson: string };
   duplicateRequest: boolean;
 }
@@ -973,6 +974,8 @@ type CustomerLocalUploadTicket = {
   id: string;
   printJobId: string;
   batchId?: string;
+  batchGroupName?: string | null;
+  batchName?: string | null;
   jobNumber: string;
   agentDeviceId: string;
   expiresUtc: string;
@@ -984,6 +987,7 @@ async function requestCustomerLocalUploadTicket(
   file: File,
   batchId: string | undefined,
   batchGroupName: string | undefined,
+  batchName: string | undefined,
   idempotencyKey: string,
   grantToken: string
 ): Promise<CustomerLocalUploadTicket> {
@@ -1001,7 +1005,8 @@ async function requestCustomerLocalUploadTicket(
       sha256,
       grantToken,
       batchId: batchId ?? null,
-      batchGroupName: batchGroupName ?? null
+      batchGroupName: batchGroupName ?? null,
+      batchName: batchName?.trim() || null
     })
   });
 }
@@ -1027,7 +1032,7 @@ async function uploadCustomerLocalTicketViaCloud(
   );
 }
 
-export async function uploadCustomerDocument(sessionToken: string, file: File, batchId?: string, batchGroupName?: string) {
+export async function uploadCustomerDocument(sessionToken: string, file: File, batchId?: string, batchGroupName?: string, batchName?: string) {
   const localKeys = customerLocalUploadAttemptStorageKeys(sessionToken, file);
   const pendingLocalIdempotency = sessionStorage.getItem(localKeys.idempotency);
   const pendingLocalGrant = sessionStorage.getItem(localKeys.grant);
@@ -1035,7 +1040,7 @@ export async function uploadCustomerDocument(sessionToken: string, file: File, b
     // The local request may have reached the Agent. Recover that exact ticket
     // using HTTPS, retaining its PrintJob ID and one-use grant.
     const ticket = await requestCustomerLocalUploadTicket(
-      sessionToken, file, batchId, batchGroupName, pendingLocalIdempotency, pendingLocalGrant
+      sessionToken, file, batchId, batchGroupName, batchName, pendingLocalIdempotency, pendingLocalGrant
     );
     const recovered = await uploadCustomerLocalTicketViaCloud(
       sessionToken, file, ticket, pendingLocalGrant
@@ -1054,6 +1059,7 @@ export async function uploadCustomerDocument(sessionToken: string, file: File, b
   const form = new FormData();
   form.append("file", file, file.name);
   if (batchGroupName) form.append("batchGroupName", batchGroupName);
+  if (batchName?.trim()) form.append("batchName", batchName.trim());
   const uploaded = await apiRequest<UploadedPrintJob>("/api/v1/public/sessions/current/jobs", {
     method: "POST",
     headers: {
@@ -1117,6 +1123,7 @@ export async function uploadCustomerDocumentLocally(
   localAgent: CustomerLocalAgentApi,
   batchId?: string,
   batchGroupName?: string,
+  batchName?: string,
   cloudAssistedPrintingEnabled = false
 ): Promise<UploadedPrintJob> {
   const keys = customerLocalUploadAttemptStorageKeys(sessionToken, file);
@@ -1128,7 +1135,7 @@ export async function uploadCustomerDocumentLocally(
   let ticket: CustomerLocalUploadTicket;
   try {
     ticket = await requestCustomerLocalUploadTicket(
-      sessionToken, file, batchId, batchGroupName, idempotencyKey, grantToken
+      sessionToken, file, batchId, batchGroupName, batchName, idempotencyKey, grantToken
     );
   } catch (exception) {
     if (exception instanceof ApiError && exception.status === 409 &&
@@ -1170,7 +1177,12 @@ export async function uploadCustomerDocumentLocally(
       clearCustomerLocalUploadAttempt(sessionToken, file);
       return {
         ...completed,
-        job: { ...completed.job, batchId: ticket.batchId ?? completed.job.batchId ?? null }
+        job: {
+          ...completed.job,
+          batchId: ticket.batchId ?? completed.job.batchId ?? null,
+          batchGroupName: ticket.batchGroupName ?? completed.job.batchGroupName ?? null,
+          batchName: ticket.batchName ?? completed.job.batchName ?? null
+        }
       };
     } catch {
       throw new LocalUploadOutcomeUnknownError(
@@ -1216,7 +1228,12 @@ export async function uploadCustomerDocumentLocally(
       clearCustomerLocalUploadAttempt(sessionToken, file);
       return {
         ...uploaded,
-        job: { ...uploaded.job, batchId: ticket.batchId ?? uploaded.job.batchId ?? null }
+        job: {
+          ...uploaded.job,
+          batchId: ticket.batchId ?? uploaded.job.batchId ?? null,
+          batchGroupName: ticket.batchGroupName ?? uploaded.job.batchGroupName ?? null,
+          batchName: ticket.batchName ?? uploaded.job.batchName ?? null
+        }
       };
     } catch {
       // Try the next advertised shop address, then continue over HTTPS if enabled.
@@ -1236,7 +1253,12 @@ export async function uploadCustomerDocumentLocally(
       clearCustomerLocalUploadAttempt(sessionToken, file);
       return {
         ...recovered,
-        job: { ...recovered.job, batchId: ticket.batchId ?? recovered.job.batchId ?? null }
+        job: {
+          ...recovered.job,
+          batchId: ticket.batchId ?? recovered.job.batchId ?? null,
+          batchGroupName: ticket.batchGroupName ?? recovered.job.batchGroupName ?? null,
+          batchName: ticket.batchName ?? recovered.job.batchName ?? null
+        }
       };
     } catch (recoveryError) {
       const detail = recoveryError instanceof ApiError
