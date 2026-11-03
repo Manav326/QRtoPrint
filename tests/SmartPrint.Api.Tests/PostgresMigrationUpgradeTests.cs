@@ -508,6 +508,7 @@ public sealed class PostgresMigrationUpgradeTests
             var migrator = migrationContext.GetService<IMigrator>();
             await migrator.MigrateAsync("202611020002_AddShopInstantPaymentPreference");
             await migrator.MigrateAsync("202611020003_AddPrintJobPrinterIdentitySnapshot");
+            await migrator.MigrateAsync("202611030001_AddPrintBatchNames");
         }
 
         await using var verification = new SmartPrintDbContext(options);
