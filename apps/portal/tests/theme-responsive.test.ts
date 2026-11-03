@@ -281,6 +281,8 @@ test("shop owner personal details are editable from the account menu without mix
   assert.match(modal, /Sign-in email/);
   assert.match(modal, /Current password/);
   assert.match(modal, /emailChanged/);
+  assert.doesNotMatch(modal, /useEffect\(/,
+    "The modal must not reset typed email state in a post-mount effect.");
   assert.doesNotMatch(settings, /ownerEmail|Current password/,
     "Personal sign-in details must stay separate from customer-facing shop branding.");
 });
