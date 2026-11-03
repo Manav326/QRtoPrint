@@ -1471,7 +1471,7 @@ function CustomersPage({ token }: { token: string }) {
                             <Status label={prettyStatus(job.status)} tone={tone}/>
                           </div>
                           <div className="customer-history-facts">
-                            <span>{job.pageCount} pages · {job.copies} copies</span>
+                            <span>{job.printKind==="PHOTO"?`Photo sheet · ${job.photoCount??0} × ${job.photoSizeCode??"photo"} · A4`:`${job.pageCount} pages · ${job.copies} copies`}</span>
                             <strong>{formatMoney(job.quotedAmountMinor, job.currency)}</strong>
                           </div>
                           {job.payment && <div className="customer-history-payment">
@@ -1616,7 +1616,7 @@ function Overview({ profile, printers, stations, printJobs, pricing, agentDevice
           <div className="panel-heading"><div><h2>Customer activity</h2><p>Recent uploads and quote requests from your QR stations</p></div><span className="neutral-chip">{printJobs.length} recent jobs</span></div>
           {printJobs.length===0 ? <div className="activity-empty-content"><div className="activity-empty-art"><div className="activity-art-sheet"><FileText size={25}/><i/><i/><i/></div><div className="activity-art-printer"><Printer size={27}/></div><span className="activity-art-spark">✦</span></div><h3>Ready when your first customer is</h3><p>Set your prices and share a QR station. Customer uploads will appear here as soon as they arrive.</p><button className="text-action" onClick={() => onNavigate(printers.length ? "QR Stations" : "Printers")}>{printers.length ? "Open QR stations" : "Add your first printer"} <span>→</span></button></div> :
             <div className="activity-job-list">
-              {printJobs.slice(0,4).map(job=><div className="activity-job-row" key={job.id}><div className="activity-job-icon"><FileText size={16}/></div><div className="activity-job-copy"><strong>{job.jobNumber}</strong><span>{job.document.originalFileName} · {job.pageCount} pages</span></div><div className="activity-job-status"><Status label={prettyStatus(job.status)} tone={job.status==="AWAITING_CUSTOMER_APPROVAL"||job.status==="AWAITING_SHOP_APPROVAL"?"amber":"blue"}/><small>{formatIstTime(job.createdUtc)}</small></div></div>)}
+              {printJobs.slice(0,4).map(job=><div className="activity-job-row" key={job.id}><div className="activity-job-icon"><FileText size={16}/></div><div className="activity-job-copy"><strong>{job.jobNumber}</strong><span>{job.document.originalFileName} · {job.printKind==="PHOTO"?`${"${job.photoCount??0}"} photos · ${"${job.photoSizeCode??""}"}`:`${"${job.pageCount}"} pages` }</span></div><div className="activity-job-status"><Status label={prettyStatus(job.status)} tone={job.status==="AWAITING_CUSTOMER_APPROVAL"||job.status==="AWAITING_SHOP_APPROVAL"?"amber":"blue"}/><small>{formatIstTime(job.createdUtc)}</small></div></div>)}
               <button className="text-action" onClick={()=>onNavigate("Print Queue")}>Open print queue <span>→</span></button>
             </div>}
         </section>
@@ -2246,7 +2246,7 @@ function PrintQueuePage({ jobs, printers, agentDevices, searchQuery, loadingBatc
             </tr>
             {expanded&&<tr className="queue-batch-detail-row"><td colSpan={8}><div className="queue-batch-files">{batch.jobs.map(job=><article className="queue-batch-file-card" key={job.id}>
               <div className="queue-batch-file-main">
-                <div><strong>{job.document.originalFileName}</strong><small>{job.batchGroupName??"Loose files"} · {job.pageCount} source pages × {job.copies} = {job.pageCount*job.copies} printed · {job.colourMode} · {job.isDuplex?"Double-sided":"Single-sided"}</small></div>
+                <div><strong>{job.document.originalFileName}</strong><small>{job.printKind==="PHOTO"?`${"${job.photoCount??0}"} photos · ${"${job.photoSizeCode??""}"} · A4 photo sheet`:`${"${job.batchGroupName??"Loose files"}"} · ${"${job.pageCount}"} source pages × ${"${job.copies}"} = ${"${job.pageCount*job.copies}"} printed · ${"${job.colourMode}"} · ${"${job.isDuplex?"Double-sided":"Single-sided"}"`}</small></div>
                 <Status label={prettyStatus(job.status)} tone={job.status==="REJECTED"?"red":job.status==="COMPLETED"||job.status==="LOCAL_QUEUE_READY"?"green":job.status==="AWAITING_SHOP_APPROVAL"?"amber":"blue"}/>
                 <strong className="amount-cell">{job.quotedAmountMinor>0?formatMoney(job.quotedAmountMinor,job.currency):"—"}</strong>
               </div>
@@ -2316,7 +2316,7 @@ function BatchReviewModal({jobs,busy,decisions,retrying,onDecision,onClose,onPre
         return <div className={accepted?"batch-review-row accepted":"batch-review-row rejected"} key={job.id}>
           <label className="batch-review-checkbox"><input type="checkbox" checked={accepted} disabled={busy} onChange={event=>onDecision(job.id,event.target.checked)}/></label>
           <span className="batch-review-index">{index+1}</span>
-          <div className="batch-review-file"><strong>{job.document.originalFileName}</strong><small>{job.pageCount} source pages × {job.copies} = {job.pageCount*job.copies} printed · {job.colourMode} · {job.isDuplex?"Double-sided":"Single-sided"} · {needsFreshQuote?"Previous quote expired · fresh quote required":formatMoney(job.quotedAmountMinor,job.currency)}</small><Status label={!accepted?"Marked for rejection":needsFreshQuote?"Accepted · re-quote needed":"Accepted"} tone={!accepted?"red":needsFreshQuote?"amber":"green"}/></div>
+          <div className="batch-review-file"><strong>{job.document.originalFileName}</strong><small>{job.printKind==="PHOTO"?`${"${job.photoCount??0}"} photos · ${"${job.photoSizeCode??""}"} · A4 photo sheet`:`${"${job.pageCount}"} source pages × ${"${job.copies}"} = ${"${job.pageCount*job.copies}"} printed · ${"${job.colourMode}"} · ${"${job.isDuplex?"Double-sided":"Single-sided"}"`} · {needsFreshQuote?"Previous quote expired · fresh quote required":formatMoney(job.quotedAmountMinor,job.currency)}</small><Status label={!accepted?"Marked for rejection":needsFreshQuote?"Accepted · re-quote needed":"Accepted"} tone={!accepted?"red":needsFreshQuote?"amber":"green"}/></div>
           <button className="subtle-button" type="button" disabled={busy} onClick={()=>onPreview(job)}>Preview</button>
         </div>;
       })}
@@ -2337,7 +2337,7 @@ function DocumentPreviewModal({name,url,mediaType,job,readOnly=false,onClose,onA
   name:string;url:string;mediaType:string;job:ShopPrintJob;readOnly?:boolean;onClose:()=>void;onApprove:()=>void;onReject:()=>void;onRefund:()=>void;
 }) {
   const isPdf=mediaType==="application/pdf";
-  const previewSummary = `${job.pageCount} source page(s) × ${job.copies} copy/copies = ${job.pageCount*job.copies} printed page(s). Preview displays the uploaded original once.`;
+  const previewSummary = job.printKind==="PHOTO" ? `${job.photoCount??0} ${job.photoSizeCode??""} photos arranged on one A4 sheet. Preview displays the uploaded original once.` : `${job.pageCount} source page(s) × ${job.copies} copy/copies = ${job.pageCount*job.copies} printed page(s). Preview displays the uploaded original once.`;
   return <Modal title={name} subtitle={readOnly ? `Read-only preview · ${previewSummary}` : job.batchId ? `File review · Batch ${job.batchId.slice(0,8).toUpperCase()} · ${previewSummary}` : previewSummary} onClose={onClose}>
     <div className="shop-document-preview">{isPdf?<iframe src={url} title={name}/>:<img src={url} alt={name}/>}</div>
     {["AWAITING_SHOP_APPROVAL","AWAITING_PAYMENT"].includes(job.status)&&<div className="file-review-note"><Check size={16}/><span>{readOnly ? "This preview is part of the batch review. Keep or change this file's decision in the batch panel after closing the preview." : "Review this file independently. Accepting or rejecting it will not change any other file in the batch."}</span></div>}
@@ -3508,6 +3508,7 @@ function CustomerPrintFlow({publicCode,sessionToken,paymentOptions,localAgent,lo
       if(paymentOptions.instantPaymentEnabled)await getQuote(results,savedSettings,savedPhotoSettings);
     } catch(exception) {
       setPrintSettingsByJobId(savedSettings);
+      setPhotoSettingsByJobId(savedPhotoSettings);
       setUploadedBatch(results);
       setUploadedFileFingerprints([...completedFingerprints]);
       if(results.length>0)setUploaded(results[0]);
