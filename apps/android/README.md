@@ -47,6 +47,12 @@ Document scanning does not need a camera permission owned by SmartPrint; Google 
 - Phones and tablets use the exact same Google Play services ML Kit Document Scanner UI and full feature mode. The scanner supplies its own camera shutter, gallery import, multi-page capture, page review, auto edge detection, crop/perspective correction, rotation, filters and PDF creation. No CameraX document-scanning implementation or second scanner flow exists.
 - The shop QR scanner remains separate and uses CameraX only to provide local image frames to ML Kit Barcode Scanning; it is not used for document scanning.
 
+
+
+## Physical-device release acceptance
+
+The complete real-device matrix, Windows/Android end-to-end acceptance sequence, Android 16 opt-in restriction test and test sign-off record are maintained in [docs/ANDROID_PHYSICAL_ACCEPTANCE.md](../../docs/ANDROID_PHYSICAL_ACCEPTANCE.md). These checks are not complete until executed on physical phones/tablets and a real Windows shop computer; CI or emulator success alone does not close them.
+
 ## Global SmartPrint customer account
 
 SmartPrint customer accounts are global and independent of any print shop. A customer registers once with SmartPrint, then uses the same account at any participating shop by scanning that shop's QR code. Shops are session destinations, not customer-account owners. New authenticated QR sessions carry the global customer ID; account print history is aggregated across shops by that ID. Guest customers can still scan, organise and print without registration. Existing guest sessions and print jobs are not silently attached to an account later.
@@ -61,15 +67,17 @@ After decoding, SmartPrint routes the payload by its strict format:
 - Customer station QR: the configured HTTPS SmartPrint origin and `/s/{stationCode}`; creates the normal short-lived customer session.
 - Shop-owner phone-readiness QR: the Agent's one-time private IPv4 URL at port `17842`, path `/api/v1/local/connection-check`, and a 43-character token. SmartPrint makes the GET request itself; it does not open an arbitrary browser URL. The Agent accepts the token once, binds the result to the selected network, expires the QR after five minutes, and records a successful phone check for ten minutes.
 
-The phone-readiness parser rejects public hosts, non-RFC1918 addresses, different ports/paths, extra query parameters, redirects and malformed tokens. The two QR purposes share one ML Kit detector and do not create two scanner screens.
+The phone-readiness parser rejects public hosts, non-RFC1918 addresses, different ports/paths, extra query parameters, redirects and malformed tokens. The two QR purposes share one ML Kit detector and do not create two scanner screens. The connected-shop manager exposes **Check shop Wi-Fi** as a separate action; a station QR scanned in that mode is rejected without changing the connected shop. The Windows phone-readiness panel directs SmartPrint users to this in-app path and retains a browser fallback for phones without the app.
 
-## QR and print flow
+The customer station QR and shop Wi-Fi readiness QR use the same ML Kit scanner surface but have separate entry purposes and strict validators. **Check shop Wi-Fi** is available from the connected-shop management sheet and never invokes the shop-switch action. Its scanner accepts only the temporary private Agent readiness URL; the normal connect/switch entry accepts only the configured SmartPrint station URL. A QR from the wrong purpose is rejected with a clear explanation before any shop or session state can change.
+
+## QR station validation and print flow
 
 The QR station code format is matched to the API's current generator: 24 random bytes encoded as a 32-character Base64URL path segment. The app validates the host against the configured smartPrintServiceUrl HTTPS origin, as well as the route, port, query and fragment. Production QR codes from any other host are rejected. A debug build may be configured with a private IPv4 HTTP service origin on port 3000; the scanned station URL must still match that exact configured origin, and the WebView credential bridge remains pinned to it.
 
 The CameraX preview feeds frames to bundled ML Kit Barcode Scanning locally. No camera frame is uploaded or retained. Only a decoded QR payload leaves the scanner, and it is accepted only when it matches the HTTPS `/s/{publicCode}` station route.
 
-The embedded customer portal then creates the same station-bound session as the PWA. Cloud-assisted and local Agent upload share the existing API, quote, shop approval, payment and dispatch lifecycle. Local Agent upload is allowed only to private IPv4 addresses on TCP 17842 and its status/upload routes; the customer portal itself remains HTTPS. Android WebView's compatibility mixed-content mode can block these active HTTP fetches, so the WebView enables mixed-content handling while its request interceptor continues to reject every HTTP URL outside the exact private-Agent allowlist. On Android 16, the WebView inherits the host app's local-network access state, so the app requests the transitional Nearby devices permission only when the customer explicitly checks Shop Wi-Fi. Android 17's ACCESS_LOCAL_NETWORK migration is deferred until the app targets API 37.
+The embedded customer portal then creates the same station-bound session as the PWA. Cloud-assisted and local Agent upload share the existing API, quote, shop approval, payment and dispatch lifecycle. Local Agent upload is allowed only to private IPv4 addresses on TCP 17842 and its status/upload routes; the customer portal itself remains HTTPS. Android WebView's compatibility mixed-content mode can block these active HTTP fetches, so the WebView enables mixed-content handling while its request interceptor continues to reject every HTTP URL outside the exact private-Agent allowlist. On Android 16, the WebView inherits the host app's local-network access state. Local-network protection is opt-in during Android 16, and apps targeting API 36 or lower retain implicit local-network access through INTERNET; SmartPrint therefore does not show a Nearby devices permission prompt during normal use. The manifest retains NEARBY_WIFI_DEVICES (capped at API 36) only for explicit restricted-network QA. To test that opt-in mode, enable RESTRICT_LOCAL_NETWORK for the app with adb, reboot, and grant Nearby devices from Android Settings; disable the compatibility flag after the test. Android 17 requires ACCESS_LOCAL_NETWORK only after SmartPrint targets API 37, at which point the permission must be added to the manifest and requested when the customer starts a local-network action.
 
 ## Build
 
@@ -94,8 +102,8 @@ The CI Android job also uploads JVM and emulator test reports as `smartprint-and
 
 ## Automated Android UI tests
 
-The CI Android job also launches an Android 15 (API 35) emulator and runs
-`connectedDebugAndroidTest`. Current instrumented coverage includes SmartPrint home/navigation, global guest-account entry, Scan & Print explanation, nested-folder operations, scanner permission explanation, encrypted account-token storage, mixed PDF/image batch composition and saved-PDF page edits. The merged Android baseline passed CI; each subsequent branch change must pass CI before it is treated as verified. This remains emulator/API/unit coverage; it does not replace physical-device camera, Google Play services scanner, file-manager provider, shop Wi-Fi, payment or printer validation.
+The CI Android job also launches an Android 16 (API 36) emulator and runs
+`connectedDebugAndroidTest`. Current instrumented coverage includes SmartPrint home/navigation, global guest-account entry, Scan & Print explanation, nested-folder operations, scanner permission explanation, encrypted account-token storage, mixed PDF/image batch composition and saved-PDF page edits. QR regression coverage verifies purpose-specific shop-connection and Wi-Fi-readiness instructions, and confirms that the connected-shop Wi-Fi check does not route through the shop-switch action. The merged Android baseline passed CI; each subsequent branch change must pass CI before it is treated as verified. This remains emulator/API/unit coverage; it does not replace physical-device camera, Google Play services scanner, file-manager provider, shop Wi-Fi, payment or printer validation.
 
 
 ## Customer-app recovery and hardening

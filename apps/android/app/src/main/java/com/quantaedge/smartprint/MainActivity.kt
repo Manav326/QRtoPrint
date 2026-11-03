@@ -271,7 +271,14 @@ class MainActivity : AppCompatActivity() {
         }
         scannerLauncher = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
             if (result.resultCode == RESULT_OK) {
-                handleScannedQr(result.data?.getStringExtra(QrScannerActivity.EXTRA_RAW_VALUE))
+                val scanResult = result.data
+                val purpose = QrScanPurpose.fromWireValue(
+                    scanResult?.getStringExtra(QrScannerActivity.EXTRA_SCAN_PURPOSE)
+                )
+                handleScannedQr(
+                    scanResult?.getStringExtra(QrScannerActivity.EXTRA_RAW_VALUE),
+                    purpose
+                )
             }
         }
         documentScanLauncher = registerForActivityResult(
@@ -2357,6 +2364,7 @@ class MainActivity : AppCompatActivity() {
             "Connected to " + shopName,
             listOf(
                 "Open print station" to { showPrint() },
+                "Check shop Wi-Fi" to { scanQr(QrScanPurpose.WIFI_READINESS) },
                 "Switch to another shop" to { switchShop() },
                 "Disconnect this device" to {
                     showConfirmSheet(
@@ -2416,31 +2424,23 @@ class MainActivity : AppCompatActivity() {
         ) { scanQr() }
     }
 
-    private fun scanQr() {
-        navigation.menu.findItem(SCAN_PRINT).isChecked = true
-        scannerLauncher.launch(Intent(this, QrScannerActivity::class.java))
+    private fun scanQr(purpose: QrScanPurpose = QrScanPurpose.SHOP_CONNECTION) {
+        val intent = Intent(this, QrScannerActivity::class.java)
+            .putExtra(QrScannerActivity.EXTRA_SCAN_PURPOSE, purpose.wireValue)
+        scannerLauncher.launch(intent)
     }
 
-    private fun handleScannedQr(rawValue: String?) {
-        val stationLink = runCatching {
-            StationQrLink.parse(
-                rawValue,
-                expectedServiceUrl = BuildConfig.SERVICE_BASE_URL,
-                allowLocalDevelopment = BuildConfig.DEBUG
-            )
-        }.getOrNull()
-        if (stationLink != null) {
-            confirmShop(stationLink)
-            return
+    private fun handleScannedQr(rawValue: String?, purpose: QrScanPurpose) {
+        when (val route = QrScanRoutingPolicy.route(
+            rawValue = rawValue,
+            purpose = purpose,
+            expectedServiceUrl = BuildConfig.SERVICE_BASE_URL,
+            allowLocalDevelopment = BuildConfig.DEBUG
+        )) {
+            is QrScanRoute.ConnectToShop -> confirmShop(route.link)
+            is QrScanRoute.VerifyShopWifi -> verifyShopPhoneConnection(route.link)
+            is QrScanRoute.Unsupported -> toast(route.message)
         }
-
-        val phoneTestLink = runCatching { LocalPhoneTestQrLink.parse(rawValue) }.getOrNull()
-        if (phoneTestLink != null) {
-            verifyShopPhoneConnection(phoneTestLink)
-            return
-        }
-
-        toast("This QR is not a supported SmartPrint shop or Wi-Fi readiness code.")
     }
 
     private fun verifyShopPhoneConnection(link: LocalPhoneTestQrLink) {
