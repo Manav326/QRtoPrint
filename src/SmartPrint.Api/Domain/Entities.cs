@@ -80,6 +80,10 @@ public sealed class ShopPricingProfile
     public long MonoDuplexPerSheetMinor { get; set; }
     public long ColourDuplexPerSheetMinor { get; set; }
     public long MinimumChargeMinor { get; set; }
+    public long Photo35x45Minor { get; set; }
+    public long Photo25x35Minor { get; set; }
+    public long Photo2x2Minor { get; set; }
+    public long Photo4x6Minor { get; set; }
     public int Version { get; set; } = 1;
     public DateTimeOffset UpdatedUtc { get; set; } = DateTimeOffset.UtcNow;
 }
@@ -243,6 +247,10 @@ public sealed class PrintJob
     public string ColourMode { get; set; } = "Mono";
     public string PaperSize { get; set; } = "A4";
     public bool IsDuplex { get; set; }
+    public string PrintKind { get; set; } = "DOCUMENT";
+    public string? PhotoSizeCode { get; set; }
+    public int PhotoCount { get; set; }
+    public long PhotoUnitPriceMinorSnapshot { get; set; }
     public int? PricingVersion { get; set; }
     public DateTimeOffset? QuoteExpiresUtc { get; set; }
     public string Currency { get; set; } = "INR";

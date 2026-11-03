@@ -50,6 +50,45 @@ public sealed class PricingCalculatorTests
         Assert.Throws<InvalidOperationException>(() => PricingCalculator.Calculate(1, 1, "Mono", false, pricing));
     }
 
+    [Fact]
+    public void PhotoQuoteUsesConfiguredPerPhotoRateWithoutDocumentMinimumCharge()
+    {
+        var pricing = ConfiguredPricing(minimum: 5_000);
+        pricing.Photo35x45Minor = 175;
+
+        Assert.Equal(700, PricingCalculator.CalculatePhoto(4, "35x45", pricing));
+        Assert.Equal(175, PricingCalculator.PhotoUnitRate("35x45", pricing));
+    }
+
+    [Fact]
+    public void PhotoQuoteUsesTheSelectedSizeRate()
+    {
+        var pricing = ConfiguredPricing();
+        pricing.Photo25x35Minor = 125;
+        pricing.Photo2x2Minor = 250;
+        pricing.Photo4x6Minor = 450;
+
+        Assert.Equal(375, PricingCalculator.CalculatePhoto(3, "25x35", pricing));
+        Assert.Equal(500, PricingCalculator.CalculatePhoto(2, "2x2", pricing));
+        Assert.Equal(900, PricingCalculator.CalculatePhoto(2, "4x6", pricing));
+    }
+
+    [Fact]
+    public void PhotoQuoteRejectsAnUnpricedSize()
+    {
+        Assert.Throws<InvalidOperationException>(() =>
+            PricingCalculator.CalculatePhoto(1, "35x45", ConfiguredPricing()));
+    }
+
+    [Fact]
+    public void PhotoSheetCapacitiesMatchTheSupportedA4Layouts()
+    {
+        Assert.Equal(25, PricingCalculator.MaximumPhotosPerA4Sheet("35x45"));
+        Assert.Equal(49, PricingCalculator.MaximumPhotosPerA4Sheet("25x35"));
+        Assert.Equal(15, PricingCalculator.MaximumPhotosPerA4Sheet("2x2"));
+        Assert.Equal(1, PricingCalculator.MaximumPhotosPerA4Sheet("4x6"));
+    }
+
     private static ShopPricingProfile ConfiguredPricing(long minimum = 0) => new()
     {
         TenantId = Guid.NewGuid(), IsConfigured = true,

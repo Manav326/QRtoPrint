@@ -1543,6 +1543,10 @@ shop.MapGet("/pricing", async (
             pricing.MonoDuplexPerSheetMinor,
             pricing.ColourDuplexPerSheetMinor,
             pricing.MinimumChargeMinor,
+            pricing.Photo35x45Minor,
+            pricing.Photo25x35Minor,
+            pricing.Photo2x2Minor,
+            pricing.Photo4x6Minor,
             pricing.Version,
             pricing.UpdatedUtc
         });
@@ -1566,7 +1570,11 @@ shop.MapPut("/pricing", async (
         request.MonoPerSideMinor,
         request.ColourPerSideMinor,
         request.MonoDuplexPerSheetMinor,
-        request.ColourDuplexPerSheetMinor
+        request.ColourDuplexPerSheetMinor,
+        request.Photo35x45Minor,
+        request.Photo25x35Minor,
+        request.Photo2x2Minor,
+        request.Photo4x6Minor
     };
     if (rates.Any(amount => amount < 0 || amount > maximumRateMinor) ||
         request.MinimumChargeMinor < 0 || request.MinimumChargeMinor > maximumMinimumChargeMinor ||
@@ -1589,6 +1597,10 @@ shop.MapPut("/pricing", async (
     pricing.MonoDuplexPerSheetMinor = request.MonoDuplexPerSheetMinor;
     pricing.ColourDuplexPerSheetMinor = request.ColourDuplexPerSheetMinor;
     pricing.MinimumChargeMinor = request.MinimumChargeMinor;
+    pricing.Photo35x45Minor = request.Photo35x45Minor;
+    pricing.Photo25x35Minor = request.Photo25x35Minor;
+    pricing.Photo2x2Minor = request.Photo2x2Minor;
+    pricing.Photo4x6Minor = request.Photo4x6Minor;
     pricing.IsConfigured = true;
     pricing.Version++;
     pricing.UpdatedUtc = DateTimeOffset.UtcNow;
@@ -1602,6 +1614,10 @@ shop.MapPut("/pricing", async (
         pricing.MonoDuplexPerSheetMinor,
         pricing.ColourDuplexPerSheetMinor,
         pricing.MinimumChargeMinor,
+            pricing.Photo35x45Minor,
+            pricing.Photo25x35Minor,
+            pricing.Photo2x2Minor,
+            pricing.Photo4x6Minor,
         pricing.Version,
         pricing.UpdatedUtc
     });
@@ -1769,6 +1785,10 @@ shop.MapGet("/customers/{customerId:guid}/jobs", async (
             job.ColourMode,
             job.PaperSize,
             job.IsDuplex,
+            job.PrintKind,
+            job.PhotoSizeCode,
+            job.PhotoCount,
+            job.PhotoUnitPriceMinorSnapshot,
             job.Currency,
             job.QuotedAmountMinor,
             job.RejectedPageNumbersJson,
@@ -4604,7 +4624,7 @@ agentApi.MapPost("/printers/sync", async (
                           printer.DriverName.Length <= 160 &&
                           (printer.OutputMode is "PHYSICAL" or "PDF_EXPORT") &&
                           (printer.PortName?.Length ?? 0) <= 255 &&
-                          validStatuses.Contains(printer.Status, StringComparer.Ordinal))
+                          (printer.CapabilitiesJson?.Length ?? 0) <= 16000 && validStatuses.Contains(printer.Status, StringComparer.Ordinal))
         .GroupBy(printer => printer.QueueName.Trim(), StringComparer.OrdinalIgnoreCase)
         .Select(group => group.First())
         .ToList();
@@ -4684,7 +4704,7 @@ agentApi.MapPost("/printers/sync", async (
                 ConnectionAddress = string.IsNullOrWhiteSpace(discovered.PortName) ? null : discovered.PortName.Trim(),
                 QueueName = discovered.QueueName.Trim(),
                 IsDefault = discovered.IsDefault,
-                CapabilitiesJson = "{}",
+                CapabilitiesJson = string.IsNullOrWhiteSpace(discovered.CapabilitiesJson) ? "{}" : discovered.CapabilitiesJson,
                 IsActive = true,
                 CreatedUtc = now
             };
@@ -4701,6 +4721,7 @@ agentApi.MapPost("/printers/sync", async (
             printer.OutputMode = discovered.OutputMode;
             printer.ConnectionAddress = string.IsNullOrWhiteSpace(discovered.PortName) ? null : discovered.PortName.Trim();
             printer.IsDefault = discovered.IsDefault;
+            printer.CapabilitiesJson = string.IsNullOrWhiteSpace(discovered.CapabilitiesJson) ? "{}" : discovered.CapabilitiesJson;
             updated++;
         }
 
@@ -6480,14 +6501,21 @@ publicApi.MapPost("/jobs/{jobId:guid}/quote", async (
         });
     }
 
-    if (job.PageCount <= 0 || job.PageCount > 500 ||
+    var isPhotoPrint = request.PrintKind == "PHOTO";
+    if ((request.PrintKind is not null && request.PrintKind is not ("DOCUMENT" or "PHOTO")) ||
+        job.PageCount is <= 0 or > 500 ||
         request.Copies is < 1 or > 100 ||
         request.PaperSize != "A4" ||
-        request.ColourMode is not ("Mono" or "Colour"))
+        request.ColourMode is not ("Mono" or "Colour") ||
+        (isPhotoPrint &&
+            (job.PageCount != 1 || request.Copies != 1 || request.ColourMode != "Colour" ||
+             request.IsDuplex || request.PhotoSizeCode is null || request.PhotoCount is null ||
+             request.PhotoCount is < 1 or > 100)) ||
+        (!isPhotoPrint && (request.PhotoSizeCode is not null || request.PhotoCount is not null)))
     {
         return Results.ValidationProblem(new Dictionary<string, string[]>
         {
-            ["printOptions"] = ["This release supports 1–100 copies, A4 paper and Mono or Colour mode."]
+            ["printOptions"] = ["Document printing uses A4, 1–100 copies and Mono or Colour mode. Photo sheets use one A4 page, one sheet copy and a supported photo size/count."]
         });
     }
 
@@ -6508,14 +6536,45 @@ publicApi.MapPost("/jobs/{jobId:guid}/quote", async (
 
     try
     {
-        var amount = PricingCalculator.Calculate(
-            job.PageCount,
-            request.Copies,
-            request.ColourMode,
-            request.IsDuplex,
-            pricing);
-        var pageRefundAllocations = PricingCalculator.CalculatePageRefundAllocations(
-            job.PageCount, request.Copies, request.ColourMode, request.IsDuplex, pricing);
+        long amount;
+        long photoUnitPriceMinor = 0;
+        long[] pageRefundAllocations;
+        if (isPhotoPrint)
+        {
+            var photoSizeCode = request.PhotoSizeCode!;
+            var photoCount = request.PhotoCount!.Value;
+            var maximumPhotos = PricingCalculator.MaximumPhotosPerA4Sheet(photoSizeCode);
+            if (photoCount > maximumPhotos)
+            {
+                return Results.ValidationProblem(new Dictionary<string, string[]>
+                {
+                    ["photoCount"] = [$"This A4 layout supports at most {maximumPhotos} photos of the selected size per sheet."]
+                });
+            }
+
+            photoUnitPriceMinor = PricingCalculator.PhotoUnitRate(photoSizeCode, pricing);
+            amount = PricingCalculator.CalculatePhoto(photoCount, photoSizeCode, pricing);
+            pageRefundAllocations = [amount];
+            job.PrintKind = "PHOTO";
+            job.PhotoSizeCode = photoSizeCode;
+            job.PhotoCount = photoCount;
+            job.PhotoUnitPriceMinorSnapshot = photoUnitPriceMinor;
+        }
+        else
+        {
+            amount = PricingCalculator.Calculate(
+                job.PageCount,
+                request.Copies,
+                request.ColourMode,
+                request.IsDuplex,
+                pricing);
+            pageRefundAllocations = PricingCalculator.CalculatePageRefundAllocations(
+                job.PageCount, request.Copies, request.ColourMode, request.IsDuplex, pricing);
+            job.PrintKind = "DOCUMENT";
+            job.PhotoSizeCode = null;
+            job.PhotoCount = 0;
+            job.PhotoUnitPriceMinorSnapshot = 0;
+        }
 
         job.ColourMode = request.ColourMode;
         job.PaperSize = request.PaperSize;
@@ -6556,6 +6615,10 @@ publicApi.MapPost("/jobs/{jobId:guid}/quote", async (
             job.ColourMode,
             job.PaperSize,
             job.IsDuplex,
+            job.PrintKind,
+            job.PhotoSizeCode,
+            job.PhotoCount,
+            PhotoUnitPriceMinor = photoUnitPriceMinor,
             job.Currency,
             job.QuotedAmountMinor,
             AmountMajor = amount / 100m,
@@ -7444,6 +7507,10 @@ publicApi.MapGet("/jobs/{jobId:guid}/status", async (
             item.ColourMode,
             item.PaperSize,
             item.IsDuplex,
+            item.PrintKind,
+            item.PhotoSizeCode,
+            item.PhotoCount,
+            item.PhotoUnitPriceMinorSnapshot,
             item.Currency,
             item.QuotedAmountMinor,
             item.QuoteExpiresUtc,
@@ -7611,7 +7678,17 @@ publicApi.MapPost("/sessions/current/resume", async (
         PaymentOptions = paymentOptions,
         Printer = printer,
         LocalAgent = await GetLocalAgentInfoAsync(db, station.TenantId, station.PrinterDeviceId, now, ct),
-        CloudAssistedPrintingEnabled = customerEntitlements.CloudAssistedPrintingEnabled
+        CloudAssistedPrintingEnabled = customerEntitlements.CloudAssistedPrintingEnabled,
+        PhotoPricing = await db.ShopPricingProfiles.AsNoTracking()
+            .Where(item => item.TenantId == station.TenantId)
+            .Select(item => new
+            {
+                item.Photo35x45Minor,
+                item.Photo25x35Minor,
+                item.Photo2x2Minor,
+                item.Photo4x6Minor
+            })
+            .SingleOrDefaultAsync(ct)
     });
 }).RequireRateLimiting("qr-session");
 
@@ -7667,6 +7744,16 @@ publicApi.MapPost("/stations/{publicCode}/sessions", async (
             .SingleAsync(ct),
         LocalAgent = await GetLocalAgentInfoAsync(db, station.TenantId, station.PrinterDeviceId, now, ct),
         CloudAssistedPrintingEnabled = customerEntitlements.CloudAssistedPrintingEnabled,
+        PhotoPricing = await db.ShopPricingProfiles.AsNoTracking()
+            .Where(item => item.TenantId == station.TenantId)
+            .Select(item => new
+            {
+                item.Photo35x45Minor,
+                item.Photo25x35Minor,
+                item.Photo2x2Minor,
+                item.Photo4x6Minor
+            })
+            .SingleOrDefaultAsync(ct),
         Printer = station.PrinterDeviceId is Guid printerId
             ? await db.PrinterDevices.AsNoTracking()
                 .Where(printer => printer.Id == printerId && printer.TenantId == station.TenantId && printer.IsActive)

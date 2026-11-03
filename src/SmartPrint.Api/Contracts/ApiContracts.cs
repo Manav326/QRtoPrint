@@ -28,9 +28,13 @@ public sealed record ShopPricingRequest(
     long ColourPerSideMinor,
     long MonoDuplexPerSheetMinor,
     long ColourDuplexPerSheetMinor,
-    long MinimumChargeMinor);
+    long MinimumChargeMinor,
+    long Photo35x45Minor = 0,
+    long Photo25x35Minor = 0,
+    long Photo2x2Minor = 0,
+    long Photo4x6Minor = 0);
 
-public sealed record PrintQuoteRequest(string ColourMode, string PaperSize, bool IsDuplex, int Copies);
+public sealed record PrintQuoteRequest(string ColourMode, string PaperSize, bool IsDuplex, int Copies, string? PrintKind = "DOCUMENT", string? PhotoSizeCode = null, int? PhotoCount = null);
 
 public sealed record TokenResponse(
     string TokenType,
@@ -63,7 +67,8 @@ public sealed record AgentPrinterDiscoveryRequest(
     string PortName,
     string Status,
     bool IsDefault,
-    string OutputMode = "PHYSICAL");
+    string OutputMode = "PHYSICAL",
+    string CapabilitiesJson = "{}");
 
 public sealed record AgentPrinterSyncRequest(IReadOnlyList<AgentPrinterDiscoveryRequest> Printers);
 
