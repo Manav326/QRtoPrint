@@ -286,11 +286,19 @@ async function exerciseWorkspaceSections(page, route, viewport, themeLabel) {
     await destination.click();
     // The native desktop shell intentionally hides the web breadcrumb; verify
     // the selected navigation item instead of waiting for hidden header text.
-    await page.waitForFunction(
-      label => [...document.querySelectorAll(".sidebar .nav-item")]
-        .some(item => item.textContent.trim() === label && item.classList.contains("active")),
-      section
-    );
+    console.log(`[workspace QA] ${route.label} / ${section} / ${viewport.width}px / ${themeLabel}`);
+    try {
+      await page.waitForFunction(
+        label => [...document.querySelectorAll(".sidebar .nav-item")]
+          .some(item => item.textContent.trim() === label && item.classList.contains("active")),
+        section,
+        { timeout: 12000 }
+      );
+    } catch (error) {
+      const sidebarState = await page.locator(".sidebar").innerText().catch(() => "sidebar unavailable");
+      const activeItems = await page.locator(".sidebar .nav-item.active").allTextContents().catch(() => []);
+      throw new Error(`Navigation did not activate "${section}" for ${route.label} at ${viewport.width}px. Active items: ${JSON.stringify(activeItems)}. Sidebar: ${sidebarState}. Original: ${error instanceof Error ? error.message : String(error)}`);
+    }
     await assertNoHorizontalOverflow(page, route, viewport);
     await assertRouteContrast(page, route);
     results.push({ check: `${route.label} / ${section} / ${themeLabel} / ${viewport.width}px`, passed: true });
