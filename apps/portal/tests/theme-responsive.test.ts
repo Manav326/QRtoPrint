@@ -243,16 +243,16 @@ test("shop owner navigation groups daily work and moves account destinations int
   assert.match(app, /Help &amp; support/);
   assert.match(app, /accountMenuOpen/);
   assert.match(app, /HelpSupportModal/);
-  assert.match(css, /\.app-shell \.nav-group-items\s*\\{/);
+  assert.match(css, /\.app-shell \.nav-group-items\s*\{/);
 });
 
 test("shop workspace content expands into the space left after the sidebar", () => {
   const css = read("../src/styles.css");
   const app = read("../src/App.tsx");
 
-  assert.match(css, /\.app-shell > \.main-panel\s*\\{[^}]*flex:\s*1 1 0%/s);
-  assert.match(css, /\.app-shell > \.main-panel > \.content-wrap\s*\\{[^}]*width:\s*100%[^}]*max-width:\s*1920px/s);
-  assert.match(css, /\.app-shell \.customers-search\s*\\{[^}]*max-width:\s*none/s);
+  assert.match(css, /\.app-shell > \.main-panel\s*\{[^}]*flex:\s*1 1 0%/s);
+  assert.match(css, /\.app-shell > \.main-panel > \.content-wrap\s*\{[^}]*width:\s*100%[^}]*max-width:\s*1920px/s);
+  assert.match(css, /\.app-shell \.customers-search\s*\{[^}]*max-width:\s*none/s);
   assert.match(app, /activePageTitle/);
   assert.match(css, /@media \(max-width: 850px\)/);
   assert.match(css, /@media \(max-width: 600px\)/);
