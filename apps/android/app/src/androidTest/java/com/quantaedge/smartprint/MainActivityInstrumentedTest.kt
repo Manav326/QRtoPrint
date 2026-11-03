@@ -139,7 +139,7 @@ class MainActivityInstrumentedTest {
         File(nested, "nested.pdf").writeText("%PDF-1.4 nested selection test")
         try {
             ActivityScenario.launch(MainActivity::class.java).use {
-                openFilesTab()
+                openNavigationDestination(2, "New folder")
                 onView(withText(folder.name)).perform(click())
                 onView(withText(first.name)).check(matches(isDisplayed()))
                 onView(withContentDescription("Select " + first.name)).check(doesNotExist())
