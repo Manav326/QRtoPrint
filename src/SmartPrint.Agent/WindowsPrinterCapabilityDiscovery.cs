@@ -60,10 +60,16 @@ public static class WindowsPrinterCapabilityDiscovery
     private static object ReadOrientation(string queueName)
     {
         var result = DeviceCapabilitiesW(queueName, null, DcOrientation, IntPtr.Zero, IntPtr.Zero);
+        bool? landscape = result switch
+        {
+            0 => false,
+            90 or 270 => true,
+            _ => null
+        };
         return new
         {
-            portrait = true,
-            landscape = result is 90 or 270 ? true : result < 0 ? (bool?)null : false
+            portrait = result >= 0 ? true : (bool?)null,
+            landscape
         };
     }
 

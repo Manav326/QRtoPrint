@@ -2802,7 +2802,7 @@ function CustomerEntry({publicCode,dark,onToggleTheme}:{publicCode:string;dark:b
         <div className="entry-printer-card"><div className="entry-printer-icon"><Printer size={20}/></div><div><strong>{result.printer?.displayName||"Shop print counter"}</strong><span>{nativeAppMode?(result.printer?.status||"Printer not selected"):result.printer?result.printer.manufacturer+" · "+result.printer.model:"The shop will select a printer for your job."}</span></div><Status label={result.printer?.status||"Session ready"} tone="blue"/></div>
         <div className="entry-session-note"><ShieldCheck size={16}/><span>{nativeAppMode?"Secure session · Expires "+formatIstTime(result.expiresUtc):"This session expires at "+formatIstTime(result.expiresUtc)+". Your document access stays limited to this shop session."}</span></div>
         <CustomerLocalConnection localAgent={result.localAgent} onReady={handleLocalReady} onUnavailable={handleLocalUnavailable} cloudAssistedPrintingEnabled={result.cloudAssistedPrintingEnabled}/>
-        <CustomerPrintFlow publicCode={publicCode} sessionToken={result.sessionToken} paymentOptions={result.paymentOptions} localAgent={result.localAgent} localReady={localReady} localFallbackSuggested={localFallbackSuggested} cloudAssistedPrintingEnabled={result.cloudAssistedPrintingEnabled} photoPricing={result.photoPricing} photoStudioReady={isPhotoStudioPrinterReady(result.printer?.capabilitiesJson)}/>
+        <CustomerPrintFlow publicCode={publicCode} sessionToken={result.sessionToken} paymentOptions={result.paymentOptions} localAgent={result.localAgent} localReady={localReady} localFallbackSuggested={localFallbackSuggested} cloudAssistedPrintingEnabled={result.cloudAssistedPrintingEnabled} photoPricing={result.photoPricing} printerCapabilitiesJson={result.printer?.capabilitiesJson} photoStudioReady={isPhotoStudioPrinterReady(result.printer?.capabilitiesJson)}/>
       </>:null}
     </main>
     <footer className="customer-entry-footer">© 2026 SmartPrint by QuantaEdge · Secure customer printing</footer>
@@ -2810,7 +2810,32 @@ function CustomerEntry({publicCode,dark,onToggleTheme}:{publicCode:string;dark:b
 }
 
 
-function isPhotoStudioPrinterReady(capabilitiesJson?:string|null):boolean{if(!capabilitiesJson)return false;try{const c=JSON.parse(capabilitiesJson) as {color?:boolean;paperSizes?:Array<{code?:number;name?:string}>};return c.color===true&&(c.paperSizes??[]).some(p=>p.code===9||p.name?.trim().toUpperCase()==="A4");}catch{return false;}}
+type CustomerPrinterCapabilities = {
+  color?: boolean;
+  duplex?: boolean;
+  paperSizes?: Array<{ code?: number; name?: string }>;
+};
+function parseCustomerPrinterCapabilities(capabilitiesJson?:string|null):CustomerPrinterCapabilities|null {
+  if(!capabilitiesJson)return null;
+  try {
+    const value=JSON.parse(capabilitiesJson) as Record<string,unknown>;
+    if(!value||typeof value!=="object"||Array.isArray(value))return null;
+    const paperSizes=Array.isArray(value.paperSizes)?value.paperSizes.flatMap(item=>{
+      if(!item||typeof item!=="object"||Array.isArray(item))return [];
+      const paper=item as Record<string,unknown>;
+      return [{code:typeof paper.code==="number"?paper.code:undefined,name:typeof paper.name==="string"?paper.name:undefined}];
+    }):undefined;
+    return {
+      color:typeof value.color==="boolean"?value.color:undefined,
+      duplex:typeof value.duplex==="boolean"?value.duplex:undefined,
+      paperSizes
+    };
+  } catch { return null; }
+}
+function isPhotoStudioPrinterReady(capabilitiesJson?:string|null):boolean{
+  const capabilities=parseCustomerPrinterCapabilities(capabilitiesJson);
+  return capabilities?.color===true&&(capabilities.paperSizes??[]).some(p=>p.code===9||p.name?.trim().toUpperCase()==="A4");
+}
 type CustomerLocalAgent = NonNullable<Awaited<ReturnType<typeof createCustomerSession>>["localAgent"]>;
 type LocalAgentCheckStatus = "idle" | "checking" | "connected" | "unverified" | "recovering" | "unavailable" | "denied" | "insecure";
 
@@ -3247,8 +3272,14 @@ function smartPrintNativeBoundary(status:string|undefined,hasQuote:boolean):stri
   }
 }
 
-function CustomerPrintFlow({publicCode,sessionToken,paymentOptions,localAgent,localReady,localFallbackSuggested,cloudAssistedPrintingEnabled,photoPricing,photoStudioReady}:{publicCode:string;sessionToken:string;paymentOptions:{upiEnabled:boolean;upiId?:string|null;payeeName?:string|null;cashEnabled:boolean;instantPaymentEnabled:boolean};localAgent:CustomerLocalAgent|null;localReady:boolean;localFallbackSuggested:boolean;cloudAssistedPrintingEnabled:boolean;photoPricing:CustomerPhotoPricing|null;photoStudioReady:boolean}) {
+function CustomerPrintFlow({publicCode,sessionToken,paymentOptions,localAgent,localReady,localFallbackSuggested,cloudAssistedPrintingEnabled,photoPricing,printerCapabilitiesJson,photoStudioReady}:{publicCode:string;sessionToken:string;paymentOptions:{upiEnabled:boolean;upiId?:string|null;payeeName?:string|null;cashEnabled:boolean;instantPaymentEnabled:boolean};localAgent:CustomerLocalAgent|null;localReady:boolean;localFallbackSuggested:boolean;cloudAssistedPrintingEnabled:boolean;photoPricing:CustomerPhotoPricing|null;printerCapabilitiesJson?:string|null;photoStudioReady:boolean}) {
   const nativeAppMode = navigator.userAgent.includes("SmartPrintAndroid/1");
+  const printerCapabilities=parseCustomerPrinterCapabilities(printerCapabilitiesJson);
+  const supportsColour=printerCapabilities?.color!==false;
+  const supportsDuplex=printerCapabilities?.duplex!==false;
+  const reportedPaperSizes=printerCapabilities?.paperSizes??[];
+  const a4ExplicitlyUnsupported=reportedPaperSizes.length>0&&!reportedPaperSizes.some(p=>p.code===9||p.name?.trim().toUpperCase()==="A4");
+  const photoRatesAvailable=Boolean(photoPricing&&[photoPricing.photo35x45Minor,photoPricing.photo25x35Minor,photoPricing.photo2x2Minor,photoPricing.photo4x6Minor].some(rate=>Number.isFinite(rate)&&rate>0));
   const initialDraft=readStoredCustomerDraft(publicCode,sessionToken);
   const [files,setFiles]=useState<File[]>([]);
   const [selectedFileIndex,setSelectedFileIndex]=useState(0);
@@ -3372,15 +3403,22 @@ function CustomerPrintFlow({publicCode,sessionToken,paymentOptions,localAgent,lo
   const batchItemsForStatus=uploadedBatch.length?uploadedBatch:(uploaded?[uploaded]:[]);
   const batchStatusKey=batchItemsForStatus.map(item=>item.job.id).join("|");
   const groupNameForFile=(candidate:File)=>fileGroupNames[customerFileFingerprint(candidate)]??customerBatchGroupName(candidate);
-  const defaultsForGroup=(name:string):CustomerGroupSettings=>groupSettings[name]??{colourMode:"Mono",isDuplex:false};
+  const defaultsForGroup=(name:string):CustomerGroupSettings=>{
+    const settings=groupSettings[name]??{colourMode:"Mono",isDuplex:false};
+    return {
+      ...settings,
+      colourMode:supportsColour?settings.colourMode:"Mono",
+      isDuplex:supportsDuplex?settings.isDuplex:false
+    };
+  };
   const settingsForFile=(candidate:File)=> {
     const fingerprint=customerFileFingerprint(candidate);
     const defaults=defaultsForGroup(groupNameForFile(candidate));
     const own=fileSettings[fingerprint];
     if(photoSettingsByFileFingerprint[fingerprint])return {colourMode:"Colour" as const,isDuplex:false,copies:1};
     return {
-      colourMode:own?.custom?own.colourMode:defaults.colourMode,
-      isDuplex:own?.custom?own.isDuplex:defaults.isDuplex,
+      colourMode:supportsColour?(own?.custom?own.colourMode:defaults.colourMode):"Mono",
+      isDuplex:supportsDuplex?(own?.custom?own.isDuplex:defaults.isDuplex):false,
       copies:Number(normalizeCustomerCopies(own?.copies??"1"))
     } as CustomerSavedPrintSettings;
   };
@@ -3548,6 +3586,7 @@ function CustomerPrintFlow({publicCode,sessionToken,paymentOptions,localAgent,lo
   }
 
   async function getQuote(itemsOverride?:UploadedPrintJob[],settingsOverride?:Record<string,CustomerSavedPrintSettings>,photoSettingsOverride?:Record<string,CustomerPhotoSettings>) {
+    if(a4ExplicitlyUnsupported){setError("The selected printer does not report A4 paper support. Ask the shop team to select an A4-capable printer before requesting a quote.");return;}
     const items=itemsOverride??(uploadedBatch.length?uploadedBatch:(uploaded?[uploaded]:[]));
     if(items.length===0)return;
     setBusy(true);setError("");setJobStatus(null);
@@ -3564,8 +3603,10 @@ function CustomerPrintFlow({publicCode,sessionToken,paymentOptions,localAgent,lo
         if(quoteExpired
           ? !["QUOTE_EXPIRED","AWAITING_CUSTOMER_APPROVAL","AWAITING_SHOP_APPROVAL","AWAITING_PAYMENT","PAYMENT_REJECTED"].includes(status)
           : !["AWAITING_CONFIGURATION","UPLOADED","Uploaded"].includes(status))continue;
-        const settings=settingsOverride?.[item.job.id]??printSettingsByJobId[item.job.id]??{colourMode:"Mono" as const,isDuplex:false,copies:1};
+        const requestedSettings=settingsOverride?.[item.job.id]??printSettingsByJobId[item.job.id]??{colourMode:"Mono" as const,isDuplex:false,copies:1};
+        const settings={...requestedSettings,colourMode:supportsColour?requestedSettings.colourMode:"Mono" as const,isDuplex:supportsDuplex?requestedSettings.isDuplex:false};
         const photoSettings=photoSettingsOverride?.[item.job.id]??photoSettingsByJobId[item.job.id];
+        if(photoSettings&&!supportsColour){failures.push(item.document.originalFileName+" (colour not supported)");continue;}
         try {
           nextQuotes[item.job.id]=await calculateCustomerQuote(sessionToken,item.job.id,{colourMode:photoSettings?"Colour":settings.colourMode,paperSize:"A4",isDuplex:photoSettings?false:settings.isDuplex,copies:photoSettings?1:settings.copies,...(photoSettings?{printKind:"PHOTO" as const,photoSizeCode:photoSettings.sizeCode,photoCount:photoSettings.photoCount}:{printKind:"DOCUMENT" as const})});
         } catch(exception) {
@@ -3749,7 +3790,7 @@ function CustomerPrintFlow({publicCode,sessionToken,paymentOptions,localAgent,lo
     for(const sheet of sheets){const fp=customerFileFingerprint(sheet.file);groups[fp]=group;settings[fp]={copies:"1",custom:true,colourMode:"Colour",isDuplex:false};photos[fp]={sizeCode:sheet.sizeCode,photoCount:sheet.photoCount};}
     setFiles(nextFiles);setSelectedFileIndex(index);setFileGroupNames(groups);setFileSettings(settings);setPhotoSettingsByFileFingerprint(photos);setPhotoStudioSource(null);setPhotoStudioSourceFingerprint(null);setError("");
   }
-  function openPhotoStudio(candidate:File){if(!photoStudioReady||!photoPricing){setError("Photo printing is not available at this station yet.");return;}setPhotoStudioSource(candidate);setPhotoStudioSourceFingerprint(customerFileFingerprint(candidate));setError("");}
+  function openPhotoStudio(candidate:File){if(!photoStudioReady||!photoRatesAvailable){setError("Photo printing is not available at this station yet.");return;}setPhotoStudioSource(candidate);setPhotoStudioSourceFingerprint(customerFileFingerprint(candidate));setError("");}
   function chooseFiles(next:File[], nativeGroupNames?:string[]) {
     if(batchLockedForPayment){
       setError("This batch already has a payment attempt. Start a new batch for additional files.");
@@ -3966,17 +4007,18 @@ function CustomerPrintFlow({publicCode,sessionToken,paymentOptions,localAgent,lo
             <div className="customer-folder-defaults">
               <div><span>Colour</span><div className="customer-choice-row">
                 <button type="button" className={defaults.colourMode==="Mono"?"customer-choice selected":"customer-choice"} onClick={()=>setGroupSettings(current=>({...current,[group.name]:{...defaults,colourMode:"Mono"}}))}>B&W</button>
-                <button type="button" className={defaults.colourMode==="Colour"?"customer-choice selected":"customer-choice"} onClick={()=>setGroupSettings(current=>({...current,[group.name]:{...defaults,colourMode:"Colour"}}))}>Colour</button>
+                <button type="button" className={defaults.colourMode==="Colour"?"customer-choice selected":"customer-choice"} disabled={!supportsColour} title={!supportsColour?"The selected printer does not report colour support":undefined} onClick={()=>setGroupSettings(current=>({...current,[group.name]:{...defaults,colourMode:"Colour"}}))}>Colour</button>
               </div></div>
               <div><span>Sides</span><div className="customer-choice-row">
                 <button type="button" className={!defaults.isDuplex?"customer-choice selected":"customer-choice"} onClick={()=>setGroupSettings(current=>({...current,[group.name]:{...defaults,isDuplex:false}}))}>Single</button>
-                <button type="button" className={defaults.isDuplex?"customer-choice selected":"customer-choice"} onClick={()=>setGroupSettings(current=>({...current,[group.name]:{...defaults,isDuplex:true}}))}>Double</button>
+                <button type="button" className={defaults.isDuplex?"customer-choice selected":"customer-choice"} disabled={!supportsDuplex} title={!supportsDuplex?"The selected printer does not report duplex support":undefined} onClick={()=>setGroupSettings(current=>({...current,[group.name]:{...defaults,isDuplex:true}}))}>Double</button>
               </div></div>
             </div>
           </div>
           <div className="customer-folder-file-list">{group.files.map(selected=>{
             const fingerprint=customerFileFingerprint(selected);
-            const own=fileSettings[fingerprint]??{copies:"1",custom:false,colourMode:defaults.colourMode,isDuplex:defaults.isDuplex};
+            const savedOwn=fileSettings[fingerprint]??{copies:"1",custom:false,colourMode:defaults.colourMode,isDuplex:defaults.isDuplex};
+            const own={...savedOwn,colourMode:supportsColour?savedOwn.colourMode:"Mono" as const,isDuplex:supportsDuplex?savedOwn.isDuplex:false};
             const index=files.findIndex(candidate=>customerFileFingerprint(candidate)===fingerprint);
             return <div className={selectedFileIndex===index?"customer-folder-file-row selected":"customer-folder-file-row"} key={fingerprint}>
               <button type="button" className="customer-folder-file-name" onClick={()=>setSelectedFileIndex(index)}><FileText size={15}/><span><strong>{selected.name}</strong><small>{formatBytes(selected.size)}</small></span></button>
@@ -3998,11 +4040,11 @@ function CustomerPrintFlow({publicCode,sessionToken,paymentOptions,localAgent,lo
               {own.custom&&<div className="customer-file-overrides">
                 <div className="customer-choice-row">
                   <button type="button" className={own.colourMode==="Mono"?"customer-choice selected":"customer-choice"} onClick={()=>setFileSettings(current=>({...current,[fingerprint]:{...own,custom:true,colourMode:"Mono"}}))}>B&W</button>
-                  <button type="button" className={own.colourMode==="Colour"?"customer-choice selected":"customer-choice"} onClick={()=>setFileSettings(current=>({...current,[fingerprint]:{...own,custom:true,colourMode:"Colour"}}))}>Colour</button>
+                  <button type="button" className={own.colourMode==="Colour"?"customer-choice selected":"customer-choice"} disabled={!supportsColour} title={!supportsColour?"The selected printer does not report colour support":undefined} onClick={()=>setFileSettings(current=>({...current,[fingerprint]:{...own,custom:true,colourMode:"Colour"}}))}>Colour</button>
                 </div>
                 <div className="customer-choice-row">
                   <button type="button" className={!own.isDuplex?"customer-choice selected":"customer-choice"} onClick={()=>setFileSettings(current=>({...current,[fingerprint]:{...own,custom:true,isDuplex:false}}))}>Single</button>
-                  <button type="button" className={own.isDuplex?"customer-choice selected":"customer-choice"} onClick={()=>setFileSettings(current=>({...current,[fingerprint]:{...own,custom:true,isDuplex:true}}))}>Double</button>
+                  <button type="button" className={own.isDuplex?"customer-choice selected":"customer-choice"} disabled={!supportsDuplex} title={!supportsDuplex?"The selected printer does not report duplex support":undefined} onClick={()=>setFileSettings(current=>({...current,[fingerprint]:{...own,custom:true,isDuplex:true}}))}>Double</button>
                 </div>
               </div>}
             </div>;
@@ -4010,8 +4052,9 @@ function CustomerPrintFlow({publicCode,sessionToken,paymentOptions,localAgent,lo
         </section>;
       })}</div>
     </div>}
+    {a4ExplicitlyUnsupported&&<p className="customer-upload-local-note" role="status">The selected printer does not report support for A4 paper. You can add files, but a quote is unavailable until the shop selects an A4-capable printer.</p>}
     {files.length>0&&<small className="customer-upload-local-note">Folder defaults apply to every file. Set an individual file to Custom for an exception.</small>}
-    {previewUrl&&file&&<div className="customer-file-preview"><div className="customer-file-label"><FileText size={15}/><span>Preview · {file.name}</span>{file.type.startsWith("image/")&&photoStudioReady&&<button type="button" className="customer-file-studio-button" disabled={busy||batchLockedForPayment} onClick={()=>openPhotoStudio(file)}><ImageIcon size={14}/> Open Photo Studio</button>}</div>{file.type==="application/pdf"||/\.pdf$/i.test(file.name)?<iframe src={previewUrl} title={file.name+" preview"}/>:<img src={previewUrl} alt={file.name+" preview"}/>}</div>}
+    {previewUrl&&file&&<div className="customer-file-preview"><div className="customer-file-label"><FileText size={15}/><span>Preview · {file.name}</span>{file.type.startsWith("image/")&&photoStudioReady&&photoRatesAvailable&&<button type="button" className="customer-file-studio-button" disabled={busy||batchLockedForPayment} onClick={()=>openPhotoStudio(file)}><ImageIcon size={14}/> Open Photo Studio</button>}</div>{file.type==="application/pdf"||/\.pdf$/i.test(file.name)?<iframe src={previewUrl} title={file.name+" preview"}/>:<img src={previewUrl} alt={file.name+" preview"}/>}</div>}
     {files.length>0&&<button className="customer-flow-button" disabled={busy||customerUploadUnavailable||pendingFilesCount===0||(uploadMode==="LOCAL"&&!localReady)} onClick={()=>void upload()}>{busy?<span className="button-spinner"/>:<><UploadIcon/>{uploadMode==="LOCAL"&&localAgent?"Upload "+pendingFilesCount+" file(s) to shop":"Upload "+pendingFilesCount+" file(s)"}</>}</button>}
     {uploadProgress&&<div className="customer-upload-progress"><span>{uploadProgress.currentFile?`Uploading ${Math.min(uploadProgress.completed+1,uploadProgress.total)} of ${uploadProgress.total}: ${uploadProgress.currentFile}`:`${uploadProgress.completed} of ${uploadProgress.total} files uploaded`}</span><div><i style={{width:`${uploadProgress.total?uploadProgress.completed/uploadProgress.total*100:0}%`}}/>{uploadProgress.currentFile&&<b aria-hidden="true"/>}</div><small>The count advances when each document finishes uploading.</small></div>}
     {files.length>0&&uploadMode==="LOCAL"&&localAgent&&<small className="customer-upload-local-note">{nativeAppMode?(localReady?"Direct shop Wi-Fi transfer uses local HTTP and is not encrypted in transit. Choose Cloud-assisted for HTTPS.":"Check shop Wi-Fi."):localReady?"Direct shop Wi-Fi transfer uses local HTTP and is not encrypted in transit. Choose Cloud-assisted for HTTPS encryption.":"Tap Check shop Wi-Fi above first to grant the browser permission."}</small>}
@@ -4037,7 +4080,7 @@ function CustomerPrintFlow({publicCode,sessionToken,paymentOptions,localAgent,lo
       {batchId&&hasLegacyIndividualPayment&&<p className="customer-payment-warning">A file in this batch already has a separate individual payment. Complete or resolve that attempt before starting another payment for this batch. A second collection path is blocked to prevent duplicate charges.</p>}
       {canCalculateBatch&&<div className="customer-batch-quote-action">
         <div className="customer-flow-heading customer-config-heading"><div><span>STEP 2</span><h2>Review batch settings</h2></div><small>{quoteItems.length} files</small></div>
-        <button className="customer-flow-button" disabled={busy} onClick={()=>void getQuote()}>{busy?<span className="button-spinner"/>:"Calculate batch quote"}</button>
+        <button className="customer-flow-button" disabled={busy||a4ExplicitlyUnsupported} onClick={()=>void getQuote()}>{busy?<span className="button-spinner"/>:"Calculate batch quote"}</button>
       </div>}
     </>}
     {error&&<div className="customer-flow-error" role="alert">{error}</div>}

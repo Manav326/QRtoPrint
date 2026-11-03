@@ -1,3 +1,4 @@
+using System.Text.Json;
 using Microsoft.Extensions.Logging.Abstractions;
 using SmartPrint.Agent;
 
@@ -64,6 +65,26 @@ public sealed class WindowsPrinterDiscoveryTests
         Assert.Equal(
             PrinterOutputModeRules.PdfExport,
             PrinterOutputModeRules.Detect("Microsoft Print to PDF", "Microsoft Print To PDF"));
+    }
+
+    [Fact]
+    public void PrinterInventorySyncSerializesDriverCapabilitiesAsWebJson()
+    {
+        const string capabilityReport = """{"schemaVersion":1,"color":true,"duplex":false,"paperSizes":[{"code":9,"name":"A4"}]}""";
+        var printer = new DiscoveredPrinter(
+            "HP Lobby", "HP Universal", "USB001", "Ready", true,
+            CapabilitiesJson: capabilityReport);
+
+        var payload = JsonSerializer.Serialize(
+            new { printers = new[] { printer } },
+            new JsonSerializerOptions(JsonSerializerDefaults.Web));
+        using var document = JsonDocument.Parse(payload);
+        var serializedReport = document.RootElement
+            .GetProperty("printers")[0]
+            .GetProperty("capabilitiesJson")
+            .GetString();
+
+        Assert.Equal(capabilityReport, serializedReport);
     }
 
     [Fact]

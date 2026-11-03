@@ -4619,6 +4619,29 @@ agentApi.MapPost("/printers/sync", async (
         });
     }
 
+    var invalidCapabilitiesJson = request.Printers.Any(printer =>
+    {
+        if (printer is null) return true;
+        var json = string.IsNullOrWhiteSpace(printer.CapabilitiesJson) ? "{}" : printer.CapabilitiesJson;
+        if (json.Length > 16000) return true;
+        try
+        {
+            using var parsed = JsonDocument.Parse(json);
+            return parsed.RootElement.ValueKind != JsonValueKind.Object;
+        }
+        catch (JsonException)
+        {
+            return true;
+        }
+    });
+    if (invalidCapabilitiesJson)
+    {
+        return Results.ValidationProblem(new Dictionary<string, string[]>
+        {
+            ["capabilitiesJson"] = ["Each printer capability report must be a valid JSON object under 16 KB."]
+        });
+    }
+
     var validStatuses = new[] { "Ready", "Busy", "Offline", "Paused", "Error", "Unknown" };
     var normalized = request.Printers
         .Where(printer => printer is not null &&
