@@ -8,28 +8,31 @@ const read = (path: string) => readFileSync(new URL(path, import.meta.url), "utf
 
 test("customer copy inputs capture event values before scheduling React state updates", () => {
   const app = read("../src/App.tsx");
-  const copyLabel = app.match(/<label className="customer-folder-copies">[\\s\\S]*?<\\/label>/)?.[0];
-  assert.ok(copyLabel, "The customer Copies input must remain present.");
+  const labelStart = app.indexOf('<label className="customer-folder-copies">');
+  const labelEnd = app.indexOf("</label>", labelStart);
+  assert.ok(labelStart >= 0 && labelEnd > labelStart, "The customer Copies input must remain present.");
+  const copyLabel = app.slice(labelStart, labelEnd);
 
-  const changeHandler = copyLabel.match(/onChange=\\{event => \\{([\\s\\S]*?)\\}\\}/)?.[1];
-  const blurHandler = copyLabel.match(/onBlur=\\{event => \\{([\\s\\S]*?)\\}\\}/)?.[1];
-  assert.ok(changeHandler, "The Copies change handler must capture its value synchronously.");
-  assert.ok(blurHandler, "The Copies blur handler must capture its value synchronously.");
+  const blurStart = copyLabel.indexOf("onBlur={event => {");
+  assert.ok(blurStart >= 0, "The Copies blur handler must remain present.");
+  const changeHandler = copyLabel.slice(copyLabel.indexOf("onChange={event => {"), blurStart);
+  const blurHandler = copyLabel.slice(blurStart);
 
   for (const [name, handler] of [["change", changeHandler], ["blur", blurHandler]] as const) {
     const captureIndex = handler.indexOf("const copies = event.currentTarget.value");
-    const updateIndex = handler.indexOf("setFileSettings(");
+    const updateIndex = handler.indexOf("setFileSettings(current =>");
     assert.ok(captureIndex >= 0 && updateIndex > captureIndex,
       `The Copies ${name} handler must read currentTarget before scheduling the state update.`);
-    assert.doesNotMatch(handler, /setFileSettings\\([\\s\\S]*event\\.currentTarget/,
+    assert.equal(handler.indexOf("event.currentTarget", updateIndex), -1,
       `The Copies ${name} handler must not read currentTarget inside a state updater.`);
   }
 });
 
 test("platform operational checkbox captures its event value before scheduling state", () => {
   const source = read("../src/PlatformOperationsSection.tsx");
-  assert.match(source, /const checked = event\\.target\\.checked;[\\s\\S]*?allowPaidJobClaimsWhenSuspended: checked/);
-  assert.doesNotMatch(source, /allowPaidJobClaimsWhenSuspended: event\\.target\\.checked/);
+  assert.ok(source.includes("const checked = event.target.checked;"));
+  assert.ok(source.includes("allowPaidJobClaimsWhenSuspended: checked"));
+  assert.ok(!source.includes("allowPaidJobClaimsWhenSuspended: event.target.checked"));
 });
 
 test("first web visit is light and saved selection is restored before rendering", () => {
