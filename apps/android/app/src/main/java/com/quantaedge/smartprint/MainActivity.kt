@@ -271,16 +271,7 @@ class MainActivity : AppCompatActivity() {
         }
         scannerLauncher = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
             if (result.resultCode == RESULT_OK) {
-                val rawValue = result.data?.getStringExtra(QrScannerActivity.EXTRA_RAW_VALUE)
-                try {
-                    confirmShop(StationQrLink.parse(
-                        rawValue,
-                        expectedServiceUrl = BuildConfig.SERVICE_BASE_URL,
-                        allowLocalDevelopment = BuildConfig.DEBUG
-                    ))
-                } catch (_: Exception) {
-                    toast("This is not a valid Smart Print shop QR code.")
-                }
+                handleScannedQr(result.data?.getStringExtra(QrScannerActivity.EXTRA_RAW_VALUE))
             }
         }
         documentScanLauncher = registerForActivityResult(
@@ -900,7 +891,7 @@ class MainActivity : AppCompatActivity() {
             scaleType = ImageView.ScaleType.CENTER_CROP
             setPadding(dp(10), dp(10), dp(10), dp(10))
             background = roundedDrawable(getColor(R.color.qp_soft), dp(13))
-            contentDescription = if (portalUrl == null) "Print at a shop" else "Connected shop logo"
+            contentDescription = if (portalUrl == null) "Shop connection" else "Connected shop icon"
         }
         if (portalUrl != null) loadShopLogo(shopGlyph)
         shopRow.addView(shopGlyph, LinearLayout.LayoutParams(dp(46), dp(46)))
@@ -2252,57 +2243,81 @@ class MainActivity : AppCompatActivity() {
         val service = Uri.parse(BuildConfig.SERVICE_BASE_URL)
         val target = try { URL(URL(BuildConfig.SERVICE_BASE_URL), raw) } catch (_: Exception) { return }
         val targetUri = Uri.parse(target.toString())
-        if (!targetUri.scheme.equals(service.scheme, true) ||
-            !targetUri.host.equals(service.host, true) ||
-            targetUri.port != service.port || targetUri.userInfo != null) return
+        val targetHost = targetUri.host?.lowercase(Locale.ROOT) ?: return
+        val servicePort = if (service.port == -1) 443 else service.port
+        val targetPort = if (targetUri.port == -1) 443 else targetUri.port
+        val sameServiceOrigin = targetHost.equals(service.host, true) && targetPort == servicePort
+        if (!targetUri.scheme.equals("https", true) ||
+            targetUri.userInfo != null || targetUri.fragment != null ||
+            (!sameServiceOrigin && (targetPort != 443 || isPrivateOrLocalLogoHost(targetHost)))) return
         imageView.tag = raw
         Thread {
             val bitmap = try {
                 val connection = target.openConnection() as? HttpURLConnection
                     ?: return@Thread
-                connection.instanceFollowRedirects = false
-                connection.connectTimeout = 5000
-                connection.readTimeout = 5000
-                connection.setRequestProperty("Accept", "image/png,image/jpeg,image/webp")
-                connection.connect()
-                if (connection.responseCode != 200 ||
-                    (connection.contentLengthLong > 2L * 1024L * 1024L)) {
+                try {
+                    connection.instanceFollowRedirects = false
+                    connection.connectTimeout = 5000
+                    connection.readTimeout = 5000
+                    connection.useCaches = false
+                    connection.setRequestProperty("Accept", "image/png,image/jpeg,image/webp")
+                    connection.connect()
+                    val contentType = connection.contentType?.substringBefore(';')?.trim()?.lowercase(Locale.ROOT)
+                    if (connection.responseCode != 200 ||
+                        contentType !in setOf("image/png", "image/jpeg", "image/webp") ||
+                        connection.contentLengthLong > 2L * 1024L * 1024L) {
+                        null
+                    } else {
+                        val bytes = connection.inputStream.use { input ->
+                            val output = ByteArrayOutputStream()
+                            val buffer = ByteArray(8192)
+                            var total = 0
+                            while (true) {
+                                val count = input.read(buffer)
+                                if (count < 0) break
+                                total += count
+                                if (total > 2 * 1024 * 1024) return@use ByteArray(0)
+                                output.write(buffer, 0, count)
+                            }
+                            output.toByteArray()
+                        }
+                        if (bytes.isEmpty()) null else {
+                            val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+                            BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
+                            if (bounds.outWidth <= 0 || bounds.outHeight <= 0) null else {
+                                val sample = maxOf(1, maxOf(bounds.outWidth, bounds.outHeight) / 512)
+                                BitmapFactory.decodeByteArray(
+                                    bytes, 0, bytes.size,
+                                    BitmapFactory.Options().apply { inSampleSize = sample }
+                                )
+                            }
+                        }
+                    }
+                } finally {
                     connection.disconnect()
-                    return@Thread
-                }
-                val bytes = connection.inputStream.use { input ->
-                    val output = ByteArrayOutputStream()
-                    val buffer = ByteArray(8192)
-                    var total = 0
-                    while (true) {
-                        val count = input.read(buffer)
-                        if (count < 0) break
-                        total += count
-                        if (total > 2 * 1024 * 1024) return@use ByteArray(0)
-                        output.write(buffer, 0, count)
-                    }
-                    output.toByteArray()
-                }
-                connection.disconnect()
-                if (bytes.isEmpty()) null else {
-                    val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-                    BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
-                    if (bounds.outWidth <= 0 || bounds.outHeight <= 0) null else {
-                        val sample = maxOf(1, maxOf(bounds.outWidth, bounds.outHeight) / 512)
-                        BitmapFactory.decodeByteArray(
-                            bytes, 0, bytes.size,
-                            BitmapFactory.Options().apply { inSampleSize = sample }
-                        )
-                    }
                 }
             } catch (_: Exception) { null }
             if (bitmap != null) runOnUiThread {
                 if (!isFinishing && !isDestroyed && imageView.tag == raw) {
                     imageView.setPadding(0, 0, 0, 0)
+                    imageView.contentDescription = "Connected shop logo"
                     imageView.setImageBitmap(bitmap)
                 } else bitmap.recycle()
             }
         }.start()
+    }
+
+    private fun isPrivateOrLocalLogoHost(host: String): Boolean {
+        if (host == "localhost" || host.endsWith(".localhost") ||
+            host.endsWith(".local") || host.endsWith(".internal") ||
+            host == "::1" || host.startsWith("fc", true) ||
+            host.startsWith("fd", true) || host.startsWith("fe80:", true)) return true
+        val octets = host.split('.').mapNotNull { it.toIntOrNull() }
+        if (octets.size != 4 || octets.any { it !in 0..255 }) return false
+        return octets[0] == 0 || octets[0] == 10 || octets[0] == 127 ||
+            (octets[0] == 172 && octets[1] in 16..31) ||
+            (octets[0] == 169 && octets[1] == 254) ||
+            (octets[0] == 192 && octets[1] == 168)
     }
 
     private fun clearShopProfile() {
@@ -2404,6 +2419,91 @@ class MainActivity : AppCompatActivity() {
     private fun scanQr() {
         navigation.menu.findItem(SCAN_PRINT).isChecked = true
         scannerLauncher.launch(Intent(this, QrScannerActivity::class.java))
+    }
+
+    private fun handleScannedQr(rawValue: String?) {
+        val stationLink = runCatching {
+            StationQrLink.parse(
+                rawValue,
+                expectedServiceUrl = BuildConfig.SERVICE_BASE_URL,
+                allowLocalDevelopment = BuildConfig.DEBUG
+            )
+        }.getOrNull()
+        if (stationLink != null) {
+            confirmShop(stationLink)
+            return
+        }
+
+        val phoneTestLink = runCatching { LocalPhoneTestQrLink.parse(rawValue) }.getOrNull()
+        if (phoneTestLink != null) {
+            verifyShopPhoneConnection(phoneTestLink)
+            return
+        }
+
+        toast("This QR is not a supported SmartPrint shop or Wi-Fi readiness code.")
+    }
+
+    private fun verifyShopPhoneConnection(link: LocalPhoneTestQrLink) {
+        val progress = AlertDialog.Builder(this)
+            .setTitle("Checking shop Wi-Fi")
+            .setMessage("Reaching the shop computer on this network…")
+            .setView(android.widget.ProgressBar(this).apply {
+                isIndeterminate = true
+                setPadding(dp(24), dp(16), dp(24), dp(16))
+            })
+            .setCancelable(false)
+            .create()
+        progress.show()
+
+        Thread {
+            val result = try {
+                val connection = URL(link.url).openConnection() as HttpURLConnection
+                try {
+                    connection.instanceFollowRedirects = false
+                    connection.connectTimeout = 5000
+                    connection.readTimeout = 5000
+                    connection.requestMethod = "GET"
+                    connection.useCaches = false
+                    connection.setRequestProperty("Accept", "text/html")
+                    connection.setRequestProperty("Cache-Control", "no-cache")
+                    when (connection.responseCode) {
+                        HttpURLConnection.HTTP_OK -> Pair(
+                            "Shop Wi-Fi verified",
+                            "This phone reached the shop computer over the selected network. The shop's phone-readiness check is now marked as passed."
+                        )
+                        HttpURLConnection.HTTP_FORBIDDEN -> Pair(
+                            "Wrong shop network",
+                            "The shop computer was reached from a network other than the one selected by the owner. Connect to the shop's selected Wi-Fi or network and scan again."
+                        )
+                        HttpURLConnection.HTTP_GONE -> Pair(
+                            "Readiness code expired",
+                            "This one-time code has expired or has already been used. Ask the shop owner to start a new phone check."
+                        )
+                        else -> Pair(
+                            "Connection not verified",
+                            "The shop computer responded with HTTP ${connection.responseCode}. Check that the phone is on the selected shop network and try a fresh code."
+                        )
+                    }
+                } finally {
+                    connection.disconnect()
+                }
+            } catch (_: Exception) {
+                Pair(
+                    "Shop computer not reachable",
+                    "Connect this phone to the same Wi-Fi or network selected by the shop owner, then ask the owner to create a fresh phone-check QR code."
+                )
+            }
+
+            runOnUiThread {
+                if (isFinishing || isDestroyed) return@runOnUiThread
+                progress.dismiss()
+                AlertDialog.Builder(this@MainActivity)
+                    .setTitle(result.first)
+                    .setMessage(result.second)
+                    .setPositiveButton("Done", null)
+                    .show()
+            }
+        }.start()
     }
 
     private fun startDocumentScan(destinationPath: String? = null) {

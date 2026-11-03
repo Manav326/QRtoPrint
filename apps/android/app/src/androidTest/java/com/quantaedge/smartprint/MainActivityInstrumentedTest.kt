@@ -262,7 +262,7 @@ class MainActivityInstrumentedTest {
             onView(withText("Recent")).check(matches(isDisplayed()))
             onView(withText("Scan document")).check(matches(isDisplayed()))
             onView(withText("Choose from phone")).check(matches(isDisplayed()))
-            onView(withContentDescription("Print at a shop")).check(matches(isDisplayed()))
+            onView(withContentDescription("Shop connection")).check(matches(isDisplayed()))
             val label = com.google.android.material.R.id.navigation_bar_item_small_label_view
             onView(allOf(withId(label), withText("Files"))).check(matches(isDisplayed()))
             onView(allOf(withId(label), withText("Print"))).check(matches(isDisplayed()))
@@ -330,12 +330,12 @@ class MainActivityInstrumentedTest {
     }
 
     @Test
-    fun connectedShopNameAndStoreIconAppearInYourSpace() {
+    fun connectedShopWithoutLogoUsesAnAccessibleStorefrontFallback() {
         ActivityScenario.launch(MainActivity::class.java).use { scenario ->
             scenario.onActivity { activity ->
                 MainActivity::class.java.getDeclaredField("portalUrl").apply {
                     isAccessible = true
-                    set(activity, "https://smartprint.example/s/AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA")
+                    set(activity, BuildConfig.SERVICE_BASE_URL + "/s/" + "A".repeat(32))
                 }
                 val method = MainActivity::class.java.getDeclaredMethod(
                     "saveCustomerShopProfile",
@@ -347,7 +347,75 @@ class MainActivityInstrumentedTest {
                 method.invoke(activity, profile)
             }
             onView(withText("Riverside Print Shop")).check(matches(isDisplayed()))
-            onView(withContentDescription("Connected shop logo")).check(matches(isDisplayed()))
+            onView(withContentDescription("Connected shop icon")).check(matches(isDisplayed()))
+        }
+    }
+
+    @Test
+    fun trustedWebViewBridgeStoresTheShopProfileReturnedByTheCustomerSession() {
+        val code = "B".repeat(32)
+        val responseReceived = java.util.concurrent.CountDownLatch(1)
+        ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+            scenario.onActivity { activity ->
+                MainActivity::class.java.getDeclaredField("portalUrl").apply {
+                    isAccessible = true
+                    set(activity, BuildConfig.SERVICE_BASE_URL + "/s/" + code)
+                }
+                MainActivity::class.java.getDeclaredField("portalHost").apply {
+                    isAccessible = true
+                    set(activity, android.net.Uri.parse(BuildConfig.SERVICE_BASE_URL).host)
+                }
+                MainActivity::class.java.getDeclaredMethod("showPrint").apply {
+                    isAccessible = true
+                    invoke(activity)
+                }
+                val page = MainActivity::class.java.getDeclaredMethod("ensureWebView").apply {
+                    isAccessible = true
+                }.invoke(activity) as WebView
+                val html = """
+                    <!doctype html><html><head><title>Waiting</title></head><body><script>
+                    const bridge = window.SmartPrintNative;
+                    bridge.addEventListener('message', event => { document.title = event.data; });
+                    const payload = encodeURIComponent(JSON.stringify({
+                      displayName: 'Bridge Test Print Shop',
+                      logoUrl: 'https://shop-logo.invalid/logo.png',
+                      accentColor: '#7258E8'
+                    }));
+                    bridge.postMessage('setCustomerShopProfile|$code|' + payload);
+                    </script></body></html>
+                """.trimIndent()
+                page.loadDataWithBaseURL(
+                    BuildConfig.SERVICE_BASE_URL + "/s/" + code,
+                    html,
+                    "text/html",
+                    "UTF-8",
+                    null
+                )
+                val handler = android.os.Handler(android.os.Looper.getMainLooper())
+                var attempts = 0
+                fun pollForBridgeReply() {
+                    page.evaluateJavascript("document.title") { title ->
+                        if (title == "\"OK\"") {
+                            responseReceived.countDown()
+                        } else if (attempts++ < 80) {
+                            handler.postDelayed({ pollForBridgeReply() }, 100)
+                        }
+                    }
+                }
+                handler.postDelayed({ pollForBridgeReply() }, 100)
+            }
+            assertTrue("The native profile bridge did not return OK.", responseReceived.await(10, java.util.concurrent.TimeUnit.SECONDS))
+            scenario.onActivity { activity ->
+                val saved = activity.getSharedPreferences("smartprint.customer.last-shop", Context.MODE_PRIVATE)
+                assertEquals("Bridge Test Print Shop", saved.getString("shopDisplayName", null))
+                assertEquals("https://shop-logo.invalid/logo.png", saved.getString("shopLogoUrl", null))
+                MainActivity::class.java.getDeclaredMethod("showHome").apply {
+                    isAccessible = true
+                    invoke(activity)
+                }
+            }
+            onView(withText("Bridge Test Print Shop")).check(matches(isDisplayed()))
+            onView(withContentDescription("Connected shop icon")).check(matches(isDisplayed()))
         }
     }
 
@@ -386,6 +454,54 @@ class MainActivityInstrumentedTest {
             onView(withText(folderName)).perform(click())
             onView(withContentDescription("Go up one folder")).check(matches(isDisplayed()))
             onView(withContentDescription("Scan document into this folder")).check(matches(isDisplayed()))
+        }
+    }
+
+    @Test
+    fun renderedNavigationSwitchesBetweenPortraitBottomBarAndLandscapeRail() {
+        ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+            scenario.onActivity { activity ->
+                val navigation = MainActivity::class.java.getDeclaredField("navigation").apply {
+                    isAccessible = true
+                }.get(activity)
+                assertTrue("Portrait must render bottom navigation", navigation is com.google.android.material.bottomnavigation.BottomNavigationView)
+                activity.requestedOrientation = android.content.pm.ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE
+            }
+
+            var landscapeRailVisible = false
+            val landscapeDeadline = android.os.SystemClock.uptimeMillis() + 8000
+            while (!landscapeRailVisible && android.os.SystemClock.uptimeMillis() < landscapeDeadline) {
+                androidx.test.platform.app.InstrumentationRegistry.getInstrumentation().waitForIdleSync()
+                scenario.onActivity { activity ->
+                    if (activity.resources.configuration.orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE) {
+                        val navigation = MainActivity::class.java.getDeclaredField("navigation").apply {
+                            isAccessible = true
+                        }.get(activity)
+                        landscapeRailVisible = navigation is com.google.android.material.navigationrail.NavigationRailView
+                    }
+                }
+                if (!landscapeRailVisible) Thread.sleep(100)
+            }
+            assertTrue("Landscape must recreate the activity with a left navigation rail", landscapeRailVisible)
+
+            scenario.onActivity { activity ->
+                activity.requestedOrientation = android.content.pm.ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
+            }
+            var portraitBarVisible = false
+            val portraitDeadline = android.os.SystemClock.uptimeMillis() + 8000
+            while (!portraitBarVisible && android.os.SystemClock.uptimeMillis() < portraitDeadline) {
+                androidx.test.platform.app.InstrumentationRegistry.getInstrumentation().waitForIdleSync()
+                scenario.onActivity { activity ->
+                    if (activity.resources.configuration.orientation == android.content.res.Configuration.ORIENTATION_PORTRAIT) {
+                        val navigation = MainActivity::class.java.getDeclaredField("navigation").apply {
+                            isAccessible = true
+                        }.get(activity)
+                        portraitBarVisible = navigation is com.google.android.material.bottomnavigation.BottomNavigationView
+                    }
+                }
+                if (!portraitBarVisible) Thread.sleep(100)
+            }
+            assertTrue("Portrait must restore bottom navigation", portraitBarVisible)
         }
     }
 
@@ -470,6 +586,7 @@ class MainActivityInstrumentedTest {
             onView(withText("Scan here")).check(matches(isDisplayed()))
             it.recreate()
             onView(withText("Scan here")).check(matches(isDisplayed()))
+            onView(withContentDescription("Go up one folder")).perform(click())
             onView(withContentDescription("Expand $folderName")).perform(click())
             onView(withText("Nested")).check(matches(isDisplayed()))
             onView(withContentDescription("Collapse $folderName")).check(matches(isDisplayed()))

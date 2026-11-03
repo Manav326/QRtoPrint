@@ -43,7 +43,7 @@ Document scanning does not need a camera permission owned by SmartPrint; Google 
 ### Responsive Android navigation and document scanning
 
 - **Portrait always uses bottom navigation**, including portrait tablets. **Landscape always uses a left-side navigation rail.** The layout decision follows orientation, not device dp width. Very narrow portrait layouts show the active bottom-navigation label only to prevent wrapping.
-- The connected-shop card shows the connected shop's display name and logo when the service supplies a same-origin logo; it uses a storefront icon when no logo is available. **Manage connected shop** provides open, switch and local disconnect actions. Disconnect removes only this device's station token and shop association; it does not delete local documents or shop orders/payments.
+- The connected-shop card shows the connected shop's display name and logo when the service supplies a trusted HTTPS logo; it uses a storefront icon when no logo is available. **Manage connected shop** provides open, switch and local disconnect actions. Disconnect removes only this device's station token and shop association; it does not delete local documents or shop orders/payments.
 - Phones and tablets use the exact same Google Play services ML Kit Document Scanner UI and full feature mode. The scanner supplies its own camera shutter, gallery import, multi-page capture, page review, auto edge detection, crop/perspective correction, rotation, filters and PDF creation. No CameraX document-scanning implementation or second scanner flow exists.
 - The shop QR scanner remains separate and uses CameraX only to provide local image frames to ML Kit Barcode Scanning; it is not used for document scanning.
 
@@ -52,6 +52,16 @@ Document scanning does not need a camera permission owned by SmartPrint; Google 
 SmartPrint customer accounts are global and independent of any print shop. A customer registers once with SmartPrint, then uses the same account at any participating shop by scanning that shop's QR code. Shops are session destinations, not customer-account owners. New authenticated QR sessions carry the global customer ID; account print history is aggregated across shops by that ID. Guest customers can still scan, organise and print without registration. Existing guest sessions and print jobs are not silently attached to an account later.
 
 Customer identity is separate from shop staff identity and uses dedicated `/api/v1/auth/register-customer` and `/api/v1/auth/customer-login` endpoints. Android access/refresh tokens and guest station-session tokens are encrypted with Android Keystore AES-GCM. Guest tokens are stored per station, so switching shops does not overwrite another shop's resumable session. The browser persists only non-secret job metadata per station. The WebView does not expose credentials through a generic JavaScript interface: AndroidX WebKit messaging is restricted to the configured top-level service origin and main frame, never to a host supplied by a scanned QR code.
+
+## QR and print flow
+
+The single shop QR scanner uses **ML Kit Barcode Scanning** to decode QR payloads. CameraX supplies the live camera frames and flashlight control for this custom preview; it is not a second barcode engine or a document-scanning fallback. The separate ML Kit Document Scanner module is used for paper documents because page detection, crop, filters and PDF assembly are a different task. Both are Google ML Kit features.
+
+After decoding, SmartPrint routes the payload by its strict format:
+- Customer station QR: the configured HTTPS SmartPrint origin and `/s/{stationCode}`; creates the normal short-lived customer session.
+- Shop-owner phone-readiness QR: the Agent's one-time private IPv4 URL at port `17842`, path `/api/v1/local/connection-check`, and a 43-character token. SmartPrint makes the GET request itself; it does not open an arbitrary browser URL. The Agent accepts the token once, binds the result to the selected network, expires the QR after five minutes, and records a successful phone check for ten minutes.
+
+The phone-readiness parser rejects public hosts, non-RFC1918 addresses, different ports/paths, extra query parameters, redirects and malformed tokens. The two QR purposes share one ML Kit detector and do not create two scanner screens.
 
 ## QR and print flow
 

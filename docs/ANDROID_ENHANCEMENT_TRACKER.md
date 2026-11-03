@@ -35,7 +35,7 @@ The Android app must continue to reuse the existing tenant/station-bound QR sess
 | AND-08 | Multi-file import | Import multiple supported files and folder trees using Android Storage Access Framework; report skipped/unsupported files and per-file failures; enforce transfer budgets; preserve names, MIME types, relative paths and order where available. | In progress | Existing SAF import remains. Native WebView picker now supports a true multi-file selection across app-library subfolders and returns the original file URIs in selection order; provider interoperability and CI validation are pending. |
 | AND-09 | Export and conversion | Export one or many files/folders to user-selected destinations. Support only conversions implemented and validated (initial target: images to PDF and multiple images to one PDF; PDF page operations where supported). Preserve originals and clearly disclose unsupported conversions. | In progress | Images/PDFs can be composed into a print PDF; saved PDF page edits save a separate rasterized copy. Lossless/vector-preserving and Office conversions are not implemented. |
 | AND-10 | Scan & Print journey | Redesign the screen as one connected journey: prepare documents → scan shop QR → configure print → quote/pay → track/collect. Explain in crisp steps with icons/flow, clarify that shop QR is displayed at a participating shop, and make the primary CTA clear. | In progress | Native Scan & Print landing flow with concise three-step explanation and shop-QR CTA added; emulator testing remains. |
-| AND-11 | QR shop connection | Keep QR decoding on-device and validate only the supported station route/origin rules. Explain what is being scanned, what connection is created, permissions and fallback paths. Preserve existing HTTPS and LAN security policy. | Not started | Existing QR scanner and station-link validation must remain intact. |
+| AND-11 | QR shop connection | Keep QR decoding on-device and validate only the supported station route/origin rules. Explain what is being scanned, what connection is created, permissions and fallback paths. Preserve existing HTTPS and LAN security policy. | In progress | One ML Kit Barcode Scanning flow handles the customer station QR and the shop-owner one-time private Agent phone-readiness QR through separate strict parsers. The readiness URL is called directly over the selected shop LAN; physical-device acceptance remains outstanding. |
 | AND-12 | Print configuration continuity | After shop connection, make the prepared collection available to the existing print workflow without bypassing server validation, quote, shop review, payment or dispatch controls. Be explicit about formats and size/page limits. | In progress | Native multi-select now hands original document URIs to the existing portal input when it requests multiple files. The portal uploads one file per request under one batch ID; quote, payment, shop review and dispatch remain server-owned. CI and device validation are pending. |
 | AND-13 | Activity and cross-shop account history | Present global SmartPrint customer profile and print history across all shops. Only list jobs whose print sessions are linked to the signed-in customer ID; guest jobs and sessions created before sign-in remain unlinked unless an explicit account-linking flow is added. | In progress | Added customer profile/jobs endpoints and Android history screen; build and account-to-multiple-shop validation pending. |
 | AND-14 | Accessibility and responsive quality | Validate touch target sizes, talkback labels, contrast, font scaling, keyboard/IME behaviour, edge-to-edge insets, small devices and landscape where relevant. | In progress | Responsive navigation policy tests pass in CI; TalkBack, font scaling, contrast and physical-device/landscape acceptance remain pending. |
@@ -54,11 +54,11 @@ The Android app must continue to reuse the existing tenant/station-bound QR sess
 7. Complete automated, accessibility, emulator and physical-device evidence (AND-14/15/16); update docs (AND-17).
 
 
-## Latest verified CI evidence
+## Historical CI evidence
 
-- **Workflow:** [GitHub Actions run 41216111944](https://github.com/Manav326/QRtoPrint/actions/runs/41216111944)
+- **Historical workflow:** [GitHub Actions run 41216111944](https://github.com/Manav326/QRtoPrint/actions/runs/41216111944)
 - **Revision:** `e2e479b43c1a3f0074ca19c4e243e8729c5b8245`
-- **Result:** workflow completed successfully, including Android 15 (API 35) emulator UI tests.
+- **Result:** this earlier revision completed successfully, including Android 15 (API 35) emulator UI tests. It is not evidence for the current revision.
 - **Artifacts uploaded by this historical run:** `qrtoprint-android-debug`, `qrtoprint-android-test-reports` and `qrtoprint-agent-win-x64`. The current CI workflow uses `smartprint-android-debug` and `smartprint-android-test-reports` for Android artifacts.
 
 ## Known product follow-ups
@@ -68,7 +68,7 @@ The Android app must continue to reuse the existing tenant/station-bound QR sess
 3. Exercise real camera capture, QR scanning, Google Play services scanner availability, file-manager providers, Android-version compatibility, light/dark and accessibility behaviour, shop Wi-Fi/tunnel, live account use across multiple shops, payment and actual printer output on physical devices.
 4. Customer sessions are linked to the global account only when a customer starts the QR session while signed in. Guest and earlier sessions are not retroactively linked; email verification and password recovery are not implemented here.
 
-CI/emulator success is development evidence, not production release or Play Store approval.
+The current revision must pass its own complete CI run before any Android implementation status is upgraded. CI/emulator success is development evidence, not physical-device validation, production release or Play Store approval.
 
 
 ## Current batch/editor implementation (validation pending)

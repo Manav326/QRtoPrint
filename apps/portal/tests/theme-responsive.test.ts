@@ -193,3 +193,23 @@ test("batch routing enforces local-computer ownership and preserves print-time a
   assert.match(css, /\.printer-duplicate-warning/);
   assert.match(css, /\.queue-batch-assignment-note\{font-size:12px/);
 });
+
+test("Android customer printing uses the same single Copies control and event handlers as the browser", () => {
+  const app = read("../src/App.tsx");
+  const customerFlowStart = app.indexOf("function CustomerPrintFlow(");
+  const customerFlowEnd = app.indexOf("function UploadIcon()", customerFlowStart);
+  assert.ok(customerFlowStart >= 0 && customerFlowEnd > customerFlowStart,
+    "The shared CustomerPrintFlow component must remain present.");
+  const customerFlow = app.slice(customerFlowStart, customerFlowEnd);
+  assert.ok(app.includes("<CustomerPrintFlow publicCode={publicCode}"));
+  assert.ok(customerFlow.includes('navigator.userAgent.includes("SmartPrintAndroid/1")'));
+  assert.equal((customerFlow.match(/customer-folder-copies/g) ?? []).length, 1,
+    "There must be one shared Copies input, not a separate Android implementation.");
+  assert.ok(customerFlow.includes("onChange={event => {"));
+  assert.ok(customerFlow.includes("onBlur={event => {"));
+  const copiesStart = customerFlow.indexOf('<label className="customer-folder-copies">');
+  const copiesEnd = customerFlow.indexOf("</label>", copiesStart);
+  const copiesInput = customerFlow.slice(copiesStart, copiesEnd);
+  assert.doesNotMatch(copiesInput, /nativeAppMode/,
+    "Android mode may change presentation, but must not fork Copies behaviour.");
+});
