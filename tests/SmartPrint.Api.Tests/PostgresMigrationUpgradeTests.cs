@@ -511,6 +511,7 @@ public sealed class PostgresMigrationUpgradeTests
             var migrator = migrationContext.GetService<IMigrator>();
             await migrator.MigrateAsync("202611020002_AddShopInstantPaymentPreference");
             await migrator.MigrateAsync("202611020003_AddPrintJobPrinterIdentitySnapshot");
+            // Restore the latest schema before querying with the current EF model.
             await migrator.MigrateAsync();
         }
 
