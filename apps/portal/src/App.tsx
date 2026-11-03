@@ -2625,11 +2625,6 @@ function ShopOwnerAccountModal({ profile, busy, onClose, onSave }: {
   const [email, setEmail] = useState(profile.ownerEmail);
   const [currentPassword, setCurrentPassword] = useState("");
   const [saveError, setSaveError] = useState("");
-  useEffect(() => {
-    setOwnerName(profile.ownerName);
-    setEmail(profile.ownerEmail);
-  }, [profile.ownerName, profile.ownerEmail]);
-
   const emailChanged = email.trim().toLowerCase() !== profile.ownerEmail.trim().toLowerCase();
   return (
     <Modal title="Personal details" subtitle="Update the name and sign-in email for your shop owner account." onClose={onClose}>
