@@ -1188,7 +1188,10 @@ shop.MapPut("/account", async (
 
         if (!passwordCheck.Succeeded)
         {
-            return Results.Unauthorized();
+            return Results.ValidationProblem(new Dictionary<string, string[]>
+            {
+                ["currentPassword"] = ["The current password is incorrect."]
+            });
         }
 
         var existingUser = await userManager.FindByEmailAsync(email);
