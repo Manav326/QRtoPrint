@@ -2612,3 +2612,18 @@ html[data-theme="light"] .auth-screen {
 .queue-print-kind-tag{display:inline-flex;align-items:center;justify-content:center;align-self:flex-start;width:max-content;margin-top:4px;padding:3px 7px;border:1px solid color-mix(in srgb,var(--accent) 34%,var(--border));border-radius:999px;background:var(--accent-soft);color:var(--accent);font-size:8px;font-weight:800;letter-spacing:.55px;line-height:1.2;white-space:nowrap}
 .queue-batch-file-title{display:flex;align-items:center;flex-wrap:wrap;gap:7px;min-width:0}
 .queue-batch-file-title .queue-print-kind-tag{margin-top:0;flex:none}
+
+/* Clear, symmetric type labels for both photo and document jobs. */
+.print-kind-tag{display:inline-flex;align-items:center;justify-content:center;align-self:flex-start;width:max-content;flex:0 0 auto;padding:3px 7px;border:1px solid transparent;border-radius:999px;font-size:8px;font-weight:800;letter-spacing:.35px;line-height:1.2;text-transform:uppercase;white-space:nowrap}
+.print-kind-tag--photo{border-color:color-mix(in srgb,#8b62c9 34%,var(--border));background:color-mix(in srgb,#8b62c9 10%,var(--surface));color:#7650ae}
+.print-kind-tag--document{border-color:color-mix(in srgb,#4a83bb 34%,var(--border));background:color-mix(in srgb,#4a83bb 10%,var(--surface));color:#356b9f}
+.queue-print-kind-summary{display:flex;align-items:center;gap:5px;flex-wrap:wrap;margin-top:4px}
+.queue-batch-file-title .print-kind-tag{margin-top:0;flex:none}
+.customer-history-heading .print-kind-tag{margin-top:1px}
+.batch-file-title-row{display:flex;align-items:center;gap:7px;min-width:0}
+.batch-file-title-row strong{min-width:0;flex:1}
+.uploaded-document-title{display:flex;align-items:center;gap:8px;min-width:0}
+.uploaded-document-title strong{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.customer-quote-line-title{display:flex;align-items:center;gap:7px;flex-wrap:wrap;margin-bottom:3px}
+html[data-theme="dark"] .print-kind-tag--photo{color:#d3baff;background:#342849;border-color:#614b7d}
+html[data-theme="dark"] .print-kind-tag--document{color:#b9d7ff;background:#20364f;border-color:#385879}
