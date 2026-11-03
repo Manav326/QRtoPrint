@@ -38,6 +38,7 @@ import androidx.activity.result.ActivityResultLauncher
 import androidx.activity.result.IntentSenderRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AlertDialog
+import androidx.activity.OnBackPressedCallback
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.FileProvider
 import androidx.core.view.ViewCompat
@@ -148,11 +149,12 @@ class MainActivity : AppCompatActivity() {
         // Restore the explicit app preference before AppCompat inflates theme-aware UI.
         SmartPrintThemePreference.apply(this)
         super.onCreate(savedInstanceState)
-        onBackPressedDispatcher.addCallback(this, object : androidx.activity.OnBackPressedCallback(true) {
+        onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
             override fun handleOnBackPressed() {
-                if (handleAppBackNavigation()) return
+                if (handleBackNavigation()) return
 
-                // At the home root, let Android perform its normal activity-close behaviour.
+                // Let the activity finish normally when the user is already at the home root.
+                // Temporarily disable this callback so the dispatcher can reach its platform fallback.
                 isEnabled = false
                 try {
                     onBackPressedDispatcher.onBackPressed()
@@ -255,7 +257,7 @@ class MainActivity : AppCompatActivity() {
         handleShareIntent(intent)
     }
 
-    private fun handleAppBackNavigation(): Boolean {
+    private fun handleBackNavigation(): Boolean {
         when {
             profileVisible -> returnFromProfile()
             pickerMode && pickerPath.isNotBlank() -> { pickerPath = parent(pickerPath); refreshLibrary(preserveScroll = false) }

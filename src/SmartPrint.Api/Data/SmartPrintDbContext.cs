@@ -132,7 +132,12 @@ public sealed class SmartPrintDbContext(DbContextOptions<SmartPrintDbContext> op
 
         modelBuilder.Entity<ShopPricingProfile>(entity =>
         {
-            entity.ToTable("ShopPricingProfiles");
+            entity.ToTable("ShopPricingProfiles", table =>
+            {
+                table.HasCheckConstraint(
+                    "CK_ShopPricingProfiles_PhotoRates",
+                    "\"Photo35x45Minor\" >= 0 AND \"Photo25x35Minor\" >= 0 AND \"Photo2x2Minor\" >= 0 AND \"Photo4x6Minor\" >= 0");
+            });
             entity.HasKey(x => x.TenantId);
             entity.Property(x => x.Version).IsConcurrencyToken();
             entity.HasOne<Tenant>().WithOne().HasForeignKey<ShopPricingProfile>(x => x.TenantId).OnDelete(DeleteBehavior.Cascade);
@@ -295,7 +300,13 @@ public sealed class SmartPrintDbContext(DbContextOptions<SmartPrintDbContext> op
 
         modelBuilder.Entity<PrintJob>(entity =>
         {
-            entity.ToTable("PrintJobs");
+            entity.ToTable("PrintJobs", table =>
+            {
+                table.HasCheckConstraint("CK_PrintJobs_PrintKind", "\"PrintKind\" IN ('DOCUMENT', 'PHOTO')");
+                table.HasCheckConstraint(
+                    "CK_PrintJobs_PhotoQuoteSnapshot",
+                    "(\"PrintKind\" = 'DOCUMENT' AND \"PhotoSizeCode\" IS NULL AND \"PhotoCount\" = 0 AND \"PhotoUnitPriceMinorSnapshot\" = 0) OR (\"PrintKind\" = 'PHOTO' AND \"PhotoSizeCode\" IN ('35x45', '25x35', '2x2', '4x6') AND \"PhotoCount\" BETWEEN 1 AND 100 AND \"PhotoUnitPriceMinorSnapshot\" > 0)");
+            });
             entity.HasKey(x => x.Id);
             entity.HasAlternateKey(x => new { x.TenantId, x.Id });
             entity.HasOne<AgentDevice>().WithMany()
@@ -309,6 +320,8 @@ public sealed class SmartPrintDbContext(DbContextOptions<SmartPrintDbContext> op
             entity.Property(x => x.IdempotencyKey).HasMaxLength(100).IsRequired();
             entity.Property(x => x.ColourMode).HasMaxLength(12).IsRequired();
             entity.Property(x => x.PaperSize).HasMaxLength(12).IsRequired();
+            entity.Property(x => x.PrintKind).HasMaxLength(16).IsRequired();
+            entity.Property(x => x.PhotoSizeCode).HasMaxLength(12);
             entity.Property(x => x.Currency).HasMaxLength(3).IsRequired();
             entity.Property(x => x.FailureCode).HasMaxLength(80);
             entity.Property(x => x.AgentDispatchAttempts).HasDefaultValue(0);

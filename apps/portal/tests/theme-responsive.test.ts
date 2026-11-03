@@ -226,6 +226,68 @@ test("shop phone-readiness QR guides SmartPrint users through the in-app Wi-Fi c
 });
 
 
+test("shop owner navigation groups daily work and moves account destinations into the header menu", () => {
+  const app = read("../src/App.tsx");
+  const css = read("../src/styles.css");
+  const sidebarStart = app.indexOf('<aside className={sidebarOpen');
+  const sidebarEnd = app.indexOf("</aside>", sidebarStart);
+  assert.ok(sidebarStart >= 0 && sidebarEnd > sidebarStart, "The shop navigation sidebar must remain present.");
+  const sidebar = app.slice(sidebarStart, sidebarEnd);
+
+  assert.match(app, /const sectionGroups:/);
+  assert.match(sidebar, /sectionGroups\.map/);
+  assert.doesNotMatch(sidebar, /plan-card|support-link|profile-row/,
+    "Trial, help and owner controls must not be permanently pinned in the sidebar.");
+  assert.match(app, /Personal details/);
+  assert.match(app, /Shop profile &amp; branding/);
+  assert.match(app, /Trial &amp; subscription/);
+  assert.match(app, /Help &amp; support/);
+  assert.match(app, /accountMenuOpen/);
+  assert.ok(app.indexOf("const [accountMenuOpen") < app.indexOf("if (!accountMenuOpen) return"),
+    "The account-menu state must be initialized before its dismissal effect reads it.");
+  assert.match(app, /HelpSupportModal/);
+  assert.match(css, /\.app-shell \.nav-group-items\s*\{/);
+});
+
+test("shop workspace content expands into the space left after the sidebar", () => {
+  const css = read("../src/styles.css");
+  const app = read("../src/App.tsx");
+
+  assert.match(css, /\.app-shell > \.main-panel\s*\{[^}]*flex:\s*1 1 0%/s);
+  assert.match(css, /\.app-shell > \.main-panel > \.content-wrap\s*\{[^}]*width:\s*100%[^}]*max-width:\s*1920px/s);
+  assert.match(css, /\.app-shell \.customers-search\s*\{[^}]*max-width:\s*none/s);
+  assert.match(app, /activePageTitle/);
+  assert.match(css, /@media \(max-width: 850px\)/);
+  assert.match(css, /@media \(max-width: 600px\)/);
+});
+
+
+test("shop owner personal details are editable from the account menu without mixing shop branding", () => {
+  const app = read("../src/App.tsx");
+  const api = read("../src/api.ts");
+  const settingsStart = app.indexOf("function SettingsPage");
+  const settingsEnd = app.indexOf("function ShopOwnerAccountModal", settingsStart);
+  const settings = app.slice(settingsStart, settingsEnd);
+  const modalStart = app.indexOf("function ShopOwnerAccountModal");
+  const modalEnd = app.indexOf("function HelpSupportModal", modalStart);
+  const modal = app.slice(modalStart, modalEnd);
+
+  assert.match(app, /Personal details/);
+  assert.match(app, /ownerAccountOpen/);
+  assert.match(app, /ShopOwnerAccountModal/);
+  assert.match(api, /updateShopOwnerAccount/);
+  assert.match(api, /ownerEmail: string/);
+  assert.match(modal, /Your name/);
+  assert.match(modal, /Sign-in email/);
+  assert.match(modal, /Current password/);
+  assert.match(modal, /emailChanged/);
+  assert.doesNotMatch(modal, /useEffect\(/,
+    "The modal must not reset typed email state in a post-mount effect.");
+  assert.doesNotMatch(settings, /ownerEmail|Current password/,
+    "Personal sign-in details must stay separate from customer-facing shop branding.");
+});
+
+
 test("native customer UI follows explicit SmartPrint theme and marks selected upload mode", () => {
   const css = read("../src/styles.css");
   const app = read("../src/App.tsx");

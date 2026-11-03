@@ -22,7 +22,8 @@ public sealed record DiscoveredPrinter(
     string PortName,
     string Status,
     bool IsDefault,
-    string OutputMode = PrinterOutputModeRules.Physical);
+    string OutputMode = PrinterOutputModeRules.Physical,
+    string CapabilitiesJson = "{}");
 
 public static class PrinterOutputModeRules
 {

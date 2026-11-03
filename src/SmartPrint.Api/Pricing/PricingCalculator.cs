@@ -34,6 +34,36 @@ public static class PricingCalculator
         return Math.Max(amount, pricing.MinimumChargeMinor);
     }
 
+    public static long CalculatePhoto(int photoCount, string photoSizeCode, ShopPricingProfile pricing)
+    {
+        ArgumentNullException.ThrowIfNull(pricing);
+        if (!pricing.IsConfigured) throw new InvalidOperationException("Shop pricing is not configured.");
+        if (photoCount is < 1 or > 100) throw new ArgumentOutOfRangeException(nameof(photoCount), "Photo count must be between 1 and 100.");
+        var unitRate = PhotoUnitRate(photoSizeCode, pricing);
+        if (unitRate <= 0) throw new InvalidOperationException("This photo size is not currently priced by the shop.");
+        return checked(photoCount * unitRate);
+    }
+
+    public static long PhotoUnitRate(string photoSizeCode, ShopPricingProfile pricing) =>
+        photoSizeCode switch
+        {
+            "35x45" => pricing.Photo35x45Minor,
+            "25x35" => pricing.Photo25x35Minor,
+            "2x2" => pricing.Photo2x2Minor,
+            "4x6" => pricing.Photo4x6Minor,
+            _ => throw new ArgumentException("Choose a supported photo size.", nameof(photoSizeCode))
+        };
+
+    public static int MaximumPhotosPerA4Sheet(string photoSizeCode) =>
+        photoSizeCode switch
+        {
+            "35x45" => 25,
+            "25x35" => 49,
+            "2x2" => 15,
+            "4x6" => 1,
+            _ => throw new ArgumentException("Choose a supported photo size.", nameof(photoSizeCode))
+        };
+
     public static long[] CalculatePageRefundAllocations(int pageCount, int copies, string colourMode, bool isDuplex, ShopPricingProfile pricing)
     {
         var total = Calculate(pageCount, copies, colourMode, isDuplex, pricing);

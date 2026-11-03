@@ -33,6 +33,7 @@ public sealed class WindowsPrintExecutor
     private const int DmDuplex = 0x00001000;
     private const int DcPapers = 2;
     private const int DcDuplex = 7;
+    private const int DcOrientation = 17;
     private const int DcColorDevice = 32;
     private const int LogPixelsX = 88;
     private const int LogPixelsY = 90;
@@ -561,6 +562,10 @@ public sealed class WindowsPrintExecutor
             var paper = PaperCode(entry.PaperSize);
             if (!SupportsPaper(queueName, pointer, paper))
                 throw new PrintExecutionBlockedException("PAPER_SIZE_UNSUPPORTED", $"The installed driver does not report support for {entry.PaperSize} paper.");
+
+            var orientationCapability = DeviceCapabilitiesW(queueName, null, DcOrientation, IntPtr.Zero, pointer);
+            if (landscape && orientationCapability == 0)
+                throw new PrintExecutionBlockedException("LANDSCAPE_UNSUPPORTED", "The installed printer driver reports that landscape orientation is not supported.");
 
             mode.Fields |= DmOrientation | DmPaperSize;
             mode.Orientation = landscape ? (short)2 : (short)1;
