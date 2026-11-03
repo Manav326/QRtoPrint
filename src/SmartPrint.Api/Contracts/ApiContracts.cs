@@ -11,6 +11,7 @@ public sealed record RegisterCustomerRequest(string DisplayName, string Email, s
 public sealed record RefreshRequest(string RefreshToken);
 public sealed record ChangeTenantStatusRequest(string Status, string Reason);
 public sealed record ShopProfileRequest(string DisplayName, string? LogoUrl, string AccentColor);
+public sealed record ShopOwnerAccountRequest(string OwnerName, string Email, string? CurrentPassword);
 
 public sealed record CreatePrinterRequest(
     string DisplayName,
