@@ -2647,7 +2647,9 @@ function ShopOwnerAccountModal({ profile, busy, onClose, onSave }: {
             autoComplete="name" maxLength={160} required/>
         </label>
         <label>Sign-in email
-          <input type="email" value={email} onChange={event => setEmail(event.target.value)}
+          <input type="email" value={email}
+            onChange={event => setEmail(event.currentTarget.value)}
+            onInput={event => setEmail(event.currentTarget.value)}
             autoComplete="email" maxLength={256} required/>
         </label>
         {emailChanged && <>
