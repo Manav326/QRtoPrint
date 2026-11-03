@@ -366,7 +366,15 @@ async function exerciseWorkspaceSections(page, route, viewport, themeLabel) {
     await openAccountMenu();
     await page.locator("#shop-account-menu").getByRole("button", { name: "Personal details", exact: true }).click();
     await personalDetails.waitFor({ state: "visible" });
-    await personalDetails.getByLabel("Sign-in email").fill("updated-owner@example.invalid");
+    const signInEmailInput = personalDetails.getByLabel("Sign-in email");
+    await signInEmailInput.fill("updated-owner@example.invalid");
+    try {
+      await personalDetails.locator(".account-email-change-note").waitFor({ state: "visible", timeout: 5000 });
+    } catch (error) {
+      const inputState = await signInEmailInput.inputValue();
+      const profileState = await personalDetails.locator(".account-edit-form").innerText();
+      throw new Error(`Changing sign-in email did not reveal the password-confirmation step. Input value: "${inputState}". Form: "${profileState}". Original: ${error instanceof Error ? error.message : String(error)}`);
+    }
     await personalDetails.getByLabel("Current password").fill("wrong-password");
     await personalDetails.getByRole("button", { name: "Save personal details" }).click();
     await personalDetails.locator(".account-edit-error").waitFor({ state: "visible" });
