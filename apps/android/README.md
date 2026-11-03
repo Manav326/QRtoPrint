@@ -36,7 +36,16 @@ General library imports allow up to 100 MB per file. The print workflow uses the
 
 ## SmartPrint document capture
 
+The native document-capture action uses **Google ML Kit Document Scanner exclusively on every phone and tablet**, in full mode. There is no separate CameraX document scanner. The Google Play services UI owns the viewfinder, camera shutter, gallery import, page review, edge detection, perspective correction, crop, rotation, filters and multi-page PDF creation. SmartPrint requests PDF and JPEG results and saves the completed PDF into the selected My Files destination. Google Play services downloads the scanner UI/models when needed; first launch can require a download, and devices below the scanner's 1.7 GB RAM requirement are not supported. If ML Kit is unavailable on a device, the app reports the error and customers can still import existing photos/PDFs from the Android file picker; it does not launch another camera implementation. **Scan document** on Home asks where to save the completed scan (My Files, an existing folder, or a new folder). **Scan here** inside My Files saves directly into the currently open folder. Captures remain local until the customer chooses to print.
 
+Document scanning does not need a camera permission owned by SmartPrint; Google Play services handles camera access for its scanner UI. The separate shop-QR reader continues to use CameraX frames processed locally by ML Kit Barcode Scanning, because QR decoding and document scanning are different tasks.
+
+### Responsive Android navigation and document scanning
+
+- **Portrait always uses bottom navigation**, including portrait tablets. **Landscape always uses a left-side navigation rail.** The layout decision follows orientation, not device dp width. Very narrow portrait layouts show the active bottom-navigation label only to prevent wrapping.
+- The connected-shop card shows the connected shop's display name and logo when the service supplies a same-origin logo; it uses a storefront icon when no logo is available. **Manage connected shop** provides open, switch and local disconnect actions. Disconnect removes only this device's station token and shop association; it does not delete local documents or shop orders/payments.
+- Phones and tablets use the exact same Google Play services ML Kit Document Scanner UI and full feature mode. The scanner supplies its own camera shutter, gallery import, multi-page capture, page review, auto edge detection, crop/perspective correction, rotation, filters and PDF creation. No CameraX document-scanning implementation or second scanner flow exists.
+- The shop QR scanner remains separate and uses CameraX only to provide local image frames to ML Kit Barcode Scanning; it is not used for document scanning.
 
 ## Global SmartPrint customer account
 
