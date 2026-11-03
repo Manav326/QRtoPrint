@@ -224,3 +224,16 @@ test("shop phone-readiness QR guides SmartPrint users through the in-app Wi-Fi c
   assert.match(section, /phone without SmartPrint/);
   assert.match(section, /five minutes/);
 });
+
+
+test("native customer UI follows explicit SmartPrint theme and marks selected upload mode", () => {
+  const css = read("../src/styles.css");
+  const app = read("../src/App.tsx");
+  assert.doesNotMatch(css, /@media\s*\(prefers-color-scheme:\s*dark\)/,
+    "The OS dark preference must not override a saved SmartPrint light theme.");
+  assert.match(css, /html\[data-theme="dark"\] \.customer-entry\.smartprint-native/);
+  assert.match(css, /\.customer-entry\.smartprint-native \.customer-upload-mode\.selected/);
+  assert.match(css, /customer-upload-mode\.selected::after[\s\S]*?Selected/);
+  assert.match(app, /aria-pressed=\{uploadMode==="LOCAL"\}/);
+  assert.match(app, /aria-pressed=\{uploadMode==="CLOUD"\}/);
+});

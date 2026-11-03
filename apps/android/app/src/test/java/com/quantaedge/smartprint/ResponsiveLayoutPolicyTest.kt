@@ -27,9 +27,11 @@ class ResponsiveLayoutPolicyTest {
     }
 
     @Test
-    fun onlyVeryNarrowPortraitLayoutsHideUnselectedBottomLabels() {
+    fun compactBottomNavigationKeepsTheActiveLabelBesideItsIcon() {
         assertFalse(ResponsiveLayoutPolicy.showLabelsOnAllBottomItems(320))
-        assertTrue(ResponsiveLayoutPolicy.showLabelsOnAllBottomItems(360))
+        assertFalse(ResponsiveLayoutPolicy.showLabelsOnAllBottomItems(360))
+        assertFalse(ResponsiveLayoutPolicy.showLabelsOnAllBottomItems(479))
+        assertTrue(ResponsiveLayoutPolicy.showLabelsOnAllBottomItems(480))
         assertTrue(ResponsiveLayoutPolicy.showLabelsOnAllBottomItems(599))
     }
 }

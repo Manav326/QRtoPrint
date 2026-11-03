@@ -16,8 +16,7 @@ import androidx.test.espresso.action.ViewActions.closeSoftKeyboard
 import androidx.test.espresso.action.ViewActions.replaceText
 import androidx.test.espresso.assertion.ViewAssertions.matches
 import androidx.test.espresso.matcher.ViewMatchers.isDisplayed
-import androidx.test.espresso.matcher.ViewMatchers.isAssignableFrom
-import com.google.android.material.navigation.NavigationBarItemView
+import androidx.test.espresso.matcher.ViewMatchers.doesNotExist
 import androidx.test.espresso.matcher.ViewMatchers.withId
 import androidx.test.espresso.matcher.ViewMatchers.withContentDescription
 import androidx.test.espresso.matcher.ViewMatchers.withHint
@@ -28,17 +27,16 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import eightbitlab.com.blurview.BlurView
 import android.view.View
+import android.widget.LinearLayout
 import android.view.ViewGroup
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 
 @RunWith(AndroidJUnit4::class)
 class MainActivityInstrumentedTest {
     private fun clickNavigationItem(description: String) {
-        onView(allOf(
-            withContentDescription(description),
-            isAssignableFrom(NavigationBarItemView::class.java)
-        )).perform(click())
+        onView(withContentDescription(description)).perform(click())
     }
 
     private fun openNavigationDestination(itemId: Int, expectedText: String) {
@@ -110,6 +108,71 @@ class MainActivityInstrumentedTest {
         }
     }
 
+
+    @Test
+    fun toolbarKeepsSmartPrintByQuantaEdgeBrandAndModernBackIcon() {
+        ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+            onView(withContentDescription("Account")).perform(click())
+            scenario.onActivity { activity ->
+                val toolbar = MainActivity::class.java.getDeclaredField("toolbar").apply { isAccessible = true }
+                    .get(activity) as com.google.android.material.appbar.MaterialToolbar
+                assertEquals("smartprint", toolbar.title.toString())
+                assertTrue(toolbar.subtitle.toString().contains("BY QUANTAEDGE"))
+                assertTrue(toolbar.subtitle.toString().contains("ACCOUNT"))
+                assertEquals("Back", toolbar.navigationContentDescription)
+                assertNotNull(toolbar.navigationIcon)
+            }
+        }
+    }
+
+    @Test
+    fun fileCheckboxesAppearOnlyInExplicitSelectionModeAndSelectAllIsFolderScoped() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val documents = File(context.filesDir, "documents")
+        val folder = File(documents, "CI-selection-${System.currentTimeMillis()}")
+        val nested = File(folder, "nested")
+        val first = File(folder, "first.pdf")
+        val second = File(folder, "second.pdf")
+        nested.mkdirs()
+        first.writeText("%PDF-1.4 selection test")
+        second.writeText("%PDF-1.4 selection test")
+        File(nested, "nested.pdf").writeText("%PDF-1.4 nested selection test")
+        try {
+            ActivityScenario.launch(MainActivity::class.java).use {
+                openFilesTab()
+                onView(withText(folder.name)).perform(click())
+                onView(withText(first.name)).check(matches(isDisplayed()))
+                onView(withContentDescription("Select " + first.name)).check(doesNotExist())
+                onView(withContentDescription("Enter file selection mode")).perform(click())
+                onView(withContentDescription("Select " + first.name)).check(matches(isDisplayed()))
+                onView(withText("Select all")).perform(click())
+                onView(withText("2 selected")).check(matches(isDisplayed()))
+                onView(withText("Deselect all")).check(matches(isDisplayed()))
+                onView(withContentDescription("Finish file selection")).perform(click())
+                onView(withContentDescription("Select " + first.name)).check(doesNotExist())
+                onView(withText("2 selected")).check(matches(isDisplayed()))
+            }
+        } finally {
+            folder.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun shopWifiVerificationUsesBrandedBottomSheet() {
+        ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+            scenario.onActivity { activity ->
+                MainActivity::class.java.getDeclaredMethod(
+                    "showShopWifiVerificationResult", String::class.java, String::class.java, Boolean::class.javaPrimitiveType!!
+                ).apply { isAccessible = true }.invoke(
+                    activity, "Shop Wi-Fi verified",
+                    "This phone reached the shop computer over the selected network.", true
+                )
+            }
+            onView(withText("Shop Wi-Fi verified")).check(matches(isDisplayed()))
+            onView(withContentDescription("Wi-Fi verified")).check(matches(isDisplayed()))
+            onView(withText("Done")).perform(click())
+        }
+    }
 
     @Test
     fun readableTextRolesMeetContrastInLightAndDarkThemes() {
@@ -464,7 +527,20 @@ class MainActivityInstrumentedTest {
                 val navigation = MainActivity::class.java.getDeclaredField("navigation").apply {
                     isAccessible = true
                 }.get(activity)
-                assertTrue("Portrait must render bottom navigation", navigation is com.google.android.material.bottomnavigation.BottomNavigationView)
+                assertTrue("Portrait retains the bottom navigation selection model", navigation is com.google.android.material.bottomnavigation.BottomNavigationView)
+                val customBar = MainActivity::class.java.getDeclaredField("bottomNavigationContent").apply {
+                    isAccessible = true
+                }.get(activity) as LinearLayout
+                assertEquals(View.VISIBLE, customBar.visibility)
+                assertEquals(LinearLayout.HORIZONTAL, customBar.orientation)
+                assertEquals(4, customBar.childCount)
+                val firstItem = customBar.getChildAt(0) as LinearLayout
+                assertEquals(LinearLayout.HORIZONTAL, firstItem.orientation)
+                assertEquals(View.VISIBLE, firstItem.getChildAt(1).visibility)
+                if (activity.resources.configuration.screenWidthDp < 480) {
+                    val inactiveItem = customBar.getChildAt(1) as LinearLayout
+                    assertEquals(View.GONE, inactiveItem.getChildAt(1).visibility)
+                }
                 activity.requestedOrientation = android.content.pm.ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE
             }
 

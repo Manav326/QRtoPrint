@@ -28,6 +28,10 @@ object SmartPrintThemePreference {
         )
 
     fun apply(context: Context) {
+        val preferences = context.getSharedPreferences(PREFERENCES_NAME, Context.MODE_PRIVATE)
+        if (!preferences.contains(THEME_KEY)) {
+            preferences.edit().putString(THEME_KEY, SmartPrintTheme.LIGHT.storedValue).commit()
+        }
         applyMode(read(context))
     }
 
