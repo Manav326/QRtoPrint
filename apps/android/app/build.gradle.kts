@@ -26,7 +26,7 @@ android {
     defaultConfig {
         applicationId = "com.quantaedge.smartprint"
         minSdk = 26
-        targetSdk = 35
+        targetSdk = 36
         versionCode = smartPrintVersionCode
         versionName = smartPrintVersionName
         buildConfigField("String", "SERVICE_BASE_URL", "\"$smartPrintServiceUrl\"")
