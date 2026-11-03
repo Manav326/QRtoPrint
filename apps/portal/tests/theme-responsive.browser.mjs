@@ -66,6 +66,52 @@ async function preparePage(context, route) {
     contentType: "application/json",
     body: JSON.stringify({ message: "Visual QA uses isolated API fixtures; no live service is contacted." })
   }));
+  if (route.auth === "shop") {
+    const profile = {
+      id: "e2e-shop",
+      slug: "e2e-shop",
+      businessName: "Example Print Shop",
+      status: "Active",
+      ownerName: "Shop Owner",
+      ownerEmail: "owner@example.invalid",
+      displayName: "Example Print Shop",
+      logoUrl: null,
+      accentColor: "#7662E8",
+      currency: "INR",
+      timeZone: "Asia/Kolkata",
+      whiteLabelEnabled: false
+    };
+    await page.route("**/api/v1/shop/**", async request => {
+      const path = new URL(request.request().url()).pathname;
+      const value = path.endsWith("/profile")
+        ? profile
+        : path.endsWith("/customers")
+          ? { page: 1, pageSize: 20, totalCount: 0, items: [] }
+          : path.endsWith("/reports/summary")
+            ? {
+                periodDays: 30,
+                fromUtc: "2026-01-01T00:00:00Z",
+                toUtc: "2026-01-31T00:00:00Z",
+                generatedUtc: "2026-01-31T00:00:00Z",
+                totalJobs: 0,
+                completedJobs: 0,
+                outputUnconfirmedJobs: 0,
+                pagesRequested: 0,
+                pendingPaymentCount: 0,
+                jobsByStatus: [],
+                verifiedCollectionsByMethod: [],
+                refundsRecordedByMethod: []
+              }
+            : path.endsWith("/pricing") || path.endsWith("/payment-settings") || path.endsWith("/subscription")
+              ? null
+              : [];
+      await request.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify(value)
+      });
+    });
+  }
   if (route.auth) {
     const key = route.auth === "admin" ? "qrtoprint.auth.admin" : "qrtoprint.auth.shop";
     const token = route.auth === "admin" ? adminToken : shopToken;
@@ -249,7 +295,7 @@ async function assertRouteContrast(page, route) {
 async function exerciseWorkspaceSections(page, route, viewport, themeLabel) {
   if (!route.auth) return;
   const sections = route.auth === "shop"
-    ? ["Overview", "Print Queue", "Printers", "QR Stations", "Print Agent", "Pricing", "Subscription", "Payments", "Customers", "Reports", "Settings"]
+    ? ["Overview", "Print Queue", "Customers", "Printers", "QR Stations", "Print Agent", "Pricing", "Payments", "Reports"]
     : ["Overview", "Shop tenants", "Plans & entitlements", "Shop subscriptions", "Operations & retention"];
   for (const section of sections) {
     if (viewport.width <= 850) await page.getByRole("button", { name: "Open navigation" }).click();
@@ -257,14 +303,124 @@ async function exerciseWorkspaceSections(page, route, viewport, themeLabel) {
     await destination.click();
     // The native desktop shell intentionally hides the web breadcrumb; verify
     // the selected navigation item instead of waiting for hidden header text.
-    await page.waitForFunction(
-      label => [...document.querySelectorAll(".sidebar .nav-item")]
-        .some(item => item.textContent.trim() === label && item.classList.contains("active")),
-      section
-    );
+    console.log(`[workspace QA] ${route.label} / ${section} / ${viewport.width}px / ${themeLabel}`);
+    try {
+      await page.waitForFunction(
+        label => [...document.querySelectorAll(".sidebar .nav-item")]
+          .some(item => item.textContent.trim() === label && item.classList.contains("active")),
+        section,
+        { timeout: 12000 }
+      );
+    } catch (error) {
+      const sidebarState = await page.locator(".sidebar").innerText().catch(() => "sidebar unavailable");
+      const activeItems = await page.locator(".sidebar .nav-item.active").allTextContents().catch(() => []);
+      throw new Error(`Navigation did not activate "${section}" for ${route.label} at ${viewport.width}px. Active items: ${JSON.stringify(activeItems)}. Sidebar: ${sidebarState}. Original: ${error instanceof Error ? error.message : String(error)}`);
+    }
     await assertNoHorizontalOverflow(page, route, viewport);
     await assertRouteContrast(page, route);
     results.push({ check: `${route.label} / ${section} / ${themeLabel} / ${viewport.width}px`, passed: true });
+  }
+
+  if (route.auth === "shop") {
+    const openAccountMenu = async () => {
+      await page.locator(".account-menu-trigger").click();
+      await page.locator("#shop-account-menu").waitFor({ state: "visible" });
+    };
+
+    if (themeLabel === "light") {
+      const accountRequests = [];
+      let currentMockOwnerEmail = "owner@example.invalid";
+      await page.route("**/api/v1/shop/account", async request => {
+        const submitted = request.request().postDataJSON();
+        accountRequests.push(submitted);
+        if (submitted.currentPassword === "wrong-password") {
+          await request.fulfill({
+            status: 400,
+            contentType: "application/json",
+            body: JSON.stringify({ errors: { currentPassword: ["The current password is incorrect."] } })
+          });
+          return;
+        }
+        const emailChanged = submitted.email.toLowerCase() !== currentMockOwnerEmail.toLowerCase();
+        currentMockOwnerEmail = submitted.email;
+        await request.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: JSON.stringify({
+            ownerName: submitted.ownerName,
+            ownerEmail: currentMockOwnerEmail,
+            emailChanged
+          })
+        });
+      });
+  
+      await openAccountMenu();
+      await page.locator("#shop-account-menu").getByRole("button", { name: "Personal details", exact: true }).click();
+      const personalDetails = page.getByRole("dialog", { name: "Personal details" });
+      await personalDetails.waitFor({ state: "visible" });
+      await personalDetails.getByLabel("Your name").fill("Updated Shop Owner");
+      await personalDetails.getByRole("button", { name: "Save personal details" }).click();
+      await personalDetails.waitFor({ state: "hidden" });
+      assert.equal(accountRequests[0]?.currentPassword, undefined,
+        "A name-only update must not demand the current password.");
+  
+      await openAccountMenu();
+      await page.locator("#shop-account-menu").getByRole("button", { name: "Personal details", exact: true }).click();
+      await personalDetails.waitFor({ state: "visible" });
+      const signInEmailInput = personalDetails.getByLabel("Sign-in email");
+      await signInEmailInput.fill("updated-owner@example.invalid");
+      try {
+        await personalDetails.locator(".account-email-change-note").waitFor({ state: "visible", timeout: 5000 });
+      } catch (error) {
+        const inputState = await signInEmailInput.inputValue();
+        const profileState = await personalDetails.locator(".account-edit-form").innerText();
+        throw new Error(`Changing sign-in email did not reveal the password-confirmation step. Input value: "${inputState}". Previous submitted email: "${accountRequests[0]?.email}". Mock current email: "${currentMockOwnerEmail}". Form: "${profileState}". Original: ${error instanceof Error ? error.message : String(error)}`);
+      }
+      await personalDetails.getByLabel("Current password").fill("wrong-password");
+      await personalDetails.getByRole("button", { name: "Save personal details" }).click();
+      await personalDetails.locator(".account-edit-error").waitFor({ state: "visible" });
+      assert.equal(await personalDetails.isVisible(), true,
+        "A wrong current password must not close the personal details editor.");
+      assert.equal(currentMockOwnerEmail, "owner@example.invalid",
+        "A failed password check must not change the sign-in email.");
+      assert.equal(accountRequests[1]?.currentPassword, "wrong-password");
+  
+      await personalDetails.getByLabel("Current password").fill("E2e-Current-Password-2026!");
+      await personalDetails.getByRole("button", { name: "Save personal details" }).click();
+      await personalDetails.waitFor({ state: "hidden" });
+      assert.equal(accountRequests[2]?.currentPassword, "E2e-Current-Password-2026!",
+        "An email change must include the current password.");
+      results.push({ check: `${route.label} / account / personal name and password-confirmed email update / ${themeLabel} / ${viewport.width}px`, passed: true });
+  
+  
+    }
+
+    const chooseAccountItem = async (label, expectedTitle) => {
+      await openAccountMenu();
+      await page.locator("#shop-account-menu").getByRole("button", { name: label, exact: true }).click();
+      await page.waitForFunction(
+        title => document.querySelector(".page-heading h1")?.textContent?.trim() === title,
+        expectedTitle
+      );
+      await assertNoHorizontalOverflow(page, route, viewport);
+      await assertRouteContrast(page, route);
+      results.push({ check: `${route.label} / account / ${label} / ${themeLabel} / ${viewport.width}px`, passed: true });
+    };
+
+    await chooseAccountItem("Trial & subscription", "Subscription");
+    await chooseAccountItem("Shop profile & branding", "Shop profile");
+
+    await openAccountMenu();
+    await page.locator("#shop-account-menu").getByRole("button", { name: "Help & support", exact: true }).click();
+    const helpDialog = page.getByRole("dialog", { name: "Help & support" });
+    await helpDialog.waitFor({ state: "visible" });
+    await helpDialog.getByRole("button", { name: "Print jobs and approvals" }).click();
+    await page.waitForFunction(
+      () => document.querySelector(".page-heading h1")?.textContent?.trim() === "Print Queue"
+    );
+    await assertNoHorizontalOverflow(page, route, viewport);
+    await assertRouteContrast(page, route);
+    results.push({ check: `${route.label} / account / Help & support / ${themeLabel} / ${viewport.width}px`, passed: true });
   }
 }
 
@@ -352,12 +508,8 @@ try {
   // Exercise the Windows desktop webview at its declared minimum window size.
   {
     const context = await browser.newContext({ viewport: { width: 1000, height: 680 } });
-    const page = await context.newPage();
-    await page.route("**/api/**", request => request.fulfill({
-      status: 503,
-      contentType: "application/json",
-      body: JSON.stringify({ message: "Visual QA uses isolated API fixtures." })
-    }));
+    const desktopRoute = { label: "windows-desktop", auth: "shop" };
+    const page = await preparePage(context, desktopRoute);
     await page.addInitScript(({ shopSession }) => {
       window.__TAURI_INTERNALS__ = {
         invoke: async command => {
@@ -380,7 +532,6 @@ try {
     await page.goto(desktopUrl, { waitUntil: "domcontentloaded" });
     await waitForRoute(page, ".app-shell");
     assert.equal(await page.locator("body").getAttribute("data-app-shell"), "desktop");
-    const desktopRoute = { label: "windows-desktop", auth: "shop" };
     const desktopViewport = { width: 1000, height: 680 };
     const lightDesktop = await assertNoHorizontalOverflow(page, desktopRoute, desktopViewport);
     await assertRouteContrast(page, desktopRoute);
@@ -420,7 +571,8 @@ try {
     if (route.auth === "admin") {
       await page.locator(".topbar").getByRole("button", { name: "Sign out" }).click();
     } else {
-      await page.locator(".sidebar").getByRole("button", { name: "Sign out" }).click();
+      await page.locator(".account-menu-trigger").click();
+      await page.locator("#shop-account-menu").getByRole("button", { name: "Sign out", exact: true }).click();
     }
     await waitForRoute(page, ".auth-screen");
     assert.equal(await page.locator("html").getAttribute("data-theme"), "dark", `${route.label} sign-out must preserve Dark.`);
