@@ -239,6 +239,7 @@ export default function PhotoStudio({
       const numberOfSheets = Math.ceil(parsedCopies / layout.perSheet);
       const outputs: PreparedPhotoSheet[] = [];
       for (let page = 0; page < numberOfSheets; page += 1) {
+        const pageCopies = Math.min(layout.perSheet, parsedCopies - page * layout.perSheet);
         const canvas = document.createElement("canvas");
         canvas.width = A4_WIDTH_PX;
         canvas.height = A4_HEIGHT_PX;

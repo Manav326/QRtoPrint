@@ -822,7 +822,6 @@ export async function createCustomerSession(publicCode: string) {
     shop: { displayName: string; logoUrl?: string | null; accentColor: string; currency: string };
     printer: { displayName: string; manufacturer: string; model: string; status: string; capabilitiesJson: string } | null;
     photoPricing: CustomerPhotoPricing | null;
-    photoPricing: CustomerPhotoPricing | null;
     paymentOptions: { upiEnabled: boolean; upiId?: string | null; payeeName?: string | null; cashEnabled: boolean; instantPaymentEnabled: boolean };
     localAgent: { agentDeviceId: string; endpoints: string[] } | null;
     cloudAssistedPrintingEnabled: boolean;
@@ -852,6 +851,7 @@ export function resumeCustomerSession(sessionToken: string, publicCode: string) 
     shop: { displayName: string; logoUrl?: string | null; accentColor: string; currency: string };
     paymentOptions: { upiEnabled: boolean; upiId?: string | null; payeeName?: string | null; cashEnabled: boolean; instantPaymentEnabled: boolean };
     printer: { displayName: string; manufacturer: string; model: string; status: string; capabilitiesJson: string } | null;
+    photoPricing: CustomerPhotoPricing | null;
     localAgent: { agentDeviceId: string; endpoints: string[] } | null;
     cloudAssistedPrintingEnabled: boolean;
   }>("/api/v1/public/sessions/current/resume", {
