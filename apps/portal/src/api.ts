@@ -1294,6 +1294,10 @@ export interface CustomerJobStatus {
   colourMode: string;
   paperSize: string;
   isDuplex: boolean;
+  printKind?: string;
+  photoSizeCode?: string | null;
+  photoCount?: number;
+  photoUnitPriceMinorSnapshot?: number;
   currency: string;
   quotedAmountMinor: number;
   quoteExpiresUtc?: string | null;
