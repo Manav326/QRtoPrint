@@ -453,7 +453,8 @@ try {
     if (route.auth === "admin") {
       await page.locator(".topbar").getByRole("button", { name: "Sign out" }).click();
     } else {
-      await page.locator(".sidebar").getByRole("button", { name: "Sign out" }).click();
+      await page.locator(".account-menu-trigger").click();
+      await page.locator("#shop-account-menu").getByRole("button", { name: "Sign out", exact: true }).click();
     }
     await waitForRoute(page, ".auth-screen");
     assert.equal(await page.locator("html").getAttribute("data-theme"), "dark", `${route.label} sign-out must preserve Dark.`);
