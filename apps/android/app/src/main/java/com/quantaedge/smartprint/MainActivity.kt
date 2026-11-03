@@ -144,6 +144,19 @@ class MainActivity : AppCompatActivity() {
         // Restore the explicit app preference before AppCompat inflates theme-aware UI.
         SmartPrintThemePreference.apply(this)
         super.onCreate(savedInstanceState)
+        onBackPressedDispatcher.addCallback(this, object : androidx.activity.OnBackPressedCallback(true) {
+            override fun handleOnBackPressed() {
+                if (handleAppBackNavigation()) return
+
+                // At the home root, let Android perform its normal activity-close behaviour.
+                isEnabled = false
+                try {
+                    onBackPressedDispatcher.onBackPressed()
+                } finally {
+                    isEnabled = true
+                }
+            }
+        })
         WindowCompat.setDecorFitsSystemWindows(window, false)
         val lightSystemBars = (resources.configuration.uiMode and android.content.res.Configuration.UI_MODE_NIGHT_MASK) ==
             android.content.res.Configuration.UI_MODE_NIGHT_NO
@@ -238,8 +251,7 @@ class MainActivity : AppCompatActivity() {
         handleShareIntent(intent)
     }
 
-    @Deprecated("Deprecated in Java")
-    override fun onBackPressed() {
+    private fun handleAppBackNavigation(): Boolean {
         when {
             profileVisible -> returnFromProfile()
             pickerMode && pickerPath.isNotBlank() -> { pickerPath = parent(pickerPath); refreshLibrary(preserveScroll = false) }
@@ -254,8 +266,9 @@ class MainActivity : AppCompatActivity() {
             navigation.selectedItemId == SCAN_PRINT -> showHome()
             navigation.selectedItemId != HOME -> showHome()
             folderPath.isNotEmpty() -> { folderPath = parent(folderPath); showFiles() }
-            else -> super.onBackPressed()
+            else -> return false
         }
+        return true
     }
 
     private fun registerFileActions() {
