@@ -242,6 +242,8 @@ test("shop owner navigation groups daily work and moves account destinations int
   assert.match(app, /Trial &amp; subscription/);
   assert.match(app, /Help &amp; support/);
   assert.match(app, /accountMenuOpen/);
+  assert.ok(app.indexOf("const [accountMenuOpen") < app.indexOf("if (!accountMenuOpen) return"),
+    "The account-menu state must be initialized before its dismissal effect reads it.");
   assert.match(app, /HelpSupportModal/);
   assert.match(css, /\.app-shell \.nav-group-items\s*\{/);
 });
