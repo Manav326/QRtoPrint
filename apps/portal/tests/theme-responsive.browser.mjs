@@ -508,12 +508,8 @@ try {
   // Exercise the Windows desktop webview at its declared minimum window size.
   {
     const context = await browser.newContext({ viewport: { width: 1000, height: 680 } });
-    const page = await context.newPage();
-    await page.route("**/api/**", request => request.fulfill({
-      status: 503,
-      contentType: "application/json",
-      body: JSON.stringify({ message: "Visual QA uses isolated API fixtures." })
-    }));
+    const desktopRoute = { label: "windows-desktop", auth: "shop" };
+    const page = await preparePage(context, desktopRoute);
     await page.addInitScript(({ shopSession }) => {
       window.__TAURI_INTERNALS__ = {
         invoke: async command => {
@@ -536,7 +532,6 @@ try {
     await page.goto(desktopUrl, { waitUntil: "domcontentloaded" });
     await waitForRoute(page, ".app-shell");
     assert.equal(await page.locator("body").getAttribute("data-app-shell"), "desktop");
-    const desktopRoute = { label: "windows-desktop", auth: "shop" };
     const desktopViewport = { width: 1000, height: 680 };
     const lightDesktop = await assertNoHorizontalOverflow(page, desktopRoute, desktopViewport);
     await assertRouteContrast(page, desktopRoute);
