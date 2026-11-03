@@ -638,6 +638,10 @@ export interface ShopCustomerJob {
   colourMode: string;
   paperSize: string;
   isDuplex: boolean;
+  printKind?: string;
+  photoSizeCode?: string | null;
+  photoCount?: number;
+  photoUnitPriceMinorSnapshot?: number;
   currency: string;
   quotedAmountMinor: number;
   rejectedPageNumbersJson: string;
@@ -817,6 +821,8 @@ export async function createCustomerSession(publicCode: string) {
     sessionToken: string;
     shop: { displayName: string; logoUrl?: string | null; accentColor: string; currency: string };
     printer: { displayName: string; manufacturer: string; model: string; status: string; capabilitiesJson: string } | null;
+    photoPricing: CustomerPhotoPricing | null;
+    photoPricing: CustomerPhotoPricing | null;
     paymentOptions: { upiEnabled: boolean; upiId?: string | null; payeeName?: string | null; cashEnabled: boolean; instantPaymentEnabled: boolean };
     localAgent: { agentDeviceId: string; endpoints: string[] } | null;
     cloudAssistedPrintingEnabled: boolean;
@@ -855,6 +861,7 @@ export function resumeCustomerSession(sessionToken: string, publicCode: string) 
   });
 }
 
+export interface CustomerPhotoPricing { photo35x45Minor:number; photo25x35Minor:number; photo2x2Minor:number; photo4x6Minor:number; }
 export interface ShopPricingProfile {
   isConfigured: boolean;
   monoPerSideMinor: number;
@@ -862,6 +869,10 @@ export interface ShopPricingProfile {
   monoDuplexPerSheetMinor: number;
   colourDuplexPerSheetMinor: number;
   minimumChargeMinor: number;
+  photo35x45Minor: number;
+  photo25x35Minor: number;
+  photo2x2Minor: number;
+  photo4x6Minor: number;
   version: number;
   updatedUtc: string;
 }
@@ -1259,6 +1270,9 @@ export function calculateCustomerQuote(sessionToken: string, jobId: string, valu
   paperSize: "A4";
   isDuplex: boolean;
   copies: number;
+  printKind?: "DOCUMENT" | "PHOTO";
+  photoSizeCode?: string;
+  photoCount?: number;
 }) {
   return apiRequest<PrintQuoteResult>(`/api/v1/public/jobs/${jobId}/quote`, {
     method: "POST",
