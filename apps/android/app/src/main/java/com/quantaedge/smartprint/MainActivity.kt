@@ -38,6 +38,7 @@ import androidx.activity.result.ActivityResultLauncher
 import androidx.activity.result.IntentSenderRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AlertDialog
+import androidx.activity.OnBackPressedCallback
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.FileProvider
 import androidx.core.view.ViewCompat
@@ -144,6 +145,20 @@ class MainActivity : AppCompatActivity() {
         // Restore the explicit app preference before AppCompat inflates theme-aware UI.
         SmartPrintThemePreference.apply(this)
         super.onCreate(savedInstanceState)
+        onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
+            override fun handleOnBackPressed() {
+                if (handleBackNavigation()) return
+
+                // Let the activity finish normally when the user is already at the home root.
+                // Temporarily disable this callback so the dispatcher can reach its platform fallback.
+                isEnabled = false
+                try {
+                    onBackPressedDispatcher.onBackPressed()
+                } finally {
+                    isEnabled = true
+                }
+            }
+        })
         WindowCompat.setDecorFitsSystemWindows(window, false)
         val lightSystemBars = (resources.configuration.uiMode and android.content.res.Configuration.UI_MODE_NIGHT_MASK) ==
             android.content.res.Configuration.UI_MODE_NIGHT_NO
@@ -238,8 +253,7 @@ class MainActivity : AppCompatActivity() {
         handleShareIntent(intent)
     }
 
-    @Deprecated("Deprecated in Java")
-    override fun onBackPressed() {
+    private fun handleBackNavigation(): Boolean {
         when {
             profileVisible -> returnFromProfile()
             pickerMode && pickerPath.isNotBlank() -> { pickerPath = parent(pickerPath); refreshLibrary(preserveScroll = false) }
@@ -254,8 +268,9 @@ class MainActivity : AppCompatActivity() {
             navigation.selectedItemId == SCAN_PRINT -> showHome()
             navigation.selectedItemId != HOME -> showHome()
             folderPath.isNotEmpty() -> { folderPath = parent(folderPath); showFiles() }
-            else -> super.onBackPressed()
+            else -> return false
         }
+        return true
     }
 
     private fun registerFileActions() {
