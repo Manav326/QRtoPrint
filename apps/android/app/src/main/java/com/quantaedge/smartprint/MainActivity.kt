@@ -139,7 +139,6 @@ class MainActivity : AppCompatActivity() {
     private lateinit var exportArchive: ActivityResultLauncher<String>
     private lateinit var scannerLauncher: ActivityResultLauncher<Intent>
     private lateinit var documentScanLauncher: ActivityResultLauncher<IntentSenderRequest>
-    private lateinit var tabletDocumentScanLauncher: ActivityResultLauncher<Intent>
 
     override fun onCreate(savedInstanceState: Bundle?) {
         // Restore the explicit app preference before AppCompat inflates theme-aware UI.
@@ -297,31 +296,6 @@ class MainActivity : AppCompatActivity() {
                     pendingScanNeedsDestination = false
                     pendingScanDestinationPath = ""
                     toast("Could not save the scan: ${message(e)}")
-                }
-            } else {
-                pendingScanNeedsDestination = false
-                pendingScanDestinationPath = ""
-            }
-        }
-        tabletDocumentScanLauncher = registerForActivityResult(
-            ActivityResultContracts.StartActivityForResult()
-        ) { result ->
-            if (result.resultCode == RESULT_OK) {
-                val rawPath = result.data?.getStringExtra(TabletDocumentScannerActivity.EXTRA_PDF_PATH)
-                val pdf = rawPath?.let { runCatching { File(it).canonicalFile }.getOrNull() }
-                    ?.takeIf { candidate ->
-                        val safeRoot = File(cacheDir, "tablet-scans").canonicalFile.path + File.separator
-                        candidate.isFile && candidate.path.startsWith(safeRoot) &&
-                            candidate.extension.equals("pdf", true)
-                    }
-                if (pdf == null) {
-                    pendingScanNeedsDestination = false
-                    pendingScanDestinationPath = ""
-                    toast("The tablet scanner did not return a valid PDF.")
-                } else if (pendingScanNeedsDestination) {
-                    showCameraScanDestinationPicker(pdf)
-                } else {
-                    saveCameraScan(pdf, pendingScanDestinationPath)
                 }
             } else {
                 pendingScanNeedsDestination = false
@@ -540,7 +514,7 @@ class MainActivity : AppCompatActivity() {
         }
         root.addView(topGlass, FrameLayout.LayoutParams(-1, dp(64), Gravity.TOP))
 
-        val useRail = ResponsiveLayoutPolicy.useNavigationRail(resources.configuration.screenWidthDp)
+        val useRail = ResponsiveLayoutPolicy.useNavigationRail(resources.configuration.orientation)
         navigation = if (useRail) NavigationRailView(this) else BottomNavigationView(this)
         navigation.apply {
             menu.add(Menu.NONE, HOME, 0, "Home").apply {
@@ -616,7 +590,7 @@ class MainActivity : AppCompatActivity() {
         if (::bottomGlass.isInitialized) bottomGlass.visibility =
             if (visible && !rail) View.VISIBLE else View.GONE
         if (::content.isInitialized) content.setPadding(
-            if (rail) dp(80) else 0,
+            if (visible && rail) dp(80) else 0,
             dp(64),
             0,
             if (visible && !rail) dp(76) else dp(8)
@@ -921,7 +895,7 @@ class MainActivity : AppCompatActivity() {
             setPadding(dp(13), dp(12), dp(13), dp(12))
         }
         val shopGlyph = ImageView(this).apply {
-            setImageResource(R.drawable.ic_nav_scan_print)
+            setImageResource(R.drawable.ic_store)
             imageTintList = ColorStateList.valueOf(getColor(R.color.qp_primary))
             scaleType = ImageView.ScaleType.CENTER_CROP
             setPadding(dp(10), dp(10), dp(10), dp(10))
@@ -1177,8 +1151,8 @@ class MainActivity : AppCompatActivity() {
         profileVisible = false
         toolbar.menu.findItem(SWITCH_SHOP)?.isVisible = portalUrl != null
         toolbar.title = "Print"
-        toolbar.setNavigationIcon(android.R.drawable.ic_media_previous)
-        toolbar.setNavigationOnClickListener { showFiles() }
+        toolbar.navigationIcon = null
+        toolbar.setNavigationOnClickListener(null)
         accountAction.visibility = View.VISIBLE
         setBottomNavigationVisible(true)
         navigation.menu.findItem(SCAN_PRINT).isChecked = true
@@ -1196,6 +1170,49 @@ class MainActivity : AppCompatActivity() {
                 (content.getChildAt(0) as? ScrollView)?.scrollTo(0, previousScroll)
             }
         }
+    }
+
+    private fun folderActionTile(
+        iconResource: Int,
+        label: String,
+        description: String,
+        action: () -> Unit
+    ): View {
+        val tile = MaterialCardView(this).apply {
+            radius = dp(12).toFloat()
+            cardElevation = 0f
+            strokeWidth = dp(1)
+            strokeColor = getColor(R.color.qp_outline)
+            setCardBackgroundColor(getColor(R.color.qp_card))
+            rippleColor = ColorStateList.valueOf(getColor(R.color.qp_soft))
+            contentDescription = description
+            isClickable = true
+            isFocusable = true
+        }
+        val row = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(11), 0, dp(8), 0)
+        }
+        val icon = ImageView(this).apply {
+            setImageResource(iconResource)
+            imageTintList = ColorStateList.valueOf(getColor(R.color.qp_primary))
+            scaleType = ImageView.ScaleType.CENTER_INSIDE
+            setPadding(dp(6), dp(6), dp(6), dp(6))
+            background = roundedDrawable(getColor(R.color.qp_soft), dp(9))
+        }
+        row.addView(icon, LinearLayout.LayoutParams(dp(36), dp(36)))
+        row.addView(
+            text(label, 12, R.color.qp_text, true).apply {
+                maxLines = 1
+                ellipsize = android.text.TextUtils.TruncateAt.END
+                setPadding(dp(9), 0, 0, 0)
+            },
+            LinearLayout.LayoutParams(0, -2, 1f)
+        )
+        tile.addView(row, ViewGroup.LayoutParams(-1, -1))
+        tile.setOnClickListener { action() }
+        return tile
     }
 
     private fun libraryView(isPicker: Boolean): View {
@@ -1262,19 +1279,27 @@ class MainActivity : AppCompatActivity() {
                 orientation = LinearLayout.HORIZONTAL
                 gravity = Gravity.CENTER_VERTICAL
             }
-            folderActions.addView(button("Scan here", false).apply {
-                minHeight = dp(40)
-                setOnClickListener { startDocumentScan(path) }
-            }, LinearLayout.LayoutParams(0, dp(40), 1f))
-            folderActions.addView(button("New folder", false).apply {
-                minHeight = dp(40)
-                setOnClickListener {
+            folderActions.addView(
+                folderActionTile(
+                    R.drawable.ic_document_scan,
+                    "Scan here",
+                    "Scan document into this folder"
+                ) { startDocumentScan(path) },
+                LinearLayout.LayoutParams(0, dp(52), 1f)
+            )
+            folderActions.addView(
+                folderActionTile(
+                    R.drawable.ic_create_new_folder,
+                    "New folder",
+                    "Create a new folder"
+                ) {
                     nameDialog("New folder", "") { name ->
                         try { store.createFolder(folderPath, name); showFiles() }
                         catch (e: Exception) { toast("Folder not created: ${message(e)}") }
                     }
-                }
-            }, LinearLayout.LayoutParams(0, dp(40), 1f).apply { marginStart = dp(8) })
+                },
+                LinearLayout.LayoutParams(0, dp(52), 1f).apply { marginStart = dp(8) }
+            )
             column.addView(folderActions, linearParams().apply { bottomMargin = dp(12) })
         }
 
@@ -1308,12 +1333,21 @@ class MainActivity : AppCompatActivity() {
         crumb.addView(text(breadcrumbText, 12, R.color.qp_muted, true),
             LinearLayout.LayoutParams(0, -2, 1f))
         if (path.isNotEmpty()) {
-            val up = button("Back", false).apply { minHeight = dp(34) }
-            crumb.addView(up)
-            up.setOnClickListener {
-                if (isPicker) pickerPath = parent(pickerPath) else folderPath = parent(folderPath)
-                refreshLibrary(preserveScroll = false)
+            val up = ImageView(this).apply {
+                setImageResource(R.drawable.ic_arrow_upward)
+                imageTintList = ColorStateList.valueOf(getColor(R.color.qp_text))
+                contentDescription = "Go up one folder"
+                scaleType = ImageView.ScaleType.CENTER_INSIDE
+                setPadding(dp(9), dp(9), dp(9), dp(9))
+                background = roundedDrawable(getColor(R.color.qp_soft), dp(11))
+                isClickable = true
+                isFocusable = true
+                setOnClickListener {
+                    if (isPicker) pickerPath = parent(pickerPath) else folderPath = parent(folderPath)
+                    refreshLibrary(preserveScroll = false)
+                }
             }
+            crumb.addView(up, LinearLayout.LayoutParams(dp(40), dp(40)))
         }
         column.addView(crumb, linearParams())
 
@@ -2375,14 +2409,15 @@ class MainActivity : AppCompatActivity() {
     private fun startDocumentScan(destinationPath: String? = null) {
         pendingScanNeedsDestination = destinationPath == null
         pendingScanDestinationPath = destinationPath.orEmpty()
-        if (ResponsiveLayoutPolicy.useCameraXDocumentScanner(resources.configuration.screenWidthDp)) {
-            tabletDocumentScanLauncher.launch(Intent(this, TabletDocumentScannerActivity::class.java))
-            return
-        }
+        // One ML Kit flow on phones and tablets. The SDK owns live capture, shutter/gallery
+        // controls, crop, perspective correction, page review and PDF creation.
         val options = GmsDocumentScannerOptions.Builder()
             .setGalleryImportAllowed(true)
             .setPageLimit(50)
-            .setResultFormats(GmsDocumentScannerOptions.RESULT_FORMAT_PDF)
+            .setResultFormats(
+                GmsDocumentScannerOptions.RESULT_FORMAT_PDF,
+                GmsDocumentScannerOptions.RESULT_FORMAT_JPEG
+            )
             .setScannerMode(GmsDocumentScannerOptions.SCANNER_MODE_FULL)
             .build()
         GmsDocumentScanning.getClient(options)
@@ -2470,94 +2505,6 @@ class MainActivity : AppCompatActivity() {
             toast("Could not save the scan: ${message(error)}")
             showScanDestinationPicker(scan)
         }
-    }
-
-    private fun showCameraScanDestinationPicker(pdf: File) {
-        val (dialog, root) = sheetRoot(
-            "Save scanned document",
-            "Choose where this multi-page scan should stay in My Files."
-        )
-        root.addView(button("My Files", true).apply {
-            minHeight = dp(46)
-            setOnClickListener { dialog.dismiss(); saveCameraScan(pdf, "") }
-        }, linearParams().apply { bottomMargin = dp(7) })
-        root.addView(button("Create a new folder", false).apply {
-            minHeight = dp(42)
-            setOnClickListener {
-                nameDialog("New folder for this scan", "") { name ->
-                    try {
-                        val folder = store.createFolder("", name)
-                        dialog.dismiss()
-                        saveCameraScan(pdf, store.pathOf(folder))
-                    } catch (error: Exception) {
-                        toast("Folder not created: " + message(error))
-                    }
-                }
-            }
-        }, linearParams().apply { bottomMargin = dp(8) })
-        val folders = store.root.walkTopDown()
-            .filter { it.isDirectory && it.canonicalPath != store.root.canonicalPath }
-            .sortedBy { runCatching { store.pathOf(it).lowercase(Locale.ROOT) }.getOrDefault(it.name.lowercase(Locale.ROOT)) }
-            .toList()
-        if (folders.isNotEmpty()) {
-            root.addView(text("Existing folders", 12, R.color.qp_muted, true)
-                .apply { setPadding(dp(2), dp(4), 0, dp(7)) })
-            val scroll = ScrollView(this)
-            val list = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-            folders.forEach { folder ->
-                val path = store.pathOf(folder)
-                val label = "My Files  ›  " + path.replace("/", "  ›  ")
-                list.addView(button(label, false).apply {
-                    minHeight = dp(44)
-                    gravity = Gravity.START or Gravity.CENTER_VERTICAL
-                    setOnClickListener { dialog.dismiss(); saveCameraScan(pdf, path) }
-                }, linearParams().apply { bottomMargin = dp(5) })
-            }
-            scroll.addView(list)
-            root.addView(scroll, LinearLayout.LayoutParams(-1, dp(220)))
-        }
-        root.addView(button("Discard scan", false).apply {
-            minHeight = dp(40)
-            setOnClickListener {
-                dialog.dismiss()
-                discardCameraScan(pdf)
-                pendingScanNeedsDestination = false
-                pendingScanDestinationPath = ""
-                toast("Scan discarded.")
-            }
-        }, linearParams().apply { topMargin = dp(8) })
-        dialog.show()
-    }
-
-    private fun saveCameraScan(pdf: File, destinationPath: String) {
-        try {
-            val destination = store.folder(destinationPath)
-            val safeRoot = File(cacheDir, "tablet-scans").canonicalFile.path + File.separator
-            val source = pdf.canonicalFile
-            require(source.path.startsWith(safeRoot) && source.isFile) {
-                "The temporary scan file is no longer available."
-            }
-            val saved = FileInputStream(source).use {
-                store.importFile(it, "Scanned document.pdf", destinationPath)
-            }
-            discardCameraScan(source)
-            pendingScanNeedsDestination = false
-            pendingScanDestinationPath = ""
-            folderPath = store.pathOf(destination)
-            showFiles()
-            val location = if (destinationPath.isBlank()) "My Files"
-                else "My Files / " + destinationPath.replace("/", " / ")
-            toast("Saved " + saved.name + " in " + location + ".")
-        } catch (error: Exception) {
-            toast("Could not save the scan: " + message(error))
-            showCameraScanDestinationPicker(pdf)
-        }
-    }
-
-    private fun discardCameraScan(pdf: File) {
-        val safeRoot = File(cacheDir, "tablet-scans").canonicalFile.path + File.separator
-        val parent = runCatching { pdf.canonicalFile.parentFile }.getOrNull() ?: return
-        if (parent.path.startsWith(safeRoot)) parent.deleteRecursively()
     }
 
     private fun confirmShop(link: StationQrLink) {

@@ -19,7 +19,7 @@ test("customer copy inputs capture event values before scheduling React state up
   const blurHandler = copyLabel.slice(blurStart);
 
   for (const [name, handler] of [["change", changeHandler], ["blur", blurHandler]] as const) {
-    const captureIndex = handler.indexOf("const copies = event.currentTarget.value");
+    const captureIndex = handler.indexOf("event.currentTarget.value");
     const updateIndex = handler.indexOf("setFileSettings(current =>");
     assert.ok(captureIndex >= 0 && updateIndex > captureIndex,
       `The Copies ${name} handler must read currentTarget before scheduling the state update.`);

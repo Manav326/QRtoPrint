@@ -36,7 +36,7 @@ General library imports allow up to 100 MB per file. The print workflow uses the
 
 ## SmartPrint document capture
 
-The native document-capture action uses Google ML Kit Document Scanner in full mode and requests a multi-page PDF. Its on-device UI provides document-edge detection, crop/perspective correction, rotation, page ordering and image filters. Google Play services downloads the scanner UI/models when needed; first launch can require a download, and devices below the scanner's 1.7 GB RAM requirement are not supported. If unavailable, customers can still import photos/PDFs through Android's file picker. **Scan document** on Home asks where to save the completed scan (My Files, an existing folder, or a new folder). **Scan here** inside My Files saves directly into the currently open folder. Captures remain local until the customer chooses to print.
+
 
 ## Global SmartPrint customer account
 
@@ -90,9 +90,4 @@ The CI Android job also launches an Android 15 (API 35) emulator and runs
 Email verification/password recovery are not exposed as functional controls yet because the current API has no customer reset/verification-token endpoints or email-delivery contract. The account activity API also needs additional fields before the app can show actual paid/refunded/net amounts and original filenames. See docs/ANDROID_CUSTOMER_APP_HARDENING.md for the remaining backend and physical-device gates.
 
 
-### Responsive Android navigation and tablet document scanning
 
-- Phone layouts retain the bottom navigation; very narrow phones show the active label only to prevent labels from wrapping into each other. Windows at 600dp and wider use a labelled navigation rail and a centered reading/work area.
-- The connected-shop card shows the shop display name and, when the API supplies a same-service-origin logo, its logo. **Manage connected shop** provides open, switch and local disconnect actions. Disconnect removes only this device's station token and shop association; it does not delete local documents or shop orders/payments.
-- Phones continue to use the Google Play services document scanner. Tablet windows (600dp+) use the in-app CameraX full-screen preview with compact capture controls, multi-page capture, gallery image import, a page-review list with per-page preview, reorder and remove actions, undo-last-page and PDF composition. The result is saved through the normal My Files storage flow. Camera permission is requested only when the tablet scanner is used.
-- The tablet camera workflow uses a framing guide and full-page captures; automatic edge detection, perspective correction and manual crop/deskew are not part of this initial adaptive path.

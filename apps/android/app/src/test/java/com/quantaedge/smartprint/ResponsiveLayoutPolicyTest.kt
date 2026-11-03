@@ -1,32 +1,33 @@
 package com.quantaedge.smartprint
 
+import android.content.res.Configuration
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class ResponsiveLayoutPolicyTest {
     @Test
-    fun phoneWidthsKeepBottomNavigationAndGoogleScanner() {
-        listOf(320, 360, 393, 430, 599).forEach { width ->
-            assertFalse("Navigation rail should not be used at " + width + "dp",
-                ResponsiveLayoutPolicy.useNavigationRail(width))
-            assertFalse("CameraX scanner should not be used at " + width + "dp",
-                ResponsiveLayoutPolicy.useCameraXDocumentScanner(width))
+    fun portraitAlwaysUsesBottomNavigationIncludingWideTablets() {
+        listOf(320, 393, 600, 800, 1200).forEach { width ->
+            assertFalse(
+                "Portrait navigation must remain at the bottom at ${width}dp",
+                ResponsiveLayoutPolicy.useNavigationRail(Configuration.ORIENTATION_PORTRAIT)
+            )
         }
     }
 
     @Test
-    fun tabletWidthsUseRailAndFullScreenCameraScanner() {
-        listOf(600, 720, 800, 900, 1200).forEach { width ->
-            assertTrue("Navigation rail expected at " + width + "dp",
-                ResponsiveLayoutPolicy.useNavigationRail(width))
-            assertTrue("CameraX scanner expected at " + width + "dp",
-                ResponsiveLayoutPolicy.useCameraXDocumentScanner(width))
+    fun landscapeAlwaysUsesLeftNavigationRail() {
+        listOf(360, 480, 600, 800, 1200).forEach { width ->
+            assertTrue(
+                "Landscape navigation rail expected at ${width}dp",
+                ResponsiveLayoutPolicy.useNavigationRail(Configuration.ORIENTATION_LANDSCAPE)
+            )
         }
     }
 
     @Test
-    fun onlyVeryNarrowPhonesHideUnselectedNavigationLabels() {
+    fun onlyVeryNarrowPortraitLayoutsHideUnselectedBottomLabels() {
         assertFalse(ResponsiveLayoutPolicy.showLabelsOnAllBottomItems(320))
         assertTrue(ResponsiveLayoutPolicy.showLabelsOnAllBottomItems(360))
         assertTrue(ResponsiveLayoutPolicy.showLabelsOnAllBottomItems(599))

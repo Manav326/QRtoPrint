@@ -262,6 +262,7 @@ class MainActivityInstrumentedTest {
             onView(withText("Recent")).check(matches(isDisplayed()))
             onView(withText("Scan document")).check(matches(isDisplayed()))
             onView(withText("Choose from phone")).check(matches(isDisplayed()))
+            onView(withContentDescription("Print at a shop")).check(matches(isDisplayed()))
             val label = com.google.android.material.R.id.navigation_bar_item_small_label_view
             onView(allOf(withId(label), withText("Files"))).check(matches(isDisplayed()))
             onView(allOf(withId(label), withText("Print"))).check(matches(isDisplayed()))
@@ -325,6 +326,66 @@ class MainActivityInstrumentedTest {
                 }
             }
             assertEquals(listOf(source), received.get()?.toList())
+        }
+    }
+
+    @Test
+    fun connectedShopNameAndStoreIconAppearInYourSpace() {
+        ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+            scenario.onActivity { activity ->
+                MainActivity::class.java.getDeclaredField("portalUrl").apply {
+                    isAccessible = true
+                    set(activity, "https://smartprint.example/s/AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA")
+                }
+                val method = MainActivity::class.java.getDeclaredMethod(
+                    "saveCustomerShopProfile",
+                    String::class.java
+                ).apply { isAccessible = true }
+                val profile = Uri.encode(
+                    """{"displayName":"Riverside Print Shop","logoUrl":"","accentColor":"#7258E8"}"""
+                )
+                method.invoke(activity, profile)
+            }
+            onView(withText("Riverside Print Shop")).check(matches(isDisplayed()))
+            onView(withContentDescription("Connected shop logo")).check(matches(isDisplayed()))
+        }
+    }
+
+    @Test
+    fun printUsesTheSharedAndroidPortalWebViewAndHasNoBackArrowInItsHeader() {
+        ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+            scenario.onActivity { activity ->
+                MainActivity::class.java.getDeclaredMethod("showPrint").apply {
+                    isAccessible = true
+                    invoke(activity)
+                }
+                val toolbar = MainActivity::class.java.getDeclaredField("toolbar").apply {
+                    isAccessible = true
+                }.get(activity) as com.google.android.material.appbar.MaterialToolbar
+                assertEquals(null, toolbar.navigationIcon)
+                val page = MainActivity::class.java.getDeclaredMethod("ensureWebView").apply {
+                    isAccessible = true
+                }.invoke(activity) as WebView
+                assertTrue(
+                    "Android print must reuse the shared customer portal's Android presentation",
+                    page.settings.userAgentString.contains("SmartPrintAndroid/1")
+                )
+            }
+        }
+    }
+
+    @Test
+    fun filesActionsHaveDedicatedAccessibleIconsAndTheFolderUpControlIsAnIcon() {
+        val folderName = "CI Action Icons " + System.currentTimeMillis()
+        ActivityScenario.launch(MainActivity::class.java).use {
+            openFilesTab()
+            onView(withContentDescription("Scan document into this folder")).check(matches(isDisplayed()))
+            onView(withContentDescription("Create a new folder")).perform(click())
+            onView(withHint("Name")).perform(replaceText(folderName), closeSoftKeyboard())
+            onView(withText("Save")).perform(click())
+            onView(withText(folderName)).perform(click())
+            onView(withContentDescription("Go up one folder")).check(matches(isDisplayed()))
+            onView(withContentDescription("Scan document into this folder")).check(matches(isDisplayed()))
         }
     }
 
@@ -409,7 +470,6 @@ class MainActivityInstrumentedTest {
             onView(withText("Scan here")).check(matches(isDisplayed()))
             it.recreate()
             onView(withText("Scan here")).check(matches(isDisplayed()))
-            onView(withText("Back")).perform(click())
             onView(withContentDescription("Expand $folderName")).perform(click())
             onView(withText("Nested")).check(matches(isDisplayed()))
             onView(withContentDescription("Collapse $folderName")).check(matches(isDisplayed()))
