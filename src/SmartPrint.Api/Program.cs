@@ -1105,7 +1105,8 @@ shop.MapGet("/profile", async (
     UserManager<AppUser> userManager,
     CancellationToken ct) =>
 {
-    if (!TryGetTenantId(principal, out var tenantId) ||
+    if (!principal.FindAll("shop_role").Any(claim => claim.Value == "ShopOwner") ||
+        !TryGetTenantId(principal, out var tenantId) ||
         !Guid.TryParse(principal.FindFirstValue(JwtRegisteredClaimNames.Sub), out var userId))
     {
         return Results.Forbid();
@@ -1211,7 +1212,6 @@ shop.MapPut("/account", async (
     {
         user.Email = email;
         user.UserName = email;
-        user.EmailConfirmed = false;
     }
 
     var update = await userManager.UpdateAsync(user);
