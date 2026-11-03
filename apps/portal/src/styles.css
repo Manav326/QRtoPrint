@@ -846,9 +846,9 @@
 /* SmartPrint native Android shell: customer print workflow without website framing. */
 .customer-entry.smartprint-native {
   --native-bg:#f4f6fa;
-  --native-surface:rgba(255,255,255,.92);
-  --native-surface-2:rgba(255,255,255,.84);
-  --native-border:rgba(141,160,185,.52);
+  --native-surface:#F8FAFD;
+  --native-surface-2:#F0EDFF;
+  --native-border:#C8D1E0;
   --native-text:#202638;
   --native-muted:#69758a;
   --native-accent:#7258e8;
@@ -1007,6 +1007,23 @@
   border-color:var(--native-border);
   background:var(--native-surface);
 }
+.customer-entry.smartprint-native .customer-upload-mode.selected {
+  border-color:var(--native-accent);
+  background:var(--native-surface-2);
+  box-shadow:inset 0 0 0 1px var(--native-accent);
+}
+.customer-entry.smartprint-native .customer-upload-mode.selected strong {
+  color:var(--native-accent);
+}
+.customer-entry.smartprint-native .customer-upload-mode.selected::after {
+  content:"✓ Selected";
+  display:block;
+  margin-top:3px;
+  color:var(--native-accent);
+  font-size:10px;
+  font-weight:700;
+  line-height:1.2;
+}
 .customer-entry.smartprint-native .customer-upload-mode strong {
   color:var(--native-text);
   font-size:11px;
@@ -1110,11 +1127,10 @@
 .customer-entry.smartprint-native .customer-payment-boundary {
   padding:10px 0 0;
 }
-@media(prefers-color-scheme:dark) {
-  .customer-entry.smartprint-native {
+  html[data-theme="dark"] .customer-entry.smartprint-native {
     --native-bg:#0c0f16;
-    --native-surface:rgba(20,26,37,.90);
-    --native-surface-2:rgba(25,33,48,.86);
+    --native-surface:#141A25;
+    --native-surface-2:#302B54;
     --native-border:rgba(156,175,201,.24);
     --native-text:#f0f3fa;
     --native-muted:#aab4c8;
@@ -1122,23 +1138,22 @@
     --native-accent-text:#17152a;
     --native-glass-shadow:0 10px 28px rgba(0,0,0,.28),inset 0 1px 0 rgba(255,255,255,.08);
   }
-  .customer-entry.smartprint-native .customer-entry-card,
-  .customer-entry.smartprint-native .customer-upload-zone,
-  .customer-entry.smartprint-native .customer-upload-mode,
-  .customer-entry.smartprint-native .customer-choice,
-  .customer-entry.smartprint-native .customer-option-grid input[type=number],
-  .customer-entry.smartprint-native .customer-reference-field input,
-  .customer-entry.smartprint-native .customer-duplex-toggle,
-  .customer-entry.smartprint-native .customer-file-preview {
+  html[data-theme="dark"] .customer-entry.smartprint-native .customer-entry-card,
+  html[data-theme="dark"] .customer-entry.smartprint-native .customer-upload-zone,
+  html[data-theme="dark"] .customer-entry.smartprint-native .customer-upload-mode:not(.selected),
+  html[data-theme="dark"] .customer-entry.smartprint-native .customer-choice,
+  html[data-theme="dark"] .customer-entry.smartprint-native .customer-option-grid input[type=number],
+  html[data-theme="dark"] .customer-entry.smartprint-native .customer-reference-field input,
+  html[data-theme="dark"] .customer-entry.smartprint-native .customer-duplex-toggle,
+  html[data-theme="dark"] .customer-entry.smartprint-native .customer-file-preview {
     background:var(--native-surface);
     color:var(--native-text);
   }
-  .customer-entry.smartprint-native .customer-flow-error {
+  html[data-theme="dark"] .customer-entry.smartprint-native .customer-flow-error {
     background:#321f27;
     border-color:#5a303b;
     color:#ff9da5;
   }
-}
 
 
 /* Native shell copy density and compact states. */

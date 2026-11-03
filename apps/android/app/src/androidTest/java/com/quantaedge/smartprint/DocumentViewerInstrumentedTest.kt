@@ -35,8 +35,10 @@ class DocumentViewerInstrumentedTest {
 
         try {
             ActivityScenario.launch(MainActivity::class.java).use {
-                val filesTab = com.google.android.material.R.id.navigation_bar_item_small_label_view
-                onView(org.hamcrest.Matchers.allOf(withText("Files"), withId(filesTab))).perform(click())
+                onView(org.hamcrest.Matchers.allOf(
+                    withContentDescription("My Files"),
+                    androidx.test.espresso.matcher.ViewMatchers.isAssignableFrom(android.widget.LinearLayout::class.java)
+                )).perform(click())
                 onView(withText(source.name)).perform(scrollTo(), click())
 
                 onView(withText("Page 1 of 2")).check(matches(isDisplayed()))
@@ -68,8 +70,10 @@ class DocumentViewerInstrumentedTest {
 
         try {
             ActivityScenario.launch(MainActivity::class.java).use {
-                val filesTab = com.google.android.material.R.id.navigation_bar_item_small_label_view
-                onView(org.hamcrest.Matchers.allOf(withText("Files"), withId(filesTab))).perform(click())
+                onView(org.hamcrest.Matchers.allOf(
+                    withContentDescription("My Files"),
+                    androidx.test.espresso.matcher.ViewMatchers.isAssignableFrom(android.widget.LinearLayout::class.java)
+                )).perform(click())
                 onView(withText(directory.name)).perform(scrollTo(), click())
                 onView(withText(selected.name)).perform(scrollTo(), click())
 

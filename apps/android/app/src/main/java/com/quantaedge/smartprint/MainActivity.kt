@@ -130,6 +130,10 @@ class MainActivity : AppCompatActivity() {
     private var profileVisible = false
     private var profileReturnDestination = HOME
     private var librarySearchQuery = ""
+    private var librarySelectionMode = false
+    private lateinit var bottomNavigationContent: LinearLayout
+    private val bottomNavigationItemViews = linkedMapOf<Int, Triple<View, ImageView, TextView>>()
+    private var webViewThemeBootstrapInstalled = false
 
     private lateinit var importFiles: ActivityResultLauncher<Array<String>>
     private lateinit var browsePhoneDocuments: ActivityResultLauncher<Array<String>>
@@ -478,9 +482,12 @@ class MainActivity : AppCompatActivity() {
         root.addView(blurTarget, FrameLayout.LayoutParams(-1, -1))
 
         toolbar = MaterialToolbar(this).apply {
-            title = "Home"
+            title = "smartprint"
+            subtitle = "BY QUANTAEDGE · HOME"
             setTitleTextColor(getColor(R.color.qp_text))
+            setSubtitleTextColor(getColor(R.color.qp_muted))
             setTitleTextAppearance(this@MainActivity, R.style.TextAppearance_SmartPrint_Toolbar)
+            setSubtitleTextAppearance(this@MainActivity, R.style.TextAppearance_SmartPrint_ToolbarSubtitle)
             setBackgroundColor(android.graphics.Color.TRANSPARENT)
             elevation = 0f
             menu.add(Menu.NONE, SWITCH_SHOP, Menu.NONE, "Manage connected shop").apply {
@@ -573,9 +580,24 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
+        if (!useRail) {
+            bottomNavigationContent = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER
+                setPadding(dp(4), 0, dp(4), 0)
+                clipChildren = false
+                clipToPadding = false
+            }
+            bottomNavigationItemViews.clear()
+            addBottomNavigationItem(HOME, "Home", "Home", R.drawable.ic_nav_home)
+            addBottomNavigationItem(FILES, "Files", "My Files", R.drawable.ic_nav_files)
+            addBottomNavigationItem(SCAN_PRINT, "Print", "Print at a shop", R.drawable.ic_nav_scan_print)
+            addBottomNavigationItem(ACTIVITY, "Activity", "Activity", R.drawable.ic_nav_activity)
+            updateBottomNavigationSelection(navigation.selectedItemId)
+        }
         bottomGlass = BlurView(this).apply {
             foreground = SmartPrintGlass.edge(this@MainActivity)
-            if (!useRail) addView(navigation, FrameLayout.LayoutParams(-1, dp(66), Gravity.BOTTOM))
+            if (!useRail) addView(bottomNavigationContent, FrameLayout.LayoutParams(-1, dp(66), Gravity.BOTTOM))
         }
         if (useRail) {
             root.addView(navigation, FrameLayout.LayoutParams(dp(80), -1, Gravity.START or Gravity.TOP).apply {
@@ -596,12 +618,78 @@ class MainActivity : AppCompatActivity() {
         ViewCompat.requestApplyInsets(root)
     }
 
+    private fun addBottomNavigationItem(id: Int, label: String, description: String, iconResource: Int) {
+        val item = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER
+            setPadding(dp(11), 0, dp(11), 0)
+            minimumWidth = dp(48)
+            minimumHeight = dp(48)
+            contentDescription = description
+            isClickable = true
+            isFocusable = true
+            val selectable = android.util.TypedValue()
+            if (this@MainActivity.theme.resolveAttribute(android.R.attr.selectableItemBackgroundBorderless, selectable, true)) {
+                foreground = this@MainActivity.getDrawable(selectable.resourceId)
+            }
+            setOnClickListener { navigation.selectedItemId = id }
+        }
+        val icon = ImageView(this).apply {
+            setImageResource(iconResource)
+            scaleType = ImageView.ScaleType.CENTER_INSIDE
+        }
+        val title = TextView(this).apply {
+            text = label
+            textSize = 11f
+            includeFontPadding = false
+            setTypeface(typeface, android.graphics.Typeface.BOLD)
+            setPadding(dp(7), 0, 0, 0)
+            maxLines = 1
+        }
+        item.addView(icon, LinearLayout.LayoutParams(dp(21), dp(21)))
+        item.addView(title, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+        bottomNavigationItemViews[id] = Triple(item, icon, title)
+        bottomNavigationContent.addView(item, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, dp(52)))
+    }
+
+    private fun updateBottomNavigationSelection(selectedId: Int) {
+        if (!::bottomNavigationContent.isInitialized) return
+        val showEveryLabel = ResponsiveLayoutPolicy.showLabelsOnAllBottomItems(resources.configuration.screenWidthDp)
+        bottomNavigationItemViews.forEach { (id, views) ->
+            val (item, icon, title) = views
+            val selected = id == selectedId
+            item.isSelected = selected
+            item.background = if (selected) roundedDrawable(getColor(R.color.qp_soft), dp(16))
+                else android.graphics.drawable.ColorDrawable(android.graphics.Color.TRANSPARENT)
+            icon.imageTintList = ColorStateList.valueOf(getColor(if (selected) R.color.qp_primary else R.color.qp_muted))
+            title.visibility = if (showEveryLabel || selected) View.VISIBLE else View.GONE
+            title.setTextColor(getColor(if (selected) R.color.qp_primary else R.color.qp_muted))
+        }
+    }
+
+    private fun setToolbarPage(title: String) {
+        toolbar.title = "smartprint"
+        toolbar.subtitle = "BY QUANTAEDGE  ·  " + title.trim().uppercase(Locale.ROOT)
+    }
+
+    private fun setToolbarBackAction(description: String, action: () -> Unit) {
+        toolbar.navigationIcon = getDrawable(R.drawable.ic_arrow_back)
+        toolbar.setNavigationIconTint(getColor(R.color.qp_text))
+        toolbar.navigationContentDescription = description
+        toolbar.setNavigationOnClickListener { action() }
+    }
+
+    private fun clearLibrarySelection() {
+        librarySelectionMode = false
+        selectedFilePaths.clear()
+    }
+
     private fun setBottomNavigationVisible(visible: Boolean) {
         val visibility = if (visible) View.VISIBLE else View.GONE
         val rail = navigation is NavigationRailView
-        navigation.visibility = visibility
-        if (::bottomGlass.isInitialized) bottomGlass.visibility =
-            if (visible && !rail) View.VISIBLE else View.GONE
+        navigation.visibility = if (rail) visibility else View.GONE
+        if (::bottomNavigationContent.isInitialized) bottomNavigationContent.visibility = if (visible && !rail) View.VISIBLE else View.GONE
+        if (::bottomGlass.isInitialized) bottomGlass.visibility = if (visible && !rail) View.VISIBLE else View.GONE
         if (::content.isInitialized) content.setPadding(
             if (visible && rail) dp(80) else 0,
             dp(64),
@@ -612,8 +700,9 @@ class MainActivity : AppCompatActivity() {
 
     private fun resetToolbar(title: String) {
         profileVisible = false
-        toolbar.title = title
+        setToolbarPage(title)
         toolbar.navigationIcon = null
+        toolbar.navigationContentDescription = null
         toolbar.setNavigationOnClickListener(null)
         toolbar.menu.findItem(SWITCH_SHOP)?.isVisible = portalUrl != null
         toolbar.menu.findItem(OPEN_WITH)?.isVisible = false
@@ -622,12 +711,12 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun showProfile() {
+        clearLibrarySelection()
         pickerMode = false
         if (!profileVisible) profileReturnDestination = navigation.selectedItemId
         profileVisible = true
-        toolbar.title = "Account"
-        toolbar.setNavigationIcon(android.R.drawable.ic_media_previous)
-        toolbar.setNavigationOnClickListener { returnFromProfile() }
+        setToolbarPage("Account")
+        setToolbarBackAction("Back", ::returnFromProfile)
         accountAction.visibility = View.GONE
         setBottomNavigationVisible(false)
         content.removeAllViews()
@@ -845,9 +934,11 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun showHome() {
+        clearLibrarySelection()
         pickerMode = false
         resetToolbar("Home")
         navigation.menu.findItem(HOME).isChecked = true
+        updateBottomNavigationSelection(HOME)
         content.removeAllViews()
         content.addView(homeView(), frameParams())
     }
@@ -960,10 +1051,12 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun showScanPrint() {
+        clearLibrarySelection()
         pickerMode = false
         if (portalUrl != null) { showPrint(); return }
         resetToolbar("Print")
         navigation.menu.findItem(SCAN_PRINT).isChecked = true
+        updateBottomNavigationSelection(SCAN_PRINT)
         content.removeAllViews()
         content.addView(scanPrintView(), frameParams())
     }
@@ -972,6 +1065,7 @@ class MainActivity : AppCompatActivity() {
         val column = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.CENTER_HORIZONTAL
+            setBackgroundColor(android.graphics.Color.TRANSPARENT)
             setPadding(dp(24), dp(34), dp(24), dp(28))
         }
         val icon = ImageView(this).apply {
@@ -998,13 +1092,19 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun showActivity() {
+        clearLibrarySelection()
         pickerMode = false
         resetToolbar("Activity")
         navigation.menu.findItem(ACTIVITY).isChecked = true
+        updateBottomNavigationSelection(ACTIVITY)
         content.removeAllViews()
-        val scroll = ScrollView(this).apply { isFillViewport = true }
+        val scroll = ScrollView(this).apply {
+            isFillViewport = true
+            setBackgroundColor(android.graphics.Color.TRANSPARENT)
+        }
         val column = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
+            setBackgroundColor(android.graphics.Color.TRANSPARENT)
             setPadding(dp(18), dp(16), dp(18), dp(24))
         }
         scroll.addView(column)
@@ -1140,6 +1240,7 @@ class MainActivity : AppCompatActivity() {
         editingPdf = null
         resetToolbar("Files")
         navigation.menu.findItem(FILES).isChecked = true
+        updateBottomNavigationSelection(FILES)
         content.removeAllViews()
         content.addView(libraryView(false), frameParams())
     }
@@ -1147,28 +1248,30 @@ class MainActivity : AppCompatActivity() {
     private fun showPicker(resetPath: Boolean = true) {
         pickerMode = true
         if (resetPath) pickerPath = ""
-        toolbar.title = when {
+        setToolbarPage(when {
             fileChooserSelectFolders -> "Select folders"
             fileChooserAllowsMultiple -> "Select files"
             else -> "Select file"
-        }
-        toolbar.setNavigationIcon(android.R.drawable.ic_media_previous)
-        toolbar.setNavigationOnClickListener { cancelPicker() }
+        })
+        setToolbarBackAction("Back", ::cancelPicker)
         setBottomNavigationVisible(false)
         content.removeAllViews()
         content.addView(libraryView(true), frameParams())
     }
 
     private fun showPrint() {
+        clearLibrarySelection()
         pickerMode = false
         profileVisible = false
         toolbar.menu.findItem(SWITCH_SHOP)?.isVisible = portalUrl != null
-        toolbar.title = "Print"
+        setToolbarPage("Print")
         toolbar.navigationIcon = null
+        toolbar.navigationContentDescription = null
         toolbar.setNavigationOnClickListener(null)
         accountAction.visibility = View.VISIBLE
         setBottomNavigationVisible(true)
         navigation.menu.findItem(SCAN_PRINT).isChecked = true
+        updateBottomNavigationSelection(SCAN_PRINT)
         content.removeAllViews()
         val view = ensureWebView()
         (view.parent as? ViewGroup)?.removeView(view)
@@ -1261,6 +1364,13 @@ class MainActivity : AppCompatActivity() {
             11, R.color.qp_muted, false
         ).apply { setPadding(0, dp(2), 0, 0) })
         heading.addView(copy, LinearLayout.LayoutParams(0, -2, 1f))
+        if (!isPicker) {
+            heading.addView(button(if (librarySelectionMode) "Done" else "Select", false).apply {
+                minHeight = dp(36)
+                contentDescription = if (librarySelectionMode) "Finish file selection" else "Enter file selection mode"
+                setOnClickListener { librarySelectionMode = !librarySelectionMode; showFiles() }
+            }, LinearLayout.LayoutParams(-2, dp(36)).apply { marginStart = dp(8) })
+        }
         column.addView(heading, linearParams().apply { bottomMargin = dp(9) })
         if (isPicker && !fileChooserSelectFolders) {
             val sourceRow = LinearLayout(this).apply {
@@ -1395,11 +1505,23 @@ class MainActivity : AppCompatActivity() {
             }
             selectionRow.addView(text("${chooserFolderSelection.size} folders selected", 12, R.color.qp_text, true),
                 LinearLayout.LayoutParams(0, -2, 1f))
+            val visibleFolders = visibleEntries.filter { it.isDirectory }
+            val allVisibleFoldersSelected = visibleFolders.isNotEmpty() && visibleFolders.all { chooserSelectedFolderPaths.contains(it.canonicalPath) }
+            selectionRow.addView(button(if (allVisibleFoldersSelected) "Deselect all" else "Select all", false).apply {
+                minHeight = dp(34)
+                setOnClickListener {
+                    visibleFolders.forEach { folder ->
+                        if (allVisibleFoldersSelected) chooserSelectedFolderPaths.remove(folder.canonicalPath)
+                        else chooserSelectedFolderPaths.add(folder.canonicalPath)
+                    }
+                    refreshLibrary()
+                }
+            })
             selectionRow.addView(button("Clear", false).apply {
                 minHeight = dp(34)
                 isEnabled = chooserFolderSelection.isNotEmpty()
                 setOnClickListener { chooserSelectedFolderPaths.clear(); refreshLibrary() }
-            })
+            }, LinearLayout.LayoutParams(-2, dp(34)).apply { marginStart = dp(5) })
             selectionRow.addView(button("Add folders", true).apply {
                 minHeight = dp(34)
                 isEnabled = chooserFolderSelection.isNotEmpty()
@@ -1415,11 +1537,23 @@ class MainActivity : AppCompatActivity() {
             }
             selectionRow.addView(text("${chooserSelection.size} selected", 12, R.color.qp_text, true),
                 LinearLayout.LayoutParams(0, -2, 1f))
+            val selectablePickerFiles = visibleEntries.filter { !it.isDirectory && DocumentNamePolicy.isPrintable(it.name, it.length()) }
+            val allVisiblePickerFilesSelected = selectablePickerFiles.isNotEmpty() && selectablePickerFiles.all { chooserSelectedFilePaths.contains(it.canonicalPath) }
+            selectionRow.addView(button(if (allVisiblePickerFilesSelected) "Deselect all" else "Select all", false).apply {
+                minHeight = dp(34)
+                setOnClickListener {
+                    selectablePickerFiles.forEach { file ->
+                        if (allVisiblePickerFilesSelected) chooserSelectedFilePaths.remove(file.canonicalPath)
+                        else chooserSelectedFilePaths.add(file.canonicalPath)
+                    }
+                    refreshLibrary()
+                }
+            })
             selectionRow.addView(button("Clear", false).apply {
                 minHeight = dp(34)
                 isEnabled = chooserSelection.isNotEmpty()
                 setOnClickListener { chooserSelectedFilePaths.clear(); refreshLibrary() }
-            })
+            }, LinearLayout.LayoutParams(-2, dp(34)).apply { marginStart = dp(5) })
             selectionRow.addView(button("Attach", true).apply {
                 minHeight = dp(34)
                 isEnabled = chooserSelection.isNotEmpty() &&
@@ -1430,32 +1564,50 @@ class MainActivity : AppCompatActivity() {
             }, LinearLayout.LayoutParams(-2, dp(34)).apply { marginStart = dp(6) })
             column.addView(selectionRow, linearParams().apply { bottomMargin = dp(10) })
         }
-        if (!isPicker && selectedHere.isNotEmpty()) {
-            val selectionRow = LinearLayout(this).apply {
-                orientation = LinearLayout.HORIZONTAL
-                gravity = Gravity.CENTER_VERTICAL
-                setPadding(dp(12), dp(8), dp(12), dp(8))
-                background = roundedDrawable(getColor(R.color.qp_soft), dp(12))
+        val selectableCurrentFiles = visibleEntries.filter { !it.isDirectory && it.isFile }
+        val allCurrentFilesSelected = selectableCurrentFiles.isNotEmpty() && selectableCurrentFiles.all { selectedFilePaths.contains(it.canonicalPath) }
+        if (!isPicker && (librarySelectionMode || selectedHere.isNotEmpty())) {
+            val selectionControls = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL
+                setPadding(dp(10), dp(7), dp(10), dp(7)); background = roundedDrawable(getColor(R.color.qp_soft), dp(12))
             }
-            selectionRow.addView(text("${selectedHere.size} selected", 12, R.color.qp_text, true),
-                LinearLayout.LayoutParams(0, -2, 1f))
-            selectionRow.addView(button("ZIP", false).apply {
-                minHeight = dp(34)
-                setOnClickListener { exportSelected(selectedHere) }
-            })
-            val supportedBatch = selectedHere.size in 2..20 &&
-                selectedHere.all {
-                    it.extension.lowercase(Locale.ROOT) in setOf("pdf", "jpg", "jpeg", "png") &&
-                        it.length() in 1..(20L * 1024L * 1024L)
-                } && selectedHere.sumOf { it.length() } <= DocumentBatchComposer.MAX_SOURCE_BYTES
-            selectionRow.addView(button("PDF", true).apply {
-                minHeight = dp(34)
-                isEnabled = supportedBatch
-                alpha = if (supportedBatch) 1f else 0.45f
-                setOnClickListener { preparePrintBatch(selectedHere) }
-            }, LinearLayout.LayoutParams(-2, dp(34)).apply { marginStart = dp(6) })
-            column.addView(selectionRow, linearParams().apply { bottomMargin = dp(10) })
-            column.addView(text("PDF merge rasterizes pages.", 10, R.color.qp_muted, false)
+            selectionControls.addView(text("${selectedHere.size} selected", 12, R.color.qp_text, true), LinearLayout.LayoutParams(0, -2, 1f))
+            if (librarySelectionMode) {
+                selectionControls.addView(button(if (allCurrentFilesSelected) "Deselect all" else "Select all", false).apply {
+                    minHeight = dp(34)
+                    setOnClickListener {
+                        selectableCurrentFiles.forEach { file ->
+                            if (allCurrentFilesSelected) selectedFilePaths.remove(file.canonicalPath) else selectedFilePaths.add(file.canonicalPath)
+                        }
+                        refreshLibrary()
+                    }
+                })
+                selectionControls.addView(button("Clear", false).apply {
+                    minHeight = dp(34); isEnabled = selectedHere.isNotEmpty()
+                    setOnClickListener { selectedFilePaths.clear(); refreshLibrary() }
+                }, LinearLayout.LayoutParams(-2, dp(34)).apply { marginStart = dp(5) })
+            } else {
+                selectionControls.addView(button("Edit", false).apply { minHeight = dp(34); setOnClickListener { librarySelectionMode = true; showFiles() } })
+                selectionControls.addView(button("Clear", false).apply {
+                    minHeight = dp(34); setOnClickListener { selectedFilePaths.clear(); showFiles() }
+                }, LinearLayout.LayoutParams(-2, dp(34)).apply { marginStart = dp(5) })
+            }
+            column.addView(selectionControls, linearParams().apply { bottomMargin = dp(7) })
+        }
+        if (!isPicker && selectedHere.isNotEmpty()) {
+            val selectionActions = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
+            selectionActions.addView(button("ZIP", false).apply {
+                minHeight = dp(38); setOnClickListener { exportSelected(selectedHere); clearLibrarySelection(); showFiles() }
+            }, LinearLayout.LayoutParams(0, dp(38), 1f))
+            val supportedBatch = selectedHere.size in 2..20 && selectedHere.all {
+                it.extension.lowercase(Locale.ROOT) in setOf("pdf", "jpg", "jpeg", "png") && it.length() in 1..(20L * 1024L * 1024L)
+            } && selectedHere.sumOf { it.length() } <= DocumentBatchComposer.MAX_SOURCE_BYTES
+            selectionActions.addView(button("Combine into PDF", true).apply {
+                minHeight = dp(38); isEnabled = supportedBatch; alpha = if (supportedBatch) 1f else 0.45f
+                setOnClickListener { preparePrintBatch(selectedHere); clearLibrarySelection(); showFiles() }
+            }, LinearLayout.LayoutParams(0, dp(38), 1f).apply { marginStart = dp(7) })
+            column.addView(selectionActions, linearParams().apply { bottomMargin = dp(5) })
+            column.addView(text("Combining rasterizes PDF pages; originals stay unchanged.", 10, R.color.qp_muted, false)
                 .apply { setPadding(dp(2), 0, 0, dp(6)) })
         }
 
@@ -1546,14 +1698,15 @@ class MainActivity : AppCompatActivity() {
                 }
             }
             row.addView(chevron, LinearLayout.LayoutParams(dp(38), dp(40)))
-        } else if (isPicker && fileChooserSelectFolders) {
-            val selected = CheckBox(this).apply {
-                isChecked = chooserSelectedFolderPaths.contains(file.canonicalPath)
-                contentDescription = "Select folder " + file.name
-                buttonTintList = ColorStateList.valueOf(getColor(R.color.qp_primary))
-                setOnCheckedChangeListener { _, checked -> setChooserFolderSelected(file, checked) }
+            if (isPicker && fileChooserSelectFolders) {
+                val selected = CheckBox(this).apply {
+                    isChecked = chooserSelectedFolderPaths.contains(file.canonicalPath)
+                    contentDescription = "Select folder " + file.name
+                    buttonTintList = ColorStateList.valueOf(getColor(R.color.qp_primary))
+                    setOnCheckedChangeListener { _, checked -> setChooserFolderSelected(file, checked) }
+                }
+                row.addView(selected, LinearLayout.LayoutParams(dp(40), dp(40)))
             }
-            row.addView(selected, LinearLayout.LayoutParams(dp(40), dp(40)))
         } else if (isPicker && fileChooserAllowsMultiple) {
             val selected = CheckBox(this).apply {
                 isChecked = chooserSelectedFilePaths.contains(file.canonicalPath)
@@ -1561,7 +1714,7 @@ class MainActivity : AppCompatActivity() {
                 setOnCheckedChangeListener { _, checked -> setChooserFileSelected(file, checked) }
             }
             row.addView(selected, LinearLayout.LayoutParams(dp(40), dp(40)))
-        } else if (!isPicker && showActions) {
+        } else if (!isPicker && showActions && librarySelectionMode) {
             val selected = CheckBox(this).apply {
                 isChecked = selectedFilePaths.contains(file.canonicalPath)
                 contentDescription = "Select " + file.name
@@ -1574,7 +1727,7 @@ class MainActivity : AppCompatActivity() {
             row.addView(selected, LinearLayout.LayoutParams(dp(38), dp(40)))
         }
 
-        if (!isPicker && showActions) {
+        if (!isPicker && showActions && !librarySelectionMode) {
             val more = ImageView(this).apply {
                 setImageResource(R.drawable.ic_more_vertical)
                 imageTintList = ColorStateList.valueOf(getColor(R.color.qp_muted))
@@ -1588,6 +1741,11 @@ class MainActivity : AppCompatActivity() {
         }
         row.setOnClickListener {
             when {
+                !isPicker && showActions && librarySelectionMode && file.isFile -> {
+                    val path = file.canonicalPath
+                    if (!selectedFilePaths.add(path)) selectedFilePaths.remove(path)
+                    refreshLibrary()
+                }
                 file.isDirectory && isPicker && fileChooserSelectFolders ->
                     setChooserFolderSelected(file, !chooserSelectedFolderPaths.contains(file.canonicalPath))
                 file.isDirectory -> {
@@ -1601,9 +1759,9 @@ class MainActivity : AppCompatActivity() {
                 else -> openDocument(file)
             }
         }
-        if (!isPicker && showActions && file.isDirectory) {
+        if (!isPicker && showActions && file.isDirectory && !librarySelectionMode) {
             row.setOnLongClickListener { showEntryMenu(row, file); true }
-        } else if (!isPicker && showActions) {
+        } else if (!isPicker && showActions && !librarySelectionMode) {
             row.setOnLongClickListener {
                 val clip = ClipData.newPlainText("SmartPrint item order", file.name)
                 row.startDragAndDrop(clip, View.DragShadowBuilder(row), file.canonicalPath, 0)
@@ -1769,9 +1927,9 @@ class MainActivity : AppCompatActivity() {
 
     private fun renderPdfEditor(file: File, pages: MutableList<PdfPageEdit>) {
         pickerMode = false
-        toolbar.title = "Edit PDF"
-        toolbar.setNavigationIcon(android.R.drawable.ic_media_previous)
-        toolbar.setNavigationOnClickListener { showFiles() }
+        clearLibrarySelection()
+        setToolbarPage("Edit PDF")
+        setToolbarBackAction("Back to My Files") { showFiles() }
         setBottomNavigationVisible(false)
         content.removeAllViews()
 
@@ -2080,6 +2238,19 @@ class MainActivity : AppCompatActivity() {
         // The bridge is pinned to the configured service origin for this build.
         val trustedPage = Uri.parse(BuildConfig.SERVICE_BASE_URL)
         val trustedOrigin = "${trustedPage.scheme}://${trustedPage.authority}"
+        if (WebViewFeature.isFeatureSupported(WebViewFeature.DOCUMENT_START_SCRIPT)) {
+            val theme = SmartPrintThemePreference.read(this).storedValue
+            val bootstrap = """
+                (() => {
+                  const selected = '$theme';
+                  try { localStorage.setItem('qrtoprint.theme', selected); } catch {}
+                  document.documentElement.dataset.theme = selected;
+                  document.documentElement.style.colorScheme = selected;
+                })();
+            """.trimIndent()
+            WebViewCompat.addDocumentStartJavaScript(view, bootstrap, setOf(trustedOrigin))
+            webViewThemeBootstrapInstalled = true
+        }
         if (trustedPage.scheme in setOf("https", "http") && trustedPage.host != null &&
             WebViewFeature.isFeatureSupported(WebViewFeature.WEB_MESSAGE_LISTENER)) {
             WebViewCompat.addWebMessageListener(
@@ -2186,7 +2357,14 @@ class MainActivity : AppCompatActivity() {
                     loadedUrl.port != trustedPage.port) return
 
                 val selectedTheme = SmartPrintThemePreference.read(this@MainActivity).storedValue
-                val script = """
+                val script = if (webViewThemeBootstrapInstalled) """
+                    (() => {
+                      const selected = '$selectedTheme';
+                      try { localStorage.setItem('qrtoprint.theme', selected); } catch {}
+                      document.documentElement.dataset.theme = selected;
+                      document.documentElement.style.colorScheme = selected;
+                    })();
+                """.trimIndent() else """
                     (() => {
                       const selected = '$selectedTheme';
                       try {
@@ -2458,16 +2636,53 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    private fun showShopWifiVerificationResult(title: String, detail: String, verified: Boolean) {
+        val (dialog, root) = sheetRoot(title)
+        val iconFrame = FrameLayout(this).apply { background = roundedDrawable(getColor(R.color.qp_soft), dp(22)) }
+        val statusIcon = ImageView(this).apply {
+            setImageResource(if (verified) R.drawable.ic_wifi_verified else R.drawable.ic_wifi)
+            imageTintList = ColorStateList.valueOf(getColor(if (verified) R.color.qp_primary else R.color.qp_danger))
+            contentDescription = if (verified) "Wi-Fi verified" else "Wi-Fi check not completed"
+        }
+        iconFrame.addView(statusIcon, FrameLayout.LayoutParams(dp(30), dp(30), Gravity.CENTER))
+        root.addView(iconFrame, LinearLayout.LayoutParams(dp(62), dp(62)).apply {
+            gravity = Gravity.CENTER_HORIZONTAL; topMargin = dp(2); bottomMargin = dp(13)
+        })
+        root.addView(text(detail, 13, R.color.qp_text, false).apply {
+            gravity = Gravity.CENTER; textAlignment = View.TEXT_ALIGNMENT_CENTER
+            setPadding(dp(4), 0, dp(4), dp(4))
+        }, linearParams())
+        root.addView(text(if (verified) "Your saved shop and files are unchanged." else "Your saved shop and files have not been changed.",
+            11, R.color.qp_muted, false).apply {
+            gravity = Gravity.CENTER; textAlignment = View.TEXT_ALIGNMENT_CENTER
+            setPadding(dp(4), dp(9), dp(4), dp(2))
+        }, linearParams())
+        root.addView(button("Done", true).apply {
+            minHeight = dp(46); setOnClickListener { dialog.dismiss() }
+        }, linearParams().apply { topMargin = dp(15) })
+        dialog.setCancelable(true)
+        dialog.show()
+    }
+
     private fun verifyShopPhoneConnection(link: LocalPhoneTestQrLink) {
-        val progress = AlertDialog.Builder(this)
-            .setTitle("Checking shop Wi-Fi")
-            .setMessage("Reaching the shop computer on this network…")
-            .setView(android.widget.ProgressBar(this).apply {
-                isIndeterminate = true
-                setPadding(dp(24), dp(16), dp(24), dp(16))
-            })
-            .setCancelable(false)
-            .create()
+        val (progress, progressRoot) = sheetRoot(
+            "Checking shop Wi-Fi",
+            "Confirming that this phone can reach the selected shop computer."
+        )
+        val progressRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL
+            setPadding(0, dp(3), 0, dp(6))
+        }
+        val spinner = android.widget.ProgressBar(this).apply {
+            isIndeterminate = true
+            indeterminateTintList = ColorStateList.valueOf(getColor(R.color.qp_primary))
+        }
+        progressRow.addView(spinner, LinearLayout.LayoutParams(dp(28), dp(28)))
+        progressRow.addView(text("Checking this network…", 12, R.color.qp_muted, false).apply {
+            setPadding(dp(12), 0, 0, 0)
+        }, LinearLayout.LayoutParams(0, -2, 1f))
+        progressRoot.addView(progressRow, linearParams().apply { topMargin = dp(10) })
+        progress.setCancelable(false)
         progress.show()
 
         Thread {
@@ -2512,11 +2727,7 @@ class MainActivity : AppCompatActivity() {
             runOnUiThread {
                 if (isFinishing || isDestroyed) return@runOnUiThread
                 progress.dismiss()
-                AlertDialog.Builder(this@MainActivity)
-                    .setTitle(result.first)
-                    .setMessage(result.second)
-                    .setPositiveButton("Done", null)
-                    .show()
+                showShopWifiVerificationResult(result.first, result.second, result.first == "Shop Wi-Fi verified")
             }
         }.start()
     }
@@ -2870,10 +3081,9 @@ class MainActivity : AppCompatActivity() {
         viewingDocument = file
         pickerMode = false
         profileVisible = false
-        toolbar.title = file.name
-        toolbar.setNavigationIcon(android.R.drawable.ic_media_previous)
-        toolbar.navigationContentDescription = "Back to My Files"
-        toolbar.setNavigationOnClickListener { closeDocumentViewer() }
+        clearLibrarySelection()
+        setToolbarPage(file.name)
+        setToolbarBackAction("Back to My Files", ::closeDocumentViewer)
         toolbar.menu.findItem(SWITCH_SHOP)?.isVisible = false
         toolbar.menu.findItem(OPEN_WITH)?.isVisible = true
         accountAction.visibility = View.GONE
@@ -2895,7 +3105,7 @@ class MainActivity : AppCompatActivity() {
         }
         val reader = SmartPrintDocumentViewer(this, file, images, startPosition) { current ->
             viewingDocument = current
-            toolbar.title = current.name
+            setToolbarPage(current.name)
         }
         documentViewer = reader
         content.addView(reader, frameParams())
@@ -2981,9 +3191,10 @@ class MainActivity : AppCompatActivity() {
     private fun parent(path: String) = path.substringBeforeLast('/', "").trim('/')
     private fun card() = MaterialCardView(this).apply {
         radius = dp(21).toFloat()
-        cardElevation = dp(4).toFloat()
+        cardElevation = dp(2).toFloat()
         strokeWidth = dp(1)
         strokeColor = getColor(R.color.qp_glass_border)
+        rippleColor = ColorStateList.valueOf(android.graphics.Color.TRANSPARENT)
         setCardBackgroundColor(getColor(R.color.qp_glass_card))
         useCompatPadding = false
     }
