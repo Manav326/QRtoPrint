@@ -5,6 +5,33 @@ import { readDarkModePreference } from "../src/ui-preferences.ts";
 
 const read = (path: string) => readFileSync(new URL(path, import.meta.url), "utf8");
 
+
+test("customer copy inputs capture event values before scheduling React state updates", () => {
+  const app = read("../src/App.tsx");
+  const copyLabel = app.match(/<label className="customer-folder-copies">[\\s\\S]*?<\\/label>/)?.[0];
+  assert.ok(copyLabel, "The customer Copies input must remain present.");
+
+  const changeHandler = copyLabel.match(/onChange=\\{event => \\{([\\s\\S]*?)\\}\\}/)?.[1];
+  const blurHandler = copyLabel.match(/onBlur=\\{event => \\{([\\s\\S]*?)\\}\\}/)?.[1];
+  assert.ok(changeHandler, "The Copies change handler must capture its value synchronously.");
+  assert.ok(blurHandler, "The Copies blur handler must capture its value synchronously.");
+
+  for (const [name, handler] of [["change", changeHandler], ["blur", blurHandler]] as const) {
+    const captureIndex = handler.indexOf("const copies = event.currentTarget.value");
+    const updateIndex = handler.indexOf("setFileSettings(");
+    assert.ok(captureIndex >= 0 && updateIndex > captureIndex,
+      `The Copies ${name} handler must read currentTarget before scheduling the state update.`);
+    assert.doesNotMatch(handler, /setFileSettings\\([\\s\\S]*event\\.currentTarget/,
+      `The Copies ${name} handler must not read currentTarget inside a state updater.`);
+  }
+});
+
+test("platform operational checkbox captures its event value before scheduling state", () => {
+  const source = read("../src/PlatformOperationsSection.tsx");
+  assert.match(source, /const checked = event\\.target\\.checked;[\\s\\S]*?allowPaidJobClaimsWhenSuspended: checked/);
+  assert.doesNotMatch(source, /allowPaidJobClaimsWhenSuspended: event\\.target\\.checked/);
+});
+
 test("first web visit is light and saved selection is restored before rendering", () => {
   const html = read("../index.html");
   const desktopHtml = read("../../desktop/index.html");

@@ -136,7 +136,10 @@ export default function PlatformOperationsSection({ tokens }: { tokens: AuthToke
             </div>
             <label className="platform-ops-toggle">
               <input type="checkbox" checked={draft.allowPaidJobClaimsWhenSuspended}
-                onChange={event => setDraft(current => current ? { ...current, allowPaidJobClaimsWhenSuspended: event.target.checked } : current)}/>
+                onChange={event => {
+                  const checked = event.target.checked;
+                  setDraft(current => current ? { ...current, allowPaidJobClaimsWhenSuspended: checked } : current);
+                }}/>
               <span><strong>Allow already-paid jobs to continue during suspension</strong><small>Only jobs created and payment-verified before the latest suspension can be claimed. New orders and post-suspension payments remain blocked.</small></span>
             </label>
             <div className="platform-ops-save-row">
