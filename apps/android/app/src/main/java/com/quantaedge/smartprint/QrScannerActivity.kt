@@ -52,6 +52,7 @@ import java.util.concurrent.atomic.AtomicBoolean
 class QrScannerActivity : AppCompatActivity() {
     companion object {
         const val EXTRA_RAW_VALUE = "qrtoprint.qr.raw_value"
+        const val EXTRA_SCAN_PURPOSE = "smartprint.qr.scan_purpose"
     }
 
     private lateinit var permissionLauncher: ActivityResultLauncher<String>
@@ -61,6 +62,7 @@ class QrScannerActivity : AppCompatActivity() {
     private lateinit var statusText: TextView
     private lateinit var torchButton: MaterialButton
     private lateinit var scanner: BarcodeScanner
+    private lateinit var scanPurpose: QrScanPurpose
     private val analyzerExecutor = Executors.newSingleThreadExecutor()
     private val hasReturnedResult = AtomicBoolean(false)
 
@@ -74,6 +76,7 @@ class QrScannerActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         SmartPrintThemePreference.apply(this)
         super.onCreate(savedInstanceState)
+        scanPurpose = QrScanPurpose.fromWireValue(intent.getStringExtra(EXTRA_SCAN_PURPOSE))
         WindowCompat.setDecorFitsSystemWindows(window, false)
         window.statusBarColor = getColor(R.color.qp_surface)
         window.navigationBarColor = getColor(R.color.qp_surface)
@@ -134,8 +137,18 @@ class QrScannerActivity : AppCompatActivity() {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(8), 0, 0, 0)
         }
-        titleColumn.addView(label("SCAN SHOP QR", 9, getColor(R.color.qp_primary), true))
-        titleColumn.addView(label("Scan QR code", 18, getColor(R.color.qp_text), true))
+        titleColumn.addView(label(scanPurpose.eyebrow, 9, getColor(R.color.qp_primary), true))
+        titleColumn.addView(label(scanPurpose.title, 18, getColor(R.color.qp_text), true))
+        titleColumn.addView(label(
+            scanPurpose.instruction,
+            11,
+            getColor(R.color.qp_muted),
+            false
+        ).apply {
+            maxLines = 2
+            ellipsize = android.text.TextUtils.TruncateAt.END
+            setPadding(0, dp(2), 0, 0)
+        })
         top.addView(titleColumn, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
         root.addView(top, LinearLayout.LayoutParams(
             ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
@@ -156,7 +169,7 @@ class QrScannerActivity : AppCompatActivity() {
         ).apply { topMargin = dp(4); bottomMargin = dp(14) })
 
         statusText = label(
-            "Align QR inside frame.",
+            scanPurpose.alignmentHint,
             13, getColor(R.color.qp_muted), false
         ).apply {
             gravity = Gravity.CENTER
@@ -242,7 +255,12 @@ class QrScannerActivity : AppCompatActivity() {
                                 }?.rawValue?.trim()
                                 if (!rawValue.isNullOrBlank() && hasReturnedResult.compareAndSet(false, true)) {
                                     runOnUiThread {
-                                        setResult(RESULT_OK, Intent().putExtra(EXTRA_RAW_VALUE, rawValue))
+                                        setResult(
+                                            RESULT_OK,
+                                            Intent()
+                                                .putExtra(EXTRA_RAW_VALUE, rawValue)
+                                                .putExtra(EXTRA_SCAN_PURPOSE, scanPurpose.wireValue)
+                                        )
                                         finish()
                                     }
                                 }
@@ -263,8 +281,11 @@ class QrScannerActivity : AppCompatActivity() {
                 val hasFlash = camera?.cameraInfo?.hasFlashUnit() == true
                 torchButton.isEnabled = hasFlash
                 if (!hasFlash) torchEnabled = false
-                statusText.text = if (hasFlash) "Align QR · Flashlight available."
-                    else "Align QR inside frame."
+                statusText.text = if (hasFlash) {
+                    scanPurpose.alignmentHint + " Flashlight available."
+                } else {
+                    scanPurpose.alignmentHint
+                }
             } catch (_: Exception) {
                 camera = null
                 statusText.text = "Camera unavailable."
