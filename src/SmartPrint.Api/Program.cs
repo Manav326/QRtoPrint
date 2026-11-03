@@ -6513,8 +6513,8 @@ publicApi.MapPost("/jobs/{jobId:guid}/quote", async (
         request.ColourMode is not ("Mono" or "Colour") ||
         (isPhotoPrint &&
             (job.PageCount != 1 || request.Copies != 1 || request.ColourMode != "Colour" ||
-             request.IsDuplex || request.PhotoSizeCode is null || request.PhotoCount is null ||
-             request.PhotoCount is < 1 or > 100)) ||
+             request.IsDuplex || request.PhotoSizeCode is not ("35x45" or "25x35" or "2x2" or "4x6") ||
+             request.PhotoCount is null || request.PhotoCount is < 1 or > 100)) ||
         (!isPhotoPrint && (request.PhotoSizeCode is not null || request.PhotoCount is not null)))
     {
         return Results.ValidationProblem(new Dictionary<string, string[]>
