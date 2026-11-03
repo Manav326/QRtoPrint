@@ -306,6 +306,15 @@ async function exerciseWorkspaceSections(page, route, viewport, themeLabel) {
     let currentMockOwnerEmail = "owner@example.invalid";
     await page.route("**/api/v1/shop/account", async request => {
       const submitted = request.request().postDataJSON();
+      accountRequests.push(submitted);
+      if (submitted.currentPassword === "wrong-password") {
+        await request.fulfill({
+          status: 400,
+          contentType: "application/json",
+          body: JSON.stringify({ errors: { currentPassword: ["The current password is incorrect."] } })
+        });
+        return;
+      }
       const emailChanged = submitted.email.toLowerCase() !== currentMockOwnerEmail.toLowerCase();
       currentMockOwnerEmail = submitted.email;
       await request.fulfill({
@@ -317,7 +326,6 @@ async function exerciseWorkspaceSections(page, route, viewport, themeLabel) {
           emailChanged
         })
       });
-      accountRequests.push(submitted);
     });
 
     await openAccountMenu();
@@ -334,12 +342,21 @@ async function exerciseWorkspaceSections(page, route, viewport, themeLabel) {
     await page.locator("#shop-account-menu").getByRole("button", { name: "Personal details", exact: true }).click();
     await personalDetails.waitFor({ state: "visible" });
     await personalDetails.getByLabel("Sign-in email").fill("updated-owner@example.invalid");
+    await personalDetails.getByLabel("Current password").fill("wrong-password");
+    await personalDetails.getByRole("button", { name: "Save personal details" }).click();
+    await personalDetails.locator(".account-edit-error").waitFor({ state: "visible" });
+    assert.equal(await personalDetails.isVisible(), true,
+      "A wrong current password must not close the personal details editor.");
+    assert.equal(currentMockOwnerEmail, "owner@example.invalid",
+      "A failed password check must not change the sign-in email.");
+    assert.equal(accountRequests[1]?.currentPassword, "wrong-password");
+
     await personalDetails.getByLabel("Current password").fill("E2e-Current-Password-2026!");
     await personalDetails.getByRole("button", { name: "Save personal details" }).click();
     await personalDetails.waitFor({ state: "hidden" });
-    assert.equal(accountRequests[1]?.currentPassword, "E2e-Current-Password-2026!",
+    assert.equal(accountRequests[2]?.currentPassword, "E2e-Current-Password-2026!",
       "An email change must include the current password.");
-    results.push({ check: `${route.label} / account / personal name and email update / ${themeLabel} / ${viewport.width}px`, passed: true });
+    results.push({ check: `${route.label} / account / personal name and password-confirmed email update / ${themeLabel} / ${viewport.width}px`, passed: true });
 
     const chooseAccountItem = async (label, expectedTitle) => {
       await openAccountMenu();
