@@ -41,8 +41,10 @@ class SavedPdfEditorInstrumentedTest {
 
         try {
             ActivityScenario.launch(MainActivity::class.java).use {
-                val navigationLabel = com.google.android.material.R.id.navigation_bar_item_small_label_view
-                onView(allOf(withId(navigationLabel), withText("Files"))).perform(click())
+                onView(allOf(
+                    withContentDescription("My Files"),
+                    androidx.test.espresso.matcher.ViewMatchers.isAssignableFrom(android.widget.LinearLayout::class.java)
+                )).perform(click())
                 onView(withContentDescription("More options for CI-editor-document.pdf")).perform(scrollTo(), click())
                 onView(withText("Edit PDF")).perform(click())
 

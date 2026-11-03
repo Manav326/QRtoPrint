@@ -327,10 +327,22 @@ class MainActivityInstrumentedTest {
             onView(withText("Scan document")).check(matches(isDisplayed()))
             onView(withText("Choose from phone")).check(matches(isDisplayed()))
             onView(withContentDescription("Shop connection")).check(matches(isDisplayed()))
-            val label = com.google.android.material.R.id.navigation_bar_item_small_label_view
-            onView(allOf(withId(label), withText("Files"))).check(matches(isDisplayed()))
-            onView(allOf(withId(label), withText("Print"))).check(matches(isDisplayed()))
-            onView(allOf(withId(label), withText("Activity"))).check(matches(isDisplayed()))
+            scenario.onActivity { activity ->
+                val customBar = MainActivity::class.java.getDeclaredField("bottomNavigationContent").apply {
+                    isAccessible = true
+                }.get(activity) as LinearLayout
+                assertEquals(4, customBar.childCount)
+                val labels = (0 until customBar.childCount).map { index ->
+                    (customBar.getChildAt(index) as LinearLayout).getChildAt(1)
+                }
+                assertEquals("Home", (labels[0] as android.widget.TextView).text.toString())
+                assertEquals(View.VISIBLE, labels[0].visibility)
+                if (activity.resources.configuration.screenWidthDp < 480) {
+                    labels.drop(1).forEach { assertEquals(View.GONE, it.visibility) }
+                } else {
+                    labels.forEach { assertEquals(View.VISIBLE, it.visibility) }
+                }
+            }
         }
     }
 
