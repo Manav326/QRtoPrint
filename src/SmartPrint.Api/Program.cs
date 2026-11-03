@@ -6526,9 +6526,9 @@ publicApi.MapPost("/sessions/current/local-upload-tickets/{ticketId:guid}/cloud-
             {
                 job.Id, job.JobNumber, job.Status, job.PageCount, job.Copies,
                 job.Currency, job.QuotedAmountMinor, job.CreatedUtc, job.BatchGroupName, job.BatchName, job.BatchId
-                job.Currency, job.QuotedAmountMinor, job.CreatedUtc, job.BatchGroupName, job.BatchId
             },
             Document = new
+            {
                 document.Id, document.OriginalFileName, document.MediaType,
                 document.SizeBytes, document.Sha256, document.PageSizesJson
             },
