@@ -2161,6 +2161,7 @@ function PrintQueuePage({ jobs, printers, agentDevices, searchQuery, loadingBatc
       <div className="table-scroll queue-table-scroll"><table className="queue-jobs-table"><thead><tr><th>JOB</th><th>DOCUMENT</th><th>PRINT SETTINGS</th><th>QUOTE</th><th>PRINTER / LOCAL QUEUE</th><th>STATUS</th><th>CREATED</th><th>ACTIONS</th></tr></thead><tbody>
         {queueBatches.map(batch=>{
           const first=batch.jobs[0];
+          const photoJobs=batch.jobs.filter(job=>job.printKind==="PHOTO");
           const waiting=batch.jobs.filter(job=>reviewableBatchFileStatuses.has(job.status));
           const folders=Array.from(new Set(batch.jobs.map(job=>job.batchGroupName??"Loose files")));
           const statusLabels=Array.from(new Set(batch.jobs.map(job=>job.status)));
@@ -2211,7 +2212,7 @@ function PrintQueuePage({ jobs, printers, agentDevices, searchQuery, loadingBatc
           const tone=statusLabels.every(status=>status==="COMPLETED"||status==="LOCAL_QUEUE_READY")?"green":statusLabels.some(status=>reviewableBatchFileStatuses.has(status)||status==="AWAITING_CUSTOMER_APPROVAL"||status==="OUTPUT_UNCONFIRMED")?"amber":"blue";
           return <Fragment key={batch.key}>
             <tr className="queue-batch-summary-row">
-              <td><strong className="job-id">{batch.batchId?"Batch · "+first.jobNumber:first.jobNumber}</strong><small className="batch-summary-sub">{batch.jobs.length} file(s) shown</small></td>
+              <td><strong className="job-id">{batch.batchId?"Batch · "+first.jobNumber:first.jobNumber}</strong><small className="batch-summary-sub">{batch.jobs.length} file(s) shown</small>{photoJobs.length>0&&<span className="queue-print-kind-tag">{photoJobs.length===batch.jobs.length?"PHOTO":photoJobs.length+" PHOTO"}</span>}</td>
               <td><div className="customer-cell"><strong>{folders.length} folder group(s)</strong><span>{folders.slice(0,3).join(" · ")}{folders.length>3?" · +"+(folders.length-3):""}</span></div></td>
               <td><div className="detail-cell"><strong>{totalPrintedPages} printed pages</strong><span>{monoPrintedPages} B&W · {colourPrintedPages} Colour</span></div></td>
               <td className="amount-cell">{totalAmount>0?formatMoney(totalAmount,first.currency):"Not quoted"}</td>
@@ -2246,7 +2247,7 @@ function PrintQueuePage({ jobs, printers, agentDevices, searchQuery, loadingBatc
             </tr>
             {expanded&&<tr className="queue-batch-detail-row"><td colSpan={8}><div className="queue-batch-files">{batch.jobs.map(job=><article className="queue-batch-file-card" key={job.id}>
               <div className="queue-batch-file-main">
-                <div><strong>{job.document.originalFileName}</strong><small>{job.printKind==="PHOTO" ? `${job.photoCount??0} photos · ${job.photoSizeCode??""} · A4 photo sheet` : `${job.batchGroupName??"Loose files"} · ${job.pageCount} source pages × ${job.copies} = ${job.pageCount*job.copies} printed · ${job.colourMode} · ${job.isDuplex?"Double-sided":"Single-sided"}`}</small></div>
+                <div><div className="queue-batch-file-title"><strong>{job.document.originalFileName}</strong>{job.printKind==="PHOTO"&&<span className="queue-print-kind-tag">PHOTO</span>}</div><small>{job.printKind==="PHOTO" ? `${job.photoCount??0} photos · ${job.photoSizeCode??""} · A4 photo sheet` : `${job.batchGroupName??"Loose files"} · ${job.pageCount} source pages × ${job.copies} = ${job.pageCount*job.copies} printed · ${job.colourMode} · ${job.isDuplex?"Double-sided":"Single-sided"}`}</small></div>
                 <Status label={prettyStatus(job.status)} tone={job.status==="REJECTED"?"red":job.status==="COMPLETED"||job.status==="LOCAL_QUEUE_READY"?"green":job.status==="AWAITING_SHOP_APPROVAL"?"amber":"blue"}/>
                 <strong className="amount-cell">{job.quotedAmountMinor>0?formatMoney(job.quotedAmountMinor,job.currency):"—"}</strong>
               </div>
@@ -2316,7 +2317,7 @@ function BatchReviewModal({jobs,busy,decisions,retrying,onDecision,onClose,onPre
         return <div className={accepted?"batch-review-row accepted":"batch-review-row rejected"} key={job.id}>
           <label className="batch-review-checkbox"><input type="checkbox" checked={accepted} disabled={busy} onChange={event=>onDecision(job.id,event.target.checked)}/></label>
           <span className="batch-review-index">{index+1}</span>
-          <div className="batch-review-file"><strong>{job.document.originalFileName}</strong><small>{job.printKind==="PHOTO" ? `${job.photoCount??0} photos · ${job.photoSizeCode??""} · A4 photo sheet` : `${job.pageCount} source pages × ${job.copies} = ${job.pageCount*job.copies} printed · ${job.colourMode} · ${job.isDuplex?"Double-sided":"Single-sided"}`} · {needsFreshQuote?"Previous quote expired · fresh quote required":formatMoney(job.quotedAmountMinor,job.currency)}</small><Status label={!accepted?"Marked for rejection":needsFreshQuote?"Accepted · re-quote needed":"Accepted"} tone={!accepted?"red":needsFreshQuote?"amber":"green"}/></div>
+          <div className="batch-review-file"><div className="queue-batch-file-title"><strong>{job.document.originalFileName}</strong>{job.printKind==="PHOTO"&&<span className="queue-print-kind-tag">PHOTO</span>}</div><small>{job.printKind==="PHOTO" ? `${job.photoCount??0} photos · ${job.photoSizeCode??""} · A4 photo sheet` : `${job.pageCount} source pages × ${job.copies} = ${job.pageCount*job.copies} printed · ${job.colourMode} · ${job.isDuplex?"Double-sided":"Single-sided"}`} · {needsFreshQuote?"Previous quote expired · fresh quote required":formatMoney(job.quotedAmountMinor,job.currency)}</small><Status label={!accepted?"Marked for rejection":needsFreshQuote?"Accepted · re-quote needed":"Accepted"} tone={!accepted?"red":needsFreshQuote?"amber":"green"}/></div>
           <button className="subtle-button" type="button" disabled={busy} onClick={()=>onPreview(job)}>Preview</button>
         </div>;
       })}
