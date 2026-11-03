@@ -3403,9 +3403,9 @@ function CustomerPrintFlow({publicCode,sessionToken,paymentOptions,localAgent,lo
   useEffect(()=>{
     const storageKey=`qrtoprint.customer-active-job:${publicCode}`;
     if(!uploaded&&uploadedBatch.length===0&&!batchName.trim()){
-    if(!uploaded&&uploadedBatch.length===0){
       localStorage.removeItem(storageKey);
       return;
+    }
     // Store only job metadata, never the bearer session capability.
     localStorage.setItem(storageKey,JSON.stringify({
       sessionMarker:sessionToken.slice(-16),
@@ -3422,7 +3422,7 @@ function CustomerPrintFlow({publicCode,sessionToken,paymentOptions,localAgent,lo
       quotesByJobId,
       photoSettingsByJobId
     } satisfies StoredCustomerDraft));
-  },[publicCode,sessionToken,uploaded,uploadedBatch,uploadedFileFingerprints,batchId,quote,fileGroupNames,groupSettings,fileSettings,printSettingsByJobId,quotesByJobId,photoSettingsByJobId]);
+  },[publicCode,sessionToken,uploaded,uploadedBatch,uploadedFileFingerprints,batchId,batchName,quote,fileGroupNames,groupSettings,fileSettings,printSettingsByJobId,quotesByJobId,photoSettingsByJobId]);
 
   const batchItemsForStatus=uploadedBatch.length?uploadedBatch:(uploaded?[uploaded]:[]);
   const batchStatusKey=batchItemsForStatus.map(item=>item.job.id).join("|");
