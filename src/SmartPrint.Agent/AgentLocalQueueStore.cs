@@ -1,0 +1,714 @@
+using System.Security.AccessControl;
+using System.Security.Cryptography;
+using System.Security.Principal;
+using System.Text;
+using System.Text.Json;
+
+namespace SmartPrint.Agent;
+
+public sealed class AgentLocalQueueStore
+{
+    private static readonly byte[] Entropy = Encoding.UTF8.GetBytes("QRtoPrint.Agent.LocalQueue.Document.v1");
+    private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web)
+    {
+        WriteIndented = false
+    };
+
+    private readonly string queueRoot;
+    private readonly bool applyWindowsAcl;
+
+    public AgentLocalQueueStore(string? rootOverride = null)
+    {
+        queueRoot = rootOverride ?? Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
+            "QRtoPrint",
+            "LocalQueue");
+        applyWindowsAcl = rootOverride is null;
+    }
+
+    public async Task InitializeAsync(CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        Directory.CreateDirectory(queueRoot);
+        if (applyWindowsAcl)
+        {
+            SecureDirectory(queueRoot);
+        }
+
+        foreach (var temporaryFile in Directory.EnumerateFiles(queueRoot, "*.tmp", SearchOption.TopDirectoryOnly))
+        {
+            File.Delete(temporaryFile);
+        }
+
+        foreach (var documentFile in Directory.EnumerateFiles(queueRoot, "*.qdoc", SearchOption.TopDirectoryOnly))
+        {
+            var manifestPath = Path.ChangeExtension(documentFile, ".json");
+            if (!File.Exists(manifestPath))
+            {
+                File.Delete(documentFile);
+            }
+        }
+
+        await Task.CompletedTask;
+    }
+
+    public AgentLocalQueueEntry? Find(Guid jobId)
+    {
+        var manifestPath = GetManifestPath(jobId);
+        if (!File.Exists(manifestPath))
+        {
+            return null;
+        }
+
+        var json = File.ReadAllText(manifestPath, Encoding.UTF8);
+        return JsonSerializer.Deserialize<AgentLocalQueueEntry>(json, JsonOptions)
+            ?? throw new InvalidDataException("A local print queue manifest is invalid.");
+    }
+
+    private IReadOnlyList<AgentLocalQueueEntry> ReadEntries()
+    {
+        var result = new List<AgentLocalQueueEntry>();
+        foreach (var path in Directory.EnumerateFiles(queueRoot, "*.json", SearchOption.TopDirectoryOnly))
+        {
+            var entry = JsonSerializer.Deserialize<AgentLocalQueueEntry>(File.ReadAllText(path, Encoding.UTF8), JsonOptions);
+            if (entry is not null) result.Add(entry);
+        }
+        return result.OrderBy(x => x.ReceivedUtc).ToArray();
+    }
+
+    public IReadOnlyList<AgentLocalQueueEntry> GetAcknowledgedJobs() =>
+        ReadEntries().Where(entry =>
+            entry.State == "ACKNOWLEDGED" ||
+            (entry.State == "OUTPUT_UNCONFIRMED" &&
+             (entry.OutputMode == PrinterOutputModeRules.PdfExport ||
+              PrinterOutputModeRules.IsPdfExport(entry.QueueName, entry.PrinterName))))
+        .ToArray();
+
+    public IReadOnlyList<AgentLocalQueueEntry> GetLegacyPdfQueueJobs() =>
+        ReadEntries().Where(entry =>
+            PrinterOutputModeRules.IsPdfExport(entry.QueueName, entry.PrinterName) &&
+            (entry.State is "SUBMITTING" or "SPOOLER_ACCEPTED" or "OUTPUT_UNCONFIRMED"))
+        .ToArray();
+
+    public IReadOnlyList<AgentLocalQueueEntry> GetPdfExportRecoveryJobs() =>
+        ReadEntries().Where(entry =>
+            (entry.OutputMode == PrinterOutputModeRules.PdfExport ||
+             PrinterOutputModeRules.IsPdfExport(entry.QueueName, entry.PrinterName)) &&
+            (entry.State is "PDF_EXPORTING" or "OUTPUT_UNCONFIRMED") &&
+            !string.IsNullOrWhiteSpace(entry.OutputFilePath))
+        .ToArray();
+
+    public IReadOnlyList<AgentLocalQueueEntry> GetPendingPdfExportReceipts() =>
+        ReadEntries().Where(entry =>
+            entry.OutputMode == PrinterOutputModeRules.PdfExport &&
+            entry.State == "PDF_EXPORTED" &&
+            !string.IsNullOrWhiteSpace(entry.OutputFilePath) &&
+            !string.IsNullOrWhiteSpace(entry.OutputFileSha256) &&
+            entry.OutputFileSizeBytes is > 0)
+        .ToArray();
+
+    public IReadOnlyList<AgentLocalQueueEntry> GetInterruptedSubmissions() =>
+        ReadEntries().Where(x => x.State == "SUBMITTING").ToArray();
+
+    public IReadOnlyList<AgentLocalQueueEntry> GetSpoolerTrackingJobs() =>
+        ReadEntries().Where(x => x.State == "SPOOLER_ACCEPTED" && x.SpoolerJobId is > 0).ToArray();
+
+    public IReadOnlyList<AgentLocalQueueEntry> GetStagedLocalUploads() =>
+        ReadEntries().Where(entry => entry.State == "LOCAL_UPLOAD_STAGED").ToArray();
+
+    public IReadOnlyList<AgentLocalQueueEntry> GetPendingPaymentLocalUploads() =>
+        ReadEntries().Where(entry => entry.State == "LOCAL_UPLOAD_PENDING_PAYMENT").ToArray();
+
+    public IReadOnlyList<AgentLocalQueueEntry> GetPendingAcknowledgements()
+    {
+        var entries = new List<AgentLocalQueueEntry>();
+        foreach (var path in Directory.EnumerateFiles(queueRoot, "*.json", SearchOption.TopDirectoryOnly))
+        {
+            var json = File.ReadAllText(path, Encoding.UTF8);
+            var entry = JsonSerializer.Deserialize<AgentLocalQueueEntry>(json, JsonOptions);
+            if (entry is not null && entry.State == "ACK_PENDING")
+            {
+                entries.Add(entry);
+            }
+        }
+
+        return entries.OrderBy(entry => entry.ReceivedUtc).ToArray();
+    }
+
+    public Task<AgentLocalQueueEntry> EnqueueAsync(
+        AgentClaimedJob job,
+        ReadOnlyMemory<byte> documentBytes,
+        CancellationToken cancellationToken) =>
+        EnqueueCoreAsync(job, documentBytes, "ACK_PENDING", cancellationToken);
+
+    public Task<AgentLocalQueueEntry> EnqueueLocalUploadAsync(
+        AgentClaimedJob job,
+        ReadOnlyMemory<byte> documentBytes,
+        CancellationToken cancellationToken) =>
+        EnqueueCoreAsync(job, documentBytes, "LOCAL_UPLOAD_STAGED", cancellationToken);
+
+    private async Task<AgentLocalQueueEntry> EnqueueCoreAsync(
+        AgentClaimedJob job,
+        ReadOnlyMemory<byte> documentBytes,
+        string initialState,
+        CancellationToken cancellationToken)
+    {
+        if (job.Id == Guid.Empty ||
+            string.IsNullOrWhiteSpace(job.JobNumber) ||
+            documentBytes.Length != job.SizeBytes ||
+            job.SizeBytes is <= 0 or > 20L * 1024 * 1024)
+        {
+            throw new InvalidDataException("The claimed job metadata or document size is invalid.");
+        }
+
+        var actualHash = Convert.ToHexString(SHA256.HashData(documentBytes.Span)).ToLowerInvariant();
+        if (!string.Equals(actualHash, job.Sha256, StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidDataException("The downloaded document SHA-256 does not match the server's original.");
+        }
+
+        var existing = Find(job.Id);
+        if (existing is not null)
+        {
+            if (!string.Equals(existing.Sha256, actualHash, StringComparison.OrdinalIgnoreCase) ||
+                existing.SizeBytes != job.SizeBytes)
+            {
+                throw new InvalidDataException("A different document is already stored for this print job.");
+            }
+
+            if (!File.Exists(existing.DocumentPath))
+            {
+                throw new FileNotFoundException("The local queue manifest exists but its protected document is missing.", existing.DocumentPath);
+            }
+
+            return existing;
+        }
+
+        await InitializeAsync(cancellationToken);
+        var documentPath = Path.Combine(queueRoot, job.Id.ToString("N") + ".qdoc");
+        var temporaryDocumentPath = documentPath + ".tmp";
+        if (File.Exists(documentPath))
+        {
+            File.Delete(documentPath);
+        }
+
+        var plaintext = documentBytes.ToArray();
+        byte[] protectedBytes;
+        try
+        {
+            protectedBytes = ProtectedData.Protect(plaintext, Entropy, DataProtectionScope.LocalMachine);
+        }
+        finally
+        {
+            CryptographicOperations.ZeroMemory(plaintext);
+        }
+
+        try
+        {
+            await using (var stream = new FileStream(
+                temporaryDocumentPath,
+                FileMode.CreateNew,
+                FileAccess.Write,
+                FileShare.None,
+                64 * 1024,
+                FileOptions.Asynchronous | FileOptions.WriteThrough))
+            {
+                await stream.WriteAsync(protectedBytes, cancellationToken);
+                await stream.FlushAsync(cancellationToken);
+            }
+            File.Move(temporaryDocumentPath, documentPath);
+        }
+        catch
+        {
+            if (File.Exists(temporaryDocumentPath)) File.Delete(temporaryDocumentPath);
+            if (File.Exists(documentPath)) File.Delete(documentPath);
+            throw;
+        }
+        finally
+        {
+            CryptographicOperations.ZeroMemory(protectedBytes);
+        }
+
+        var entry = new AgentLocalQueueEntry(
+            job.Id,
+            job.JobNumber,
+            job.PrinterDeviceId,
+            job.PrinterName,
+            job.QueueName,
+            job.DocumentName,
+            job.MediaType,
+            actualHash,
+            job.SizeBytes,
+            job.PageCount,
+            job.Copies,
+            job.ColourMode,
+            job.PaperSize,
+            job.IsDuplex,
+            job.Currency,
+            job.QuotedAmountMinor,
+            documentPath,
+            initialState,
+            DateTimeOffset.UtcNow,
+            job.LeaseExpiresUtc,
+            OutputMode: job.OutputMode);
+
+        try
+        {
+            await SaveManifestAsync(entry, cancellationToken);
+            return entry;
+        }
+        catch
+        {
+            if (File.Exists(documentPath)) File.Delete(documentPath);
+            throw;
+        }
+    }
+
+    public async Task MarkLocalUploadFinalizedAsync(Guid jobId, CancellationToken cancellationToken)
+    {
+        var entry = Find(jobId)
+            ?? throw new FileNotFoundException("The staged local upload is missing from the protected queue.");
+        if (!File.Exists(entry.DocumentPath))
+        {
+            throw new FileNotFoundException("The staged local upload document is missing.", entry.DocumentPath);
+        }
+        if (entry.State is "LOCAL_UPLOAD_PENDING_PAYMENT" or "ACK_PENDING" or "ACKNOWLEDGED" or
+            "SUBMITTING" or "SPOOLER_ACCEPTED" or "PRINTING" or "OUTPUT_UNCONFIRMED" or "OUTPUT_CONFIRMED")
+        {
+            return;
+        }
+        if (entry.State != "LOCAL_UPLOAD_STAGED")
+        {
+            throw new InvalidOperationException($"Cannot finalise a local upload in state {entry.State}.");
+        }
+
+        await SaveManifestAsync(entry with { State = "LOCAL_UPLOAD_PENDING_PAYMENT" }, cancellationToken);
+    }
+
+    public async Task DeleteExpiredLocalUploadAsync(Guid jobId, DateTimeOffset now, CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        var entry = Find(jobId);
+        if (entry is null) return;
+        if (entry.State != "LOCAL_UPLOAD_STAGED" || entry.LeaseExpiresUtc > now)
+        {
+            throw new InvalidOperationException("Only an expired, unfinalised local upload can be removed.");
+        }
+
+        var queueRootFull = Path.GetFullPath(queueRoot);
+        var queuePrefix = queueRootFull.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + Path.DirectorySeparatorChar;
+        var comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
+        var documentPath = Path.GetFullPath(entry.DocumentPath);
+        if (!documentPath.StartsWith(queuePrefix, comparison))
+            throw new InvalidDataException("The staged local upload document path is outside the protected queue.");
+
+        var manifestPath = GetManifestPath(jobId);
+        if (File.Exists(manifestPath)) File.Delete(manifestPath);
+        if (File.Exists(documentPath)) File.Delete(documentPath);
+        await Task.CompletedTask;
+    }
+
+    public async Task DeleteExpiredPendingPaymentUploadAsync(
+        Guid jobId,
+        DateTimeOffset deleteAfterUtc,
+        DateTimeOffset now,
+        CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        if (deleteAfterUtc > now)
+            throw new InvalidOperationException("The platform retention deadline has not been reached.");
+
+        var entry = Find(jobId);
+        if (entry is null) return;
+        if (entry.State != "LOCAL_UPLOAD_PENDING_PAYMENT")
+            throw new InvalidOperationException("Only a server-approved pending-payment local upload can be removed.");
+
+        var queueRootFull = Path.GetFullPath(queueRoot);
+        var queuePrefix = queueRootFull.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + Path.DirectorySeparatorChar;
+        var comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
+        var documentPath = Path.GetFullPath(entry.DocumentPath);
+        if (!documentPath.StartsWith(queuePrefix, comparison))
+            throw new InvalidDataException("The local upload document path is outside the protected queue.");
+
+        var manifestPath = GetManifestPath(jobId);
+        if (File.Exists(documentPath)) File.Delete(documentPath);
+        if (File.Exists(manifestPath)) File.Delete(manifestPath);
+        await Task.CompletedTask;
+    }
+
+    public async Task<int> PruneRetainedEntriesAsync(
+        DateTimeOffset now,
+        TimeSpan completedRetention,
+        string pdfExportDirectory,
+        CancellationToken cancellationToken)
+    {
+        if (completedRetention <= TimeSpan.Zero)
+            throw new ArgumentOutOfRangeException(nameof(completedRetention));
+        if (string.IsNullOrWhiteSpace(pdfExportDirectory) || !Path.IsPathFullyQualified(pdfExportDirectory))
+            throw new ArgumentException("A fully qualified PDF export directory is required.", nameof(pdfExportDirectory));
+
+        var queueRootFull = Path.GetFullPath(queueRoot);
+        var queuePrefix = queueRootFull.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + Path.DirectorySeparatorChar;
+        var outputRootFull = Path.GetFullPath(pdfExportDirectory);
+        var outputPrefix = outputRootFull.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + Path.DirectorySeparatorChar;
+        var comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
+        var cutoff = now - completedRetention;
+        var removed = 0;
+
+        foreach (var entry in ReadEntries())
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            if (entry.State == "LOCAL_UPLOAD_STAGED" && entry.LeaseExpiresUtc <= now)
+            {
+                await DeleteExpiredLocalUploadAsync(entry.JobId, now, cancellationToken);
+                removed++;
+                continue;
+            }
+
+            if (entry.State is not ("OUTPUT_CONFIRMED" or "PDF_EXPORT_REPORTED") ||
+                entry.CompletedUtc is not DateTimeOffset completedUtc ||
+                completedUtc > cutoff)
+                continue;
+
+            var documentPath = Path.GetFullPath(entry.DocumentPath);
+            if (!documentPath.StartsWith(queuePrefix, comparison))
+                continue;
+
+            if (!string.IsNullOrWhiteSpace(entry.OutputFilePath))
+            {
+                var outputPath = Path.GetFullPath(entry.OutputFilePath);
+                if (!outputPath.StartsWith(outputPrefix, comparison))
+                    continue;
+                if (File.Exists(outputPath)) File.Delete(outputPath);
+            }
+
+            var manifestPath = GetManifestPath(entry.JobId);
+            if (File.Exists(documentPath)) File.Delete(documentPath);
+            if (File.Exists(manifestPath)) File.Delete(manifestPath);
+            removed++;
+        }
+
+        return removed;
+    }
+
+    public async Task UpdateFromClaimAsync(AgentClaimedJob job, CancellationToken cancellationToken)
+    {
+        var entry = Find(job.Id)
+            ?? throw new FileNotFoundException("The pre-staged local upload is missing from the protected queue.");
+        if (!string.Equals(entry.Sha256, job.Sha256, StringComparison.OrdinalIgnoreCase) ||
+            entry.SizeBytes != job.SizeBytes ||
+            job.PrinterDeviceId is null ||
+            string.IsNullOrWhiteSpace(job.PrinterName) ||
+            string.IsNullOrWhiteSpace(job.QueueName))
+        {
+            throw new InvalidDataException("The paid job no longer matches the local upload or has an invalid printer assignment.");
+        }
+        if (entry.State is not ("LOCAL_UPLOAD_PENDING_PAYMENT" or "LOCAL_UPLOAD_STAGED" or "ACK_PENDING" or "ACKNOWLEDGED"))
+        {
+            throw new InvalidOperationException($"Cannot update print options for a local upload in state {entry.State}.");
+        }
+        if (!File.Exists(entry.DocumentPath))
+        {
+            throw new FileNotFoundException("The pre-staged local upload is missing its protected document.", entry.DocumentPath);
+        }
+
+        await SaveManifestAsync(entry with
+        {
+            State = "ACK_PENDING",
+            PrinterDeviceId = job.PrinterDeviceId,
+            PrinterName = job.PrinterName,
+            QueueName = job.QueueName,
+            PageCount = job.PageCount,
+            Copies = job.Copies,
+            ColourMode = job.ColourMode,
+            PaperSize = job.PaperSize,
+            IsDuplex = job.IsDuplex,
+            Currency = job.Currency,
+            QuotedAmountMinor = job.QuotedAmountMinor,
+            LeaseExpiresUtc = job.LeaseExpiresUtc,
+            OutputMode = job.OutputMode
+        }, cancellationToken);
+    }
+
+    public async Task MarkAcknowledgedAsync(Guid jobId, CancellationToken cancellationToken)
+    {
+        var entry = Find(jobId);
+        if (entry is null)
+        {
+            throw new InvalidOperationException("Cannot acknowledge a job that is not stored in the local queue.");
+        }
+
+        if (entry.State == "ACKNOWLEDGED")
+        {
+            return;
+        }
+        if (entry.State is not ("ACK_PENDING" or "LOCAL_UPLOAD_STAGED"))
+        {
+            throw new InvalidOperationException($"Cannot acknowledge a local queue item in state {entry.State}.");
+        }
+
+        await SaveManifestAsync(entry with { State = "ACKNOWLEDGED" }, cancellationToken);
+    }
+
+
+    public async Task UpdateRejectedPagesAsync(Guid jobId, IReadOnlyList<int> rejectedPageNumbers, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(rejectedPageNumbers);
+        var entry = Find(jobId) ?? throw new FileNotFoundException("The local print job does not exist.");
+        var pages = rejectedPageNumbers.Distinct().Order().ToArray();
+        if (pages.Length != rejectedPageNumbers.Count || pages.Any(page => page < 1 || page > entry.PageCount))
+            throw new InvalidDataException("The server returned an invalid rejected-page selection.");
+        await SaveManifestAsync(entry with { RejectedPageNumbers = pages }, ct);
+    }
+
+    public async Task MarkSubmissionStartedAsync(Guid jobId, string spoolerJobName, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(spoolerJobName) || spoolerJobName.Length > 180)
+            throw new ArgumentException("A stable Windows spooler document name is required.", nameof(spoolerJobName));
+        var entry = Find(jobId) ?? throw new FileNotFoundException("The local print job does not exist.");
+        if (entry.State == "SUBMITTING" && entry.SpoolerJobName == spoolerJobName) return;
+        if (entry.State != "ACKNOWLEDGED")
+            throw new InvalidOperationException($"Cannot submit a local job in state {entry.State}.");
+        await SaveManifestAsync(entry with
+        {
+            State = "SUBMITTING", SpoolerJobName = spoolerJobName, SpoolerJobId = null,
+            SpoolerSubmittedUtc = null, SpoolerStatus = "SUBMISSION_STARTED", FailureCode = null
+        }, ct);
+    }
+
+    public async Task MarkPdfExportStartedAsync(Guid jobId, string outputPath, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(outputPath) || outputPath.Length > 1024 || !Path.IsPathFullyQualified(outputPath))
+            throw new ArgumentException("A fully qualified PDF export destination is required.", nameof(outputPath));
+        var entry = Find(jobId) ?? throw new FileNotFoundException("The local print job does not exist.");
+        if (entry.State == "PDF_EXPORTING" &&
+            string.Equals(entry.OutputFilePath, outputPath, StringComparison.OrdinalIgnoreCase))
+            return;
+        if (entry.State is not ("ACKNOWLEDGED" or "OUTPUT_UNCONFIRMED"))
+            throw new InvalidOperationException($"Cannot export a local job in state {entry.State}.");
+        await SaveManifestAsync(entry with
+        {
+            State = "PDF_EXPORTING",
+            OutputMode = PrinterOutputModeRules.PdfExport,
+            OutputFilePath = outputPath,
+            OutputFileName = Path.GetFileName(outputPath),
+            OutputFileSha256 = null,
+            OutputFileSizeBytes = null,
+            FailureCode = null,
+            SpoolerJobId = null,
+            SpoolerJobName = null,
+            SpoolerSubmittedUtc = null,
+            SpoolerStatus = null
+        }, ct);
+    }
+
+    public async Task MarkPdfExportedAsync(Guid jobId, PdfExportReceipt receipt, CancellationToken ct)
+    {
+        var entry = Find(jobId) ?? throw new FileNotFoundException("The local print job does not exist.");
+        if ((entry.State is "PDF_EXPORTED" or "PDF_EXPORT_REPORTED") &&
+            string.Equals(entry.OutputFileSha256, receipt.Sha256, StringComparison.OrdinalIgnoreCase))
+            return;
+        if (entry.State is not ("PDF_EXPORTING" or "OUTPUT_UNCONFIRMED"))
+            throw new InvalidOperationException($"Cannot complete a PDF export from state {entry.State}.");
+        await SaveManifestAsync(entry with
+        {
+            State = "PDF_EXPORTED",
+            OutputMode = PrinterOutputModeRules.PdfExport,
+            OutputFilePath = receipt.OutputPath,
+            OutputFileName = receipt.FileName,
+            OutputFileSha256 = receipt.Sha256,
+            OutputFileSizeBytes = receipt.SizeBytes,
+            FailureCode = null
+        }, ct);
+    }
+
+    public async Task MarkPdfExportReceiptReportedAsync(Guid jobId, CancellationToken ct)
+    {
+        var entry = Find(jobId) ?? throw new FileNotFoundException("The local PDF export manifest does not exist.");
+        if (entry.State == "PDF_EXPORT_REPORTED")
+        {
+            if (entry.CompletedUtc is null)
+                await SaveManifestAsync(entry with { CompletedUtc = DateTimeOffset.UtcNow }, ct);
+            return;
+        }
+        if (entry.State != "PDF_EXPORTED")
+            throw new InvalidOperationException($"Cannot acknowledge a PDF export receipt from state {entry.State}.");
+        await SaveManifestAsync(entry with { State = "PDF_EXPORT_REPORTED", CompletedUtc = DateTimeOffset.UtcNow }, ct);
+    }
+
+    public async Task MarkPdfExportReadyToRetryAsync(Guid jobId, CancellationToken ct)
+    {
+        var entry = Find(jobId) ?? throw new FileNotFoundException("The local print job does not exist.");
+        if (entry.State is not ("PDF_EXPORTING" or "OUTPUT_UNCONFIRMED"))
+            throw new InvalidOperationException($"Cannot recover a PDF export from state {entry.State}.");
+        if (!string.IsNullOrWhiteSpace(entry.OutputFilePath) && File.Exists(entry.OutputFilePath))
+            throw new InvalidOperationException("The PDF export file exists; it must be reconciled, not retried.");
+        await SaveManifestAsync(entry with
+        {
+            State = "ACKNOWLEDGED",
+            OutputMode = PrinterOutputModeRules.PdfExport,
+            OutputFilePath = null,
+            OutputFileName = null,
+            OutputFileSha256 = null,
+            OutputFileSizeBytes = null,
+            FailureCode = null,
+            SpoolerStatus = null
+        }, ct);
+    }
+
+    public async Task MarkSpoolerAcceptedAsync(Guid jobId, int spoolerJobId, string spoolerJobName, CancellationToken ct)
+    {
+        if (spoolerJobId <= 0) throw new ArgumentOutOfRangeException(nameof(spoolerJobId));
+        var entry = Find(jobId) ?? throw new FileNotFoundException("The local print job does not exist.");
+        if (entry.State == "SPOOLER_ACCEPTED" && entry.SpoolerJobId == spoolerJobId) return;
+        if (entry.State != "SUBMITTING")
+            throw new InvalidOperationException($"Cannot mark a local job spooler accepted from state {entry.State}.");
+        await SaveManifestAsync(entry with
+        {
+            State = "SPOOLER_ACCEPTED", SpoolerJobId = spoolerJobId,
+            SpoolerJobName = spoolerJobName, SpoolerSubmittedUtc = DateTimeOffset.UtcNow,
+            SpoolerStatus = "QUEUED", FailureCode = null
+        }, ct);
+    }
+
+    public async Task MarkReadyAfterBlockedAsync(Guid jobId, string reasonCode, CancellationToken ct)
+    {
+        var entry = Find(jobId) ?? throw new FileNotFoundException("The local print job does not exist.");
+        if (entry.State == "ACKNOWLEDGED") return;
+        if (entry.State is not ("SUBMITTING" or "PDF_EXPORTING"))
+            throw new InvalidOperationException($"Cannot safely unblock a local job from state {entry.State}.");
+        await SaveManifestAsync(entry with
+        {
+            State = "ACKNOWLEDGED", SpoolerJobId = null, SpoolerJobName = null,
+            SpoolerSubmittedUtc = null, SpoolerStatus = "BLOCKED_BEFORE_SUBMISSION",
+            OutputFilePath = null, OutputFileName = null, OutputFileSha256 = null, OutputFileSizeBytes = null,
+            FailureCode = reasonCode
+        }, ct);
+    }
+
+    public async Task MarkOutputUnconfirmedAsync(
+        Guid jobId,
+        string reasonCode,
+        CancellationToken ct,
+        string? outputMode = null)
+    {
+        var entry = Find(jobId) ?? throw new FileNotFoundException("The local print job does not exist.");
+        if (entry.State == "OUTPUT_UNCONFIRMED" &&
+            (outputMode is null || entry.OutputMode == outputMode))
+            return;
+        if (entry.State is not ("SUBMITTING" or "SPOOLER_ACCEPTED" or "PDF_EXPORTING" or "OUTPUT_UNCONFIRMED"))
+            throw new InvalidOperationException($"Cannot reconcile a local job from state {entry.State}.");
+        await SaveManifestAsync(entry with
+        {
+            State = "OUTPUT_UNCONFIRMED",
+            OutputMode = outputMode ?? entry.OutputMode,
+            SpoolerStatus = "OUTPUT_UNCONFIRMED",
+            FailureCode = reasonCode
+        }, ct);
+    }
+
+    public async Task MarkOutputConfirmedAsync(Guid jobId, CancellationToken ct)
+    {
+        var entry = Find(jobId) ?? throw new FileNotFoundException("The local print job does not exist.");
+        if (entry.State == "OUTPUT_CONFIRMED")
+        {
+            if (entry.CompletedUtc is null)
+                await SaveManifestAsync(entry with { CompletedUtc = DateTimeOffset.UtcNow }, ct);
+            return;
+        }
+        if (entry.State is not ("SPOOLER_ACCEPTED" or "OUTPUT_UNCONFIRMED"))
+            throw new InvalidOperationException($"Cannot confirm local output from state {entry.State}.");
+        await SaveManifestAsync(entry with
+        {
+            State = "OUTPUT_CONFIRMED",
+            SpoolerStatus = "SHOP_CONFIRMED_OUTPUT",
+            CompletedUtc = DateTimeOffset.UtcNow
+        }, ct);
+    }
+
+    public async Task UpdateSpoolerStatusAsync(Guid jobId, string status, CancellationToken ct)
+    {
+        var entry = Find(jobId) ?? throw new FileNotFoundException("The local print job does not exist.");
+        if (entry.State != "SPOOLER_ACCEPTED") return;
+        await SaveManifestAsync(entry with { SpoolerStatus = status }, ct);
+    }
+
+    public byte[] ReadDocument(Guid jobId)
+    {
+        var entry = Find(jobId)
+            ?? throw new FileNotFoundException("The print job is not present in the local queue.");
+        var protectedBytes = File.ReadAllBytes(entry.DocumentPath);
+        try
+        {
+            var plaintext = ProtectedData.Unprotect(protectedBytes, Entropy, DataProtectionScope.LocalMachine);
+            var actualHash = Convert.ToHexString(SHA256.HashData(plaintext)).ToLowerInvariant();
+            if (plaintext.LongLength != entry.SizeBytes ||
+                !string.Equals(actualHash, entry.Sha256, StringComparison.OrdinalIgnoreCase))
+            {
+                CryptographicOperations.ZeroMemory(plaintext);
+                throw new InvalidDataException("The protected local document failed its integrity check.");
+            }
+
+            return plaintext;
+        }
+        finally
+        {
+            CryptographicOperations.ZeroMemory(protectedBytes);
+        }
+    }
+
+    private async Task SaveManifestAsync(AgentLocalQueueEntry entry, CancellationToken cancellationToken)
+    {
+        var manifestPath = GetManifestPath(entry.JobId);
+        var temporaryPath = manifestPath + ".tmp";
+        var json = JsonSerializer.Serialize(entry, JsonOptions);
+        await using (var stream = new FileStream(
+            temporaryPath,
+            FileMode.Create,
+            FileAccess.Write,
+            FileShare.None,
+            16 * 1024,
+            FileOptions.Asynchronous | FileOptions.WriteThrough))
+        await using (var writer = new StreamWriter(stream, new UTF8Encoding(false)))
+        {
+            await writer.WriteAsync(json.AsMemory(), cancellationToken);
+            await writer.FlushAsync(cancellationToken);
+            await stream.FlushAsync(cancellationToken);
+        }
+
+        if (File.Exists(manifestPath))
+        {
+            File.Replace(temporaryPath, manifestPath, null, ignoreMetadataErrors: true);
+        }
+        else
+        {
+            File.Move(temporaryPath, manifestPath);
+        }
+    }
+
+    private string GetManifestPath(Guid jobId) =>
+        Path.Combine(queueRoot, jobId.ToString("N") + ".json");
+
+    private static void SecureDirectory(string directory)
+    {
+        var systemSid = new SecurityIdentifier(WellKnownSidType.LocalSystemSid, null);
+        var administratorsSid = new SecurityIdentifier(WellKnownSidType.BuiltinAdministratorsSid, null);
+        var security = new DirectorySecurity();
+        security.SetAccessRuleProtection(isProtected: true, preserveInheritance: false);
+        security.SetOwner(administratorsSid);
+        security.AddAccessRule(new FileSystemAccessRule(
+            systemSid,
+            FileSystemRights.FullControl,
+            InheritanceFlags.ContainerInherit | InheritanceFlags.ObjectInherit,
+            PropagationFlags.None,
+            AccessControlType.Allow));
+        security.AddAccessRule(new FileSystemAccessRule(
+            administratorsSid,
+            FileSystemRights.FullControl,
+            InheritanceFlags.ContainerInherit | InheritanceFlags.ObjectInherit,
+            PropagationFlags.None,
+            AccessControlType.Allow));
+        new DirectoryInfo(directory).SetAccessControl(security);
+    }
+}
