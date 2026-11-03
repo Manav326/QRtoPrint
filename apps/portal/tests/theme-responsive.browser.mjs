@@ -85,9 +85,26 @@ async function preparePage(context, route) {
       const path = new URL(request.request().url()).pathname;
       const value = path.endsWith("/profile")
         ? profile
-        : path.endsWith("/pricing") || path.endsWith("/payment-settings") || path.endsWith("/subscription")
-          ? null
-          : [];
+        : path.endsWith("/customers")
+          ? { page: 1, pageSize: 20, totalCount: 0, items: [] }
+          : path.endsWith("/reports/summary")
+            ? {
+                periodDays: 30,
+                fromUtc: "2026-01-01T00:00:00Z",
+                toUtc: "2026-01-31T00:00:00Z",
+                generatedUtc: "2026-01-31T00:00:00Z",
+                totalJobs: 0,
+                completedJobs: 0,
+                outputUnconfirmedJobs: 0,
+                pagesRequested: 0,
+                pendingPaymentCount: 0,
+                jobsByStatus: [],
+                verifiedCollectionsByMethod: [],
+                refundsRecordedByMethod: []
+              }
+            : path.endsWith("/pricing") || path.endsWith("/payment-settings") || path.endsWith("/subscription")
+              ? null
+              : [];
       await request.fulfill({
         status: 200,
         contentType: "application/json",
