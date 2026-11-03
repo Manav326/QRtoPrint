@@ -5,7 +5,7 @@ using SmartPrint.Api.Data;
 namespace SmartPrint.Api.Migrations;
 
 [DbContext(typeof(SmartPrintDbContext))]
-[Migration("202611030001_AddPhotoPrintingPricingAndJobSnapshots")]
+[Migration("202611030002_AddPhotoPrintingPricingAndJobSnapshots")]
 public sealed class AddPhotoPrintingPricingAndJobSnapshots : Migration
 {
     protected override void Up(MigrationBuilder migrationBuilder)

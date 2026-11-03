@@ -2150,10 +2150,10 @@ function PrintQueuePage({ jobs, printers, agentDevices, searchQuery, loadingBatc
   const queueBatches=Array.from(batchMap.values());
 
   return <section className="panel queue-panel live-queue-panel">
+    <div className="collection-header"><div><h2>Customer print jobs</h2><p>Review every file separately, but assign one printer to the entire batch. Every accepted file in that batch will use that same printer.</p></div><div className="queue-header-actions"><span className="setup-count">{queueBatches.length} batches shown</span><form className="queue-search-form" onSubmit={event=>{event.preventDefault();void onSearch(searchInput);}}><input aria-label="Search all print jobs" type="search" maxLength={120} placeholder="Batch, job, file or printer" value={searchInput} onChange={event=>setSearchInput(event.target.value)}/><button className="secondary-button" type="submit"><Search size={13}/> Search</button></form><button className="secondary-button queue-refresh-button" onClick={()=>void refreshQueue()} disabled={refreshRunning.current}><Activity size={13}/> Refresh queue</button></div></div>
     <div className="collection-header"><div><h2>Customer print jobs</h2><p>Review every file separately, but assign one printer to the entire batch. Every accepted file in that batch will use that same printer.</p></div><div className="queue-header-actions"><span className="setup-count">{queueBatches.length} batches shown</span><form className="queue-search-form" onSubmit={event=>{event.preventDefault();void onSearch(searchInput);}}><input aria-label="Search all print jobs" type="search" maxLength={120} placeholder="Job, file or printer" value={searchInput} onChange={event=>setSearchInput(event.target.value)}/><button className="secondary-button" type="submit"><Search size={13}/> Search</button></form><button className="secondary-button queue-refresh-button" onClick={()=>void refreshQueue()} disabled={refreshRunning.current}><Activity size={13}/> Refresh queue</button></div></div>
     <div className="queue-refresh-controls">
       <label className="queue-auto-toggle"><input type="checkbox" checked={autoRefresh} onChange={event=>setAutoRefresh(event.target.checked)}/><span className="queue-toggle-track"/><strong>Auto refresh</strong><small>{autoRefresh?"On":"Off"}</small></label>
-      <label className="queue-refresh-interval">Refresh every <input type="number" min={5} max={3600} step={1} value={refreshSeconds} onChange={event=>setRefreshSeconds(Math.max(5,Math.min(3600,Number(event.target.value)||5)))}/> seconds</label>
       <span className="queue-refresh-note">{autoRefresh?"Queue refreshes automatically while this page is open.":"Automatic refresh is off. Use Refresh queue whenever needed."}</span>
     </div>
     {reviewBatches.length>0&&<div className="batch-review-strip"><div><strong>{reviewBatches.length} batch(es) with files waiting for review</strong><span>Review loads every eligible file in a batch, even when this queue is searched or paginated. New files start accepted; previously rejected files stay unchecked until restored.</span></div>{reviewBatches.map(batchId=><button key={batchId} className="secondary-button" disabled={loadingBatchId===batchId||!!loadingBatchId} onClick={()=>onReviewBatch(batchId)}>{loadingBatchId===batchId?<><span className="button-spinner"/>Loading full batch…</>:<>Review batch · {jobs.filter(job=>job.batchId===batchId&&reviewableBatchFileStatuses.has(job.status)).length} shown</>}</button>)}</div>}
@@ -2207,13 +2207,14 @@ function PrintQueuePage({ jobs, printers, agentDevices, searchQuery, loadingBatc
                 ?dispatchablePrinters.filter(printer=>printer.agentDeviceId===requiredLocalAgentId)
                 :dispatchablePrinters;
           const expanded=expandedBatchKeys.has(batch.key);
+          const customerBatchName=batch.jobs.find(job=>job.batchName?.trim())?.batchName?.trim()??null;
           const allPdfsSaved = batch.jobs.length > 0 && batch.jobs.every(job => !!verifiedPdfExportPath(job));
           const singleSavedPdfPath = batch.jobs.length === 1 ? verifiedPdfExportPath(first) : null;
           const label=statusLabels.length===1?(allPdfsSaved?"PDF saved":prettyStatus(statusLabels[0])):`${statusLabels.length} states`;
           const tone=statusLabels.every(status=>status==="COMPLETED"||status==="LOCAL_QUEUE_READY")?"green":statusLabels.some(status=>reviewableBatchFileStatuses.has(status)||status==="AWAITING_CUSTOMER_APPROVAL"||status==="OUTPUT_UNCONFIRMED")?"amber":"blue";
           return <Fragment key={batch.key}>
             <tr className="queue-batch-summary-row">
-              <td><strong className="job-id">{batch.batchId?"Batch · "+first.jobNumber:first.jobNumber}</strong><small className="batch-summary-sub">{batch.jobs.length} file(s) shown</small><div className="queue-print-kind-summary">{photoJobs.length>0&&<PrintKindTag printKind="PHOTO" count={photoJobs.length}/>}{documentJobs.length>0&&<PrintKindTag printKind="DOCUMENT" count={documentJobs.length}/>}</div></td>
+              <td><strong className="job-id">{customerBatchName??(batch.batchId?"Batch · "+first.jobNumber:first.jobNumber)}</strong><small className="batch-summary-sub">{batch.batchId?"First job · "+first.jobNumber+" · "+batch.jobs.length+" file(s) shown":batch.jobs.length+" file(s) shown"}</small><div className="queue-print-kind-summary">{photoJobs.length>0&&<PrintKindTag printKind="PHOTO" count={photoJobs.length}/>}{documentJobs.length>0&&<PrintKindTag printKind="DOCUMENT" count={documentJobs.length}/>}</div></td>
               <td><div className="customer-cell"><strong>{folders.length} folder group(s)</strong><span>{folders.slice(0,3).join(" · ")}{folders.length>3?" · +"+(folders.length-3):""}</span></div></td>
               <td><div className="detail-cell"><strong>{totalPrintedPages} printed pages</strong><span>{monoPrintedPages} B&W · {colourPrintedPages} Colour</span></div></td>
               <td className="amount-cell">{totalAmount>0?formatMoney(totalAmount,first.currency):"Not quoted"}</td>
@@ -3176,11 +3177,12 @@ function customerPhotoSizeLabel(sizeCode?:string|null):string {
 
 type StoredCustomerDraft = {
   sessionMarker: string;
+  uploaded?: UploadedPrintJob;
   uploaded: UploadedPrintJob;
+  batchName?: string;
   uploadedBatch?: UploadedPrintJob[];
   uploadedFileFingerprints?: string[];
   batchId?: string;
-  quote: PrintQuoteResult | null;
   fileGroupNames?: Record<string,string>;
   groupSettings?: Record<string,CustomerGroupSettings>;
   fileSettings?: Record<string,CustomerFileSettings>;
@@ -3215,10 +3217,10 @@ function readStoredCustomerDraft(publicCode:string,sessionToken:string):StoredCu
     if(!raw)return null;
     const draft=JSON.parse(raw) as StoredCustomerDraft;
     return draft.sessionMarker===sessionToken.slice(-16)&&
+      (draft.uploaded?.job?.id||draft.uploadedBatch?.length||draft.batchName?.trim())?draft:null;
       (draft.uploaded?.job?.id||draft.uploadedBatch?.length)?draft:null;
   } catch {
     return null;
-  }
 }
 
 function smartPrintNativeHeadline(status:string):string {
@@ -3309,6 +3311,7 @@ function CustomerPrintFlow({publicCode,sessionToken,paymentOptions,localAgent,lo
   const [uploadedBatch,setUploadedBatch]=useState<UploadedPrintJob[]>(()=>initialDraft?.uploadedBatch??(initialDraft?.uploaded?[initialDraft.uploaded]:[]));
   const [uploadedFileFingerprints,setUploadedFileFingerprints]=useState<string[]>(()=>initialDraft?.uploadedFileFingerprints??[]);
   const [batchId,setBatchId]=useState(()=>initialDraft?.batchId??"");
+  const [batchName,setBatchName]=useState(()=>initialDraft?.batchName??initialDraft?.uploadedBatch?.[0]?.job?.batchName??initialDraft?.uploaded?.job?.batchName??"");
   const [fileGroupNames,setFileGroupNames]=useState<Record<string,string>>(()=>initialDraft?.fileGroupNames??{});
   const [groupSettings,setGroupSettings]=useState<Record<string,CustomerGroupSettings>>(()=>initialDraft?.groupSettings??{});
   const [fileSettings,setFileSettings]=useState<Record<string,CustomerFileSettings>>(()=>initialDraft?.fileSettings??{});
@@ -3399,10 +3402,10 @@ function CustomerPrintFlow({publicCode,sessionToken,paymentOptions,localAgent,lo
 
   useEffect(()=>{
     const storageKey=`qrtoprint.customer-active-job:${publicCode}`;
+    if(!uploaded&&uploadedBatch.length===0&&!batchName.trim()){
     if(!uploaded&&uploadedBatch.length===0){
       localStorage.removeItem(storageKey);
       return;
-    }
     // Store only job metadata, never the bearer session capability.
     localStorage.setItem(storageKey,JSON.stringify({
       sessionMarker:sessionToken.slice(-16),
@@ -3410,6 +3413,7 @@ function CustomerPrintFlow({publicCode,sessionToken,paymentOptions,localAgent,lo
       uploadedBatch,
       uploadedFileFingerprints,
       batchId,
+      batchName,
       quote,
       fileGroupNames,
       groupSettings,
@@ -3522,6 +3526,7 @@ function CustomerPrintFlow({publicCode,sessionToken,paymentOptions,localAgent,lo
       return;
     }
     let currentBatchId=batchId||crypto.randomUUID();
+    let currentBatchName=batchName.trim();
     setBatchId(currentBatchId);
     const completedFingerprints=new Set(uploadedFileFingerprints);
     const results=[...uploadedBatch];
@@ -3538,14 +3543,18 @@ function CustomerPrintFlow({publicCode,sessionToken,paymentOptions,localAgent,lo
         const batchGroupName=groupNameForFile(candidate);
         const settings=settingsForFile(candidate);
         const created=uploadMode==="LOCAL"&&localAgent
-          ? await uploadCustomerDocumentLocally(sessionToken,candidate,localAgent,currentBatchId,batchGroupName,cloudAssistedPrintingEnabled)
-          : await uploadCustomerDocument(sessionToken,candidate,currentBatchId,batchGroupName);
+          ? await uploadCustomerDocumentLocally(sessionToken,candidate,localAgent,currentBatchId,batchGroupName,currentBatchName||undefined,cloudAssistedPrintingEnabled)
+          : await uploadCustomerDocument(sessionToken,candidate,currentBatchId,batchGroupName,currentBatchName||undefined);
         if(created.job.batchId&&created.job.batchId!==currentBatchId) {
           if(results.length>0) {
             throw new ApiError("This file belongs to an earlier batch. Refresh the original print request before adding more files; SmartPrint will not mix two batches.",409);
           }
           currentBatchId=created.job.batchId;
           setBatchId(currentBatchId);
+        }
+        if(created.job.batchName) {
+          currentBatchName=created.job.batchName;
+          setBatchName(currentBatchName);
         }
         if(!results.some(item=>item.job.id===created.job.id))results.push(created);
         savedSettings[created.job.id]=settings;
@@ -4079,7 +4088,15 @@ function CustomerPrintFlow({publicCode,sessionToken,paymentOptions,localAgent,lo
     </div>}
     {a4ExplicitlyUnsupported&&<p className="customer-upload-local-note" role="status">The selected printer reports no A4 paper support. The shop team needs to select an A4-capable printer before a quote can be prepared.</p>}
     {a4SupportUnknown&&<p className="customer-upload-local-note" role="status">The shop printer has not confirmed its supported paper sizes yet. The shop team needs to check the printer before an A4 quote can be prepared.</p>}
-    {files.length>0&&<small className="customer-upload-local-note">Folder defaults apply to every file. Set an individual file to Custom for an exception.</small>}
+    {files.length>0&&<label className="customer-batch-name-field">
+  <span>Give this batch a name <small>Optional · the shop will see it in the print queue</small></span>
+  <input type="text" value={batchName} maxLength={50}
+    placeholder="e.g. Rahul – College Notes"
+    disabled={busy||uploadedBatch.length>0}
+    onChange={event=>setBatchName(event.target.value)}
+  />
+</label>}
+{files.length>0&&<small className="customer-upload-local-note">Folder defaults apply to every file. Set an individual file to Custom for an exception.</small>}
     {previewUrl&&file&&<div className="customer-file-preview"><div className="customer-file-label"><FileText size={15}/><span>Preview · {file.name}</span>{file.type.startsWith("image/")&&photoStudioReady&&photoRatesAvailable&&<button type="button" className="customer-file-studio-button" disabled={busy||batchLockedForPayment} onClick={()=>openPhotoStudio(file)}><ImageIcon size={14}/> Open Photo Studio</button>}</div>{file.type==="application/pdf"||/\.pdf$/i.test(file.name)?<iframe src={previewUrl} title={file.name+" preview"}/>:<img src={previewUrl} alt={file.name+" preview"}/>}</div>}
     {files.length>0&&<button className="customer-flow-button" disabled={busy||customerUploadUnavailable||pendingFilesCount===0||(uploadMode==="LOCAL"&&!localReady)} onClick={()=>void upload()}>{busy?<span className="button-spinner"/>:<><UploadIcon/>{uploadMode==="LOCAL"&&localAgent?"Upload "+pendingFilesCount+" file(s) to shop":"Upload "+pendingFilesCount+" file(s)"}</>}</button>}
     {uploadProgress&&<div className="customer-upload-progress"><span>{uploadProgress.currentFile?`Uploading ${Math.min(uploadProgress.completed+1,uploadProgress.total)} of ${uploadProgress.total}: ${uploadProgress.currentFile}`:`${uploadProgress.completed} of ${uploadProgress.total} files uploaded`}</span><div><i style={{width:`${uploadProgress.total?uploadProgress.completed/uploadProgress.total*100:0}%`}}/>{uploadProgress.currentFile&&<b aria-hidden="true"/>}</div><small>The count advances when each document finishes uploading.</small></div>}
@@ -4087,7 +4104,7 @@ function CustomerPrintFlow({publicCode,sessionToken,paymentOptions,localAgent,lo
     {files.length>0&&uploadMode==="CLOUD"&&localAgent&&<small className="customer-upload-local-note">{nativeAppMode?"Encrypted HTTPS cloud transfer.":"HTTPS cloud-assisted transfer: files are encrypted in transit to the API and then transferred securely to the shop computer."}</small>}
     {uploaded&&<>
       {uploadedBatch.length>0&&<div className="customer-uploaded-batch">
-        <div className="customer-uploaded-batch-head"><strong>Batch · {uploadedBatch.length} files</strong><span>Select a file to view its status. Pay once for all accepted files.</span></div>
+        <div className="customer-uploaded-batch-head"><strong>{batchName.trim()?"Batch · "+batchName.trim():"Batch · "+uploadedBatch.length+" files"}</strong><span>{uploadedBatch[0]?.job.jobNumber?"First job · "+uploadedBatch[0].job.jobNumber+" · ":""}Select a file to view its status. Pay once for all accepted files.</span></div>
         {batchLockedForPayment&&<p className="customer-payment-model-note">This batch is locked because a payment attempt has started. Add more documents in a new batch to keep each checkout total accurate.</p>}
         {Array.from(new Set(uploadedBatch.map(item=>item.job.batchGroupName??"Loose files"))).map(groupName=><section className="customer-uploaded-folder" key={groupName}>
           <strong>{groupName}</strong>

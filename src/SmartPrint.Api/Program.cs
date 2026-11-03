@@ -943,6 +943,7 @@ customerApi.MapGet("/jobs", async (
         {
             job.Id,
             job.BatchGroupName,
+            job.BatchName,
             job.JobNumber,
             job.Status,
             job.PageCount,
@@ -1867,6 +1868,7 @@ shop.MapGet("/print-jobs", async (
             job.Id,
             job.BatchId,
             job.BatchGroupName,
+            job.BatchName,
             job.RejectedPageNumbersJson,
             job.JobNumber,
             job.Status,
@@ -1970,6 +1972,7 @@ shop.MapGet("/print-jobs", async (
         var normalizedSearch = searchTerm.ToLowerInvariant();
         query = query.Where(job =>
             job.JobNumber.ToLower().Contains(normalizedSearch) ||
+            (job.BatchName != null && job.BatchName.ToLower().Contains(normalizedSearch)) ||
             (job.BatchGroupName != null && job.BatchGroupName.ToLower().Contains(normalizedSearch)) ||
             job.Document.OriginalFileName.ToLower().Contains(normalizedSearch) ||
             (job.PrinterName != null && job.PrinterName.ToLower().Contains(normalizedSearch)));
@@ -4080,6 +4083,7 @@ agentApi.MapPost("/local-uploads/{ticketId:guid}/complete", async (
         TenantId = ticket.TenantId,
         BatchId = ticket.BatchId,
         BatchGroupName = ticket.BatchGroupName,
+        BatchName = ticket.BatchName,
         QrStationId = ticket.QrStationId,
         PrinterDeviceId = ticket.PrinterDeviceId,
         CustomerSessionId = ticket.CustomerSessionId,
@@ -4131,6 +4135,9 @@ agentApi.MapPost("/local-uploads/{ticketId:guid}/complete", async (
             Job = new
             {
                 job.Id,
+                job.BatchGroupName,
+                job.BatchName,
+                job.BatchId,
                 job.JobNumber,
                 job.Status,
                 job.PageCount,
@@ -5478,10 +5485,10 @@ publicApi.MapPost("/sessions/current/jobs", async (
 
     var existing = await db.PrintJobs.AsNoTracking()
         .Where(job => job.TenantId == session.TenantId && job.IdempotencyKey == idempotencyKey)
+        .Select(job => new { job.Id, job.BatchId, job.BatchGroupName, job.BatchName, job.CustomerSessionId, job.JobNumber, job.Status, job.PageCount, job.CreatedUtc })
         .Select(job => new { job.Id, job.BatchId, job.BatchGroupName, job.CustomerSessionId, job.JobNumber, job.Status, job.PageCount, job.CreatedUtc })
         .SingleOrDefaultAsync(ct);
     if (existing is not null)
-    {
         if (existing.CustomerSessionId != session.Id)
         {
             return Results.Conflict(new { code = "idempotency_key_reused", message = "This request key has already been used for another customer session." });
@@ -5526,6 +5533,16 @@ publicApi.MapPost("/sessions/current/jobs", async (
     catch (ArgumentException exception)
     {
         return Results.BadRequest(new { code = "invalid_batch_group", message = exception.Message });
+    }
+
+    string? requestedBatchName;
+    try
+    {
+        requestedBatchName = PrintBatchNameRules.Normalize(form["batchName"].FirstOrDefault());
+    }
+    catch (ArgumentException exception)
+    {
+        return Results.BadRequest(new { code = "invalid_batch_name", message = exception.Message });
     }
     if (file.Length is <= 0 or > 20 * 1024 * 1024)
     {
@@ -5595,6 +5612,7 @@ publicApi.MapPost("/sessions/current/jobs", async (
         CustomerSessionId = session.Id,
         BatchId = batchId,
         BatchGroupName = batchGroupName,
+        BatchName = requestedBatchName,
         JobNumber = $"SP-{now:yyMMdd}-{Guid.NewGuid().ToString("N")[..8].ToUpperInvariant()}",
         Status = "AWAITING_CONFIGURATION",
         IdempotencyKey = idempotencyKey,
@@ -5626,10 +5644,10 @@ publicApi.MapPost("/sessions/current/jobs", async (
         await entitlements.AcquireQuotaLockAsync(session.TenantId, TenantQuotaResource.MonthlyPrintJob, ct);
         var racedJob = await db.PrintJobs.AsNoTracking()
             .Where(item => item.TenantId == session.TenantId && item.IdempotencyKey == idempotencyKey)
+            .Select(item => new { item.Id, item.CustomerSessionId, item.BatchId, item.BatchName, item.JobNumber, item.Status, item.PageCount, item.CreatedUtc })
             .Select(item => new { item.Id, item.CustomerSessionId, item.BatchId, item.JobNumber, item.Status, item.PageCount, item.CreatedUtc })
             .SingleOrDefaultAsync(ct);
         if (racedJob is not null)
-        {
             await transaction.RollbackAsync(ct);
             await storage.DeleteAsync(stored.StorageKey);
             if (racedJob.CustomerSessionId != session.Id)
@@ -5678,6 +5696,31 @@ publicApi.MapPost("/sessions/current/jobs", async (
                 code = "batch_upload_locked_after_payment_start",
                 message = "This batch payment started while the file was uploading. The file was not added; start a new batch for it."
             });
+        }
+
+        var batchJobsForName = await db.PrintJobs
+            .Where(item => item.TenantId == session.TenantId && item.CustomerSessionId == session.Id && item.BatchId == batchId)
+            .ToListAsync(ct);
+        var batchTicketsForName = await db.LocalPrintUploadTickets
+            .Where(item => item.TenantId == session.TenantId && item.CustomerSessionId == session.Id && item.BatchId == batchId)
+            .ToListAsync(ct);
+        string? effectiveBatchName;
+        try
+        {
+            effectiveBatchName = PrintBatchNameRules.Resolve(requestedBatchName,
+                batchJobsForName.Select(item => item.BatchName).Concat(batchTicketsForName.Select(item => item.BatchName)));
+        }
+        catch (ArgumentException)
+        {
+            await transaction.RollbackAsync(ct);
+            await storage.DeleteAsync(stored.StorageKey);
+            return Results.Conflict(new { code = "batch_name_locked", message = "This print batch already has a different name. Refresh the original request and keep its saved batch name, or start a new batch." });
+        }
+        if (effectiveBatchName is not null)
+        {
+            foreach (var existingBatchJob in batchJobsForName) existingBatchJob.BatchName ??= effectiveBatchName;
+            foreach (var existingBatchTicket in batchTicketsForName) existingBatchTicket.BatchName ??= effectiveBatchName;
+            job.BatchName = effectiveBatchName;
         }
 
         var batchJobSizes = await (
@@ -5740,6 +5783,7 @@ publicApi.MapPost("/sessions/current/jobs", async (
         {
             job.Id,
             job.BatchGroupName,
+            job.BatchName,
             job.JobNumber,
             job.Status,
             job.PageCount,
@@ -5787,6 +5831,16 @@ publicApi.MapPost("/sessions/current/local-upload-tickets", async (
     catch (ArgumentException exception)
     {
         return Results.BadRequest(new { code = "invalid_batch_group", message = exception.Message });
+    }
+
+    string? requestedBatchName;
+    try
+    {
+        requestedBatchName = PrintBatchNameRules.Normalize(request.BatchName);
+    }
+    catch (ArgumentException exception)
+    {
+        return Results.BadRequest(new { code = "invalid_batch_name", message = exception.Message });
     }
 
     var originalName = request.OriginalFileName?.Split('/', '\\').LastOrDefault() ?? string.Empty;
@@ -5848,6 +5902,7 @@ publicApi.MapPost("/sessions/current/local-upload-tickets", async (
             existing.PrintJobId,
             existing.BatchId,
             existing.BatchGroupName,
+            existing.BatchName,
             existing.JobNumber,
             existing.AgentDeviceId,
             existing.ExpiresUtc,
@@ -5943,6 +5998,7 @@ publicApi.MapPost("/sessions/current/local-upload-tickets", async (
         AgentDeviceId = stationPrinter.AgentDeviceId,
         BatchId = batchId,
         BatchGroupName = batchGroupName,
+        BatchName = requestedBatchName,
         JobNumber = $"SP-{now:yyMMdd}-{Guid.NewGuid().ToString("N")[..8].ToUpperInvariant()}",
         IdempotencyKey = idempotencyKey,
         GrantHash = grantHash,
@@ -6016,11 +6072,36 @@ publicApi.MapPost("/sessions/current/local-upload-tickets", async (
             racedTicket.PrintJobId,
             racedTicket.BatchId,
             racedTicket.BatchGroupName,
+            racedTicket.BatchName,
             racedTicket.JobNumber,
             racedTicket.AgentDeviceId,
             racedTicket.ExpiresUtc,
             Completed = racedTicket.CompletedUtc != null
         });
+    }
+
+    var batchJobsForName = await db.PrintJobs
+        .Where(item => item.TenantId == session.TenantId && item.CustomerSessionId == session.Id && item.BatchId == batchId)
+        .ToListAsync(ct);
+    var batchTicketsForName = await db.LocalPrintUploadTickets
+        .Where(item => item.TenantId == session.TenantId && item.CustomerSessionId == session.Id && item.BatchId == batchId)
+        .ToListAsync(ct);
+    string? effectiveBatchName;
+    try
+    {
+        effectiveBatchName = PrintBatchNameRules.Resolve(requestedBatchName,
+            batchJobsForName.Select(item => item.BatchName).Concat(batchTicketsForName.Select(item => item.BatchName)));
+    }
+    catch (ArgumentException)
+    {
+        await transaction.RollbackAsync(ct);
+        return Results.Conflict(new { code = "batch_name_locked", message = "This print batch already has a different name. Refresh the original request and keep its saved batch name, or start a new batch." });
+    }
+    if (effectiveBatchName is not null)
+    {
+        foreach (var existingBatchJob in batchJobsForName) existingBatchJob.BatchName ??= effectiveBatchName;
+        foreach (var existingBatchTicket in batchTicketsForName) existingBatchTicket.BatchName ??= effectiveBatchName;
+        ticket.BatchName = effectiveBatchName;
     }
 
     var quota = await entitlements.CheckCapacityAsync(session.TenantId, TenantQuotaResource.MonthlyPrintJob, ct);
@@ -6102,6 +6183,7 @@ publicApi.MapPost("/sessions/current/local-upload-tickets", async (
         ticket.PrintJobId,
         ticket.BatchId,
         ticket.BatchGroupName,
+        ticket.BatchName,
         ticket.JobNumber,
         ticket.AgentDeviceId,
         ticket.ExpiresUtc,
@@ -6175,6 +6257,7 @@ publicApi.MapPost("/sessions/current/local-upload-tickets/{ticketId:guid}/cloud-
                 preflightJob.PageCount, preflightJob.Copies, preflightJob.Currency,
                 preflightJob.QuotedAmountMinor, preflightJob.CreatedUtc,
                 preflightJob.BatchGroupName,
+                preflightJob.BatchName,
                 preflightJob.BatchId
             },
             Document = new
@@ -6292,6 +6375,7 @@ publicApi.MapPost("/sessions/current/local-upload-tickets/{ticketId:guid}/cloud-
                     existingJob.PageCount, existingJob.Copies, existingJob.Currency,
                     existingJob.QuotedAmountMinor, existingJob.CreatedUtc,
                     existingJob.BatchGroupName,
+                    existingJob.BatchName,
                     existingJob.BatchId
                 },
                 Document = new
@@ -6391,6 +6475,7 @@ publicApi.MapPost("/sessions/current/local-upload-tickets/{ticketId:guid}/cloud-
             CustomerSessionId = ticket.CustomerSessionId,
             BatchId = ticket.BatchId,
             BatchGroupName = ticket.BatchGroupName,
+            BatchName = ticket.BatchName,
             JobNumber = ticket.JobNumber,
             Status = "AWAITING_CONFIGURATION",
             IdempotencyKey = $"LOCAL-{ticket.Id:N}",
@@ -6440,10 +6525,10 @@ publicApi.MapPost("/sessions/current/local-upload-tickets/{ticketId:guid}/cloud-
             Job = new
             {
                 job.Id, job.JobNumber, job.Status, job.PageCount, job.Copies,
+                job.Currency, job.QuotedAmountMinor, job.CreatedUtc, job.BatchGroupName, job.BatchName, job.BatchId
                 job.Currency, job.QuotedAmountMinor, job.CreatedUtc, job.BatchGroupName, job.BatchId
             },
             Document = new
-            {
                 document.Id, document.OriginalFileName, document.MediaType,
                 document.SizeBytes, document.Sha256, document.PageSizesJson
             },

@@ -59,7 +59,10 @@ public sealed class PostgresMigrationUpgradeTests
             "202611020003_AddPrintJobPrinterIdentitySnapshot",
             await db.Database.GetAppliedMigrationsAsync());
         Assert.Contains(
-            "202611030001_AddPhotoPrintingPricingAndJobSnapshots",
+            "202611030001_AddPrintBatchNames",
+            await db.Database.GetAppliedMigrationsAsync());
+        Assert.Contains(
+            "202611030002_AddPhotoPrintingPricingAndJobSnapshots",
             await db.Database.GetAppliedMigrationsAsync());
 
         // Reproduce the local-upload completion transaction at the exact monthly quota boundary.
@@ -511,6 +514,7 @@ public sealed class PostgresMigrationUpgradeTests
             var migrator = migrationContext.GetService<IMigrator>();
             await migrator.MigrateAsync("202611020002_AddShopInstantPaymentPreference");
             await migrator.MigrateAsync("202611020003_AddPrintJobPrinterIdentitySnapshot");
+            await migrator.MigrateAsync("202611030001_AddPrintBatchNames");
             // Restore the latest schema before querying with the current EF model.
             await migrator.MigrateAsync();
         }
