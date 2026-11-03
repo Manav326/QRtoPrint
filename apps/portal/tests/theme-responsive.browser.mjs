@@ -66,6 +66,35 @@ async function preparePage(context, route) {
     contentType: "application/json",
     body: JSON.stringify({ message: "Visual QA uses isolated API fixtures; no live service is contacted." })
   }));
+  if (route.auth === "shop") {
+    const profile = {
+      id: "e2e-shop",
+      slug: "e2e-shop",
+      businessName: "Example Print Shop",
+      status: "Active",
+      ownerName: "Shop Owner",
+      ownerEmail: "owner@example.invalid",
+      displayName: "Example Print Shop",
+      logoUrl: null,
+      accentColor: "#7662E8",
+      currency: "INR",
+      timeZone: "Asia/Kolkata",
+      whiteLabelEnabled: false
+    };
+    await page.route("**/api/v1/shop/**", async request => {
+      const path = new URL(request.request().url()).pathname;
+      const value = path.endsWith("/profile")
+        ? profile
+        : path.endsWith("/pricing") || path.endsWith("/payment-settings") || path.endsWith("/subscription")
+          ? null
+          : [];
+      await request.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify(value)
+      });
+    });
+  }
   if (route.auth) {
     const key = route.auth === "admin" ? "qrtoprint.auth.admin" : "qrtoprint.auth.shop";
     const token = route.auth === "admin" ? adminToken : shopToken;
@@ -272,6 +301,46 @@ async function exerciseWorkspaceSections(page, route, viewport, themeLabel) {
       await page.locator(".account-menu-trigger").click();
       await page.locator("#shop-account-menu").waitFor({ state: "visible" });
     };
+
+    const accountRequests = [];
+    let currentMockOwnerEmail = "owner@example.invalid";
+    await page.route("**/api/v1/shop/account", async request => {
+      const submitted = request.request().postDataJSON();
+      const emailChanged = submitted.email.toLowerCase() !== currentMockOwnerEmail.toLowerCase();
+      currentMockOwnerEmail = submitted.email;
+      await request.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          ownerName: submitted.ownerName,
+          ownerEmail: currentMockOwnerEmail,
+          emailChanged
+        })
+      });
+      accountRequests.push(submitted);
+    });
+
+    await openAccountMenu();
+    await page.locator("#shop-account-menu").getByRole("button", { name: "Personal details", exact: true }).click();
+    const personalDetails = page.getByRole("dialog", { name: "Personal details" });
+    await personalDetails.waitFor({ state: "visible" });
+    await personalDetails.getByLabel("Your name").fill("Updated Shop Owner");
+    await personalDetails.getByRole("button", { name: "Save personal details" }).click();
+    await personalDetails.waitFor({ state: "hidden" });
+    assert.equal(accountRequests[0]?.currentPassword, undefined,
+      "A name-only update must not demand the current password.");
+
+    await openAccountMenu();
+    await page.locator("#shop-account-menu").getByRole("button", { name: "Personal details", exact: true }).click();
+    await personalDetails.waitFor({ state: "visible" });
+    await personalDetails.getByLabel("Sign-in email").fill("updated-owner@example.invalid");
+    await personalDetails.getByLabel("Current password").fill("E2e-Current-Password-2026!");
+    await personalDetails.getByRole("button", { name: "Save personal details" }).click();
+    await personalDetails.waitFor({ state: "hidden" });
+    assert.equal(accountRequests[1]?.currentPassword, "E2e-Current-Password-2026!",
+      "An email change must include the current password.");
+    results.push({ check: `${route.label} / account / personal name and email update / ${themeLabel} / ${viewport.width}px`, passed: true });
+
     const chooseAccountItem = async (label, expectedTitle) => {
       await openAccountMenu();
       await page.locator("#shop-account-menu").getByRole("button", { name: label, exact: true }).click();
