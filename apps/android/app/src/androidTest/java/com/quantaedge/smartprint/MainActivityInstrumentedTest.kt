@@ -17,6 +17,7 @@ import androidx.test.espresso.action.ViewActions.replaceText
 import androidx.test.espresso.assertion.ViewAssertions.doesNotExist
 import androidx.test.espresso.assertion.ViewAssertions.matches
 import androidx.test.espresso.matcher.ViewMatchers.isDisplayed
+import androidx.test.espresso.matcher.ViewMatchers.isAssignableFrom
 import androidx.test.espresso.matcher.ViewMatchers.withId
 import androidx.test.espresso.matcher.ViewMatchers.withContentDescription
 import androidx.test.espresso.matcher.ViewMatchers.withHint
@@ -36,7 +37,7 @@ import org.junit.Assert.assertTrue
 @RunWith(AndroidJUnit4::class)
 class MainActivityInstrumentedTest {
     private fun clickNavigationItem(description: String) {
-        onView(withContentDescription(description)).perform(click())
+        onView(allOf(withContentDescription(description), isAssignableFrom(LinearLayout::class.java))).perform(click())
     }
 
     private fun openNavigationDestination(itemId: Int, expectedText: String) {
