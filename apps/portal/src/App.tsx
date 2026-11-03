@@ -3961,8 +3961,8 @@ function CustomerPrintFlow({publicCode,sessionToken,paymentOptions,localAgent,lo
   );
   const batchQuoteTotal=acceptedQuoteEntries.reduce((total,entry)=>
     total+(entry.quote?.quotedAmountMinor??0),0);
-  const batchDocumentSourcePages=quoteEntries.reduce((total,entry)=>
-    total+(entry.quote?.printKind==="PHOTO"?0:(entry.quote?.pageCount??entry.item.job.pageCount)),0);
+  const batchDocumentSourcePages=acceptedDocumentEntries.reduce((total,entry)=>
+    total+(entry.quote?.pageCount??entry.item.job.pageCount),0);
   const acceptedDocumentEntries=acceptedQuoteEntries.filter(entry=>entry.quote?.printKind!=="PHOTO");
   const acceptedPhotoEntries=acceptedQuoteEntries.filter(entry=>entry.quote?.printKind==="PHOTO");
   const batchPhotoCount=acceptedPhotoEntries.reduce((total,entry)=>total+(entry.quote?.photoCount??0),0);
