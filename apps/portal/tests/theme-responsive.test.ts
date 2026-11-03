@@ -238,6 +238,7 @@ test("shop owner navigation groups daily work and moves account destinations int
   assert.match(sidebar, /sectionGroups\.map/);
   assert.doesNotMatch(sidebar, /plan-card|support-link|profile-row/,
     "Trial, help and owner controls must not be permanently pinned in the sidebar.");
+  assert.match(app, /Personal details/);
   assert.match(app, /Shop profile &amp; branding/);
   assert.match(app, /Trial &amp; subscription/);
   assert.match(app, /Help &amp; support/);
@@ -258,4 +259,28 @@ test("shop workspace content expands into the space left after the sidebar", () 
   assert.match(app, /activePageTitle/);
   assert.match(css, /@media \(max-width: 850px\)/);
   assert.match(css, /@media \(max-width: 600px\)/);
+});
+
+
+test("shop owner personal details are editable from the account menu without mixing shop branding", () => {
+  const app = read("../src/App.tsx");
+  const api = read("../src/api.ts");
+  const settingsStart = app.indexOf("function SettingsPage");
+  const settingsEnd = app.indexOf("function ShopOwnerAccountModal", settingsStart);
+  const settings = app.slice(settingsStart, settingsEnd);
+  const modalStart = app.indexOf("function ShopOwnerAccountModal");
+  const modalEnd = app.indexOf("function HelpSupportModal", modalStart);
+  const modal = app.slice(modalStart, modalEnd);
+
+  assert.match(app, /Personal details/);
+  assert.match(app, /ownerAccountOpen/);
+  assert.match(app, /ShopOwnerAccountModal/);
+  assert.match(api, /updateShopOwnerAccount/);
+  assert.match(api, /ownerEmail: string/);
+  assert.match(modal, /Your name/);
+  assert.match(modal, /Sign-in email/);
+  assert.match(modal, /Current password/);
+  assert.match(modal, /emailChanged/);
+  assert.doesNotMatch(settings, /ownerEmail|Current password/,
+    "Personal sign-in details must stay separate from customer-facing shop branding.");
 });
