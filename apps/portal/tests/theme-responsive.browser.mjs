@@ -249,7 +249,7 @@ async function assertRouteContrast(page, route) {
 async function exerciseWorkspaceSections(page, route, viewport, themeLabel) {
   if (!route.auth) return;
   const sections = route.auth === "shop"
-    ? ["Overview", "Print Queue", "Printers", "QR Stations", "Print Agent", "Pricing", "Subscription", "Payments", "Customers", "Reports", "Settings"]
+    ? ["Overview", "Print Queue", "Customers", "Printers", "QR Stations", "Print Agent", "Pricing", "Payments", "Reports"]
     : ["Overview", "Shop tenants", "Plans & entitlements", "Shop subscriptions", "Operations & retention"];
   for (const section of sections) {
     if (viewport.width <= 850) await page.getByRole("button", { name: "Open navigation" }).click();
