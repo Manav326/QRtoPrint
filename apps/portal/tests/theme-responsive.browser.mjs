@@ -266,6 +266,39 @@ async function exerciseWorkspaceSections(page, route, viewport, themeLabel) {
     await assertRouteContrast(page, route);
     results.push({ check: `${route.label} / ${section} / ${themeLabel} / ${viewport.width}px`, passed: true });
   }
+
+  if (route.auth === "shop") {
+    const openAccountMenu = async () => {
+      await page.locator(".account-menu-trigger").click();
+      await page.locator("#shop-account-menu").waitFor({ state: "visible" });
+    };
+    const chooseAccountItem = async (label, expectedTitle) => {
+      await openAccountMenu();
+      await page.locator("#shop-account-menu").getByRole("button", { name: label, exact: true }).click();
+      await page.waitForFunction(
+        title => document.querySelector(".page-heading h1")?.textContent?.trim() === title,
+        expectedTitle
+      );
+      await assertNoHorizontalOverflow(page, route, viewport);
+      await assertRouteContrast(page, route);
+      results.push({ check: `${route.label} / account / ${label} / ${themeLabel} / ${viewport.width}px`, passed: true });
+    };
+
+    await chooseAccountItem("Trial & subscription", "Subscription");
+    await chooseAccountItem("Shop profile & branding", "Shop profile");
+
+    await openAccountMenu();
+    await page.locator("#shop-account-menu").getByRole("button", { name: "Help & support", exact: true }).click();
+    const helpDialog = page.getByRole("dialog", { name: "Help & support" });
+    await helpDialog.waitFor({ state: "visible" });
+    await helpDialog.getByRole("button", { name: "Print jobs and approvals" }).click();
+    await page.waitForFunction(
+      () => document.querySelector(".page-heading h1")?.textContent?.trim() === "Print Queue"
+    );
+    await assertNoHorizontalOverflow(page, route, viewport);
+    await assertRouteContrast(page, route);
+    results.push({ check: `${route.label} / account / Help & support / ${themeLabel} / ${viewport.width}px`, passed: true });
+  }
 }
 
 async function assertThemeToggle(page) {
