@@ -1294,6 +1294,7 @@ export interface CustomerJobStatus {
   colourMode: string;
   paperSize: string;
   isDuplex: boolean;
+  // Photo quotes retain the configured per-photo rate used at quote time.
   printKind?: string;
   photoSizeCode?: string | null;
   photoCount?: number;
