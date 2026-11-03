@@ -143,6 +143,11 @@ function ShopConsole({ tokens, onSignOut, dark, onToggleTheme }: { tokens: AuthT
     return () => window.removeEventListener("popstate", syncSectionFromPath);
   }, []);
 
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(readSidebarCollapsedPreference);
+  const [accountMenuOpen, setAccountMenuOpen] = useState(false);
+  const [helpOpen, setHelpOpen] = useState(false);
+  const accountMenuRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (!accountMenuOpen) return;
     const closeOnOutsidePointer = (event: PointerEvent) => {
@@ -158,11 +163,6 @@ function ShopConsole({ tokens, onSignOut, dark, onToggleTheme }: { tokens: AuthT
       window.removeEventListener("keydown", closeOnEscape);
     };
   }, [accountMenuOpen]);
-  const [sidebarOpen, setSidebarOpen] = useState(false);
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(readSidebarCollapsedPreference);
-  const [accountMenuOpen, setAccountMenuOpen] = useState(false);
-  const [helpOpen, setHelpOpen] = useState(false);
-  const accountMenuRef = useRef<HTMLDivElement>(null);
   const reloadInFlight = useRef(false);
   const desktopAgentSyncTimer = useRef<number | null>(null);
   const desktopAgentSyncInFlight = useRef(false);
