@@ -45,7 +45,8 @@ public sealed class WindowsPrinterDiscovery(ILogger<WindowsPrinterDiscovery> log
                         port?.Trim() ?? string.Empty,
                         status,
                         isDefault,
-                        outputMode));
+                        outputMode,
+                        WindowsPrinterCapabilityDiscovery.DiscoverJson(name.Trim())));
                 }
             }
 

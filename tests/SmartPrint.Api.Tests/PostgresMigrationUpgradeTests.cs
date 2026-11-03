@@ -58,6 +58,12 @@ public sealed class PostgresMigrationUpgradeTests
         Assert.Contains(
             "202611020003_AddPrintJobPrinterIdentitySnapshot",
             await db.Database.GetAppliedMigrationsAsync());
+        Assert.Contains(
+            "202611030001_AddPrintBatchNames",
+            await db.Database.GetAppliedMigrationsAsync());
+        Assert.Contains(
+            "202611030002_AddPhotoPrintingPricingAndJobSnapshots",
+            await db.Database.GetAppliedMigrationsAsync());
 
         // Reproduce the local-upload completion transaction at the exact monthly quota boundary.
         settings.TrialMaxMonthlyPrintJobs = 1;
@@ -509,6 +515,8 @@ public sealed class PostgresMigrationUpgradeTests
             await migrator.MigrateAsync("202611020002_AddShopInstantPaymentPreference");
             await migrator.MigrateAsync("202611020003_AddPrintJobPrinterIdentitySnapshot");
             await migrator.MigrateAsync("202611030001_AddPrintBatchNames");
+            // Restore the latest schema before querying with the current EF model.
+            await migrator.MigrateAsync();
         }
 
         await using var verification = new SmartPrintDbContext(options);

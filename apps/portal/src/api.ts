@@ -638,6 +638,10 @@ export interface ShopCustomerJob {
   colourMode: string;
   paperSize: string;
   isDuplex: boolean;
+  printKind?: string;
+  photoSizeCode?: string | null;
+  photoCount?: number;
+  photoUnitPriceMinorSnapshot?: number;
   currency: string;
   quotedAmountMinor: number;
   rejectedPageNumbersJson: string;
@@ -817,6 +821,7 @@ export async function createCustomerSession(publicCode: string) {
     sessionToken: string;
     shop: { displayName: string; logoUrl?: string | null; accentColor: string; currency: string };
     printer: { displayName: string; manufacturer: string; model: string; status: string; capabilitiesJson: string } | null;
+    photoPricing: CustomerPhotoPricing | null;
     paymentOptions: { upiEnabled: boolean; upiId?: string | null; payeeName?: string | null; cashEnabled: boolean; instantPaymentEnabled: boolean };
     localAgent: { agentDeviceId: string; endpoints: string[] } | null;
     cloudAssistedPrintingEnabled: boolean;
@@ -846,6 +851,7 @@ export function resumeCustomerSession(sessionToken: string, publicCode: string) 
     shop: { displayName: string; logoUrl?: string | null; accentColor: string; currency: string };
     paymentOptions: { upiEnabled: boolean; upiId?: string | null; payeeName?: string | null; cashEnabled: boolean; instantPaymentEnabled: boolean };
     printer: { displayName: string; manufacturer: string; model: string; status: string; capabilitiesJson: string } | null;
+    photoPricing: CustomerPhotoPricing | null;
     localAgent: { agentDeviceId: string; endpoints: string[] } | null;
     cloudAssistedPrintingEnabled: boolean;
   }>("/api/v1/public/sessions/current/resume", {
@@ -855,6 +861,7 @@ export function resumeCustomerSession(sessionToken: string, publicCode: string) 
   });
 }
 
+export interface CustomerPhotoPricing { photo35x45Minor:number; photo25x35Minor:number; photo2x2Minor:number; photo4x6Minor:number; }
 export interface ShopPricingProfile {
   isConfigured: boolean;
   monoPerSideMinor: number;
@@ -862,6 +869,10 @@ export interface ShopPricingProfile {
   monoDuplexPerSheetMinor: number;
   colourDuplexPerSheetMinor: number;
   minimumChargeMinor: number;
+  photo35x45Minor: number;
+  photo25x35Minor: number;
+  photo2x2Minor: number;
+  photo4x6Minor: number;
   version: number;
   updatedUtc: string;
 }
@@ -879,6 +890,10 @@ export interface ShopPrintJob {
   colourMode: string;
   paperSize: string;
   isDuplex: boolean;
+  printKind?: string;
+  photoSizeCode?: string | null;
+  photoCount?: number;
+  photoUnitPriceMinorSnapshot?: number;
   currency: string;
   quotedAmountMinor: number;
   quoteExpiresUtc?: string | null;
@@ -916,7 +931,7 @@ export interface ShopPrintJob {
 }
 
 export interface UploadedPrintJob {
-  job: { id: string; jobNumber: string; status: string; pageCount: number; copies: number; currency: string; quotedAmountMinor: number; createdUtc: string; batchGroupName?: string | null; batchName?: string | null; batchId?: string | null };
+  job: { id: string; jobNumber: string; status: string; pageCount: number; copies: number; currency: string; quotedAmountMinor: number; createdUtc: string; batchGroupName?: string | null; batchName?: string | null; batchId?: string | null; printKind?: string; photoSizeCode?: string | null; photoCount?: number; photoUnitPriceMinorSnapshot?: number };
   document: { id: string; originalFileName: string; mediaType: string; sizeBytes: number; sha256: string; pageSizesJson: string };
   duplicateRequest: boolean;
 }
@@ -931,6 +946,10 @@ export interface PrintQuoteResult {
   colourMode: string;
   paperSize: string;
   isDuplex: boolean;
+  printKind?: "DOCUMENT" | "PHOTO";
+  photoSizeCode?: string | null;
+  photoCount?: number;
+  photoUnitPriceMinor?: number;
   currency: string;
   quotedAmountMinor: number;
   amountMajor: number;
@@ -945,6 +964,10 @@ export function updateShopPricing(token: string, values: {
   monoDuplexPerSheetMinor: number;
   colourDuplexPerSheetMinor: number;
   minimumChargeMinor: number;
+  photo35x45Minor: number;
+  photo25x35Minor: number;
+  photo2x2Minor: number;
+  photo4x6Minor: number;
 }) {
   return apiRequest<ShopPricingProfile>("/api/v1/shop/pricing", {
     method: "PUT",
@@ -1281,6 +1304,9 @@ export function calculateCustomerQuote(sessionToken: string, jobId: string, valu
   paperSize: "A4";
   isDuplex: boolean;
   copies: number;
+  printKind?: "DOCUMENT" | "PHOTO";
+  photoSizeCode?: string;
+  photoCount?: number;
 }) {
   return apiRequest<PrintQuoteResult>(`/api/v1/public/jobs/${jobId}/quote`, {
     method: "POST",
@@ -1298,6 +1324,11 @@ export interface CustomerJobStatus {
   colourMode: string;
   paperSize: string;
   isDuplex: boolean;
+  // Photo quotes retain the configured per-photo rate used at quote time.
+  printKind?: string;
+  photoSizeCode?: string | null;
+  photoCount?: number;
+  photoUnitPriceMinorSnapshot?: number;
   currency: string;
   quotedAmountMinor: number;
   quoteExpiresUtc?: string | null;
