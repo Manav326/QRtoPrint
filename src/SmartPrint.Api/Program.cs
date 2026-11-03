@@ -5486,9 +5486,9 @@ publicApi.MapPost("/sessions/current/jobs", async (
     var existing = await db.PrintJobs.AsNoTracking()
         .Where(job => job.TenantId == session.TenantId && job.IdempotencyKey == idempotencyKey)
         .Select(job => new { job.Id, job.BatchId, job.BatchGroupName, job.BatchName, job.CustomerSessionId, job.JobNumber, job.Status, job.PageCount, job.CreatedUtc })
-        .Select(job => new { job.Id, job.BatchId, job.BatchGroupName, job.CustomerSessionId, job.JobNumber, job.Status, job.PageCount, job.CreatedUtc })
         .SingleOrDefaultAsync(ct);
     if (existing is not null)
+    {
         if (existing.CustomerSessionId != session.Id)
         {
             return Results.Conflict(new { code = "idempotency_key_reused", message = "This request key has already been used for another customer session." });
@@ -5645,9 +5645,9 @@ publicApi.MapPost("/sessions/current/jobs", async (
         var racedJob = await db.PrintJobs.AsNoTracking()
             .Where(item => item.TenantId == session.TenantId && item.IdempotencyKey == idempotencyKey)
             .Select(item => new { item.Id, item.CustomerSessionId, item.BatchId, item.BatchName, item.JobNumber, item.Status, item.PageCount, item.CreatedUtc })
-            .Select(item => new { item.Id, item.CustomerSessionId, item.BatchId, item.JobNumber, item.Status, item.PageCount, item.CreatedUtc })
             .SingleOrDefaultAsync(ct);
         if (racedJob is not null)
+        {
             await transaction.RollbackAsync(ct);
             await storage.DeleteAsync(stored.StorageKey);
             if (racedJob.CustomerSessionId != session.Id)
