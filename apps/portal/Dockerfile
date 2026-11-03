@@ -5,7 +5,7 @@ LABEL org.opencontainers.image.description="QRtoPrint customer and shop web port
 WORKDIR /workspace
 RUN corepack enable && corepack prepare pnpm@10.18.0 --activate
 COPY . .
-RUN pnpm install --no-frozen-lockfile
+RUN pnpm install --frozen-lockfile
 ARG VITE_API_BASE_URL=
 ENV VITE_API_BASE_URL=${VITE_API_BASE_URL}
 RUN pnpm --filter @qrtoprint/portal build
