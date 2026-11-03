@@ -224,3 +224,36 @@ test("shop phone-readiness QR guides SmartPrint users through the in-app Wi-Fi c
   assert.match(section, /phone without SmartPrint/);
   assert.match(section, /five minutes/);
 });
+
+
+test("shop owner navigation groups daily work and moves account destinations into the header menu", () => {
+  const app = read("../src/App.tsx");
+  const css = read("../src/styles.css");
+  const sidebarStart = app.indexOf('<aside className={sidebarOpen');
+  const sidebarEnd = app.indexOf("</aside>", sidebarStart);
+  assert.ok(sidebarStart >= 0 && sidebarEnd > sidebarStart, "The shop navigation sidebar must remain present.");
+  const sidebar = app.slice(sidebarStart, sidebarEnd);
+
+  assert.match(app, /const sectionGroups:/);
+  assert.match(sidebar, /sectionGroups\\.map/);
+  assert.doesNotMatch(sidebar, /plan-card|support-link|profile-row/,
+    "Trial, help and owner controls must not be permanently pinned in the sidebar.");
+  assert.match(app, /Shop profile &amp; branding/);
+  assert.match(app, /Trial &amp; subscription/);
+  assert.match(app, /Help &amp; support/);
+  assert.match(app, /accountMenuOpen/);
+  assert.match(app, /HelpSupportModal/);
+  assert.match(css, /\\.app-shell \\.nav-group-items\\s*\\{/);
+});
+
+test("shop workspace content expands into the space left after the sidebar", () => {
+  const css = read("../src/styles.css");
+  const app = read("../src/App.tsx");
+
+  assert.match(css, /\\.app-shell > \\.main-panel\\s*\\{[^}]*flex:\\s*1 1 0%/s);
+  assert.match(css, /\\.app-shell > \\.main-panel > \\.content-wrap\\s*\\{[^}]*width:\\s*100%[^}]*max-width:\\s*1920px/s);
+  assert.match(css, /\\.app-shell \\.customers-search\\s*\\{[^}]*max-width:\\s*none/s);
+  assert.match(app, /activePageTitle/);
+  assert.match(css, /@media \\(max-width: 850px\\)/);
+  assert.match(css, /@media \\(max-width: 600px\\)/);
+});
