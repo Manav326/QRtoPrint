@@ -103,7 +103,6 @@ public sealed record CreateLocalPrintUploadTicketRequest(
     Guid? BatchId = null,
     string? BatchGroupName = null,
     string? BatchName = null);
-    string? BatchGroupName = null);
 
 public sealed record RecordPrintRefundRequest(
     string? RefundReference,
