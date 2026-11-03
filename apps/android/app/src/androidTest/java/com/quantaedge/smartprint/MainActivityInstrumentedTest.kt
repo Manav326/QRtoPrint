@@ -321,7 +321,7 @@ class MainActivityInstrumentedTest {
 
     @Test
     fun rendersCompactSmartPrintHomeAndFourDestinations() {
-        ActivityScenario.launch(MainActivity::class.java).use {
+        ActivityScenario.launch(MainActivity::class.java).use { scenario ->
             onView(withText("Your space")).check(matches(isDisplayed()))
             onView(withText("Recent")).check(matches(isDisplayed()))
             onView(withText("Scan document")).check(matches(isDisplayed()))
