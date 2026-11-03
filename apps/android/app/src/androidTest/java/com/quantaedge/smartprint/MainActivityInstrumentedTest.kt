@@ -631,6 +631,76 @@ class MainActivityInstrumentedTest {
             onView(withText("Delete")).check(matches(isDisplayed()))
         }
     }
+
+    @Test
+    fun connectedShopHasDedicatedWifiCheckWithoutStartingAShopSwitch() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val shopPreferences = context.getSharedPreferences(
+            "smartprint.customer.last-shop",
+            Context.MODE_PRIVATE
+        )
+        val previousPreferences = shopPreferences.all.toMap()
+        val stationUrl = BuildConfig.SERVICE_BASE_URL.trimEnd('/') + "/s/" + "S".repeat(32)
+        val stationHost = Uri.parse(stationUrl).host.orEmpty()
+
+        try {
+            ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+                scenario.onActivity { activity ->
+                    shopPreferences.edit()
+                        .putString("portalUrl", stationUrl)
+                        .putString("portalHost", stationHost)
+                        .putString("shopDisplayName", "Wi-Fi Check Test Shop")
+                        .commit()
+
+                    MainActivity::class.java.getDeclaredField("portalUrl").apply {
+                        isAccessible = true
+                    }.set(activity, stationUrl)
+                    MainActivity::class.java.getDeclaredField("portalHost").apply {
+                        isAccessible = true
+                    }.set(activity, stationHost)
+                    MainActivity::class.java.getDeclaredField("shopDisplayName").apply {
+                        isAccessible = true
+                    }.set(activity, "Wi-Fi Check Test Shop")
+                    MainActivity::class.java.getDeclaredMethod("showHome").apply {
+                        isAccessible = true
+                    }.invoke(activity)
+                    MainActivity::class.java.getDeclaredMethod("showShopManager").apply {
+                        isAccessible = true
+                    }.invoke(activity)
+                }
+
+                onView(withText("Check shop Wi-Fi")).check(matches(isDisplayed()))
+                onView(withText("Check shop Wi-Fi")).perform(click())
+                onView(withText("Scan the temporary phone-check QR shown on the shop computer."))
+                    .check(matches(isDisplayed()))
+                onView(withContentDescription("Close QR scanner")).perform(click())
+                onView(withText("Wi-Fi Check Test Shop")).check(matches(isDisplayed()))
+
+                scenario.onActivity { activity ->
+                    val currentPortalUrl = MainActivity::class.java.getDeclaredField("portalUrl").apply {
+                        isAccessible = true
+                    }.get(activity)
+                    assertEquals(stationUrl, currentPortalUrl)
+                    assertEquals(stationUrl, shopPreferences.getString("portalUrl", null))
+                    assertEquals(stationHost, shopPreferences.getString("portalHost", null))
+                    assertEquals("Wi-Fi Check Test Shop", shopPreferences.getString("shopDisplayName", null))
+                }
+            }
+        } finally {
+            val editor = shopPreferences.edit().clear()
+            previousPreferences.forEach { (key, value) ->
+                when (value) {
+                    is String -> editor.putString(key, value)
+                    is Boolean -> editor.putBoolean(key, value)
+                    is Int -> editor.putInt(key, value)
+                    is Long -> editor.putLong(key, value)
+                    is Float -> editor.putFloat(key, value)
+                    is Set<*> -> editor.putStringSet(key, value.filterIsInstance<String>().toSet())
+                }
+            }
+            editor.commit()
+        }
+    }
 }
 
 @RunWith(AndroidJUnit4::class)
@@ -641,6 +711,9 @@ class QrScannerPermissionInstrumentedTest {
         // Do not change a package permission from the instrumentation process:
         // Android kills the app UID when a runtime permission grant changes.
         ActivityScenario.launch(QrScannerActivity::class.java).use {
+            onView(withText("Scan shop QR")).check(matches(isDisplayed()))
+            onView(withText("Scan the SmartPrint QR displayed at the shop counter to connect."))
+                .check(matches(isDisplayed()))
             onView(withText("Camera access needed")).check(matches(isDisplayed()))
             onView(withText("Allow camera for QR scanning."))
                 .check(matches(isDisplayed()))
