@@ -73,6 +73,7 @@ import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.util.Date
 import java.util.Locale
+import java.util.UUID
 import java.net.HttpURLConnection
 import java.net.URL
 import java.util.zip.ZipEntry
@@ -89,6 +90,8 @@ class MainActivity : AppCompatActivity() {
         private const val MAX_TREE_FILES = 500
         private const val MAX_TREE_DEPTH = 12
         private const val FOLDER_PICKER_ACCEPT = "application/x-smartprint-folder-selection"
+        private const val MAX_CUSTOMER_UPLOAD_PREVIEW_BYTES = 20L * 1024L * 1024L
+        private const val MAX_CUSTOMER_UPLOAD_PREVIEW_BATCH_BYTES = 50L * 1024L * 1024L
     }
 
     private lateinit var store: LocalDocumentStore
@@ -104,6 +107,8 @@ class MainActivity : AppCompatActivity() {
     private lateinit var accountAction: ImageView
     private var documentViewer: SmartPrintDocumentViewer? = null
     private var viewingDocument: File? = null
+    private var customerUploadPdfPreviewOpen = false
+    private val customerUploadPdfPreviews = java.util.concurrent.ConcurrentHashMap<String, File>()
     private var webView: WebView? = null
     private var folderPath = ""
     private var pickerPath = ""
@@ -239,7 +244,7 @@ class MainActivity : AppCompatActivity() {
         outState.putInt("selectedNavigation", if (::navigation.isInitialized) navigation.selectedItemId else HOME)
         outState.putBoolean("profileVisible", profileVisible)
         outState.putInt("profileReturnDestination", profileReturnDestination)
-        outState.putString("viewingDocumentPath", viewingDocument?.absolutePath)
+        outState.putString("viewingDocumentPath", viewingDocument?.absolutePath?.takeUnless { customerUploadPdfPreviewOpen })
         outState.putInt("viewerPosition", documentViewer?.currentPosition() ?: 0)
         outState.putString("portalUrl", portalUrl)
         outState.putString("portalHost", portalHost)
@@ -262,7 +267,7 @@ class MainActivity : AppCompatActivity() {
             profileVisible -> returnFromProfile()
             pickerMode && pickerPath.isNotBlank() -> { pickerPath = parent(pickerPath); refreshLibrary(preserveScroll = false) }
             pickerMode -> cancelPicker()
-            documentViewer != null -> closeDocumentViewer()
+            documentViewer != null -> if (customerUploadPdfPreviewOpen) closeCustomerUploadPdfPreview() else closeDocumentViewer()
             editingPdf != null -> showFiles()
             navigation.selectedItemId == SCAN_PRINT && webView?.canGoBack() == true -> webView?.goBack()
             navigation.selectedItemId == FILES && folderPath.isNotEmpty() -> {
@@ -404,6 +409,7 @@ class MainActivity : AppCompatActivity() {
     override fun onDestroy() {
         documentViewer?.dispose()
         documentViewer = null
+        clearCustomerUploadPdfPreviews()
         super.onDestroy()
     }
 
@@ -2269,9 +2275,28 @@ class MainActivity : AppCompatActivity() {
                             else runCatching { replyProxy.postMessage("localNetworkAccess:denied") }
                         }
                     } else {
-                        Thread {
+                        val parts = message.data.orEmpty().split("|", limit = 3)
+                        when {
+                            parts.size == 2 && parts[0] == "previewCustomerPdf" &&
+                                isCustomerUploadPdfPreviewToken(parts[1]) -> {
+                                val token = parts[1]
+                                runOnUiThread {
+                                    if (!isFinishing && !isDestroyed) {
+                                        showCustomerUploadPdfPreview(token)
+                                        replyProxy.postMessage("OK")
+                                    }
+                                }
+                            }
+                            parts.size == 2 && parts[0] == "retainCustomerPdfPreviews" -> {
+                                runOnUiThread {
+                                    if (!isFinishing && !isDestroyed) {
+                                        retainCustomerUploadPdfPreviews(parts[1])
+                                        replyProxy.postMessage("OK")
+                                    }
+                                }
+                            }
+                            else -> Thread {
                         val response = try {
-                            val parts = message.data.orEmpty().split("|", limit = 3)
                             when {
                                 message.data == "getCustomerAccessToken" -> {
                                     var auth = customerAccountStore.read()
@@ -2304,6 +2329,7 @@ class MainActivity : AppCompatActivity() {
                             if (!isFinishing && !isDestroyed) replyProxy.postMessage(response)
                         }
                         }.start()
+                        }
                     }
                 }
             }
@@ -2333,6 +2359,8 @@ class MainActivity : AppCompatActivity() {
                     "upi", "tel", "mailto" -> { launchExternal(uri); true }
                     "intent" -> { launchIntent(uri.toString()); true }
                     "http" -> !(allowedAgentLocalEndpoint(uri, request.method, request.requestHeaders) || allowedLocalDevelopmentEndpoint(uri))
+                    // Android's WebView does not render PDF iframe documents. The
+                    // customer form opens selected PDFs in the existing native reader.
                     "about" -> false
                     else -> true
                 }
@@ -2921,8 +2949,12 @@ class MainActivity : AppCompatActivity() {
             }.toTypedArray()
             val safeGroupNames = groupNames?.takeIf { it.size == files.size }
                 ?: files.map(::printBatchGroupName)
+            val previewTokens = JSONArray().apply {
+                files.forEach { put(createCustomerUploadPdfPreview(it) ?: JSONObject.NULL) }
+            }
             val metadataScript = "window.__smartPrintNativePickerGroups = " +
-                JSONArray().apply { safeGroupNames.forEach { put(it) } }.toString() + ";"
+                JSONArray().apply { safeGroupNames.forEach { put(it) } }.toString() + ";" +
+                "window.__smartPrintNativePdfPreviews = " + previewTokens.toString() + ";"
             val deliverSelection = {
                 fileCallback = null
                 chooserSelectedFilePaths.clear()
@@ -2962,8 +2994,99 @@ class MainActivity : AppCompatActivity() {
         fileChooserAllowsMultiple = false
         fileChooserSelectFolders = false
         showPrint()
-        runCatching { callback.onReceiveValue(selected.toTypedArray()) }
-            .onFailure { toast("Could not attach the selected phone documents.") }
+        val previewTokens = JSONArray().apply {
+            selected.forEach { put(createCustomerUploadPdfPreview(it) ?: JSONObject.NULL) }
+        }
+        val metadataScript = "window.__smartPrintNativePdfPreviews = $previewTokens;"
+        val activeWebView = webView
+        if (activeWebView != null) {
+            activeWebView.evaluateJavascript(metadataScript) {
+                runCatching { callback.onReceiveValue(selected.toTypedArray()) }
+                    .onFailure { toast("Could not attach the selected phone documents.") }
+            }
+        } else {
+            runCatching { callback.onReceiveValue(selected.toTypedArray()) }
+                .onFailure { toast("Could not attach the selected phone documents.") }
+        }
+    }
+
+    private fun createCustomerUploadPdfPreview(file: File): String? {
+        val source = runCatching { file.canonicalFile }.getOrNull() ?: return null
+        if (!source.isFile || !source.name.endsWith(".pdf", true) ||
+            source.length() !in 1..MAX_CUSTOMER_UPLOAD_PREVIEW_BYTES) return null
+        val token = UUID.randomUUID().toString()
+        customerUploadPdfPreviews[token] = source
+        return token
+    }
+
+    private fun createCustomerUploadPdfPreview(uri: Uri): String? {
+        val name = queryName(uri)
+        if (!name.endsWith(".pdf", true)) return null
+        val directory = File(cacheDir, "customer-upload-pdf-preview")
+        if (!directory.exists() && !directory.mkdirs()) return null
+        val canonicalDirectory = directory.canonicalFile
+        val existingPreviewBytes = customerUploadPdfPreviews.values.sumOf { preview ->
+            val parent = runCatching { preview.canonicalFile.parentFile }.getOrNull()
+            if (parent == canonicalDirectory) preview.length() else 0L
+        }
+        val target = runCatching { File.createTempFile("upload-preview-", ".pdf", directory) }.getOrNull()
+            ?: return null
+        return try {
+            val input = contentResolver.openInputStream(uri) ?: error("Selected PDF is unavailable.")
+            val copiedBytes = input.use { source ->
+                target.outputStream().use { destination ->
+                    val buffer = ByteArray(8192)
+                    var total = 0L
+                    while (true) {
+                        val count = source.read(buffer)
+                        if (count < 0) break
+                        total += count
+                        require(total <= MAX_CUSTOMER_UPLOAD_PREVIEW_BYTES) {
+                            "This PDF is too large to preview."
+                        }
+                        require(existingPreviewBytes + total <= MAX_CUSTOMER_UPLOAD_PREVIEW_BATCH_BYTES) {
+                            "The selected PDFs exceed the preview limit for one batch."
+                        }
+                        destination.write(buffer, 0, count)
+                    }
+                    total
+                }
+            }
+            require(copiedBytes > 0L) { "Selected PDF is empty." }
+            val token = UUID.randomUUID().toString()
+            customerUploadPdfPreviews[token] = target
+            token
+        } catch (_: Exception) {
+            target.delete()
+            null
+        }
+    }
+
+    private fun isCustomerUploadPdfPreviewToken(token: String): Boolean =
+        runCatching { UUID.fromString(token).toString() == token }.getOrDefault(false)
+
+    private fun retainCustomerUploadPdfPreviews(rawTokens: String) {
+        val retained = rawTokens.split(',')
+            .map(String::trim)
+            .filter(::isCustomerUploadPdfPreviewToken)
+            .toSet()
+        val previewDirectory = File(cacheDir, "customer-upload-pdf-preview").canonicalFile
+        customerUploadPdfPreviews.entries.toList().forEach { entry ->
+            if (entry.key !in retained && customerUploadPdfPreviews.remove(entry.key, entry.value)) {
+                val parent = runCatching { entry.value.canonicalFile.parentFile }.getOrNull()
+                if (parent == previewDirectory) entry.value.delete()
+            }
+        }
+    }
+
+    private fun clearCustomerUploadPdfPreviews() {
+        val previewDirectory = File(cacheDir, "customer-upload-pdf-preview").canonicalFile
+        customerUploadPdfPreviews.values.forEach { file ->
+            val parent = runCatching { file.canonicalFile.parentFile }.getOrNull()
+            if (parent == previewDirectory) file.delete()
+        }
+        customerUploadPdfPreviews.clear()
+        previewDirectory.deleteRecursively()
     }
 
     private fun cancelPicker() {
@@ -3078,6 +3201,7 @@ class MainActivity : AppCompatActivity() {
         }
 
         documentViewer?.dispose()
+        customerUploadPdfPreviewOpen = false
         viewingDocument = file
         pickerMode = false
         profileVisible = false
@@ -3111,6 +3235,40 @@ class MainActivity : AppCompatActivity() {
         content.addView(reader, frameParams())
     }
 
+    private fun showCustomerUploadPdfPreview(token: String) {
+        val file = customerUploadPdfPreviews[token]
+            ?.takeIf { it.isFile && it.name.endsWith(".pdf", true) }
+        if (file == null) {
+            toast("Please select this PDF again before previewing it.")
+            return
+        }
+
+        documentViewer?.dispose()
+        viewingDocument = file
+        customerUploadPdfPreviewOpen = true
+        pickerMode = false
+        profileVisible = false
+        setToolbarPage(file.name)
+        setToolbarBackAction("Back to upload", ::closeCustomerUploadPdfPreview)
+        toolbar.menu.findItem(SWITCH_SHOP)?.isVisible = false
+        toolbar.menu.findItem(OPEN_WITH)?.isVisible = false
+        accountAction.visibility = View.GONE
+        setBottomNavigationVisible(false)
+        content.removeAllViews()
+
+        val reader = SmartPrintDocumentViewer(this, file, emptyList(), null) {}
+        documentViewer = reader
+        content.addView(reader, frameParams())
+    }
+
+    private fun closeCustomerUploadPdfPreview() {
+        documentViewer?.dispose()
+        documentViewer = null
+        viewingDocument = null
+        customerUploadPdfPreviewOpen = false
+        showPrint()
+    }
+
     private fun sameDocument(left: File, right: File): Boolean =
         runCatching { left.canonicalPath == right.canonicalPath }.getOrDefault(false)
 
@@ -3118,6 +3276,7 @@ class MainActivity : AppCompatActivity() {
         documentViewer?.dispose()
         documentViewer = null
         viewingDocument = null
+        customerUploadPdfPreviewOpen = false
         showFiles()
     }
 

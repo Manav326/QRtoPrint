@@ -383,11 +383,15 @@ class MainActivityInstrumentedTest {
     fun browsePhoneSelectionPassesOriginalContentUrisToTheWebView() {
         val source = Uri.parse("content://com.android.providers.downloads.documents/document/42")
         val received = AtomicReference<Array<Uri>?>(null)
+        val callbackDelivered = java.util.concurrent.CountDownLatch(1)
         ActivityScenario.launch(MainActivity::class.java).use { scenario ->
             scenario.onActivity { activity ->
                 MainActivity::class.java.getDeclaredField("fileCallback").apply {
                     isAccessible = true
-                    set(activity, ValueCallback<Array<Uri>> { value -> received.set(value) })
+                    set(activity, ValueCallback<Array<Uri>> { value ->
+                        received.set(value)
+                        callbackDelivered.countDown()
+                    })
                 }
                 MainActivity::class.java.getDeclaredField("fileChooserAllowsMultiple").apply {
                     isAccessible = true
@@ -401,6 +405,10 @@ class MainActivityInstrumentedTest {
                     invoke(activity, listOf(source))
                 }
             }
+            assertTrue(
+                "The selected phone documents are returned after preview metadata is ready.",
+                callbackDelivered.await(5, java.util.concurrent.TimeUnit.SECONDS)
+            )
             assertEquals(listOf(source), received.get()?.toList())
         }
     }
