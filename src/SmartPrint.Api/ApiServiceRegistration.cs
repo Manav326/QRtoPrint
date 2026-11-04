@@ -85,6 +85,7 @@ public static class ApiServiceRegistration
         // Application workflows coordinate state changes outside the HTTP endpoint modules.
         services.AddScoped<AgentJobQueueService>();
         services.AddScoped<AgentConnectivityService>();
+        services.AddScoped<ShopAccountService>();
         services.AddScoped<AgentLocalUploadClaimService>();
         services.AddScoped<AgentLocalUploadCompletionService>();
         services.AddScoped<PlatformPlanService>();
