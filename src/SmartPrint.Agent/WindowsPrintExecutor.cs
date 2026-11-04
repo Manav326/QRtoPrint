@@ -539,32 +539,27 @@ public sealed class WindowsPrintExecutor
 
         using var regularTypeface = SKTypeface.FromFamilyName("Arial", SKFontStyle.Normal);
         using var boldTypeface = SKTypeface.FromFamilyName("Arial", SKFontStyle.Bold);
+        using var smartFont = new SKFont(boldTypeface, wordSize, 1f, 0f);
+        using var byFont = new SKFont(regularTypeface, bySize, 1f, 0f);
+        using var wordFont = new SKFont(boldTypeface, wordSize, 1f, 0f);
         using var smartPaint = new SKPaint
         {
             IsAntialias = true,
-            TextSize = wordSize,
-            Typeface = boldTypeface,
             Color = monochrome ? new SKColor(17, 24, 39) : new SKColor(21, 32, 56)
         };
         using var byPaint = new SKPaint
         {
             IsAntialias = true,
-            TextSize = bySize,
-            Typeface = regularTypeface,
             Color = monochrome ? new SKColor(75, 85, 99) : new SKColor(102, 112, 133)
         };
         using var quantaPaint = new SKPaint
         {
             IsAntialias = true,
-            TextSize = wordSize,
-            Typeface = boldTypeface,
             Color = monochrome ? new SKColor(17, 24, 39) : new SKColor(21, 32, 56)
         };
         using var edgePaint = new SKPaint
         {
             IsAntialias = true,
-            TextSize = wordSize,
-            Typeface = boldTypeface,
             Color = monochrome ? new SKColor(17, 24, 39) : new SKColor(249, 115, 22)
         };
         using var dividerPaint = new SKPaint
@@ -580,34 +575,34 @@ public sealed class WindowsPrintExecutor
         if (monochrome)
         {
             for (var y = 0; y < logo.Height; y++)
-            for (var x = 0; x < logo.Width; x++)
+            for (var pixelX = 0; pixelX < logo.Width; pixelX++)
             {
-                var pixel = logo.GetPixel(x, y);
+                var pixel = logo.GetPixel(pixelX, y);
                 if (pixel.Alpha > 0)
-                    logo.SetPixel(x, y, new SKColor(17, 24, 39, pixel.Alpha));
+                    logo.SetPixel(pixelX, y, new SKColor(17, 24, 39, pixel.Alpha));
             }
         }
 
-        var smartWidth = smartPaint.MeasureText("SmartPrint");
-        var byWidth = byPaint.MeasureText("by");
-        var quantaWidth = quantaPaint.MeasureText("Quanta");
-        var edgeWidth = edgePaint.MeasureText("Edge");
+        var smartWidth = smartFont.MeasureText("SmartPrint");
+        var byWidth = byFont.MeasureText("by");
+        var quantaWidth = wordFont.MeasureText("Quanta");
+        var edgeWidth = wordFont.MeasureText("Edge");
         var totalWidth = logoSize + gap + smartWidth + textGap + byWidth + textGap + quantaWidth + edgeWidth;
         if (totalWidth > page.Width - (margin * 2))
             return;
 
         canvas.DrawLine(margin, dividerY, page.Width - margin, dividerY, dividerPaint);
-        var x = (page.Width - totalWidth) / 2f;
+        var textX = (page.Width - totalWidth) / 2f;
         var logoTop = baseline - (6.3f * scale);
-        canvas.DrawBitmap(logo, new SKRect(x, logoTop, x + logoSize, logoTop + logoSize));
-        x += logoSize + gap;
-        canvas.DrawText("SmartPrint", x, baseline, smartPaint);
-        x += smartWidth + textGap;
-        canvas.DrawText("by", x, baseline, byPaint);
-        x += byWidth + textGap;
-        canvas.DrawText("Quanta", x, baseline, quantaPaint);
-        x += quantaWidth;
-        canvas.DrawText("Edge", x, baseline, edgePaint);
+        canvas.DrawBitmap(logo, new SKRect(textX, logoTop, textX + logoSize, logoTop + logoSize));
+        textX += logoSize + gap;
+        canvas.DrawText("SmartPrint", textX, baseline, SKTextAlign.Left, smartFont, smartPaint);
+        textX += smartWidth + textGap;
+        canvas.DrawText("by", textX, baseline, SKTextAlign.Left, byFont, byPaint);
+        textX += byWidth + textGap;
+        canvas.DrawText("Quanta", textX, baseline, SKTextAlign.Left, wordFont, quantaPaint);
+        textX += quantaWidth;
+        canvas.DrawText("Edge", textX, baseline, SKTextAlign.Left, wordFont, edgePaint);
         canvas.Flush();
         Marshal.Copy(destinationPixels, page.Pixels, 0, page.Pixels.Length);
     }
