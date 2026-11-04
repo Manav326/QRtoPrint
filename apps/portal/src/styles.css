@@ -3149,6 +3149,7 @@ html[data-theme="dark"] .customer-entry .customer-branding-note{color:#aab6ca}
 html[data-theme="dark"] .customer-entry .customer-branding-note strong{color:#eef2fb}
 html[data-theme="dark"] .customer-entry .context-info-trigger{border-color:#526078;color:#c0b3ff}
 html[data-theme="light"] .customer-entry .context-info-trigger{border-color:#cbd4e1;color:#59677e}
+html[data-theme="light"] .customer-entry .customer-entry-brand .brand-caption,html[data-theme="light"] .customer-entry .customer-entry-footer{color:#5f6b80}
 @media(max-width:650px){
   .customer-entry:not(.smartprint-native) .customer-entry-card--upload .customer-print-flow{width:100%}
   .customer-entry:not(.smartprint-native) .customer-flow-heading{align-items:center}
