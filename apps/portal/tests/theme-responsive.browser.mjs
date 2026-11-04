@@ -539,7 +539,7 @@ async function exercisePhotoStudioBrowser() {
     assert.equal(output.mode, item.mode);
     assert.equal(output.mediaType, "application/pdf");
     assert.equal(output.photoCount, largePhotoBatch ? 50 : 8);
-    assert.equal(output.photosPerPage, largePhotoBatch ? 9 : 25);
+    assert.equal(output.photosPerPage, largePhotoBatch ? 9 : item.mode === "customer" ? 20 : 25);
     assert.equal(output.pageCount, largePhotoBatch ? 6 : 1);
     assert.ok(output.bytes > 0 && output.bytes <= 20 * 1024 * 1024);
     await context.close();
