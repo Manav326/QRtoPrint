@@ -5059,14 +5059,25 @@ agentApi.MapGet("/local-document-previews/{jobId:guid}/authorize", async (
     CancellationToken ct) =>
 {
     var device = await AuthenticateAgentAsync(context, db, ct);
-    if (device is null) return Results.Unauthorized();
+    if (device is null)
+    {
+        return Results.Json(new
+        {
+            code = "agent_identity_rejected",
+            message = "The paired Print Agent identity was rejected by the shop service. Repair or re-pair this computer, then reopen the document preview."
+        }, statusCode: StatusCodes.Status401Unauthorized);
+    }
 
     var grantToken = context.Request.Headers["X-Print-Preview-Grant"].FirstOrDefault();
     if (!LocalDocumentPreviewGrant.TryValidate(
             grantToken, signingKeyText, issuer, audience, DateTimeOffset.UtcNow, out var grant) ||
         !LocalDocumentPreviewGrant.IsFor(grant, device.TenantId, jobId, device.Id))
     {
-        return Results.Unauthorized();
+        return Results.Json(new
+        {
+            code = "preview_grant_invalid_or_expired",
+            message = "The local preview permission expired or does not match this print job. Close the preview and reopen it."
+        }, statusCode: StatusCodes.Status401Unauthorized);
     }
 
     var document = await (
