@@ -7,26 +7,6 @@ export type FileDownloadState = {
   errorMessage: string | null;
 };
 
-type WritableDownloadFile = {
-  write(data: Uint8Array): Promise<void>;
-  close(): Promise<void>;
-  abort(): Promise<void>;
-};
-
-type SaveFileHandle = {
-  createWritable(): Promise<WritableDownloadFile>;
-};
-
-type SaveFilePickerWindow = Window & {
-  showSaveFilePicker?: (options: {
-    suggestedName: string;
-    types: Array<{
-      description: string;
-      accept: Record<string, string[]>;
-    }>;
-  }) => Promise<SaveFileHandle>;
-};
-
 const initialState: FileDownloadState = {
   status: "idle",
   bytesReceived: 0,
@@ -56,9 +36,10 @@ function saveBlob(blob: Blob, fileName: string): void {
 }
 
 /**
- * Downloads a same-origin release asset while measuring bytes from the actual
- * response stream. Where supported, the File System Access API writes chunks
- * directly to the selected file instead of buffering the whole installer.
+ * Downloads a same-origin release asset and measures bytes from the actual
+ * response stream. The completed, size-checked Blob is handed to the browser
+ * only after the response has finished, so an interrupted transfer cannot
+ * leave an empty destination file behind or grant the site write access to it.
  */
 export function useFileDownload(fileName: string): {
   download: FileDownloadState;
@@ -73,7 +54,6 @@ export function useFileDownload(fileName: string): {
 
     const controller = new AbortController();
     controllerRef.current = controller;
-    let writable: WritableDownloadFile | null = null;
 
     setDownload({
       status: "downloading",
@@ -83,19 +63,6 @@ export function useFileDownload(fileName: string): {
     });
 
     try {
-      const pickerWindow = window as SaveFilePickerWindow;
-      if (window.isSecureContext && typeof pickerWindow.showSaveFilePicker === "function") {
-        const extension = fileName.toLowerCase().endsWith(".apk") ? ".apk" : ".exe";
-        const handle = await pickerWindow.showSaveFilePicker({
-          suggestedName: fileName,
-          types: [{
-            description: extension === ".apk" ? "Android application package" : "Windows installer",
-            accept: { "application/octet-stream": [extension] }
-          }]
-        });
-        writable = await handle.createWritable();
-      }
-
       const response = await fetch(url, {
         method: "GET",
         headers: { Accept: "application/octet-stream" },
@@ -122,12 +89,7 @@ export function useFileDownload(fileName: string): {
           if (result.done) break;
           const chunk = result.value;
           bytesReceived += chunk.byteLength;
-
-          if (writable) {
-            await writable.write(chunk);
-          } else {
-            chunks.push(chunk.slice().buffer as ArrayBuffer);
-          }
+          chunks.push(chunk.slice().buffer as ArrayBuffer);
 
           setDownload({
             status: "downloading",
@@ -139,12 +101,8 @@ export function useFileDownload(fileName: string): {
       } else {
         const blob = await response.blob();
         bytesReceived = blob.size;
-        if (writable) {
-          const buffer = await blob.arrayBuffer();
-          await writable.write(new Uint8Array(buffer));
-        } else {
-          chunks.push(await blob.arrayBuffer());
-        }
+        chunks.push(blob);
+
         setDownload({
           status: "downloading",
           bytesReceived,
@@ -153,20 +111,24 @@ export function useFileDownload(fileName: string): {
         });
       }
 
+      if (bytesReceived <= 0) {
+        throw new Error("The download server returned an empty file. Please retry.");
+      }
+
       if (totalBytes !== null && bytesReceived !== totalBytes) {
         throw new Error(`The download was incomplete (${bytesReceived} of ${totalBytes} bytes received). Please retry.`);
       }
 
-      if (writable) {
-        await writable.close();
-        writable = null;
-      } else {
-        const blob = new Blob(chunks, { type: response.headers.get("content-type") || "application/octet-stream" });
-        if (blob.size !== bytesReceived) {
-          throw new Error("The downloaded file could not be assembled correctly. Please retry.");
-        }
-        saveBlob(blob, fileName);
+      const blob = new Blob(chunks, {
+        type: response.headers.get("content-type") || "application/octet-stream"
+      });
+      if (blob.size !== bytesReceived) {
+        throw new Error("The downloaded file could not be assembled correctly. Please retry.");
       }
+
+      // Let the browser handle the actual save. No File System Access API or
+      // persistent write permission is requested from the customer.
+      saveBlob(blob, fileName);
 
       setDownload({
         status: "complete",
@@ -175,10 +137,6 @@ export function useFileDownload(fileName: string): {
         errorMessage: null
       });
     } catch (error) {
-      if (writable) {
-        try { await writable.abort(); } catch { /* Ignore cleanup errors after an interrupted download. */ }
-        writable = null;
-      }
       if (isAbortError(error) || controller.signal.aborted) {
         setDownload(current => ({
           ...current,
