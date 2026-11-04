@@ -339,7 +339,8 @@ public sealed class AgentLocalPhotoRevisionService(SmartPrintDbContext db)
             !IsValidPageSizesJson(request.PageSizesJson, request.PageCount) ||
             request.PhotoCount is < 1 or > 100 ||
             request.PhotoSizeCode is not ("35x45" or "25x35" or "2x2" or "4x6") ||
-            request.PhotosPerPage is < 1 or > 100)
+            request.PhotosPerPage is < 1 or > 100 ||
+            request.PhotosPerPage > PricingCalculator.MaximumPhotosPerA4Sheet(request.PhotoSizeCode))
         {
             return new
             {
