@@ -104,6 +104,39 @@ public sealed class AgentLocalQueueStoreTests
     }
 
     [Fact]
+    public async Task RenewedLocalUploadLeaseKeepsTheOriginalStagedDocumentUntilRetryCompletes()
+    {
+        var root = CreateTemporaryDirectory();
+        try
+        {
+            var store = new AgentLocalQueueStore(root);
+            await store.InitializeAsync(CancellationToken.None);
+            var bytes = "Original staged upload reused after LAN lease renewal"u8.ToArray();
+            var expiredLease = DateTimeOffset.UtcNow.AddMinutes(-1);
+            var job = CreateJob(bytes) with
+            {
+                Status = "LOCAL_UPLOAD_STAGED",
+                StorageMode = "LOCAL_AGENT",
+                LeaseExpiresUtc = expiredLease
+            };
+            await store.EnqueueLocalUploadAsync(job, bytes, CancellationToken.None);
+
+            var renewedLease = DateTimeOffset.UtcNow.AddMinutes(15);
+            await store.RefreshStagedLocalUploadLeaseAsync(
+                job.Id, job.Sha256, job.SizeBytes, renewedLease, CancellationToken.None);
+
+            var refreshed = store.Find(job.Id)!;
+            Assert.Equal(renewedLease, refreshed.LeaseExpiresUtc);
+            Assert.Equal("LOCAL_UPLOAD_STAGED", refreshed.State);
+            Assert.True(bytes.AsSpan().SequenceEqual(store.ReadDocument(job.Id)));
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
     public async Task ReassignedCloudJobRefreshesItsAcknowledgedQueueTargetWithoutRedownloading()
     {
         var root = CreateTemporaryDirectory();
