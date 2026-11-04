@@ -1750,6 +1750,7 @@ export async function replaceShopPhotoDocumentLocally(
         photoSizeCode: string;
         photoCount: number;
         pageCount: number;
+        photosPerPage: number;
         photoUnitPriceMinor: number;
         quotedAmountMinor: number;
         pricingVersion: number;
