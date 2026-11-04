@@ -1273,6 +1273,18 @@ export async function uploadCustomerDocumentLocally(
           "local_upload_ticket_expired"
         );
       }
+      if (exception instanceof ApiError &&
+          exception.status === 409 &&
+          exception.code === "batch_upload_locked_after_payment_start") {
+        // Checkout intentionally excludes this unfinished file. Do not keep
+        // offering it as part of a batch whose payment total is already locked.
+        clearCustomerLocalUploadAttempt(sessionToken, file);
+        throw new LocalUploadPreflightError(
+          "Checkout has already started for this batch, so this unfinished file was not included. Start a new batch for this file.",
+          409,
+          "batch_upload_locked_after_payment_start"
+        );
+      }
       // A network interruption or reconciliation conflict is not proof that
       // the original ticket is dead. Preserve its idempotency key and grant.
       throw new LocalUploadOutcomeUnknownError(
