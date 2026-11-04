@@ -35,6 +35,26 @@ public static class LocalUploadRecoveryRules
                IsWithinRecoveryWindow(ticketCreatedUtc, nowUtc, maximumRecoveryAge);
     }
 
+    /// <summary>
+    /// A timed-out LAN attempt can be reissued with its original idempotency key
+    /// only after its previous claim lease has ended and before the 24-hour
+    /// recovery reservation expires. The job/document existence check remains
+    /// a caller responsibility because it requires database state.
+    /// </summary>
+    public static bool CanRenewExpiredTicket(
+        DateTimeOffset ticketCreatedUtc,
+        DateTimeOffset ticketExpiresUtc,
+        DateTimeOffset? claimLeaseExpiresUtc,
+        DateTimeOffset? ticketCompletedUtc,
+        DateTimeOffset nowUtc,
+        TimeSpan maximumRecoveryAge)
+    {
+        return ticketCompletedUtc is null &&
+               ticketExpiresUtc <= nowUtc &&
+               (claimLeaseExpiresUtc is null || claimLeaseExpiresUtc <= nowUtc) &&
+               IsWithinRecoveryWindow(ticketCreatedUtc, nowUtc, maximumRecoveryAge);
+    }
+
     public static bool MatchesOriginalDocument(
         long expectedSizeBytes,
         string? expectedSha256,
