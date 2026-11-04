@@ -281,7 +281,7 @@ public static partial class AgentEndpoints
                     DuplicateRequest = false
                 }
             });
-        });;
+        });
         
         agentApi.MapGet("/local-uploads/{jobId:guid}/status", async (
             Guid jobId,
