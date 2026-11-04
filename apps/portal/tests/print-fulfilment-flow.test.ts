@@ -303,7 +303,7 @@ test("local Agent photo revision is scoped to its grant and idempotent after com
   assert.match(endpoint, /revisions\.CompleteAsync/);
   assert.match(service, /LocalDocumentPhotoRevisionGrant\.IsFor/);
   assert.match(service, /item\.TenantId == device\.TenantId/);
-  assert.match(service, /item\.AgentDeviceId == device\.Id/);
+  assert.match(service, /document\.AgentDeviceId != device\.Id/);
   assert.match(service, /MatchesCommittedRevision/);
   assert.match(service, /DuplicateRequest = true/);
   assert.match(grant, /photo_revision_agent_id/);
