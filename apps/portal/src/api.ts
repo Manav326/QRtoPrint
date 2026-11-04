@@ -1695,6 +1695,87 @@ export async function downloadShopDocument(token: string, jobId: string): Promis
   );
 }
 
+export async function replaceShopPhotoDocumentLocally(
+  token: string,
+  jobId: string,
+  file: File,
+  photoSizeCode: string,
+  photoCount: number
+) {
+  const grant = await apiRequest<{
+    grantToken: string;
+    endpoints: string[];
+    expiresUtc: string;
+  }>(`/api/v1/shop/print-jobs/${jobId}/photo-revision-grant`, {
+    method: "POST"
+  }, token);
+
+  if (Date.parse(grant.expiresUtc) <= Date.now())
+    throw new ApiError("The local photo-edit permission expired. Reopen the photo editor and try again.", 409);
+
+  const form = new FormData();
+  form.append("file", file, file.name);
+  form.append("photoSizeCode", photoSizeCode);
+  form.append("photoCount", String(photoCount));
+
+  let lastError: Error | null = null;
+  for (const value of grant.endpoints.slice(0, 8)) {
+    const endpoint = isPrivateLocalPreviewEndpoint(value);
+    if (!endpoint) continue;
+    const controller = new AbortController();
+    const timeout = window.setTimeout(() => controller.abort(), 45_000);
+    try {
+      const response = await fetch(
+        `${endpoint.origin}/api/v1/local/documents/${encodeURIComponent(jobId)}/photo-revision`,
+        {
+          method: "POST",
+          mode: "cors",
+          cache: "no-store",
+          credentials: "omit",
+          headers: { "X-Print-Photo-Revision-Grant": grant.grantToken },
+          body: form,
+          signal: controller.signal,
+          targetAddressSpace: "local"
+        } as RequestInit & { targetAddressSpace: "local" }
+      );
+      if (response.ok) return await response.json() as {
+        jobId: string;
+        originalFileName: string;
+        mediaType: string;
+        sizeBytes: number;
+        sha256: string;
+        photoSizeCode: string;
+        photoCount: number;
+        photoUnitPriceMinor: number;
+        quotedAmountMinor: number;
+        pricingVersion: number;
+      };
+
+      const raw = await response.text();
+      let detail = "";
+      if (raw) {
+        try {
+          const payload = JSON.parse(raw) as { title?: string; detail?: string; message?: string };
+          detail = payload.detail || payload.message || payload.title || "";
+        } catch {
+          detail = raw;
+        }
+      }
+      lastError = new ApiError(detail || `Local photo revision failed (${response.status}).`, response.status);
+      if ([401, 403, 404, 409, 413, 415, 422].includes(response.status)) break;
+    } catch (exception) {
+      lastError = exception instanceof Error ? exception : new Error("Could not reach the paired shop computer.");
+    } finally {
+      window.clearTimeout(timeout);
+    }
+  }
+
+  throw lastError ?? new ApiError(
+    "The paired shop computer has no reachable local photo-revision endpoint. Reconnect the Print Agent and try again.",
+    0
+  );
+}
+
 export function replaceShopPhotoDocument(
   token: string,
   jobId: string,
