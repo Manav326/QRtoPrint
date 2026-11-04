@@ -603,6 +603,12 @@ public sealed class LocalAgentApiHostedService(
                 HttpContext context,
                 CancellationToken ct) =>
             {
+                var variant = context.Request.Query["variant"].FirstOrDefault();
+                var outputPreview = string.Equals(variant, "output", StringComparison.OrdinalIgnoreCase);
+                if (!string.IsNullOrWhiteSpace(variant) && !outputPreview &&
+                    !string.Equals(variant, "original", StringComparison.OrdinalIgnoreCase))
+                    return Results.BadRequest(new { code = "local_preview_variant_invalid" });
+
                 AgentCredentials? credentials;
                 try
                 {
@@ -614,6 +620,7 @@ public sealed class LocalAgentApiHostedService(
                     return Results.Problem(statusCode: StatusCodes.Status503ServiceUnavailable,
                         title: "The saved SmartPrint API address must use HTTPS. Repair the Agent connection.");
                 }
+
                 var grantToken = context.Request.Headers["X-Print-Preview-Grant"].FirstOrDefault();
                 if (credentials is null || string.IsNullOrWhiteSpace(grantToken) || grantToken.Length > 4096)
                     return Results.Unauthorized();
@@ -621,9 +628,9 @@ public sealed class LocalAgentApiHostedService(
                 var client = httpClientFactory.CreateClient("cloud");
                 client.Timeout = TimeSpan.FromSeconds(15);
                 client.BaseAddress = new Uri(credentials.ApiBaseUrl.TrimEnd('/') + "/");
-                using var authorizeRequest = new HttpRequestMessage(
-                    HttpMethod.Get,
-                    $"api/v1/agent/local-document-previews/{jobId}/authorize");
+                var authorizePath = $"api/v1/agent/local-document-previews/{jobId}/authorize" +
+                    (outputPreview ? "?variant=output" : string.Empty);
+                using var authorizeRequest = new HttpRequestMessage(HttpMethod.Get, authorizePath);
                 authorizeRequest.Headers.Add("X-Print-Agent-Id", credentials.AgentDeviceId.ToString());
                 authorizeRequest.Headers.Add("X-Print-Agent-Secret", credentials.AgentSecret);
                 authorizeRequest.Headers.Add("X-Print-Preview-Grant", grantToken);
@@ -664,31 +671,69 @@ public sealed class LocalAgentApiHostedService(
                     return Results.Problem(statusCode: StatusCodes.Status502BadGateway, title: "The cloud service returned invalid local preview metadata.");
 
                 var entry = localQueueStore.Find(jobId);
-                if (entry is null || !File.Exists(entry.DocumentPath))
-                    return Results.NotFound(new { code = "local_preview_document_missing", message = "The original file is no longer present on this shop computer." });
-
-                if (entry.MediaType is not ("application/pdf" or "image/jpeg" or "image/png"))
-                    return Results.StatusCode(StatusCodes.Status415UnsupportedMediaType);
-
-                if (entry.SizeBytes != authorizedDocument.SizeBytes ||
-                    !string.Equals(entry.Sha256, authorizedDocument.Sha256, StringComparison.OrdinalIgnoreCase) ||
-                    !string.Equals(entry.MediaType, authorizedDocument.MediaType, StringComparison.OrdinalIgnoreCase) ||
-                    !string.Equals(entry.DocumentName, authorizedDocument.OriginalFileName, StringComparison.Ordinal))
-                {
-                    return Results.Conflict(new { code = "local_preview_document_mismatch", message = "The protected local file does not match the document registered by the shop API." });
-                }
+                if (entry is null)
+                    return Results.NotFound(new { code = "local_preview_document_missing", message = "This print job is no longer available on the shop computer." });
 
                 byte[] bytes;
-                try
+                string mediaType;
+                if (outputPreview)
                 {
-                    bytes = localQueueStore.ReadDocument(jobId);
+                    if (!PdfExportPreviewRules.TryGetVerifiedReceipt(
+                            entry,
+                            authorizedDocument.OriginalFileName,
+                            authorizedDocument.SizeBytes,
+                            authorizedDocument.Sha256,
+                            out var outputPath))
+                        return Results.Conflict(new { code = "local_preview_output_mismatch", message = "The saved PDF does not match the export receipt recorded by the shop service." });
+
+                    try
+                    {
+                        var info = new FileInfo(outputPath);
+                        if (!info.Exists)
+                            return Results.NotFound(new { code = "local_preview_output_missing", message = "The final PDF export is no longer present on this shop computer." });
+                        if (info.Length != authorizedDocument.SizeBytes)
+                            return Results.Conflict(new { code = "local_preview_output_mismatch", message = "The saved PDF file size no longer matches its verified export receipt." });
+                        bytes = await File.ReadAllBytesAsync(outputPath, ct);
+                    }
+                    catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or ArgumentException)
+                    {
+                        logger.LogError(exception, "Saved PDF preview could not be read for job {JobId}.", jobId);
+                        return Results.Problem(statusCode: StatusCodes.Status500InternalServerError,
+                            title: "The saved PDF could not be read safely from the shop computer.");
+                    }
+
+                    if (!PdfExportPreviewRules.MatchesPdfBytes(
+                            bytes, authorizedDocument.SizeBytes, authorizedDocument.Sha256))
+                    {
+                        CryptographicOperations.ZeroMemory(bytes);
+                        return Results.Conflict(new { code = "local_preview_output_integrity_failed", message = "The saved PDF failed its integrity check and has not been shown." });
+                    }
+                    mediaType = "application/pdf";
                 }
-                catch (Exception exception) when (exception is IOException or CryptographicException or InvalidDataException)
+                else
                 {
-                    logger.LogError(exception, "Local document preview integrity check failed for job {JobId}.", jobId);
-                    return Results.Problem(
-                        statusCode: StatusCodes.Status500InternalServerError,
-                        title: "The protected local document could not be read safely.");
+                    if (!File.Exists(entry.DocumentPath))
+                        return Results.NotFound(new { code = "local_preview_document_missing", message = "The original file is no longer present on this shop computer." });
+                    if (entry.MediaType is not ("application/pdf" or "image/jpeg" or "image/png"))
+                        return Results.StatusCode(StatusCodes.Status415UnsupportedMediaType);
+                    if (entry.SizeBytes != authorizedDocument.SizeBytes ||
+                        !string.Equals(entry.Sha256, authorizedDocument.Sha256, StringComparison.OrdinalIgnoreCase) ||
+                        !string.Equals(entry.MediaType, authorizedDocument.MediaType, StringComparison.OrdinalIgnoreCase) ||
+                        !string.Equals(entry.DocumentName, authorizedDocument.OriginalFileName, StringComparison.Ordinal))
+                        return Results.Conflict(new { code = "local_preview_document_mismatch", message = "The protected local file does not match the document registered by the shop API." });
+
+                    try
+                    {
+                        bytes = localQueueStore.ReadDocument(jobId);
+                    }
+                    catch (Exception exception) when (exception is IOException or CryptographicException or InvalidDataException)
+                    {
+                        logger.LogError(exception, "Local document preview integrity check failed for job {JobId}.", jobId);
+                        return Results.Problem(
+                            statusCode: StatusCodes.Status500InternalServerError,
+                            title: "The protected local document could not be read safely.");
+                    }
+                    mediaType = entry.MediaType;
                 }
 
                 context.Response.Headers["Cache-Control"] = "private, no-store";
@@ -700,7 +745,7 @@ public sealed class LocalAgentApiHostedService(
                     CryptographicOperations.ZeroMemory(bytes);
                     return Task.CompletedTask;
                 });
-                return Results.File(bytes, entry.MediaType, enableRangeProcessing: false);
+                return Results.File(bytes, mediaType, enableRangeProcessing: false);
             }).RequireCors("CustomerPortal");
 
             app.MapPost("/api/v1/local/uploads/{ticketId:guid}", async (

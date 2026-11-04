@@ -321,6 +321,7 @@ public sealed class SmartPrintDbContext(DbContextOptions<SmartPrintDbContext> op
             entity.Property(x => x.ColourMode).HasMaxLength(12).IsRequired();
             entity.Property(x => x.PaperSize).HasMaxLength(12).IsRequired();
             entity.Property(x => x.Orientation).HasMaxLength(16).IsRequired();
+            entity.Property(x => x.PdfBrandingEnabled).HasDefaultValue(false);
             entity.Property(x => x.PrintKind).HasMaxLength(16).IsRequired();
             entity.Property(x => x.PhotoSizeCode).HasMaxLength(12);
             entity.Property(x => x.Currency).HasMaxLength(3).IsRequired();

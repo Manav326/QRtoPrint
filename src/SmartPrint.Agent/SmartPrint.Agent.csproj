@@ -16,5 +16,6 @@
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="../SmartPrint.Documents/SmartPrint.Documents.csproj" />
+    <EmbeddedResource Include="Branding/quantaedge-mark.png" />
   </ItemGroup>
 </Project>

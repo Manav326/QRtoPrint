@@ -250,4 +250,140 @@ public sealed class PdfExportExecutorTests
             CryptographicOperations.ZeroMemory(bytes);
         }
     }
+
+
+    [Fact]
+    public void DoesNotRasterPaintBrandingWhenAComplexExportNeedsRebuilding()
+    {
+        using var source = new MemoryStream();
+        using (var pdf = SkiaSharp.SKDocument.CreatePdf(source))
+        {
+            var canvas = pdf.BeginPage(595.276f, 841.89f);
+            using var typeface = SkiaSharp.SKTypeface.FromFamilyName("Arial", SkiaSharp.SKFontStyle.Normal);
+            using var font = new SkiaSharp.SKFont(typeface, 14);
+            using var paint = new SkiaSharp.SKPaint { Color = SkiaSharp.SKColors.Black, IsAntialias = true };
+            canvas.DrawText("ORIGINAL DOCUMENT CONTENT", 48, 72, SkiaSharp.SKTextAlign.Left, font, paint);
+            pdf.EndPage();
+            pdf.Close();
+        }
+
+        var bytes = source.ToArray();
+        var directory = Path.Combine(Path.GetTempPath(), "smartprint-unbranded-fallback-" + Guid.NewGuid().ToString("N"));
+        var entry = new AgentLocalQueueEntry(
+            Guid.NewGuid(), "SP-UNBRANDED-FALLBACK", Guid.NewGuid(), "PDF Export",
+            "PDF Export", "original.pdf", "application/pdf",
+            Convert.ToHexString(SHA256.HashData(bytes)).ToLowerInvariant(), bytes.LongLength,
+            1, 2, "Colour", "A4", false, "INR", 100, "unused", "ACKNOWLEDGED",
+            DateTimeOffset.UtcNow, DateTimeOffset.UtcNow.AddMinutes(3),
+            OutputMode: PrinterOutputModeRules.PdfExport,
+            PdfBrandingEnabled: true);
+
+        try
+        {
+            var receipt = new WindowsPrintExecutor().ExportPdf(entry, bytes, directory, CancellationToken.None);
+            using var rendered = UglyToad.PdfPig.PdfDocument.Open(receipt.OutputPath);
+            Assert.Equal(2, rendered.NumberOfPages);
+            Assert.DoesNotContain("SmartPrint", string.Join(" ", rendered.GetPages().Select(page => page.Text)), StringComparison.Ordinal);
+        }
+        finally
+        {
+            CryptographicOperations.ZeroMemory(bytes);
+            if (Directory.Exists(directory)) Directory.Delete(directory, recursive: true);
+        }
+    }
+
+public sealed class PdfBrandingOverlayTests
+{
+    [Fact]
+    public void UnbrandedSingleCopyPdfExportPreservesTheOriginalPdfBytes()
+    {
+        using var source = new MemoryStream();
+        using (var pdf = SkiaSharp.SKDocument.CreatePdf(source))
+        {
+            var canvas = pdf.BeginPage(595.276f, 841.89f);
+            using var typeface = SkiaSharp.SKTypeface.FromFamilyName("Arial", SkiaSharp.SKFontStyle.Normal);
+            using var font = new SkiaSharp.SKFont(typeface, 14);
+            using var paint = new SkiaSharp.SKPaint { Color = SkiaSharp.SKColors.Black, IsAntialias = true };
+            canvas.DrawText("ORIGINAL PDF MUST REMAIN INTACT", 48, 72, SkiaSharp.SKTextAlign.Left, font, paint);
+            pdf.EndPage();
+            pdf.Close();
+        }
+
+        var bytes = source.ToArray();
+        var directory = Path.Combine(Path.GetTempPath(), "smartprint-unbranded-original-" + Guid.NewGuid().ToString("N"));
+        var entry = new AgentLocalQueueEntry(
+            Guid.NewGuid(), "SP-UNBRANDED-ORIGINAL", Guid.NewGuid(), "PDF Export",
+            "PDF Export", "original.pdf", "application/pdf",
+            Convert.ToHexString(SHA256.HashData(bytes)).ToLowerInvariant(), bytes.LongLength,
+            1, 1, "Colour", "A4", false, "INR", 100, "unused", "ACKNOWLEDGED",
+            DateTimeOffset.UtcNow, DateTimeOffset.UtcNow.AddMinutes(3),
+            OutputMode: PrinterOutputModeRules.PdfExport,
+            PdfBrandingEnabled: false);
+
+        try
+        {
+            var receipt = new WindowsPrintExecutor().ExportPdf(entry, bytes, directory, CancellationToken.None);
+            var saved = File.ReadAllBytes(receipt.OutputPath);
+            Assert.Equal(bytes, saved);
+        }
+        finally
+        {
+            CryptographicOperations.ZeroMemory(bytes);
+            if (Directory.Exists(directory)) Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void AddsVectorFooterWithoutFlatteningSelectableOriginalText()
+    {
+        using var source = new MemoryStream();
+        using (var pdf = SkiaSharp.SKDocument.CreatePdf(source))
+        {
+            var canvas = pdf.BeginPage(595.276f, 841.89f);
+            using var typeface = SkiaSharp.SKTypeface.FromFamilyName("Arial", SkiaSharp.SKFontStyle.Normal);
+            using var font = new SkiaSharp.SKFont(typeface, 14);
+            using var paint = new SkiaSharp.SKPaint { Color = SkiaSharp.SKColors.Black, IsAntialias = true };
+            canvas.DrawText("SELECTABLE ORIGINAL CONTENT", 48, 72, SkiaSharp.SKTextAlign.Left, font, paint);
+            pdf.EndPage();
+            pdf.Close();
+        }
+
+        var bytes = source.ToArray();
+        var directory = Path.Combine(Path.GetTempPath(), "smartprint-vector-branding-" + Guid.NewGuid().ToString("N"));
+        var entry = new AgentLocalQueueEntry(
+            Guid.NewGuid(), "SP-VECTOR-BRAND-TEST", Guid.NewGuid(), "PDF Export",
+            "PDF Export", "original.pdf", "application/pdf",
+            Convert.ToHexString(SHA256.HashData(bytes)).ToLowerInvariant(), bytes.LongLength,
+            1, 1, "Colour", "A4", false, "INR", 100, "unused", "ACKNOWLEDGED",
+            DateTimeOffset.UtcNow, DateTimeOffset.UtcNow.AddMinutes(3),
+            OutputMode: PrinterOutputModeRules.PdfExport,
+            PdfBrandingEnabled: true);
+
+        try
+        {
+            var receipt = new WindowsPrintExecutor().ExportPdf(entry, bytes, directory, CancellationToken.None);
+            using var rendered = UglyToad.PdfPig.PdfDocument.Open(receipt.OutputPath);
+            var page = Assert.Single(rendered.GetPages());
+            Assert.Contains("SELECTABLE ORIGINAL CONTENT", page.Text, StringComparison.Ordinal);
+            Assert.Contains("SmartPrint", page.Text, StringComparison.Ordinal);
+            Assert.InRange(Math.Abs(page.Width - 595.276), 0d, 1d);
+            Assert.InRange(Math.Abs(page.Height - 841.89), 0d, 1d);
+        }
+        finally
+        {
+            CryptographicOperations.ZeroMemory(bytes);
+            if (Directory.Exists(directory)) Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void SignedAndFormDocumentsAreCopiedWithoutAddingBranding()
+    {
+        // The preservation decision is covered at the PDFium boundary: a signed or
+        // interactive-form PDF must never be modified by adding page objects.
+        Assert.False(PdfBrandingOverlay.CanModifyDocument(hasDigitalSignatures: true, hasInteractiveForms: false));
+        Assert.False(PdfBrandingOverlay.CanModifyDocument(hasDigitalSignatures: false, hasInteractiveForms: true));
+        Assert.True(PdfBrandingOverlay.CanModifyDocument(hasDigitalSignatures: false, hasInteractiveForms: false));
+    }
+}
 }

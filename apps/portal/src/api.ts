@@ -909,6 +909,7 @@ export interface ShopPrintJob {
   paperSize: string;
   isDuplex: boolean;
   orientation?: string;
+  pdfBrandingEnabled?: boolean;
   pricingVersion?: number;
   printKind?: string;
   photoSizeCode?: string | null;
@@ -1440,6 +1441,7 @@ export interface CustomerJobStatus {
   quotedAmountMinor: number;
   quoteExpiresUtc?: string | null;
   rejectedPageNumbersJson?: string;
+  pdfBrandingEnabled?: boolean;
   updatedUtc: string;
   timeline?: Array<{ newStatus: string; actorType: string; createdUtc: string }>;
   payment?: CustomerPayment | null;
@@ -1575,7 +1577,8 @@ export function applyShopPrintBatchReview(
   token: string,
   batchId: string,
   reviewedJobIds: string[],
-  acceptedJobIds: string[]
+  acceptedJobIds: string[],
+  pdfBrandingEnabled = false
 ) {
   return apiRequest<{
     batchId: string;
@@ -1587,7 +1590,7 @@ export function applyShopPrintBatchReview(
     nextStep: string;
   }>(`/api/v1/shop/print-batches/${batchId}/review`, {
     method: "POST",
-    body: JSON.stringify({ reviewedJobIds, acceptedJobIds })
+    body: JSON.stringify({ reviewedJobIds, acceptedJobIds, pdfBrandingEnabled })
   }, token);
 }
 
@@ -1609,13 +1612,20 @@ function isPrivateLocalPreviewEndpoint(value: string): URL | null {
   }
 }
 
-export async function downloadShopDocument(token: string, jobId: string): Promise<Blob> {
+export async function downloadShopDocument(
+  token: string,
+  jobId: string,
+  variant: "original" | "output" = "original"
+): Promise<Blob> {
+  const query = variant === "output" ? "?variant=output" : "";
   const source = await apiRequest<
     | { mode: "CLOUD" }
     | { mode: "LOCAL_AGENT"; grantToken: string; endpoints: string[]; expiresUtc: string }
-  >(`/api/v1/shop/print-jobs/${jobId}/preview-source`, {}, token);
+  >(`/api/v1/shop/print-jobs/${jobId}/preview-source${query}`, {}, token);
 
   if (source.mode === "CLOUD") {
+    if (variant === "output")
+      throw new ApiError("The saved PDF is available only on the paired shop computer. Reconnect that computer and try again.", 409);
     const documentPath = `/api/v1/shop/print-jobs/${jobId}/document`;
     const request = (accessToken: string) => fetchApiResponse(documentPath, {
       headers: {
@@ -1658,7 +1668,7 @@ export async function downloadShopDocument(token: string, jobId: string): Promis
     const timeout = window.setTimeout(() => controller.abort(), 15_000);
     try {
       const response = await fetch(
-        `${endpoint.origin}/api/v1/local/documents/${encodeURIComponent(jobId)}/preview`,
+        `${endpoint.origin}/api/v1/local/documents/${encodeURIComponent(jobId)}/preview${variant === "output" ? "?variant=output" : ""}`,
         {
           method: "GET",
           mode: "cors",

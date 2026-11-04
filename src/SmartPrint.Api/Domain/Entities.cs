@@ -244,6 +244,7 @@ public sealed class PrintJob
     public string Status { get; set; } = "Uploaded";
     public string IdempotencyKey { get; set; } = string.Empty;
     public int PageCount { get; set; }
+    public bool PdfBrandingEnabled { get; set; }
     public int Copies { get; set; } = 1;
     public string ColourMode { get; set; } = "Mono";
     public string PaperSize { get; set; } = "A4";
