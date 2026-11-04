@@ -1411,6 +1411,7 @@ export function calculateCustomerQuote(sessionToken: string, jobId: string, valu
   printKind?: "DOCUMENT" | "PHOTO";
   photoSizeCode?: string;
   photoCount?: number;
+  photosPerPage?: number;
 }) {
   return apiRequest<PrintQuoteResult>(`/api/v1/public/jobs/${jobId}/quote`, {
     method: "POST",
@@ -1615,14 +1616,31 @@ export async function downloadShopDocument(token: string, jobId: string): Promis
   >(`/api/v1/shop/print-jobs/${jobId}/preview-source`, {}, token);
 
   if (source.mode === "CLOUD") {
-    const response = await fetchApiResponse(`/api/v1/shop/print-jobs/${jobId}/document`, {
-      headers: { Accept: "application/pdf,image/jpeg,image/png", Authorization: `Bearer ${token}` },
+    const documentPath = `/api/v1/shop/print-jobs/${jobId}/document`;
+    const request = (accessToken: string) => fetchApiResponse(documentPath, {
+      headers: {
+        Accept: "application/pdf,image/jpeg,image/png",
+        Authorization: `Bearer ${accessToken}`
+      },
       cache: "no-store"
     });
+
+    // preview-source may have refreshed an expired shop session internally.
+    // Reuse that newer session for this second, binary request too; otherwise
+    // the cloud document request can send the stale token and fail with 401
+    // only on long-lived desktop sessions.
+    let response = await request(token);
+    if (response.status === 401) {
+      const refreshed = await refreshStoredSession(token);
+      if (refreshed) response = await request(refreshed.accessToken);
+    }
+
     if (!response.ok) {
-      const message = response.status === 404
-        ? "This job document is no longer available."
-        : `Document preview failed (${response.status}).`;
+      const message = response.status === 401
+        ? "Your shop session has expired. Sign in again to preview this document."
+        : response.status === 404
+          ? "This job document is no longer available."
+          : `Document preview failed (${response.status}).`;
       throw new ApiError(message, response.status);
     }
     return response.blob();
@@ -1676,6 +1694,124 @@ export async function downloadShopDocument(token: string, jobId: string): Promis
     "The original file is stored on the shop computer. Open the shop console from the shop network and try preview again.",
     0
   );
+}
+
+export async function replaceShopPhotoDocumentLocally(
+  token: string,
+  jobId: string,
+  file: File,
+  photoSizeCode: string,
+  photoCount: number,
+  photosPerPage: number
+) {
+  const grant = await apiRequest<{
+    grantToken: string;
+    endpoints: string[];
+    expiresUtc: string;
+  }>(`/api/v1/shop/print-jobs/${jobId}/photo-revision-grant`, {
+    method: "POST"
+  }, token);
+
+  if (Date.parse(grant.expiresUtc) <= Date.now())
+    throw new ApiError("The local photo-edit permission expired. Reopen the photo editor and try again.", 409);
+
+  const form = new FormData();
+  form.append("file", file, file.name);
+  form.append("photoSizeCode", photoSizeCode);
+  form.append("photoCount", String(photoCount));
+  form.append("photosPerPage", String(photosPerPage));
+
+  let lastError: Error | null = null;
+  for (const value of grant.endpoints.slice(0, 8)) {
+    const endpoint = isPrivateLocalPreviewEndpoint(value);
+    if (!endpoint) continue;
+    const controller = new AbortController();
+    const timeout = window.setTimeout(() => controller.abort(), 45_000);
+    try {
+      const response = await fetch(
+        `${endpoint.origin}/api/v1/local/documents/${encodeURIComponent(jobId)}/photo-revision`,
+        {
+          method: "POST",
+          mode: "cors",
+          cache: "no-store",
+          credentials: "omit",
+          headers: { "X-Print-Photo-Revision-Grant": grant.grantToken },
+          body: form,
+          signal: controller.signal,
+          targetAddressSpace: "local"
+        } as RequestInit & { targetAddressSpace: "local" }
+      );
+      if (response.ok) return await response.json() as {
+        jobId: string;
+        originalFileName: string;
+        mediaType: string;
+        sizeBytes: number;
+        sha256: string;
+        photoSizeCode: string;
+        photoCount: number;
+        pageCount: number;
+        photosPerPage: number;
+        photoUnitPriceMinor: number;
+        quotedAmountMinor: number;
+        pricingVersion: number;
+      };
+
+      const raw = await response.text();
+      let detail = "";
+      if (raw) {
+        try {
+          const payload = JSON.parse(raw) as { title?: string; detail?: string; message?: string };
+          detail = payload.detail || payload.message || payload.title || "";
+        } catch {
+          detail = raw;
+        }
+      }
+      lastError = new ApiError(detail || `Local photo revision failed (${response.status}).`, response.status);
+      if ([401, 403, 404, 409, 413, 415, 422].includes(response.status)) break;
+    } catch (exception) {
+      lastError = exception instanceof Error ? exception : new Error("Could not reach the paired shop computer.");
+    } finally {
+      window.clearTimeout(timeout);
+    }
+  }
+
+  throw lastError ?? new ApiError(
+    "The paired shop computer has no reachable local photo-revision endpoint. Reconnect the Print Agent and try again.",
+    0
+  );
+}
+
+export function replaceShopPhotoDocument(
+  token: string,
+  jobId: string,
+  file: File,
+  photoSizeCode: string,
+  photoCount: number,
+  photosPerPage: number
+) {
+  const form = new FormData();
+  form.append("file", file, file.name);
+  form.append("photoSizeCode", photoSizeCode);
+  form.append("photoCount", String(photoCount));
+  form.append("photosPerPage", String(photosPerPage));
+  return apiRequest<{
+    id: string;
+    status: string;
+    pageCount: number;
+    printKind: "PHOTO";
+    photoSizeCode: string;
+    photoCount: number;
+    photoUnitPriceMinorSnapshot: number;
+    quotedAmountMinor: number;
+    pricingVersion: number;
+    quoteExpiresUtc: string;
+    originalFileName: string;
+    mediaType: string;
+    sizeBytes: number;
+  }>(`/api/v1/shop/print-jobs/${jobId}/photo-revision`, {
+    method: "POST",
+    body: form
+  }, token);
 }
 
 export function createAgentEnrollmentCode(token: string) {

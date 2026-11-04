@@ -186,3 +186,213 @@ test("local upload ticket retries preserve batch identity and renew the same exp
   assert.match(app, /Checkout has already started for this batch/);
   assert.match(entitlements, /!db\.PrintBatchPayments\.Any\(payment =>[\s\S]*?payment\.Status != "REJECTED"/);
 });
+
+
+test("customer local transfer remains visible with a clear unavailable state when no Agent endpoint exists",()=>{
+ const app=read("../src/App.tsx");
+ const start=app.indexOf("function CustomerLocalConnection("),end=app.indexOf("type CustomerGroupSettings",start);
+ const connection=app.slice(start,end);
+ assert.match(connection,/if\(!localAgent\?\.endpoints\.length\)[\s\S]*?setCheckStatus\("unavailable"\)/);
+ assert.doesNotMatch(connection,/if\(!localAgent\?\.endpoints\.length\)return null/);
+ assert.match(connection,/Direct transfer is temporarily unavailable/);
+ assert.match(app,/customer-upload-mode-unavailable/);
+});
+
+test("owner preview selects the persisted supported MIME type before the blob response type",()=>{
+ const app=read("../src/App.tsx");
+ assert.match(app,/const storedType=\(job\.document\.mediaType\|\|""\)/);
+ assert.match(app,/supportedTypes\.has\(storedType\)[\s\S]*?supportedTypes\.has\(responseType\)/);
+ assert.match(app,/Preview format is not supported/);
+});
+
+test("customer web upload accepts drag and drop and contains no JavaScript browser alert dialogs",()=>{
+ const app=read("../src/App.tsx");
+ assert.match(app,/onDragOver=\{event=>\{if\(!batchLockedForPayment\)event\.preventDefault\(\);\}\}/);
+ assert.match(app,/onDrop=\{event=>\{event\.preventDefault\(\);if\(batchLockedForPayment\)return;chooseFiles\(Array\.from\(event\.dataTransfer\.files\|\|\[\]\)\);\}\}/);
+ assert.doesNotMatch(app,/window\.(alert|confirm|prompt)\s*\(/);
+});
+
+test("photo studio's selected photo quantity creates one multi-page file with one photo-count record",()=>{
+ const app=read("../src/App.tsx");
+ const studio=read("../src/PhotoStudio.tsx");
+ assert.match(studio,/const pages=Math\.ceil\(parsedCopies\/photosPerPage\)/);
+ assert.match(studio,/onApply\(\[\{file:output,sizeCode:size\.id,photoCount:parsedCopies,photosPerPage\}\]\)/);
+ assert.match(studio,/buildPhotoPdf\(jpegPages\)/);
+ assert.match(app,/const generated=sheets\.map\(sheet=>sheet\.file\)/);
+ assert.match(app,/photos\[fp\]=\{sizeCode:sheet\.sizeCode,photoCount:sheet\.photoCount,photosPerPage:sheet\.photosPerPage\}/);
+});
+
+
+test("Shop Wi-Fi option remains visible when HTTPS fallback is disabled",()=>{
+ const app=read("../src/App.tsx");
+ const start=app.indexOf('<div className="customer-upload-modes">');
+ const picker=app.indexOf('<div className="customer-upload-picker-grid"',start);
+ assert.ok(start>=0&&picker>start);
+ const modes=app.slice(start,picker);
+ assert.match(modes,/customer-upload-mode-unavailable/);
+ assert.match(modes,/secureQueueFallbackEnabled&&/);
+ assert.doesNotMatch(modes,/\? <div className="customer-upload-modes"/);
+});
+
+ 
+test("cloud shop document preview retries the binary fetch with a refreshed access token",()=>{
+ const api=read("../src/api.ts");
+ const start=api.indexOf("export async function downloadShopDocument(");
+ const end=api.indexOf("export function createAgentEnrollmentCode(",start);
+ assert.ok(start>=0&&end>start);
+ const preview=api.slice(start,end);
+ assert.match(preview,/if \(response\.status === 401\)\s*\{\s*const refreshed = await refreshStoredSession\(token\)/);
+ assert.match(preview,/if \(refreshed\) response = await request\(refreshed\.accessToken\)/);
+ assert.match(preview,/Your shop session has expired/);
+});
+
+test("Photo Studio uses only the uploaded source and offers no edited-photo export action",()=>{
+ const studio=read("../src/PhotoStudio.tsx");
+ assert.match(studio,/source:\s*File/);
+ assert.doesNotMatch(studio,/<input[^>]+type=["']file/i);
+ assert.doesNotMatch(studio,/<a[^>]+download/i);
+ assert.match(studio,/setDesktopContentProtection\(true\)/);
+ assert.match(studio,/previewProtection/);
+ const studioCss=read("../src/PhotoStudio.module.css");
+ assert.match(studioCss,/\.previewProtection::before/);
+ assert.match(studio,/mode === "shop" \? "Save sheet to this job" : "Prepare A4 sheet"/);
+ assert.match(studio,/This prepared multi-page A4 photo PDF replaces it in your batch/);
+ assert.match(studio,/type="date"/);
+ assert.match(studio,/formatDobForPrint/);
+});
+
+test("photo quantities support up to 100 copies and automatically paginate over A4 sheets",()=>{
+ const studio=read("../src/PhotoStudio.tsx");
+ assert.match(studio,/const MAX_PHOTO_COUNT = 100/);
+ assert.match(studio,/const maxCopies=MAX_PHOTO_COUNT/);
+ assert.match(studio,/const sheetCount = Math\.ceil\(copies \/ photosPerPage\)/);
+ assert.match(studio,/Photos per A4 page/);
+ assert.match(studio,/Final A4 page:/);
+});
+
+ 
+test("cloud shop photo revisions require an unpaid review-stage image and validate every A4 page",()=>{
+ const program=read("../../../src/SmartPrint.Api/Program.cs");
+ const start=program.indexOf('shop.MapPost("/print-jobs/{jobId:guid}/photo-revision"');
+ const end=program.indexOf('shop.MapGet("/print-jobs/{jobId:guid}/preview-source"',start);
+ assert.ok(start>=0&&end>start);
+ const route=program.slice(start,end);
+ assert.match(route,/IsShopOwner\(principal\)/);
+ assert.match(route,/job\.Status != "AWAITING_SHOP_APPROVAL"/);
+ assert.match(route,/document\.StorageMode, "CLOUD"/);
+ assert.match(route,/document\.MediaType is not \("image\/jpeg" or "image\/png"\)/);
+ assert.match(route,/hasPayment \|\| hasBatchPayment/);
+ assert.match(route,/job\.LocalQueueReceivedUtc is not null/);
+ assert.match(route,/job\.ClaimedByAgentDeviceId is not null/);
+ assert.match(route,/PricingCalculator\.MaximumPhotosPerA4Sheet/);
+ assert.match(route,/PricingCalculator\.PhotoPageCount\(photoCount, photoSizeCode, photosPerPage\)/);
+ assert.match(route,/stored\.Analysis\.PageCount != expectedPageCount/);
+ assert.match(route,/SHOP_PHOTO_ENHANCED/);
+});
+
+test("customer photo previews do not expose the raw image or prepared PDF viewer",()=>{
+ const app=read("../src/App.tsx");
+ const previewStart=app.indexOf("{previewUrl&&file&&");
+ const previewEnd=app.indexOf("{files.length>0&&<button className=\"customer-flow-button\"",previewStart);
+ assert.ok(previewStart>=0&&previewEnd>previewStart);
+ const preview=app.slice(previewStart,previewEnd);
+ assert.match(preview,/Photo held in the shop workflow/);
+ assert.match(preview,/Photo sheet prepared for this shop/);
+ assert.doesNotMatch(preview,/<img src=\{previewUrl\}/);
+ assert.doesNotMatch(preview,/photoSettingsByFileFingerprint\[[^\]]+\]\?<iframe/);
+});
+
+test("the exact same Photo Studio is opened from the shop image review",()=>{
+ const app=read("../src/App.tsx");
+ assert.match(app,/setShopPhotoStudio\(\{source,job:preview\.job,returnPreview\}\)/);
+ assert.match(app,/replaceShopPhotoDocument\(tokens\.accessToken,editor\.job\.id,sheet\.file,sheet\.sizeCode,sheet\.photoCount,sheet\.photosPerPage\)/);
+ assert.match(app,/shopPhotoStudio && <PhotoStudio source=\{shopPhotoStudio\.source\}/);
+ assert.match(app,/Enhance photo for printing/);
+});
+
+test("native Windows content capture protection covers the photo editor and image preview",()=>{
+ const studio=read("../src/PhotoStudio.tsx");
+ const app=read("../src/App.tsx");
+ const bridge=read("../src/desktop-bridge.ts");
+ const permissions=JSON.parse(read("../../desktop/src-tauri/capabilities/default.json"));
+ assert.match(studio,/setDesktopContentProtection\(true\)/);
+ assert.match(app,/setDesktopContentProtection\(true\)/);
+ assert.match(bridge,/getCurrentWindow\(\)\.setContentProtected\(enabled\)/);
+ assert.ok(permissions.permissions.includes("core:window:allow-set-content-protected"));
+});
+
+ 
+test("shop owner can open the same editor for cloud and local Agent images",()=>{
+ const app=read("../src/App.tsx");
+ const api=read("../src/api.ts");
+ assert.match(app,/preview\.job\.storageMode==="CLOUD"\|\|preview\.job\.storageMode==="LOCAL_AGENT"/);
+ assert.match(app,/editor\.job\.storageMode==="LOCAL_AGENT"[\s\S]*?replaceShopPhotoDocumentLocally/);
+ assert.match(app,/replaceShopPhotoDocument\(tokens\.accessToken,editor\.job\.id,sheet\.file,sheet\.sizeCode,sheet\.photoCount,sheet\.photosPerPage\)/);
+ assert.match(api,/\/api\/v1\/shop\/print-jobs\/\$\{jobId\}\/photo-revision-grant/);
+ assert.match(api,/\/api\/v1\/local\/documents\/\$\{encodeURIComponent\(jobId\)\}\/photo-revision/);
+});
+
+test("local photo revisions use a purpose-bound grant and preserve local storage",()=>{
+ const program=read("../../../src/SmartPrint.Api/Program.cs");
+ const agent=read("../../../src/SmartPrint.Agent/LocalAgentApiHostedService.cs");
+ const queue=read("../../../src/SmartPrint.Agent/AgentLocalQueueStore.cs");
+ const grant=read("../../../src/SmartPrint.Api/Security/LocalDocumentPhotoRevisionGrant.cs");
+ assert.match(program,/LocalDocumentPhotoRevisionGrant\.Issue\([\s\S]*?GetActorId\(principal\)/);
+ assert.match(program,/LocalDocumentPhotoRevisionGrant\.TryValidate/);
+ assert.match(program,/document\.StorageMode != "LOCAL_AGENT" \|\| document\.AgentDeviceId != device\.Id/);
+ assert.match(program,/document\.StorageMode = previousStorageMode/);
+ assert.match(program,/ActorId = grant\.ActorUserId/);
+ assert.match(agent,/X-Print-Photo-Revision-Grant/);
+ assert.match(agent,/ReplaceStagedPhotoDocumentAsync/);
+ assert.match(agent,/local-document-photo-revisions\/\{jobId\}\/complete/);
+ assert.match(queue,/await commitServerRevisionAsync\(\)/);
+ assert.match(queue,/File\.Move\(backupPath, entry\.DocumentPath\)/);
+ assert.match(grant,/local_document_photo_revision/);
+});
+
+test("local photo revision rejects paid, handed-off and changed originals",()=>{
+ const program=read("../../../src/SmartPrint.Api/Program.cs");
+ const start=program.indexOf('agentApi.MapPost("/local-document-photo-revisions/{jobId:guid}/complete"');
+ const end=program.indexOf('agentApi.MapGet("/local-document-previews/{jobId:guid}/authorize"',start);
+ assert.ok(start>=0&&end>start);
+ const route=program.slice(start,end);
+ assert.match(route,/job\.Status != "AWAITING_SHOP_APPROVAL"/);
+ assert.match(route,/job\.LocalQueueReceivedUtc is not null/);
+ assert.match(route,/job\.ClaimedByAgentDeviceId is not null/);
+ assert.match(route,/document\.StorageMode != "LOCAL_AGENT"/);
+ assert.match(route,/document\.AgentDeviceId != device\.Id/);
+ assert.match(route,/hasPayment \|\| hasBatchPayment/);
+ assert.match(route,/document\.Sha256, request\.ExpectedOriginalSha256/);
+ assert.match(route,/request\.PhotosPerPage > PricingCalculator\.MaximumPhotosPerA4Sheet/);
+ assert.match(route,/request\.PageCount != PricingCalculator\.PhotoPageCount\(request\.PhotoCount, request\.PhotoSizeCode, request\.PhotosPerPage\)/);
+});
+
+
+test("shop-owner Photo Studio supports cloud and local storage without changing a local job into cloud storage",()=>{
+ const app=read("../src/App.tsx");
+ const api=read("../src/api.ts");
+ const program=read("../../../src/SmartPrint.Api/Program.cs");
+ const agent=read("../../../src/SmartPrint.Agent/LocalAgentApiHostedService.cs");
+ assert.match(app,/preview\.job\.storageMode==="CLOUD"\|\|preview\.job\.storageMode==="LOCAL_AGENT"/);
+ assert.match(app,/editor\.job\.storageMode==="LOCAL_AGENT"[\s\S]*?replaceShopPhotoDocumentLocally/);
+ assert.match(api,/\/api\/v1\/shop\/print-jobs\/\$\{jobId\}\/photo-revision-grant/);
+ assert.match(api,/\/api\/v1\/local\/documents\/\$\{encodeURIComponent\(jobId\)\}\/photo-revision/);
+ assert.match(program,/document\.StorageMode = previousStorageMode/);
+ assert.match(program,/document\.AgentDeviceId = device\.Id/);
+ assert.match(agent,/ReplaceStagedPhotoDocumentAsync/);
+});
+
+
+
+test("native Android protects Photo Studio from screenshots through the origin-pinned WebView bridge",()=>{
+ const studio=read("../src/PhotoStudio.tsx");
+ const activity=read("../../android/app/src/main/java/com/quantaedge/smartprint/MainActivity.kt");
+ assert.match(studio,/postMessage\("setSensitivePreview\|on"\)/);
+ assert.match(studio,/postMessage\("setSensitivePreview\|off"\)/);
+ assert.match(activity,/sourceOrigin\.scheme == trustedPage\.scheme/);
+ assert.match(activity,/sourceOrigin\.host\.equals\(trustedPage\.host, true\)/);
+ assert.match(activity,/isMainFrame/);
+ assert.match(activity,/parts\[0\] == "setSensitivePreview"/);
+ assert.match(activity,/window\.addFlags\(WindowManager\.LayoutParams\.FLAG_SECURE\)/);
+ assert.match(activity,/window\.clearFlags\(WindowManager\.LayoutParams\.FLAG_SECURE\)/);
+});

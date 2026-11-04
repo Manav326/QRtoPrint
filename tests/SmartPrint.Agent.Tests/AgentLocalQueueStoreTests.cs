@@ -679,6 +679,110 @@ public sealed class AgentLocalQueueStoreTests
         }
     }
 
+    [Fact]
+    public async Task LocalPhotoRevisionReplacesTheProtectedDocumentAndCommitsTheServerSnapshot()
+    {
+        var root = CreateTemporaryDirectory();
+        try
+        {
+            var store = new AgentLocalQueueStore(root);
+            await store.InitializeAsync(CancellationToken.None);
+            var originalBytes = "Original local image bytes"u8.ToArray();
+            var job = CreateJob(originalBytes) with
+            {
+                Status = "AWAITING_SHOP_APPROVAL",
+                StorageMode = "LOCAL_AGENT",
+                MediaType = "image/jpeg",
+                DocumentName = "original.jpg"
+            };
+            var staged = await store.EnqueueLocalUploadAsync(job, originalBytes, CancellationToken.None);
+            await store.MarkLocalUploadFinalizedAsync(job.Id, CancellationToken.None);
+            var replacement = "%PDF-1.4\\nshop-prepared-a4-photo-sheet"u8.ToArray();
+            var committed = false;
+
+            await store.ReplaceStagedPhotoDocumentAsync(
+                job.Id,
+                staged.Sha256,
+                staged.SizeBytes,
+                "photo-sheet.pdf",
+                replacement,
+                2,
+                750,
+                () =>
+                {
+                    committed = true;
+                    Assert.True(replacement.AsSpan().SequenceEqual(store.ReadDocument(job.Id)));
+                    return Task.CompletedTask;
+                },
+                CancellationToken.None);
+
+            var updated = store.Find(job.Id)!;
+            Assert.True(committed);
+            Assert.Equal("photo-sheet.pdf", updated.DocumentName);
+            Assert.Equal("application/pdf", updated.MediaType);
+            Assert.Equal(replacement.LongLength, updated.SizeBytes);
+            Assert.Equal(Convert.ToHexString(SHA256.HashData(replacement)).ToLowerInvariant(), updated.Sha256);
+            Assert.Equal(2, updated.PageCount);
+            Assert.Equal(1, updated.Copies);
+            Assert.Equal("Colour", updated.ColourMode);
+            Assert.Equal("A4", updated.PaperSize);
+            Assert.False(updated.IsDuplex);
+            Assert.Equal(750, updated.QuotedAmountMinor);
+            Assert.True(replacement.AsSpan().SequenceEqual(store.ReadDocument(job.Id)));
+            Assert.Empty(Directory.GetFiles(root, "*.photo-revision.bak"));
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task FailedCloudCommitRollsBackTheLocalPhotoBytesAndManifest()
+    {
+        var root = CreateTemporaryDirectory();
+        try
+        {
+            var store = new AgentLocalQueueStore(root);
+            await store.InitializeAsync(CancellationToken.None);
+            var originalBytes = "Original local image bytes"u8.ToArray();
+            var job = CreateJob(originalBytes) with
+            {
+                Status = "AWAITING_SHOP_APPROVAL",
+                StorageMode = "LOCAL_AGENT",
+                MediaType = "image/jpeg",
+                DocumentName = "original.jpg"
+            };
+            var staged = await store.EnqueueLocalUploadAsync(job, originalBytes, CancellationToken.None);
+            await store.MarkLocalUploadFinalizedAsync(job.Id, CancellationToken.None);
+            var replacement = "%PDF-1.4\nshop-prepared-a4-photo-sheet"u8.ToArray();
+
+            await Assert.ThrowsAsync<InvalidOperationException>(() =>
+                store.ReplaceStagedPhotoDocumentAsync(
+                    job.Id,
+                    staged.Sha256,
+                    staged.SizeBytes,
+                    "photo-sheet.pdf",
+                    replacement,
+                    1,
+                    750,
+                    () => throw new InvalidOperationException("Cloud metadata commit was rejected."),
+                    CancellationToken.None));
+
+            var restored = store.Find(job.Id)!;
+            Assert.Equal(staged.Sha256, restored.Sha256);
+            Assert.Equal(staged.SizeBytes, restored.SizeBytes);
+            Assert.Equal("original.jpg", restored.DocumentName);
+            Assert.Equal("image/jpeg", restored.MediaType);
+            Assert.True(originalBytes.AsSpan().SequenceEqual(store.ReadDocument(job.Id)));
+            Assert.Empty(Directory.GetFiles(root, "*.photo-revision.bak"));
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
     private static AgentClaimedJob CreateJob(byte[] content)
     {
         var hash = Convert.ToHexString(SHA256.HashData(content)).ToLowerInvariant();

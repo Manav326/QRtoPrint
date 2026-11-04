@@ -424,6 +424,136 @@ async function exerciseWorkspaceSections(page, route, viewport, themeLabel) {
   }
 }
 
+async function exercisePhotoStudioBrowser() {
+  const cases = [
+    { mode: "customer", theme: "light", width: 320, height: 568 },
+    { mode: "customer", theme: "dark", width: 390, height: 844 },
+    { mode: "customer", theme: "light", width: 520, height: 900 },
+    { mode: "shop", theme: "dark", width: 390, height: 568 },
+    { mode: "shop", theme: "light", width: 768, height: 1024 },
+    { mode: "shop", theme: "dark", width: 1440, height: 1000 }
+  ];
+
+  for (const item of cases) {
+    const context = await browser.newContext({ viewport: { width: item.width, height: item.height } });
+    const page = await context.newPage();
+    await page.goto(
+      `${baseUrl}/tests/photo-studio.browser.html?mode=${item.mode}&theme=${item.theme}`,
+      { waitUntil: "domcontentloaded" }
+    );
+    const openButton = page.getByRole("button", { name: "Open Photo Studio" });
+    await openButton.waitFor({ state: "visible" });
+    await page.waitForFunction(() => document.querySelector("#photo-studio-result")?.getAttribute("data-ready") === "true");
+
+    await openButton.click();
+    const dialog = page.getByRole("dialog", { name: "Photo Studio" });
+    await dialog.waitFor({ state: "visible" });
+    assert.equal(await dialog.getAttribute("aria-busy"), "false");
+
+    const measurements = await page.evaluate(() => {
+      const rect = selector => {
+        const element = document.querySelector(selector);
+        if (!element) return null;
+        const value = element.getBoundingClientRect();
+        return { left: value.left, right: value.right, top: value.top, bottom: value.bottom, width: value.width, height: value.height };
+      };
+      const panel = document.querySelector("[class*='toolPanel']");
+      const panelStyle = panel ? getComputedStyle(panel) : null;
+      return {
+        viewportWidth: window.innerWidth,
+        viewportHeight: window.innerHeight,
+        documentWidth: document.documentElement.scrollWidth,
+        bodyWidth: document.body.scrollWidth,
+        dialog: rect("[role='dialog']"),
+        header: rect("[role='dialog'] header"),
+        preview: rect("[class*='canvasWorkspace']"),
+        canvas: rect("canvas"),
+        panel: rect("[class*='toolPanel']"),
+        footer: rect("[role='dialog'] footer"),
+        action: rect("[class*='applyButton']"),
+        panelScrollHeight: panel?.scrollHeight ?? 0,
+        panelClientHeight: panel?.clientHeight ?? 0,
+        panelOverflowY: panelStyle?.overflowY ?? "missing",
+        bodyOverflow: getComputedStyle(document.body).overflow
+      };
+    });
+    assert.ok(measurements.documentWidth <= item.width + 1 && measurements.bodyWidth <= item.width + 1,
+      `Photo Studio has horizontal overflow at ${item.width}x${item.height}: ${JSON.stringify(measurements)}`);
+    assert.ok(measurements.header && measurements.header.top >= -1 && measurements.header.bottom <= item.height + 1,
+      `Photo Studio header is clipped: ${JSON.stringify(measurements)}`);
+    assert.ok(measurements.canvas && measurements.canvas.width > 0 && measurements.canvas.height > 0,
+      `Photo Studio page preview is missing: ${JSON.stringify(measurements)}`);
+    assert.ok(measurements.footer && measurements.footer.bottom <= item.height + 1,
+      `Photo Studio save footer is outside the viewport: ${JSON.stringify(measurements)}`);
+    assert.ok(measurements.action && measurements.action.bottom <= item.height + 1,
+      `Photo Studio primary action is clipped: ${JSON.stringify(measurements)}`);
+    assert.equal(measurements.bodyOverflow, "hidden", "The editor must prevent background page scroll while open.");
+    await page.screenshot({
+      path: join(artifactDirectory, `photo-studio-${item.mode}-${item.width}x${item.height}-${item.theme}.png`),
+      fullPage: false,
+      animations: "disabled"
+    });
+
+    // Cancel should restore focus to the exact customer/shop entry control.
+    await dialog.getByRole("button", { name: "Cancel", exact: true }).click();
+    await dialog.waitFor({ state: "hidden" });
+    assert.equal(await page.evaluate(() => document.activeElement?.id), "open-photo-studio",
+      "Closing Photo Studio must restore keyboard focus to its invoking control.");
+
+    await openButton.click();
+    const reopened = page.getByRole("dialog", { name: "Photo Studio" });
+    await reopened.waitFor({ state: "visible" });
+    if (item.mode === "customer") {
+      assert.equal(await reopened.locator('input[type="date"]').count(), 0,
+        "Customer name and DOB fields must be hidden until explicitly enabled.");
+      await reopened.getByRole("checkbox", { name: /Add name and DOB to each photo/ }).check();
+      await reopened.getByLabel("Name for form (optional)").fill("Browser QA Customer");
+      await reopened.getByLabel("Date of birth (optional)").fill("2000-01-02");
+      assert.equal(await reopened.locator('input[type="date"]').count(), 1);
+    }
+
+    const largePhotoBatch = item.mode === "shop" && item.width === 768;
+    if (largePhotoBatch) {
+      await reopened.getByLabel("Number of photos").fill("50");
+      await reopened.getByLabel("Photos per A4 page").selectOption("9");
+      const pageSummary = reopened.locator("[class*='sheetSummary'] > div").filter({ hasText: "A4 pages in this job" }).locator("strong");
+      await page.waitForFunction(() => {
+        const summary = Array.from(document.querySelectorAll("[class*='sheetSummary'] > div"));
+        return summary.some(row => row.textContent?.includes("A4 pages in this job") && row.querySelector("strong")?.textContent === "6");
+      });
+      assert.equal(await pageSummary.innerText(), "6");
+      assert.equal(await reopened.locator("[class*='sheetSummary'] small").filter({ hasText: "Final A4 page: 5 photos" }).count(), 1);
+      for (let pageIndex = 0; pageIndex < 5; pageIndex += 1)
+        await reopened.getByRole("button", { name: "Next A4 page" }).click();
+      assert.equal(await reopened.getByText("Page 6 of 6").count(), 1);
+      assert.match(await reopened.locator("[class*='canvasFooter']").innerText(), /Page 6: 5 photos/);
+    }
+
+    const actionLabel = item.mode === "shop" ? "Save sheet to this job" : "Prepare A4 sheet";
+    await reopened.getByRole("button", { name: actionLabel }).click();
+    await page.waitForFunction(() => {
+      const value = document.querySelector("#photo-studio-result")?.textContent ?? "";
+      return value.includes('"mediaType":"application/pdf"');
+    }, null, { timeout: 20000 });
+    const output = JSON.parse(await page.locator("#photo-studio-result").innerText());
+    assert.equal(output.mode, item.mode);
+    assert.equal(output.mediaType, "application/pdf");
+    assert.equal(output.photoCount, largePhotoBatch ? 50 : 8);
+    assert.equal(output.photosPerPage, largePhotoBatch ? 9 : 25);
+    assert.equal(output.pageCount, largePhotoBatch ? 6 : 1);
+    assert.ok(output.bytes > 0 && output.bytes <= 20 * 1024 * 1024);
+    await context.close();
+    results.push({
+      check: `Photo Studio ${item.mode} / ${item.theme} / ${item.width}x${item.height}`,
+      passed: true,
+      outputSizeBytes: output.bytes,
+      photoCount: output.photoCount,
+      photosPerPage: output.photosPerPage,
+      pdfPageCount: output.pageCount
+    });
+  }
+}
+
 async function assertThemeToggle(page) {
   const darkToggle = page.getByRole("button", { name: "Switch to dark theme" });
   const lightToggle = page.getByRole("button", { name: "Switch to light theme" });
@@ -504,6 +634,9 @@ try {
       await context.close();
     }
   }
+
+  // Exercise the actual shared Photo Studio component on phone, tablet and desktop.
+  await exercisePhotoStudioBrowser();
 
   // Exercise the Windows desktop webview at its declared minimum window size.
   {

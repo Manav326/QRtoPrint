@@ -35,7 +35,7 @@ public sealed record ShopPricingRequest(
     long Photo2x2Minor = 0,
     long Photo4x6Minor = 0);
 
-public sealed record PrintQuoteRequest(string ColourMode, string PaperSize, bool IsDuplex, int Copies, string? PrintKind = "DOCUMENT", string? PhotoSizeCode = null, int? PhotoCount = null, string Orientation = "AUTO");
+public sealed record PrintQuoteRequest(string ColourMode, string PaperSize, bool IsDuplex, int Copies, string? PrintKind = "DOCUMENT", string? PhotoSizeCode = null, int? PhotoCount = null, string Orientation = "AUTO", int? PhotosPerPage = null);
 
 public sealed record UpdatePrintJobSettingsRequest(
     string ColourMode,

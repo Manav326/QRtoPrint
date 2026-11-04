@@ -2805,6 +2805,327 @@ shop.MapGet("/print-jobs/{jobId:guid}/events", async (
     return Results.Ok(events);
 });
 
+shop.MapPost("/print-jobs/{jobId:guid}/photo-revision-grant", async (
+    Guid jobId,
+    ClaimsPrincipal principal,
+    SmartPrintDbContext db,
+    CancellationToken ct) =>
+{
+    if (!IsShopOwner(principal) || !TryGetTenantId(principal, out var tenantId))
+        return Results.Forbid();
+
+    var job = await db.PrintJobs.AsNoTracking()
+        .SingleOrDefaultAsync(item => item.Id == jobId && item.TenantId == tenantId, ct);
+    if (job is null) return Results.NotFound();
+
+    if (job.Status != "AWAITING_SHOP_APPROVAL" ||
+        job.LocalQueueReceivedUtc is not null ||
+        job.ClaimedByAgentDeviceId is not null)
+        return Results.Conflict(new
+        {
+            code = "photo_revision_not_allowed",
+            message = "Local photo enhancement is available only before payment and before the job is handed to a printer."
+        });
+
+    var document = await db.PrintDocuments.AsNoTracking()
+        .Where(item => item.TenantId == tenantId && item.PrintJobId == jobId)
+        .Select(item => new { item.StorageMode, item.AgentDeviceId, item.MediaType })
+        .SingleOrDefaultAsync(ct);
+    if (document is null) return Results.NotFound();
+    if (document.StorageMode != "LOCAL_AGENT" || document.AgentDeviceId is not Guid agentId)
+        return Results.Conflict(new { code = "photo_revision_not_local", message = "This document is not stored on the paired local computer." });
+    if (document.MediaType is not ("image/jpeg" or "image/png"))
+        return Results.Conflict(new { code = "photo_revision_source_not_image", message = "The shop editor requires an original JPG or PNG image." });
+
+    var hasPayment = await db.PrintPayments.AnyAsync(item =>
+        item.TenantId == tenantId && item.PrintJobId == jobId &&
+        item.Status != "REJECTED" && item.Status != "REFUNDED", ct);
+    var hasBatchPayment = job.BatchId is Guid batchId && await db.PrintBatchPayments.AnyAsync(item =>
+        item.TenantId == tenantId && item.BatchId == batchId &&
+        item.Status != "REJECTED" && item.Status != "REFUNDED", ct);
+    if (hasPayment || hasBatchPayment)
+        return Results.Conflict(new
+        {
+            code = "photo_revision_payment_started",
+            message = "A payment attempt already exists for this file or batch. Photo editing is locked."
+        });
+
+    var now = DateTimeOffset.UtcNow;
+    var agent = await db.AgentDevices.AsNoTracking()
+        .Where(item => item.Id == agentId && item.TenantId == tenantId &&
+                       item.RevokedUtc == null && item.Status != "Revoked" &&
+                       item.LastSeenUtc != null && item.LastSeenUtc >= now.AddMinutes(-2))
+        .Select(item => new { item.Id, item.LocalEndpointsJson })
+        .SingleOrDefaultAsync(ct);
+    if (agent is null)
+        return Results.Conflict(new
+        {
+            code = "photo_revision_agent_offline",
+            message = "The paired shop computer is offline. Reconnect it before saving a local photo enhancement."
+        });
+
+    var endpoints = ReadLocalAgentEndpoints(agent.LocalEndpointsJson);
+    if (endpoints.Length == 0)
+        return Results.Conflict(new
+        {
+            code = "photo_revision_endpoint_missing",
+            message = "The paired shop computer has not published a reachable local endpoint."
+        });
+
+    var expiresUtc = now.AddMinutes(2);
+    var grantToken = LocalDocumentPhotoRevisionGrant.Issue(
+        signingKeyText, issuer, audience, tenantId, jobId, agent.Id, GetActorId(principal), now, expiresUtc);
+    return Results.Ok(new { GrantToken = grantToken, Endpoints = endpoints, ExpiresUtc = expiresUtc });
+});
+
+shop.MapPost("/print-jobs/{jobId:guid}/photo-revision", async (
+    Guid jobId,
+    ClaimsPrincipal principal,
+    SmartPrintDbContext db,
+    DocumentStorage storage,
+    HttpContext context,
+    CancellationToken ct) =>
+{
+    if (!IsShopOwner(principal) || !TryGetTenantId(principal, out var tenantId))
+        return Results.Forbid();
+
+    await using var transaction = await db.Database.BeginTransactionAsync(ct);
+    var lockedJobs = await db.PrintJobs.FromSqlInterpolated(
+        $"SELECT * FROM \"PrintJobs\" WHERE \"Id\" = {jobId} AND \"TenantId\" = {tenantId} FOR UPDATE")
+        .ToListAsync(ct);
+    var job = lockedJobs.SingleOrDefault();
+    if (job is null)
+    {
+        await transaction.RollbackAsync(ct);
+        return Results.NotFound();
+    }
+
+    if (job.Status != "AWAITING_SHOP_APPROVAL" ||
+        job.LocalQueueReceivedUtc is not null ||
+        job.ClaimedByAgentDeviceId is not null)
+    {
+        await transaction.RollbackAsync(ct);
+        return Results.Conflict(new
+        {
+            code = "photo_revision_not_allowed",
+            message = "Photo enhancements can only be saved while this job is awaiting shop review and before any payment or printer handoff."
+        });
+    }
+
+    var document = await db.PrintDocuments.SingleOrDefaultAsync(
+        item => item.TenantId == tenantId && item.PrintJobId == jobId, ct);
+    if (document is null || document.PurgedUtc is not null)
+    {
+        await transaction.RollbackAsync(ct);
+        return Results.NotFound();
+    }
+
+    if (!string.Equals(document.StorageMode, "CLOUD", StringComparison.Ordinal))
+    {
+        await transaction.RollbackAsync(ct);
+        return Results.Conflict(new
+        {
+            code = "photo_revision_local_storage",
+            message = "This original is stored only on the paired shop computer. It has not been copied to cloud storage; local-only photo editing is not available in this release."
+        });
+    }
+
+    if (document.MediaType is not ("image/jpeg" or "image/png"))
+    {
+        await transaction.RollbackAsync(ct);
+        return Results.Conflict(new
+        {
+            code = "photo_revision_source_not_image",
+            message = "The shop editor can enhance an original JPG or PNG photo. This job is not an original image."
+        });
+    }
+
+    var hasPayment = await db.PrintPayments.AnyAsync(item =>
+        item.TenantId == tenantId && item.PrintJobId == jobId &&
+        item.Status != "REJECTED" && item.Status != "REFUNDED", ct);
+    var hasBatchPayment = job.BatchId is Guid batchId && await db.PrintBatchPayments.AnyAsync(item =>
+        item.TenantId == tenantId && item.BatchId == batchId &&
+        item.Status != "REJECTED" && item.Status != "REFUNDED", ct);
+    if (hasPayment || hasBatchPayment)
+    {
+        await transaction.RollbackAsync(ct);
+        return Results.Conflict(new
+        {
+            code = "photo_revision_payment_started",
+            message = "This file or its batch already has a payment attempt. The original is locked against editing; use the existing refund/review workflow."
+        });
+    }
+
+    if (!context.Request.HasFormContentType)
+    {
+        await transaction.RollbackAsync(ct);
+        return Results.BadRequest(new { code = "photo_revision_form_required", message = "Send the prepared photo sheet as a multipart file." });
+    }
+
+    var form = await context.Request.ReadFormAsync(ct);
+    if (form.Files.Count != 1)
+    {
+        await transaction.RollbackAsync(ct);
+        return Results.BadRequest(new { code = "one_photo_sheet_required", message = "Save exactly one prepared photo-sheet PDF." });
+    }
+
+    var file = form.Files[0];
+    if (file.Length is <= 0 or > 20 * 1024 * 1024 ||
+        !string.Equals(Path.GetExtension(file.FileName), ".pdf", StringComparison.OrdinalIgnoreCase))
+    {
+        await transaction.RollbackAsync(ct);
+        return Results.UnprocessableEntity(new
+        {
+            code = "photo_sheet_invalid",
+            message = "The prepared photo sheet must be a PDF between 1 byte and 20 MB."
+        });
+    }
+
+    var photoSizeCode = form["photoSizeCode"].FirstOrDefault() ?? string.Empty;
+    if (photoSizeCode is not ("35x45" or "25x35" or "2x2" or "4x6") ||
+        !int.TryParse(form["photoCount"].FirstOrDefault(), out var photoCount) ||
+        photoCount is < 1 or > 100 ||
+        !int.TryParse(form["photosPerPage"].FirstOrDefault(), out var photosPerPage) ||
+        photosPerPage < 1 || photosPerPage > PricingCalculator.MaximumPhotosPerA4Sheet(photoSizeCode))
+    {
+        await transaction.RollbackAsync(ct);
+        return Results.ValidationProblem(new Dictionary<string, string[]>
+        {
+            ["photoDetails"] = ["Choose a supported ID photo size and a quantity from 1 to 100."]
+        });
+    }
+
+    var expectedPageCount = PricingCalculator.PhotoPageCount(photoCount, photoSizeCode, photosPerPage);
+
+    var pricing = await db.ShopPricingProfiles.AsNoTracking()
+        .SingleOrDefaultAsync(item => item.TenantId == tenantId && item.IsConfigured, ct);
+    if (pricing is null)
+    {
+        await transaction.RollbackAsync(ct);
+        return Results.Conflict(new { code = "shop_pricing_not_configured", message = "Configure photo prices before saving an enhanced photo job." });
+    }
+
+    long amount;
+    long unitPrice;
+    try
+    {
+        unitPrice = PricingCalculator.PhotoUnitRate(photoSizeCode, pricing);
+        amount = PricingCalculator.CalculatePhoto(photoCount, photoSizeCode, pricing);
+    }
+    catch (Exception exception) when (exception is ArgumentException or InvalidOperationException or OverflowException)
+    {
+        await transaction.RollbackAsync(ct);
+        return Results.Conflict(new { code = "photo_pricing_unavailable", message = exception.Message });
+    }
+
+    var newDocumentId = Guid.NewGuid();
+    var outputName = $"photo-sheet-{job.JobNumber}.pdf";
+    StoredDocument stored;
+    try
+    {
+        await using var input = file.OpenReadStream();
+        stored = await storage.ValidateAndStoreAsync(tenantId, newDocumentId, outputName, input, file.Length, ct);
+    }
+    catch (DocumentValidationException exception)
+    {
+        await transaction.RollbackAsync(ct);
+        return Results.UnprocessableEntity(new { code = "photo_sheet_not_supported", message = exception.Message });
+    }
+
+    if (stored.Analysis.PageCount != expectedPageCount)
+    {
+        await storage.DeleteAsync(stored.StorageKey);
+        await transaction.RollbackAsync(ct);
+        return Results.UnprocessableEntity(new
+        {
+            code = "photo_sheet_page_count_mismatch",
+            message = $"The prepared PDF must contain exactly {expectedPageCount} A4 page(s) for {photoCount} photos of the selected size."
+        });
+    }
+
+    var previousStorageKey = document.StorageKey;
+    var now = DateTimeOffset.UtcNow;
+    document.OriginalFileName = outputName;
+    document.MediaType = stored.Analysis.MediaType;
+    document.FileExtension = stored.Analysis.Extension;
+    document.SizeBytes = stored.SizeBytes;
+    document.Sha256 = stored.Sha256;
+    document.StorageKey = stored.StorageKey;
+    document.StorageMode = "CLOUD";
+    document.AgentDeviceId = null;
+    document.PageSizesJson = stored.Analysis.PageSizesJson;
+    document.PurgedUtc = null;
+
+    job.PageCount = expectedPageCount;
+    job.Copies = 1;
+    job.ColourMode = "Colour";
+    job.PaperSize = "A4";
+    job.IsDuplex = false;
+    job.Orientation = "AUTO";
+    job.PrintKind = "PHOTO";
+    job.PhotoSizeCode = photoSizeCode;
+    job.PhotoCount = photoCount;
+    job.PhotoUnitPriceMinorSnapshot = unitPrice;
+    job.Currency = "INR";
+    job.QuotedAmountMinor = amount;
+    job.PageRefundAllocationsJson = JsonSerializer.Serialize(
+        PricingCalculator.CalculatePhotoPageRefundAllocations(photoCount, photoSizeCode, photosPerPage, unitPrice));
+    job.PricingVersion = pricing.Version;
+    job.QuoteExpiresUtc = now.AddMinutes(10);
+    job.UpdatedUtc = now;
+
+    db.PrintJobEvents.Add(new PrintJobEvent
+    {
+        TenantId = tenantId,
+        PrintJobId = job.Id,
+        PreviousStatus = job.Status,
+        NewStatus = job.Status,
+        ActorType = "ShopUser",
+        ActorId = GetActorId(principal),
+        ReasonCode = "SHOP_PHOTO_ENHANCED",
+        CreatedUtc = now
+    });
+
+    try
+    {
+        await db.SaveChangesAsync(ct);
+        await transaction.CommitAsync(ct);
+    }
+    catch
+    {
+        await transaction.RollbackAsync(ct);
+        await storage.DeleteAsync(stored.StorageKey);
+        throw;
+    }
+
+    try
+    {
+        await storage.DeleteAsync(previousStorageKey);
+    }
+    catch (IOException)
+    {
+        // The database now points to the new revision. A failed old-file cleanup
+        // must not turn a successful customer-visible revision into an error.
+    }
+
+    return Results.Ok(new
+    {
+        job.Id,
+        job.Status,
+        job.PageCount,
+        job.PrintKind,
+        job.PhotoSizeCode,
+        job.PhotoCount,
+        job.PhotoUnitPriceMinorSnapshot,
+        job.QuotedAmountMinor,
+        job.PricingVersion,
+        job.QuoteExpiresUtc,
+        document.OriginalFileName,
+        document.MediaType,
+        document.SizeBytes
+    });
+});
+
 shop.MapGet("/print-jobs/{jobId:guid}/preview-source", async (
     Guid jobId,
     ClaimsPrincipal principal,
@@ -4799,6 +5120,319 @@ agentApi.MapPost("/jobs/{jobId:guid}/spooler-status", async (Guid jobId, AgentSp
     return Results.Ok(new { job.Id, job.Status, job.SpoolerStatus, job.SpoolerObservedUtc });
 });
 
+agentApi.MapPost("/local-document-photo-revisions/{jobId:guid}/authorize", async (
+    Guid jobId,
+    HttpContext context,
+    AgentLocalPhotoRevisionRequest request,
+    SmartPrintDbContext db,
+    CancellationToken ct) =>
+{
+    var device = await AuthenticateAgentAsync(context, db, ct);
+    if (device is null) return Results.Unauthorized();
+
+    var grantToken = context.Request.Headers["X-Print-Photo-Revision-Grant"].FirstOrDefault();
+    if (!LocalDocumentPhotoRevisionGrant.TryValidate(
+            grantToken, signingKeyText, issuer, audience, DateTimeOffset.UtcNow, out var grant) ||
+        !LocalDocumentPhotoRevisionGrant.IsFor(grant, device.TenantId, jobId, device.Id))
+        return Results.Unauthorized();
+
+    var job = await db.PrintJobs.AsNoTracking()
+        .SingleOrDefaultAsync(item => item.Id == jobId && item.TenantId == device.TenantId, ct);
+    if (job is null) return Results.NotFound();
+
+    var document = await db.PrintDocuments.AsNoTracking()
+        .Where(item => item.TenantId == device.TenantId && item.PrintJobId == jobId)
+        .Select(item => new { item.StorageMode, item.AgentDeviceId, item.Sha256, item.SizeBytes, item.MediaType })
+        .SingleOrDefaultAsync(ct);
+    if (document is null) return Results.NotFound();
+
+    if (job.Status != "AWAITING_SHOP_APPROVAL" ||
+        job.LocalQueueReceivedUtc is not null || job.ClaimedByAgentDeviceId is not null ||
+        document.StorageMode != "LOCAL_AGENT" || document.AgentDeviceId != device.Id)
+        return Results.Conflict(new { code = "photo_revision_not_allowed", message = "This local document is no longer eligible for photo enhancement." });
+
+    if (document.MediaType is not ("image/jpeg" or "image/png") ||
+        !string.Equals(document.Sha256, request.ExpectedOriginalSha256, StringComparison.OrdinalIgnoreCase) ||
+        document.SizeBytes != request.ExpectedOriginalSizeBytes)
+        return Results.Conflict(new { code = "photo_revision_original_changed", message = "The local original no longer matches the document registered by the shop service. Reopen its preview." });
+
+    if (request.PageCount is < 1 or > 100 || request.SizeBytes is <= 0 or > 20 * 1024 * 1024 ||
+        string.IsNullOrWhiteSpace(request.Sha256) || request.Sha256.Length != 64 || !request.Sha256.All(Uri.IsHexDigit) ||
+        string.IsNullOrWhiteSpace(request.PageSizesJson) || request.PageSizesJson.Length > 4000 || !IsValidPageSizesJson(request.PageSizesJson))
+        return Results.ValidationProblem(new Dictionary<string, string[]>
+        {
+            ["photoSheet"] = ["The prepared local photo sheet metadata is invalid."]
+        });
+
+    var hasPayment = await db.PrintPayments.AnyAsync(item =>
+        item.TenantId == device.TenantId && item.PrintJobId == jobId &&
+        item.Status != "REJECTED" && item.Status != "REFUNDED", ct);
+    var hasBatchPayment = job.BatchId is Guid batchId && await db.PrintBatchPayments.AnyAsync(item =>
+        item.TenantId == device.TenantId && item.BatchId == batchId &&
+        item.Status != "REJECTED" && item.Status != "REFUNDED", ct);
+    if (hasPayment || hasBatchPayment)
+        return Results.Conflict(new { code = "photo_revision_payment_started", message = "A payment attempt already exists. This local photo is locked." });
+
+    ShopPricingProfile? pricing = await db.ShopPricingProfiles.AsNoTracking()
+        .SingleOrDefaultAsync(item => item.TenantId == device.TenantId && item.IsConfigured, ct);
+    if (pricing is null)
+        return Results.Conflict(new { code = "shop_pricing_not_configured", message = "Configure photo prices before saving an enhanced photo job." });
+
+    long amount;
+    long unitPrice;
+    try
+    {
+        var expectedPageCount = PricingCalculator.PhotoPageCount(request.PhotoCount, request.PhotoSizeCode, request.PhotosPerPage);
+        if (request.PageCount != expectedPageCount)
+            return Results.ValidationProblem(new Dictionary<string, string[]>
+            {
+                ["pageCount"] = [$"The prepared PDF must contain exactly {expectedPageCount} A4 page(s) for this photo quantity."]
+            });
+        unitPrice = PricingCalculator.PhotoUnitRate(request.PhotoSizeCode, pricing);
+        amount = PricingCalculator.CalculatePhoto(request.PhotoCount, request.PhotoSizeCode, pricing);
+    }
+    catch (Exception exception) when (exception is ArgumentException or InvalidOperationException or OverflowException)
+    {
+        return Results.Conflict(new { code = "photo_pricing_unavailable", message = exception.Message });
+    }
+
+    return Results.Ok(new
+    {
+        job.Id,
+        OriginalSha256 = document.Sha256,
+        OriginalSizeBytes = document.SizeBytes,
+        NewSha256 = request.Sha256,
+        NewSizeBytes = request.SizeBytes,
+        request.PhotoSizeCode,
+        request.PhotoCount,
+        request.PageCount,
+        request.PhotosPerPage,
+        PhotoUnitPriceMinor = unitPrice,
+        QuotedAmountMinor = amount,
+        PricingVersion = pricing.Version
+    });
+});
+
+agentApi.MapPost("/local-document-photo-revisions/{jobId:guid}/complete", async (
+    Guid jobId,
+    HttpContext context,
+    AgentLocalPhotoRevisionRequest request,
+    SmartPrintDbContext db,
+    CancellationToken ct) =>
+{
+    var device = await AuthenticateAgentAsync(context, db, ct);
+    if (device is null) return Results.Unauthorized();
+
+    if (request.PageCount is < 1 or > 100 ||
+        request.PhotoCount is < 1 or > 100 ||
+        request.PhotosPerPage is < 1 or > 100 ||
+        request.PhotoSizeCode is not ("35x45" or "25x35" or "2x2" or "4x6"))
+        return Results.BadRequest(new { code = "photo_revision_output_invalid", message = "The prepared photo page metadata is invalid." });
+
+    if (request.PhotosPerPage > PricingCalculator.MaximumPhotosPerA4Sheet(request.PhotoSizeCode) ||
+        request.PageCount != PricingCalculator.PhotoPageCount(request.PhotoCount, request.PhotoSizeCode, request.PhotosPerPage))
+        return Results.BadRequest(new
+        {
+            code = "photo_revision_page_count_invalid",
+            message = "The local photo PDF page count must match its selected photos-per-page layout."
+        });
+
+    var grantToken = context.Request.Headers["X-Print-Photo-Revision-Grant"].FirstOrDefault();
+    if (!LocalDocumentPhotoRevisionGrant.TryValidate(
+            grantToken, signingKeyText, issuer, audience, DateTimeOffset.UtcNow, out var grant) ||
+        !LocalDocumentPhotoRevisionGrant.IsFor(grant, device.TenantId, jobId, device.Id))
+        return Results.Unauthorized();
+
+    await using var transaction = await db.Database.BeginTransactionAsync(ct);
+    var lockedJobs = await db.PrintJobs.FromSqlInterpolated(
+        $"SELECT * FROM \"PrintJobs\" WHERE \"Id\" = {jobId} AND \"TenantId\" = {device.TenantId} FOR UPDATE")
+        .ToListAsync(ct);
+    var job = lockedJobs.SingleOrDefault();
+    if (job is null)
+    {
+        await transaction.RollbackAsync(ct);
+        return Results.NotFound();
+    }
+
+    var document = await db.PrintDocuments.SingleOrDefaultAsync(
+        item => item.TenantId == device.TenantId && item.PrintJobId == jobId, ct);
+    if (document is null)
+    {
+        await transaction.RollbackAsync(ct);
+        return Results.NotFound();
+    }
+
+    // Idempotent retry: the previous completion may have committed while its
+    // HTTP response was lost. Recognise the exact same prepared sheet before
+    // requiring the original image hash again.
+    if (job.Status == "AWAITING_SHOP_APPROVAL" &&
+        job.LocalQueueReceivedUtc is null &&
+        job.ClaimedByAgentDeviceId is null &&
+        document.StorageMode == "LOCAL_AGENT" &&
+        document.AgentDeviceId == device.Id &&
+        document.MediaType == "application/pdf" &&
+        string.Equals(document.Sha256, request.Sha256, StringComparison.OrdinalIgnoreCase) &&
+        document.SizeBytes == request.SizeBytes &&
+        job.PrintKind == "PHOTO" &&
+        job.PageCount == request.PageCount &&
+        job.PhotoSizeCode == request.PhotoSizeCode &&
+        job.PhotoCount == request.PhotoCount &&
+        string.Equals(
+            job.PageRefundAllocationsJson,
+            JsonSerializer.Serialize(PricingCalculator.CalculatePhotoPageRefundAllocations(
+                request.PhotoCount, request.PhotoSizeCode, request.PhotosPerPage, job.PhotoUnitPriceMinorSnapshot)),
+            StringComparison.Ordinal) &&
+        string.Equals(document.PageSizesJson, request.PageSizesJson, StringComparison.Ordinal))
+    {
+        var duplicateHasPayment = await db.PrintPayments.AnyAsync(item =>
+            item.TenantId == device.TenantId && item.PrintJobId == jobId &&
+            item.Status != "REJECTED" && item.Status != "REFUNDED", ct);
+        var duplicateHasBatchPayment = job.BatchId is Guid duplicateBatchId &&
+            await db.PrintBatchPayments.AnyAsync(item =>
+                item.TenantId == device.TenantId && item.BatchId == duplicateBatchId &&
+                item.Status != "REJECTED" && item.Status != "REFUNDED", ct);
+        if (!duplicateHasPayment && !duplicateHasBatchPayment)
+        {
+            await transaction.RollbackAsync(ct);
+            return Results.Ok(new
+            {
+                job.Id,
+                job.Status,
+                job.PageCount,
+                job.PrintKind,
+                job.PhotoSizeCode,
+                job.PhotoCount,
+                job.PhotoUnitPriceMinorSnapshot,
+                job.QuotedAmountMinor,
+                job.PricingVersion,
+                job.QuoteExpiresUtc,
+                document.OriginalFileName,
+                document.MediaType,
+                document.SizeBytes,
+                DuplicateRequest = true
+            });
+        }
+    }
+
+    if (job.Status != "AWAITING_SHOP_APPROVAL" ||
+        job.LocalQueueReceivedUtc is not null || job.ClaimedByAgentDeviceId is not null ||
+        document.StorageMode != "LOCAL_AGENT" || document.AgentDeviceId != device.Id ||
+        document.MediaType is not ("image/jpeg" or "image/png") ||
+        !string.Equals(document.Sha256, request.ExpectedOriginalSha256, StringComparison.OrdinalIgnoreCase) ||
+        document.SizeBytes != request.ExpectedOriginalSizeBytes)
+    {
+        await transaction.RollbackAsync(ct);
+        return Results.Conflict(new { code = "photo_revision_original_changed", message = "The local original or job state changed before the revision was committed. The original file has been restored on the shop computer." });
+    }
+
+    var hasPayment = await db.PrintPayments.AnyAsync(item =>
+        item.TenantId == device.TenantId && item.PrintJobId == jobId &&
+        item.Status != "REJECTED" && item.Status != "REFUNDED", ct);
+    var hasBatchPayment = job.BatchId is Guid batchId && await db.PrintBatchPayments.AnyAsync(item =>
+        item.TenantId == device.TenantId && item.BatchId == batchId &&
+        item.Status != "REJECTED" && item.Status != "REFUNDED", ct);
+    if (hasPayment || hasBatchPayment)
+    {
+        await transaction.RollbackAsync(ct);
+        return Results.Conflict(new { code = "photo_revision_payment_started", message = "A payment attempt started before the revision could be saved. The local original has been restored." });
+    }
+
+    if (request.PageCount is < 1 or > 100 || request.SizeBytes is <= 0 or > 20 * 1024 * 1024 ||
+        request.Sha256.Length != 64 || !request.Sha256.All(Uri.IsHexDigit) ||
+        string.IsNullOrWhiteSpace(request.PageSizesJson) || request.PageSizesJson.Length > 4000)
+    {
+        await transaction.RollbackAsync(ct);
+        return Results.BadRequest(new { code = "photo_revision_output_invalid", message = "The local Agent supplied invalid prepared-sheet metadata." });
+    }
+
+    ShopPricingProfile? pricing = await db.ShopPricingProfiles.AsNoTracking()
+        .SingleOrDefaultAsync(item => item.TenantId == device.TenantId && item.IsConfigured, ct);
+    if (pricing is null)
+    {
+        await transaction.RollbackAsync(ct);
+        return Results.Conflict(new { code = "shop_pricing_not_configured", message = "Photo pricing is no longer configured." });
+    }
+
+    long amount;
+    long unitPrice;
+    try
+    {
+        var expectedPageCount = PricingCalculator.PhotoPageCount(request.PhotoCount, request.PhotoSizeCode, request.PhotosPerPage);
+        if (request.PageCount != expectedPageCount)
+            throw new ArgumentException($"The prepared PDF must contain exactly {expectedPageCount} A4 page(s) for this photo quantity.", nameof(request.PageCount));
+        unitPrice = PricingCalculator.PhotoUnitRate(request.PhotoSizeCode, pricing);
+        amount = PricingCalculator.CalculatePhoto(request.PhotoCount, request.PhotoSizeCode, pricing);
+    }
+    catch (Exception exception) when (exception is ArgumentException or InvalidOperationException or OverflowException)
+    {
+        await transaction.RollbackAsync(ct);
+        return Results.Conflict(new { code = "photo_pricing_unavailable", message = exception.Message });
+    }
+
+    var now = DateTimeOffset.UtcNow;
+    var previousStorageMode = document.StorageMode;
+    var outputName = $"photo-sheet-{job.JobNumber}.pdf";
+    document.OriginalFileName = outputName;
+    document.MediaType = "application/pdf";
+    document.FileExtension = ".pdf";
+    document.SizeBytes = request.SizeBytes;
+    document.Sha256 = request.Sha256.ToLowerInvariant();
+    document.PageSizesJson = request.PageSizesJson;
+    document.PurgedUtc = null;
+    document.StorageMode = previousStorageMode;
+    document.AgentDeviceId = device.Id;
+
+    job.PageCount = request.PageCount;
+    job.Copies = 1;
+    job.ColourMode = "Colour";
+    job.PaperSize = "A4";
+    job.IsDuplex = false;
+    job.Orientation = "AUTO";
+    job.PrintKind = "PHOTO";
+    job.PhotoSizeCode = request.PhotoSizeCode;
+    job.PhotoCount = request.PhotoCount;
+    job.PhotoUnitPriceMinorSnapshot = unitPrice;
+    job.Currency = "INR";
+    job.QuotedAmountMinor = amount;
+    job.PageRefundAllocationsJson = JsonSerializer.Serialize(
+        PricingCalculator.CalculatePhotoPageRefundAllocations(
+            request.PhotoCount, request.PhotoSizeCode, request.PhotosPerPage, unitPrice));
+    job.PricingVersion = pricing.Version;
+    job.QuoteExpiresUtc = now.AddMinutes(10);
+    job.UpdatedUtc = now;
+
+    db.PrintJobEvents.Add(new PrintJobEvent
+    {
+        TenantId = device.TenantId,
+        PrintJobId = job.Id,
+        PreviousStatus = job.Status,
+        NewStatus = job.Status,
+        ActorType = "ShopUser",
+        ActorId = grant.ActorUserId,
+        ReasonCode = "SHOP_PHOTO_ENHANCED_LOCAL",
+        CreatedUtc = now
+    });
+
+    await db.SaveChangesAsync(ct);
+    await transaction.CommitAsync(ct);
+    return Results.Ok(new
+    {
+        job.Id,
+        job.Status,
+        job.PageCount,
+        job.PrintKind,
+        job.PhotoSizeCode,
+        job.PhotoCount,
+        job.PhotoUnitPriceMinorSnapshot,
+        job.QuotedAmountMinor,
+        job.PricingVersion,
+        job.QuoteExpiresUtc,
+        document.OriginalFileName,
+        document.MediaType,
+        document.SizeBytes
+    });
+});
+
 agentApi.MapGet("/local-document-previews/{jobId:guid}/authorize", async (
     Guid jobId,
     HttpContext context,
@@ -4806,14 +5440,25 @@ agentApi.MapGet("/local-document-previews/{jobId:guid}/authorize", async (
     CancellationToken ct) =>
 {
     var device = await AuthenticateAgentAsync(context, db, ct);
-    if (device is null) return Results.Unauthorized();
+    if (device is null)
+    {
+        return Results.Json(new
+        {
+            code = "agent_identity_rejected",
+            message = "The paired Print Agent identity was rejected by the shop service. Repair or re-pair this computer, then reopen the document preview."
+        }, statusCode: StatusCodes.Status401Unauthorized);
+    }
 
     var grantToken = context.Request.Headers["X-Print-Preview-Grant"].FirstOrDefault();
     if (!LocalDocumentPreviewGrant.TryValidate(
             grantToken, signingKeyText, issuer, audience, DateTimeOffset.UtcNow, out var grant) ||
         !LocalDocumentPreviewGrant.IsFor(grant, device.TenantId, jobId, device.Id))
     {
-        return Results.Unauthorized();
+        return Results.Json(new
+        {
+            code = "preview_grant_invalid_or_expired",
+            message = "The local preview permission expired or does not match this print job. Close the preview and reopen it."
+        }, statusCode: StatusCodes.Status401Unauthorized);
     }
 
     var document = await (
@@ -7102,11 +7747,12 @@ publicApi.MapPost("/jobs/{jobId:guid}/quote", async (
         request.ColourMode is not ("Mono" or "Colour") ||
         request.Orientation is not ("AUTO" or "PORTRAIT" or "LANDSCAPE") ||
         (isPhotoPrint &&
-            (job.PageCount != 1 || request.Copies != 1 || request.ColourMode != "Colour" ||
+            (request.Copies != 1 || request.ColourMode != "Colour" ||
              request.IsDuplex || request.PhotoSizeCode is not ("35x45" or "25x35" or "2x2" or "4x6") ||
-             request.PhotoCount is null || request.PhotoCount is < 1 or > 100)) ||
+             request.PhotoCount is null || request.PhotoCount is < 1 or > 100 ||
+             request.PhotosPerPage is < 1)) ||
         (isPhotoPrint && (request.PaperSize != "A4" || request.Orientation != "AUTO")) ||
-        (!isPhotoPrint && (request.PhotoSizeCode is not null || request.PhotoCount is not null)))
+        (!isPhotoPrint && (request.PhotoSizeCode is not null || request.PhotoCount is not null || request.PhotosPerPage is not null)))
     {
         return Results.ValidationProblem(new Dictionary<string, string[]>
         {
@@ -7138,18 +7784,20 @@ publicApi.MapPost("/jobs/{jobId:guid}/quote", async (
         {
             var photoSizeCode = request.PhotoSizeCode!;
             var photoCount = request.PhotoCount!.Value;
-            var maximumPhotos = PricingCalculator.MaximumPhotosPerA4Sheet(photoSizeCode);
-            if (photoCount > maximumPhotos)
+            var photosPerPage = request.PhotosPerPage ?? photoCount;
+            var expectedPageCount = PricingCalculator.PhotoPageCount(photoCount, photoSizeCode, photosPerPage);
+            if (job.PageCount != expectedPageCount)
             {
                 return Results.ValidationProblem(new Dictionary<string, string[]>
                 {
-                    ["photoCount"] = [$"This A4 layout supports at most {maximumPhotos} photos of the selected size per sheet."]
+                    ["pageCount"] = [$"The prepared PDF must contain exactly {expectedPageCount} A4 page(s) for {photoCount} photos of the selected size."]
                 });
             }
 
             photoUnitPriceMinor = PricingCalculator.PhotoUnitRate(photoSizeCode, pricing);
             amount = PricingCalculator.CalculatePhoto(photoCount, photoSizeCode, pricing);
-            pageRefundAllocations = [amount];
+            pageRefundAllocations = PricingCalculator.CalculatePhotoPageRefundAllocations(
+                photoCount, photoSizeCode, photosPerPage, photoUnitPriceMinor);
             job.PrintKind = "PHOTO";
             job.PhotoSizeCode = photoSizeCode;
             job.PhotoCount = photoCount;
@@ -8682,6 +9330,19 @@ static object BuildBatchPaymentResponse(PrintBatchPayment payment, int fileCount
             payment.PayeeNameSnapshot, payment.AmountMinor, payment.Currency,
             "Batch " + payment.BatchId.ToString("N")[..8].ToUpperInvariant())
     };
+
+static bool IsValidPageSizesJson(string value)
+{
+    try
+    {
+        using var parsed = JsonDocument.Parse(value);
+        return parsed.RootElement.ValueKind == JsonValueKind.Array;
+    }
+    catch (JsonException)
+    {
+        return false;
+    }
+}
 
 static bool IsHexColor(string value) =>
     value is { Length: 7 } && value[0] == '#' && value[1..].All(Uri.IsHexDigit);

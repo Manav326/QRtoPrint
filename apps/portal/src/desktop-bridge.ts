@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 
 export interface DesktopAgentReadiness {
   queueInitialized: boolean;
@@ -82,4 +83,10 @@ export function readDesktopSession(): Promise<string | null> {
 
 export function writeDesktopSession(session: string | null): Promise<void> {
   return invoke<void>("write_secure_session", { session });
+}
+/** Enables native OS capture protection for sensitive photo/document previews. */
+export async function setDesktopContentProtection(enabled:boolean):Promise<boolean>{
+  if(!isDesktopApp())return false;
+  try{await getCurrentWindow().setContentProtected(enabled);return true;}
+  catch{return false;}
 }
