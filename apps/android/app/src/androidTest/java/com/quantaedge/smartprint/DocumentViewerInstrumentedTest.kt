@@ -63,9 +63,8 @@ class DocumentViewerInstrumentedTest {
     @Test
     fun opensCustomerUploadPdfInTheNativeReaderAndReturnsToTheUploadPage() {
         val context = ApplicationProvider.getApplicationContext<Context>()
-        val directory = File(context.cacheDir, "customer-upload-pdf-preview")
-        directory.mkdirs()
-        val source = File(directory, "customer-upload-preview-${System.currentTimeMillis()}.pdf")
+        val previewDirectory = File(context.cacheDir, "customer-upload-pdf-preview")
+        val source = File(context.cacheDir, "CI-customer-upload-preview-${System.currentTimeMillis()}.pdf")
         createPdf(source)
 
         try {
@@ -106,7 +105,7 @@ class DocumentViewerInstrumentedTest {
             }
         } finally {
             source.delete()
-            directory.deleteRecursively()
+            previewDirectory.deleteRecursively()
         }
     }
 
