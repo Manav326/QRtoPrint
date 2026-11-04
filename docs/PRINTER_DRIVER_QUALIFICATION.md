@@ -6,6 +6,10 @@ Qualify selected Windows printer driver packages on disposable GitHub-hosted Win
 
 The existing SmartPrint Agent and Windows spooler remain the sole print execution path. This workflow does not introduce a vendor-specific print implementation.
 
+## Runner and OS certification boundary
+
+The qualification runner currently reports Windows Server 2025 x64. GitHub-hosted Windows runners do not provide a Windows 11 desktop image in this workflow. A successful install/render therefore certifies only the recorded Windows Server runner environment. It does not certify Windows 11 compatibility. The manifest records this distinction for every vendor entry. A model/OS claim requires vendor support information plus a matching Windows 11 hardware or supported VM/lab test.
+
 ## Initial India-market registry
 
 The version-controlled registry is `scripts/printer-qualification/printer-driver-manifest.json`.
@@ -46,7 +50,7 @@ Canon's India Generic Plus UFR II V3.50 support page currently carries restricti
 5. Verify a valid signed catalog from the approved publisher.
 6. Stage the INF with PnPUtil and register the print driver.
 7. Create a uniquely named queue with a local file-backed port.
-8. Run the existing `WindowsPrintExecutor.Print` path against a generated, non-customer PNG.
+8. Run the existing `WindowsPrintExecutor.Print` path in monochrome on A4 against a generated, non-customer PNG. This provides a conservative baseline; feature-specific colour/duplex checks are separate.
 9. Capture the rendered printer-language output, SHA-256 and Windows `DeviceCapabilities` report.
 10. Upload only the JSON evidence. Remove the queue, port and generated print output; the hosted VM is discarded after the run.
 
@@ -63,7 +67,7 @@ The workflow is pinned to GitHub-hosted `windows-2025` x64 (Windows Server 2025)
 
 ## Evidence and status language
 
-The output report uses `DRIVER_RENDERED` only when an approved package was installed, a queue was created, Windows accepted the spooler job and the driver produced a non-empty output file.
+The output report uses `DRIVER_RENDERED` only when an approved package was installed, a queue was created, Windows accepted the spooler job and the driver produced a non-empty output file. The PR workflow also runs a built-in Microsoft Print to PDF fixture through the same file-backed local port and production Agent path; this validates the harness mechanics but is not a vendor-driver pass.
 
 It always sets `physicalPrinterVerified: false`.
 
