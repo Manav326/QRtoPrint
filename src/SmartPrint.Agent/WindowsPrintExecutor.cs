@@ -391,51 +391,74 @@ public sealed class WindowsPrintExecutor
         var temporaryPath = outputPath + "." + Guid.NewGuid().ToString("N") + ".tmp";
         try
         {
-            using (var output = new FileStream(
-                temporaryPath, FileMode.CreateNew, FileAccess.Write, FileShare.None, 64 * 1024,
-                FileOptions.SequentialScan | FileOptions.WriteThrough))
+            var vectorBranding = entry.PdfBrandingEnabled &&
+                string.Equals(entry.MediaType, "application/pdf", StringComparison.OrdinalIgnoreCase) &&
+                raster is PdfRasterDocument pdfRaster
+                    ? PdfBrandingOverlay.TryCreate(entry, bytes, pdfRaster.HasDigitalSignatures, pdfRaster.HasInteractiveForms, cancellationToken)
+                    : null;
+            try
             {
-                using var pdf = SKDocument.CreatePdf(output)
-                    ?? throw new PrintExecutionBlockedException("PDF_EXPORT_CREATE_FAILED", "The PDF document could not be created.");
-                const int dpi = 300;
-                for (var copy = 0; copy < entry.Copies; copy++)
+                using (var output = new FileStream(
+                    temporaryPath, FileMode.CreateNew, FileAccess.Write, FileShare.None, 64 * 1024,
+                    FileOptions.SequentialScan | FileOptions.WriteThrough))
                 {
-                    foreach (var pageIndex in printablePageIndices)
+                    if (vectorBranding is not null)
                     {
-                        cancellationToken.ThrowIfCancellationRequested();
-                        using var page = raster.RenderPage(pageIndex, dpi);
-                        if (entry.PdfBrandingEnabled &&
-                            string.Equals(entry.MediaType, "application/pdf", StringComparison.OrdinalIgnoreCase))
+                        output.Write(vectorBranding.Bytes);
+                        output.Flush(true);
+                    }
+                    else
+                    {
+                        using var pdf = SKDocument.CreatePdf(output)
+                            ?? throw new PrintExecutionBlockedException("PDF_EXPORT_CREATE_FAILED", "The PDF document could not be created.");
+                        const int dpi = 300;
+                        var allowRasterBranding = raster is not PdfRasterDocument sourcePdf ||
+                            (!sourcePdf.HasDigitalSignatures && !sourcePdf.HasInteractiveForms);
+                        for (var copy = 0; copy < entry.Copies; copy++)
                         {
-                            ApplySmartPrintFooter(page, entry.ColourMode == "Mono");
-                        }
-                        using var bitmap = new SKBitmap(new SKImageInfo(
-                            page.Width, page.Height, SKColorType.Bgra8888, SKAlphaType.Opaque));
-                        var pixels = bitmap.GetPixels();
-                        if (pixels == IntPtr.Zero)
-                            throw new PrintExecutionBlockedException("PDF_EXPORT_BITMAP_FAILED", "The page bitmap could not be allocated.");
-                        Marshal.Copy(page.Pixels, 0, pixels, page.Pixels.Length);
-                        using var image = SKImage.FromBitmap(bitmap)
-                            ?? throw new PrintExecutionBlockedException("PDF_EXPORT_IMAGE_FAILED", "The rendered page could not be encoded.");
+                            foreach (var pageIndex in printablePageIndices)
+                            {
+                                cancellationToken.ThrowIfCancellationRequested();
+                                using var page = raster.RenderPage(pageIndex, dpi);
+                                if (entry.PdfBrandingEnabled && allowRasterBranding &&
+                                    string.Equals(entry.MediaType, "application/pdf", StringComparison.OrdinalIgnoreCase))
+                                {
+                                    ApplySmartPrintFooter(page, entry.ColourMode == "Mono");
+                                }
+                                using var bitmap = new SKBitmap(new SKImageInfo(
+                                    page.Width, page.Height, SKColorType.Bgra8888, SKAlphaType.Opaque));
+                                var pixels = bitmap.GetPixels();
+                                if (pixels == IntPtr.Zero)
+                                    throw new PrintExecutionBlockedException("PDF_EXPORT_BITMAP_FAILED", "The page bitmap could not be allocated.");
+                                Marshal.Copy(page.Pixels, 0, pixels, page.Pixels.Length);
+                                using var image = SKImage.FromBitmap(bitmap)
+                                    ?? throw new PrintExecutionBlockedException("PDF_EXPORT_IMAGE_FAILED", "The rendered page could not be encoded.");
 
-                        var landscape = ResolveLandscape(entry.Orientation, page.Width > page.Height);
-                        var (paperWidth, paperHeight) = PdfPageSize(entry.PaperSize, landscape);
-                        var canvas = pdf.BeginPage(paperWidth, paperHeight);
-                        var scale = Math.Min(paperWidth / page.Width, paperHeight / page.Height);
-                        var width = page.Width * scale;
-                        var height = page.Height * scale;
-                        var destination = new SKRect(
-                            (paperWidth - width) / 2f,
-                            (paperHeight - height) / 2f,
-                            (paperWidth + width) / 2f,
-                            (paperHeight + height) / 2f);
-                        canvas.Clear(SKColors.White);
-                        canvas.DrawImage(image, destination);
-                        canvas.Flush();
-                        pdf.EndPage();
+                                var landscape = ResolveLandscape(entry.Orientation, page.Width > page.Height);
+                                var (paperWidth, paperHeight) = PdfPageSize(entry.PaperSize, landscape);
+                                var canvas = pdf.BeginPage(paperWidth, paperHeight);
+                                var scale = Math.Min(paperWidth / page.Width, paperHeight / page.Height);
+                                var width = page.Width * scale;
+                                var height = page.Height * scale;
+                                var destination = new SKRect(
+                                    (paperWidth - width) / 2f,
+                                    (paperHeight - height) / 2f,
+                                    (paperWidth + width) / 2f,
+                                    (paperHeight + height) / 2f);
+                                canvas.Clear(SKColors.White);
+                                canvas.DrawImage(image, destination);
+                                canvas.Flush();
+                                pdf.EndPage();
+                            }
+                        }
+                        pdf.Close();
                     }
                 }
-                pdf.Close();
+            }
+            finally
+            {
+                if (vectorBranding is not null)
+                    CryptographicOperations.ZeroMemory(vectorBranding.Bytes);
             }
 
             var info = new FileInfo(temporaryPath);
@@ -495,7 +518,7 @@ public sealed class WindowsPrintExecutor
             Convert.ToHexString(hash).ToLowerInvariant());
     }
 
-    private static byte[] LoadQuantaEdgeMark()
+    internal static byte[] LoadQuantaEdgeMark()
     {
         using var stream = typeof(WindowsPrintExecutor).Assembly.GetManifestResourceStream(
             "SmartPrint.Agent.Branding.quantaedge-mark.png")
@@ -888,6 +911,8 @@ public sealed class WindowsPrintExecutor
                 Marshal.FreeHGlobal(documentMemory);
                 throw new PrintExecutionBlockedException("PDF_RENDER_OPEN_FAILED", $"PDFium could not open the PDF (error {fpdfview.FPDF_GetLastError()}).");
             }
+            HasDigitalSignatures = fpdf_signature.FPDF_GetSignatureCount(document) != 0;
+            HasInteractiveForms = fpdf_formfill.FPDF_GetFormType(document) != 0;
             PageCount = fpdfview.FPDF_GetPageCount(document);
             if (PageCount is <= 0 or > 500)
             {
@@ -900,6 +925,8 @@ public sealed class WindowsPrintExecutor
         }
         public int PageCount { get; }
         public bool FirstPageLandscape { get; }
+        public bool HasDigitalSignatures { get; }
+        public bool HasInteractiveForms { get; }
         public RasterPage RenderPage(int pageIndex, int dpi)
         {
             using var page = LoadPage(pageIndex);
