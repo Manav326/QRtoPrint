@@ -106,6 +106,19 @@ public sealed class PricingCalculatorTests
         Assert.Equal(PricingCalculator.CalculatePhoto(50, "35x45", ConfiguredPricingWithPhotoRate(175)), allocations.Sum());
     }
 
+
+    [Fact]
+    public void FiftyPhotosAtNinePerPageProduceSixA4PagesAndCorrectLastPageRefund()
+    {
+        Assert.Equal(6, PricingCalculator.PhotoPageCount(50, "35x45", 9));
+
+        var allocations = PricingCalculator.CalculatePhotoPageRefundAllocations(
+            50, "35x45", 9, 175);
+
+        Assert.Equal(new long[] { 1_575, 1_575, 1_575, 1_575, 1_575, 875 }, allocations);
+        Assert.Equal(PricingCalculator.CalculatePhoto(50, "35x45", ConfiguredPricingWithPhotoRate(175)), allocations.Sum());
+    }
+
     [Fact]
     public void RejectsPageCapacityThatExceedsTheSelectedPhotoSize()
     {
