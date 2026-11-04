@@ -54,26 +54,19 @@ public static class ShopStationEndpoints
         shop.MapPost("/qr-stations", async (
             CreateQrStationRequest request,
             ClaimsPrincipal principal,
-            SmartPrintDbContext db,
             IConfiguration configuration,
-            TenantEntitlementService entitlements,
+            ShopStationService stations,
             CancellationToken ct) =>
         {
             if (!IsShopOwner(principal) || !TryGetTenantId(principal, out var tenantId))
-            {
                 return Results.Forbid();
-            }
 
             var portalBase = (configuration["PublicPortal:BaseUrl"] ?? string.Empty).TrimEnd('/');
-            if (!Uri.TryCreate(portalBase, UriKind.Absolute, out var portalUri) ||
-                portalUri.Scheme != Uri.UriSchemeHttps || portalUri.AbsolutePath != "/" ||
-                !string.IsNullOrEmpty(portalUri.Query) || !string.IsNullOrEmpty(portalUri.Fragment) ||
-                !string.IsNullOrEmpty(portalUri.UserInfo))
-            {
+            var result = await stations.CreateAsync(tenantId, request, portalBase, ct);
+            if (result.Failure == ShopStationMutationFailure.InvalidPublicUrl)
                 return Results.Problem(statusCode: StatusCodes.Status503ServiceUnavailable, title: "The canonical public HTTPS URL is not configured.");
-            }
 
-            if (string.IsNullOrWhiteSpace(request.DisplayName) || request.DisplayName.Trim().Length > 120)
+            if (result.Failure == ShopStationMutationFailure.InvalidDisplayName)
             {
                 return Results.ValidationProblem(new Dictionary<string, string[]>
                 {
@@ -81,8 +74,7 @@ public static class ShopStationEndpoints
                 });
             }
 
-            if (request.PrinterDeviceId is Guid printerId &&
-                !await db.PrinterDevices.AnyAsync(printer => printer.Id == printerId && printer.TenantId == tenantId, ct))
+            if (result.Failure == ShopStationMutationFailure.PrinterNotOwned)
             {
                 return Results.ValidationProblem(new Dictionary<string, string[]>
                 {
@@ -90,29 +82,18 @@ public static class ShopStationEndpoints
                 });
             }
 
-            await using var transaction = await db.Database.BeginTransactionAsync(ct);
-            await entitlements.AcquireQuotaLockAsync(tenantId, TenantQuotaResource.QrStation, ct);
-            var quota = await entitlements.CheckCapacityAsync(tenantId, TenantQuotaResource.QrStation, ct);
-            if (!quota.Allowed)
+            if (result.Failure == ShopStationMutationFailure.QuotaExceeded)
             {
-                await transaction.RollbackAsync(ct);
-                return Results.Conflict(new { code = quota.Code, message = quota.Message, current = quota.Current, maximum = quota.Maximum });
+                return Results.Conflict(new
+                {
+                    code = result.QuotaCode,
+                    message = result.QuotaMessage,
+                    current = result.QuotaCurrent,
+                    maximum = result.QuotaMaximum
+                });
             }
 
-            var publicCode = Microsoft.AspNetCore.WebUtilities.WebEncoders.Base64UrlEncode(RandomNumberGenerator.GetBytes(24));
-            var station = new QrStation
-            {
-                TenantId = tenantId,
-                PrinterDeviceId = request.PrinterDeviceId,
-                DisplayName = request.DisplayName.Trim(),
-                PublicCodeHash = HashOpaqueToken(publicCode),
-                PublicCode = publicCode,
-                PublicCodeHint = publicCode[^4..]
-            };
-            db.QrStations.Add(station);
-            await db.SaveChangesAsync(ct);
-            await transaction.CommitAsync(ct);
-
+            var station = result.Station!;
             return Results.Created($"/api/v1/shop/qr-stations/{station.Id}", new
             {
                 station.Id,
@@ -120,49 +101,34 @@ public static class ShopStationEndpoints
                 station.PrinterDeviceId,
                 station.PublicCodeHint,
                 station.IsEnabled,
-                PublicUrl = $"{portalBase}/s/{publicCode}"
+                PublicUrl = result.PublicUrl
             });
         });
 
         shop.MapPost("/qr-stations/{stationId:guid}/rotate-code", async (
             Guid stationId,
             ClaimsPrincipal principal,
-            SmartPrintDbContext db,
             IConfiguration configuration,
+            ShopStationService stations,
             CancellationToken ct) =>
         {
             if (!IsShopOwner(principal) || !TryGetTenantId(principal, out var tenantId))
-            {
                 return Results.Forbid();
-            }
 
             var portalBase = (configuration["PublicPortal:BaseUrl"] ?? string.Empty).TrimEnd('/');
-            if (!Uri.TryCreate(portalBase, UriKind.Absolute, out var portalUri) ||
-                portalUri.Scheme != Uri.UriSchemeHttps || portalUri.AbsolutePath != "/" ||
-                !string.IsNullOrEmpty(portalUri.Query) || !string.IsNullOrEmpty(portalUri.Fragment) ||
-                !string.IsNullOrEmpty(portalUri.UserInfo))
-            {
+            var result = await stations.RotateCodeAsync(tenantId, stationId, portalBase, ct);
+            if (result.Failure == ShopStationMutationFailure.InvalidPublicUrl)
                 return Results.Problem(statusCode: StatusCodes.Status503ServiceUnavailable, title: "The canonical public HTTPS URL is not configured.");
-            }
 
-            var station = await db.QrStations.SingleOrDefaultAsync(
-                item => item.Id == stationId && item.TenantId == tenantId, ct);
-            if (station is null)
-            {
+            if (result.Failure == ShopStationMutationFailure.NotFound)
                 return Results.NotFound();
-            }
 
-            var publicCode = Microsoft.AspNetCore.WebUtilities.WebEncoders.Base64UrlEncode(RandomNumberGenerator.GetBytes(24));
-            station.PublicCodeHash = HashOpaqueToken(publicCode);
-            station.PublicCode = publicCode;
-            station.PublicCodeHint = publicCode[^4..];
-            await db.SaveChangesAsync(ct);
-
+            var station = result.Station!;
             return Results.Ok(new
             {
                 station.Id,
                 station.PublicCodeHint,
-                PublicUrl = $"{portalBase}/s/{publicCode}"
+                PublicUrl = result.PublicUrl
             });
         });
 
@@ -170,23 +136,17 @@ public static class ShopStationEndpoints
             Guid stationId,
             bool isEnabled,
             ClaimsPrincipal principal,
-            SmartPrintDbContext db,
+            ShopStationService stations,
             CancellationToken ct) =>
         {
             if (!IsShopOwner(principal) || !TryGetTenantId(principal, out var tenantId))
-            {
                 return Results.Forbid();
-            }
 
-            var station = await db.QrStations.SingleOrDefaultAsync(
-                item => item.Id == stationId && item.TenantId == tenantId, ct);
-            if (station is null)
-            {
+            var result = await stations.SetEnabledAsync(tenantId, stationId, isEnabled, ct);
+            if (result.Failure == ShopStationMutationFailure.NotFound)
                 return Results.NotFound();
-            }
 
-            station.IsEnabled = isEnabled;
-            await db.SaveChangesAsync(ct);
+            var station = result.Station!;
             return Results.Ok(new { station.Id, station.IsEnabled });
         });
 
