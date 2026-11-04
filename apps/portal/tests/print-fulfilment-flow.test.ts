@@ -219,7 +219,7 @@ test("photo studio's selected photo quantity creates one multi-page file with on
  assert.match(studio,/onApply\(\[\{file:output,sizeCode:size\.id,photoCount:parsedCopies,photosPerPage\}\]\)/);
  assert.match(studio,/buildPhotoPdf\(jpegPages\)/);
  assert.match(app,/const generated=sheets\.map\(sheet=>sheet\.file\)/);
- assert.match(app,/photos\[fp\]=\{sizeCode:sheet\.sizeCode,photoCount:sheet\.photoCount\}/);
+ assert.match(app,/photos\[fp\]=\{sizeCode:sheet\.sizeCode,photoCount:sheet\.photoCount,photosPerPage:sheet\.photosPerPage\}/);
 });
 
 
@@ -286,7 +286,7 @@ test("cloud shop photo revisions require an unpaid review-stage image and valida
  assert.match(route,/job\.ClaimedByAgentDeviceId is not null/);
  assert.match(route,/PricingCalculator\.MaximumPhotosPerA4Sheet/);
  assert.match(route,/PricingCalculator\.PhotoPageCount\(photoCount, photoSizeCode, photosPerPage\)/);
- assert.match(route,/job\.PageCount != expectedPageCount/);
+ assert.match(route,/stored\.Analysis\.PageCount != expectedPageCount/);
  assert.match(route,/SHOP_PHOTO_ENHANCED/);
 });
 
