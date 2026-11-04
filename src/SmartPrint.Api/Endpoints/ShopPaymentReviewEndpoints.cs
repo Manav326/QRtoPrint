@@ -38,9 +38,8 @@ public static partial class ShopPaymentEndpoints
                     return Results.Ok(new { batchPayment.Id, batchPayment.Status, batchPayment.VerifiedUtc, DuplicateRequest = true });
                 }
 
-                var batchCanVerify = batchPayment.Method == "UPI"
-                    ? batchPayment.Status is "AWAITING_CUSTOMER_PAYMENT" or "CUSTOMER_REPORTED"
-                    : batchPayment.Method == "CASH" && batchPayment.Status == "CASH_AWAITING_PAYMENT";
+                var batchCanVerify = ShopPaymentReviewRules.CanVerify(
+                    batchPayment.Method, batchPayment.Status);
                 if (!batchCanVerify)
                 {
                     await transaction.RollbackAsync(ct);
@@ -85,7 +84,8 @@ public static partial class ShopPaymentEndpoints
                     filePayment.UpdatedUtc = batchVerifiedUtc;
                     var batchJob = jobsById[filePayment.PrintJobId];
                     var batchPreviousStatus = batchJob.Status;
-                    var batchFileWasRejected = batchJob.Status is "REJECTED" or "REFUNDED";
+                    var batchFileWasRejected =
+                        ShopPaymentReviewRules.MustPreserveRejectedJobStatus(batchJob.Status);
                     if (!batchFileWasRejected)
                     {
                         batchJob.Status = "PAID_AUTHORISED";
@@ -149,9 +149,7 @@ public static partial class ShopPaymentEndpoints
                 return Results.Ok(new { payment.Id, payment.Status, payment.VerifiedUtc, DuplicateRequest = true });
             }
 
-            var canVerify = payment.Method == "UPI"
-                ? payment.Status is "AWAITING_CUSTOMER_PAYMENT" or "CUSTOMER_REPORTED"
-                : payment.Method == "CASH" && payment.Status == "CASH_AWAITING_PAYMENT";
+            var canVerify = ShopPaymentReviewRules.CanVerify(payment.Method, payment.Status);
             if (!canVerify)
             {
                 await transaction.RollbackAsync(ct);
@@ -178,7 +176,8 @@ public static partial class ShopPaymentEndpoints
             payment.VerifiedUtc = now;
             payment.UpdatedUtc = now;
             var previousStatus = job.Status;
-            var singleFileWasRejected = job.Status is "REJECTED" or "REFUNDED";
+            var singleFileWasRejected =
+                ShopPaymentReviewRules.MustPreserveRejectedJobStatus(job.Status);
             if (!singleFileWasRejected)
                 job.Status = "PAID_AUTHORISED";
             job.UpdatedUtc = now;
@@ -259,7 +258,7 @@ public static partial class ShopPaymentEndpoints
                     return Results.Ok(new { batchPayment.Id, batchPayment.Status, batchPayment.RejectionReason, DuplicateRequest = true });
                 }
 
-                if (batchPayment.Status is not ("AWAITING_CUSTOMER_PAYMENT" or "CUSTOMER_REPORTED" or "CASH_AWAITING_PAYMENT"))
+                if (!ShopPaymentReviewRules.CanReject(batchPayment.Status))
                 {
                     await transaction.RollbackAsync(ct);
                     return Results.Conflict(new
@@ -356,7 +355,7 @@ public static partial class ShopPaymentEndpoints
                 return Results.Ok(new { payment.Id, payment.Status, payment.RejectionReason, DuplicateRequest = true });
             }
 
-            if (payment.Status is not ("AWAITING_CUSTOMER_PAYMENT" or "CUSTOMER_REPORTED" or "CASH_AWAITING_PAYMENT"))
+            if (!ShopPaymentReviewRules.CanReject(payment.Status))
             {
                 await transaction.RollbackAsync(ct);
                 return Results.Conflict(new
