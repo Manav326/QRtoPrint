@@ -98,7 +98,8 @@ public sealed record LocalAgentPhotoRevisionRequest(
     int PageCount,
     string PageSizesJson,
     string PhotoSizeCode,
-    int PhotoCount);
+    int PhotoCount,
+    int PhotosPerPage);
 
 public sealed record LocalAgentPhotoRevisionAuthorizationResponse(
     Guid Id,
