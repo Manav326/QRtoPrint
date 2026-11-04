@@ -22,12 +22,12 @@ import {
   downloadShopDocument, getCustomerJobStatus, getShopAgentDevices, getShopJobEvents, getShopPrinters, getShopPrintJobsPage, getShopPrintBatchJobs, loadShopData,
   logout, readStoredTokens, rejectShopPrintJob, rejectShopPayment, revokeAgentDevice,
   reportCustomerBatchPayment, reportCustomerUpiPayment, renewCustomerPrintSession, getNativeCustomerPrintSession, saveNativeCustomerPrintSession, saveNativeCustomerShopProfile, clearNativeCustomerPrintSession, resumeCustomerSession, rotateStationCode, startCustomerBatchPayment, startCustomerPayment, storeTokens,
-  updatePrinterActive, updateShopPaymentSettings, updateShopPricing,
+  updatePrinterActive, updateShopPaymentSettings, updateShopPricing, updateShopPrintJobSettings,
   updateShopOwnerAccount, updateShopProfile, updateStationEnabled, uploadCustomerDocument, uploadCustomerDocumentLocally,
   verifyShopPayment, retryShopPdfExport, recordShopPrintRefund, previewShopPrintRefund, type CustomerBatchPayment, type CustomerPayment, type CustomerPhotoPricing, type ShopPayment, type ShopPaymentSettings, type ShopRefund,
   type AgentDevice, type AuthTokens, type CustomerJobStatus, type PrinterDevice, type PrintQuoteResult, type ShopJobEvent,
   type QrStation, type ShopCustomer, type ShopCustomerHistory, type ShopCustomerPage, type ShopPricingProfile, type ShopPrintJob, type ShopProfile, type ShopReportSummary, type ShopSubscriptionSummary,
-  type UploadedPrintJob
+  type UploadedPrintJob, type CustomerPrintRequestSettings
 } from "./api";
 import {
   enrollLocalAgent, getLocalAgentStatus, getLocalNetworkSnapshot, selectLocalNetwork, startLocalPhoneTest,
@@ -918,6 +918,20 @@ function ShopConsole({ tokens, onSignOut, dark, onToggleTheme }: { tokens: AuthT
   }
 
 
+  async function updatePrintJobSettings(job:ShopPrintJob,settings:CustomerPrintRequestSettings) {
+    setBusyJobId(job.id);
+    setError("");
+    try {
+      const revised=await updateShopPrintJobSettings(tokens.accessToken,job.id,settings);
+      setToast(`Revised quote ${formatMoney(revised.quotedAmountMinor,revised.currency)} sent to the customer for approval. Printing remains paused until approval and release.`);
+      await reload();
+    } catch(exception) {
+      setError(exception instanceof Error?exception.message:"Could not revise this print request.");
+    } finally {
+      setBusyJobId(null);
+    }
+  }
+
   async function dispatchPrintJob(job: ShopPrintJob) {
     const pdfExport = job.outputMode === "PDF_EXPORT";
     const ok = await confirmInApp(pdfExport
@@ -1385,7 +1399,7 @@ function ShopConsole({ tokens, onSignOut, dark, onToggleTheme }: { tokens: AuthT
           {active === "Subscription" && subscription && <SubscriptionPage summary={subscription}/>}
           {active === "Payments" && paymentSettings && <PaymentsPage settings={paymentSettings} payments={payments} refunds={refunds} onSave={savePaymentSettings} onVerify={verifyPayment} onReject={rejectPayment} busy={busy} busyJobId={busyJobId}/>}
           {active === "Settings" && profile && <SettingsPage profile={profile} onSave={saveProfile} busy={busy}/>}
-          {active === "Print Queue" && <PrintQueuePage jobs={printJobs} printers={printers} agentDevices={agentDevices} searchQuery={queueSearch} loadingBatchId={batchReviewLoadingId} onSearch={searchPrintQueue} onPreview={previewJob} onApprove={approveJob} onReject={rejectJob} onRefund={job=>setRefundJob(job)} onReviewBatch={openBatchReview} onHistory={viewJobHistory} onAssignPrinter={assignPrinter} onDispatch={dispatchPrintJob} onConfirmOutput={confirmPrintedOutput} onRetryPdfExport={retryPdfExport} onRefresh={refreshPrintQueue} onLoadOlder={loadOlderQueueJobs} hasMoreJobs={hasMoreQueueJobs} loadingOlderJobs={loadingOlderQueueJobs} busyJobId={busyJobId}/>} 
+          {active === "Print Queue" && <PrintQueuePage jobs={printJobs} printers={printers} agentDevices={agentDevices} searchQuery={queueSearch} loadingBatchId={batchReviewLoadingId} onSearch={searchPrintQueue} onPreview={previewJob} onApprove={approveJob} onReject={rejectJob} onRefund={job=>setRefundJob(job)} onReviewBatch={openBatchReview} onHistory={viewJobHistory} onAssignPrinter={assignPrinter} onUpdateSettings={updatePrintJobSettings} onDispatch={dispatchPrintJob} onConfirmOutput={confirmPrintedOutput} onRetryPdfExport={retryPdfExport} onRefresh={refreshPrintQueue} onLoadOlder={loadOlderQueueJobs} hasMoreJobs={hasMoreQueueJobs} loadingOlderJobs={loadingOlderQueueJobs} busyJobId={busyJobId}/>} 
           {active === "Customers" && <CustomersPage token={tokens.accessToken}/>}
           {active === "Reports" && <ReportsPage token={tokens.accessToken}/>} 
 
@@ -2182,7 +2196,7 @@ function PaymentsPage({settings,payments,refunds,onSave,onVerify,onReject,busy,b
   </div>;
 }
 
-function PrintQueuePage({ jobs, printers, agentDevices, searchQuery, loadingBatchId, onSearch, onPreview, onApprove, onReject, onRefund, onReviewBatch, onHistory, onAssignPrinter, onDispatch, onConfirmOutput, onRetryPdfExport, onRefresh, onLoadOlder, hasMoreJobs, loadingOlderJobs, busyJobId }: {
+function PrintQueuePage({ jobs, printers, agentDevices, searchQuery, loadingBatchId, onSearch, onPreview, onApprove, onReject, onRefund, onReviewBatch, onHistory, onAssignPrinter, onUpdateSettings, onDispatch, onConfirmOutput, onRetryPdfExport, onRefresh, onLoadOlder, hasMoreJobs, loadingOlderJobs, busyJobId }: {
   jobs: ShopPrintJob[];
   printers: PrinterDevice[];
   agentDevices: AgentDevice[];
@@ -2196,6 +2210,7 @@ function PrintQueuePage({ jobs, printers, agentDevices, searchQuery, loadingBatc
   onReviewBatch: (batchId: string) => void;
   onHistory: (job: ShopPrintJob) => void;
   onAssignPrinter: (job: ShopPrintJob, printerDeviceId: string) => void;
+  onUpdateSettings: (job:ShopPrintJob,settings:CustomerPrintRequestSettings) => Promise<void> | void;
   onDispatch: (job: ShopPrintJob) => void;
   onConfirmOutput: (job: ShopPrintJob) => void;
   onRetryPdfExport: (job: ShopPrintJob) => void;
@@ -2209,6 +2224,8 @@ function PrintQueuePage({ jobs, printers, agentDevices, searchQuery, loadingBatc
   const [refreshSeconds,setRefreshSeconds]=useState(10);
   const [searchInput,setSearchInput]=useState(searchQuery);
   const [expandedBatchKeys,setExpandedBatchKeys]=useState<Set<string>>(()=>new Set());
+  const [editingSettingsJobId,setEditingSettingsJobId]=useState<string|null>(null);
+  const [editingPrintSettings,setEditingPrintSettings]=useState<CustomerPrintRequestSettings|null>(null);
   useEffect(()=>setSearchInput(searchQuery),[searchQuery]);
   const refreshRunning=useRef(false);
   const refreshCallback=useRef(onRefresh);
@@ -2349,7 +2366,7 @@ function PrintQueuePage({ jobs, printers, agentDevices, searchQuery, loadingBatc
             </tr>
             {expanded&&<tr className="queue-batch-detail-row"><td colSpan={8}><div className="queue-batch-files">{batch.jobs.map(job=><article className="queue-batch-file-card" key={job.id}>
               <div className="queue-batch-file-main">
-                <div><div className="queue-batch-file-title"><strong>{job.document.originalFileName}</strong><PrintKindTag printKind={job.printKind}/></div><small>{job.printKind==="PHOTO" ? `${job.photoCount??0} photos · ${job.photoSizeCode??""} · A4 photo sheet` : `${job.batchGroupName??"Loose files"} · ${job.pageCount} pages × ${job.copies} copies = ${job.pageCount*job.copies} pages requested · ${job.colourMode} · ${job.isDuplex?"Double-sided":"Single-sided"}`}</small></div>
+                <div><div className="queue-batch-file-title"><strong>{job.document.originalFileName}</strong><PrintKindTag printKind={job.printKind}/></div><small>{job.printKind==="PHOTO" ? `${job.photoCount??0} photos · ${job.photoSizeCode??""} · A4 photo sheet` : `${job.batchGroupName??"Loose files"} · ${job.pageCount} pages × ${job.copies} copies = ${job.pageCount*job.copies} pages requested · ${job.colourMode} · ${job.isDuplex?"Double-sided":"Single-sided"} · ${job.paperSize||"A4"} · ${job.orientation??"AUTO"}`}</small></div>
                 <Status label={prettyStatus(job.status)} tone={job.status==="REJECTED"?"red":job.status==="COMPLETED"||job.status==="LOCAL_QUEUE_READY"?"green":job.status==="AWAITING_SHOP_APPROVAL"?"amber":"blue"}/>
                 <strong className="amount-cell">{job.quotedAmountMinor>0?formatMoney(job.quotedAmountMinor,job.currency):"—"}</strong>
               </div>
@@ -2368,7 +2385,21 @@ function PrintQueuePage({ jobs, printers, agentDevices, searchQuery, loadingBatc
                 <span>Saved PDF location</span>
                 <code>{verifiedPdfExportPath(job)}</code>
               </div>}
-              <div className="queue-batch-file-actions">
+              {job.status==="LOCAL_QUEUE_READY"&&job.failureCode&&<div className="printer-duplicate-warning" role="status">
+                 <strong>Printing paused before submission</strong>
+                 <span>{printBlockMessage(job.failureCode)} The original document and requested settings remain unchanged. Reassign this batch to a compatible printer, or resolve the issue with the customer before changing any setting. A settings change must be sent as a revised quote and explicitly approved before output.</span>
+               </div>}
+               <div className="queue-batch-file-actions">
+                {job.printKind!=="PHOTO"&&["AWAITING_CONFIGURATION","AWAITING_CUSTOMER_APPROVAL","AWAITING_SHOP_APPROVAL","AWAITING_PAYMENT","QUOTE_EXPIRED","PAYMENT_REJECTED"].includes(job.status)&&<button className="subtle-button" disabled={busyJobId===job.id} onClick={()=>{
+                  setEditingSettingsJobId(job.id);
+                  setEditingPrintSettings({
+                    copies:job.copies,
+                    colourMode:job.colourMode==="Colour"?"Colour":"Mono",
+                    paperSize:(["A4","A3","A5","LETTER","LEGAL"].includes(job.paperSize)?job.paperSize:"A4") as CustomerPrintRequestSettings["paperSize"],
+                    isDuplex:job.isDuplex,
+                    orientation:(["AUTO","PORTRAIT","LANDSCAPE"].includes(job.orientation??"AUTO")?job.orientation??"AUTO":"AUTO") as CustomerPrintRequestSettings["orientation"]
+                  });
+                }}>Adjust options</button>}
                 <button className="subtle-button" disabled={busyJobId===job.id} onClick={()=>onPreview(job)}>Preview</button>
                 <button className="subtle-button" disabled={busyJobId===job.id} onClick={()=>onHistory(job)}>History</button>
                 {job.status==="AWAITING_SHOP_APPROVAL"&&<button className="subtle-button approve-action" disabled={busyJobId===job.id} onClick={()=>onApprove(job)}>Accept</button>}
@@ -2378,6 +2409,33 @@ function PrintQueuePage({ jobs, printers, agentDevices, searchQuery, loadingBatc
                 {job.status==="OUTPUT_UNCONFIRMED"&&job.outputMode==="PDF_EXPORT"&&<button className="subtle-button approve-action" disabled={busyJobId===job.id} onClick={()=>onRetryPdfExport(job)}>Save PDF again</button>}
                 {(job.status==="SPOOLER_ACCEPTED"||job.status==="PRINTING"||(job.status==="OUTPUT_UNCONFIRMED"&&job.outputMode!=="PDF_EXPORT"))&&<button className="subtle-button approve-action" disabled={busyJobId===job.id||(job.status!=="OUTPUT_UNCONFIRMED"&&!!spoolerStatusWarning(job.spoolerStatus,job.printerStatus))} onClick={()=>onConfirmOutput(job)}>Confirm output</button>}
               </div>
+              {editingSettingsJobId===job.id&&editingPrintSettings&&<div className="queue-settings-editor">
+                <div><strong>Review print options</strong><small>The revised quote must be approved by the customer before payment or printing.</small></div>
+                <label>Colour <select value={editingPrintSettings.colourMode} onChange={event=>{
+                  const colourMode=event.currentTarget.value as CustomerPrintRequestSettings["colourMode"];
+                  setEditingPrintSettings(current=>current?{...current,colourMode}:current);
+                }}><option value="Mono">B&W</option><option value="Colour">Colour</option></select></label>
+                <label>Sides <select value={editingPrintSettings.isDuplex?"DOUBLE":"SINGLE"} onChange={event=>{
+                  const isDuplex=event.currentTarget.value==="DOUBLE";
+                  setEditingPrintSettings(current=>current?{...current,isDuplex}:current);
+                }}><option value="SINGLE">Single-sided</option><option value="DOUBLE">Double-sided</option></select></label>
+                <label>Copies <input type="number" min={1} max={100} value={editingPrintSettings.copies} onChange={event=>{
+                  const copies=Math.max(1,Math.min(100,Number(event.currentTarget.value)||1));
+                  setEditingPrintSettings(current=>current?{...current,copies}:current);
+                }}/></label>
+                <label>Paper size <select value={editingPrintSettings.paperSize} onChange={event=>{
+                  const paperSize=event.currentTarget.value as CustomerPrintRequestSettings["paperSize"];
+                  setEditingPrintSettings(current=>current?{...current,paperSize}:current);
+                }}><option value="A4">A4</option><option value="A3">A3</option><option value="A5">A5</option><option value="LETTER">Letter</option><option value="LEGAL">Legal</option></select></label>
+                <label>Orientation <select value={editingPrintSettings.orientation} onChange={event=>{
+                  const orientation=event.currentTarget.value as CustomerPrintRequestSettings["orientation"];
+                  setEditingPrintSettings(current=>current?{...current,orientation}:current);
+                }}><option value="AUTO">Auto · follow document</option><option value="PORTRAIT">Portrait</option><option value="LANDSCAPE">Landscape</option></select></label>
+                <div className="queue-settings-actions">
+                  <button className="secondary-button" type="button" onClick={()=>{setEditingSettingsJobId(null);setEditingPrintSettings(null);}}>Cancel</button>
+                  <button className="primary-button" type="button" disabled={busyJobId===job.id||!editingPrintSettings} onClick={()=>{if(editingPrintSettings)void onUpdateSettings(job,editingPrintSettings);setEditingSettingsJobId(null);setEditingPrintSettings(null);}}>Send revised quote</button>
+                </div>
+              </div>}
             </article>)}</div></td></tr>}
           </Fragment>;
         })}
@@ -2594,6 +2652,25 @@ function prettyStatus(status:string) {
   };
   return names[status] || status.replaceAll("_"," ").toLowerCase().replace(/\\b\\w/g,letter=>letter.toUpperCase());
 }
+function printBlockMessage(code:string):string {
+  switch(code) {
+    case "PAPER_SIZE_UNSUPPORTED":
+    case "PAPER_SIZE_REJECTED":
+      return "The selected printer did not confirm the requested paper size.";
+    case "LANDSCAPE_UNSUPPORTED":
+    case "ORIENTATION_UNCONFIRMED":
+      return "The selected printer did not confirm the requested page orientation.";
+    case "COLOUR_UNSUPPORTED":
+    case "COLOUR_REJECTED":
+      return "The selected printer did not confirm colour output.";
+    case "DUPLEX_UNSUPPORTED":
+    case "DUPLEX_REJECTED":
+      return "The selected printer did not confirm double-sided output.";
+    default:
+      return "The Windows Agent could not confirm the requested settings with this output device.";
+  }
+}
+
 function isPrinterAvailable(printer: PrinterDevice, onlineAgentIds: ReadonlySet<string>, now = Date.now()) {
   if (!printer.isActive || !printer.agentDeviceId || !onlineAgentIds.has(printer.agentDeviceId)) return false;
   if (printer.outputMode === "PDF_EXPORT") return true;
@@ -3201,8 +3278,9 @@ function CustomerLocalConnection({localAgent,onReady,onUnavailable,cloudAssisted
           if(status.localUploadReady!==true || status.readiness?.localUploadReady!==true) {
             setCheckStatus("recovering");
             onReady(false);
-            if(cloudAssistedPrintingEnabled)onUnavailable();
             const readiness=status.readiness;
+            const agentHeartbeatOffline=readiness?.heartbeatFresh!==true;
+            if(cloudAssistedPrintingEnabled||agentHeartbeatOffline)onUnavailable();
             const blockers=[
               readiness?.queueInitialized!==true?"protected document queue is not ready":null,
               readiness?.printWorkerRunning!==true?"print worker is not running":null,
@@ -3213,7 +3291,9 @@ function CustomerLocalConnection({localAgent,onReady,onUnavailable,cloudAssisted
             setMessage("The shop computer is reachable, but local printing is recovering ("+detail+"). "+
               (cloudAssistedPrintingEnabled
                 ? "Choose Cloud-assisted upload while the shop operator restores the local print pipeline."
-                : "Ask the shop operator to restore the Agent and printer connection, then check again."));
+                : agentHeartbeatOffline
+                  ? "The Agent cloud heartbeat is offline. Choose Secure queue · HTTPS to save this request while the shop reconnects."
+                  : "Ask the shop operator to restore the protected local queue, then check again."));
             return;
           }
           setCheckStatus("connected");
@@ -3231,14 +3311,17 @@ function CustomerLocalConnection({localAgent,onReady,onUnavailable,cloudAssisted
     if(generation!==checkGeneration.current)return;
     setCheckStatus("unavailable");
     onReady(false);
-    if(cloudAssistedPrintingEnabled)onUnavailable();
+    // A customer session can outlive the Agent heartbeat. Surface the existing
+    // HTTPS queue path after the local Agent endpoint is confirmed unreachable;
+    // the API still verifies the live Agent/plan boundary before accepting bytes.
+    onUnavailable();
     setMessage(nativeAppMode
       ? nativeLocalNetworkPermissionDenied
         ? "Could not reach the shop. Check that this phone is on the same Wi-Fi as the shop computer. If Android 16 local-network access is restricted, allow SmartPrint under Android Settings → Permissions → Nearby devices. Cloud-assisted upload remains available."
-        : "Shop offline · Cloud upload available."
+        : "Shop offline · Secure HTTPS queue available while the shop Agent is offline."
       : validEndpointCount===0
-        ? "The shop Agent has not announced a usable local address. The regular cloud-assisted upload remains available."
-        : "Could not reach the shop computer. Make sure this phone is connected to the same shop Wi-Fi, then ask the shop operator to check the connection. The regular cloud-assisted upload remains available.");
+        ? "The shop Agent has not announced a usable local address. Secure HTTPS queue fallback is available only while the shop Agent is offline."
+        : "Could not reach the shop computer. Make sure this phone is connected to the same shop Wi-Fi, then ask the shop operator to check the connection. Secure HTTPS queue fallback is available only while the shop Agent is offline.");
   }
 
   useEffect(()=>{
@@ -3342,8 +3425,15 @@ function CustomerLocalConnection({localAgent,onReady,onUnavailable,cloudAssisted
 }
 
 
-type CustomerGroupSettings = { colourMode: "Mono" | "Colour"; isDuplex: boolean };
-type CustomerFileSettings = { copies: string; custom: boolean; colourMode: "Mono" | "Colour"; isDuplex: boolean };
+type CustomerGroupSettings = {
+  copies: string;
+  colourMode: "Mono" | "Colour";
+  isDuplex: boolean;
+  advancedEnabled: boolean;
+  paperSize: CustomerPrintRequestSettings["paperSize"];
+  orientation: CustomerPrintRequestSettings["orientation"];
+};
+type CustomerFileSettings = CustomerGroupSettings & { custom: boolean };
 
 function consumeSmartPrintNativePickerGroups():string[]|undefined {
   const target=window as Window & {__smartPrintNativePickerGroups?:string[]};
@@ -3351,7 +3441,7 @@ function consumeSmartPrintNativePickerGroups():string[]|undefined {
   delete target.__smartPrintNativePickerGroups;
   return Array.isArray(groups)?groups:undefined;
 }
-type CustomerSavedPrintSettings = { copies: number; colourMode: "Mono" | "Colour"; isDuplex: boolean };
+type CustomerSavedPrintSettings = CustomerPrintRequestSettings & { advancedEnabled?: boolean };
 type CustomerPhotoSettings = { sizeCode: string; photoCount: number };
 function customerPhotoSizeLabel(sizeCode?:string|null):string {
   switch(sizeCode){
@@ -3501,15 +3591,10 @@ function smartPrintNativeBoundary(status:string|undefined,hasQuote:boolean):stri
 
 function CustomerPrintFlow({publicCode,sessionToken,paymentOptions,localAgent,localReady,localFallbackSuggested,cloudAssistedPrintingEnabled,photoPricing,hasAssignedPrinter,printerCapabilitiesJson,photoStudioReady}:{publicCode:string;sessionToken:string;paymentOptions:{upiEnabled:boolean;upiId?:string|null;payeeName?:string|null;cashEnabled:boolean;instantPaymentEnabled:boolean};localAgent:CustomerLocalAgent|null;localReady:boolean;localFallbackSuggested:boolean;cloudAssistedPrintingEnabled:boolean;photoPricing:CustomerPhotoPricing|null;hasAssignedPrinter:boolean;printerCapabilitiesJson?:string|null;photoStudioReady:boolean}) {
   const nativeAppMode = navigator.userAgent.includes("SmartPrintAndroid/1");
-  const printerCapabilities=parseCustomerPrinterCapabilities(printerCapabilitiesJson);
-  const reportedPaperSizes=printerCapabilities?.paperSizes??[];
-  const a4Supported=reportedPaperSizes.some(p=>p.code===9||p.name?.trim().toUpperCase()==="A4");
-  const a4ExplicitlyUnsupported=hasAssignedPrinter&&reportedPaperSizes.length>0&&!a4Supported;
-  const a4SupportUnknown=hasAssignedPrinter&&reportedPaperSizes.length===0;
-  const a4NotConfirmed=a4ExplicitlyUnsupported||a4SupportUnknown;
-  // Unknown driver capabilities are not the same as unsupported; the Agent validates before output.
-  const supportsColour=!hasAssignedPrinter||printerCapabilities?.color!==false;
-  const supportsDuplex=!hasAssignedPrinter||printerCapabilities?.duplex!==false;
+  // Customer requests are captured independently of current hardware reports.
+  // The shop may wait, reassign, or request an approved change before dispatch.
+  void hasAssignedPrinter;
+  void printerCapabilitiesJson;
   const photoRatesAvailable=Boolean(photoPricing&&[photoPricing.photo35x45Minor,photoPricing.photo25x35Minor,photoPricing.photo2x2Minor,photoPricing.photo4x6Minor].some(rate=>Number.isFinite(rate)&&rate>0));
   const initialDraft=readStoredCustomerDraft(publicCode,sessionToken);
   const [files,setFiles]=useState<File[]>([]);
@@ -3572,6 +3657,52 @@ function CustomerPrintFlow({publicCode,sessionToken,paymentOptions,localAgent,lo
     setJobStatus(current=>
       !current||current.id!==candidate.id||Date.parse(candidate.updatedUtc)>=Date.parse(current.updatedUtc)
         ?candidate:current);
+    if(candidate.pricingVersion&&candidate.quotedAmountMinor>0) {
+      const paperSize=(["A4","A3","A5","LETTER","LEGAL"].includes(candidate.paperSize)
+        ?candidate.paperSize:"A4") as CustomerPrintRequestSettings["paperSize"];
+      const orientation=(["AUTO","PORTRAIT","LANDSCAPE"].includes(candidate.orientation??"AUTO")
+        ?candidate.orientation??"AUTO":"AUTO") as CustomerPrintRequestSettings["orientation"];
+      // A shop-side quote revision is authoritative. Keep the settings shown
+      // to the customer in step with the revised amount before approval.
+      setPrintSettingsByJobId(current=>{
+        const previous=current[candidate.id];
+        return {
+          ...current,
+          [candidate.id]:{
+            ...previous,
+            copies:candidate.copies,
+            colourMode:candidate.colourMode==="Colour"?"Colour":"Mono",
+            paperSize,
+            isDuplex:candidate.isDuplex,
+            orientation,
+            advancedEnabled:Boolean(previous?.advancedEnabled)||paperSize!=="A4"||orientation!=="AUTO"
+          }
+        };
+      });
+      const revisedQuote:PrintQuoteResult={
+        id:candidate.id,
+        batchId:uploadedBatch.find(item=>item.job.id===candidate.id)?.job.batchId??uploaded?.job.batchId??null,
+        jobNumber:candidate.jobNumber,
+        status:candidate.status,
+        pageCount:candidate.pageCount,
+        copies:candidate.copies,
+        colourMode:candidate.colourMode as "Mono"|"Colour",
+        paperSize:candidate.paperSize as CustomerPrintRequestSettings["paperSize"],
+        isDuplex:candidate.isDuplex,
+        orientation:(candidate.orientation??"AUTO") as CustomerPrintRequestSettings["orientation"],
+        printKind:(candidate.printKind??"DOCUMENT") as "DOCUMENT"|"PHOTO",
+        photoSizeCode:candidate.photoSizeCode??null,
+        photoCount:candidate.photoCount,
+        photoUnitPriceMinor:candidate.photoUnitPriceMinorSnapshot,
+        currency:candidate.currency,
+        quotedAmountMinor:candidate.quotedAmountMinor,
+        amountMajor:candidate.quotedAmountMinor/100,
+        pricingVersion:candidate.pricingVersion,
+        quoteExpiresUtc:candidate.quoteExpiresUtc??""
+      };
+      setQuotesByJobId(current=>({...current,[candidate.id]:revisedQuote}));
+      setQuote(revisedQuote);
+    }
     rememberCustomerPayment(candidate.payment);
     rememberBatchPayment(candidate.payment?.batchPayment);
   }
@@ -3584,25 +3715,27 @@ function CustomerPrintFlow({publicCode,sessionToken,paymentOptions,localAgent,lo
   );
   const [uploadModeManuallySelected,setUploadModeManuallySelected]=useState(false);
 
+  const secureQueueFallbackEnabled = cloudAssistedPrintingEnabled || !localAgent?.endpoints.length || localFallbackSuggested;
+
   useEffect(()=>{
     setUploadMode(current=>resolveCustomerUploadMode(
       current,
       Boolean(localAgent?.endpoints?.length),
-      cloudAssistedPrintingEnabled,
+      secureQueueFallbackEnabled,
       uploadModeManuallySelected
     ));
-  },[cloudAssistedPrintingEnabled,localAgent?.endpoints.join("|"),uploadModeManuallySelected]);
+  },[secureQueueFallbackEnabled,localAgent?.endpoints.join("|"),uploadModeManuallySelected]);
 
   useEffect(()=>{
     if(uploadModeManuallySelected)return;
-    if(localFallbackSuggested&&cloudAssistedPrintingEnabled) {
+    if((localFallbackSuggested||!localReady)&&secureQueueFallbackEnabled) {
       setUploadMode("CLOUD");
     } else if(!localFallbackSuggested&&localReady&&localAgent?.endpoints.length) {
       setUploadMode("LOCAL");
     }
-  },[localFallbackSuggested,localReady,localAgent?.endpoints.length,cloudAssistedPrintingEnabled,uploadModeManuallySelected]);
+  },[localFallbackSuggested,localReady,localAgent?.endpoints.length,secureQueueFallbackEnabled,uploadModeManuallySelected]);
 
-  const customerUploadUnavailable = !cloudAssistedPrintingEnabled && !localAgent?.endpoints.length;
+  const customerUploadUnavailable = !secureQueueFallbackEnabled && !localAgent?.endpoints.length;
 
   useEffect(()=>{
     if(!paymentOptions.upiEnabled&&paymentOptions.cashEnabled)setPaymentMethod("CASH");
@@ -3637,23 +3770,27 @@ function CustomerPrintFlow({publicCode,sessionToken,paymentOptions,localAgent,lo
   const batchStatusKey=batchItemsForStatus.map(item=>item.job.id).join("|");
   const groupNameForFile=(candidate:File)=>fileGroupNames[customerFileFingerprint(candidate)]??customerBatchGroupName(candidate);
   const defaultsForGroup=(name:string):CustomerGroupSettings=>{
-    const settings=groupSettings[name]??{colourMode:"Mono",isDuplex:false};
-    return {
-      ...settings,
-      colourMode:supportsColour?settings.colourMode:"Mono",
-      isDuplex:supportsDuplex?settings.isDuplex:false
+    const baseline:CustomerGroupSettings={
+      copies:"1",colourMode:"Mono",isDuplex:false,advancedEnabled:false,paperSize:"A4",orientation:"AUTO"
     };
+    return {...baseline,...(groupSettings[name]??{})};
   };
-  const settingsForFile=(candidate:File)=> {
+  const settingsForFile=(candidate:File):CustomerSavedPrintSettings=> {
     const fingerprint=customerFileFingerprint(candidate);
     const defaults=defaultsForGroup(groupNameForFile(candidate));
     const own=fileSettings[fingerprint];
-    if(photoSettingsByFileFingerprint[fingerprint])return {colourMode:"Colour" as const,isDuplex:false,copies:1};
+    if(photoSettingsByFileFingerprint[fingerprint])return {
+      copies:1,colourMode:"Colour",paperSize:"A4",isDuplex:false,orientation:"AUTO",advancedEnabled:false
+    };
+    const selected=own?.custom?{...defaults,...own}:defaults;
     return {
-      colourMode:supportsColour?(own?.custom?own.colourMode:defaults.colourMode):"Mono",
-      isDuplex:supportsDuplex?(own?.custom?own.isDuplex:defaults.isDuplex):false,
-      copies:Number(normalizeCustomerCopies(own?.copies??"1"))
-    } as CustomerSavedPrintSettings;
+      copies:Number(normalizeCustomerCopies(selected.copies)),
+      colourMode:selected.colourMode,
+      isDuplex:selected.isDuplex,
+      paperSize:selected.advancedEnabled?selected.paperSize:"A4",
+      orientation:selected.advancedEnabled?selected.orientation:"AUTO",
+      advancedEnabled:selected.advancedEnabled
+    };
   };
 
   useEffect(()=>{
@@ -3770,8 +3907,8 @@ function CustomerPrintFlow({publicCode,sessionToken,paymentOptions,localAgent,lo
         const batchGroupName=groupNameForFile(candidate);
         const settings=settingsForFile(candidate);
         const created=uploadMode==="LOCAL"&&localAgent
-          ? await uploadCustomerDocumentLocally(sessionToken,candidate,localAgent,currentBatchId,batchGroupName,currentBatchName||undefined,cloudAssistedPrintingEnabled)
-          : await uploadCustomerDocument(sessionToken,candidate,currentBatchId,batchGroupName,currentBatchName||undefined);
+          ? await uploadCustomerDocumentLocally(sessionToken,candidate,localAgent,currentBatchId,batchGroupName,currentBatchName||undefined,cloudAssistedPrintingEnabled,settings)
+          : await uploadCustomerDocument(sessionToken,candidate,currentBatchId,batchGroupName,currentBatchName||undefined,settings);
         if(created.job.batchId&&created.job.batchId!==currentBatchId) {
           if(results.length>0) {
             throw new ApiError("This file belongs to an earlier batch. Refresh the original print request before adding more files; SmartPrint will not mix two batches.",409);
@@ -3807,9 +3944,16 @@ function CustomerPrintFlow({publicCode,sessionToken,paymentOptions,localAgent,lo
       setUploadedFileFingerprints([...completedFingerprints]);
       if(results.length>0)setUploaded(results[0]);
       const confirmedPreTicketRejection=uploadMode==="LOCAL"&&exception instanceof LocalUploadPreflightError;
-      const canFallbackToCloud=canFallbackToCloudFromLocalFailure(confirmedPreTicketRejection,cloudAssistedPrintingEnabled);
+      const agentUnavailable=exception instanceof LocalUploadPreflightError&&
+        ["local_print_agent_unavailable","local_print_printer_unavailable"].includes(exception.code??"");
+      const batchCheckoutLocked=exception instanceof LocalUploadPreflightError&&
+        exception.code==="batch_upload_locked_after_payment_start";
+      const canFallbackToCloud=!batchCheckoutLocked&&canFallbackToCloudFromLocalFailure(
+        confirmedPreTicketRejection,
+        cloudAssistedPrintingEnabled||agentUnavailable
+      );
       if(canFallbackToCloud){setUploadModeManuallySelected(true);setUploadMode("CLOUD");}
-      if(exception instanceof LocalUploadOutcomeUnknownError&&uploadMode==="LOCAL"&&cloudAssistedPrintingEnabled) {
+      if(exception instanceof LocalUploadOutcomeUnknownError&&uploadMode==="LOCAL"&&secureQueueFallbackEnabled) {
         // Local ticket and grant are preserved. The next retry will resume that
         // same PrintJob over HTTPS rather than creating a second cloud upload.
         setUploadModeManuallySelected(true);
@@ -3819,7 +3963,9 @@ function CustomerPrintFlow({publicCode,sessionToken,paymentOptions,localAgent,lo
         ? cloudAssistedPrintingEnabled
           ? "Shop Wi-Fi was interrupted. Cloud-assisted upload is now selected for secure HTTPS continuation. SmartPrint has kept this file attached to its original job; tap Retry to resume that same upload without creating another print job."
           : "Shop Wi-Fi was interrupted. SmartPrint has kept this file attached to its original job. Reconnect to the shop computer and tap Retry; the same upload will resume without creating a second print job."
-        : confirmedPreTicketRejection
+        : batchCheckoutLocked
+          ? "Checkout has already started for this batch, so this unfinished file was not included. Start a new batch for this file."
+          : confirmedPreTicketRejection
           ? exception instanceof LocalUploadPreflightError && exception.code==="local_upload_ticket_expired"
             ? canFallbackToCloud
               ? "The earlier shop Wi-Fi attempt expired before a job was created. Cloud-assisted HTTPS is now selected; tap Retry to start a fresh transfer."
@@ -3842,7 +3988,6 @@ function CustomerPrintFlow({publicCode,sessionToken,paymentOptions,localAgent,lo
   }
 
   async function getQuote(itemsOverride?:UploadedPrintJob[],settingsOverride?:Record<string,CustomerSavedPrintSettings>,photoSettingsOverride?:Record<string,CustomerPhotoSettings>) {
-    if(a4NotConfirmed){setError(a4ExplicitlyUnsupported?"The selected printer does not report A4 paper support. The shop team needs to select an A4-capable printer before requesting a quote.":"The shop printer has not reported its paper sizes yet. The shop team needs to check the printer before an A4 quote can be prepared.");return;}
     const items=itemsOverride??(uploadedBatch.length?uploadedBatch:(uploaded?[uploaded]:[]));
     if(items.length===0)return;
     setBusy(true);setError("");setJobStatus(null);
@@ -3859,12 +4004,25 @@ function CustomerPrintFlow({publicCode,sessionToken,paymentOptions,localAgent,lo
         if(quoteExpired
           ? !["QUOTE_EXPIRED","AWAITING_CUSTOMER_APPROVAL","AWAITING_SHOP_APPROVAL","AWAITING_PAYMENT","PAYMENT_REJECTED"].includes(status)
           : !["AWAITING_CONFIGURATION","UPLOADED","Uploaded"].includes(status))continue;
-        const requestedSettings=settingsOverride?.[item.job.id]??printSettingsByJobId[item.job.id]??{colourMode:"Mono" as const,isDuplex:false,copies:1};
-        const settings={...requestedSettings,colourMode:supportsColour?requestedSettings.colourMode:"Mono" as const,isDuplex:supportsDuplex?requestedSettings.isDuplex:false};
+        const requestedSettings=settingsOverride?.[item.job.id]??printSettingsByJobId[item.job.id];
+        const settings:CustomerSavedPrintSettings={
+          copies:requestedSettings?.copies??1,
+          colourMode:requestedSettings?.colourMode??"Mono",
+          isDuplex:requestedSettings?.isDuplex??false,
+          paperSize:requestedSettings?.paperSize??"A4",
+          orientation:requestedSettings?.orientation??"AUTO",
+          advancedEnabled:requestedSettings?.advancedEnabled??false
+        };
         const photoSettings=photoSettingsOverride?.[item.job.id]??photoSettingsByJobId[item.job.id];
-        if(photoSettings&&!supportsColour){failures.push(item.document.originalFileName+" (colour not supported)");continue;}
         try {
-          nextQuotes[item.job.id]=await calculateCustomerQuote(sessionToken,item.job.id,{colourMode:photoSettings?"Colour":settings.colourMode,paperSize:"A4",isDuplex:photoSettings?false:settings.isDuplex,copies:photoSettings?1:settings.copies,...(photoSettings?{printKind:"PHOTO" as const,photoSizeCode:photoSettings.sizeCode,photoCount:photoSettings.photoCount}:{printKind:"DOCUMENT" as const})});
+          nextQuotes[item.job.id]=await calculateCustomerQuote(sessionToken,item.job.id,{
+            colourMode:photoSettings?"Colour":settings.colourMode,
+            paperSize:photoSettings?"A4":settings.paperSize,
+            isDuplex:photoSettings?false:settings.isDuplex,
+            copies:photoSettings?1:settings.copies,
+            orientation:photoSettings?"AUTO":settings.orientation,
+            ...(photoSettings?{printKind:"PHOTO" as const,photoSizeCode:photoSettings.sizeCode,photoCount:photoSettings.photoCount}:{printKind:"DOCUMENT" as const})
+          });
         } catch(exception) {
           failures.push(item.document.originalFileName);
         }
@@ -4043,7 +4201,7 @@ function CustomerPrintFlow({publicCode,sessionToken,paymentOptions,localAgent,lo
     if(uploadedBatch.length+pending.length>20||bytes>50*1024*1024){setError("Prepared photo sheets exceed the batch limit. Reduce the copies or start a new batch.");setPhotoStudioSource(null);setPhotoStudioSourceFingerprint(null);return;}
     const group=groupNameForFile(files[index]),groups={...fileGroupNames},settings={...fileSettings},photos={...photoSettingsByFileFingerprint};
     delete groups[photoStudioSourceFingerprint];delete settings[photoStudioSourceFingerprint];delete photos[photoStudioSourceFingerprint];
-    for(const sheet of sheets){const fp=customerFileFingerprint(sheet.file);groups[fp]=group;settings[fp]={copies:"1",custom:true,colourMode:"Colour",isDuplex:false};photos[fp]={sizeCode:sheet.sizeCode,photoCount:sheet.photoCount};}
+    for(const sheet of sheets){const fp=customerFileFingerprint(sheet.file);groups[fp]=group;settings[fp]={copies:"1",custom:true,colourMode:"Colour",isDuplex:false,advancedEnabled:false,paperSize:"A4",orientation:"AUTO"};photos[fp]={sizeCode:sheet.sizeCode,photoCount:sheet.photoCount};}
     setFiles(nextFiles);setSelectedFileIndex(index);setFileGroupNames(groups);setFileSettings(settings);setPhotoSettingsByFileFingerprint(photos);setPhotoStudioSource(null);setPhotoStudioSourceFingerprint(null);setError("");
   }
   function openPhotoStudio(candidate:File){if(!photoStudioReady||!photoRatesAvailable){setError("Photo printing is not available at this station yet.");return;}setPhotoStudioSource(candidate);setPhotoStudioSourceFingerprint(customerFileFingerprint(candidate));setError("");}
@@ -4105,7 +4263,7 @@ function CustomerPrintFlow({publicCode,sessionToken,paymentOptions,localAgent,lo
       for(const candidate of supported) {
         const nativeGroup=nativeGroupNames?.[next.indexOf(candidate)]?.trim();
         const group=nativeGroup||customerBatchGroupName(candidate);
-        if(!updated[group])updated[group]={colourMode:"Mono",isDuplex:false};
+        if(!updated[group])updated[group]={copies:"1",colourMode:"Mono",isDuplex:false,advancedEnabled:false,paperSize:"A4",orientation:"AUTO"};
       }
       return updated;
     });
@@ -4113,7 +4271,7 @@ function CustomerPrintFlow({publicCode,sessionToken,paymentOptions,localAgent,lo
       const updated={...current};
       for(const candidate of supported) {
         const key=customerFileFingerprint(candidate);
-        if(!updated[key])updated[key]={copies:"1",custom:false,colourMode:"Mono",isDuplex:false};
+        if(!updated[key])updated[key]={...defaultsForGroup(fileGroupNames[key]??customerBatchGroupName(candidate)),custom:false};
       }
       return updated;
     });
@@ -4253,11 +4411,11 @@ function CustomerPrintFlow({publicCode,sessionToken,paymentOptions,localAgent,lo
   const photoPriceMap={"35x45":photoPricing?.photo35x45Minor??0,"25x35":photoPricing?.photo25x35Minor??0,"2x2":photoPricing?.photo2x2Minor??0,"4x6":photoPricing?.photo4x6Minor??0};
   return <>{photoStudioSource&&<PhotoStudio source={photoStudioSource} photoPrices={photoPriceMap} onCancel={()=>{setPhotoStudioSource(null);setPhotoStudioSourceFingerprint(null);}} onApply={applyPhotoSheets}/>}<section className="customer-print-flow">
     <div className="customer-flow-heading"><div><span>STEP 1</span><h2>{nativeAppMode?"Add files":"Add documents or images"}</h2></div><span className="upload-limit">PDF documents · JPG/PNG images · Up to 20 files / 50 MB per batch</span></div>
-    {(localAgent?.endpoints.length || cloudAssistedPrintingEnabled) ? <div className="customer-upload-modes">
+    {(localAgent?.endpoints.length || secureQueueFallbackEnabled) ? <div className="customer-upload-modes">
       {Boolean(localAgent?.endpoints?.length)&&<button type="button" aria-pressed={uploadMode==="LOCAL"} className={uploadMode==="LOCAL"?"customer-upload-mode selected":"customer-upload-mode"} onClick={()=>{setUploadModeManuallySelected(true);setUploadMode("LOCAL");}}><strong>Shop Wi-Fi · local transfer</strong><small>Direct local HTTP · not encrypted in transit</small></button>}
-      {cloudAssistedPrintingEnabled&&<button type="button" aria-pressed={uploadMode==="CLOUD"} className={uploadMode==="CLOUD"?"customer-upload-mode selected":"customer-upload-mode"} onClick={()=>{setUploadModeManuallySelected(true);setUploadMode("CLOUD");}}><strong>Cloud-assisted · HTTPS</strong><small>Secure transfer through the API · resumes interrupted local uploads</small></button>}
+      {secureQueueFallbackEnabled&&<button type="button" aria-pressed={uploadMode==="CLOUD"} className={uploadMode==="CLOUD"?"customer-upload-mode selected":"customer-upload-mode"} onClick={()=>{setUploadModeManuallySelected(true);setUploadMode("CLOUD");}}><strong>{cloudAssistedPrintingEnabled?"Cloud-assisted · HTTPS":"Secure queue · HTTPS"}</strong><small>Upload securely now; the shop can print when its Agent and printer are ready</small></button>}
     </div>:null}
-    {customerUploadUnavailable&&<div className="customer-upload-local-note" role="status">This shop's print computer is not connected, and cloud-assisted uploads are not included in its plan. Ask the shop operator to reconnect SmartPrint.</div>}
+    {customerUploadUnavailable&&<div className="customer-upload-local-note" role="status">Secure upload is temporarily unavailable. Please ask the shop to reconnect its print service.</div>}
     <div className="customer-upload-picker-grid">
       <label className="customer-upload-zone">
         <input type="file" multiple disabled={batchLockedForPayment} accept=".pdf,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png" onChange={event=>{const selected=Array.from(event.currentTarget.files||[]);chooseFiles(selected,consumeSmartPrintNativePickerGroups(),consumeSmartPrintNativePdfPreviews());event.currentTarget.value="";}}/>
@@ -4282,53 +4440,94 @@ function CustomerPrintFlow({publicCode,sessionToken,paymentOptions,localAgent,lo
             <div className="customer-folder-defaults">
               <div><span>Colour</span><div className="customer-choice-row">
                 <button type="button" className={defaults.colourMode==="Mono"?"customer-choice selected":"customer-choice"} onClick={()=>setGroupSettings(current=>({...current,[group.name]:{...defaults,colourMode:"Mono"}}))}>B&W</button>
-                <button type="button" className={defaults.colourMode==="Colour"?"customer-choice selected":"customer-choice"} disabled={!supportsColour} title={!supportsColour?"Colour is unavailable until the shop printer confirms support":undefined} onClick={()=>setGroupSettings(current=>({...current,[group.name]:{...defaults,colourMode:"Colour"}}))}>Colour</button>
+                <button type="button" className={defaults.colourMode==="Colour"?"customer-choice selected":"customer-choice"} onClick={()=>setGroupSettings(current=>({...current,[group.name]:{...defaults,colourMode:"Colour"}}))}>Colour</button>
               </div></div>
               <div><span>Sides</span><div className="customer-choice-row">
                 <button type="button" className={!defaults.isDuplex?"customer-choice selected":"customer-choice"} onClick={()=>setGroupSettings(current=>({...current,[group.name]:{...defaults,isDuplex:false}}))}>Single</button>
-                <button type="button" className={defaults.isDuplex?"customer-choice selected":"customer-choice"} disabled={!supportsDuplex} title={!supportsDuplex?"Double-sided printing is unavailable until the shop printer confirms support":undefined} onClick={()=>setGroupSettings(current=>({...current,[group.name]:{...defaults,isDuplex:true}}))}>Double</button>
+                <button type="button" className={defaults.isDuplex?"customer-choice selected":"customer-choice"} onClick={()=>setGroupSettings(current=>({...current,[group.name]:{...defaults,isDuplex:true}}))}>Double</button>
               </div></div>
+              <label className="customer-folder-copies"><span>Copies · all files</span><input type="text" inputMode="numeric" pattern="[0-9]*" maxLength={3} value={defaults.copies}
+                 onChange={event=>{
+                   const copies=event.currentTarget.value.replace(/\D/g,"").slice(0,3);
+                   setGroupSettings(current=>({...current,[group.name]:{...(current[group.name]??defaults),copies}}));
+                 }}
+                 onBlur={event=>{
+                   const copies=normalizeCustomerCopies(event.currentTarget.value);
+                   setGroupSettings(current=>({...current,[group.name]:{...(current[group.name]??defaults),copies}}));
+                 }}/></label>
+              <div><span>Paper</span><strong className="customer-paper-default">{defaults.advancedEnabled?defaults.paperSize:"A4"}</strong></div>
+              <label className="customer-advanced-toggle"><input type="checkbox" checked={defaults.advancedEnabled} onChange={event=>{
+                 const advancedEnabled=event.currentTarget.checked;
+                 setGroupSettings(current=>({...current,[group.name]:{...(current[group.name]??defaults),advancedEnabled}}));
+               }}/><span>Advanced settings</span></label>
             </div>
+            {defaults.advancedEnabled&&<div className="customer-file-overrides customer-folder-advanced">
+              <label><span>Paper size</span><select value={defaults.paperSize} onChange={event=>{
+                 const paperSize=event.currentTarget.value as CustomerGroupSettings["paperSize"];
+                 setGroupSettings(current=>({...current,[group.name]:{...(current[group.name]??defaults),paperSize}}));
+               }}>
+                <option value="A4">A4</option><option value="A3">A3</option><option value="A5">A5</option><option value="LETTER">Letter</option><option value="LEGAL">Legal</option>
+              </select></label>
+              <label><span>Orientation</span><select value={defaults.orientation} onChange={event=>{
+                 const orientation=event.currentTarget.value as CustomerGroupSettings["orientation"];
+                 setGroupSettings(current=>({...current,[group.name]:{...(current[group.name]??defaults),orientation}}));
+               }}>
+                <option value="AUTO">Auto · follow document</option><option value="PORTRAIT">Portrait</option><option value="LANDSCAPE">Landscape</option>
+              </select></label>
+            </div>}
           </div>
           <div className="customer-folder-file-list">{group.files.map(selected=>{
             const fingerprint=customerFileFingerprint(selected);
-            const savedOwn=fileSettings[fingerprint]??{copies:"1",custom:false,colourMode:defaults.colourMode,isDuplex:defaults.isDuplex};
-            const own={...savedOwn,colourMode:supportsColour?savedOwn.colourMode:"Mono" as const,isDuplex:supportsDuplex?savedOwn.isDuplex:false};
+            const savedOwn=fileSettings[fingerprint]??{...defaults,custom:false};
+            const own={...defaults,...savedOwn};
             const index=files.findIndex(candidate=>customerFileFingerprint(candidate)===fingerprint);
             return <div className={selectedFileIndex===index?"customer-folder-file-row selected":"customer-folder-file-row"} key={fingerprint}>
               <button type="button" className="customer-folder-file-name" onClick={()=>setSelectedFileIndex(index)}><FileText size={15}/><span><strong>{selected.name}</strong><small>{formatBytes(selected.size)}</small></span><PrintKindTag printKind={photoSettingsByFileFingerprint[fingerprint]?"PHOTO":"DOCUMENT"}/></button>
-              <label className="customer-folder-copies"><span>Copies</span><input type="text" inputMode="numeric" pattern="[0-9]*" maxLength={3} value={own.copies} onChange={event => {
-                const copies = event.currentTarget.value.replace(/\D/g, "").slice(0, 3);
-                setFileSettings(current => ({
-                  ...current,
-                  [fingerprint]: { ...(current[fingerprint] ?? own), copies }
-                }));
-              }} onBlur={event => {
-                const copies = normalizeCustomerCopies(event.currentTarget.value);
-                setFileSettings(current => ({
-                  ...current,
-                  [fingerprint]: { ...(current[fingerprint] ?? own), copies }
-                }));
-              }}/></label>
-              <button type="button" className={own.custom?"customer-file-custom active":"customer-file-custom"} onClick={()=>setFileSettings(current=>({...current,[fingerprint]:{...(current[fingerprint]??own),custom:!own.custom,colourMode:own.custom?own.colourMode:defaults.colourMode,isDuplex:own.custom?own.isDuplex:defaults.isDuplex}}))}>{own.custom?"Custom":"Folder"}</button>
+              <button type="button" className={own.custom?"customer-file-custom active":"customer-file-custom"} onClick={()=>setFileSettings(current=>({...current,[fingerprint]:{...defaults,...(current[fingerprint]??{}),custom:!own.custom,...(!own.custom?{copies:defaults.copies,colourMode:defaults.colourMode,isDuplex:defaults.isDuplex,advancedEnabled:defaults.advancedEnabled,paperSize:defaults.paperSize,orientation:defaults.orientation}:{})}}))}>{own.custom?"Custom":"Folder"}</button>
               <button type="button" className="customer-file-remove" aria-label={`Remove ${selected.name} from this selection`} title="Remove from this selection" disabled={busy} onClick={()=>removeSelectedFile(fingerprint)}><X size={13}/><span>Remove</span></button>
               {own.custom&&<div className="customer-file-overrides">
+                <label className="customer-folder-copies"><span>Copies</span><input type="text" inputMode="numeric" pattern="[0-9]*" maxLength={3} value={own.copies}
+                   onChange={event=>{
+                     const copies=event.currentTarget.value.replace(/\D/g,"").slice(0,3);
+                     setFileSettings(current=>({...current,[fingerprint]:{...(current[fingerprint]??own),custom:true,copies}}));
+                   }}
+                   onBlur={event=>{
+                     const copies=normalizeCustomerCopies(event.currentTarget.value);
+                     setFileSettings(current=>({...current,[fingerprint]:{...(current[fingerprint]??own),custom:true,copies}}));
+                   }}/></label>
                 <div className="customer-choice-row">
                   <button type="button" className={own.colourMode==="Mono"?"customer-choice selected":"customer-choice"} onClick={()=>setFileSettings(current=>({...current,[fingerprint]:{...own,custom:true,colourMode:"Mono"}}))}>B&W</button>
-                  <button type="button" className={own.colourMode==="Colour"?"customer-choice selected":"customer-choice"} disabled={!supportsColour} title={!supportsColour?"Colour is unavailable until the shop printer confirms support":undefined} onClick={()=>setFileSettings(current=>({...current,[fingerprint]:{...own,custom:true,colourMode:"Colour"}}))}>Colour</button>
+                  <button type="button" className={own.colourMode==="Colour"?"customer-choice selected":"customer-choice"} onClick={()=>setFileSettings(current=>({...current,[fingerprint]:{...own,custom:true,colourMode:"Colour"}}))}>Colour</button>
                 </div>
                 <div className="customer-choice-row">
                   <button type="button" className={!own.isDuplex?"customer-choice selected":"customer-choice"} onClick={()=>setFileSettings(current=>({...current,[fingerprint]:{...own,custom:true,isDuplex:false}}))}>Single</button>
-                  <button type="button" className={own.isDuplex?"customer-choice selected":"customer-choice"} disabled={!supportsDuplex} title={!supportsDuplex?"Double-sided printing is unavailable until the shop printer confirms support":undefined} onClick={()=>setFileSettings(current=>({...current,[fingerprint]:{...own,custom:true,isDuplex:true}}))}>Double</button>
+                  <button type="button" className={own.isDuplex?"customer-choice selected":"customer-choice"} onClick={()=>setFileSettings(current=>({...current,[fingerprint]:{...own,custom:true,isDuplex:true}}))}>Double</button>
                 </div>
+                <div><span>Paper</span><strong className="customer-paper-default">{own.advancedEnabled?own.paperSize:"A4"}</strong></div>
+                <label className="customer-advanced-toggle"><input type="checkbox" checked={own.advancedEnabled} onChange={event=>{
+                   const advancedEnabled=event.currentTarget.checked;
+                   setFileSettings(current=>({...current,[fingerprint]:{...(current[fingerprint]??own),custom:true,advancedEnabled}}));
+                 }}/><span>Advanced settings</span></label>
+                {own.advancedEnabled&&<div className="customer-file-overrides customer-folder-advanced">
+                  <label><span>Paper size</span><select value={own.paperSize} onChange={event=>{
+                     const paperSize=event.currentTarget.value as CustomerFileSettings["paperSize"];
+                     setFileSettings(current=>({...current,[fingerprint]:{...(current[fingerprint]??own),custom:true,paperSize}}));
+                   }}>
+                    <option value="A4">A4</option><option value="A3">A3</option><option value="A5">A5</option><option value="LETTER">Letter</option><option value="LEGAL">Legal</option>
+                  </select></label>
+                  <label><span>Orientation</span><select value={own.orientation} onChange={event=>{
+                     const orientation=event.currentTarget.value as CustomerFileSettings["orientation"];
+                     setFileSettings(current=>({...current,[fingerprint]:{...(current[fingerprint]??own),custom:true,orientation}}));
+                   }}>
+                    <option value="AUTO">Auto · follow document</option><option value="PORTRAIT">Portrait</option><option value="LANDSCAPE">Landscape</option>
+                  </select></label>
+                </div>}
               </div>}
             </div>;
           })}</div>
         </section>;
       })}</div>
     </div>}
-    {a4ExplicitlyUnsupported&&<p className="customer-upload-local-note" role="status">The selected printer reports no A4 paper support. The shop team needs to select an A4-capable printer before a quote can be prepared.</p>}
-    {a4SupportUnknown&&<p className="customer-upload-local-note" role="status">The shop printer has not confirmed its supported paper sizes yet. The shop team needs to check the printer before an A4 quote can be prepared.</p>}
     {files.length>0&&<label className="customer-batch-name-field">
   <span>Give this batch a name <small>Optional · the shop will see it in the print queue</small></span>
   <input type="text" value={batchName} maxLength={50}
@@ -4342,7 +4541,7 @@ function CustomerPrintFlow({publicCode,sessionToken,paymentOptions,localAgent,lo
     {files.length>0&&<button className="customer-flow-button" disabled={busy||customerUploadUnavailable||pendingFilesCount===0||(uploadMode==="LOCAL"&&!localReady)} onClick={()=>void upload()}>{busy?<span className="button-spinner"/>:<><UploadIcon/>{uploadMode==="LOCAL"&&localAgent?"Upload "+pendingFilesCount+" file(s) to shop":"Upload "+pendingFilesCount+" file(s)"}</>}</button>}
     {uploadProgress&&<div className="customer-upload-progress"><span>{uploadProgress.currentFile?`Uploading ${Math.min(uploadProgress.completed+1,uploadProgress.total)} of ${uploadProgress.total}: ${uploadProgress.currentFile}`:`${uploadProgress.completed} of ${uploadProgress.total} files uploaded`}</span><div><i style={{width:`${uploadProgress.total?uploadProgress.completed/uploadProgress.total*100:0}%`}}/>{uploadProgress.currentFile&&<b aria-hidden="true"/>}</div><small>The count advances when each document finishes uploading.</small></div>}
     {files.length>0&&uploadMode==="LOCAL"&&localAgent&&<small className="customer-upload-local-note">{nativeAppMode?(localReady?"Direct shop Wi-Fi transfer uses local HTTP and is not encrypted in transit. Choose Cloud-assisted for HTTPS.":"Check shop Wi-Fi."):localReady?"Direct shop Wi-Fi transfer uses local HTTP and is not encrypted in transit. Choose Cloud-assisted for HTTPS encryption.":"Tap Check shop Wi-Fi above first to grant the browser permission."}</small>}
-    {files.length>0&&uploadMode==="CLOUD"&&localAgent&&<small className="customer-upload-local-note">{nativeAppMode?"Encrypted HTTPS cloud transfer.":"HTTPS cloud-assisted transfer: files are encrypted in transit to the API and then transferred securely to the shop computer."}</small>}
+    {files.length>0&&uploadMode==="CLOUD"&&<small className="customer-upload-local-note">{nativeAppMode?"Encrypted HTTPS secure upload.":"Files are encrypted in transit and stored securely in the existing print queue until the shop computer is ready."}</small>}
     {uploaded&&<>
       {uploadedBatch.length>0&&<div className="customer-uploaded-batch">
         <div className="customer-uploaded-batch-head"><strong>{batchName.trim()?"Batch · "+batchName.trim():"Batch · "+uploadedBatch.length+" files"}</strong><span>{uploadedBatch[0]?.job.jobNumber?"First job · "+uploadedBatch[0].job.jobNumber+" · ":""}Select a file to view its status. Pay once for all accepted files.</span></div>
@@ -4350,7 +4549,7 @@ function CustomerPrintFlow({publicCode,sessionToken,paymentOptions,localAgent,lo
         {Array.from(new Set(uploadedBatch.map(item=>item.job.batchGroupName??"Loose files"))).map(groupName=><section className="customer-uploaded-folder" key={groupName}>
           <strong>{groupName}</strong>
           {uploadedBatch.filter(item=>(item.job.batchGroupName??"Loose files")===groupName).map(item=><button type="button" key={item.job.id} className={uploaded.job.id===item.job.id?"customer-uploaded-batch-item active":"customer-uploaded-batch-item"} onClick={()=>selectUploadedFile(item)}>
-            <span className="batch-file-index"><FileText size={14}/></span><span className="batch-file-copy"><span className="batch-file-title-row"><strong>{item.document.originalFileName}</strong><PrintKindTag printKind={(photoSettingsByJobId[item.job.id]||batchStatuses[item.job.id]?.printKind==="PHOTO"||item.job.printKind==="PHOTO")?"PHOTO":"DOCUMENT"}/></span><small>{(photoSettingsByJobId[item.job.id]||batchStatuses[item.job.id]?.printKind==="PHOTO"||item.job.printKind==="PHOTO")?`${photoSettingsByJobId[item.job.id]?.photoCount??batchStatuses[item.job.id]?.photoCount??item.job.photoCount??0} photos · ${photoSettingsByJobId[item.job.id]?.sizeCode??batchStatuses[item.job.id]?.photoSizeCode??item.job.photoSizeCode??""} · A4 photo sheet`:`${item.job.pageCount} pages × ${printSettingsByJobId[item.job.id]?.copies??item.job.copies} copies = ${item.job.pageCount*(printSettingsByJobId[item.job.id]?.copies??item.job.copies)} pages requested · ${printSettingsByJobId[item.job.id]?.colourMode??"Mono"} · ${(printSettingsByJobId[item.job.id]?.isDuplex??false)?"Double-sided":"Single-sided"}`} · {(batchStatuses[item.job.id]?.quotedAmountMinor??item.job.quotedAmountMinor)>0?formatMoney(batchStatuses[item.job.id]?.quotedAmountMinor??item.job.quotedAmountMinor,item.job.currency):"Awaiting quote"}</small></span>
+            <span className="batch-file-index"><FileText size={14}/></span><span className="batch-file-copy"><span className="batch-file-title-row"><strong>{item.document.originalFileName}</strong><PrintKindTag printKind={(photoSettingsByJobId[item.job.id]||batchStatuses[item.job.id]?.printKind==="PHOTO"||item.job.printKind==="PHOTO")?"PHOTO":"DOCUMENT"}/></span><small>{(photoSettingsByJobId[item.job.id]||batchStatuses[item.job.id]?.printKind==="PHOTO"||item.job.printKind==="PHOTO")?`${photoSettingsByJobId[item.job.id]?.photoCount??batchStatuses[item.job.id]?.photoCount??item.job.photoCount??0} photos · ${photoSettingsByJobId[item.job.id]?.sizeCode??batchStatuses[item.job.id]?.photoSizeCode??item.job.photoSizeCode??""} · A4 photo sheet`:`${item.job.pageCount} pages × ${printSettingsByJobId[item.job.id]?.copies??item.job.copies} copies = ${item.job.pageCount*(printSettingsByJobId[item.job.id]?.copies??item.job.copies)} pages requested · ${printSettingsByJobId[item.job.id]?.colourMode??"Mono"} · ${(printSettingsByJobId[item.job.id]?.isDuplex??false)?"Double-sided":"Single-sided"} · ${printSettingsByJobId[item.job.id]?.paperSize??item.job.paperSize??"A4"} · ${(printSettingsByJobId[item.job.id]?.orientation??item.job.orientation??"AUTO")==="LANDSCAPE"?"Landscape":(printSettingsByJobId[item.job.id]?.orientation??item.job.orientation??"AUTO")==="PORTRAIT"?"Portrait":"Auto orientation"}`} · {(batchStatuses[item.job.id]?.quotedAmountMinor??item.job.quotedAmountMinor)>0?formatMoney(batchStatuses[item.job.id]?.quotedAmountMinor??item.job.quotedAmountMinor,item.job.currency):"Awaiting quote"}</small></span>
             <Status
               label={quoteExpiredForBatchItem(item)&&!["REJECTED","REFUNDED"].includes(statusForBatchItem(item))?"Quote expired":prettyStatus(batchStatuses[item.job.id]?.status??item.job.status??"UPLOADED")}
               tone={quoteExpiredForBatchItem(item)&&!["REJECTED","REFUNDED"].includes(statusForBatchItem(item))?"amber":
@@ -4364,13 +4563,13 @@ function CustomerPrintFlow({publicCode,sessionToken,paymentOptions,localAgent,lo
       {batchId&&hasLegacyIndividualPayment&&<p className="customer-payment-warning">A file in this batch already has a separate individual payment. Complete or resolve that attempt before starting another payment for this batch. A second collection path is blocked to prevent duplicate charges.</p>}
       {canCalculateBatch&&<div className="customer-batch-quote-action">
         <div className="customer-flow-heading customer-config-heading"><div><span>STEP 2</span><h2>Review batch settings</h2></div><small>{quoteItems.length} files</small></div>
-        <button className="customer-flow-button" disabled={busy||a4NotConfirmed} onClick={()=>void getQuote()}>{busy?<span className="button-spinner"/>:"Calculate batch quote"}</button>
+        <button className="customer-flow-button" disabled={busy} onClick={()=>void getQuote()}>{busy?<span className="button-spinner"/>:"Calculate batch quote"}</button>
       </div>}
     </>}
     {error&&<div className="customer-flow-error" role="alert">{error}</div>}
     {quoteEntries.length>0&&<div className="customer-quote-card customer-batch-quote-card">
       <div><span>BATCH QUOTE</span><strong>{formatMoney(batchQuoteTotal,quoteEntries[0].quote!.currency)}</strong><small>{quoteEntries.length} files · {batchDocumentSourcePages} document pages · {batchPhotoCount} photos · {batchPrintedPages} output pages/sheets</small></div>
-      <div className="customer-batch-quote-lines">{quoteEntries.map(entry=><div key={entry.item.job.id}><span><span className="customer-quote-line-title">{entry.item.document.originalFileName}<PrintKindTag printKind={entry.quote!.printKind}/>{["REJECTED","REFUNDED"].includes(statusForBatchItem(entry.item))?" · Rejected":""}</span><small>{entry.quote!.printKind==="PHOTO"?(entry.quote!.photoCount??0)+" × "+customerPhotoSizeLabel(entry.quote!.photoSizeCode)+" · "+formatMoney(entry.quote!.photoUnitPriceMinor??0,entry.quote!.currency)+" per photo":entry.quote!.pageCount+" pages × "+entry.quote!.copies+" copies"}</small></span><strong>{["REJECTED","REFUNDED"].includes(statusForBatchItem(entry.item))?"Excluded":formatMoney(entry.quote!.quotedAmountMinor,entry.quote!.currency)}</strong></div>)}</div>
+      <div className="customer-batch-quote-lines">{quoteEntries.map(entry=><div key={entry.item.job.id}><span><span className="customer-quote-line-title">{entry.item.document.originalFileName}<PrintKindTag printKind={entry.quote!.printKind}/>{["REJECTED","REFUNDED"].includes(statusForBatchItem(entry.item))?" · Rejected":""}</span><small>{entry.quote!.printKind==="PHOTO"?(entry.quote!.photoCount??0)+" × "+customerPhotoSizeLabel(entry.quote!.photoSizeCode)+" · "+formatMoney(entry.quote!.photoUnitPriceMinor??0,entry.quote!.currency)+" per photo":entry.quote!.pageCount+" pages × "+entry.quote!.copies+" copies · "+entry.quote!.colourMode+" · "+(entry.quote!.isDuplex?"Double-sided":"Single-sided")+" · "+entry.quote!.paperSize+" · "+(entry.quote!.orientation==="LANDSCAPE"?"Landscape":entry.quote!.orientation==="PORTRAIT"?"Portrait":"Auto orientation")}</small></span><strong>{["REJECTED","REFUNDED"].includes(statusForBatchItem(entry.item))?"Excluded":formatMoney(entry.quote!.quotedAmountMinor,entry.quote!.currency)}</strong></div>)}</div>
       <div className="customer-batch-print-breakdown">
         {batchMonoPrintedPages>0&&<div><span>B&W · {batchMonoPrintedPages} document pages</span><strong>{formatMoney(batchMonoAmount,quoteEntries[0].quote!.currency)}</strong></div>}
         {batchColourPrintedPages>0&&<div><span>Colour · {batchColourPrintedPages} document pages</span><strong>{formatMoney(batchColourAmount,quoteEntries[0].quote!.currency)}</strong></div>}

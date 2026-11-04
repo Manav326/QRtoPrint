@@ -6,25 +6,35 @@ import { readDarkModePreference } from "../src/ui-preferences.ts";
 const read = (path: string) => readFileSync(new URL(path, import.meta.url), "utf8");
 
 
-test("customer copy inputs capture event values before scheduling React state updates", () => {
+test("folder and per-file Copies inputs capture values before scheduling React state updates", () => {
   const app = read("../src/App.tsx");
-  const labelStart = app.indexOf('<label className="customer-folder-copies">');
-  const labelEnd = app.indexOf("</label>", labelStart);
-  assert.ok(labelStart >= 0 && labelEnd > labelStart, "The customer Copies input must remain present.");
-  const copyLabel = app.slice(labelStart, labelEnd);
+  const copyLabels: string[] = [];
+  let cursor = 0;
+  while (true) {
+    const start = app.indexOf('<label className="customer-folder-copies">', cursor);
+    if (start < 0) break;
+    const end = app.indexOf("</label>", start);
+    assert.ok(end > start, "Each Copies label must be properly closed.");
+    copyLabels.push(app.slice(start, end));
+    cursor = end + "</label>".length;
+  }
+  assert.equal(copyLabels.length, 2, "The shared flow must have folder-default and per-file Copies inputs.");
 
-  const blurStart = copyLabel.indexOf("onBlur={event => {");
-  assert.ok(blurStart >= 0, "The Copies blur handler must remain present.");
-  const changeHandler = copyLabel.slice(copyLabel.indexOf("onChange={event => {"), blurStart);
-  const blurHandler = copyLabel.slice(blurStart);
+  for (const [index, copyLabel] of copyLabels.entries()) {
+    const setter = index === 0 ? "setGroupSettings(current=>" : "setFileSettings(current=>";
+    const blurStart = copyLabel.indexOf("onBlur={event=>{");
+    assert.ok(blurStart >= 0, "Each Copies input must keep a blur handler.");
+    const changeHandler = copyLabel.slice(copyLabel.indexOf("onChange={event=>{"), blurStart);
+    const blurHandler = copyLabel.slice(blurStart);
 
-  for (const [name, handler] of [["change", changeHandler], ["blur", blurHandler]] as const) {
-    const captureIndex = handler.indexOf("event.currentTarget.value");
-    const updateIndex = handler.indexOf("setFileSettings(current =>");
-    assert.ok(captureIndex >= 0 && updateIndex > captureIndex,
-      `The Copies ${name} handler must read currentTarget before scheduling the state update.`);
-    assert.equal(handler.indexOf("event.currentTarget", updateIndex), -1,
-      `The Copies ${name} handler must not read currentTarget inside a state updater.`);
+    for (const [name, handler] of [["change", changeHandler], ["blur", blurHandler]] as const) {
+      const captureIndex = handler.indexOf("event.currentTarget.value");
+      const updateIndex = handler.indexOf(setter);
+      assert.ok(captureIndex >= 0 && updateIndex > captureIndex,
+        `The ${name} handler must read currentTarget before scheduling the state update.`);
+      assert.equal(handler.indexOf("event.currentTarget", updateIndex), -1,
+        `The ${name} handler must not read currentTarget inside a state updater.`);
+    }
   }
 });
 
@@ -220,10 +230,10 @@ test("Android customer printing uses the same single Copies control and event ha
   const customerFlow = app.slice(customerFlowStart, customerFlowEnd);
   assert.ok(app.includes("<CustomerPrintFlow publicCode={publicCode}"));
   assert.ok(customerFlow.includes('navigator.userAgent.includes("SmartPrintAndroid/1")'));
-  assert.equal((customerFlow.match(/customer-folder-copies/g) ?? []).length, 1,
-    "There must be one shared Copies input, not a separate Android implementation.");
-  assert.ok(customerFlow.includes("onChange={event => {"));
-  assert.ok(customerFlow.includes("onBlur={event => {"));
+  assert.equal((customerFlow.match(/customer-folder-copies/g) ?? []).length, 2,
+    "There must be one folder-default Copies input and one per-file Custom override in the shared flow.");
+  assert.ok(customerFlow.includes("onChange={event=>{"));
+  assert.ok(customerFlow.includes("onBlur={event=>{"));
   const copiesStart = customerFlow.indexOf('<label className="customer-folder-copies">');
   const copiesEnd = customerFlow.indexOf("</label>", copiesStart);
   const copiesInput = customerFlow.slice(copiesStart, copiesEnd);
@@ -318,7 +328,7 @@ test("native customer UI follows explicit SmartPrint theme and marks selected up
 });
 
 
-test("customer print options remain selectable when printer capability is unknown", () => {
+test("customer print settings are preserved independently of printer capability reports", () => {
   const app = read("../src/App.tsx");
   const flowStart = app.indexOf("function CustomerPrintFlow(");
   const flowEnd = app.indexOf("function UploadIcon()", flowStart);
@@ -326,10 +336,65 @@ test("customer print options remain selectable when printer capability is unknow
     "The shared customer print flow must remain present.");
   const flow = app.slice(flowStart, flowEnd);
 
-  assert.ok(flow.includes("const supportsColour=!hasAssignedPrinter||printerCapabilities?.color!==false;"));
-  assert.ok(flow.includes("const supportsDuplex=!hasAssignedPrinter||printerCapabilities?.duplex!==false;"));
-  assert.ok(app.includes('color:typeof value.color==="boolean"?value.color:undefined'));
-  assert.ok(app.includes('duplex:typeof value.duplex==="boolean"?value.duplex:undefined'));
+  assert.ok(flow.includes("Customer requests are captured independently of current hardware reports."));
+  assert.ok(flow.includes("void printerCapabilitiesJson;"));
+  assert.doesNotMatch(flow, /disabled=\{!supportsColour\}|disabled=\{!supportsDuplex\}|a4NotConfirmed/);
   assert.ok(flow.includes('colourMode:photoSettings?"Colour":settings.colourMode'));
   assert.ok(flow.includes("isDuplex:photoSettings?false:settings.isDuplex"));
+  assert.ok(flow.includes('paperSize:photoSettings?"A4":settings.paperSize'));
+  assert.ok(flow.includes('orientation:photoSettings?"AUTO":settings.orientation'));
+});
+
+test("folder defaults inherit to files and advanced paper options are opt-in", () => {
+  const app = read("../src/App.tsx");
+  const flowStart = app.indexOf("function CustomerPrintFlow(");
+  const flowEnd = app.indexOf("function UploadIcon()", flowStart);
+  const flow = app.slice(flowStart, flowEnd);
+
+  assert.ok(flow.includes("advancedEnabled:false"));
+  assert.ok(flow.includes("const selected=own?.custom?{...defaults,...own}:defaults;"));
+  assert.ok(flow.includes("checked={defaults.advancedEnabled}"));
+  assert.ok(flow.includes("checked={own.advancedEnabled}"));
+  assert.ok(flow.includes("{defaults.advancedEnabled&&"));
+  assert.ok(flow.includes("{own.advancedEnabled&&"));
+  assert.ok(flow.includes('{defaults.colourMode==="Mono"'));
+  assert.ok(flow.includes('Copies · all files'));
+});
+
+test("offline requests use the existing secure queue and owner changes require customer approval", () => {
+  const app = read("../src/App.tsx");
+  const api = read("../src/api.ts");
+  const server = read("../../../src/SmartPrint.Api/Program.cs");
+
+  assert.ok(app.includes("secureQueueFallbackEnabled"));
+  assert.ok(server.includes('publicApi.MapPost("/sessions/current/local-upload-tickets/{ticketId:guid}/cloud-recovery"'));
+  assert.ok(server.includes("if (!subscription.CloudAssistedPrintingEnabled && recoveryAgentAvailable)"));
+  assert.doesNotMatch(api, /X-Print-Queue-Fallback|allowQueueFallback/);
+  assert.doesNotMatch(server, /X-Print-Queue-Fallback|queueFallbackRequested/);
+  assert.ok(server.includes('shop.MapPatch("/print-jobs/{jobId:guid}/settings"'));
+  assert.ok(server.includes('job.Status = "AWAITING_CUSTOMER_APPROVAL";'));
+  assert.ok(app.includes("onUpdateSettings={updatePrintJobSettings}"));
+});
+
+test("customer paper summaries reflect advanced folder and per-file choices", () => {
+  const app = read("../src/App.tsx");
+  assert.match(app, /customer-paper-default">\{defaults\.advancedEnabled\?defaults\.paperSize:"A4"\}/);
+  assert.match(app, /customer-paper-default">\{own\.advancedEnabled\?own\.paperSize:"A4"\}/);
+  assert.match(app, /entry\.quote!\.paperSize/);
+  assert.match(app, /item\.job\.paperSize\?\?"A4"/);
+});
+
+test("all print settings controls capture React event values before state updaters", () => {
+  const app = read("../src/App.tsx");
+  const setters = ["setGroupSettings(current=>","setFileSettings(current=>","setEditingPrintSettings(current=>"];
+  for (const setter of setters) {
+    const lines = app.split("\n").filter(line => line.includes(setter));
+    assert.ok(lines.length > 0, `${setter} must remain part of the shared print settings flow.`);
+    assert.ok(lines.every(line => !line.includes("event.currentTarget") && !line.includes("event.target")),
+      `${setter} must use values captured before entering the state updater.`);
+  }
+  assert.match(app, /const advancedEnabled=event\.currentTarget\.checked/);
+  assert.match(app, /const paperSize=event\.currentTarget\.value/);
+  assert.match(app, /const orientation=event\.currentTarget\.value/);
+  assert.match(app, /const copies=Math\.max\(1,Math\.min\(100,Number\(event\.currentTarget\.value\)\|\|1\)\)/);
 });

@@ -1983,6 +1983,8 @@ shop.MapGet("/print-jobs", async (
             job.ColourMode,
             job.PaperSize,
             job.IsDuplex,
+            job.Orientation,
+            job.PricingVersion,
             job.PrintKind,
             job.PhotoSizeCode,
             job.PhotoCount,
@@ -2418,6 +2420,8 @@ shop.MapPatch("/print-jobs/{jobId:guid}/printer", async (
             batchJob.AgentLeaseExpiresUtc = null;
             batchJob.AgentClaimedUtc = null;
             batchJob.LocalQueueReceivedUtc = null;
+            batchJob.FailureCode = null;
+            batchJob.SpoolerStatus = null;
         }
         batchJob.UpdatedUtc = now;
         db.PrintJobEvents.Add(new PrintJobEvent
@@ -2448,7 +2452,128 @@ shop.MapPatch("/print-jobs/{jobId:guid}/printer", async (
         AssignedJobCount = assigned,
         UpdatedUtc = now
     });
-});shop.MapPost("/print-jobs/{jobId:guid}/dispatch", async (Guid jobId, ClaimsPrincipal principal, SmartPrintDbContext db, CancellationToken ct) =>
+});
+
+shop.MapPatch("/print-jobs/{jobId:guid}/settings", async (
+    Guid jobId,
+    UpdatePrintJobSettingsRequest request,
+    ClaimsPrincipal principal,
+    SmartPrintDbContext db,
+    CancellationToken ct) =>
+{
+    if (!IsShopOwner(principal) || !TryGetTenantId(principal, out var tenantId)) return Results.Forbid();
+
+    var colourMode = request.ColourMode?.Trim();
+    var paperSize = request.PaperSize?.Trim().ToUpperInvariant();
+    var orientation = request.Orientation?.Trim().ToUpperInvariant();
+    if (colourMode is not ("Mono" or "Colour") ||
+        paperSize is not ("A4" or "A3" or "A5" or "LETTER" or "LEGAL") ||
+        request.Copies is < 1 or > 100 ||
+        orientation is not ("AUTO" or "PORTRAIT" or "LANDSCAPE"))
+        return Results.ValidationProblem(new Dictionary<string, string[]>
+        {
+            ["printOptions"] = ["Choose supported paper, orientation, colour, sides and 1–100 copies."]
+        });
+
+    await using var transaction = await db.Database.BeginTransactionAsync(ct);
+    var lockedJobs = await db.PrintJobs.FromSqlInterpolated(
+        $"SELECT * FROM \"PrintJobs\" WHERE \"Id\" = {jobId} AND \"TenantId\" = {tenantId} FOR UPDATE")
+        .ToListAsync(ct);
+    var job = lockedJobs.SingleOrDefault();
+    if (job is null)
+    {
+        await transaction.RollbackAsync(ct);
+        return Results.NotFound();
+    }
+
+    if (job.PrintKind != "DOCUMENT" ||
+        job.Status is not ("AWAITING_CONFIGURATION" or "AWAITING_CUSTOMER_APPROVAL" or
+            "AWAITING_SHOP_APPROVAL" or "AWAITING_PAYMENT" or "QUOTE_EXPIRED" or "PAYMENT_REJECTED"))
+    {
+        await transaction.RollbackAsync(ct);
+        return Results.Conflict(new
+        {
+            code = "print_settings_locked",
+            message = "Print options can only be adjusted before payment begins and before the job is handed to the Agent."
+        });
+    }
+
+    var hasStartedPayment = await db.PrintPayments.AsNoTracking().AnyAsync(payment =>
+        payment.TenantId == tenantId && payment.PrintJobId == jobId && payment.Status != "REJECTED", ct);
+    var batchPaymentStarted = job.BatchId is Guid batchId &&
+        await db.PrintBatchPayments.AsNoTracking().AnyAsync(payment =>
+            payment.TenantId == tenantId && payment.BatchId == batchId && payment.Status != "REJECTED", ct);
+    if (hasStartedPayment || batchPaymentStarted)
+    {
+        await transaction.RollbackAsync(ct);
+        return Results.Conflict(new
+        {
+            code = "payment_already_started",
+            message = "This job or its batch already has a payment attempt. Do not change its quoted settings; resolve the payment or refund first."
+        });
+    }
+
+    var pricing = await db.ShopPricingProfiles.AsNoTracking()
+        .SingleOrDefaultAsync(item => item.TenantId == tenantId && item.IsConfigured, ct);
+    if (pricing is null)
+    {
+        await transaction.RollbackAsync(ct);
+        return Results.Conflict(new { code = "shop_pricing_not_configured", message = "Configure shop print prices before revising this quote." });
+    }
+
+    long amount;
+    long[] pageRefundAllocations;
+    try
+    {
+        amount = PricingCalculator.Calculate(job.PageCount, request.Copies, colourMode, request.IsDuplex, pricing);
+        pageRefundAllocations = PricingCalculator.CalculatePageRefundAllocations(
+            job.PageCount, request.Copies, colourMode, request.IsDuplex, pricing);
+    }
+    catch (DuplexPricingNotConfiguredException exception)
+    {
+        await transaction.RollbackAsync(ct);
+        return Results.Conflict(new { code = "duplex_pricing_not_configured", message = exception.Message });
+    }
+
+    var now = DateTimeOffset.UtcNow;
+    var previousStatus = job.Status;
+    job.ColourMode = colourMode;
+    job.PaperSize = paperSize;
+    job.IsDuplex = request.IsDuplex;
+    job.Copies = request.Copies;
+    job.Orientation = orientation;
+    job.Currency = "INR";
+    job.QuotedAmountMinor = amount;
+    job.PageRefundAllocationsJson = JsonSerializer.Serialize(pageRefundAllocations);
+    job.PricingVersion = pricing.Version;
+    job.QuoteExpiresUtc = now.AddMinutes(10);
+    job.Status = "AWAITING_CUSTOMER_APPROVAL";
+    job.FailureCode = null;
+    job.UpdatedUtc = now;
+    db.PrintJobEvents.Add(new PrintJobEvent
+    {
+        TenantId = tenantId,
+        PrintJobId = job.Id,
+        PreviousStatus = previousStatus,
+        NewStatus = job.Status,
+        ActorType = "ShopUser",
+        ActorId = GetActorId(principal),
+        ReasonCode = "SHOP_REVISED_PRINT_SETTINGS_CUSTOMER_APPROVAL_REQUIRED",
+        CreatedUtc = now
+    });
+
+    await db.SaveChangesAsync(ct);
+    await transaction.CommitAsync(ct);
+    return Results.Ok(new
+    {
+        job.Id, job.JobNumber, job.Status, job.PageCount, job.Copies,
+        job.ColourMode, job.PaperSize, job.IsDuplex, job.Orientation,
+        job.Currency, job.QuotedAmountMinor, AmountMajor = amount / 100m,
+        job.PricingVersion, job.QuoteExpiresUtc, CustomerApprovalRequired = true
+    });
+});
+
+shop.MapPost("/print-jobs/{jobId:guid}/dispatch", async (Guid jobId, ClaimsPrincipal principal, SmartPrintDbContext db, CancellationToken ct) =>
 {
     if (!IsShopOwner(principal) || !TryGetTenantId(principal, out var tenantId)) return Results.Forbid();
 
@@ -3554,13 +3679,14 @@ agentApi.MapPost("/jobs/claim", async (
 
     var now = DateTimeOffset.UtcNow;
     var onlineAfter = now.AddMinutes(-2);
+    // Queue staging secures a paid document on the paired shop computer; it
+    // must not require the physical printer to be Ready. The owner explicitly
+    // releases output later, and the dispatch route rechecks live hardware.
     var availablePrinterIds = await db.PrinterDevices.AsNoTracking()
         .Where(printer => printer.TenantId == device.TenantId &&
                           printer.AgentDeviceId == device.Id &&
                           printer.IsActive &&
-                          (printer.OutputMode == "PDF_EXPORT" ||
-                           (printer.LastSeenUtc != null && printer.LastSeenUtc >= onlineAfter &&
-                            (printer.Status == "Ready" || printer.Status == "Busy"))) &&
+                          printer.QueueName != null && printer.QueueName != "" &&
                           db.AgentDevices.Any(agent =>
                               agent.Id == device.Id && agent.TenantId == device.TenantId &&
                               agent.RevokedUtc == null && agent.Status != "Revoked" &&
@@ -3618,6 +3744,7 @@ agentApi.MapPost("/jobs/claim", async (
             job.ColourMode,
             job.PaperSize,
             job.IsDuplex,
+            job.Orientation,
             job.Currency,
             job.QuotedAmountMinor,
             job.PrinterDeviceId,
@@ -3654,9 +3781,7 @@ agentApi.MapPost("/jobs/claim", async (
                               printer.TenantId == device.TenantId &&
                               printer.AgentDeviceId == device.Id &&
                               printer.IsActive &&
-                              (printer.OutputMode == "PDF_EXPORT" ||
-                               (printer.LastSeenUtc != null && printer.LastSeenUtc >= onlineAfter &&
-                                (printer.Status == "Ready" || printer.Status == "Busy")))) &&
+                              printer.QueueName != null && printer.QueueName != "") &&
                           db.AgentDevices.Any(agent =>
                               agent.Id == device.Id &&
                               agent.TenantId == device.TenantId &&
@@ -3705,6 +3830,7 @@ agentApi.MapPost("/jobs/claim", async (
             candidate.ColourMode,
             candidate.PaperSize,
             candidate.IsDuplex,
+            candidate.Orientation,
             candidate.Currency,
             candidate.QuotedAmountMinor,
             candidate.PrinterDeviceId,
@@ -3933,6 +4059,11 @@ agentApi.MapPost("/local-uploads/{ticketId:guid}/claim", async (
                     completedJob.Status,
                     completedJob.PageCount,
                     completedJob.Copies,
+                    completedJob.ColourMode,
+                    completedJob.PaperSize,
+                    completedJob.IsDuplex,
+                    completedJob.Orientation,
+                    completedJob.PricingVersion,
                     completedJob.Currency,
                     completedJob.QuotedAmountMinor,
                     completedJob.CreatedUtc
@@ -3961,21 +4092,15 @@ agentApi.MapPost("/local-uploads/{ticketId:guid}/claim", async (
     var stationPrinter = await db.PrinterDevices.AsNoTracking()
         .Where(item => item.Id == ticket.PrinterDeviceId &&
                        item.TenantId == device.TenantId &&
-                       item.AgentDeviceId == device.Id &&
-                       item.IsActive &&
-                       !string.IsNullOrWhiteSpace(item.QueueName))
-        .Select(item => new { item.Id, item.DisplayName, item.QueueName, item.Status, item.LastSeenUtc, item.OutputMode })
+                       item.AgentDeviceId == device.Id)
+        .Select(item => new { item.Id, item.DisplayName, QueueName = item.QueueName ?? string.Empty, item.OutputMode })
         .SingleOrDefaultAsync(ct);
-    if (stationPrinter is null ||
-        (stationPrinter.OutputMode != "PDF_EXPORT" &&
-         (stationPrinter.LastSeenUtc is null ||
-          stationPrinter.LastSeenUtc < now.AddMinutes(-2) ||
-          (stationPrinter.Status != "Ready" && stationPrinter.Status != "Busy"))))
+    if (stationPrinter is null)
     {
         return Results.Conflict(new
         {
-            code = "local_upload_printer_unavailable",
-            message = "The QR station's assigned printer is no longer ready. Choose Cloud-assisted upload and ask the shop to assign one available printer to the whole batch."
+            code = "local_upload_printer_assignment_missing",
+            message = "The original printer assignment changed. SmartPrint will keep this request in the secure queue for the shop owner to reassign."
         });
     }
 
@@ -3999,6 +4124,11 @@ agentApi.MapPost("/local-uploads/{ticketId:guid}/claim", async (
         ticket.MediaType,
         ticket.SizeBytes,
         ticket.Sha256,
+        ticket.ColourMode,
+        ticket.PaperSize,
+        ticket.IsDuplex,
+        ticket.Copies,
+        ticket.Orientation,
         ticket.ExpiresUtc
     });
 });
@@ -4063,6 +4193,11 @@ agentApi.MapPost("/local-uploads/{ticketId:guid}/complete", async (
                     completedJob.Status,
                     completedJob.PageCount,
                     completedJob.Copies,
+                    completedJob.ColourMode,
+                    completedJob.PaperSize,
+                    completedJob.IsDuplex,
+                    completedJob.Orientation,
+                    completedJob.PricingVersion,
                     completedJob.Currency,
                     completedJob.QuotedAmountMinor,
                     completedJob.CreatedUtc
@@ -4157,6 +4292,11 @@ agentApi.MapPost("/local-uploads/{ticketId:guid}/complete", async (
                     existingJob.Status,
                     existingJob.PageCount,
                     existingJob.Copies,
+                    existingJob.ColourMode,
+                    existingJob.PaperSize,
+                    existingJob.IsDuplex,
+                    existingJob.Orientation,
+                    existingJob.PricingVersion,
                     existingJob.Currency,
                     existingJob.QuotedAmountMinor,
                     existingJob.CreatedUtc
@@ -4197,7 +4337,11 @@ agentApi.MapPost("/local-uploads/{ticketId:guid}/complete", async (
         Status = "AWAITING_CONFIGURATION",
         IdempotencyKey = $"LOCAL-{ticket.Id:N}",
         PageCount = request.PageCount,
-        Copies = 1,
+        Copies = ticket.Copies,
+        ColourMode = ticket.ColourMode,
+        PaperSize = ticket.PaperSize,
+        IsDuplex = ticket.IsDuplex,
+        Orientation = ticket.Orientation,
         Currency = "INR",
         QuotedAmountMinor = 0,
         CreatedUtc = now,
@@ -4248,6 +4392,11 @@ agentApi.MapPost("/local-uploads/{ticketId:guid}/complete", async (
                 job.Status,
                 job.PageCount,
                 job.Copies,
+                job.ColourMode,
+                job.PaperSize,
+                job.IsDuplex,
+                job.Orientation,
+                job.PricingVersion,
                 job.Currency,
                 job.QuotedAmountMinor,
                 job.CreatedUtc
@@ -4552,6 +4701,17 @@ agentApi.MapPost("/jobs/{jobId:guid}/print-blocked", async (Guid jobId, AgentPri
     var previous = job.Status;
     job.Status = "LOCAL_QUEUE_READY";
     job.PrintDispatchLeaseExpiresUtc = null;
+    // This failure is reported before StartDoc/StartPage. Remove the attempted
+    // spooler name and dispatch snapshot so the owner can safely reassign the
+    // same protected local document to another compatible queue.
+    job.SpoolerJobName = null;
+    job.SpoolerJobId = null;
+    job.SpoolerSubmittedUtc = null;
+    job.SpoolerObservedUtc = null;
+    job.PrinterNameSnapshot = null;
+    job.PrinterQueueNameSnapshot = null;
+    job.PrinterAgentNameSnapshot = null;
+    job.PrinterSnapshotUtc = null;
     job.FailureCode = reason;
     job.SpoolerStatus = "BLOCKED_BEFORE_SUBMISSION";
     job.UpdatedUtc = DateTimeOffset.UtcNow;
@@ -5589,36 +5749,6 @@ publicApi.MapPost("/sessions/current/jobs", async (
         return Results.Unauthorized();
     }
 
-    var existing = await db.PrintJobs.AsNoTracking()
-        .Where(job => job.TenantId == session.TenantId && job.IdempotencyKey == idempotencyKey)
-        .Select(job => new { job.Id, job.BatchId, job.BatchGroupName, job.BatchName, job.CustomerSessionId, job.JobNumber, job.Status, job.PageCount, job.CreatedUtc })
-        .SingleOrDefaultAsync(ct);
-    if (existing is not null)
-    {
-        if (existing.CustomerSessionId != session.Id)
-        {
-            return Results.Conflict(new { code = "idempotency_key_reused", message = "This request key has already been used for another customer session." });
-        }
-
-        var existingDocument = await db.PrintDocuments.AsNoTracking()
-            .Where(document => document.TenantId == session.TenantId && document.PrintJobId == existing.Id)
-            .Select(document => new { document.OriginalFileName, document.MediaType, document.SizeBytes })
-            .SingleOrDefaultAsync(ct);
-        return Results.Ok(new { Job = existing, Document = existingDocument, DuplicateRequest = true });
-    }
-
-    var batchCheckoutLocked = await db.PrintBatchPayments.AsNoTracking().AnyAsync(item =>
-        item.TenantId == session.TenantId &&
-        item.CustomerSessionId == session.Id &&
-        item.BatchId == batchId &&
-        item.Status != "REJECTED", ct);
-    if (batchCheckoutLocked)
-        return Results.Conflict(new
-        {
-            code = "batch_upload_locked_after_payment_start",
-            message = "This batch has a payment attempt or a verified payment. Start a new batch for additional files so every file has a clear payment total."
-        });
-
     if (!context.Request.HasFormContentType)
     {
         return Results.BadRequest(new { code = "multipart_form_required", message = "Upload the document using multipart/form-data." });
@@ -5631,6 +5761,23 @@ publicApi.MapPost("/sessions/current/jobs", async (
     }
 
     var file = form.Files[0];
+    var requestedColourMode = form["colourMode"].FirstOrDefault() ?? "Mono";
+    var requestedPaperSize = form["paperSize"].FirstOrDefault() ?? "A4";
+    var requestedDuplexText = form["isDuplex"].FirstOrDefault() ?? "false";
+    var requestedCopiesText = form["copies"].FirstOrDefault() ?? "1";
+    var requestedOrientation = form["orientation"].FirstOrDefault() ?? "AUTO";
+    if (requestedColourMode is not ("Mono" or "Colour") ||
+        requestedPaperSize is not ("A4" or "A3" or "A5" or "LETTER" or "LEGAL") ||
+        !bool.TryParse(requestedDuplexText, out var requestedDuplex) ||
+        !int.TryParse(requestedCopiesText, out var requestedCopies) ||
+        requestedCopies is < 1 or > 100 ||
+        requestedOrientation is not ("AUTO" or "PORTRAIT" or "LANDSCAPE"))
+    {
+        return Results.ValidationProblem(new Dictionary<string, string[]>
+        {
+            ["printOptions"] = ["Choose a supported paper size, portrait/landscape orientation, Mono/Colour, single/double-sided and 1–100 copies."]
+        });
+    }
     string batchGroupName;
     try
     {
@@ -5655,6 +5802,81 @@ publicApi.MapPost("/sessions/current/jobs", async (
         return Results.Problem(statusCode: StatusCodes.Status413PayloadTooLarge, title: "File size must be between 1 byte and 20 MB.");
     }
 
+    var originalName = file.FileName.Split('/', '\\').LastOrDefault() ?? string.Empty;
+    originalName = new string(originalName.Where(character => !char.IsControl(character)).ToArray()).Trim();
+    if (string.IsNullOrWhiteSpace(originalName))
+        return Results.BadRequest(new { code = "invalid_file_name", message = "The uploaded file name is invalid." });
+    originalName = originalName[..Math.Min(originalName.Length, 255)];
+
+    // A retry must be the exact original document and the exact original
+    // settings. Do not return an existing job just because its key matches;
+    // verify the body before treating this request as idempotent.
+    var existing = await db.PrintJobs.AsNoTracking()
+        .Where(job => job.TenantId == session.TenantId && job.IdempotencyKey == idempotencyKey)
+        .Select(job => new
+        {
+            job.Id, job.BatchId, job.BatchGroupName, job.BatchName, job.CustomerSessionId,
+            job.JobNumber, job.Status, job.PageCount, job.Copies, job.ColourMode,
+            job.PaperSize, job.IsDuplex, job.Orientation, job.PricingVersion,
+            job.Currency, job.QuotedAmountMinor, job.CreatedUtc
+        })
+        .SingleOrDefaultAsync(ct);
+    if (existing is not null)
+    {
+        if (existing.CustomerSessionId != session.Id)
+            return Results.Conflict(new { code = "idempotency_key_reused", message = "This request key has already been used for another customer session." });
+
+        var existingDocument = await db.PrintDocuments.AsNoTracking()
+            .Where(document => document.TenantId == session.TenantId && document.PrintJobId == existing.Id)
+            .Select(document => new
+            {
+                document.OriginalFileName, document.MediaType, document.SizeBytes,
+                document.Sha256, document.PageSizesJson
+            })
+            .SingleOrDefaultAsync(ct);
+        if (existingDocument is null)
+            return Results.Conflict(new { code = "idempotency_state_missing", message = "The original document record is unavailable. Refresh the request before retrying." });
+
+        string suppliedSha;
+        await using (var existingInput = file.OpenReadStream())
+        {
+            suppliedSha = Convert.ToHexString(await SHA256.HashDataAsync(existingInput, ct)).ToLowerInvariant();
+        }
+
+        if ((!string.IsNullOrWhiteSpace(rawBatchId) && existing.BatchId != batchId) ||
+            PrintBatchGroupRules.Normalize(existing.BatchGroupName) != batchGroupName ||
+            existing.Copies != requestedCopies ||
+            existing.ColourMode != requestedColourMode ||
+            existing.PaperSize != requestedPaperSize ||
+            existing.IsDuplex != requestedDuplex ||
+            existing.Orientation != requestedOrientation ||
+            (requestedBatchName is not null && existing.BatchName != requestedBatchName) ||
+            existingDocument.OriginalFileName != originalName ||
+            existingDocument.SizeBytes != file.Length ||
+            !string.Equals(existingDocument.Sha256, suppliedSha, StringComparison.OrdinalIgnoreCase))
+        {
+            return Results.Conflict(new
+            {
+                code = "idempotency_key_reused",
+                message = "This upload key already belongs to a different file, batch or set of print options. Keep the original request unchanged or start a new upload."
+            });
+        }
+
+        return Results.Ok(new { Job = existing, Document = existingDocument, DuplicateRequest = true });
+    }
+
+    var batchCheckoutLocked = await db.PrintBatchPayments.AsNoTracking().AnyAsync(item =>
+        item.TenantId == session.TenantId &&
+        item.CustomerSessionId == session.Id &&
+        item.BatchId == batchId &&
+        item.Status != "REJECTED", ct);
+    if (batchCheckoutLocked)
+        return Results.Conflict(new
+        {
+            code = "batch_upload_locked_after_payment_start",
+            message = "This batch has a payment attempt or a verified payment. Start a new batch for additional files so every file has a clear payment total."
+        });
+
     var subscription = await entitlements.GetForTenantAsync(session.TenantId, ct);
     if (!subscription.IsAccessActive)
     {
@@ -5663,11 +5885,17 @@ publicApi.MapPost("/sessions/current/jobs", async (
             title: "This shop's trial or subscription period is no longer active.");
     }
 
-    if (!subscription.CloudAssistedPrintingEnabled)
+    var stationDefaultPrinterId = await db.QrStations.AsNoTracking()
+        .Where(station => station.Id == session.QrStationId && station.TenantId == session.TenantId)
+        .Select(station => station.PrinterDeviceId)
+        .SingleOrDefaultAsync(ct);
+    var localAgentAvailable = await GetLocalAgentInfoAsync(
+        db, session.TenantId, stationDefaultPrinterId, now, ct) is not null;
+    if (!subscription.CloudAssistedPrintingEnabled && localAgentAvailable)
     {
         return Results.Problem(
             statusCode: StatusCodes.Status403Forbidden,
-            title: "Cloud-assisted printing is not included in this shop's current plan.");
+            title: "Secure cloud uploads are not included in this shop's plan while its local Agent is available.");
     }
 
     if (!PlanEntitlementRules.AllowsDocument(subscription.MaxDocumentBytes, file.Length))
@@ -5684,14 +5912,6 @@ publicApi.MapPost("/sessions/current/jobs", async (
         return Results.Conflict(new { code = preflightQuota.Code, message = preflightQuota.Message, current = preflightQuota.Current, maximum = preflightQuota.Maximum });
     }
 
-    var originalName = file.FileName.Split('/', '\\').LastOrDefault() ?? string.Empty;
-    originalName = new string(originalName.Where(character => !char.IsControl(character)).ToArray()).Trim();
-    if (string.IsNullOrWhiteSpace(originalName))
-    {
-        return Results.BadRequest(new { code = "invalid_file_name", message = "The uploaded file name is invalid." });
-    }
-    originalName = originalName[..Math.Min(originalName.Length, 255)];
-
     var documentId = Guid.NewGuid();
     StoredDocument stored;
     try
@@ -5704,11 +5924,6 @@ publicApi.MapPost("/sessions/current/jobs", async (
     {
         return Results.UnprocessableEntity(new { code = "document_not_supported", message = exception.Message });
     }
-
-    var stationDefaultPrinterId = await db.QrStations.AsNoTracking()
-        .Where(station => station.Id == session.QrStationId && station.TenantId == session.TenantId)
-        .Select(station => station.PrinterDeviceId)
-        .SingleOrDefaultAsync(ct);
 
     var job = new PrintJob
     {
@@ -5723,7 +5938,11 @@ publicApi.MapPost("/sessions/current/jobs", async (
         Status = "AWAITING_CONFIGURATION",
         IdempotencyKey = idempotencyKey,
         PageCount = stored.Analysis.PageCount,
-        Copies = 1,
+        Copies = requestedCopies,
+        ColourMode = requestedColourMode,
+        PaperSize = requestedPaperSize,
+        IsDuplex = requestedDuplex,
+        Orientation = requestedOrientation,
         Currency = "INR",
         QuotedAmountMinor = 0,
         CreatedUtc = now,
@@ -5750,7 +5969,13 @@ publicApi.MapPost("/sessions/current/jobs", async (
         await entitlements.AcquireQuotaLockAsync(session.TenantId, TenantQuotaResource.MonthlyPrintJob, ct);
         var racedJob = await db.PrintJobs.AsNoTracking()
             .Where(item => item.TenantId == session.TenantId && item.IdempotencyKey == idempotencyKey)
-            .Select(item => new { item.Id, item.CustomerSessionId, item.BatchId, item.BatchName, item.JobNumber, item.Status, item.PageCount, item.CreatedUtc })
+            .Select(item => new
+            {
+                item.Id, item.CustomerSessionId, item.BatchId, item.BatchName, item.BatchGroupName,
+                item.JobNumber, item.Status, item.PageCount, item.Copies, item.ColourMode,
+                item.PaperSize, item.IsDuplex, item.Orientation, item.PricingVersion,
+                item.Currency, item.QuotedAmountMinor, item.CreatedUtc
+            })
             .SingleOrDefaultAsync(ct);
         if (racedJob is not null)
         {
@@ -5762,6 +5987,25 @@ publicApi.MapPost("/sessions/current/jobs", async (
                 .Where(item => item.TenantId == session.TenantId && item.PrintJobId == racedJob.Id)
                 .Select(item => new { item.OriginalFileName, item.MediaType, item.SizeBytes, item.Sha256, item.PageSizesJson })
                 .SingleOrDefaultAsync(ct);
+            if (racedDocument is null ||
+                (!string.IsNullOrWhiteSpace(rawBatchId) && racedJob.BatchId != batchId) ||
+                racedJob.BatchGroupName != batchGroupName ||
+                racedJob.Copies != requestedCopies ||
+                racedJob.ColourMode != requestedColourMode ||
+                racedJob.PaperSize != requestedPaperSize ||
+                racedJob.IsDuplex != requestedDuplex ||
+                racedJob.Orientation != requestedOrientation ||
+                (requestedBatchName is not null && racedJob.BatchName != requestedBatchName) ||
+                racedDocument.OriginalFileName != originalName ||
+                racedDocument.SizeBytes != file.Length ||
+                !string.Equals(racedDocument.Sha256, stored.Sha256, StringComparison.OrdinalIgnoreCase))
+            {
+                return Results.Conflict(new
+                {
+                    code = "idempotency_key_reused",
+                    message = "This upload key already belongs to a different file or set of print options. Refresh the request instead of changing the original job."
+                });
+            }
             return Results.Ok(new { Job = racedJob, Document = racedDocument, DuplicateRequest = true });
         }
 
@@ -5894,6 +6138,11 @@ publicApi.MapPost("/sessions/current/jobs", async (
             job.Status,
             job.PageCount,
             job.Copies,
+            job.ColourMode,
+            job.PaperSize,
+            job.IsDuplex,
+            job.Orientation,
+            job.PricingVersion,
             job.Currency,
             job.QuotedAmountMinor,
             job.CreatedUtc
@@ -5966,7 +6215,11 @@ publicApi.MapPost("/sessions/current/local-upload-tickets", async (
     };
     var sha = request.Sha256?.Trim().ToLowerInvariant();
     if (mediaType is null || request.SizeBytes is <= 0 or > 20L * 1024 * 1024 ||
-        string.IsNullOrWhiteSpace(sha) || sha.Length != 64 || sha.Any(character => !Uri.IsHexDigit(character)))
+        string.IsNullOrWhiteSpace(sha) || sha.Length != 64 || sha.Any(character => !Uri.IsHexDigit(character)) ||
+        request.ColourMode is not ("Mono" or "Colour") ||
+        request.PaperSize is not ("A4" or "A3" or "A5" or "LETTER" or "LEGAL") ||
+        request.Copies is < 1 or > 100 ||
+        request.Orientation is not ("AUTO" or "PORTRAIT" or "LANDSCAPE"))
     {
         return Results.UnprocessableEntity(new { code = "document_not_supported", message = "Local upload supports PDF, JPG/JPEG and PNG files up to 20 MB with a valid SHA-256 digest." });
     }
@@ -5995,13 +6248,125 @@ publicApi.MapPost("/sessions/current/local-upload-tickets", async (
             existing.SizeBytes != request.SizeBytes ||
             !string.Equals(existing.Sha256, sha, StringComparison.OrdinalIgnoreCase) ||
             existing.OriginalFileName != originalName ||
-            PrintBatchGroupRules.Normalize(existing.BatchGroupName) != batchGroupName)
+            (request.BatchId is Guid requestedBatchId && existing.BatchId != requestedBatchId) ||
+            (requestedBatchName is not null && existing.BatchName != requestedBatchName) ||
+            PrintBatchGroupRules.Normalize(existing.BatchGroupName) != batchGroupName ||
+            existing.ColourMode != request.ColourMode ||
+            existing.PaperSize != request.PaperSize ||
+            existing.IsDuplex != request.IsDuplex ||
+            existing.Copies != request.Copies ||
+            existing.Orientation != request.Orientation)
         {
-            return Results.Conflict(new { code = "local_upload_idempotency_conflict", message = "This upload attempt key is already associated with a different document." });
+            return Results.Conflict(new { code = "local_upload_idempotency_conflict", message = "This upload attempt key is already associated with a different document, batch or set of print options." });
         }
 
-        // Keep the ticket identity after its LAN claim window expires. HTTPS
-        // recovery can still complete this same PrintJob for up to 24 hours.
+        var originalTicket = existing;
+        // Reuse the original ticket rather than creating a second reservation
+        // when a never-completed LAN attempt's 15-minute lease has expired.
+        // This is allowed only after the old claim lease ends, while the same
+        // shop Agent remains paired/online and no PrintJob or document exists.
+        var renewalNow = DateTimeOffset.UtcNow;
+        if (LocalUploadRecoveryRules.CanRenewExpiredTicket(
+                existing.CreatedUtc, existing.ExpiresUtc, existing.ClaimLeaseExpiresUtc,
+                existing.CompletedUtc, renewalNow,
+                TimeSpan.FromHours(LocalUploadRecoveryRules.MaximumRecoveryAgeHours)))
+        {
+            await using var renewalTransaction = await db.Database.BeginTransactionAsync(ct);
+            var lockedTickets = await db.LocalPrintUploadTickets.FromSqlInterpolated(
+                $"SELECT * FROM \"LocalPrintUploadTickets\" WHERE \"Id\" = {existing.Id} AND \"TenantId\" = {session.TenantId} AND \"CustomerSessionId\" = {session.Id} FOR UPDATE")
+                .ToListAsync(ct);
+            var lockedTicket = lockedTickets.SingleOrDefault();
+            if (lockedTicket is not null)
+            {
+                // Return the authoritative row even when another retry renewed it
+                // while this request was waiting for the lock.
+                existing = lockedTicket;
+
+                // Checkout takes the same batch-job row locks. Serialise lease
+                // renewal with payment creation so a ticket cannot become active
+                // after the batch has entered checkout.
+                _ = await db.PrintJobs.FromSqlInterpolated(
+                    $"SELECT * FROM \"PrintJobs\" WHERE \"TenantId\" = {lockedTicket.TenantId} AND \"CustomerSessionId\" = {lockedTicket.CustomerSessionId} AND \"BatchId\" = {lockedTicket.BatchId} FOR UPDATE")
+                    .ToListAsync(ct);
+            }
+            if (lockedTicket is not null &&
+                lockedTicket.IdempotencyKey == idempotencyKey &&
+                lockedTicket.TenantId == originalTicket.TenantId &&
+                lockedTicket.CustomerSessionId == originalTicket.CustomerSessionId &&
+                lockedTicket.PrintJobId == originalTicket.PrintJobId &&
+                lockedTicket.BatchId == originalTicket.BatchId &&
+                lockedTicket.QrStationId == originalTicket.QrStationId &&
+                lockedTicket.PrinterDeviceId == originalTicket.PrinterDeviceId &&
+                lockedTicket.AgentDeviceId == originalTicket.AgentDeviceId &&
+                lockedTicket.GrantHash == originalTicket.GrantHash &&
+                lockedTicket.SizeBytes == request.SizeBytes &&
+                string.Equals(lockedTicket.Sha256, sha, StringComparison.OrdinalIgnoreCase) &&
+                lockedTicket.OriginalFileName == originalName &&
+                lockedTicket.BatchGroupName == originalTicket.BatchGroupName &&
+                lockedTicket.BatchName == originalTicket.BatchName &&
+                lockedTicket.ColourMode == request.ColourMode &&
+                lockedTicket.PaperSize == request.PaperSize &&
+                lockedTicket.IsDuplex == request.IsDuplex &&
+                lockedTicket.Copies == request.Copies &&
+                lockedTicket.Orientation == request.Orientation &&
+                lockedTicket.CompletedUtc is null &&
+                LocalUploadRecoveryRules.CanRenewExpiredTicket(
+                    lockedTicket.CreatedUtc, lockedTicket.ExpiresUtc, lockedTicket.ClaimLeaseExpiresUtc,
+                    lockedTicket.CompletedUtc, renewalNow,
+                    TimeSpan.FromHours(LocalUploadRecoveryRules.MaximumRecoveryAgeHours)) &&
+                !await db.PrintJobs.AsNoTracking().AnyAsync(item =>
+                    item.TenantId == lockedTicket.TenantId && item.Id == lockedTicket.PrintJobId, ct) &&
+                !await db.PrintDocuments.AsNoTracking().AnyAsync(item =>
+                    item.TenantId == lockedTicket.TenantId && item.PrintJobId == lockedTicket.PrintJobId, ct) &&
+                !await db.PrintBatchPayments.AsNoTracking().AnyAsync(item =>
+                    item.TenantId == lockedTicket.TenantId &&
+                    item.CustomerSessionId == lockedTicket.CustomerSessionId &&
+                    item.BatchId == lockedTicket.BatchId &&
+                    item.Status != "REJECTED", ct))
+            {
+                var currentAgentEndpoints = await (
+                    from station in db.QrStations.AsNoTracking()
+                    join printer in db.PrinterDevices.AsNoTracking()
+                        on new { station.TenantId, PrinterId = station.PrinterDeviceId!.Value }
+                        equals new { printer.TenantId, PrinterId = printer.Id }
+                    join agent in db.AgentDevices.AsNoTracking()
+                        on new { printer.TenantId, AgentId = printer.AgentDeviceId!.Value }
+                        equals new { agent.TenantId, AgentId = agent.Id }
+                    where station.Id == lockedTicket.QrStationId &&
+                          station.TenantId == lockedTicket.TenantId &&
+                          station.IsEnabled &&
+                          station.PrinterDeviceId == lockedTicket.PrinterDeviceId &&
+                          printer.IsActive &&
+                          printer.AgentDeviceId == lockedTicket.AgentDeviceId &&
+                          !string.IsNullOrWhiteSpace(printer.QueueName) &&
+                          agent.Id == lockedTicket.AgentDeviceId &&
+                          agent.RevokedUtc == null &&
+                          agent.LastSeenUtc != null &&
+                          agent.LastSeenUtc >= renewalNow.AddMinutes(-2)
+                    select agent.LocalEndpointsJson
+                ).SingleOrDefaultAsync(ct);
+
+                if (currentAgentEndpoints is not null &&
+                    AgentLocalEndpointRules.Normalize(ReadLocalAgentEndpoints(currentAgentEndpoints)).Count > 0)
+                {
+                    lockedTicket.ExpiresUtc = renewalNow.AddMinutes(15);
+                    lockedTicket.ClaimedUtc = null;
+                    lockedTicket.ClaimLeaseExpiresUtc = null;
+                    await db.SaveChangesAsync(ct);
+                    await renewalTransaction.CommitAsync(ct);
+                    existing = lockedTicket;
+                }
+                else
+                {
+                    await renewalTransaction.RollbackAsync(ct);
+                }
+            }
+            else
+            {
+                await renewalTransaction.RollbackAsync(ct);
+            }
+        }
+
         return Results.Ok(new
         {
             existing.Id,
@@ -6068,20 +6433,7 @@ publicApi.MapPost("/sessions/current/local-upload-tickets", async (
         return Results.Conflict(new
         {
             code = "local_print_agent_unavailable",
-            message = "This QR station does not have a recently connected Windows Print Agent. Use cloud-assisted upload or ask the shop operator."
-        });
-    }
-
-    var stationPrinterIsAvailable = stationPrinter.OutputMode == "PDF_EXPORT" ||
-        (stationPrinter.LastSeenUtc != null &&
-         stationPrinter.LastSeenUtc >= now.AddMinutes(-2) &&
-         (stationPrinter.Status == "Ready" || stationPrinter.Status == "Busy"));
-    if (!stationPrinterIsAvailable)
-    {
-        return Results.Conflict(new
-        {
-            code = "local_print_printer_unavailable",
-            message = "The printer assigned to this QR station is offline, paused or not responding. Choose Cloud-assisted upload; the shop can then assign one available printer to the whole batch."
+            message = "The shop computer is temporarily unavailable. SmartPrint can keep this request securely online; the shop can release it when an Agent is ready."
         });
     }
 
@@ -6113,6 +6465,11 @@ publicApi.MapPost("/sessions/current/local-upload-tickets", async (
         FileExtension = extension,
         SizeBytes = request.SizeBytes,
         Sha256 = sha,
+        ColourMode = request.ColourMode,
+        PaperSize = request.PaperSize,
+        IsDuplex = request.IsDuplex,
+        Copies = request.Copies,
+        Orientation = request.Orientation,
         CreatedUtc = now,
         ExpiresUtc = now.AddMinutes(15)
     };
@@ -6163,10 +6520,17 @@ publicApi.MapPost("/sessions/current/local-upload-tickets", async (
     if (racedTicket is not null)
     {
         await transaction.RollbackAsync(ct);
-        var sameRequest = racedTicket.SizeBytes == request.SizeBytes &&
+        var sameRequest = (request.BatchId is null || racedTicket.BatchId == request.BatchId.Value) &&
+            (requestedBatchName is null || racedTicket.BatchName == requestedBatchName) &&
+            racedTicket.SizeBytes == request.SizeBytes &&
             string.Equals(racedTicket.Sha256, sha, StringComparison.OrdinalIgnoreCase) &&
             racedTicket.OriginalFileName == originalName &&
             PrintBatchGroupRules.Normalize(racedTicket.BatchGroupName) == batchGroupName &&
+            racedTicket.ColourMode == request.ColourMode &&
+            racedTicket.PaperSize == request.PaperSize &&
+            racedTicket.IsDuplex == request.IsDuplex &&
+            racedTicket.Copies == request.Copies &&
+            racedTicket.Orientation == request.Orientation &&
             CryptographicOperations.FixedTimeEquals(
                 Convert.FromHexString(racedTicket.GrantHash),
                 Convert.FromHexString(grantHash));
@@ -6360,7 +6724,9 @@ publicApi.MapPost("/sessions/current/local-upload-tickets/{ticketId:guid}/cloud-
             Job = new
             {
                 preflightJob.Id, preflightJob.JobNumber, preflightJob.Status,
-                preflightJob.PageCount, preflightJob.Copies, preflightJob.Currency,
+                preflightJob.PageCount, preflightJob.Copies, preflightJob.ColourMode,
+                preflightJob.PaperSize, preflightJob.IsDuplex, preflightJob.Orientation,
+                preflightJob.PricingVersion, preflightJob.Currency,
                 preflightJob.QuotedAmountMinor, preflightJob.CreatedUtc,
                 preflightJob.BatchGroupName,
                 preflightJob.BatchName,
@@ -6478,7 +6844,9 @@ publicApi.MapPost("/sessions/current/local-upload-tickets/{ticketId:guid}/cloud-
                 Job = new
                 {
                     existingJob.Id, existingJob.JobNumber, existingJob.Status,
-                    existingJob.PageCount, existingJob.Copies, existingJob.Currency,
+                    existingJob.PageCount, existingJob.Copies, existingJob.ColourMode,
+                    existingJob.PaperSize, existingJob.IsDuplex, existingJob.Orientation,
+                    existingJob.PricingVersion, existingJob.Currency,
                     existingJob.QuotedAmountMinor, existingJob.CreatedUtc,
                     existingJob.BatchGroupName,
                     existingJob.BatchName,
@@ -6507,9 +6875,11 @@ publicApi.MapPost("/sessions/current/local-upload-tickets/{ticketId:guid}/cloud-
         if (!subscription.IsAccessActive)
             return await RejectAndCleanAsync(Results.Problem(statusCode: StatusCodes.Status403Forbidden,
                 title: "This shop's trial or subscription period is no longer active."));
-        if (!subscription.CloudAssistedPrintingEnabled)
+        var recoveryAgentAvailable = await GetLocalAgentInfoAsync(
+            db, ticket.TenantId, ticket.PrinterDeviceId, commitNow, ct) is not null;
+        if (!subscription.CloudAssistedPrintingEnabled && recoveryAgentAvailable)
             return await RejectAndCleanAsync(Results.Problem(statusCode: StatusCodes.Status403Forbidden,
-                title: "Secure cloud recovery is not included in this shop's current plan. The original local upload remains available."));
+                title: "Secure HTTPS recovery is not available while the paired shop Agent is online on this plan."));
         if (!PlanEntitlementRules.AllowsDocument(subscription.MaxDocumentBytes, ticket.SizeBytes))
             return await RejectAndCleanAsync(Results.Problem(statusCode: StatusCodes.Status413PayloadTooLarge,
                 title: "This document exceeds the maximum size configured for this shop's plan."));
@@ -6586,7 +6956,11 @@ publicApi.MapPost("/sessions/current/local-upload-tickets/{ticketId:guid}/cloud-
             Status = "AWAITING_CONFIGURATION",
             IdempotencyKey = $"LOCAL-{ticket.Id:N}",
             PageCount = stored.Analysis.PageCount,
-            Copies = 1,
+            Copies = ticket.Copies,
+            ColourMode = ticket.ColourMode,
+            PaperSize = ticket.PaperSize,
+            IsDuplex = ticket.IsDuplex,
+            Orientation = ticket.Orientation,
             Currency = "INR",
             QuotedAmountMinor = 0,
             CreatedUtc = commitNow,
@@ -6631,6 +7005,7 @@ publicApi.MapPost("/sessions/current/local-upload-tickets/{ticketId:guid}/cloud-
             Job = new
             {
                 job.Id, job.JobNumber, job.Status, job.PageCount, job.Copies,
+                job.ColourMode, job.PaperSize, job.IsDuplex, job.Orientation, job.PricingVersion,
                 job.Currency, job.QuotedAmountMinor, job.CreatedUtc, job.BatchGroupName, job.BatchName, job.BatchId
             },
             Document = new
@@ -6723,17 +7098,19 @@ publicApi.MapPost("/jobs/{jobId:guid}/quote", async (
     if ((request.PrintKind is not null && request.PrintKind is not ("DOCUMENT" or "PHOTO")) ||
         job.PageCount is <= 0 or > 500 ||
         request.Copies is < 1 or > 100 ||
-        request.PaperSize != "A4" ||
+        request.PaperSize is not ("A4" or "A3" or "A5" or "LETTER" or "LEGAL") ||
         request.ColourMode is not ("Mono" or "Colour") ||
+        request.Orientation is not ("AUTO" or "PORTRAIT" or "LANDSCAPE") ||
         (isPhotoPrint &&
             (job.PageCount != 1 || request.Copies != 1 || request.ColourMode != "Colour" ||
              request.IsDuplex || request.PhotoSizeCode is not ("35x45" or "25x35" or "2x2" or "4x6") ||
              request.PhotoCount is null || request.PhotoCount is < 1 or > 100)) ||
+        (isPhotoPrint && (request.PaperSize != "A4" || request.Orientation != "AUTO")) ||
         (!isPhotoPrint && (request.PhotoSizeCode is not null || request.PhotoCount is not null)))
     {
         return Results.ValidationProblem(new Dictionary<string, string[]>
         {
-            ["printOptions"] = ["Document printing uses A4, 1–100 copies and Mono or Colour mode. Photo sheets use one A4 page, one sheet copy and a supported photo size/count."]
+            ["printOptions"] = ["Document printing supports A4, A3, A5, Letter or Legal paper, automatic/portrait/landscape orientation, 1–100 copies, Mono or Colour and single/double-sided. Photo sheets use one A4 page and a supported photo size/count."]
         });
     }
 
@@ -6798,6 +7175,7 @@ publicApi.MapPost("/jobs/{jobId:guid}/quote", async (
         job.PaperSize = request.PaperSize;
         job.IsDuplex = request.IsDuplex;
         job.Copies = request.Copies;
+        job.Orientation = request.Orientation;
         job.Currency = "INR";
         job.QuotedAmountMinor = amount;
         job.PageRefundAllocationsJson = JsonSerializer.Serialize(pageRefundAllocations);
@@ -6833,6 +7211,7 @@ publicApi.MapPost("/jobs/{jobId:guid}/quote", async (
             job.ColourMode,
             job.PaperSize,
             job.IsDuplex,
+            job.Orientation,
             job.PrintKind,
             job.PhotoSizeCode,
             job.PhotoCount,
@@ -7725,6 +8104,8 @@ publicApi.MapGet("/jobs/{jobId:guid}/status", async (
             item.ColourMode,
             item.PaperSize,
             item.IsDuplex,
+            item.Orientation,
+            item.PricingVersion,
             item.PrintKind,
             item.PhotoSizeCode,
             item.PhotoCount,

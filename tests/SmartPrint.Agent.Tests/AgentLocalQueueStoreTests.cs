@@ -55,12 +55,16 @@ public sealed class AgentLocalQueueStoreTests
                 StorageMode = "LOCAL_AGENT",
                 Copies = 1,
                 ColourMode = "Mono",
-                IsDuplex = false
+                PaperSize = "A3",
+                IsDuplex = false,
+                Orientation = "LANDSCAPE"
             };
 
             var staged = await store.EnqueueLocalUploadAsync(upload, bytes, CancellationToken.None);
 
             Assert.Equal("LOCAL_UPLOAD_STAGED", staged.State);
+            Assert.Equal("A3", staged.PaperSize);
+            Assert.Equal("LANDSCAPE", staged.Orientation);
             Assert.Empty(store.GetAcknowledgedJobs());
             Assert.Empty(store.GetPendingAcknowledgements());
             Assert.True(bytes.AsSpan().SequenceEqual(store.ReadDocument(upload.Id)));
@@ -70,7 +74,9 @@ public sealed class AgentLocalQueueStoreTests
                 Status = "LOCAL_QUEUE_CLAIMED",
                 Copies = 3,
                 ColourMode = "Colour",
+                PaperSize = "A5",
                 IsDuplex = true,
+                Orientation = "PORTRAIT",
                 QuotedAmountMinor = 900,
                 LeaseExpiresUtc = DateTimeOffset.UtcNow.AddMinutes(3)
             };
@@ -81,6 +87,8 @@ public sealed class AgentLocalQueueStoreTests
             Assert.Single(store.GetPendingAcknowledgements());
             Assert.Equal(3, refreshed.Copies);
             Assert.Equal("Colour", refreshed.ColourMode);
+            Assert.Equal("A5", refreshed.PaperSize);
+            Assert.Equal("PORTRAIT", refreshed.Orientation);
             Assert.True(refreshed.IsDuplex);
             Assert.Equal(900, refreshed.QuotedAmountMinor);
             Assert.Empty(store.GetAcknowledgedJobs());
@@ -88,6 +96,132 @@ public sealed class AgentLocalQueueStoreTests
             await store.MarkAcknowledgedAsync(upload.Id, CancellationToken.None);
             Assert.Equal("ACKNOWLEDGED", store.Find(upload.Id)!.State);
             Assert.Single(store.GetAcknowledgedJobs());
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task RenewedLocalUploadLeaseKeepsTheOriginalStagedDocumentUntilRetryCompletes()
+    {
+        var root = CreateTemporaryDirectory();
+        try
+        {
+            var store = new AgentLocalQueueStore(root);
+            await store.InitializeAsync(CancellationToken.None);
+            var bytes = "Original staged upload reused after LAN lease renewal"u8.ToArray();
+            var expiredLease = DateTimeOffset.UtcNow.AddMinutes(-1);
+            var job = CreateJob(bytes) with
+            {
+                Status = "LOCAL_UPLOAD_STAGED",
+                StorageMode = "LOCAL_AGENT",
+                LeaseExpiresUtc = expiredLease
+            };
+            await store.EnqueueLocalUploadAsync(job, bytes, CancellationToken.None);
+
+            var renewedLease = DateTimeOffset.UtcNow.AddMinutes(15);
+            await store.RefreshStagedLocalUploadLeaseAsync(
+                job.Id, job.Sha256, job.SizeBytes, renewedLease, CancellationToken.None);
+
+            // Simulate the background sweep acting on its earlier expired snapshot.
+            // The store must re-read the manifest and leave the renewed file intact.
+            Assert.False(await store.DeleteExpiredLocalUploadAsync(
+                job.Id, expiredLease.AddSeconds(5), CancellationToken.None));
+
+            var refreshed = store.Find(job.Id)!;
+            Assert.Equal(renewedLease, refreshed.LeaseExpiresUtc);
+            Assert.Equal("LOCAL_UPLOAD_STAGED", refreshed.State);
+            Assert.True(bytes.AsSpan().SequenceEqual(store.ReadDocument(job.Id)));
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task ReassignedCloudJobRefreshesItsAcknowledgedQueueTargetWithoutRedownloading()
+    {
+        var root = CreateTemporaryDirectory();
+        try
+        {
+            var store = new AgentLocalQueueStore(root);
+            await store.InitializeAsync(CancellationToken.None);
+            var bytes = "Cloud-backed job already staged on this Agent"u8.ToArray();
+            var original = CreateJob(bytes) with
+            {
+                StorageMode = "CLOUD",
+                PaperSize = "A4",
+                Orientation = "AUTO"
+            };
+
+            var staged = await store.EnqueueAsync(original, bytes, CancellationToken.None);
+            await store.MarkAcknowledgedAsync(original.Id, CancellationToken.None);
+            Assert.Equal("ACKNOWLEDGED", store.Find(original.Id)!.State);
+
+            var reassigned = original with
+            {
+                PrinterDeviceId = Guid.NewGuid(),
+                PrinterName = "Alternate printer on this shop computer",
+                QueueName = "Alternate Windows Queue",
+                Copies = 4,
+                PaperSize = "A3",
+                Orientation = "LANDSCAPE",
+                LeaseExpiresUtc = DateTimeOffset.UtcNow.AddMinutes(3)
+            };
+            await store.UpdateFromClaimAsync(reassigned, CancellationToken.None);
+
+            var refreshed = store.Find(original.Id)!;
+            Assert.Equal("ACK_PENDING", refreshed.State);
+            Assert.Equal(reassigned.PrinterDeviceId, refreshed.PrinterDeviceId);
+            Assert.Equal("Alternate printer on this shop computer", refreshed.PrinterName);
+            Assert.Equal("Alternate Windows Queue", refreshed.QueueName);
+            Assert.Equal(4, refreshed.Copies);
+            Assert.Equal("A3", refreshed.PaperSize);
+            Assert.Equal("LANDSCAPE", refreshed.Orientation);
+            Assert.True(bytes.AsSpan().SequenceEqual(store.ReadDocument(original.Id)));
+            Assert.True(File.Exists(staged.DocumentPath));
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task ReassignedCloudJobRefreshesAnAcknowledgementPendingQueueTarget()
+    {
+        var root = CreateTemporaryDirectory();
+        try
+        {
+            var store = new AgentLocalQueueStore(root);
+            await store.InitializeAsync(CancellationToken.None);
+            var bytes = "Cloud-backed document awaiting queue acknowledgement"u8.ToArray();
+            var original = CreateJob(bytes) with { StorageMode = "CLOUD" };
+
+            await store.EnqueueAsync(original, bytes, CancellationToken.None);
+            Assert.Equal("ACK_PENDING", store.Find(original.Id)!.State);
+
+            var reassigned = original with
+            {
+                PrinterDeviceId = Guid.NewGuid(),
+                PrinterName = "Replacement printer",
+                QueueName = "Replacement queue",
+                Copies = 5,
+                Orientation = "LANDSCAPE",
+                LeaseExpiresUtc = DateTimeOffset.UtcNow.AddMinutes(3)
+            };
+            await store.UpdateFromClaimAsync(reassigned, CancellationToken.None);
+
+            var refreshed = store.Find(original.Id)!;
+            Assert.Equal("ACK_PENDING", refreshed.State);
+            Assert.Equal(reassigned.PrinterDeviceId, refreshed.PrinterDeviceId);
+            Assert.Equal("Replacement queue", refreshed.QueueName);
+            Assert.Equal(5, refreshed.Copies);
+            Assert.Equal("LANDSCAPE", refreshed.Orientation);
+            Assert.True(bytes.AsSpan().SequenceEqual(store.ReadDocument(original.Id)));
         }
         finally
         {
@@ -178,8 +312,8 @@ public sealed class AgentLocalQueueStoreTests
             Assert.Equal("LOCAL_UPLOAD_PENDING_PAYMENT", store.Find(job.Id)!.State);
             Assert.Empty(store.GetStagedLocalUploads());
 
-            await Assert.ThrowsAsync<InvalidOperationException>(() =>
-                store.DeleteExpiredLocalUploadAsync(job.Id, DateTimeOffset.UtcNow, CancellationToken.None));
+            Assert.False(await store.DeleteExpiredLocalUploadAsync(
+                job.Id, DateTimeOffset.UtcNow, CancellationToken.None));
             Assert.True(bytes.AsSpan().SequenceEqual(store.ReadDocument(job.Id)));
         }
         finally
