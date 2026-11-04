@@ -108,167 +108,23 @@ if ($ids.Count -ne ($ids | Sort-Object -Unique).Count) {
 }
 
 foreach ($item in $manifest.drivers) {
-    if ([string]$item.id -notmatch '^[a-z0-9][a-z0-9-]{2,80}$') { throw "Invalid driver ID." }
-    if ([string]$item.officialSupportUrl -notmatch '^https://') { throw "Driver '$($item.id)' has no HTTPS official support URL." }
+    if ([string]$item.id -notmatch '^[a-z0-9][a-z0-9-]{2,80}$') {
+        throw "Invalid driver ID '$($item.id)'."
+    }
+    if ([string]$item.officialSupportUrl -notmatch '^https://') {
+        throw "Driver '$($item.id)' has no HTTPS official support URL."
+    }
+
     if ($item.ciApproval -eq "approved") {
         if (-not $item.packageUrl -or
-            [string]$item.packageSha256 -notmatch '^[A-Fa-f0-9]{64}
-    }
-}
-
-if ($DriverId -eq "manifest-only") {
-    Write-Host "Manifest validation passed: $($manifest.drivers.Count) driver entries."
-    return
-}
-
-$selected = @($manifest.drivers | Where-Object { $_.id -ceq $DriverId })
-if ($selected.Count -ne 1) { throw "Driver ID '$DriverId' was not found exactly once." }
-$driver = $selected[0]
-
-if ($driver.ciApproval -ne "approved" -or $driver.licenseReview -ne "approved") {
-    throw "Driver '$DriverId' is not approved for CI installation. CI approval: '$($driver.ciApproval)'; license review: '$($driver.licenseReview)'. No package was downloaded or installed."
-}
-
-if (-not (Test-AllowedVendorUri -Uri ([uri]$driver.packageUrl) -AllowedHosts @($driver.allowedDownloadHosts))) {
-    throw "Package URL must use HTTPS and an explicitly approved vendor host."
-}
-
-if ([System.IO.Path]::IsPathRooted([string]$driver.infRelativePath) -or
-    [string]$driver.infRelativePath -match '(^|[\\/])\.\.([\\/]|$)') {
-    throw "INF path must be relative and cannot traverse outside the extraction directory."
-}
-
-$runRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("smartprint-driver-qa-" + [guid]::NewGuid().ToString("N"))
-$extractRoot = Join-Path $runRoot "package"
-$packagePath = Join-Path $runRoot ("vendor-driver." + $driver.packageFormat)
-$portRoot = Join-Path $ReportDirectory "ports"
-$queueName = $null
-$portName = $null
-
-New-Item -ItemType Directory -Force -Path $extractRoot, $portRoot, $ReportDirectory | Out-Null
-
-try {
-    Receive-ApprovedDriverPackage -Uri ([uri]$driver.packageUrl) -Destination $packagePath -AllowedHosts @($driver.allowedDownloadHosts)
-
-    $actualHash = (Get-FileHash -LiteralPath $packagePath -Algorithm SHA256).Hash.ToLowerInvariant()
-    $expectedHash = ([string]$driver.packageSha256).ToLowerInvariant()
-    if ($actualHash -ne $expectedHash) {
-        throw "Driver package SHA-256 mismatch. Expected $expectedHash; received $actualHash."
-    }
-
-    switch ($driver.packageFormat) {
-        "zip" { Expand-Archive -LiteralPath $packagePath -DestinationPath $extractRoot -Force }
-        "cab" {
-            $expand = Join-Path $env:WINDIR "System32\expand.exe"
-            & $expand "-F:*" $packagePath $extractRoot
-            if ($LASTEXITCODE -ne 0) { throw "CAB extraction failed with exit code $LASTEXITCODE." }
-        }
-        default { throw "Only approved ZIP and CAB INF packages are accepted. Vendor setup EXEs are never executed." }
-    }
-
-    $infPath = [System.IO.Path]::GetFullPath((Join-Path $extractRoot $driver.infRelativePath))
-    $prefix = [System.IO.Path]::GetFullPath($extractRoot).TrimEnd([System.IO.Path]::DirectorySeparatorChar) + [System.IO.Path]::DirectorySeparatorChar
-    if (-not $infPath.StartsWith($prefix, [StringComparison]::OrdinalIgnoreCase) -or
-        -not (Test-Path -LiteralPath $infPath -PathType Leaf) -or
-        [System.IO.Path]::GetExtension($infPath) -ne ".inf") {
-        throw "Pinned INF path is missing or escapes the extracted package."
-    }
-
-    $catalogs = @(Get-ChildItem -LiteralPath $extractRoot -Filter "*.cat" -File -Recurse)
-    $verifiedCatalogs = @()
-    foreach ($catalog in $catalogs) {
-        $signature = Get-AuthenticodeSignature -LiteralPath $catalog.FullName
-        if ($signature.Status -eq "Valid" -and
-            $signature.SignerCertificate.Subject -like "*$($driver.catalogSignerContains)*") {
-            $verifiedCatalogs += [pscustomobject]@{
-                file = $catalog.Name
-                signer = $signature.SignerCertificate.Subject
-                thumbprint = $signature.SignerCertificate.Thumbprint
-            }
-        }
-    }
-    if ($verifiedCatalogs.Count -eq 0) {
-        throw "No valid signed driver catalog matched approved publisher '$($driver.catalogSignerContains)'."
-    }
-
-    $pnputil = Join-Path $env:WINDIR "System32\pnputil.exe"
-    $pnputilOutput = & $pnputil "/add-driver" $infPath 2>&1
-    if ($LASTEXITCODE -ne 0) { throw "PnPUtil staging failed: $($pnputilOutput -join ' ')" }
-
-    Add-PrinterDriver -Name $driver.driverName -InfPath $infPath -ErrorAction Stop
-    $installed = Get-PrinterDriver -Name $driver.driverName -ErrorAction Stop
-    if ($installed.Name -ne $driver.driverName) { throw "Installed driver name does not match the approved manifest." }
-
-    $suffix = [guid]::NewGuid().ToString("N").Substring(0, 8)
-    $queueName = "SmartPrint QA $DriverId $suffix"
-    $portName = Join-Path $portRoot ("driver-output-" + $suffix + ".prn")
-
-    Add-PrinterPort -Name $portName -ErrorAction Stop
-    Add-Printer -Name $queueName -DriverName $driver.driverName -PortName $portName -ErrorAction Stop
-
-    $queue = Get-Printer -Name $queueName -ErrorAction Stop
-    if ($queue.DriverName -ne $driver.driverName -or $queue.PortName -ne $portName) {
-        throw "Queue driver/port did not match the approved test configuration."
-    }
-
-    $installReport = [pscustomobject]@{
-        schemaVersion = 1
-        status = "DRIVER_INSTALLED_QUEUE_CREATED"
-        driverId = $driver.id
-        manufacturer = $driver.manufacturer
-        family = $driver.family
-        version = $driver.version
-        packageFileName = [System.IO.Path]::GetFileName($packagePath)
-        packageSha256 = $actualHash
-        packageSizeBytes = (Get-Item -LiteralPath $packagePath).Length
-        infRelativePath = $driver.infRelativePath
-        driverName = $installed.Name
-        driverVersion = $installed.DriverVersion
-        driverManufacturer = $installed.Manufacturer
-        catalogs = $verifiedCatalogs
-        queueName = $queue.Name
-        portName = $queue.PortName
-        windowsVersion = [System.Environment]::OSVersion.Version.ToString()
-        qualificationScope = "SIGNED_DRIVER_INSTALL_AND_VIRTUAL_SPOOLER_RENDERING"
-        physicalPrinterVerified = $false
-        completedAtUtc = [DateTimeOffset]::UtcNow
-    }
-    Write-Report -Path (Join-Path $ReportDirectory "driver-install.json") -Value $installReport
-
-    @(
-        "SMARTPRINT_DRIVER_QUALIFICATION_QUEUE=$queueName"
-        "SMARTPRINT_DRIVER_QUALIFICATION_PORT=$portName"
-        "SMARTPRINT_DRIVER_QUALIFICATION_DRIVER=$($driver.driverName)"
-        "SMARTPRINT_DRIVER_QUALIFICATION_ID=$($driver.id)"
-        "SMARTPRINT_DRIVER_QUALIFICATION_OUTPUT=$portName"
-        "SMARTPRINT_DRIVER_QUALIFICATION_REPORT=$(Join-Path $ReportDirectory 'driver-rendering.json')"
-    ) | Add-Content -LiteralPath $env:GITHUB_ENV -Encoding utf8
-
-    Write-Host "Installed approved driver '$($driver.driverName)' and created isolated queue '$queueName'."
-    Write-Host "No physical printer was contacted; the following test renders to a local file-backed port."
-}
-catch {
-    Write-Report -Path (Join-Path $ReportDirectory "driver-install-failure.json") -Value ([pscustomobject]@{
-        schemaVersion = 1
-        status = "FAILED"
-        driverId = $driver.id
-        error = $_.Exception.Message
-        completedAtUtc = [DateTimeOffset]::UtcNow
-        physicalPrinterVerified = $false
-    })
-    throw
-}
-finally {
-    if (Test-Path -LiteralPath $packagePath) { Remove-Item -LiteralPath $packagePath -Force -ErrorAction SilentlyContinue }
-    if (Test-Path -LiteralPath $runRoot) { Remove-Item -LiteralPath $runRoot -Recurse -Force -ErrorAction SilentlyContinue }
-} -or
+            [string]$item.packageSha256 -notmatch '^[A-Fa-f0-9]{64}$' -or
             $item.packageFormat -notin @("zip", "cab") -or
             [string]::IsNullOrWhiteSpace([string]$item.infRelativePath) -or
             [string]::IsNullOrWhiteSpace([string]$item.driverName) -or
             [string]::IsNullOrWhiteSpace([string]$item.catalogSignerContains) -or
             @($item.allowedDownloadHosts).Count -eq 0 -or
             $item.licenseReview -ne "approved") {
-            throw "Approved driver '$($item.id)' lacks a pinned package URL/hash, ZIP/CAB format, INF, driver name, trusted signer, host allowlist or license approval."
+            throw "Approved driver '$($item.id)' lacks a pinned URL/hash, ZIP/CAB format, INF, driver name, trusted signer, host allowlist or license approval."
         }
 
         if (-not (Test-AllowedVendorUri -Uri ([uri]$item.packageUrl) -AllowedHosts @($item.allowedDownloadHosts))) {
@@ -283,7 +139,9 @@ if ($DriverId -eq "manifest-only") {
 }
 
 $selected = @($manifest.drivers | Where-Object { $_.id -ceq $DriverId })
-if ($selected.Count -ne 1) { throw "Driver ID '$DriverId' was not found exactly once." }
+if ($selected.Count -ne 1) {
+    throw "Driver ID '$DriverId' was not found exactly once."
+}
 $driver = $selected[0]
 
 if ($driver.ciApproval -ne "approved" -or $driver.licenseReview -ne "approved") {
@@ -295,7 +153,7 @@ if (-not (Test-AllowedVendorUri -Uri ([uri]$driver.packageUrl) -AllowedHosts @($
 }
 
 if ([System.IO.Path]::IsPathRooted([string]$driver.infRelativePath) -or
-    [string]$driver.infRelativePath -match '(^|[\\/])\.\.([\\/]|$)') {
+    ([string]$driver.infRelativePath) -match '(^|[\\/])\.\.([\\/]|$)') {
     throw "INF path must be relative and cannot traverse outside the extraction directory."
 }
 
@@ -318,13 +176,19 @@ try {
     }
 
     switch ($driver.packageFormat) {
-        "zip" { Expand-Archive -LiteralPath $packagePath -DestinationPath $extractRoot -Force }
+        "zip" {
+            Expand-Archive -LiteralPath $packagePath -DestinationPath $extractRoot -Force
+        }
         "cab" {
             $expand = Join-Path $env:WINDIR "System32\expand.exe"
             & $expand "-F:*" $packagePath $extractRoot
-            if ($LASTEXITCODE -ne 0) { throw "CAB extraction failed with exit code $LASTEXITCODE." }
+            if ($LASTEXITCODE -ne 0) {
+                throw "CAB extraction failed with exit code $LASTEXITCODE."
+            }
         }
-        default { throw "Only approved ZIP and CAB INF packages are accepted. Vendor setup EXEs are never executed." }
+        default {
+            throw "Only approved ZIP and CAB INF packages are accepted. Vendor setup EXEs are never executed."
+        }
     }
 
     $infPath = [System.IO.Path]::GetFullPath((Join-Path $extractRoot $driver.infRelativePath))
@@ -354,11 +218,15 @@ try {
 
     $pnputil = Join-Path $env:WINDIR "System32\pnputil.exe"
     $pnputilOutput = & $pnputil "/add-driver" $infPath 2>&1
-    if ($LASTEXITCODE -ne 0) { throw "PnPUtil staging failed: $($pnputilOutput -join ' ')" }
+    if ($LASTEXITCODE -ne 0) {
+        throw "PnPUtil staging failed: $($pnputilOutput -join ' ')"
+    }
 
     Add-PrinterDriver -Name $driver.driverName -InfPath $infPath -ErrorAction Stop
     $installed = Get-PrinterDriver -Name $driver.driverName -ErrorAction Stop
-    if ($installed.Name -ne $driver.driverName) { throw "Installed driver name does not match the approved manifest." }
+    if ($installed.Name -ne $driver.driverName) {
+        throw "Installed driver name does not match the approved manifest."
+    }
 
     $suffix = [guid]::NewGuid().ToString("N").Substring(0, 8)
     $queueName = "SmartPrint QA $DriverId $suffix"
@@ -420,6 +288,10 @@ catch {
     throw
 }
 finally {
-    if (Test-Path -LiteralPath $packagePath) { Remove-Item -LiteralPath $packagePath -Force -ErrorAction SilentlyContinue }
-    if (Test-Path -LiteralPath $runRoot) { Remove-Item -LiteralPath $runRoot -Recurse -Force -ErrorAction SilentlyContinue }
+    if (Test-Path -LiteralPath $packagePath) {
+        Remove-Item -LiteralPath $packagePath -Force -ErrorAction SilentlyContinue
+    }
+    if (Test-Path -LiteralPath $runRoot) {
+        Remove-Item -LiteralPath $runRoot -Recurse -Force -ErrorAction SilentlyContinue
+    }
 }
