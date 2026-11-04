@@ -395,7 +395,7 @@ test("cloud shop photo revisions require an unpaid review-stage image and valida
  const service=read("../../../src/SmartPrint.Api/Services/ShopPhotoRevisionService.cs");
  assert.match(endpoint,/MapPost\("\/print-jobs\/\{jobId:guid\}\/photo-revision"/);
  assert.match(service,/job\.Status != "AWAITING_SHOP_APPROVAL"/);
- assert.match(service,/document\.StorageMode, "CLOUD"/);
+ assert.match(service,/string\.Equals\(document\.StorageMode, "CLOUD"/);
  assert.match(service,/document\.MediaType is not \("image\/jpeg" or "image\/png"\)/);
  assert.match(service,/HasPaymentAsync/);
  assert.match(service,/job\.LocalQueueReceivedUtc is not null/);
