@@ -109,6 +109,8 @@ public sealed record LocalAgentPhotoRevisionAuthorizationResponse(
     long NewSizeBytes,
     string PhotoSizeCode,
     int PhotoCount,
+    int PageCount,
+    int PhotosPerPage,
     long PhotoUnitPriceMinor,
     long QuotedAmountMinor,
     int PricingVersion);
