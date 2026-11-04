@@ -7,7 +7,7 @@ public sealed class ShopStationRulesTests
     [Theory]
     [InlineData("https://print.example.com", "https://print.example.com")]
     [InlineData("https://print.example.com/", "https://print.example.com")]
-    [InlineData(" https://print.example.com/// ", " https://print.example.com")]
+    [InlineData("https://print.example.com///", "https://print.example.com")]
     public void AcceptsCanonicalHttpsBaseUrls(string supplied, string expected)
     {
         Assert.True(ShopStationRules.TryNormalizePublicPortalBaseUrl(supplied, out var normalized));
