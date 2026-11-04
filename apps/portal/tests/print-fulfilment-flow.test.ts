@@ -253,7 +253,8 @@ test("Photo Studio uses only the uploaded source and offers no edited-photo expo
  assert.match(studio,/previewProtection/);
  const studioCss=read("../src/PhotoStudio.module.css");
  assert.match(studioCss,/\.previewProtection::before/);
- assert.match(studio,/Use photo for shop printing/);
+ assert.match(studio,/mode === "shop" \? "Save sheet to this job" : "Prepare A4 sheet"/);
+ assert.match(studio,/This prepared A4 sheet replaces it in your batch/);
  assert.match(studio,/type="date"/);
  assert.match(studio,/formatDobForPrint/);
 });
