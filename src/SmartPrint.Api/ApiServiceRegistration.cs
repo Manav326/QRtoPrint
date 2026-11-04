@@ -102,6 +102,7 @@ public static class ApiServiceRegistration
         services.AddScoped<ShopPrintRefundService>();
         services.AddScoped<ShopPrintJobDispatchService>();
         services.AddScoped<AgentSpoolerLifecycleService>();
+        services.AddScoped<ShopPrintJobAssignmentService>();
         services.AddSingleton<DocumentStorage>();
         services.AddHostedService<DocumentRetentionWorker>();
         services.AddRateLimiter(options =>
