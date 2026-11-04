@@ -347,7 +347,7 @@ export default function PhotoStudio({
   async function createPrintSheets(){
     if(!image||busy)return;
     const parsedCopies=Number(copiesInput);
-    if(!Number.isInteger(parsedCopies)||parsedCopies<1||parsedCopies>maxCopies){setError("Choose between 1 and "+maxCopies+" photo copies so the result stays within the 20-sheet batch limit.");return;}
+    if(!Number.isInteger(parsedCopies)||parsedCopies<1||parsedCopies>maxCopies){setError("Choose between 1 and "+maxCopies+" photos so the selected size fits on one A4 sheet.");return;}
     setBusy(true);setError("");
     try{
       const pages=Math.ceil(parsedCopies/layout.perSheet),jpegPages:Uint8Array[]=[];
