@@ -6,25 +6,27 @@ import { readDarkModePreference } from "../src/ui-preferences.ts";
 const read = (path: string) => readFileSync(new URL(path, import.meta.url), "utf8");
 
 
-test("customer copy inputs capture event values before scheduling React state updates", () => {
+test("folder and per-file Copies inputs capture values before scheduling React state updates", () => {
   const app = read("../src/App.tsx");
-  const labelStart = app.indexOf('<label className="customer-folder-copies">');
-  const labelEnd = app.indexOf("</label>", labelStart);
-  assert.ok(labelStart >= 0 && labelEnd > labelStart, "The customer Copies input must remain present.");
-  const copyLabel = app.slice(labelStart, labelEnd);
+  const copyLabels = [...app.matchAll(/<label className="customer-folder-copies">[\\s\\S]*?<\\/label>/g)]
+    .map(match => match[0]);
+  assert.equal(copyLabels.length, 2, "The shared flow must have folder-default and per-file Copies inputs.");
 
-  const blurStart = copyLabel.indexOf("onBlur={event=>");
-  assert.ok(blurStart >= 0, "The folder-default Copies blur handler must remain present.");
-  const changeHandler = copyLabel.slice(copyLabel.indexOf("onChange={event=>"), blurStart);
-  const blurHandler = copyLabel.slice(blurStart);
+  for (const [index, copyLabel] of copyLabels.entries()) {
+    const setter = index === 0 ? "setGroupSettings(current=>" : "setFileSettings(current=>";
+    const blurStart = copyLabel.indexOf("onBlur={event=>{");
+    assert.ok(blurStart >= 0, "Each Copies input must keep a blur handler.");
+    const changeHandler = copyLabel.slice(copyLabel.indexOf("onChange={event=>{"), blurStart);
+    const blurHandler = copyLabel.slice(blurStart);
 
-  for (const [name, handler] of [["change", changeHandler], ["blur", blurHandler]] as const) {
-    const captureIndex = handler.indexOf("event.currentTarget.value");
-    const updateIndex = handler.indexOf("setGroupSettings(current=>");
-    assert.ok(captureIndex >= 0 && updateIndex > captureIndex,
-      `The folder-default Copies ${name} handler must read currentTarget before scheduling the state update.`);
-    assert.equal(handler.indexOf("event.currentTarget", updateIndex), -1,
-      `The folder-default Copies ${name} handler must not read currentTarget inside a state updater.`);
+    for (const [name, handler] of [["change", changeHandler], ["blur", blurHandler]] as const) {
+      const captureIndex = handler.indexOf("event.currentTarget.value");
+      const updateIndex = handler.indexOf(setter);
+      assert.ok(captureIndex >= 0 && updateIndex > captureIndex,
+        `The ${name} handler must read currentTarget before scheduling the state update.`);
+      assert.equal(handler.indexOf("event.currentTarget", updateIndex), -1,
+        `The ${name} handler must not read currentTarget inside a state updater.`);
+    }
   }
 });
 
@@ -222,8 +224,8 @@ test("Android customer printing uses the same single Copies control and event ha
   assert.ok(customerFlow.includes('navigator.userAgent.includes("SmartPrintAndroid/1")'));
   assert.equal((customerFlow.match(/customer-folder-copies/g) ?? []).length, 2,
     "There must be one folder-default Copies input and one per-file Custom override in the shared flow.");
-  assert.ok(customerFlow.includes("onChange={event => {"));
-  assert.ok(customerFlow.includes("onBlur={event => {"));
+  assert.ok(customerFlow.includes("onChange={event=>{"));
+  assert.ok(customerFlow.includes("onBlur={event=>{"));
   const copiesStart = customerFlow.indexOf('<label className="customer-folder-copies">');
   const copiesEnd = customerFlow.indexOf("</label>", copiesStart);
   const copiesInput = customerFlow.slice(copiesStart, copiesEnd);
