@@ -59,6 +59,7 @@ public static class ApiEndpointMappings
         shop.MapShopPrintJobDispatchEndpoints();
         
         shop.MapShopPrintJobReviewEndpoints();
+        shop.MapShopPhotoRevisionEndpoints(signingKeyText, issuer, audience);
         
         var shopAgents = app.MapGroup("/api/v1/shop").RequireAuthorization()
             .AddEndpointFilter((context, next) => TenantEndpointAccess.EnforceTenantActiveAsync(context, next, allowSubscriptionRead: false));
