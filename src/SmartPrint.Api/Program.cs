@@ -6359,10 +6359,16 @@ publicApi.MapPost("/sessions/current/local-upload-tickets", async (
     if (racedTicket is not null)
     {
         await transaction.RollbackAsync(ct);
-        var sameRequest = racedTicket.SizeBytes == request.SizeBytes &&
+        var sameRequest = racedTicket.BatchId == batchId &&
+            racedTicket.SizeBytes == request.SizeBytes &&
             string.Equals(racedTicket.Sha256, sha, StringComparison.OrdinalIgnoreCase) &&
             racedTicket.OriginalFileName == originalName &&
             PrintBatchGroupRules.Normalize(racedTicket.BatchGroupName) == batchGroupName &&
+            racedTicket.ColourMode == request.ColourMode &&
+            racedTicket.PaperSize == request.PaperSize &&
+            racedTicket.IsDuplex == request.IsDuplex &&
+            racedTicket.Copies == request.Copies &&
+            racedTicket.Orientation == request.Orientation &&
             CryptographicOperations.FixedTimeEquals(
                 Convert.FromHexString(racedTicket.GrantHash),
                 Convert.FromHexString(grantHash));
