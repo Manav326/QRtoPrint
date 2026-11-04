@@ -60,6 +60,8 @@ jobs:
           DRIVER_ID: ${{ inputs.driver_id }}
         run: ./scripts/printer-qualification/Invoke-PrinterDriverQualification.ps1 -DriverId "$env:DRIVER_ID"
       - name: Render a QA document and capture driver capabilities
+        env:
+          SMARTPRINT_RUN_DRIVER_QUALIFICATION: "1"
         run: dotnet test tests/SmartPrint.Agent.Tests/SmartPrint.Agent.Tests.csproj --configuration Release --filter "FullyQualifiedName~WindowsPrinterDriverQualificationTests"
       - name: Upload qualification evidence
         if: always()
