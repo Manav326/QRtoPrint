@@ -40,7 +40,6 @@ public sealed class AgentLocalUploadCompletionService(
         AgentDevice device,
         string? rawGrant,
         LocalPrintUploadCompletionRequest request,
-        DateTimeOffset now,
         CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(device);
@@ -88,6 +87,9 @@ public sealed class AgentLocalUploadCompletionService(
         if (!LocalUploadCompletionRules.HasValidPageAnalysis(request.PageSizesJson, request.PageCount))
             return new AgentLocalUploadCompletionResult(AgentLocalUploadCompletionFailure.PageAnalysisInvalid);
 
+        // Sample time only after the ticket and customer-authorised file metadata have
+        // been read and validated; do not extend the lease by database round-trip time.
+        var now = DateTimeOffset.UtcNow;
         if (ticket.ExpiresUtc <= now ||
             ticket.ClaimLeaseExpiresUtc is null ||
             ticket.ClaimLeaseExpiresUtc <= now)
