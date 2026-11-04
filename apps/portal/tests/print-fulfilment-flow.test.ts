@@ -231,3 +231,32 @@ test("Shop Wi-Fi option remains visible when HTTPS fallback is disabled",()=>{
  assert.match(modes,/secureQueueFallbackEnabled&&/);
  assert.doesNotMatch(modes,/\? <div className="customer-upload-modes"/);
 });
+
+ 
+test("cloud shop document preview retries the binary fetch with a refreshed access token",()=>{
+ const api=read("../src/api.ts");
+ const start=api.indexOf("export async function downloadShopDocument(");
+ const end=api.indexOf("export function createAgentEnrollmentCode(",start);
+ assert.ok(start>=0&&end>start);
+ const preview=api.slice(start,end);
+ assert.match(preview,/if\(response\.status===401\)\s*\{\s*const refreshed=await refreshStoredSession\(token\)/);
+ assert.match(preview,/if\(refreshed\)response=await request\(refreshed\.accessToken\)/);
+ assert.match(preview,/Your shop session has expired/);
+});
+
+test("Photo Studio uses only the uploaded source and offers no edited-photo export action",()=>{
+ const studio=read("../src/PhotoStudio.tsx");
+ assert.match(studio,/source:\s*File/);
+ assert.doesNotMatch(studio,/<input[^>]+type=["']file/i);
+ assert.doesNotMatch(studio,/<a[^>]+download/i);
+ assert.match(studio,/setDesktopContentProtection\(true\)/);
+ assert.match(studio,/previewProtection/);
+ assert.match(studio,/Use photo for shop printing/);
+ assert.match(studio,/type="date"/);
+ assert.match(studio,/formatDobForPrint/);
+});
+
+test("photo quantities never exceed the one-A4-page quote limit",()=>{
+ const studio=read("../src/PhotoStudio.tsx");
+ assert.match(studio,/const maxCopies=Math\.min\(100,layout\.perSheet\)/);
+});
