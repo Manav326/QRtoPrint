@@ -152,7 +152,6 @@ public static partial class AgentEndpoints
                 device,
                 rawGrant,
                 request,
-                DateTimeOffset.UtcNow,
                 ct);
 
             switch (completion.Failure)
