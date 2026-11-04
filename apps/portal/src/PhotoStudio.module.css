@@ -40,3 +40,9 @@
  .panelHeading,.sheetSummary,.privacyNote,.lookGrid,.editorHelp,.backgroundPresets,.backgroundPreviewRow{grid-column:1/-1}
 }
 @media(max-width:390px){.toolPanel{grid-template-columns:1fr}}
+
+/* The watermark deters casual capture on web and complements native desktop protection. */
+.sheetFrame{position:relative;overflow:hidden;user-select:none;-webkit-user-select:none}
+.previewProtection{position:absolute;inset:0;z-index:2;pointer-events:none;overflow:hidden;display:grid;place-items:center;background:repeating-linear-gradient(135deg,transparent 0 44px,rgba(32,45,70,.025) 44px 46px)}
+.previewProtection::before{content:"SMARTPRINT · SHOP PRINT ONLY · PRIVATE PREVIEW";position:absolute;inset:-30%;display:grid;place-items:center;transform:rotate(-28deg);font-size:clamp(9px,1.8vw,16px);font-weight:800;letter-spacing:.18em;color:rgba(44,59,84,.14);text-align:center;white-space:normal;line-height:8}
+.previewCanvas{user-select:none;-webkit-user-select:none;-webkit-user-drag:none}
