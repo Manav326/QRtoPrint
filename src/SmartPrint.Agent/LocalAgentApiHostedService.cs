@@ -414,6 +414,8 @@ public sealed class LocalAgentApiHostedService(
                 var photoSizeCode = form["photoSizeCode"].FirstOrDefault() ?? string.Empty;
                 if (!int.TryParse(form["photoCount"].FirstOrDefault(), out var photoCount) ||
                     photoCount is < 1 or > 100 ||
+                    !int.TryParse(form["photosPerPage"].FirstOrDefault(), out var photosPerPage) ||
+                    photosPerPage is < 1 or > 100 ||
                     photoSizeCode is not ("35x45" or "25x35" or "2x2" or "4x6"))
                     return Results.ValidationProblem(new Dictionary<string, string[]>
                     {
@@ -438,13 +440,14 @@ public sealed class LocalAgentApiHostedService(
                     CryptographicOperations.ZeroMemory(bytes);
                     return Results.UnprocessableEntity(new { code = "photo_sheet_not_supported", message = exception.Message });
                 }
-                if (analysis.PageCount != 1)
+                var expectedPageCount = checked((photoCount + photosPerPage - 1) / photosPerPage);
+                if (analysis.PageCount != expectedPageCount)
                 {
                     CryptographicOperations.ZeroMemory(bytes);
                     return Results.UnprocessableEntity(new
                     {
-                        code = "photo_sheet_must_be_one_page",
-                        message = "A photo print is one A4 sheet per job. Reduce the quantity or create another photo job."
+                        code = "photo_sheet_page_count_mismatch",
+                        message = $"The prepared PDF must contain exactly {expectedPageCount} A4 page(s) for this layout."
                     });
                 }
 
@@ -466,7 +469,8 @@ public sealed class LocalAgentApiHostedService(
                     analysis.PageCount,
                     analysis.PageSizesJson,
                     photoSizeCode,
-                    photoCount);
+                    photoCount,
+                    photosPerPage);
 
                 var client = httpClientFactory.CreateClient("cloud");
                 client.Timeout = TimeSpan.FromSeconds(30);
@@ -503,7 +507,8 @@ public sealed class LocalAgentApiHostedService(
                     !string.Equals(authorization.NewSha256, hash, StringComparison.OrdinalIgnoreCase) ||
                     authorization.NewSizeBytes != bytes.LongLength ||
                     authorization.PhotoSizeCode != photoSizeCode ||
-                    authorization.PhotoCount != photoCount)
+                    authorization.PhotoCount != photoCount ||
+                    authorization.PhotosPerPage != photosPerPage)
                 {
                     CryptographicOperations.ZeroMemory(bytes);
                     return Results.Conflict(new { code = "local_photo_revision_authorization_mismatch", message = "The cloud service authorization did not match this original and prepared photo sheet." });
@@ -518,6 +523,7 @@ public sealed class LocalAgentApiHostedService(
                         entry.SizeBytes,
                         outputName,
                         bytes,
+                        analysis.PageCount,
                         authorization.QuotedAmountMinor,
                         async () =>
                         {
@@ -583,6 +589,8 @@ public sealed class LocalAgentApiHostedService(
                     Sha256 = revisionRequest.Sha256,
                     revisionRequest.PhotoSizeCode,
                     revisionRequest.PhotoCount,
+                    revisionRequest.PageCount,
+                    revisionRequest.PhotosPerPage,
                     authorization.PhotoUnitPriceMinor,
                     authorization.QuotedAmountMinor,
                     authorization.PricingVersion
