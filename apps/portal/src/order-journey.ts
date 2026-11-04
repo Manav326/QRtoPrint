@@ -16,16 +16,22 @@ const VERIFYABLE = new Set(["AWAITING_CUSTOMER_PAYMENT","CUSTOMER_REPORTED","CAS
 const NON_ACTIVE = new Set(["REJECTED","REFUNDED","CANCELLED"]);
 const VERIFIED = new Set(["VERIFIED","PARTIALLY_REFUNDED"]);
 
+function latestPayment(entries: ShopPayment[]): ShopPayment | null {
+  return [...entries].sort((left, right) =>
+    Date.parse(right.createdUtc) - Date.parse(left.createdUtc)
+  )[0] ?? null;
+}
+
 function paymentFor(batchId: string | null, jobs: ShopPrintJob[], payments: ShopPayment[]): ShopPayment | null {
   if (batchId) {
     // A PrintBatchPayment has its own ID; it is not the customer upload BatchId.
     // The shop payments endpoint exposes the grouped payment through one of
     // its member PrintJob IDs, so link by the files in this journey.
     const jobIds = new Set(jobs.map(job => job.id));
-    return payments.find(payment => !!payment.batchPaymentId && jobIds.has(payment.printJobId)) ?? null;
+    return latestPayment(payments.filter(payment => !!payment.batchPaymentId && jobIds.has(payment.printJobId)));
   }
   const jobId = jobs[0]?.id;
-  return jobId ? payments.find(payment => !payment.batchPaymentId && payment.printJobId === jobId) ?? null : null;
+  return jobId ? latestPayment(payments.filter(payment => !payment.batchPaymentId && payment.printJobId === jobId)) : null;
 }
 function resolveStage(jobs: ShopPrintJob[], payment: ShopPayment | null) {
   const active = jobs.filter(job => !NON_ACTIVE.has(job.status));

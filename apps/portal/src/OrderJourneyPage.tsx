@@ -35,8 +35,10 @@ function paymentLabel(payment:ShopPayment|null,stage:OrderJourneyStage){
 }
 function isAgentOnline(agent:AgentDevice){return !agent.revokedUtc&&agent.status==="Online"&&!!agent.lastSeenUtc&&Date.parse(agent.lastSeenUtc)>Date.now()-120000;}
 function printerSummary(jobs:ShopPrintJob[],printers:PrinterDevice[],agents:AgentDevice[]){
-  const ids=new Set(jobs.map(job=>job.printerDeviceId).filter((id):id is string=>!!id));
+  const acceptedJobs=jobs.filter(job=>!["REJECTED","REFUNDED","CANCELLED"].includes(job.status));
+  const ids=new Set(acceptedJobs.map(job=>job.printerDeviceId).filter((id):id is string=>!!id));
   if(!ids.size)return {name:"Printer not assigned",detail:"Assign one in the print queue after payment verification",ready:false};
+  if(ids.size>1)return {name:"Multiple printers assigned",detail:"Accepted files in this batch must use one printer before dispatch",ready:false};
   const assigned=printers.filter(printer=>ids.has(printer.id));
   const online=new Set(agents.filter(isAgentOnline).map(agent=>agent.id));
   const connected=assigned.filter(printer=>printer.isActive&&!!printer.agentDeviceId&&online.has(printer.agentDeviceId));
@@ -118,6 +120,7 @@ export default function OrderJourneyPage({jobs,payments,printers,agents,refreshi
   const attention=journeys.reduce((n,j)=>n+j.attentionJobs.length,0),agentsOnline=agents.filter(isAgentOnline).length;
   const reachable=printers.filter(p=>p.isActive&&!!p.agentDeviceId&&agents.some(a=>a.id===p.agentDeviceId&&isAgentOnline(a))).length;
   const inMotion=journeys.filter(j=>!j.isClosed).length;
+  const visualJourney=journeys.find(j=>j.attentionJobs.length>0)??journeys.find(j=>j.stage==="printing")??journeys[0];
   return <div className={styles.journeyPage}>
     <header className={styles.pageHero}><div><div className={styles.eyebrow}><span className={styles.livePulse}/> LIVE ORDER CONTROL</div>
       <h2>From customer upload to print handover.</h2><p>One clear view of every recent order, what is happening now, and what needs your attention next.</p></div>
@@ -130,7 +133,7 @@ export default function OrderJourneyPage({jobs,payments,printers,agents,refreshi
           <div className={styles.flowStepCopy}><strong>{step.title}</strong><small>{count} {count===1?"order":"orders"}</small></div><span className={styles.flowStepDetail}>{step.detail}</span>
         </div>{index<flowSteps.length-1&&<span className={styles.flowConnector} aria-hidden="true"><ArrowRight size={15}/></span>}</div>;})}</div>
       <div className={styles.flowLegend}><div className={styles.legendCopy}><ShieldCheck size={16}/><span><strong>Safe by design</strong> — only accepted files move forward, and printing is never triggered just by receiving payment.</span></div>
-        <PrinterVisual stage={journeys.find(j=>j.stage==="printing")?.stage??journeys[0]?.stage??"received"} attention={attention>0}/></div>
+        <PrinterVisual stage={visualJourney?.stage??"received"} attention={(visualJourney?.attentionJobs.length??0)>0}/></div>
     </section>
     <section className={styles.summaryStrip} aria-label="Shop order summary">
       <div className={styles.summaryItem}><span className={styles.summaryIcon}><Activity size={17}/></span><div><strong>{inMotion}</strong><small>Orders in motion</small></div></div>

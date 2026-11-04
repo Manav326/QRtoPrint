@@ -24,11 +24,13 @@ function payment(v: Partial<ShopPayment> & Pick<ShopPayment,"id"|"printJobId"|"s
 test("groups files in one batch and associates its batch payment",()=>{
   const jobs=[job({id:"a",jobNumber:"SP-1",batchId:"batch-1",batchName:"Morning orders",status:"AWAITING_SHOP_APPROVAL",pageCount:3}),
     job({id:"b",jobNumber:"SP-2",batchId:"batch-1",batchName:"Morning orders",status:"AWAITING_SHOP_APPROVAL",pageCount:5})];
-  const pay=payment({id:"batch-payment-id",printJobId:"a",batchPaymentId:"batch-payment-id",status:"CUSTOMER_REPORTED"});
-  const orders=buildShopOrderJourneys(jobs,[pay]);
+  const oldAttempt=payment({id:"older-payment",printJobId:"a",batchPaymentId:"older-payment",status:"REJECTED",createdUtc:"2026-11-04T09:00:00Z"});
+  const pay=payment({id:"batch-payment-id",printJobId:"a",batchPaymentId:"batch-payment-id",status:"CUSTOMER_REPORTED",createdUtc:"2026-11-04T11:00:00Z"});
+  const orders=buildShopOrderJourneys(jobs,[oldAttempt,pay]);
   assert.equal(orders.length,1);assert.equal(orders[0].name,"Morning orders");
   assert.equal(orders[0].jobs.length,2);assert.equal(orders[0].payment?.id,"batch-payment-id");
   assert.equal(orders[0].stage,"payment");assert.equal(orders[0].pageCount,8);
+  assert.equal(orders[0].canVerifyPayment,true);
 });
 test("keeps unbatched uploads as separate orders",()=>{
   const orders=buildShopOrderJourneys([job({id:"a",jobNumber:"SP-1",status:"AWAITING_SHOP_APPROVAL"}),job({id:"b",jobNumber:"SP-2",status:"AWAITING_SHOP_APPROVAL"})],[]);

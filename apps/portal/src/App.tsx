@@ -259,7 +259,6 @@ function ShopConsole({ tokens, onSignOut, dark, onToggleTheme }: { tokens: AuthT
       setAgentDevices(snapshot.agentDevices);
       setPaymentSettings(snapshot.paymentSettings);
       setPayments(snapshot.payments);
-      setJourneyPayments(snapshot.payments);
       setRefunds(snapshot.refunds);
       setSubscription(snapshot.subscription);
       setApiConnectionState("connected");
