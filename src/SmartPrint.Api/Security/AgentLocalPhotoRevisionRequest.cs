@@ -8,4 +8,5 @@ public sealed record AgentLocalPhotoRevisionRequest(
     int PageCount,
     string PageSizesJson,
     string PhotoSizeCode,
-    int PhotoCount);
+    int PhotoCount,
+    int PhotosPerPage);
