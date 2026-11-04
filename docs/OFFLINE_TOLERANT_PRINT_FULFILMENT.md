@@ -14,7 +14,7 @@ Local Agent intake requires an initialized protected queue and a fresh authentic
 
 A local upload ticket still binds to the shop's assigned printer and paired Agent identity, but ticket creation does not require the physical printer to report Ready or Busy. The queue name and printer assignment must exist so the same Agent can stage the request.
 
-The existing HTTPS storage path remains the fallback when the paired Agent is unavailable. For shops without the cloud-assisted entitlement, the API checks Agent availability itself before accepting a new HTTPS upload; a customer-supplied header cannot bypass that check. The explicit queue-fallback header is used only to recover an already-issued local ticket with its original session, ticket ID, file hash/size and one-use grant.
+The existing HTTPS storage path remains the fallback when the paired Agent is unavailable. For shops without the cloud-assisted entitlement, the API checks Agent availability itself before accepting a new HTTPS upload or recovering an existing local ticket; the client cannot override that decision. When recovery is allowed, it remains bound to the original session, ticket ID, file hash/size and one-use grant.
 
 ## Owner review and dispatch
 
