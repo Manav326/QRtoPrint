@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { readFileSync } from "node:fs";
 import { buildPhotoPdf,getPhotoSheetLayout } from "../src/photo-studio-layout.ts";
 
 test("exact physical photo layout is centred on A4",()=>{
@@ -47,4 +48,13 @@ test("multiple prepared A4 pages become one multi-page PDF",()=>{
 test("photo PDF generation rejects empty or incomplete JPEG pages",()=>{
  assert.throws(()=>buildPhotoPdf([]),/At least one/);
  assert.throws(()=>buildPhotoPdf([new Uint8Array([1,2,3])]),/complete JPEG/);
+});
+
+test("name and DOB are opt-in and are absent from the default photo sheet",()=>{
+ const studio=readFileSync(new URL("../src/PhotoStudio.tsx",import.meta.url),"utf8");
+ assert.match(studio,/const \[includeFormDetails,setIncludeFormDetails\]=useState\(false\)/);
+ assert.match(studio,/const hasCaption=includeFormDetails&&Boolean\(photoName\.trim\(\)\|\|dateOfBirth\.trim\(\)\)/);
+ assert.match(studio,/checked=\{includeFormDetails\}/);
+ assert.match(studio,/\{includeFormDetails&&<>[\s\S]*?Name for form[\s\S]*?Date of birth/);
+ assert.match(studio,/if\(!enabled\)\{setPhotoName\(""\);setDateOfBirth\(""\);\}/);
 });
