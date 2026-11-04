@@ -205,6 +205,14 @@ export default function PhotoStudio({
   },[]);
 
   useEffect(()=>{
+    const bridge=(window as Window & {SmartPrintNative?:{postMessage:(value:string)=>void}}).SmartPrintNative;
+    try{bridge?.postMessage("setSensitivePreview|on");}catch{/* Native screenshot protection is best-effort outside supported desktop builds. */}
+    return ()=>{
+      try{bridge?.postMessage("setSensitivePreview|off");}catch{/* The WebView may already be closing. */}
+    };
+  },[]);
+
+  useEffect(()=>{
     const protectContextMenu=(event:globalThis.MouseEvent)=>event.preventDefault();
     const protectShortcuts=(event:KeyboardEvent)=>{
       const key=event.key.toLowerCase();
