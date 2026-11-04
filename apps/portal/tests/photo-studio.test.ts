@@ -103,10 +103,10 @@ test("Photo Studio locks background scroll and supports accessible keyboard dism
  assert.match(css,/@media\(max-width:390px\)[\s\S]*?topbarMeta span:last-child\{display:none\}/);
 });
 
-test("a successful shop photo save is not misreported as failed when refreshing the queue fails",()=>{
+test("a successful shop photo PDF save is not misreported as failed when refreshing the queue fails",()=>{
  const app=readFileSync(new URL("../src/App.tsx",import.meta.url),"utf8");
- assert.match(app,/The enhanced A4 sheet is saved to the same print job/);
- assert.match(app,/The A4 sheet was saved to the existing print job, but the queue could not refresh/);
+ assert.match(app,/The enhanced multi-page A4 photo PDF is saved to the same print job/);
+ assert.match(app,/The A4 photo PDF was saved to the existing print job, but the queue could not refresh/);
 });
 
 
