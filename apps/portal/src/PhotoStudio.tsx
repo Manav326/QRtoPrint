@@ -174,6 +174,7 @@ export default function PhotoStudio({
   const [focusY, setFocusY] = useState(50);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [includeFormDetails,setIncludeFormDetails]=useState(false);
   const [photoName,setPhotoName]=useState("");
   const [dateOfBirth,setDateOfBirth]=useState("");
   const [captionFontSizePt,setCaptionFontSizePt]=useState(6);
@@ -185,7 +186,7 @@ export default function PhotoStudio({
 
   const availableSizes = PHOTO_SIZES.filter(item => (photoPrices[item.id] ?? 0) > 0);
   const size = availableSizes.find(item => item.id === sizeId) ?? availableSizes[0] ?? PHOTO_SIZES[0];
-  const hasCaption=Boolean(photoName.trim()||dateOfBirth.trim());
+  const hasCaption=includeFormDetails&&Boolean(photoName.trim()||dateOfBirth.trim());
   const captionFontMm=captionFontSizePt*25.4/72;
   const captionHeightMm=hasCaption?Math.max(7,captionFontMm*2+1.2):0;
   const layout=useMemo(()=>getPhotoSheetLayout(size,captionHeightMm),[size,captionHeightMm]);
@@ -384,13 +385,23 @@ export default function PhotoStudio({
           </>}
 
           {activeTool === "sheet" && <>
-            <label className={styles.fieldLabel}>Name for form (optional)
-              <input type="text" maxLength={48} value={photoName} onChange={event=>setPhotoName(event.target.value)} placeholder="Enter the name to print below each photo"/>
+            <label className={styles.captionOptIn}>
+              <input type="checkbox" checked={includeFormDetails} onChange={event=>{
+                const enabled=event.target.checked;
+                setIncludeFormDetails(enabled);
+                if(!enabled){setPhotoName("");setDateOfBirth("");}
+              }}/>
+              <span><strong>Add name and DOB to each photo</strong><small>Optional. Nothing is printed below the photos unless you switch this on.</small></span>
             </label>
-            <label className={styles.fieldLabel}>Date of birth (optional)
-              <input type="date" min="1900-01-01" max={new Date().toISOString().slice(0,10)} value={dateOfBirth} onChange={event=>setDateOfBirth(event.target.value)}/>
-            </label>
-            <div className={styles.editorHelp}>Name and DOB are printed directly below every ID photo for pasting into forms. Leave either field blank when it is not required.</div>
+            {includeFormDetails&&<>
+              <label className={styles.fieldLabel}>Name for form (optional)
+                <input type="text" maxLength={48} value={photoName} onChange={event=>setPhotoName(event.target.value)} placeholder="Enter the name to print below each photo"/>
+              </label>
+              <label className={styles.fieldLabel}>Date of birth (optional)
+                <input type="date" min="1900-01-01" max={new Date().toISOString().slice(0,10)} value={dateOfBirth} onChange={event=>setDateOfBirth(event.target.value)}/>
+              </label>
+              <div className={styles.editorHelp}>Only the details you enter are printed below each photo. The photo dimensions stay unchanged.</div>
+            </>}
             <label className={styles.fieldLabel}>Photo size
               <select value={sizeId} onChange={event => setSizeId(event.target.value)}>
                 {availableSizes.map(item => <option key={item.id} value={item.id}>{item.label} · {item.detail} · {formatPhotoRate(photoPrices[item.id])}/photo</option>)}
