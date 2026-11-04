@@ -1983,6 +1983,8 @@ shop.MapGet("/print-jobs", async (
             job.ColourMode,
             job.PaperSize,
             job.IsDuplex,
+            job.Orientation,
+            job.PricingVersion,
             job.PrintKind,
             job.PhotoSizeCode,
             job.PhotoCount,
@@ -2448,7 +2450,9 @@ shop.MapPatch("/print-jobs/{jobId:guid}/printer", async (
         AssignedJobCount = assigned,
         UpdatedUtc = now
     });
-});shop.MapPatch("/print-jobs/{jobId:guid}/settings", async (
+});
+
+shop.MapPatch("/print-jobs/{jobId:guid}/settings", async (
     Guid jobId,
     UpdatePrintJobSettingsRequest request,
     ClaimsPrincipal principal,
@@ -5893,7 +5897,12 @@ publicApi.MapPost("/sessions/current/jobs", async (
         await entitlements.AcquireQuotaLockAsync(session.TenantId, TenantQuotaResource.MonthlyPrintJob, ct);
         var racedJob = await db.PrintJobs.AsNoTracking()
             .Where(item => item.TenantId == session.TenantId && item.IdempotencyKey == idempotencyKey)
-            .Select(item => new { item.Id, item.CustomerSessionId, item.BatchId, item.BatchName, item.JobNumber, item.Status, item.PageCount, item.CreatedUtc })
+            .Select(item => new
+            {
+                item.Id, item.CustomerSessionId, item.BatchId, item.BatchName, item.BatchGroupName,
+                item.JobNumber, item.Status, item.PageCount, item.Copies, item.ColourMode,
+                item.PaperSize, item.IsDuplex, item.Orientation, item.CreatedUtc
+            })
             .SingleOrDefaultAsync(ct);
         if (racedJob is not null)
         {
@@ -5905,6 +5914,24 @@ publicApi.MapPost("/sessions/current/jobs", async (
                 .Where(item => item.TenantId == session.TenantId && item.PrintJobId == racedJob.Id)
                 .Select(item => new { item.OriginalFileName, item.MediaType, item.SizeBytes, item.Sha256, item.PageSizesJson })
                 .SingleOrDefaultAsync(ct);
+            if (racedDocument is null ||
+                racedJob.BatchId != batchId ||
+                racedJob.BatchGroupName != batchGroupName ||
+                racedJob.Copies != requestedCopies ||
+                racedJob.ColourMode != requestedColourMode ||
+                racedJob.PaperSize != requestedPaperSize ||
+                racedJob.IsDuplex != requestedDuplex ||
+                racedJob.Orientation != requestedOrientation ||
+                racedDocument.OriginalFileName != originalName ||
+                racedDocument.SizeBytes != file.Length ||
+                !string.Equals(racedDocument.Sha256, stored.Sha256, StringComparison.OrdinalIgnoreCase))
+            {
+                return Results.Conflict(new
+                {
+                    code = "idempotency_key_reused",
+                    message = "This upload key already belongs to a different file or set of print options. Refresh the request instead of changing the original job."
+                });
+            }
             return Results.Ok(new { Job = racedJob, Document = racedDocument, DuplicateRequest = true });
         }
 
@@ -6113,7 +6140,7 @@ publicApi.MapPost("/sessions/current/local-upload-tickets", async (
         request.ColourMode is not ("Mono" or "Colour") ||
         request.PaperSize is not ("A4" or "A3" or "A5" or "LETTER" or "LEGAL") ||
         request.Copies is < 1 or > 100 ||
-        request.Orientation is not ("AUTO" or "PORTRAIT" or "LANDSCAPE")
+        request.Orientation is not ("AUTO" or "PORTRAIT" or "LANDSCAPE"))
     {
         return Results.UnprocessableEntity(new { code = "document_not_supported", message = "Local upload supports PDF, JPG/JPEG and PNG files up to 20 MB with a valid SHA-256 digest." });
     }
@@ -6887,7 +6914,7 @@ publicApi.MapPost("/jobs/{jobId:guid}/quote", async (
     {
         return Results.ValidationProblem(new Dictionary<string, string[]>
         {
-            ["printOptions"] = ["Document printing uses A4, 1–100 copies and Mono or Colour mode. Photo sheets use one A4 page, one sheet copy and a supported photo size/count."]
+            ["printOptions"] = ["Document printing supports A4, A3, A5, Letter or Legal paper, automatic/portrait/landscape orientation, 1–100 copies, Mono or Colour and single/double-sided. Photo sheets use one A4 page and a supported photo size/count."]
         });
     }
 
@@ -6988,6 +7015,7 @@ publicApi.MapPost("/jobs/{jobId:guid}/quote", async (
             job.ColourMode,
             job.PaperSize,
             job.IsDuplex,
+            job.Orientation,
             job.PrintKind,
             job.PhotoSizeCode,
             job.PhotoCount,
