@@ -72,3 +72,22 @@ test("pre-submission printer capability blocks are explained in the shop queue",
   assert.match(app, /Reassign this batch to a compatible printer/);
   assert.match(app, /explicitly approved before output/);
 });
+
+test("a pre-output capability block clears the attempted spooler name so the existing job can be reassigned", () => {
+  const program = read("../../../src/SmartPrint.Api/Program.cs");
+  const blockedStart = program.indexOf('agentApi.MapPost("/jobs/{jobId:guid}/print-blocked"');
+  const blockedEnd = program.indexOf('agentApi.MapPost("/jobs/{jobId:guid}/output-unconfirmed"', blockedStart);
+  const assignmentStart = program.indexOf('shop.MapPatch("/print-jobs/{jobId:guid}/printer"');
+  const assignmentEnd = program.indexOf('shop.MapPatch("/print-jobs/{jobId:guid}/settings"', assignmentStart);
+  assert.ok(blockedStart >= 0 && blockedEnd > blockedStart);
+  assert.ok(assignmentStart >= 0 && assignmentEnd > assignmentStart);
+  const blocked = program.slice(blockedStart, blockedEnd);
+  const assignment = program.slice(assignmentStart, assignmentEnd);
+  assert.match(blocked, /job\.Status = "LOCAL_QUEUE_READY"/);
+  assert.match(blocked, /job\.SpoolerJobName = null/);
+  assert.match(blocked, /job\.SpoolerJobId = null/);
+  assert.match(blocked, /job\.SpoolerStatus = "BLOCKED_BEFORE_SUBMISSION"/);
+  assert.match(assignment, /var readyQueueCanBeReassigned = selectedJob\.Status == "LOCAL_QUEUE_READY"/);
+  assert.match(assignment, /string\.IsNullOrWhiteSpace\(selectedJob\.SpoolerJobName\)/);
+  assert.match(assignment, /needsQueueReset/);
+});
