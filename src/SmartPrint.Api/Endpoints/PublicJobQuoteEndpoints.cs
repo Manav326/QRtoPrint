@@ -85,23 +85,20 @@ public static partial class PublicJobEndpoints
             }
 
             var isPhotoPrint = request.PrintKind == "PHOTO";
-            if ((request.PrintKind is not null && request.PrintKind is not ("DOCUMENT" or "PHOTO")) ||
-                job.PageCount is <= 0 or > 500 ||
-                request.Copies is < 1 or > 100 ||
-                request.PaperSize is not ("A4" or "A3" or "A5" or "LETTER" or "LEGAL") ||
-                request.ColourMode is not ("Mono" or "Colour") ||
-                request.Orientation is not ("AUTO" or "PORTRAIT" or "LANDSCAPE") ||
-                (isPhotoPrint &&
-                    (job.PageCount != 1 || request.Copies != 1 || request.ColourMode != "Colour" ||
-                     request.IsDuplex || request.PhotoSizeCode is not ("35x45" or "25x35" or "2x2" or "4x6") ||
-                     request.PhotoCount is null || request.PhotoCount is < 1 or > 100)) ||
-                (isPhotoPrint && (request.PaperSize != "A4" || request.Orientation != "AUTO")) ||
-                (!isPhotoPrint && (request.PhotoSizeCode is not null || request.PhotoCount is not null)))
+            var isPhotoPrint = request.PrintKind == "PHOTO";
+            var printOptionErrors = PrintJobQuoteRules.ValidatePrintOptions(
+                job.PageCount,
+                request.PrintKind,
+                request.ColourMode,
+                request.PaperSize,
+                request.IsDuplex,
+                request.Copies,
+                request.Orientation,
+                request.PhotoSizeCode,
+                request.PhotoCount);
+            if (printOptionErrors.Count != 0)
             {
-                return Results.ValidationProblem(new Dictionary<string, string[]>
-                {
-                    ["printOptions"] = ["Document printing supports A4, A3, A5, Letter or Legal paper, automatic/portrait/landscape orientation, 1–100 copies, Mono or Colour and single/double-sided. Photo sheets use one A4 page and a supported photo size/count."]
-                });
+                return Results.ValidationProblem(printOptionErrors);
             }
 
 
