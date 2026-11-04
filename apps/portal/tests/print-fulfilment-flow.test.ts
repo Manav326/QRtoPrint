@@ -297,7 +297,7 @@ test("customer photo previews do not expose the raw image or prepared PDF viewer
 
 test("the exact same Photo Studio is opened from the shop image review",()=>{
  const app=read("../src/App.tsx");
- assert.match(app,/setShopPhotoStudio\(\{source,job:preview\.job\}\)/);
+ assert.match(app,/setShopPhotoStudio\(\{source,job:preview\.job,returnPreview\}\)/);
  assert.match(app,/replaceShopPhotoDocument\(tokens\.accessToken,editor\.job\.id,sheet\.file,sheet\.sizeCode,sheet\.photoCount\)/);
  assert.match(app,/shopPhotoStudio && <PhotoStudio source=\{shopPhotoStudio\.source\}/);
  assert.match(app,/Enhance photo for printing/);
