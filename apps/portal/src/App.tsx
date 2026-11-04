@@ -3263,8 +3263,9 @@ function CustomerLocalConnection({localAgent,onReady,onUnavailable,cloudAssisted
           if(status.localUploadReady!==true || status.readiness?.localUploadReady!==true) {
             setCheckStatus("recovering");
             onReady(false);
-            if(cloudAssistedPrintingEnabled)onUnavailable();
             const readiness=status.readiness;
+            const agentHeartbeatOffline=readiness?.heartbeatFresh!==true;
+            if(cloudAssistedPrintingEnabled||agentHeartbeatOffline)onUnavailable();
             const blockers=[
               readiness?.queueInitialized!==true?"protected document queue is not ready":null,
               readiness?.printWorkerRunning!==true?"print worker is not running":null,
@@ -3275,7 +3276,9 @@ function CustomerLocalConnection({localAgent,onReady,onUnavailable,cloudAssisted
             setMessage("The shop computer is reachable, but local printing is recovering ("+detail+"). "+
               (cloudAssistedPrintingEnabled
                 ? "Choose Cloud-assisted upload while the shop operator restores the local print pipeline."
-                : "Ask the shop operator to restore the Agent and printer connection, then check again."));
+                : agentHeartbeatOffline
+                  ? "The Agent cloud heartbeat is offline. Choose Secure queue · HTTPS to save this request while the shop reconnects."
+                  : "Ask the shop operator to restore the protected local queue, then check again."));
             return;
           }
           setCheckStatus("connected");
