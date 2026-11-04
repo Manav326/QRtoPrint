@@ -155,13 +155,15 @@ export default function PhotoStudio({
   onCancel,
   onApply,
   photoPrices,
-  mode = "customer"
+  mode = "customer",
+  dark = false
 }: {
   source: File;
   onCancel: () => void;
   photoPrices: Record<string, number>;
   onApply: (sheets: PreparedPhotoSheet[]) => void | Promise<void>;
   mode?: "customer" | "shop";
+  dark?: boolean;
 }) {
   const dialogRef = useRef<HTMLDivElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -376,7 +378,7 @@ export default function PhotoStudio({
   const cropPanel=activeTool==="crop",lookPanel=activeTool==="look",textPanel=activeTool==="text",backgroundPanel=activeTool==="background";
 
   return (
-    <div ref={dialogRef} className={styles.overlay} role="dialog" aria-modal="true" aria-labelledby="photo-studio-title" aria-busy={busy} tabIndex={-1}>
+    <div ref={dialogRef} className={styles.overlay + (dark ? " " + styles.dark : "")} role="dialog" aria-modal="true" aria-labelledby="photo-studio-title" aria-busy={busy} tabIndex={-1}>
       <header className={styles.topbar}>
         <div className={styles.brand}>
           <span className={styles.brandMark}><ImageIcon size={17}/></span>
