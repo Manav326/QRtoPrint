@@ -5162,8 +5162,8 @@ agentApi.MapPost("/local-document-photo-revisions/{jobId:guid}/authorize", async
         return Results.Conflict(new { code = "photo_revision_original_changed", message = "The local original no longer matches the document registered by the shop service. Reopen its preview." });
 
     if (request.PageCount != 1 || request.SizeBytes is <= 0 or > 20 * 1024 * 1024 ||
-        request.Sha256.Length != 64 || !request.Sha256.All(Uri.IsHexDigit) ||
-        string.IsNullOrWhiteSpace(request.PageSizesJson) || request.PageSizesJson.Length > 4000)
+        string.IsNullOrWhiteSpace(request.Sha256) || request.Sha256.Length != 64 || !request.Sha256.All(Uri.IsHexDigit) ||
+        string.IsNullOrWhiteSpace(request.PageSizesJson) || request.PageSizesJson.Length > 4000 || !IsValidPageSizesJson(request.PageSizesJson))
         return Results.ValidationProblem(new Dictionary<string, string[]>
         {
             ["photoSheet"] = ["The prepared local photo sheet metadata is invalid."]
@@ -5248,6 +5248,53 @@ agentApi.MapPost("/local-document-photo-revisions/{jobId:guid}/complete", async 
     {
         await transaction.RollbackAsync(ct);
         return Results.NotFound();
+    }
+
+    // Idempotent retry: the previous completion may have committed while its
+    // HTTP response was lost. Recognise the exact same prepared sheet before
+    // requiring the original image hash again.
+    if (job.Status == "AWAITING_SHOP_APPROVAL" &&
+        job.LocalQueueReceivedUtc is null &&
+        job.ClaimedByAgentDeviceId is null &&
+        document.StorageMode == "LOCAL_AGENT" &&
+        document.AgentDeviceId == device.Id &&
+        document.MediaType == "application/pdf" &&
+        string.Equals(document.Sha256, request.Sha256, StringComparison.OrdinalIgnoreCase) &&
+        document.SizeBytes == request.SizeBytes &&
+        job.PrintKind == "PHOTO" &&
+        job.PageCount == 1 &&
+        job.PhotoSizeCode == request.PhotoSizeCode &&
+        job.PhotoCount == request.PhotoCount &&
+        string.Equals(document.PageSizesJson, request.PageSizesJson, StringComparison.Ordinal))
+    {
+        var duplicateHasPayment = await db.PrintPayments.AnyAsync(item =>
+            item.TenantId == device.TenantId && item.PrintJobId == jobId &&
+            item.Status != "REJECTED" && item.Status != "REFUNDED", ct);
+        var duplicateHasBatchPayment = job.BatchId is Guid duplicateBatchId &&
+            await db.PrintBatchPayments.AnyAsync(item =>
+                item.TenantId == device.TenantId && item.BatchId == duplicateBatchId &&
+                item.Status != "REJECTED" && item.Status != "REFUNDED", ct);
+        if (!duplicateHasPayment && !duplicateHasBatchPayment)
+        {
+            await transaction.RollbackAsync(ct);
+            return Results.Ok(new
+            {
+                job.Id,
+                job.Status,
+                job.PageCount,
+                job.PrintKind,
+                job.PhotoSizeCode,
+                job.PhotoCount,
+                job.PhotoUnitPriceMinorSnapshot,
+                job.QuotedAmountMinor,
+                job.PricingVersion,
+                job.QuoteExpiresUtc,
+                document.OriginalFileName,
+                document.MediaType,
+                document.SizeBytes,
+                DuplicateRequest = true
+            });
+        }
     }
 
     if (job.Status != "AWAITING_SHOP_APPROVAL" ||
@@ -9260,6 +9307,19 @@ static object BuildBatchPaymentResponse(PrintBatchPayment payment, int fileCount
             payment.PayeeNameSnapshot, payment.AmountMinor, payment.Currency,
             "Batch " + payment.BatchId.ToString("N")[..8].ToUpperInvariant())
     };
+
+static bool IsValidPageSizesJson(string value)
+{
+    try
+    {
+        using var parsed = JsonDocument.Parse(value);
+        return parsed.RootElement.ValueKind == JsonValueKind.Array;
+    }
+    catch (JsonException)
+    {
+        return false;
+    }
+}
 
 static bool IsHexColor(string value) =>
     value is { Length: 7 } && value[0] == '#' && value[1..].All(Uri.IsHexDigit);
