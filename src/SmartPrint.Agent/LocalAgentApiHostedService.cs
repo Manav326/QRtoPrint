@@ -736,7 +736,9 @@ public sealed class LocalAgentApiHostedService(
 
     private sealed record LocalUploadedJob(
         Guid Id, string JobNumber, string Status, int PageCount, int Copies,
-        string Currency, long QuotedAmountMinor, DateTimeOffset CreatedUtc);
+        string Currency, long QuotedAmountMinor, DateTimeOffset CreatedUtc,
+        string ColourMode = "Mono", string PaperSize = "A4", bool IsDuplex = false,
+        string Orientation = "AUTO", int PricingVersion = 1);
 
     private sealed record LocalUploadedDocument(
         Guid Id, string OriginalFileName, string MediaType, long SizeBytes,
