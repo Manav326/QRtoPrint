@@ -5811,7 +5811,9 @@ publicApi.MapPost("/sessions/current/jobs", async (
         .SingleOrDefaultAsync(ct);
     var localAgentAvailable = await GetLocalAgentInfoAsync(
         db, session.TenantId, stationDefaultPrinterId, now, ct) is not null;
-    if (!subscription.CloudAssistedPrintingEnabled && localAgentAvailable)
+    var queueFallbackRequested = string.Equals(
+        context.Request.Headers["X-Print-Queue-Fallback"].FirstOrDefault(), "true", StringComparison.OrdinalIgnoreCase);
+    if (!subscription.CloudAssistedPrintingEnabled && localAgentAvailable && !queueFallbackRequested)
     {
         return Results.Problem(
             statusCode: StatusCodes.Status403Forbidden,
@@ -6657,7 +6659,9 @@ publicApi.MapPost("/sessions/current/local-upload-tickets/{ticketId:guid}/cloud-
                 title: "This shop's trial or subscription period is no longer active."));
         var recoveryAgentAvailable = await GetLocalAgentInfoAsync(
             db, ticket.TenantId, ticket.PrinterDeviceId, commitNow, ct) is not null;
-        if (!subscription.CloudAssistedPrintingEnabled && recoveryAgentAvailable)
+        var queueFallbackRequested = string.Equals(
+            context.Request.Headers["X-Print-Queue-Fallback"].FirstOrDefault(), "true", StringComparison.OrdinalIgnoreCase);
+        if (!subscription.CloudAssistedPrintingEnabled && recoveryAgentAvailable && !queueFallbackRequested)
             return await RejectAndCleanAsync(Results.Problem(statusCode: StatusCodes.Status403Forbidden,
                 title: "Secure HTTPS recovery is not available while the paired shop Agent is online on this plan."));
         if (!PlanEntitlementRules.AllowsDocument(subscription.MaxDocumentBytes, ticket.SizeBytes))
