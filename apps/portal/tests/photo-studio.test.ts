@@ -188,3 +188,8 @@ test("50 photos at nine per page build one six-page A4 PDF",()=>{
  assert.match(value,/\/Count 6/);
  assert.equal((value.match(/\/Type \/Page \/Parent 2 0 R/g)??[]).length,6);
 });
+
+test("changing photos per A4 page redraws the live preview",()=>{
+ const studio=readFileSync(new URL("../src/PhotoStudio.tsx",import.meta.url),"utf8");
+ assert.match(studio,/\},\[image,size,copies,photosPerPage,previewPageIndex,/);
+});
