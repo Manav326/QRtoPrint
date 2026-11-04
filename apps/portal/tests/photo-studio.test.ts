@@ -163,3 +163,14 @@ test("customers are told when the shop has not enabled photo printing",()=>{
  assert.match(app,/Photo printing is not enabled at this shop yet/);
  assert.match(app,/Ask the shop owner to configure photo sizes and rates/);
 });
+
+test("50 photos can be laid out as nine per A4 page with a partially filled final page",()=>{
+ const layout=getPhotoSheetLayout({widthMm:35,heightMm:45},0,9);
+ assert.equal(layout.perSheet,9);
+ assert.equal(layout.columns,5);
+ assert.equal(layout.rows,2);
+ const photoCount=50;
+ const pageCount=Math.ceil(photoCount/layout.perSheet);
+ assert.equal(pageCount,6);
+ assert.equal(photoCount-(pageCount-1)*layout.perSheet,5);
+});
