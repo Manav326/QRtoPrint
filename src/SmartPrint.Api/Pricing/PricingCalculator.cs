@@ -73,6 +73,42 @@ public static class PricingCalculator
         return checked((photoCount + photosPerPage - 1) / photosPerPage);
     }
 
+    public static int PhotoPageCount(int photoCount, string photoSizeCode, int photosPerPage)
+    {
+        if (photoCount is < 1 or > 100)
+            throw new ArgumentOutOfRangeException(nameof(photoCount), "Photo count must be between 1 and 100.");
+
+        var maximumPhotos = MaximumPhotosPerA4Sheet(photoSizeCode);
+        if (photosPerPage is < 1 || photosPerPage > maximumPhotos)
+            throw new ArgumentOutOfRangeException(nameof(photosPerPage), $"Photos per A4 page must be between 1 and {maximumPhotos} for the selected size.");
+
+        return checked((photoCount + photosPerPage - 1) / photosPerPage);
+    }
+
+    public static long[] CalculatePhotoPageRefundAllocations(
+        int photoCount, string photoSizeCode, int photosPerPage, long photoUnitPriceMinor)
+    {
+        if (photoUnitPriceMinor <= 0)
+            throw new ArgumentOutOfRangeException(nameof(photoUnitPriceMinor), "The per-photo rate must be positive.");
+
+        var pageCount = PhotoPageCount(photoCount, photoSizeCode, photosPerPage);
+        var allocations = new long[pageCount];
+        var remainingPhotos = photoCount;
+        long allocated = 0;
+        for (var page = 0; page < pageCount; page++)
+        {
+            var pagePhotos = Math.Min(photosPerPage, remainingPhotos);
+            allocations[page] = checked((long)pagePhotos * photoUnitPriceMinor);
+            allocated = checked(allocated + allocations[page]);
+            remainingPhotos -= pagePhotos;
+        }
+
+        var expectedTotal = checked((long)photoCount * photoUnitPriceMinor);
+        if (remainingPhotos != 0 || allocated != expectedTotal)
+            throw new InvalidOperationException("The per-page photo refund allocation does not equal the quoted photo total.");
+        return allocations;
+    }
+
     public static long[] CalculatePageRefundAllocations(int pageCount, int copies, string colourMode, bool isDuplex, ShopPricingProfile pricing)
     {
         var total = Calculate(pageCount, copies, colourMode, isDuplex, pricing);
