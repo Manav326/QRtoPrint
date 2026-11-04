@@ -262,8 +262,9 @@ public sealed class PdfBrandingOverlayTests
         {
             var canvas = pdf.BeginPage(595.276f, 841.89f);
             using var typeface = SkiaSharp.SKTypeface.FromFamilyName("Arial", SkiaSharp.SKFontStyle.Normal);
-            using var paint = new SkiaSharp.SKPaint { Typeface = typeface, TextSize = 14, Color = SkiaSharp.SKColors.Black, IsAntialias = true };
-            canvas.DrawText("SELECTABLE ORIGINAL CONTENT", 48, 72, paint);
+            using var font = new SkiaSharp.SKFont(typeface, 14);
+            using var paint = new SkiaSharp.SKPaint { Color = SkiaSharp.SKColors.Black, IsAntialias = true };
+            canvas.DrawText("SELECTABLE ORIGINAL CONTENT", 48, 72, SkiaSharp.SKTextAlign.Left, font, paint);
             pdf.EndPage();
             pdf.Close();
         }
