@@ -1,0 +1,172 @@
+using System.Security.Claims;
+using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Routing;
+using SmartPrint.Api.Services;
+using static SmartPrint.Api.Security.EndpointIdentity;
+
+namespace SmartPrint.Api.Endpoints;
+
+public static class ShopPrintJobDispatchEndpoints
+{
+    public static RouteGroupBuilder MapShopPrintJobDispatchEndpoints(this RouteGroupBuilder shop)
+    {
+        shop.MapPost("/print-jobs/{jobId:guid}/dispatch", async (
+            Guid jobId,
+            ClaimsPrincipal principal,
+            ShopPrintJobDispatchService dispatch,
+            CancellationToken ct) =>
+        {
+            if (!IsShopOwner(principal) || !TryGetTenantId(principal, out var tenantId))
+            {
+                return Results.Forbid();
+            }
+
+            var result = await dispatch.DispatchAsync(jobId, tenantId, GetActorId(principal), ct);
+            switch (result.Failure)
+            {
+                case ShopPrintDispatchFailure.NotFound:
+                    return Results.NotFound();
+                case ShopPrintDispatchFailure.JobNotReady:
+                    return Results.Conflict(new
+                    {
+                        code = "job_not_ready_for_print_dispatch",
+                        message = "The paid document must be secured by its assigned agent before printing can start."
+                    });
+                case ShopPrintDispatchFailure.BatchPrinterMismatch:
+                    return Results.Conflict(new
+                    {
+                        code = "batch_printer_mismatch",
+                        message = "Every accepted file in this batch must use the same printer. Assign one printer to the whole batch before starting output."
+                    });
+                case ShopPrintDispatchFailure.PrerequisitesNotMet:
+                    return Results.Conflict(new
+                    {
+                        code = "print_prerequisites_not_met",
+                        message = "Verified payment and the same paired computer's live printer queue are required."
+                    });
+            }
+
+            var job = result.Job!;
+            if (result.DuplicateRequest)
+            {
+                return Results.Ok(new
+                {
+                    job.Id,
+                    job.Status,
+                    job.SpoolerJobName,
+                    DuplicateRequest = true
+                });
+            }
+
+            var printer = result.Printer!;
+            return Results.Ok(new
+            {
+                job.Id,
+                job.JobNumber,
+                job.Status,
+                PrinterName = printer.DisplayName,
+                printer.QueueName,
+                printer.OutputMode,
+                printer.AgentId,
+                job.SpoolerJobName
+            });
+        });
+
+        shop.MapPost("/print-jobs/{jobId:guid}/retry-pdf-export", async (
+            Guid jobId,
+            ClaimsPrincipal principal,
+            ShopPrintJobDispatchService dispatch,
+            CancellationToken ct) =>
+        {
+            if (!IsShopOwner(principal) || !TryGetTenantId(principal, out var tenantId))
+            {
+                return Results.Forbid();
+            }
+
+            var result = await dispatch.RetryPdfExportAsync(
+                jobId, tenantId, GetActorId(principal), ct);
+            switch (result.Failure)
+            {
+                case ShopPrintDispatchFailure.NotFound:
+                    return Results.NotFound();
+                case ShopPrintDispatchFailure.PdfExportNotRecoverable:
+                    return Results.Conflict(new
+                    {
+                        code = "pdf_export_not_recoverable",
+                        message = "Only an output-unconfirmed job assigned to a PDF export destination can be retried."
+                    });
+                case ShopPrintDispatchFailure.PdfExportLocalCopyMissing:
+                    return Results.Conflict(new
+                    {
+                        code = "pdf_export_local_copy_missing",
+                        message = "The original protected local document and assigned Agent are required."
+                    });
+                case ShopPrintDispatchFailure.PdfExportPrerequisitesNotMet:
+                    return Results.Conflict(new
+                    {
+                        code = "pdf_export_prerequisites_not_met",
+                        message = "Verified payment and the same paired computer's live PDF export destination are required."
+                    });
+            }
+
+            var job = result.Job!;
+            return Results.Ok(new
+            {
+                job.Id,
+                job.JobNumber,
+                job.Status,
+                OutputMode = "PDF_EXPORT",
+                PrinterName = result.OutputDestinationName
+            });
+        });
+
+        shop.MapPost("/print-jobs/{jobId:guid}/confirm-output", async (
+            Guid jobId,
+            ClaimsPrincipal principal,
+            ShopPrintJobDispatchService dispatch,
+            CancellationToken ct) =>
+        {
+            if (!IsShopOwner(principal) || !TryGetTenantId(principal, out var tenantId))
+            {
+                return Results.Forbid();
+            }
+
+            var result = await dispatch.ConfirmOutputAsync(
+                jobId, tenantId, GetActorId(principal), ct);
+            switch (result.Failure)
+            {
+                case ShopPrintDispatchFailure.NotFound:
+                    return Results.NotFound();
+                case ShopPrintDispatchFailure.PdfExportConfirmationNotAllowed:
+                    return Results.Conflict(new
+                    {
+                        code = "pdf_export_not_physical_output",
+                        message = "PDF exports are confirmed when the local PDF file is saved and verified. Physical paper-output confirmation does not apply."
+                    });
+                case ShopPrintDispatchFailure.OutputNotReadyForConfirmation:
+                    return Results.Conflict(new
+                    {
+                        code = "output_not_ready_for_confirmation",
+                        message = "Only a submitted or output-unconfirmed job can be completed after checking the physical pages."
+                    });
+            }
+
+            var job = result.Job!;
+            if (result.DuplicateRequest)
+            {
+                return Results.Ok(new
+                {
+                    job.Id,
+                    job.Status,
+                    job.OutputConfirmedUtc,
+                    DuplicateRequest = true
+                });
+            }
+
+            return Results.Ok(new { job.Id, job.Status, job.OutputConfirmedUtc });
+        });
+
+        return shop;
+    }
+}
