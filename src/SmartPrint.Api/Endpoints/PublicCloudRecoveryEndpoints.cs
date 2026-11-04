@@ -2,6 +2,8 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
+using SmartPrint.Api.Data;
+using SmartPrint.Documents;
 using SmartPrint.Api.Domain;
 using SmartPrint.Api.Services;
 using SmartPrint.Api.Storage;
