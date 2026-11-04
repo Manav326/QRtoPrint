@@ -136,6 +136,7 @@ test("shop cancellation returns to the original document preview",()=>{
  assert.match(app,/focusEditOnMount=\{focusShopPhotoEdit\}/);
  assert.match(app,/setFocusShopPhotoEdit\(true\)/);
  assert.match(app,/editPhotoButtonRef\.current\?\.focus\(\)/);
+ assert.match(app,/setPreview\(null\); setFocusShopPhotoEdit\(false\)/);
 });
 
 test("Photo Studio follows the saved light or dark appearance in both customer and shop routes",()=>{
