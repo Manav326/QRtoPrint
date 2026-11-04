@@ -60,7 +60,7 @@ test("plan-limited HTTPS fallback is only offered when the Agent is unavailable"
   const publicUpload = publicUploadSource.slice(publicUploadStart);
   assert.match(publicUpload, /!subscription\.CloudAssistedPrintingEnabled && localAgentAvailable/);
   assert.doesNotMatch(publicUpload, /queueFallbackRequested/);
-  assert.doesNotMatch(program, /X-Print-Queue-Fallback|queueFallbackRequested/);
+  assert.doesNotMatch(publicUploadSource, /X-Print-Queue-Fallback|queueFallbackRequested/);
   assert.doesNotMatch(api, /X-Print-Queue-Fallback|allowQueueFallback/);
   assert.match(app, /setCheckStatus\("unavailable"\);\s*onReady\(false\);[\s\S]*?onUnavailable\(\);/);
   assert.match(app, /const agentHeartbeatOffline=readiness\?\.heartbeatFresh!==true;[\s\S]*?if\(cloudAssistedPrintingEnabled\|\|agentHeartbeatOffline\)onUnavailable\(\)/);
