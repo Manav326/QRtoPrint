@@ -613,6 +613,10 @@ public sealed class WindowsPrintExecutor
             var validated = Marshal.PtrToStructure<DevModeW>(pointer);
             if ((validated.Fields & DmPaperSize) == 0 || validated.PaperSize != paper)
                 throw new PrintExecutionBlockedException("PAPER_SIZE_REJECTED", "The printer driver did not accept the requested paper size.");
+            var expectedOrientation = landscape ? (short)2 : (short)1;
+            if (!PrinterCapabilityRules.IsRequestedOrientationAccepted(
+                    (validated.Fields & DmOrientation) != 0, validated.Orientation, expectedOrientation))
+                throw new PrintExecutionBlockedException("ORIENTATION_UNCONFIRMED", "The printer driver could not confirm the requested orientation. No pages were printed.");
             if (entry.IsDuplex && ((validated.Fields & DmDuplex) == 0 || validated.Duplex != 2))
                 throw new PrintExecutionBlockedException("DUPLEX_REJECTED", "The driver did not accept duplex mode.");
             if (entry.ColourMode == "Colour" && ((validated.Fields & DmColor) == 0 || validated.Color != 2))
