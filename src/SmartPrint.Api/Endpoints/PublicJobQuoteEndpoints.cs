@@ -94,7 +94,8 @@ public static partial class PublicJobEndpoints
                 request.Copies,
                 request.Orientation,
                 request.PhotoSizeCode,
-                request.PhotoCount);
+                request.PhotoCount,
+                request.PhotosPerPage);
             if (printOptionErrors.Count != 0)
             {
                 return Results.ValidationProblem(printOptionErrors);
@@ -125,18 +126,20 @@ public static partial class PublicJobEndpoints
                 {
                     var photoSizeCode = request.PhotoSizeCode!;
                     var photoCount = request.PhotoCount!.Value;
-                    var maximumPhotos = PricingCalculator.MaximumPhotosPerA4Sheet(photoSizeCode);
-                    if (photoCount > maximumPhotos)
+                    var photosPerPage = request.PhotosPerPage ?? photoCount;
+                    var expectedPageCount = PricingCalculator.PhotoPageCount(photoCount, photoSizeCode, photosPerPage);
+                    if (job.PageCount != expectedPageCount)
                     {
                         return Results.ValidationProblem(new Dictionary<string, string[]>
                         {
-                            ["photoCount"] = [$"This A4 layout supports at most {maximumPhotos} photos of the selected size per sheet."]
+                            ["pageCount"] = [$"The prepared PDF must contain exactly {expectedPageCount} A4 page(s) for {photoCount} photos of the selected size."]
                         });
                     }
 
                     photoUnitPriceMinor = PricingCalculator.PhotoUnitRate(photoSizeCode, pricing);
                     amount = PricingCalculator.CalculatePhoto(photoCount, photoSizeCode, pricing);
-                    pageRefundAllocations = [amount];
+                    pageRefundAllocations = PricingCalculator.CalculatePhotoPageRefundAllocations(
+                        photoCount, photoSizeCode, photosPerPage, photoUnitPriceMinor);
                     job.PrintKind = "PHOTO";
                     job.PhotoSizeCode = photoSizeCode;
                     job.PhotoCount = photoCount;
