@@ -5229,6 +5229,14 @@ agentApi.MapPost("/local-document-photo-revisions/{jobId:guid}/complete", async 
         request.PhotoSizeCode is not ("35x45" or "25x35" or "2x2" or "4x6"))
         return Results.BadRequest(new { code = "photo_revision_output_invalid", message = "The prepared photo page metadata is invalid." });
 
+    if (request.PhotosPerPage > PricingCalculator.MaximumPhotosPerA4Sheet(request.PhotoSizeCode) ||
+        request.PageCount != PricingCalculator.PhotoPageCount(request.PhotoCount, request.PhotoSizeCode, request.PhotosPerPage))
+        return Results.BadRequest(new
+        {
+            code = "photo_revision_page_count_invalid",
+            message = "The local photo PDF page count must match its selected photos-per-page layout."
+        });
+
     var grantToken = context.Request.Headers["X-Print-Photo-Revision-Grant"].FirstOrDefault();
     if (!LocalDocumentPhotoRevisionGrant.TryValidate(
             grantToken, signingKeyText, issuer, audience, DateTimeOffset.UtcNow, out var grant) ||
