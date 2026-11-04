@@ -154,13 +154,16 @@ export default function PhotoStudio({
   source,
   onCancel,
   onApply,
-  photoPrices
+  photoPrices,
+  mode = "customer"
 }: {
   source: File;
   onCancel: () => void;
   photoPrices: Record<string, number>;
   onApply: (sheets: PreparedPhotoSheet[]) => void | Promise<void>;
+  mode?: "customer" | "shop";
 }) {
+  const dialogRef = useRef<HTMLDivElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const [image, setImage] = useState<HTMLImageElement | null>(null);
   const [imageError, setImageError] = useState("");
@@ -174,6 +177,10 @@ export default function PhotoStudio({
   const [focusY, setFocusY] = useState(50);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const busyRef = useRef(busy);
+  const onCancelRef = useRef(onCancel);
+  busyRef.current = busy;
+  onCancelRef.current = onCancel;
   const [includeFormDetails,setIncludeFormDetails]=useState(false);
   const [photoName,setPhotoName]=useState("");
   const [dateOfBirth,setDateOfBirth]=useState("");
@@ -194,6 +201,44 @@ export default function PhotoStudio({
   const copies = Math.max(1, Math.min(maxCopies, Number(copiesInput) || 1));
   const sheetCount = Math.ceil(copies / layout.perSheet);
   const previewCapacity = layout.perSheet;
+
+  useEffect(() => {
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    const focusableSelector = 'button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
+    const focusableElements = () => Array.from(dialogRef.current?.querySelectorAll<HTMLElement>(focusableSelector) ?? []);
+    const handleDialogKeydown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        if (!busyRef.current) {
+          event.preventDefault();
+          onCancelRef.current();
+        }
+        return;
+      }
+      if (event.key !== "Tab") return;
+      const elements = focusableElements();
+      if (!elements.length) {
+        event.preventDefault();
+        dialogRef.current?.focus();
+        return;
+      }
+      const first = elements[0];
+      const last = elements[elements.length - 1];
+      if (event.shiftKey && (document.activeElement === first || !dialogRef.current?.contains(document.activeElement))) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && (document.activeElement === last || !dialogRef.current?.contains(document.activeElement))) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+    document.addEventListener("keydown", handleDialogKeydown, true);
+    focusableElements()[0]?.focus();
+    return () => {
+      document.removeEventListener("keydown", handleDialogKeydown, true);
+      document.body.style.overflow = previousOverflow;
+    };
+  }, []);
 
   useEffect(() => {
     if (availableSizes.length && !availableSizes.some(item => item.id === sizeId)) setSizeId(availableSizes[0].id);
@@ -323,17 +368,22 @@ export default function PhotoStudio({
   }
 
   const resolutionMessage = image ? sourceResolutionNote(image, size) : "";
+  const footerHint = mode === "shop"
+    ? "Save your prepared A4 sheet to this existing unpaid job. It returns to the review queue; printing still requires shop approval, verified payment and dispatch."
+    : "The original upload stays untouched. This prepared A4 sheet replaces it in your batch when you submit your print request.";
+  const actionLabel = mode === "shop" ? "Save sheet to this job" : "Prepare A4 sheet";
+  const busyLabel = mode === "shop" ? "Saving to the existing job…" : "Preparing your A4 sheet…";
   const cropPanel=activeTool==="crop",lookPanel=activeTool==="look",textPanel=activeTool==="text",backgroundPanel=activeTool==="background";
 
   return (
-    <div className={styles.overlay} role="dialog" aria-modal="true" aria-label="SmartPrint Photo Studio">
+    <div ref={dialogRef} className={styles.overlay} role="dialog" aria-modal="true" aria-labelledby="photo-studio-title" aria-busy={busy} tabIndex={-1}>
       <header className={styles.topbar}>
         <div className={styles.brand}>
           <span className={styles.brandMark}><ImageIcon size={17}/></span>
-          <span><strong>Photo Studio</strong><small>SMARTPRINT · PRINT PREPARATION</small></span>
+          <span><strong id="photo-studio-title">Photo Studio</strong><small>{mode === "shop" ? "SHOP · EDIT EXISTING JOB" : "CUSTOMER · BEFORE UPLOAD"}</small></span>
         </div>
         <div className={styles.topbarMeta}><span>A4 · 210 × 297 mm</span><span>300 DPI</span></div>
-        <button type="button" className={styles.iconButton} onClick={onCancel} aria-label="Close Photo Studio" title="Close"><X size={18}/></button>
+        <button type="button" className={styles.iconButton} onClick={onCancel} disabled={busy} aria-label="Close Photo Studio" title="Close"><X size={18}/></button>
       </header>
 
       <div className={styles.editor}>
@@ -441,18 +491,18 @@ export default function PhotoStudio({
           </div>
           <div className={styles.canvasFooter}>
             <span>{size.label} · {size.widthMm} × {size.heightMm} mm</span>
-            <span>{copies} photo copies · {sheetCount} A4 page(s) in one PDF</span>
+            <span>{copies} photos · {sheetCount} A4 sheet for this job</span>
             {resolutionMessage && <small>{resolutionMessage}</small>}
           </div>
         </main>
       </div>
 
       <footer className={styles.footer}>
-        <div className={styles.footerHint}><Check size={14}/> This protected preview stays in the shop workflow. The prepared sheet is uploaded for printing here; it is not offered as a customer download.</div>
+        <div className={styles.footerHint}><Check size={14}/> {footerHint}</div>
         <div className={styles.footerActions}>
           <button type="button" className={styles.cancelButton} onClick={onCancel} disabled={busy}>Cancel</button>
           <button type="button" className={styles.applyButton} onClick={() => void createPrintSheets()} disabled={!image || busy || !!imageError || availableSizes.length === 0 || !Number.isInteger(Number(copiesInput)) || Number(copiesInput) < 1 || Number(copiesInput) > maxCopies}>
-            {busy ? "Preparing shop print sheet…" : "Use photo for shop printing"} <ChevronDown size={15}/>
+            {busy ? busyLabel : actionLabel} <Check size={15}/>
           </button>
         </div>
       </footer>
