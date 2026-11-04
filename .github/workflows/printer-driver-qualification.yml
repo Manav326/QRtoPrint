@@ -45,7 +45,7 @@ jobs:
   virtual-fixture:
     name: Exercise Agent with isolated file-backed printer port
     needs: manifest
-    runs-on: windows-latest
+    runs-on: windows-2025
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v7
@@ -59,7 +59,7 @@ jobs:
         run: |
           $driverName = "Microsoft Print To PDF"
           $driver = Get-PrinterDriver -Name $driverName -ErrorAction Stop
-          $driverVersion = Get-Printer -Name "Microsoft Print to PDF" -ErrorAction Stop
+          $driverDetails = Get-PrinterDriver -Name $driver.Name -ErrorAction Stop
           $fixtureRoot = Join-Path $env:RUNNER_TEMP "smartprint-driver-fixture"
           New-Item -ItemType Directory -Force -Path $fixtureRoot | Out-Null
           $portName = Join-Path $fixtureRoot "rendered-output.prn"
@@ -74,13 +74,16 @@ jobs:
             "SMARTPRINT_DRIVER_QUALIFICATION_QUEUE=$queueName"
             "SMARTPRINT_DRIVER_QUALIFICATION_PORT=$portName"
             "SMARTPRINT_DRIVER_QUALIFICATION_DRIVER=$($driver.Name)"
+            "SMARTPRINT_DRIVER_QUALIFICATION_VERSION=$($driverDetails.DriverVersion)"
+            "SMARTPRINT_DRIVER_QUALIFICATION_MANUFACTURER=$($driverDetails.Manufacturer)"
             "SMARTPRINT_DRIVER_QUALIFICATION_ID=microsoft-print-to-pdf-fixture"
             "SMARTPRINT_DRIVER_QUALIFICATION_OUTPUT=$portName"
             "SMARTPRINT_DRIVER_QUALIFICATION_REPORT=$((Join-Path $env:GITHUB_WORKSPACE 'artifacts/printer-driver-qualification/driver-rendering.json'))"
           ) | Add-Content -LiteralPath $env:GITHUB_ENV -Encoding utf8
           Write-Host "Fixture queue: $queueName"
           Write-Host "Driver: $($driver.Name)"
-          Write-Host "Driver version: $($driverVersion.DriverName)"
+          Write-Host "Driver version: $($driverDetails.DriverVersion)"
+          Write-Host "Manufacturer: $($driverDetails.Manufacturer)"
           Write-Host "File-backed port: $portName"
       - name: Render through the production Agent spooler path
         env:
