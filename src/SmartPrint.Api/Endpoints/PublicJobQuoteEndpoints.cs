@@ -85,7 +85,6 @@ public static partial class PublicJobEndpoints
             }
 
             var isPhotoPrint = request.PrintKind == "PHOTO";
-            var isPhotoPrint = request.PrintKind == "PHOTO";
             var printOptionErrors = PrintJobQuoteRules.ValidatePrintOptions(
                 job.PageCount,
                 request.PrintKind,
