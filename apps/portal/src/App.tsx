@@ -3908,7 +3908,7 @@ function CustomerPrintFlow({publicCode,sessionToken,paymentOptions,localAgent,lo
         const settings=settingsForFile(candidate);
         const created=uploadMode==="LOCAL"&&localAgent
           ? await uploadCustomerDocumentLocally(sessionToken,candidate,localAgent,currentBatchId,batchGroupName,currentBatchName||undefined,cloudAssistedPrintingEnabled,settings)
-          : await uploadCustomerDocument(sessionToken,candidate,currentBatchId,batchGroupName,currentBatchName||undefined,settings,uploadMode==="CLOUD"&&!cloudAssistedPrintingEnabled);
+          : await uploadCustomerDocument(sessionToken,candidate,currentBatchId,batchGroupName,currentBatchName||undefined,settings);
         if(created.job.batchId&&created.job.batchId!==currentBatchId) {
           if(results.length>0) {
             throw new ApiError("This file belongs to an earlier batch. Refresh the original print request before adding more files; SmartPrint will not mix two batches.",409);
