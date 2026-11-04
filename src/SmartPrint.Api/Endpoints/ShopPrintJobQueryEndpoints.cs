@@ -46,6 +46,7 @@ public static class ShopPrintJobQueryEndpoints
                     job.BatchGroupName,
                     job.BatchName,
                     job.RejectedPageNumbersJson,
+                    job.PdfBrandingEnabled,
                     job.JobNumber,
                     job.Status,
                     job.PageCount,
