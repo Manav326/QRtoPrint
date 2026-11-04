@@ -265,6 +265,29 @@ public sealed class AgentLocalQueueStore
         }
     }
 
+    public async Task RefreshStagedLocalUploadLeaseAsync(
+        Guid jobId,
+        string sha256,
+        long sizeBytes,
+        DateTimeOffset leaseExpiresUtc,
+        CancellationToken cancellationToken)
+    {
+        var entry = Find(jobId)
+            ?? throw new FileNotFoundException("The staged local upload is missing from the protected queue.");
+        if (!string.Equals(entry.Sha256, sha256, StringComparison.OrdinalIgnoreCase) ||
+            entry.SizeBytes != sizeBytes ||
+            !File.Exists(entry.DocumentPath))
+        {
+            throw new InvalidDataException("The staged local upload no longer matches its authorised document.");
+        }
+        if (entry.State != "LOCAL_UPLOAD_STAGED" || leaseExpiresUtc <= entry.LeaseExpiresUtc)
+        {
+            return;
+        }
+
+        await SaveManifestAsync(entry with { LeaseExpiresUtc = leaseExpiresUtc }, cancellationToken);
+    }
+
     public async Task MarkLocalUploadFinalizedAsync(Guid jobId, CancellationToken cancellationToken)
     {
         var entry = Find(jobId)
