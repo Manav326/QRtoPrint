@@ -193,6 +193,8 @@ shop.MapShopStationEndpoints();
 
 shop.MapShopPricingEndpoints();
 
+shop.MapShopPaymentEndpoints();
+
 shop.MapShopCustomerEndpoints();
 
 shop.MapShopPrintJobQueryEndpoints();
