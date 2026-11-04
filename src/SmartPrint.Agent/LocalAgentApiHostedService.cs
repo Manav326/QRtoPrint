@@ -379,6 +379,192 @@ public sealed class LocalAgentApiHostedService(
                     "text/html; charset=utf-8");
             });
 
+            app.MapPost("/api/v1/local/documents/{jobId:guid}/photo-revision", async (
+                Guid jobId,
+                HttpContext context,
+                CancellationToken ct) =>
+            {
+                AgentCredentials? credentials;
+                try
+                {
+                    credentials = credentialStore.LoadForCloudRequests(configuration["Agent:ApiBaseUrl"]);
+                }
+                catch (InvalidOperationException exception)
+                {
+                    logger.LogWarning("Blocked a local photo revision because the saved Agent API address is not secure ({FailureType}).", exception.GetType().Name);
+                    return Results.Problem(statusCode: StatusCodes.Status503ServiceUnavailable,
+                        title: "The saved SmartPrint API address must use HTTPS. Repair the Agent connection.");
+                }
+
+                var grantToken = context.Request.Headers["X-Print-Photo-Revision-Grant"].FirstOrDefault();
+                if (credentials is null || string.IsNullOrWhiteSpace(grantToken) || grantToken.Length > 4096)
+                    return Results.Unauthorized();
+                if (!context.Request.HasFormContentType)
+                    return Results.BadRequest(new { code = "photo_revision_form_required", message = "Send one prepared photo-sheet PDF." });
+
+                var form = await context.Request.ReadFormAsync(ct);
+                if (form.Files.Count != 1)
+                    return Results.BadRequest(new { code = "one_photo_sheet_required", message = "Send exactly one prepared photo-sheet PDF." });
+
+                var file = form.Files[0];
+                if (file.Length is <= 0 or > 20 * 1024 * 1024 ||
+                    !string.Equals(Path.GetExtension(file.FileName), ".pdf", StringComparison.OrdinalIgnoreCase))
+                    return Results.UnprocessableEntity(new { code = "photo_sheet_invalid", message = "The prepared photo sheet must be a PDF between 1 byte and 20 MB." });
+
+                var photoSizeCode = form["photoSizeCode"].FirstOrDefault() ?? string.Empty;
+                if (!int.TryParse(form["photoCount"].FirstOrDefault(), out var photoCount) ||
+                    photoCount is < 1 or > 100 ||
+                    photoSizeCode is not ("35x45" or "25x35" or "2x2" or "4x6"))
+                    return Results.ValidationProblem(new Dictionary<string, string[]>
+                    {
+                        ["photoDetails"] = ["Choose a supported ID photo size and a quantity from 1 to 100."]
+                    });
+
+                byte[] bytes;
+                await using (var input = file.OpenReadStream())
+                await using (var memory = new MemoryStream((int)file.Length))
+                {
+                    await input.CopyToAsync(memory, ct);
+                    bytes = memory.ToArray();
+                }
+
+                DocumentAnalysis analysis;
+                try
+                {
+                    analysis = DocumentAnalyzer.Analyse(bytes, ".pdf");
+                }
+                catch (DocumentValidationException exception)
+                {
+                    CryptographicOperations.ZeroMemory(bytes);
+                    return Results.UnprocessableEntity(new { code = "photo_sheet_not_supported", message = exception.Message });
+                }
+                if (analysis.PageCount != 1)
+                {
+                    CryptographicOperations.ZeroMemory(bytes);
+                    return Results.UnprocessableEntity(new
+                    {
+                        code = "photo_sheet_must_be_one_page",
+                        message = "A photo print is one A4 sheet per job. Reduce the quantity or create another photo job."
+                    });
+                }
+
+                var hash = Convert.ToHexString(SHA256.HashData(bytes)).ToLowerInvariant();
+                var entry = localQueueStore.Find(jobId);
+                if (entry is null ||
+                    entry.State is not ("LOCAL_UPLOAD_STAGED" or "LOCAL_UPLOAD_PENDING_PAYMENT") ||
+                    !File.Exists(entry.DocumentPath))
+                {
+                    CryptographicOperations.ZeroMemory(bytes);
+                    return Results.Conflict(new { code = "local_photo_source_missing", message = "The original local photo is no longer eligible for enhancement." });
+                }
+
+                var revisionRequest = new LocalAgentPhotoRevisionRequest(
+                    entry.Sha256,
+                    entry.SizeBytes,
+                    hash,
+                    bytes.LongLength,
+                    analysis.PageCount,
+                    analysis.PageSizesJson,
+                    photoSizeCode,
+                    photoCount);
+
+                var client = httpClientFactory.CreateClient("cloud");
+                client.Timeout = TimeSpan.FromSeconds(30);
+                client.BaseAddress = new Uri(credentials.ApiBaseUrl.TrimEnd('/') + "/");
+
+                using var authorizeRequest = new HttpRequestMessage(
+                    HttpMethod.Post,
+                    $"api/v1/agent/local-document-photo-revisions/{jobId}/authorize")
+                {
+                    Content = JsonContent.Create(revisionRequest)
+                };
+                authorizeRequest.Headers.Add("X-Print-Agent-Id", credentials.AgentDeviceId.ToString());
+                authorizeRequest.Headers.Add("X-Print-Agent-Secret", credentials.AgentSecret);
+                authorizeRequest.Headers.Add("X-Print-Photo-Revision-Grant", grantToken);
+
+                using var authorizeResponse = await client.SendAsync(authorizeRequest, ct);
+                if (!authorizeResponse.IsSuccessStatusCode)
+                {
+                    var detail = await authorizeResponse.Content.ReadAsStringAsync(ct);
+                    CryptographicOperations.ZeroMemory(bytes);
+                    logger.LogWarning("Local photo revision authorization for job {JobId} returned HTTP {StatusCode}.",
+                        jobId, (int)authorizeResponse.StatusCode);
+                    return Results.Problem(
+                        statusCode: (int)authorizeResponse.StatusCode,
+                        title: string.IsNullOrWhiteSpace(detail)
+                            ? "The cloud service could not authorize this local photo revision."
+                            : detail);
+                }
+
+                var authorization = await authorizeResponse.Content.ReadFromJsonAsync<LocalAgentPhotoRevisionAuthorizationResponse>(cancellationToken: ct);
+                if (authorization is null ||
+                    !string.Equals(authorization.OriginalSha256, entry.Sha256, StringComparison.OrdinalIgnoreCase) ||
+                    authorization.OriginalSizeBytes != entry.SizeBytes ||
+                    !string.Equals(authorization.NewSha256, hash, StringComparison.OrdinalIgnoreCase) ||
+                    authorization.NewSizeBytes != bytes.LongLength ||
+                    authorization.PhotoSizeCode != photoSizeCode ||
+                    authorization.PhotoCount != photoCount)
+                {
+                    CryptographicOperations.ZeroMemory(bytes);
+                    return Results.Conflict(new { code = "local_photo_revision_authorization_mismatch", message = "The cloud service authorization did not match this original and prepared photo sheet." });
+                }
+
+                var outputName = $"photo-sheet-{entry.JobNumber}.pdf";
+                try
+                {
+                    await localQueueStore.ReplaceStagedPhotoDocumentAsync(
+                        jobId,
+                        entry.Sha256,
+                        entry.SizeBytes,
+                        outputName,
+                        bytes,
+                        authorization.QuotedAmountMinor,
+                        async () =>
+                        {
+                            using var completeRequest = new HttpRequestMessage(
+                                HttpMethod.Post,
+                                $"api/v1/agent/local-document-photo-revisions/{jobId}/complete")
+                            {
+                                Content = JsonContent.Create(revisionRequest)
+                            };
+                            completeRequest.Headers.Add("X-Print-Agent-Id", credentials.AgentDeviceId.ToString());
+                            completeRequest.Headers.Add("X-Print-Agent-Secret", credentials.AgentSecret);
+                            completeRequest.Headers.Add("X-Print-Photo-Revision-Grant", grantToken);
+                            using var completeResponse = await client.SendAsync(completeRequest, ct);
+                            if (!completeResponse.IsSuccessStatusCode)
+                            {
+                                var detail = await completeResponse.Content.ReadAsStringAsync(ct);
+                                throw new InvalidOperationException(string.IsNullOrWhiteSpace(detail)
+                                    ? $"The cloud service rejected the local photo revision ({(int)completeResponse.StatusCode})."
+                                    : detail);
+                            }
+                        },
+                        ct);
+                }
+                catch (Exception exception) when (exception is IOException or InvalidDataException or InvalidOperationException or UnauthorizedAccessException)
+                {
+                    logger.LogWarning("Local photo revision for job {JobId} was rolled back ({FailureType}).", jobId, exception.GetType().Name);
+                    CryptographicOperations.ZeroMemory(bytes);
+                    return Results.Problem(statusCode: StatusCodes.Status409Conflict,
+                        title: exception.Message);
+                }
+
+                CryptographicOperations.ZeroMemory(bytes);
+                return Results.Ok(new
+                {
+                    JobId = jobId,
+                    OriginalFileName = outputName,
+                    MediaType = "application/pdf",
+                    SizeBytes = revisionRequest.SizeBytes,
+                    Sha256 = revisionRequest.Sha256,
+                    revisionRequest.PhotoSizeCode,
+                    revisionRequest.PhotoCount,
+                    authorization.PhotoUnitPriceMinor,
+                    authorization.QuotedAmountMinor,
+                    authorization.PricingVersion
+                });
+            }).RequireCors("CustomerPortal");
+
             app.MapGet("/api/v1/local/documents/{jobId:guid}/preview", async (
                 Guid jobId,
                 HttpContext context,
