@@ -1615,14 +1615,31 @@ export async function downloadShopDocument(token: string, jobId: string): Promis
   >(`/api/v1/shop/print-jobs/${jobId}/preview-source`, {}, token);
 
   if (source.mode === "CLOUD") {
-    const response = await fetchApiResponse(`/api/v1/shop/print-jobs/${jobId}/document`, {
-      headers: { Accept: "application/pdf,image/jpeg,image/png", Authorization: `Bearer ${token}` },
+    const documentPath = `/api/v1/shop/print-jobs/${jobId}/document`;
+    const request = (accessToken: string) => fetchApiResponse(documentPath, {
+      headers: {
+        Accept: "application/pdf,image/jpeg,image/png",
+        Authorization: `Bearer ${accessToken}`
+      },
       cache: "no-store"
     });
+
+    // preview-source may have refreshed an expired shop session internally.
+    // Reuse that newer session for this second, binary request too; otherwise
+    // the cloud document request can send the stale token and fail with 401
+    // only on long-lived desktop sessions.
+    let response = await request(token);
+    if (response.status === 401) {
+      const refreshed = await refreshStoredSession(token);
+      if (refreshed) response = await request(refreshed.accessToken);
+    }
+
     if (!response.ok) {
-      const message = response.status === 404
-        ? "This job document is no longer available."
-        : `Document preview failed (${response.status}).`;
+      const message = response.status === 401
+        ? "Your shop session has expired. Sign in again to preview this document."
+        : response.status === 404
+          ? "This job document is no longer available."
+          : `Document preview failed (${response.status}).`;
       throw new ApiError(message, response.status);
     }
     return response.blob();
