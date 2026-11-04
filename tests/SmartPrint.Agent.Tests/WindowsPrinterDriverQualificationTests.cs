@@ -58,7 +58,7 @@ public sealed class WindowsPrinterDriverQualificationTests
             bytes.LongLength,
             1,
             1,
-            "Colour",
+            "Mono",
             "A4",
             false,
             "INR",
@@ -120,6 +120,8 @@ public sealed class WindowsPrinterDriverQualificationTests
                 outputHeaderHex = Convert.ToHexString(rendered.AsSpan(0, Math.Min(32, rendered.Length))),
                 capabilities = capabilities.RootElement.Clone(),
                 windowsVersion = Environment.OSVersion.Version.ToString(),
+                windowsPlatform = System.Runtime.InteropServices.RuntimeInformation.OSDescription,
+                processArchitecture = System.Runtime.InteropServices.RuntimeInformation.ProcessArchitecture.ToString(),
                 qualificationScope = "SIGNED_DRIVER_INSTALL_AND_VIRTUAL_SPOOLER_RENDERING",
                 physicalPrinterVerified = false,
                 completedAtUtc = DateTimeOffset.UtcNow
