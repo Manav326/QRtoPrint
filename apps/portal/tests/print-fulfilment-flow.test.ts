@@ -873,3 +873,16 @@ test("all API endpoint modules keep database state writes inside application ser
     }
   }
 });
+
+
+test("HTTPS cloud recovery keeps encrypted storage and original-file reconciliation inside the service", () => {
+  const endpoint = readApi("PublicCloudRecoveryEndpoints.cs");
+  const service = read("../../../src/SmartPrint.Api/Services/PublicCloudRecoveryService.cs");
+  assert.match(endpoint, /recovery\.CompleteUploadAsync/);
+  assert.doesNotMatch(endpoint, /storage\.ValidateAndStoreAsync|storage\.DeleteAsync/);
+  assert.match(service, /public async Task<PublicCloudRecoveryResult> CompleteUploadAsync/);
+  assert.match(service, /storage\.ValidateAndStoreAsync/);
+  assert.match(service, /LocalUploadRecoveryRules\.MatchesOriginalDocument/);
+  assert.match(service, /storage\.DeleteAsync\(stored\.StorageKey\)/);
+  assert.match(service, /CompleteAsync\(\s*ticketId,\s*rawSessionToken,\s*rawGrant/);
+});
