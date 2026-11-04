@@ -44,6 +44,24 @@ public sealed class AgentLocalEndpointRulesTests
     }
 
     [Fact]
+    public void ReadsEndpointAddressesFromJson()
+    {
+        var result = AgentLocalEndpointRules.ReadJson("[\"http://192.168.1.25:17842\",\"http://192.168.1.26:17842\"]");
+
+        Assert.Equal(new[] { "http://192.168.1.25:17842", "http://192.168.1.26:17842" }, result);
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("   ")]
+    [InlineData("not-json")]
+    [InlineData("null")]
+    public void MissingOrMalformedEndpointJsonReturnsAnEmptyList(string? json)
+    {
+        Assert.Empty(AgentLocalEndpointRules.ReadJson(json));
+    }
+    [Fact]
     public void MissingEndpointsReturnAnEmptyList()
     {
         Assert.Empty(AgentLocalEndpointRules.Normalize(null));

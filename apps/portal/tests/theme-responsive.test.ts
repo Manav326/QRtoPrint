@@ -364,15 +364,19 @@ test("folder defaults inherit to files and advanced paper options are opt-in", (
 test("offline requests use the existing secure queue and owner changes require customer approval", () => {
   const app = read("../src/App.tsx");
   const api = read("../src/api.ts");
-  const server = read("../../../src/SmartPrint.Api/Program.cs");
+  const recovery = read("../../../src/SmartPrint.Api/Endpoints/PublicCloudRecoveryEndpoints.cs");
+  const recoveryService = read("../../../src/SmartPrint.Api/Services/PublicCloudRecoveryService.cs");
+  const settings = read("../../../src/SmartPrint.Api/Endpoints/ShopPrintJobSettingsEndpoints.cs");
+  const settingsService = read("../../../src/SmartPrint.Api/Services/ShopPrintJobSettingsService.cs");
+  const server = `${recovery}\n${recoveryService}\n${settings}\n${settingsService}`;
 
   assert.ok(app.includes("secureQueueFallbackEnabled"));
-  assert.ok(server.includes('publicApi.MapPost("/sessions/current/local-upload-tickets/{ticketId:guid}/cloud-recovery"'));
+  assert.ok(recovery.includes('publicApi.MapPost("/sessions/current/local-upload-tickets/{ticketId:guid}/cloud-recovery"'));
   assert.ok(server.includes("if (!subscription.CloudAssistedPrintingEnabled && recoveryAgentAvailable)"));
   assert.doesNotMatch(api, /X-Print-Queue-Fallback|allowQueueFallback/);
   assert.doesNotMatch(server, /X-Print-Queue-Fallback|queueFallbackRequested/);
-  assert.ok(server.includes('shop.MapPatch("/print-jobs/{jobId:guid}/settings"'));
-  assert.ok(server.includes('job.Status = "AWAITING_CUSTOMER_APPROVAL";'));
+  assert.ok(settings.includes('shop.MapPatch("/print-jobs/{jobId:guid}/settings"'));
+  assert.ok(settingsService.includes('job.Status = "AWAITING_CUSTOMER_APPROVAL";'));
   assert.ok(app.includes("onUpdateSettings={updatePrintJobSettings}"));
 });
 
@@ -403,8 +407,13 @@ test("all print settings controls capture React event values before state update
 test("PDF footer branding is opt-in per batch and cannot cover source content or paper output", () => {
   const app = read("../src/App.tsx");
   const api = read("../src/api.ts");
-  const server = read("../../../src/SmartPrint.Api/Program.cs");
+  const reviewEndpoint = read("../../../src/SmartPrint.Api/Endpoints/ShopPrintBatchReviewEndpoints.cs");
+  const reviewService = read("../../../src/SmartPrint.Api/Services/ShopPrintBatchReviewService.cs");
   const contracts = read("../../../src/SmartPrint.Api/Contracts/ApiContracts.cs");
+  const shopQueue = read("../../../src/SmartPrint.Api/Endpoints/ShopPrintJobQueryEndpoints.cs");
+  const shopCustomers = read("../../../src/SmartPrint.Api/Endpoints/ShopCustomerEndpoints.cs");
+  const customerStatus = read("../../../src/SmartPrint.Api/Services/PublicJobStatusService.cs");
+  const agentJobs = read("../../../src/SmartPrint.Api/Endpoints/AgentJobEndpoints.cs");
   const agent = read("../../../src/SmartPrint.Agent/WindowsPrintExecutor.cs");
   const pdfOverlay = read("../../../src/SmartPrint.Agent/PdfBrandingOverlay.cs");
   const queueModels = read("../../../src/SmartPrint.Agent/AgentQueueModels.cs");
@@ -414,11 +423,14 @@ test("PDF footer branding is opt-in per batch and cannot cover source content or
   assert.ok(app.includes('checked={pdfBrandingEnabled} disabled={busy}'));
   assert.ok(api.includes('body: JSON.stringify({ reviewedJobIds, acceptedJobIds, pdfBrandingEnabled })'));
   assert.ok(contracts.includes('bool PdfBrandingEnabled = false'));
-  assert.ok(server.includes('request.PdfBrandingEnabled'));
-  assert.ok(server.includes('job.PdfBrandingEnabled = request.PdfBrandingEnabled'));
-  assert.ok(server.includes('foreach (var job in lockedJobs)\n    {\n        if (job.PdfBrandingEnabled'));
-  assert.ok(!server.includes('foreach (var job in allBatchJobs)\n    {\n        if (job.PdfBrandingEnabled'));
-  assert.ok(server.includes('candidate.PdfBrandingEnabled'));
+  assert.ok(reviewEndpoint.includes('request.PdfBrandingEnabled'));
+  assert.ok(reviewService.includes('job.PdfBrandingEnabled = pdfBrandingEnabled'));
+  assert.ok(reviewService.includes('foreach (var job in lockedJobs)'));
+  assert.ok(!reviewService.includes('foreach (var job in allBatchJobs)'));
+  assert.ok(shopQueue.includes('job.PdfBrandingEnabled'));
+  assert.ok(shopCustomers.includes('job.PdfBrandingEnabled'));
+  assert.ok(customerStatus.includes('item.PdfBrandingEnabled'));
+  assert.ok(agentJobs.includes('candidate.PdfBrandingEnabled'));
   assert.ok(queueModels.includes('bool PdfBrandingEnabled = false'));
   assert.ok(agent.includes('"SMARTPRINT_BRANDED_PDF_RENDERER"'));
   assert.ok(agent.includes('PdfBrandingOverlay.TryCreate(entry, bytes, pdfRaster.HasDigitalSignatures, pdfRaster.HasInteractiveForms, cancellationToken)'));
@@ -426,7 +438,6 @@ test("PDF footer branding is opt-in per batch and cannot cover source content or
   assert.ok(!agent.includes('ApplySmartPrintFooter(page'));
   assert.ok(pdfOverlay.includes('PdfBrandingRules.HasSafeFooterBand(packed, width, height, bandHeight)'));
   assert.ok(safetyRules.includes('RequiredBlankBandPoints = 20f'));
-  assert.ok(server.includes('item.PdfBrandingEnabled'));
   assert.ok(app.includes('jobStatus.pdfBrandingEnabled&&<div className="customer-branding-note">'));
   assert.ok(app.includes('Ask the shop for an unbranded, single-copy full-document export when you need the original PDF structure preserved.'));
   assert.ok(app.includes('digital-signature validation'));
