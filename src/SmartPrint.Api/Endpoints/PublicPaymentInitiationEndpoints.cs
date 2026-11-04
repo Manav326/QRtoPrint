@@ -111,15 +111,8 @@ public static partial class PublicPaymentEndpoints
                     jobs.Count(item => item.Status is not ("REJECTED" or "REFUNDED"))));
             }
 
-            var settledOrApprovedStates = new HashSet<string>(StringComparer.Ordinal)
-            {
-                "REJECTED", "REFUNDED", "AWAITING_PAYMENT", "PAYMENT_REJECTED",
-                "AWAITING_CUSTOMER_PAYMENT", "PAYMENT_REPORTED", "AWAITING_COUNTER_PAYMENT",
-                "PAID_AUTHORISED", "LOCAL_QUEUE_CLAIMED", "LOCAL_QUEUE_READY",
-                "PRINT_AUTHORISED", "PRINT_SUBMITTING", "SPOOLER_ACCEPTED", "PRINTING",
-                "OUTPUT_UNCONFIRMED", "COMPLETED"
-            };
-            var pendingReview = jobs.FirstOrDefault(job => !settledOrApprovedStates.Contains(job.Status));
+            var pendingReview = jobs.FirstOrDefault(job =>
+                !PrintBatchCheckoutRules.IsReviewComplete(job.Status));
             if (pendingReview is not null)
                 return Results.Conflict(new
                 {
@@ -128,7 +121,7 @@ public static partial class PublicPaymentEndpoints
                 });
 
             var payableJobs = jobs
-                .Where(job => job.Status is "AWAITING_PAYMENT" or "PAYMENT_REJECTED")
+                .Where(job => PrintBatchCheckoutRules.IsPayable(job.Status))
                 .ToList();
             if (payableJobs.Count == 0)
                 return Results.Conflict(new
@@ -138,7 +131,7 @@ public static partial class PublicPaymentEndpoints
                 });
 
             var expiredQuotes = payableJobs
-                .Where(job => job.QuoteExpiresUtc is null || job.QuoteExpiresUtc <= now)
+                .Where(job => PrintBatchCheckoutRules.IsQuoteExpired(job.QuoteExpiresUtc, now))
                 .ToArray();
             if (expiredQuotes.Length > 0)
             {
@@ -169,7 +162,8 @@ public static partial class PublicPaymentEndpoints
                 });
             }
 
-            if (payableJobs.Any(job => job.QuotedAmountMinor <= 0 || job.Currency != "INR"))
+            if (payableJobs.Any(job =>
+                !PrintBatchCheckoutRules.HasValidQuote(job.QuotedAmountMinor, job.Currency)))
                 return Results.Conflict(new
                 {
                     code = "batch_quote_invalid",
