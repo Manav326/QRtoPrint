@@ -114,7 +114,7 @@ public static partial class ShopPrintJobReviewEndpoints
                         }
 
                         var previousStatus = job.Status;
-                        var quoteExpired = job.QuoteExpiresUtc is null || job.QuoteExpiresUtc <= now;
+                        var quoteExpired = PrintBatchCheckoutRules.IsQuoteExpired(job.QuoteExpiresUtc, now);
                         job.Status = quoteExpired ? "QUOTE_EXPIRED" : "AWAITING_PAYMENT";
                         if (quoteExpired) quoteRefreshRequiredCount++;
                         job.FailureCode = null;
@@ -136,7 +136,7 @@ public static partial class ShopPrintJobReviewEndpoints
                     else if (job.Status == "AWAITING_SHOP_APPROVAL")
                     {
                         var previousStatus = job.Status;
-                        var quoteExpired = job.QuoteExpiresUtc is null || job.QuoteExpiresUtc <= now;
+                        var quoteExpired = PrintBatchCheckoutRules.IsQuoteExpired(job.QuoteExpiresUtc, now);
                         job.Status = quoteExpired ? "QUOTE_EXPIRED" : "AWAITING_PAYMENT";
                         if (quoteExpired) quoteRefreshRequiredCount++;
                         job.FailureCode = null;
@@ -157,7 +157,7 @@ public static partial class ShopPrintJobReviewEndpoints
                     }
                     else if (job.Status is "AWAITING_PAYMENT" or "PAYMENT_REJECTED")
                     {
-                        if (job.QuoteExpiresUtc is null || job.QuoteExpiresUtc <= now)
+                        if (PrintBatchCheckoutRules.IsQuoteExpired(job.QuoteExpiresUtc, now))
                         {
                             var previousStatus = job.Status;
                             job.Status = "QUOTE_EXPIRED";
