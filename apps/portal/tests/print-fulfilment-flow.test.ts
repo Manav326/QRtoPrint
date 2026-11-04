@@ -30,6 +30,7 @@ test("owner quote edits are sent through the existing print-job API", () => {
 test("paid jobs are staged while a physical printer is offline and checked at dispatch", () => {
   const claimSource = readApi("AgentJobEndpoints.cs");
   const dispatchSource = readApi("ShopPrintJobDispatchEndpoints.cs");
+  const dispatchService = read("../../../src/SmartPrint.Api/Services/ShopPrintJobDispatchService.cs");
   const claimStart = claimSource.indexOf('agentApi.MapPost("/jobs/claim"');
   const claimEnd = claimSource.indexOf('agentApi.MapGet("/jobs/{jobId:guid}/document"', claimStart);
   const dispatchStart = dispatchSource.indexOf('shop.MapPost("/print-jobs/{jobId:guid}/dispatch"');
@@ -42,8 +43,9 @@ test("paid jobs are staged while a physical printer is offline and checked at di
   assert.match(claimRoute, /printer\.QueueName != null/);
   assert.doesNotMatch(claimRoute, /printer\.Status == "Ready"/);
   assert.doesNotMatch(claimRoute, /printer\.LastSeenUtc/);
-  assert.match(dispatchRoute, /printer\.Status == "Ready"/);
-  assert.match(dispatchRoute, /printer\.LastSeenUtc/);
+  assert.match(dispatchRoute, /dispatch\.DispatchAsync/);
+  assert.match(dispatchService, /printer\.Status == "Ready"/);
+  assert.match(dispatchService, /printer\.LastSeenUtc/);
 });
 
 test("plan-limited HTTPS fallback is only offered when the Agent is unavailable", () => {
@@ -79,18 +81,24 @@ test("pre-submission printer capability blocks are explained in the shop queue",
 
 test("a pre-output capability block clears the attempted spooler name so the existing job can be reassigned", () => {
   const blockedSource = readApi("AgentSpoolerLifecycleEndpoints.cs");
+  const blockedService = read("../../../src/SmartPrint.Api/Services/AgentSpoolerLifecycleService.cs");
   const assignmentSource = readApi("ShopPrintJobAssignmentEndpoints.cs");
   const blockedStart = blockedSource.indexOf('agentApi.MapPost("/jobs/{jobId:guid}/print-blocked"');
   const blockedEnd = blockedSource.indexOf('agentApi.MapPost("/jobs/{jobId:guid}/output-unconfirmed"', blockedStart);
+  const serviceStart = blockedService.indexOf("public async Task<AgentSpoolerLifecycleResult> ReportPrintBlockedAsync");
+  const serviceEnd = blockedService.indexOf("public async Task<AgentSpoolerLifecycleResult> ReportOutputUnconfirmedAsync", serviceStart);
   const assignmentStart = assignmentSource.indexOf('shop.MapPatch("/print-jobs/{jobId:guid}/printer"');
   assert.ok(blockedStart >= 0 && blockedEnd > blockedStart);
+  assert.ok(serviceStart >= 0 && serviceEnd > serviceStart);
   assert.ok(assignmentStart >= 0);
   const blocked = blockedSource.slice(blockedStart, blockedEnd);
+  const blockedWorkflow = blockedService.slice(serviceStart, serviceEnd);
   const assignment = assignmentSource.slice(assignmentStart);
-  assert.match(blocked, /job\.Status = "LOCAL_QUEUE_READY"/);
-  assert.match(blocked, /job\.SpoolerJobName = null/);
-  assert.match(blocked, /job\.SpoolerJobId = null/);
-  assert.match(blocked, /job\.SpoolerStatus = "BLOCKED_BEFORE_SUBMISSION"/);
+  assert.match(blocked, /spooler\.ReportPrintBlockedAsync/);
+  assert.match(blockedWorkflow, /job\.Status = "LOCAL_QUEUE_READY"/);
+  assert.match(blockedWorkflow, /job\.SpoolerJobName = null/);
+  assert.match(blockedWorkflow, /job\.SpoolerJobId = null/);
+  assert.match(blockedWorkflow, /job\.SpoolerStatus = "BLOCKED_BEFORE_SUBMISSION"/);
   assert.match(assignment, /var readyQueueCanBeReassigned = selectedJob\.Status == "LOCAL_QUEUE_READY"/);
   assert.match(assignment, /string\.IsNullOrWhiteSpace\(selectedJob\.SpoolerJobName\)/);
   assert.match(assignment, /needsQueueReset/);
@@ -124,13 +132,20 @@ test("cloud upload retries must match the original file, batch and selected prin
 
 test("HTTPS recovery returns the original saved print settings on new and duplicate responses", () => {
   const source = readApi("PublicCloudRecoveryEndpoints.cs");
+  const service = read("../../../src/SmartPrint.Api/Services/PublicCloudRecoveryService.cs");
   const recoveryStart = source.indexOf('publicApi.MapPost("/sessions/current/local-upload-tickets/{ticketId:guid}/cloud-recovery"');
-  assert.ok(recoveryStart >= 0);
+  const responseStart = source.indexOf("private static object BuildCloudRecoveryResponse");
+  assert.ok(recoveryStart >= 0 && responseStart > recoveryStart);
   const recovery = source.slice(recoveryStart);
-  for (const entity of ["preflightJob", "existingJob", "job"]) {
-    for (const property of ["ColourMode", "PaperSize", "IsDuplex", "Orientation", "PricingVersion"])
-      assert.ok(recovery.includes(`${entity}.${property}`), `Recovery must return ${entity}.${property}.`);
+  const response = source.slice(responseStart);
+  assert.match(recovery, /BuildCloudRecoveryResponse\(\s*preflight\.Job!/);
+  assert.match(recovery, /BuildCloudRecoveryResponse\(\s*result\.Job!/);
+  for (const property of ["ColourMode", "PaperSize", "IsDuplex", "Orientation", "PricingVersion"]) {
+    assert.ok(response.includes(`job.${property}`), `Recovery response must return job.${property}.`);
+    assert.ok(service.includes(`${property} = ticket.${property}`), `Recovery service must preserve ticket ${property}.`);
   }
+  assert.match(service, /Job: existingJob/);
+  assert.match(service, /Document: existingDocument/);
 });
 
 test("local Agent completion creates the job with the customer's ticket settings", () => {
