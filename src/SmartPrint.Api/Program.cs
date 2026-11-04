@@ -2874,7 +2874,7 @@ shop.MapPost("/print-jobs/{jobId:guid}/photo-revision-grant", async (
 
     var expiresUtc = now.AddMinutes(2);
     var grantToken = LocalDocumentPhotoRevisionGrant.Issue(
-        signingKeyText, issuer, audience, tenantId, jobId, agent.Id, now, expiresUtc);
+        signingKeyText, issuer, audience, tenantId, jobId, agent.Id, GetActorId(principal), now, expiresUtc);
     return Results.Ok(new { GrantToken = grantToken, Endpoints = endpoints, ExpiresUtc = expiresUtc });
 });
 
@@ -5341,7 +5341,7 @@ agentApi.MapPost("/local-document-photo-revisions/{jobId:guid}/complete", async 
         PreviousStatus = job.Status,
         NewStatus = job.Status,
         ActorType = "ShopUser",
-        ActorId = null,
+        ActorId = grant.ActorUserId,
         ReasonCode = "SHOP_PHOTO_ENHANCED_LOCAL",
         CreatedUtc = now
     });
