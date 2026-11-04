@@ -36,10 +36,13 @@ test("multiple prepared A4 pages become one multi-page PDF",()=>{
  const xrefOffset=Number(value.match(/startxref\n(\d+)\n%%EOF/)?.[1]);
  assert.ok(Number.isInteger(xrefOffset));
  assert.ok(value.slice(xrefOffset).startsWith("xref\n"));
+ let objectNumber=1;
  for(const match of value.slice(xrefOffset).matchAll(/(\d{10}) 00000 n/g)){
   const offset=Number(match[1]);
-  assert.match(value.slice(offset,offset+7),/^\d+ 0 obj/);
+  assert.ok(value.slice(offset).startsWith(`${objectNumber} 0 obj`),`PDF object ${objectNumber} has a valid cross-reference offset`);
+  objectNumber+=1;
  }
+ assert.equal(objectNumber,12);
 });
 test("photo PDF generation rejects empty or incomplete JPEG pages",()=>{
  assert.throws(()=>buildPhotoPdf([]),/At least one/);
