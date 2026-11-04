@@ -571,8 +571,8 @@ public sealed class WindowsPrintExecutor
 
             var mode = Marshal.PtrToStructure<DevModeW>(pointer);
             var paper = PaperCode(entry.PaperSize);
-            if (!SupportsPaper(queueName, pointer, paper))
-                throw new PrintExecutionBlockedException("PAPER_SIZE_UNSUPPORTED", $"The installed driver does not report support for {entry.PaperSize} paper.");
+            if (SupportsPaper(queueName, pointer, paper) is false)
+                throw new PrintExecutionBlockedException("PAPER_SIZE_UNSUPPORTED", $"The installed driver explicitly reports that {entry.PaperSize} paper is unsupported.");
 
             var orientationCapability = DeviceCapabilitiesW(queueName, null, DcOrientation, IntPtr.Zero, pointer);
             if (landscape && orientationCapability == 0)
@@ -584,8 +584,11 @@ public sealed class WindowsPrintExecutor
 
             if (entry.ColourMode == "Colour")
             {
-                if ((mode.Fields & DmColor) == 0 || DeviceCapabilitiesW(queueName, null, DcColorDevice, IntPtr.Zero, pointer) != 1)
-                    throw new PrintExecutionBlockedException("COLOUR_UNSUPPORTED", "The selected printer driver does not support colour.");
+                var colourCapability = DeviceCapabilitiesW(queueName, null, DcColorDevice, IntPtr.Zero, pointer);
+                if (PrinterCapabilityRules.IsExplicitlyUnsupportedCapability(colourCapability))
+                    throw new PrintExecutionBlockedException("COLOUR_UNSUPPORTED", "The selected printer driver explicitly reports that colour is unsupported.");
+                // A missing/failed capability report is unknown, not negative.
+                // Ask the driver to apply the option and validate its response below.
                 mode.Color = 2;
                 mode.Fields |= DmColor;
             }
@@ -593,8 +596,9 @@ public sealed class WindowsPrintExecutor
 
             if (entry.IsDuplex)
             {
-                if ((mode.Fields & DmDuplex) == 0 || DeviceCapabilitiesW(queueName, null, DcDuplex, IntPtr.Zero, pointer) != 1)
-                    throw new PrintExecutionBlockedException("DUPLEX_UNSUPPORTED", "The selected printer driver does not report duplex support.");
+                var duplexCapability = DeviceCapabilitiesW(queueName, null, DcDuplex, IntPtr.Zero, pointer);
+                if (PrinterCapabilityRules.IsExplicitlyUnsupportedCapability(duplexCapability))
+                    throw new PrintExecutionBlockedException("DUPLEX_UNSUPPORTED", "The selected printer driver explicitly reports that duplex printing is unsupported.");
                 mode.Duplex = 2;
                 mode.Fields |= DmDuplex;
             }
@@ -622,17 +626,21 @@ public sealed class WindowsPrintExecutor
         }
     }
 
-    private static bool SupportsPaper(string queueName, IntPtr devMode, short paperCode)
+    private static bool? SupportsPaper(string queueName, IntPtr devMode, short paperCode)
     {
         var count = DeviceCapabilitiesW(queueName, null, DcPapers, IntPtr.Zero, devMode);
-        if (count <= 0 || count > 256) return false;
+        if (count <= 0 || count > 256) return null;
+
         var buffer = Marshal.AllocHGlobal(count * sizeof(short));
         try
         {
             var actual = DeviceCapabilitiesW(queueName, null, DcPapers, buffer, devMode);
+            if (actual <= 0 || actual > count) return null;
+
+            var reportedPapers = new short[actual];
             for (var i = 0; i < actual; i++)
-                if (Marshal.ReadInt16(buffer, i * sizeof(short)) == paperCode) return true;
-            return false;
+                reportedPapers[i] = Marshal.ReadInt16(buffer, i * sizeof(short));
+            return PrinterCapabilityRules.EvaluatePaperSupport(count, actual, reportedPapers, paperCode);
         }
         finally { Marshal.FreeHGlobal(buffer); }
     }
