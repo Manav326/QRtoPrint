@@ -12,6 +12,16 @@ public sealed class PdfBrandingRulesTests
     }
 
     [Fact]
+    public void IgnoresTheUnusedFourthPixelByteWhenAlphaIsDisabled()
+    {
+        var pixels = CreateWhitePage(width: 8, height: 10);
+        for (var offset = 3; offset < pixels.Length; offset += 4)
+            pixels[offset] = 0;
+
+        Assert.True(PdfBrandingRules.HasSafeFooterBand(pixels, 8, 10, bandHeightPixels: 3));
+    }
+
+    [Fact]
     public void RejectsFooterWhenTextOrMarksExistAnywhereInTheReservedBand()
     {
         var pixels = CreateWhitePage(width: 8, height: 10);

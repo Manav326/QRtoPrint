@@ -40,8 +40,9 @@ public static class PdfBrandingRules
             for (var x = 0; x < width; x++)
             {
                 var pixelOffset = rowOffset + (x * 4);
-                if (bgra[pixelOffset + 3] < minimumWhiteChannel ||
-                    bgra[pixelOffset + 2] < minimumWhiteChannel ||
+                // PDFium was opened with alpha disabled; the fourth BGRA slot is
+                // padding, not an alpha channel. Only actual colour channels prove blankness.
+                if (bgra[pixelOffset + 2] < minimumWhiteChannel ||
                     bgra[pixelOffset + 1] < minimumWhiteChannel ||
                     bgra[pixelOffset] < minimumWhiteChannel)
                     return false;
