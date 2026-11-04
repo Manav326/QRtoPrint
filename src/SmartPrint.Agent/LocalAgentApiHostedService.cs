@@ -508,6 +508,7 @@ public sealed class LocalAgentApiHostedService(
                     authorization.NewSizeBytes != bytes.LongLength ||
                     authorization.PhotoSizeCode != photoSizeCode ||
                     authorization.PhotoCount != photoCount ||
+                    authorization.PageCount != analysis.PageCount ||
                     authorization.PhotosPerPage != photosPerPage)
                 {
                     CryptographicOperations.ZeroMemory(bytes);
