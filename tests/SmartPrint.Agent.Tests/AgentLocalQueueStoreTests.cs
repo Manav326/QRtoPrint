@@ -104,6 +104,55 @@ public sealed class AgentLocalQueueStoreTests
     }
 
     [Fact]
+    public async Task ReassignedCloudJobRefreshesItsAcknowledgedQueueTargetWithoutRedownloading()
+    {
+        var root = CreateTemporaryDirectory();
+        try
+        {
+            var store = new AgentLocalQueueStore(root);
+            await store.InitializeAsync(CancellationToken.None);
+            var bytes = "Cloud-backed job already staged on this Agent"u8.ToArray();
+            var original = CreateJob(bytes) with
+            {
+                StorageMode = "CLOUD",
+                PaperSize = "A4",
+                Orientation = "AUTO"
+            };
+
+            var staged = await store.EnqueueAsync(original, bytes, CancellationToken.None);
+            await store.MarkAcknowledgedAsync(original.Id, CancellationToken.None);
+            Assert.Equal("ACKNOWLEDGED", store.Find(original.Id)!.State);
+
+            var reassigned = original with
+            {
+                PrinterDeviceId = Guid.NewGuid(),
+                PrinterName = "Alternate printer on this shop computer",
+                QueueName = "Alternate Windows Queue",
+                Copies = 4,
+                PaperSize = "A3",
+                Orientation = "LANDSCAPE",
+                LeaseExpiresUtc = DateTimeOffset.UtcNow.AddMinutes(3)
+            };
+            await store.UpdateFromClaimAsync(reassigned, CancellationToken.None);
+
+            var refreshed = store.Find(original.Id)!;
+            Assert.Equal("ACK_PENDING", refreshed.State);
+            Assert.Equal(reassigned.PrinterDeviceId, refreshed.PrinterDeviceId);
+            Assert.Equal("Alternate printer on this shop computer", refreshed.PrinterName);
+            Assert.Equal("Alternate Windows Queue", refreshed.QueueName);
+            Assert.Equal(4, refreshed.Copies);
+            Assert.Equal("A3", refreshed.PaperSize);
+            Assert.Equal("LANDSCAPE", refreshed.Orientation);
+            Assert.True(bytes.AsSpan().SequenceEqual(store.ReadDocument(original.Id)));
+            Assert.True(File.Exists(staged.DocumentPath));
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
     public async Task LocalUploadCanMoveToAnotherQueueWhenTheServerAuthorisesTheSameComputer()
     {
         var root = CreateTemporaryDirectory();
