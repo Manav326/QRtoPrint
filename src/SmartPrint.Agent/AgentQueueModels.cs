@@ -89,6 +89,28 @@ public sealed record AgentLocalUploadStatusResponse(
     DateTimeOffset ExpiresUtc,
     bool SafeToDelete = false,
     DateTimeOffset? DeleteAfterUtc = null);
+
+public sealed record LocalAgentPhotoRevisionRequest(
+    string ExpectedOriginalSha256,
+    long ExpectedOriginalSizeBytes,
+    string Sha256,
+    long SizeBytes,
+    int PageCount,
+    string PageSizesJson,
+    string PhotoSizeCode,
+    int PhotoCount);
+
+public sealed record LocalAgentPhotoRevisionAuthorizationResponse(
+    Guid Id,
+    string OriginalSha256,
+    long OriginalSizeBytes,
+    string NewSha256,
+    long NewSizeBytes,
+    string PhotoSizeCode,
+    int PhotoCount,
+    long PhotoUnitPriceMinor,
+    long QuotedAmountMinor,
+    int PricingVersion);
 public static class AgentLocalQueueBatchSelector
 {
     public static IReadOnlyList<T> SelectNext<T>(
