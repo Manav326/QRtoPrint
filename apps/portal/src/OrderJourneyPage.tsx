@@ -49,7 +49,7 @@ function printerSummary(jobs:ShopPrintJob[],printers:PrinterDevice[],agents:Agen
 }
 function PrinterVisual({stage,attention}:{stage:OrderJourneyStage;attention:boolean}){
   const printing=stage==="printing"&&!attention,ready=stage==="ready";
-  return <div className={styles.machineVisual+(printing?" "+styles.machinePrinting:"")+(ready?" "+styles.machineReady:"")} aria-label={attention?"Printing needs attention":ready?"Print output complete":printing?"Print job in progress":"Print workflow illustration"}>
+  return <div role="img" className={styles.machineVisual+(printing?" "+styles.machinePrinting:"")+(ready?" "+styles.machineReady:"")} aria-label={attention?"Printing needs attention":ready?"Print output complete":printing?"Print job in progress":"Print workflow illustration"}>
     <div className={styles.paper}><span/><span/><span/><span/><i>{ready?<Check size={13}/>:<FileText size={13}/>}</i></div>
     <div className={styles.printerTop}><div className={styles.printerTopLine}/><div className={styles.printerStatusDot}/></div>
     <div className={styles.printerBody}><div className={styles.printerDisplay}><span/>{attention?"!":ready?"OK":printing?"RUN":"READY"}</div><div className={styles.printerSlot}/><div className={styles.printerTray}><span/><span/><span/></div></div><div className={styles.printerBase}/>
@@ -65,7 +65,7 @@ function OrderCard({journey,printers,agents,onNavigate,onReviewBatch,onVerifyPay
     journey.stage==="payment"?(journey.payment?.status==="CUSTOMER_REPORTED"?"Payment reported · verification needed":"Waiting for payment"):
     journey.stage==="printing"?"Order is being prepared":
     journey.jobs.every(job=>job.status==="PDF_EXPORTED")?"PDF output saved":"Ready for collection";
-  const primary=journey.isClosed?"View order history":canReview?"Review files":journey.canVerifyPayment?"Verify payment":
+  const primary=journey.isClosed?"Open print queue":canReview?"Review files":journey.canVerifyPayment?"Verify payment":
     journey.stage==="payment"?"View order in queue":journey.stage==="ready"?"View completed order":"Open print queue";
   const activate=()=>{if(canReview&&journey.batchId){onReviewBatch(journey.batchId);return;}if(journey.canVerifyPayment&&journey.payment){onVerifyPayment(journey.payment);return;}onNavigate("Print Queue");};
   const stageIndex=journey.isClosed?1:journey.stageIndex,files=journey.jobs.slice(0,3),hidden=Math.max(0,journey.jobs.length-files.length);

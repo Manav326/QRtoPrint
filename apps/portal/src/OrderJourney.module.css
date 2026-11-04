@@ -89,11 +89,11 @@
 .currentStatus{display:inline-flex;align-items:center;gap:6px;border-radius:7px;padding:6px 8px;font-size:8px;white-space:nowrap;flex:0 0 auto}
 .currentStatus>span{height:6px;width:6px;border-radius:50%;background:currentColor}
 .currentStatus strong{font-size:8px;font-weight:700}
-.toneReceived{color:var(--blue);background:rgba(121,170,255,.1)}
-.toneReview{color:#a89aff;background:rgba(155,140,255,.12)}
-.tonePayment{color:var(--amber);background:rgba(233,185,106,.12)}
-.tonePrinting{color:#75c9e5;background:rgba(90,190,222,.12)}
-.toneReady{color:var(--green);background:rgba(88,214,160,.12)}
+.toneReceived{color:var(--muted);background:color-mix(in srgb,var(--muted) 8%,var(--surface))}
+.toneReview{color:var(--accent);background:color-mix(in srgb,var(--accent) 9%,var(--surface))}
+.tonePayment{color:var(--amber);background:color-mix(in srgb,var(--amber) 10%,var(--surface))}
+.tonePrinting{color:var(--blue);background:color-mix(in srgb,var(--blue) 9%,var(--surface))}
+.toneReady{color:var(--green);background:color-mix(in srgb,var(--green) 10%,var(--surface))}
 .miniProgress{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:4px;margin:12px 0 9px}
 .progressSegment{height:4px;border-radius:5px;background:var(--surface-3)}
 .progressComplete{background:var(--border)}
