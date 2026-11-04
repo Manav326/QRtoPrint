@@ -504,3 +504,22 @@ test("native Android protects Photo Studio from screenshots through the origin-p
  assert.match(activity,/window\.addFlags\(WindowManager\.LayoutParams\.FLAG_SECURE\)/);
  assert.match(activity,/window\.clearFlags\(WindowManager\.LayoutParams\.FLAG_SECURE\)/);
 });
+
+
+test("PDF export preview grants require a verified local Agent-owned export", () => {
+  const shop = readApi("ShopPrintJobReadEndpoints.cs");
+  const agent = readApi("AgentDocumentPreviewEndpoints.cs");
+  const grant = read("../../../src/SmartPrint.Api/Security/LocalDocumentPreviewGrant.cs");
+
+  assert.match(shop, /context\.Request\.Query\["variant"\]/);
+  assert.match(shop, /output\.Status != "COMPLETED"/);
+  assert.match(shop, /output\.OutputType != "PDF_EXPORT"/);
+  assert.match(shop, /output\.OutputSha256 is not \{ Length: 64 \}/);
+  assert.match(shop, /output\.ClaimedByAgentDeviceId is not Guid outputAgentId/);
+  assert.match(shop, /LocalDocumentPreviewGrant\.Issue/);
+  assert.match(agent, /LocalDocumentPreviewGrant\.TryValidate/);
+  assert.match(agent, /job\.ClaimedByAgentDeviceId == device\.Id/);
+  assert.match(agent, /output\.OutputType != "PDF_EXPORT"/);
+  assert.match(agent, /MediaType = "application\/pdf"/);
+  assert.match(grant, /local_document_preview/);
+});
