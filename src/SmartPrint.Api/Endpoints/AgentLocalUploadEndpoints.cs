@@ -274,8 +274,8 @@ public static partial class AgentEndpoints
                 return Results.Conflict(new { code = quota.Code, message = quota.Message, current = quota.Current, maximum = quota.Maximum });
             }
 
-            var completedJob = completion.Job!;
-            var completedDocument = completion.Document!;
+            var finalizedJob = completion.Job!;
+            var finalizedDocument = completion.Document!;
             if (completion.AlreadyCompleted)
             {
                 return Results.Ok(new
@@ -285,28 +285,28 @@ public static partial class AgentEndpoints
                     {
                         Job = new
                         {
-                            completedJob.Id,
-                            completedJob.JobNumber,
-                            completedJob.Status,
-                            completedJob.PageCount,
-                            completedJob.Copies,
-                            completedJob.ColourMode,
-                            completedJob.PaperSize,
-                            completedJob.IsDuplex,
-                            completedJob.Orientation,
-                            completedJob.PricingVersion,
-                            completedJob.Currency,
-                            completedJob.QuotedAmountMinor,
-                            completedJob.CreatedUtc
+                            finalizedJob.Id,
+                            finalizedJob.JobNumber,
+                            finalizedJob.Status,
+                            finalizedJob.PageCount,
+                            finalizedJob.Copies,
+                            finalizedJob.ColourMode,
+                            finalizedJob.PaperSize,
+                            finalizedJob.IsDuplex,
+                            finalizedJob.Orientation,
+                            finalizedJob.PricingVersion,
+                            finalizedJob.Currency,
+                            finalizedJob.QuotedAmountMinor,
+                            finalizedJob.CreatedUtc
                         },
                         Document = new
                         {
-                            completedDocument.Id,
-                            completedDocument.OriginalFileName,
-                            completedDocument.MediaType,
-                            completedDocument.SizeBytes,
-                            completedDocument.Sha256,
-                            completedDocument.PageSizesJson
+                            finalizedDocument.Id,
+                            finalizedDocument.OriginalFileName,
+                            finalizedDocument.MediaType,
+                            finalizedDocument.SizeBytes,
+                            finalizedDocument.Sha256,
+                            finalizedDocument.PageSizesJson
                         },
                         DuplicateRequest = true
                     }
@@ -320,31 +320,31 @@ public static partial class AgentEndpoints
                 {
                     Job = new
                     {
-                        completedJob.Id,
-                        completedJob.BatchGroupName,
-                        completedJob.BatchName,
-                        completedJob.BatchId,
-                        completedJob.JobNumber,
-                        completedJob.Status,
-                        completedJob.PageCount,
-                        completedJob.Copies,
-                        completedJob.ColourMode,
-                        completedJob.PaperSize,
-                        completedJob.IsDuplex,
-                        completedJob.Orientation,
-                        completedJob.PricingVersion,
-                        completedJob.Currency,
-                        completedJob.QuotedAmountMinor,
-                        completedJob.CreatedUtc
+                        finalizedJob.Id,
+                        finalizedJob.BatchGroupName,
+                        finalizedJob.BatchName,
+                        finalizedJob.BatchId,
+                        finalizedJob.JobNumber,
+                        finalizedJob.Status,
+                        finalizedJob.PageCount,
+                        finalizedJob.Copies,
+                        finalizedJob.ColourMode,
+                        finalizedJob.PaperSize,
+                        finalizedJob.IsDuplex,
+                        finalizedJob.Orientation,
+                        finalizedJob.PricingVersion,
+                        finalizedJob.Currency,
+                        finalizedJob.QuotedAmountMinor,
+                        finalizedJob.CreatedUtc
                     },
                     Document = new
                     {
-                        completedDocument.Id,
-                        completedDocument.OriginalFileName,
-                        completedDocument.MediaType,
-                        completedDocument.SizeBytes,
-                        completedDocument.Sha256,
-                        completedDocument.PageSizesJson
+                        finalizedDocument.Id,
+                        finalizedDocument.OriginalFileName,
+                        finalizedDocument.MediaType,
+                        finalizedDocument.SizeBytes,
+                        finalizedDocument.Sha256,
+                        finalizedDocument.PageSizesJson
                     },
                     DuplicateRequest = false
                 }

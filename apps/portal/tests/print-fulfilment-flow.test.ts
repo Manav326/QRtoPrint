@@ -135,11 +135,18 @@ test("HTTPS recovery returns the original saved print settings on new and duplic
 
 test("local Agent completion creates the job with the customer's ticket settings", () => {
   const source = readApi("AgentLocalUploadEndpoints.cs");
+  const service = readApi("AgentLocalUploadCompletionService.cs");
   const completeStart = source.indexOf('agentApi.MapPost("/local-uploads/{ticketId:guid}/complete"');
-  const jobStart = source.indexOf("var job = new PrintJob", completeStart);
-  const documentStart = source.indexOf("var printDocument = new PrintDocument", jobStart);
-  assert.ok(completeStart >= 0 && jobStart > completeStart && documentStart > jobStart);
-  const localJob = source.slice(jobStart, documentStart);
+  const serviceStart = service.indexOf("public async Task<AgentLocalUploadCompletionResult> CompleteAsync");
+  const jobStart = service.indexOf("var job = new PrintJob", serviceStart);
+  const documentStart = service.indexOf("var printDocument = new PrintDocument", jobStart);
+  assert.ok(completeStart >= 0 && serviceStart >= 0 && jobStart > serviceStart && documentStart > jobStart);
+  assert.ok(source.includes("completionService.CompleteAsync(ticket, device, request, now, ct)"));
+  assert.match(service, /BeginTransactionAsync\(cancellationToken\)/);
+  assert.match(service, /ExecuteUpdateAsync/);
+  assert.match(service, /AcquireQuotaLockAsync/);
+  assert.match(service, /CheckCapacityAsync/);
+  const localJob = service.slice(jobStart, documentStart);
   assert.match(localJob, /Copies = ticket\.Copies/);
   assert.match(localJob, /ColourMode = ticket\.ColourMode/);
   assert.match(localJob, /PaperSize = ticket\.PaperSize/);
