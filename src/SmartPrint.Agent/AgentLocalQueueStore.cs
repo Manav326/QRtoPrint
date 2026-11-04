@@ -691,6 +691,7 @@ public sealed class AgentLocalQueueStore
         long expectedOriginalSizeBytes,
         string replacementDocumentName,
         ReadOnlyMemory<byte> replacementBytes,
+        int pageCount,
         long quotedAmountMinor,
         Func<Task> commitServerRevisionAsync,
         CancellationToken cancellationToken)
@@ -702,6 +703,7 @@ public sealed class AgentLocalQueueStore
             replacementDocumentName.Length > 255 ||
             !string.Equals(Path.GetExtension(replacementDocumentName), ".pdf", StringComparison.OrdinalIgnoreCase) ||
             replacementBytes.Length is <= 0 or > 20 * 1024 * 1024 ||
+            pageCount is < 1 or > 100 ||
             quotedAmountMinor <= 0)
             throw new InvalidDataException("The prepared local photo revision metadata is invalid.");
 
@@ -756,7 +758,7 @@ public sealed class AgentLocalQueueStore
                 MediaType = "application/pdf",
                 Sha256 = newHash,
                 SizeBytes = replacementBytes.Length,
-                PageCount = 1,
+                PageCount = pageCount,
                 Copies = 1,
                 ColourMode = "Colour",
                 PaperSize = "A4",
