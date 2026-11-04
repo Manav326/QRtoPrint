@@ -34,6 +34,15 @@ public sealed class PrinterCapabilityRulesTests
         Assert.False(PrinterCapabilityRules.EvaluatePaperSupport(4, 4, supportedPapers, 9));
     }
 
+    
+    [Fact]
+    public void OrientationMustBeConfirmedExactlyBeforePrinting()
+    {
+        Assert.True(PrinterCapabilityRules.IsRequestedOrientationAccepted(true, 2, 2));
+        Assert.False(PrinterCapabilityRules.IsRequestedOrientationAccepted(true, 1, 2));
+        Assert.False(PrinterCapabilityRules.IsRequestedOrientationAccepted(false, 2, 2));
+    }
+
     [Fact]
     public void IncompletePaperListRemainsUnknown()
     {
