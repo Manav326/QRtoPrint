@@ -135,7 +135,7 @@ test("HTTPS recovery returns the original saved print settings on new and duplic
 
 test("local Agent completion creates the job with the customer's ticket settings", () => {
   const source = readApi("AgentLocalUploadEndpoints.cs");
-  const service = readApi("AgentLocalUploadCompletionService.cs");
+  const service = read("../../../src/SmartPrint.Api/Services/AgentLocalUploadCompletionService.cs");
   const completeStart = source.indexOf('agentApi.MapPost("/local-uploads/{ticketId:guid}/complete"');
   const serviceStart = service.indexOf("public async Task<AgentLocalUploadCompletionResult> CompleteAsync");
   const jobStart = service.indexOf("var job = new PrintJob", serviceStart);
