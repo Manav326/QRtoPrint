@@ -134,6 +134,20 @@ test("HTTPS recovery returns the original saved print settings on new and duplic
   }
 });
 
+test("local Agent completion creates the job with the customer's ticket settings", () => {
+  const program = read("../../../src/SmartPrint.Api/Program.cs");
+  const completeStart = program.indexOf('agentApi.MapPost("/local-uploads/{ticketId:guid}/complete"');
+  const jobStart = program.indexOf("var job = new PrintJob", completeStart);
+  const documentStart = program.indexOf("var printDocument = new PrintDocument", jobStart);
+  assert.ok(completeStart >= 0 && jobStart > completeStart && documentStart > jobStart);
+  const localJob = program.slice(jobStart, documentStart);
+  assert.match(localJob, /Copies = ticket\.Copies/);
+  assert.match(localJob, /ColourMode = ticket\.ColourMode/);
+  assert.match(localJob, /PaperSize = ticket\.PaperSize/);
+  assert.match(localJob, /IsDuplex = ticket\.IsDuplex/);
+  assert.match(localJob, /Orientation = ticket\.Orientation/);
+});
+
 test("local upload ticket retries preserve batch identity and renew the same expired reservation", () => {
   const program = read("../../../src/SmartPrint.Api/Program.cs");
   const api = read("../src/api.ts");
