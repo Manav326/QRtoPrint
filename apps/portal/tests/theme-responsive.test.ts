@@ -420,10 +420,13 @@ test("PDF footer branding is opt-in per batch and cannot cover source content or
   assert.ok(server.includes('candidate.PdfBrandingEnabled'));
   assert.ok(queueModels.includes('bool PdfBrandingEnabled = false'));
   assert.ok(agent.includes('"SMARTPRINT_BRANDED_PDF_RENDERER"'));
-  assert.ok(agent.includes('PdfBrandingRules.HasSafeFooterBand(page.Pixels, page.Width, page.Height, requiredBandHeight)'));
+  assert.ok(agent.includes('PdfBrandingOverlay.TryCreate(entry, bytes, pdfRaster.HasDigitalSignatures, pdfRaster.HasInteractiveForms, cancellationToken)'));
+  assert.ok(agent.includes('Never raster-paint a fallback PDF'));
+  assert.ok(!agent.includes('ApplySmartPrintFooter(page'));
+  assert.ok(agent.includes('PdfBrandingRules.HasSafeFooterBand(packed, width, height, bandHeight)'));
   assert.ok(safetyRules.includes('RequiredBlankBandPoints = 20f'));
   assert.ok(server.includes('item.PdfBrandingEnabled'));
   assert.ok(app.includes('jobStatus.pdfBrandingEnabled&&<div className="customer-branding-note">'));
-  assert.ok(app.includes('Ask the shop for an unbranded PDF before payment if you need those features.'));
+  assert.ok(app.includes('Ask the shop for an unbranded export when you need the PDF structure preserved.'));
   assert.ok(app.includes('digital-signature validation'));
 });
