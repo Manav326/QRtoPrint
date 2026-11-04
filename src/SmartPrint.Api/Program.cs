@@ -2813,34 +2813,76 @@ shop.MapGet("/print-jobs/{jobId:guid}/preview-source", async (
     HttpContext context,
     CancellationToken ct) =>
 {
-    // The short-lived Agent preview grant is a bearer credential. Never allow
-    // browsers or intermediate proxies to cache this response.
+    // Preview grants are bearer credentials; never let browsers or proxies cache them.
     context.Response.Headers.CacheControl = "private, no-store";
     context.Response.Headers.Pragma = "no-cache";
 
     if (!TryGetTenantId(principal, out var tenantId))
-    {
         return Results.Forbid();
-    }
 
-    var document = await db.PrintDocuments.AsNoTracking()
-        .Where(item => item.TenantId == tenantId && item.PrintJobId == jobId)
-        .Select(item => new { item.StorageMode, item.AgentDeviceId })
-        .SingleOrDefaultAsync(ct);
-    if (document is null) return Results.NotFound();
+    var variant = context.Request.Query["variant"].FirstOrDefault();
+    var outputPreview = string.Equals(variant, "output", StringComparison.OrdinalIgnoreCase);
+    if (!string.IsNullOrWhiteSpace(variant) && !outputPreview &&
+        !string.Equals(variant, "original", StringComparison.OrdinalIgnoreCase))
+        return Results.BadRequest(new { code = "local_preview_variant_invalid" });
 
-    if (!string.Equals(document.StorageMode, "LOCAL_AGENT", StringComparison.Ordinal))
+    Guid agentId;
+    if (outputPreview)
     {
-        return Results.Ok(new { Mode = "CLOUD" });
-    }
+        var output = await db.PrintJobs.AsNoTracking()
+            .Where(job => job.Id == jobId && job.TenantId == tenantId)
+            .Select(job => new
+            {
+                job.Status,
+                job.OutputType,
+                job.OutputFileName,
+                job.OutputSha256,
+                job.OutputSizeBytes,
+                job.OutputCompletedUtc,
+                job.ClaimedByAgentDeviceId
+            })
+            .SingleOrDefaultAsync(ct);
 
-    if (document.AgentDeviceId is not Guid agentId)
-    {
-        return Results.Conflict(new
+        if (output is null)
+            return Results.NotFound();
+        if (output.Status != "COMPLETED" || output.OutputType != "PDF_EXPORT" ||
+            output.OutputCompletedUtc is null ||
+            string.IsNullOrWhiteSpace(output.OutputFileName) ||
+            output.OutputFileName.Length > 255 ||
+            output.OutputFileName.Contains('/') || output.OutputFileName.Contains('\\') ||
+            !string.Equals(Path.GetExtension(output.OutputFileName), ".pdf", StringComparison.OrdinalIgnoreCase) ||
+            output.OutputSizeBytes is not long outputSize || outputSize <= 0 || outputSize > 100L * 1024 * 1024 ||
+            output.OutputSha256 is not { Length: 64 } || !output.OutputSha256.All(Uri.IsHexDigit) ||
+            output.ClaimedByAgentDeviceId is not Guid outputAgentId)
         {
-            code = "local_preview_agent_missing",
-            message = "This local-only document is not associated with a paired print computer."
-        });
+            return Results.Conflict(new
+            {
+                code = "pdf_export_preview_unavailable",
+                message = "A verified, completed PDF export is not available for this job yet."
+            });
+        }
+
+        agentId = outputAgentId;
+    }
+    else
+    {
+        var document = await db.PrintDocuments.AsNoTracking()
+            .Where(item => item.TenantId == tenantId && item.PrintJobId == jobId)
+            .Select(item => new { item.StorageMode, item.AgentDeviceId })
+            .SingleOrDefaultAsync(ct);
+        if (document is null)
+            return Results.NotFound();
+        if (!string.Equals(document.StorageMode, "LOCAL_AGENT", StringComparison.Ordinal))
+            return Results.Ok(new { Mode = "CLOUD" });
+        if (document.AgentDeviceId is not Guid documentAgentId)
+        {
+            return Results.Conflict(new
+            {
+                code = "local_preview_agent_missing",
+                message = "This local-only document is not associated with a paired print computer."
+            });
+        }
+        agentId = documentAgentId;
     }
 
     var now = DateTimeOffset.UtcNow;
@@ -4835,8 +4877,49 @@ agentApi.MapGet("/local-document-previews/{jobId:guid}/authorize", async (
     if (!LocalDocumentPreviewGrant.TryValidate(
             grantToken, signingKeyText, issuer, audience, DateTimeOffset.UtcNow, out var grant) ||
         !LocalDocumentPreviewGrant.IsFor(grant, device.TenantId, jobId, device.Id))
-    {
         return Results.Unauthorized();
+
+    var variant = context.Request.Query["variant"].FirstOrDefault();
+    var outputPreview = string.Equals(variant, "output", StringComparison.OrdinalIgnoreCase);
+    if (!string.IsNullOrWhiteSpace(variant) && !outputPreview &&
+        !string.Equals(variant, "original", StringComparison.OrdinalIgnoreCase))
+        return Results.BadRequest(new { code = "local_preview_variant_invalid" });
+
+    if (outputPreview)
+    {
+        var output = await db.PrintJobs.AsNoTracking()
+            .Where(job => job.Id == jobId && job.TenantId == device.TenantId &&
+                          job.ClaimedByAgentDeviceId == device.Id)
+            .Select(job => new
+            {
+                job.Status,
+                job.OutputType,
+                job.OutputFileName,
+                job.OutputSizeBytes,
+                job.OutputSha256,
+                job.OutputCompletedUtc
+            })
+            .SingleOrDefaultAsync(ct);
+
+        if (output is null)
+            return Results.NotFound();
+        if (output.Status != "COMPLETED" || output.OutputType != "PDF_EXPORT" ||
+            output.OutputCompletedUtc is null ||
+            string.IsNullOrWhiteSpace(output.OutputFileName) ||
+            output.OutputFileName.Length > 255 ||
+            output.OutputFileName.Contains('/') || output.OutputFileName.Contains('\\') ||
+            !string.Equals(Path.GetExtension(output.OutputFileName), ".pdf", StringComparison.OrdinalIgnoreCase) ||
+            output.OutputSizeBytes is not long outputSize || outputSize <= 0 || outputSize > 100L * 1024 * 1024 ||
+            output.OutputSha256 is not { Length: 64 } || !output.OutputSha256.All(Uri.IsHexDigit))
+            return Results.Conflict(new { code = "pdf_export_preview_unavailable" });
+
+        return Results.Ok(new
+        {
+            MediaType = "application/pdf",
+            OriginalFileName = output.OutputFileName,
+            SizeBytes = outputSize,
+            Sha256 = output.OutputSha256
+        });
     }
 
     var document = await (

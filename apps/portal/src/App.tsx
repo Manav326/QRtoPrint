@@ -207,7 +207,7 @@ function ShopConsole({ tokens, onSignOut, dark, onToggleTheme }: { tokens: AuthT
   const [modal, setModal] = useState<Modal>(null);
   const [busy, setBusy] = useState(false);
   const [toast, setToast] = useState("");
-  const [preview, setPreview] = useState<{ name: string; url: string; mediaType: string; job: ShopPrintJob; readOnly: boolean } | null>(null);
+  const [preview, setPreview] = useState<{ name: string; url: string; mediaType: string; job: ShopPrintJob; readOnly: boolean; isSavedOutput: boolean } | null>(null);
   const [refundJob, setRefundJob] = useState<ShopPrintJob | null>(null);
   const [batchReviewJobs, setBatchReviewJobs] = useState<ShopPrintJob[] | null>(null);
   const [batchReviewDecisions, setBatchReviewDecisions] = useState<Record<string, boolean>>({});
@@ -1109,13 +1109,25 @@ function ShopConsole({ tokens, onSignOut, dark, onToggleTheme }: { tokens: AuthT
     }
   }
 
-  async function previewJob(job: ShopPrintJob, readOnly = false) {
+  async function previewJob(
+    job: ShopPrintJob,
+    readOnly = false,
+    variant: "original" | "output" = "original"
+  ) {
     setBusyJobId(job.id);
     setError("");
     try {
-      const blob = await downloadShopDocument(tokens.accessToken, job.id);
+      const blob = await downloadShopDocument(tokens.accessToken, job.id, variant);
       const url = URL.createObjectURL(blob);
-      setPreview({ name: job.document.originalFileName, url, mediaType: blob.type || job.document.mediaType, job, readOnly });
+      const isSavedOutput = variant === "output";
+      setPreview({
+        name: isSavedOutput ? job.outputFileName || `${job.jobNumber}_SmartPrint.pdf` : job.document.originalFileName,
+        url,
+        mediaType: isSavedOutput ? "application/pdf" : blob.type || job.document.mediaType,
+        job,
+        readOnly: readOnly || isSavedOutput,
+        isSavedOutput
+      });
     } catch (exception) {
       setError(exception instanceof Error ? exception.message : "Could not open the document.");
     } finally {
@@ -1400,7 +1412,7 @@ function ShopConsole({ tokens, onSignOut, dark, onToggleTheme }: { tokens: AuthT
           {active === "Subscription" && subscription && <SubscriptionPage summary={subscription}/>}
           {active === "Payments" && paymentSettings && <PaymentsPage settings={paymentSettings} payments={payments} refunds={refunds} onSave={savePaymentSettings} onVerify={verifyPayment} onReject={rejectPayment} busy={busy} busyJobId={busyJobId}/>}
           {active === "Settings" && profile && <SettingsPage profile={profile} onSave={saveProfile} busy={busy}/>}
-          {active === "Print Queue" && <PrintQueuePage jobs={printJobs} printers={printers} agentDevices={agentDevices} searchQuery={queueSearch} loadingBatchId={batchReviewLoadingId} onSearch={searchPrintQueue} onPreview={previewJob} onApprove={approveJob} onReject={rejectJob} onRefund={job=>setRefundJob(job)} onReviewBatch={openBatchReview} onHistory={viewJobHistory} onAssignPrinter={assignPrinter} onUpdateSettings={updatePrintJobSettings} onDispatch={dispatchPrintJob} onConfirmOutput={confirmPrintedOutput} onRetryPdfExport={retryPdfExport} onRefresh={refreshPrintQueue} onLoadOlder={loadOlderQueueJobs} hasMoreJobs={hasMoreQueueJobs} loadingOlderJobs={loadingOlderQueueJobs} busyJobId={busyJobId}/>} 
+          {active === "Print Queue" && <PrintQueuePage jobs={printJobs} printers={printers} agentDevices={agentDevices} searchQuery={queueSearch} loadingBatchId={batchReviewLoadingId} onSearch={searchPrintQueue} onPreview={previewJob} onPreviewOutput={job=>void previewJob(job,true,"output")} onApprove={approveJob} onReject={rejectJob} onRefund={job=>setRefundJob(job)} onReviewBatch={openBatchReview} onHistory={viewJobHistory} onAssignPrinter={assignPrinter} onUpdateSettings={updatePrintJobSettings} onDispatch={dispatchPrintJob} onConfirmOutput={confirmPrintedOutput} onRetryPdfExport={retryPdfExport} onRefresh={refreshPrintQueue} onLoadOlder={loadOlderQueueJobs} hasMoreJobs={hasMoreQueueJobs} loadingOlderJobs={loadingOlderQueueJobs} busyJobId={busyJobId}/>} 
           {active === "Customers" && <CustomersPage token={tokens.accessToken}/>}
           {active === "Reports" && <ReportsPage token={tokens.accessToken}/>} 
 
@@ -1413,7 +1425,7 @@ function ShopConsole({ tokens, onSignOut, dark, onToggleTheme }: { tokens: AuthT
       {modal === "printer" && <PrinterModal busy={busy} onClose={() => setModal(null)} onSubmit={submitPrinter}/>}
       {modal === "station" && <StationModal busy={busy} printers={printers.filter(printer => printer.isActive)} onClose={() => setModal(null)} onSubmit={submitStation}/>}
             {batchReviewJobs && <BatchReviewModal jobs={batchReviewJobs} busy={busyJobId==="batch-review"} decisions={batchReviewDecisions} retrying={batchReviewRetry} onDecision={(jobId,accepted)=>setBatchReviewDecisions(current=>({...current,[jobId]:accepted}))} onClose={()=>setBatchReviewJobs(null)} onPreview={job=>void previewJob(job,true)} onApply={(acceptedIds,pdfBrandingEnabled)=>void applyBatchReview(batchReviewJobs,acceptedIds,pdfBrandingEnabled)}/>} 
-      {preview && <DocumentPreviewModal name={preview.name} url={preview.url} mediaType={preview.mediaType} job={preview.job} readOnly={preview.readOnly} onApprove={()=>void approveJob(preview.job)} onReject={()=>void rejectJob(preview.job)} onRefund={()=>setRefundJob(preview.job)} onClose={() => { URL.revokeObjectURL(preview.url); setPreview(null); }}/>} 
+      {preview && <DocumentPreviewModal name={preview.name} url={preview.url} mediaType={preview.mediaType} job={preview.job} readOnly={preview.readOnly} isSavedOutput={preview.isSavedOutput} onApprove={()=>void approveJob(preview.job)} onReject={()=>void rejectJob(preview.job)} onRefund={()=>setRefundJob(preview.job)} onClose={() => { URL.revokeObjectURL(preview.url); setPreview(null); }}/>} 
       {eventHistory && <JobHistoryModal job={eventHistory.job} events={eventHistory.events} onClose={() => setEventHistory(null)}/>}
       {refundJob && <RefundModal job={refundJob} token={tokens.accessToken} busy={busyJobId===refundJob.id} onClose={()=>setRefundJob(null)} onSubmit={values=>void recordFileRefund(refundJob,values)}/>} 
       {actionDialog && <Modal title={actionDialog.title} subtitle="This action will be recorded against your shop account." onClose={closeActionDialog}>
@@ -2197,7 +2209,7 @@ function PaymentsPage({settings,payments,refunds,onSave,onVerify,onReject,busy,b
   </div>;
 }
 
-function PrintQueuePage({ jobs, printers, agentDevices, searchQuery, loadingBatchId, onSearch, onPreview, onApprove, onReject, onRefund, onReviewBatch, onHistory, onAssignPrinter, onUpdateSettings, onDispatch, onConfirmOutput, onRetryPdfExport, onRefresh, onLoadOlder, hasMoreJobs, loadingOlderJobs, busyJobId }: {
+function PrintQueuePage({ jobs, printers, agentDevices, searchQuery, loadingBatchId, onSearch, onPreview, onPreviewOutput, onApprove, onReject, onRefund, onReviewBatch, onHistory, onAssignPrinter, onUpdateSettings, onDispatch, onConfirmOutput, onRetryPdfExport, onRefresh, onLoadOlder, hasMoreJobs, loadingOlderJobs, busyJobId }: {
   jobs: ShopPrintJob[];
   printers: PrinterDevice[];
   agentDevices: AgentDevice[];
@@ -2205,6 +2217,7 @@ function PrintQueuePage({ jobs, printers, agentDevices, searchQuery, loadingBatc
   loadingBatchId: string | null;
   onSearch: (query: string) => Promise<void>;
   onPreview: (job: ShopPrintJob) => void;
+  onPreviewOutput: (job: ShopPrintJob) => void;
   onApprove: (job: ShopPrintJob) => void;
   onReject: (job: ShopPrintJob) => void;
   onRefund: (job: ShopPrintJob) => void;
@@ -2401,7 +2414,8 @@ function PrintQueuePage({ jobs, printers, agentDevices, searchQuery, loadingBatc
                     orientation:(["AUTO","PORTRAIT","LANDSCAPE"].includes(job.orientation??"AUTO")?job.orientation??"AUTO":"AUTO") as CustomerPrintRequestSettings["orientation"]
                   });
                 }}>Adjust options</button>}
-                <button className="subtle-button" disabled={busyJobId===job.id} onClick={()=>onPreview(job)}>Preview</button>
+                <button className="subtle-button" disabled={busyJobId===job.id} onClick={()=>onPreview(job)}>Preview original</button>
+                {job.status==="COMPLETED"&&job.outputType==="PDF_EXPORT"&&verifiedPdfExportPath(job)&&job.outputFileName&&job.outputSha256?.length===64&&(job.outputSizeBytes??0)>0&&<button className="subtle-button approve-action" disabled={busyJobId===job.id} onClick={()=>onPreviewOutput(job)}>Preview saved PDF</button>}
                 <button className="subtle-button" disabled={busyJobId===job.id} onClick={()=>onHistory(job)}>History</button>
                 {job.status==="AWAITING_SHOP_APPROVAL"&&<button className="subtle-button approve-action" disabled={busyJobId===job.id} onClick={()=>onApprove(job)}>Accept</button>}
                 {["AWAITING_SHOP_APPROVAL","AWAITING_PAYMENT"].includes(job.status)&&<button className="subtle-button reject-action" disabled={busyJobId===job.id} onClick={()=>onReject(job)}>Reject file</button>}
@@ -2508,12 +2522,15 @@ function JobHistoryModal({job,events,onClose}:{job:ShopPrintJob;events:ShopJobEv
   </Modal>;
 }
 
-function DocumentPreviewModal({name,url,mediaType,job,readOnly=false,onClose,onApprove,onReject,onRefund}:{
-  name:string;url:string;mediaType:string;job:ShopPrintJob;readOnly?:boolean;onClose:()=>void;onApprove:()=>void;onReject:()=>void;onRefund:()=>void;
+function DocumentPreviewModal({name,url,mediaType,job,readOnly=false,isSavedOutput=false,onClose,onApprove,onReject,onRefund}:{
+  name:string;url:string;mediaType:string;job:ShopPrintJob;readOnly?:boolean;isSavedOutput?:boolean;onClose:()=>void;onApprove:()=>void;onReject:()=>void;onRefund:()=>void;
 }) {
   const isPdf=mediaType==="application/pdf";
-  const previewSummary = job.printKind==="PHOTO" ? `${job.photoCount??0} ${job.photoSizeCode??""} photos arranged on one A4 sheet. Preview displays the uploaded original once.` : `${job.pageCount} source page(s) × ${job.copies} copy/copies = ${job.pageCount*job.copies} printed page(s). Preview displays the uploaded original once.`;
-  return <Modal title={name} subtitle={readOnly ? `Read-only preview · ${previewSummary}` : job.batchId ? `File review · Batch ${job.batchId.slice(0,8).toUpperCase()} · ${previewSummary}` : previewSummary} onClose={onClose}>
+  const previewSummary = isSavedOutput
+    ? "Final PDF export saved by this shop. This is the actual output file; the uploaded original remains separate and unchanged."
+    : job.printKind==="PHOTO" ? `${job.photoCount??0} ${job.photoSizeCode??""} photos arranged on one A4 sheet. Preview displays the uploaded original once.` : `${job.pageCount} source page(s) × ${job.copies} copy/copies = ${job.pageCount*job.copies} printed page(s). Preview displays the uploaded original once.`;
+  const subtitle = isSavedOutput ? "Saved PDF output · Read-only preview" : readOnly ? `Read-only preview · ${previewSummary}` : job.batchId ? `File review · Batch ${job.batchId.slice(0,8).toUpperCase()} · ${previewSummary}` : previewSummary;
+  return <Modal title={name} subtitle={subtitle} onClose={onClose}>
     <div className="shop-document-preview">{isPdf?<iframe src={url} title={name}/>:<img src={url} alt={name}/>}</div>
     {["AWAITING_SHOP_APPROVAL","AWAITING_PAYMENT"].includes(job.status)&&<div className="file-review-note"><Check size={16}/><span>{readOnly ? "This preview is part of the batch review. Keep or change this file's decision in the batch panel after closing the preview." : "Review this file independently. Accepting or rejecting it will not change any other file in the batch."}</span></div>}
     {job.status==="PAID_AUTHORISED"&&(job.payment?.status==="VERIFIED"||job.payment?.status==="PARTIALLY_REFUNDED")&&<div className="file-refund-note"><Wallet size={16}/><span>Paid amount: <strong>{formatMoney(job.payment.amountMinor,job.payment.currency)}</strong>. A refund can be recorded while this file has not yet been handed to the shop computer.</span></div>}
