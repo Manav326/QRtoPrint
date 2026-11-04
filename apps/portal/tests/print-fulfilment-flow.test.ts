@@ -52,16 +52,15 @@ test("plan-limited HTTPS fallback is only offered when the Agent is unavailable"
   const app = read("../src/App.tsx");
   const api = read("../src/api.ts");
   const publicUploadSource = readApi("PublicJobCreationEndpoints.cs");
+  const publicUploadService = read("../../../src/SmartPrint.Api/Services/PublicJobCreationService.cs");
   assert.match(app, /secureQueueFallbackEnabled = cloudAssistedPrintingEnabled \|\| !localAgent\?\.endpoints\.length \|\| localFallbackSuggested/);
   const directUploadStart = api.indexOf("export async function uploadCustomerDocument(");
   const directUploadEnd = api.indexOf("type CustomerLocalAgentApi", directUploadStart);
   const directUpload = api.slice(directUploadStart, directUploadEnd);
   assert.doesNotMatch(directUpload, /X-Print-Queue-Fallback/);
-  const publicUploadStart = publicUploadSource.indexOf('publicApi.MapPost("/sessions/current/jobs"');
-  assert.ok(publicUploadStart >= 0);
-  const publicUpload = publicUploadSource.slice(publicUploadStart);
-  assert.match(publicUpload, /!subscription\.CloudAssistedPrintingEnabled && localAgentAvailable/);
-  assert.doesNotMatch(publicUpload, /queueFallbackRequested/);
+  assert.match(publicUploadSource, /jobCreation\.CreateAsync/);
+  assert.match(publicUploadService, /!subscription\.CloudAssistedPrintingEnabled && localAgentAvailable/);
+  assert.doesNotMatch(publicUploadService, /queueFallbackRequested/);
   assert.doesNotMatch(publicUploadSource, /X-Print-Queue-Fallback|queueFallbackRequested/);
   assert.doesNotMatch(api, /X-Print-Queue-Fallback|allowQueueFallback/);
   assert.match(app, /setCheckStatus\("unavailable"\);\s*onReady\(false\);[\s\S]*?onUnavailable\(\);/);
@@ -114,20 +113,17 @@ test("reassigning a blocked queued job clears the previous printer failure", () 
 
 test("cloud upload retries must match the original file, batch and selected print settings", () => {
   const source = readApi("PublicJobCreationEndpoints.cs");
-  const routeStart = source.indexOf('publicApi.MapPost("/sessions/current/jobs"');
-  assert.ok(routeStart >= 0);
-  const route = source.slice(routeStart);
-  const formRead = route.indexOf("await context.Request.ReadFormAsync(ct)");
-  const existingLookup = route.indexOf("var existing = await db.PrintJobs.AsNoTracking()");
-  const batchPaymentGate = route.indexOf("var batchCheckoutLocked =");
-  assert.ok(formRead >= 0 && existingLookup > formRead);
-  assert.ok(batchPaymentGate > existingLookup);
-  assert.match(route, /SHA256\.HashDataAsync\(existingInput, ct\)/);
+  const service = read("../../../src/SmartPrint.Api/Services/PublicJobCreationService.cs");
+  assert.match(source, /jobCreation\.CreateAsync/);
+  assert.match(service, /var existing = await db\.PrintJobs\.AsNoTracking\(\)/);
+  assert.match(service, /var batchCheckoutLocked = await db\.PrintBatchPayments/);
+  assert.match(service, /SHA256\.HashDataAsync\(existingInput, cancellationToken\)/);
   for (const setting of ["Copies", "ColourMode", "PaperSize", "IsDuplex", "Orientation"])
-    assert.ok(route.includes("existing."+setting), `Retry must compare ${setting}.`);
-  assert.match(route, /existingDocument\.Sha256, suppliedSha/);
-  assert.match(route, /existingDocument\.OriginalFileName != originalName/);
-  assert.match(route, /existingDocument\.SizeBytes != file\.Length/);
+    assert.ok(service.includes("existing."+setting+" != command."+setting), `Retry must compare ${setting}.`);
+  assert.match(service, /existingDocument\.Sha256, suppliedSha/);
+  assert.match(service, /existingDocument\.OriginalFileName != command\.OriginalName/);
+  assert.match(service, /existingDocument\.SizeBytes != command\.File\.Length/);
+  assert.match(service, /racedJob = await db\.PrintJobs/);
 });
 
 test("HTTPS recovery returns the original saved print settings on new and duplicate responses", () => {
@@ -522,4 +518,14 @@ test("PDF export preview grants require a verified local Agent-owned export", ()
   assert.match(agent, /output\.OutputType != "PDF_EXPORT"/);
   assert.match(agent, /MediaType = "application\/pdf"/);
   assert.match(grant, /local_document_preview/);
+});
+
+
+test("cloud upload keeps encrypted storage when the transaction commit outcome cannot be confirmed", () => {
+  const service = read("../../../src/SmartPrint.Api/Services/PublicJobCreationService.cs");
+  assert.match(service, /ReconcileStoredDocumentAfterUnknownCommitAsync/);
+  assert.match(service, /item\.StorageKey == storageKey/);
+  assert.match(service, /if \(committed\)\s*return/);
+  assert.match(service, /Keep the encrypted object when the DB outcome cannot be checked/);
+  assert.match(service, /logger\.LogError/);
 });
