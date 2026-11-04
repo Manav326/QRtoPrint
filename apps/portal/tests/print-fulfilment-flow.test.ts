@@ -219,3 +219,15 @@ test("photo studio's selected photo quantity is a single output file with one ph
  assert.match(app,/const generated=sheets\.map\(sheet=>sheet\.file\)/);
  assert.match(app,/photos\[fp\]=\{sizeCode:sheet\.sizeCode,photoCount:sheet\.photoCount\}/);
 });
+
+
+test("Shop Wi-Fi option remains visible when HTTPS fallback is disabled",()=>{
+ const app=read("../src/App.tsx");
+ const start=app.indexOf('<div className="customer-upload-modes">');
+ const picker=app.indexOf('<div className="customer-upload-picker-grid"',start);
+ assert.ok(start>=0&&picker>start);
+ const modes=app.slice(start,picker);
+ assert.match(modes,/customer-upload-mode-unavailable/);
+ assert.match(modes,/secureQueueFallbackEnabled&&/);
+ assert.doesNotMatch(modes,/\? <div className="customer-upload-modes"/);
+});
