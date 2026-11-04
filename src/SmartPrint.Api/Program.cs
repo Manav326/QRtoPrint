@@ -5223,6 +5223,12 @@ agentApi.MapPost("/local-document-photo-revisions/{jobId:guid}/complete", async 
     var device = await AuthenticateAgentAsync(context, db, ct);
     if (device is null) return Results.Unauthorized();
 
+    if (request.PageCount is < 1 or > 100 ||
+        request.PhotoCount is < 1 or > 100 ||
+        request.PhotosPerPage is < 1 or > 100 ||
+        request.PhotoSizeCode is not ("35x45" or "25x35" or "2x2" or "4x6"))
+        return Results.BadRequest(new { code = "photo_revision_output_invalid", message = "The prepared photo page metadata is invalid." });
+
     var grantToken = context.Request.Headers["X-Print-Photo-Revision-Grant"].FirstOrDefault();
     if (!LocalDocumentPhotoRevisionGrant.TryValidate(
             grantToken, signingKeyText, issuer, audience, DateTimeOffset.UtcNow, out var grant) ||
@@ -7736,7 +7742,7 @@ publicApi.MapPost("/jobs/{jobId:guid}/quote", async (
             (request.Copies != 1 || request.ColourMode != "Colour" ||
              request.IsDuplex || request.PhotoSizeCode is not ("35x45" or "25x35" or "2x2" or "4x6") ||
              request.PhotoCount is null || request.PhotoCount is < 1 or > 100 ||
-             request.PhotosPerPage is null or < 1)) ||
+             request.PhotosPerPage is < 1)) ||
         (isPhotoPrint && (request.PaperSize != "A4" || request.Orientation != "AUTO")) ||
         (!isPhotoPrint && (request.PhotoSizeCode is not null || request.PhotoCount is not null || request.PhotosPerPage is not null)))
     {
@@ -7770,7 +7776,8 @@ publicApi.MapPost("/jobs/{jobId:guid}/quote", async (
         {
             var photoSizeCode = request.PhotoSizeCode!;
             var photoCount = request.PhotoCount!.Value;
-            var expectedPageCount = PricingCalculator.PhotoPageCount(photoCount, photoSizeCode, request.PhotosPerPage!.Value);
+            var photosPerPage = request.PhotosPerPage ?? photoCount;
+            var expectedPageCount = PricingCalculator.PhotoPageCount(photoCount, photoSizeCode, photosPerPage);
             if (job.PageCount != expectedPageCount)
             {
                 return Results.ValidationProblem(new Dictionary<string, string[]>
@@ -7782,7 +7789,7 @@ publicApi.MapPost("/jobs/{jobId:guid}/quote", async (
             photoUnitPriceMinor = PricingCalculator.PhotoUnitRate(photoSizeCode, pricing);
             amount = PricingCalculator.CalculatePhoto(photoCount, photoSizeCode, pricing);
             pageRefundAllocations = PricingCalculator.CalculatePhotoPageRefundAllocations(
-                photoCount, photoSizeCode, request.PhotosPerPage!.Value, photoUnitPriceMinor);
+                photoCount, photoSizeCode, photosPerPage, photoUnitPriceMinor);
             job.PrintKind = "PHOTO";
             job.PhotoSizeCode = photoSizeCode;
             job.PhotoCount = photoCount;
