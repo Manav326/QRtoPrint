@@ -239,7 +239,7 @@ test("cloud shop document preview retries the binary fetch with a refreshed acce
  const end=api.indexOf("export function createAgentEnrollmentCode(",start);
  assert.ok(start>=0&&end>start);
  const preview=api.slice(start,end);
- assert.match(preview,/if\(response\.status===401\)\s*\{\s*const refreshed=await refreshStoredSession\(token\)/);
+ assert.match(preview,/if \(response\.status === 401\)\s*\{\s*const refreshed = await refreshStoredSession\(token\)/);
  assert.match(preview,/if\(refreshed\)response=await request\(refreshed\.accessToken\)/);
  assert.match(preview,/Your shop session has expired/);
 });
@@ -251,6 +251,8 @@ test("Photo Studio uses only the uploaded source and offers no edited-photo expo
  assert.doesNotMatch(studio,/<a[^>]+download/i);
  assert.match(studio,/setDesktopContentProtection\(true\)/);
  assert.match(studio,/previewProtection/);
+ const studioCss=read("../src/PhotoStudio.module.css");
+ assert.match(studioCss,/\.previewProtection::before/);
  assert.match(studio,/Use photo for shop printing/);
  assert.match(studio,/type="date"/);
  assert.match(studio,/formatDobForPrint/);
