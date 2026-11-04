@@ -1,10 +1,23 @@
 using System.Net;
+using System.Text.Json;
 using System.Net.Sockets;
 
 namespace SmartPrint.Api.Domain;
 
 public static class AgentLocalEndpointRules
 {
+    public static string[] ReadJson(string? json)
+    {
+        try
+        {
+            return JsonSerializer.Deserialize<string[]>(string.IsNullOrWhiteSpace(json) ? "[]" : json)
+                ?? Array.Empty<string>();
+        }
+        catch (JsonException)
+        {
+            return Array.Empty<string>();
+        }
+    }
     public const int LocalApiPort = 17842;
     private const int MaximumEndpoints = 8;
 
