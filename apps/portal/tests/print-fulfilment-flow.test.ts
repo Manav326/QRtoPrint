@@ -25,3 +25,21 @@ test("owner quote edits are sent through the existing print-job API", () => {
   assert.match(app, /paperSize,/);
   assert.match(app, /orientation,/);
 });
+
+test("paid jobs are staged while a physical printer is offline and checked at dispatch", () => {
+  const program = read("../../../src/SmartPrint.Api/Program.cs");
+  const claimStart = program.indexOf('agentApi.MapPost("/jobs/claim"');
+  const claimEnd = program.indexOf('agentApi.MapGet("/jobs/{jobId:guid}/document"', claimStart);
+  const dispatchStart = program.indexOf('shop.MapPost("/print-jobs/{jobId:guid}/dispatch"');
+  const dispatchEnd = program.indexOf('shop.MapPost("/print-jobs/{jobId:guid}/retry-pdf-export"', dispatchStart);
+  assert.ok(claimStart >= 0 && claimEnd > claimStart);
+  assert.ok(dispatchStart >= 0 && dispatchEnd > dispatchStart);
+  const claimRoute = program.slice(claimStart, claimEnd);
+  const dispatchRoute = program.slice(dispatchStart, dispatchEnd);
+  assert.match(claimRoute, /printer\.IsActive/);
+  assert.match(claimRoute, /printer\.QueueName != null/);
+  assert.doesNotMatch(claimRoute, /printer\.Status == "Ready"/);
+  assert.doesNotMatch(claimRoute, /printer\.LastSeenUtc/);
+  assert.match(dispatchRoute, /printer\.Status == "Ready"/);
+  assert.match(dispatchRoute, /printer\.LastSeenUtc/);
+});
