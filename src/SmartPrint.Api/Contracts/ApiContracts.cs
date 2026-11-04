@@ -95,7 +95,8 @@ public sealed record ReportPrintPaymentRequest(string ReferenceNumber);
 public sealed record RejectPrintPaymentRequest(string Reason);
 public sealed record ApplyPrintBatchReviewRequest(
     IReadOnlyList<Guid> ReviewedJobIds,
-    IReadOnlyList<Guid> AcceptedJobIds);
+    IReadOnlyList<Guid> AcceptedJobIds,
+    bool PdfBrandingEnabled = false);
 
 
 public sealed record ResumeCustomerSessionRequest(string PublicCode);

@@ -2960,3 +2960,25 @@ html[data-theme="dark"] .print-kind-tag--document{color:#b9d7ff;background:#2036
   color: var(--accent);
 }
 .account-edit-error { margin: 0; }
+
+
+/* Batch-scoped PDF footer branding control. */
+.batch-branding-setting {
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:16px;
+  padding:14px 16px;
+  border:1px solid var(--border);
+  border-radius:12px;
+  background:var(--surface-2);
+}
+.batch-branding-copy { display:flex; flex:1; min-width:0; flex-direction:column; gap:5px; }
+.batch-branding-copy strong { color:var(--text); font-size:12px; font-weight:800; letter-spacing:.01em; }
+.batch-branding-copy small { color:var(--muted); font-size:10px; line-height:1.55; }
+.batch-branding-toggle { display:flex; align-items:center; gap:9px; flex:0 0 auto; color:var(--text); font-size:11px; font-weight:750; white-space:nowrap; cursor:pointer; }
+.batch-branding-toggle input { width:18px; height:18px; margin:0; accent-color:#F97316; cursor:pointer; }
+.batch-branding-toggle input:disabled { cursor:not-allowed; opacity:.65; }
+@media(max-width:560px) {
+  .batch-branding-setting { align-items:flex-start; flex-direction:column; gap:11px; }
+}

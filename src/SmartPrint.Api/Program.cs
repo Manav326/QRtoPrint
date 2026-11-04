@@ -1976,6 +1976,7 @@ shop.MapGet("/print-jobs", async (
             job.BatchGroupName,
             job.BatchName,
             job.RejectedPageNumbersJson,
+            job.PdfBrandingEnabled,
             job.JobNumber,
             job.Status,
             job.PageCount,
@@ -3002,6 +3003,26 @@ shop.MapPost("/print-batches/{batchId:guid}/review", async (
 
     var accepted = acceptedIds.ToHashSet();
     var now = DateTimeOffset.UtcNow;
+    foreach (var job in allBatchJobs)
+    {
+        if (job.PdfBrandingEnabled == request.PdfBrandingEnabled)
+            continue;
+
+        job.PdfBrandingEnabled = request.PdfBrandingEnabled;
+        db.PrintJobEvents.Add(new PrintJobEvent
+        {
+            TenantId = tenantId,
+            PrintJobId = job.Id,
+            PreviousStatus = job.Status,
+            NewStatus = job.Status,
+            ActorType = "ShopUser",
+            ActorId = GetActorId(principal),
+            ReasonCode = request.PdfBrandingEnabled
+                ? "SHOP_BATCH_PDF_BRANDING_ENABLED"
+                : "SHOP_BATCH_PDF_BRANDING_DISABLED",
+            CreatedUtc = now
+        });
+    }
     var acceptedCount = 0;
     var rejectedCount = 0;
     var quoteRefreshRequiredCount = 0;
@@ -3745,6 +3766,7 @@ agentApi.MapPost("/jobs/claim", async (
             job.PaperSize,
             job.IsDuplex,
             job.Orientation,
+            job.PdfBrandingEnabled,
             job.Currency,
             job.QuotedAmountMinor,
             job.PrinterDeviceId,
@@ -3831,6 +3853,7 @@ agentApi.MapPost("/jobs/claim", async (
             candidate.PaperSize,
             candidate.IsDuplex,
             candidate.Orientation,
+            candidate.PdfBrandingEnabled,
             candidate.Currency,
             candidate.QuotedAmountMinor,
             candidate.PrinterDeviceId,

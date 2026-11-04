@@ -252,7 +252,8 @@ public sealed class AgentLocalQueueStore
             DateTimeOffset.UtcNow,
             job.LeaseExpiresUtc,
             OutputMode: job.OutputMode,
-            Orientation: job.Orientation);
+            Orientation: job.Orientation,
+            PdfBrandingEnabled: job.PdfBrandingEnabled);
 
         try
         {
@@ -478,7 +479,8 @@ public sealed class AgentLocalQueueStore
             Currency = job.Currency,
             QuotedAmountMinor = job.QuotedAmountMinor,
             LeaseExpiresUtc = job.LeaseExpiresUtc,
-            OutputMode = job.OutputMode
+            OutputMode = job.OutputMode,
+            PdfBrandingEnabled = job.PdfBrandingEnabled
         }, cancellationToken);
     }
 

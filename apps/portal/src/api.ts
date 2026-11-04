@@ -909,6 +909,7 @@ export interface ShopPrintJob {
   paperSize: string;
   isDuplex: boolean;
   orientation?: string;
+  pdfBrandingEnabled?: boolean;
   pricingVersion?: number;
   printKind?: string;
   photoSizeCode?: string | null;
@@ -1574,7 +1575,8 @@ export function applyShopPrintBatchReview(
   token: string,
   batchId: string,
   reviewedJobIds: string[],
-  acceptedJobIds: string[]
+  acceptedJobIds: string[],
+  pdfBrandingEnabled = false
 ) {
   return apiRequest<{
     batchId: string;
@@ -1586,7 +1588,7 @@ export function applyShopPrintBatchReview(
     nextStep: string;
   }>(`/api/v1/shop/print-batches/${batchId}/review`, {
     method: "POST",
-    body: JSON.stringify({ reviewedJobIds, acceptedJobIds })
+    body: JSON.stringify({ reviewedJobIds, acceptedJobIds, pdfBrandingEnabled })
   }, token);
 }
 

@@ -1170,14 +1170,14 @@ function ShopConsole({ tokens, onSignOut, dark, onToggleTheme }: { tokens: AuthT
     }
   }
 
-  async function applyBatchReview(batchJobs: ShopPrintJob[], acceptedJobIds: string[]) {
+  async function applyBatchReview(batchJobs: ShopPrintJob[], acceptedJobIds: string[], pdfBrandingEnabled: boolean) {
     const batchId=batchJobs.find(job=>job.batchId)?.batchId;
     if(!batchId||batchJobs.length===0)return;
     const accepted=new Set(acceptedJobIds);
     const acceptCount=batchJobs.filter(job=>accepted.has(job.id)).length;
     const rejectCount=batchJobs.length-acceptCount;
     if (!(await confirmInApp(
-      `Accept ${acceptCount} file(s) and reject ${rejectCount} file(s)? Previously rejected files you tick will be restored only if no payment has started. Expired quotes must be recalculated before checkout. The decisions are applied together.`,
+      `Accept ${acceptCount} file(s) and reject ${rejectCount} file(s)? Previously rejected files you tick will be restored only if no payment has started. Expired quotes must be recalculated before checkout. PDF footer branding will be ${pdfBrandingEnabled ? "enabled on safe blank margins" : "off"} for this batch. Original uploads and normal paper prints remain unchanged. The decisions are applied together.`,
       "Confirm batch review",
       "Apply review"
     ))) return;
@@ -1189,7 +1189,8 @@ function ShopConsole({ tokens, onSignOut, dark, onToggleTheme }: { tokens: AuthT
         tokens.accessToken,
         batchId,
         batchJobs.map(job=>job.id),
-        acceptedJobIds
+        acceptedJobIds,
+        pdfBrandingEnabled
       );
       await reload();
       setBatchReviewJobs(null);
@@ -1411,7 +1412,7 @@ function ShopConsole({ tokens, onSignOut, dark, onToggleTheme }: { tokens: AuthT
       {helpOpen && <HelpSupportModal onClose={() => setHelpOpen(false)} onNavigate={section => { setHelpOpen(false); navAction(section); }}/>}
       {modal === "printer" && <PrinterModal busy={busy} onClose={() => setModal(null)} onSubmit={submitPrinter}/>}
       {modal === "station" && <StationModal busy={busy} printers={printers.filter(printer => printer.isActive)} onClose={() => setModal(null)} onSubmit={submitStation}/>}
-            {batchReviewJobs && <BatchReviewModal jobs={batchReviewJobs} busy={busyJobId==="batch-review"} decisions={batchReviewDecisions} retrying={batchReviewRetry} onDecision={(jobId,accepted)=>setBatchReviewDecisions(current=>({...current,[jobId]:accepted}))} onClose={()=>setBatchReviewJobs(null)} onPreview={job=>void previewJob(job,true)} onApply={acceptedIds=>void applyBatchReview(batchReviewJobs,acceptedIds)}/>} 
+            {batchReviewJobs && <BatchReviewModal jobs={batchReviewJobs} busy={busyJobId==="batch-review"} decisions={batchReviewDecisions} retrying={batchReviewRetry} onDecision={(jobId,accepted)=>setBatchReviewDecisions(current=>({...current,[jobId]:accepted}))} onClose={()=>setBatchReviewJobs(null)} onPreview={job=>void previewJob(job,true)} onApply={(acceptedIds,pdfBrandingEnabled)=>void applyBatchReview(batchReviewJobs,acceptedIds,pdfBrandingEnabled)}/>} 
       {preview && <DocumentPreviewModal name={preview.name} url={preview.url} mediaType={preview.mediaType} job={preview.job} readOnly={preview.readOnly} onApprove={()=>void approveJob(preview.job)} onReject={()=>void rejectJob(preview.job)} onRefund={()=>setRefundJob(preview.job)} onClose={() => { URL.revokeObjectURL(preview.url); setPreview(null); }}/>} 
       {eventHistory && <JobHistoryModal job={eventHistory.job} events={eventHistory.events} onClose={() => setEventHistory(null)}/>}
       {refundJob && <RefundModal job={refundJob} token={tokens.accessToken} busy={busyJobId===refundJob.id} onClose={()=>setRefundJob(null)} onSubmit={values=>void recordFileRefund(refundJob,values)}/>} 
@@ -2454,8 +2455,9 @@ function BatchReviewModal({jobs,busy,decisions,retrying,onDecision,onClose,onPre
   onDecision:(jobId:string,accepted:boolean)=>void;
   onClose:()=>void;
   onPreview:(job:ShopPrintJob)=>void;
-  onApply:(acceptedJobIds:string[])=>void;
+  onApply:(acceptedJobIds:string[],pdfBrandingEnabled:boolean)=>void;
 }) {
+  const [pdfBrandingEnabled,setPdfBrandingEnabled]=useState(()=>jobs.some(job=>job.pdfBrandingEnabled===true));
   const acceptedIds=jobs.filter(job=>decisions[job.id]??true).map(job=>job.id);
   const acceptedCount=acceptedIds.length;
   const rejectedCount=jobs.length-acceptedCount;
@@ -2483,8 +2485,19 @@ function BatchReviewModal({jobs,busy,decisions,retrying,onDecision,onClose,onPre
         </div>;
       })}
     </section>)}</div>
+    <div className="batch-branding-setting">
+      <div className="batch-branding-copy">
+        <strong>SmartPrint PDF footer</strong>
+        <small>Add a slim SmartPrint by QuantaEdge footer to eligible PDF exports in this batch. Only pages with a fully clear bottom margin receive the footer; pages without enough safe space are left unchanged.</small>
+        <small>Original uploaded files and normal paper printing are never modified. New batches start with branding off.</small>
+      </div>
+      <label className="batch-branding-toggle">
+        <input type="checkbox" checked={pdfBrandingEnabled} disabled={busy} onChange={event=>setPdfBrandingEnabled(event.currentTarget.checked)} aria-label="Add SmartPrint footer to PDF exports in this batch"/>
+        <span>{pdfBrandingEnabled?"On for this batch":"Off · default"}</span>
+      </label>
+    </div>
     <div className="batch-review-summary"><span><strong>{acceptedCount}</strong> accepted</span><span><strong>{rejectedCount}</strong> rejected</span><span><strong>{acceptedRequestedPages}</strong> pages requested</span><span><strong>{acceptedMonoPages}</strong> B&W · <strong>{acceptedColourPages}</strong> Colour</span><span><strong>{formatMoney(acceptedTotal,jobs[0]?.currency??"INR")}</strong> accepted value with valid quotes</span>{quoteRefreshRequiredCount>0&&<span><strong>{quoteRefreshRequiredCount}</strong> need a fresh quote</span>}<small>Page count = source pages × copies. Refresh expired quotes before checkout. Reject files before checkout; after payment starts, use the file-level refund action.</small></div>
-    <div className="modal-actions"><button className="secondary-button" onClick={onClose} disabled={busy}>Keep reviewing</button><button className="primary-button" disabled={busy||jobs.length===0} onClick={()=>onApply(acceptedIds)}>{busy?<span className="button-spinner"/>:"Apply review"}</button></div>
+    <div className="modal-actions"><button className="secondary-button" onClick={onClose} disabled={busy}>Keep reviewing</button><button className="primary-button" disabled={busy||jobs.length===0} onClick={()=>onApply(acceptedIds,pdfBrandingEnabled)>{busy?<span className="button-spinner"/>:"Apply review"}</button></div>
   </Modal>;
 }
 

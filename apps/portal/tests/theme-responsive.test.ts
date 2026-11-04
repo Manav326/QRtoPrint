@@ -398,3 +398,26 @@ test("all print settings controls capture React event values before state update
   assert.match(app, /const orientation=event\.currentTarget\.value/);
   assert.match(app, /const copies=Math\.max\(1,Math\.min\(100,Number\(event\.currentTarget\.value\)\|\|1\)\)/);
 });
+
+
+test("PDF footer branding is opt-in per batch and cannot cover source content or paper output", () => {
+  const app = read("../src/App.tsx");
+  const api = read("../src/api.ts");
+  const server = read("../../../src/SmartPrint.Api/Program.cs");
+  const contracts = read("../../../src/SmartPrint.Api/Contracts/ApiContracts.cs");
+  const agent = read("../../../src/SmartPrint.Agent/WindowsPrintExecutor.cs");
+  const queueModels = read("../../../src/SmartPrint.Agent/AgentQueueModels.cs");
+  const safetyRules = read("../../../src/SmartPrint.Agent/PdfBrandingRules.cs");
+
+  assert.ok(app.includes('useState(()=>jobs.some(job=>job.pdfBrandingEnabled===true))'));
+  assert.ok(app.includes('checked={pdfBrandingEnabled} disabled={busy}'));
+  assert.ok(api.includes('body: JSON.stringify({ reviewedJobIds, acceptedJobIds, pdfBrandingEnabled })'));
+  assert.ok(contracts.includes('bool PdfBrandingEnabled = false'));
+  assert.ok(server.includes('request.PdfBrandingEnabled'));
+  assert.ok(server.includes('job.PdfBrandingEnabled = request.PdfBrandingEnabled'));
+  assert.ok(server.includes('candidate.PdfBrandingEnabled'));
+  assert.ok(queueModels.includes('bool PdfBrandingEnabled = false'));
+  assert.ok(agent.includes('"SMARTPRINT_BRANDED_PDF_RENDERER"'));
+  assert.ok(agent.includes('PdfBrandingRules.HasSafeFooterBand(page.Pixels, page.Width, page.Height, requiredBandHeight)'));
+  assert.ok(safetyRules.includes('RequiredBlankBandPoints = 20f'));
+});
