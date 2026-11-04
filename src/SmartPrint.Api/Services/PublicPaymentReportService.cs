@@ -62,8 +62,8 @@ public sealed class PublicPaymentReportService(SmartPrintDbContext db)
                 BatchPayment: batchPayment);
         }
 
-        if (batchPayment.Status == "CUSTOMER_REPORTED" &&
-            string.Equals(batchPayment.PaymentReference, reference, StringComparison.Ordinal))
+        if (PaymentReportRules.IsDuplicateSubmission(
+                batchPayment.Method, batchPayment.Status, batchPayment.PaymentReference, reference))
         {
             await transaction.RollbackAsync(cancellationToken);
             return new PublicPaymentReportResult(
@@ -72,7 +72,7 @@ public sealed class PublicPaymentReportService(SmartPrintDbContext db)
                 DuplicateRequest: true);
         }
 
-        if (batchPayment.Status != "AWAITING_CUSTOMER_PAYMENT")
+        if (!PaymentReportRules.CanSubmitReference(batchPayment.Method, batchPayment.Status))
         {
             await transaction.RollbackAsync(cancellationToken);
             return new PublicPaymentReportResult(
@@ -192,8 +192,8 @@ public sealed class PublicPaymentReportService(SmartPrintDbContext db)
                 Job: job);
         }
 
-        if (payment.Status == "CUSTOMER_REPORTED" &&
-            string.Equals(payment.PaymentReference, reference, StringComparison.Ordinal))
+        if (PaymentReportRules.IsDuplicateSubmission(
+                payment.Method, payment.Status, payment.PaymentReference, reference))
         {
             return new PublicPaymentReportResult(
                 PublicPaymentReportFailure.None,
@@ -202,7 +202,7 @@ public sealed class PublicPaymentReportService(SmartPrintDbContext db)
                 DuplicateRequest: true);
         }
 
-        if (payment.Status != "AWAITING_CUSTOMER_PAYMENT")
+        if (!PaymentReportRules.CanSubmitReference(payment.Method, payment.Status))
         {
             return new PublicPaymentReportResult(
                 PublicPaymentReportFailure.PaymentNotAwaitingReference,
