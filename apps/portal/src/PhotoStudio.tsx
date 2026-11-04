@@ -4,6 +4,7 @@ import {
   Sparkles, X, ZoomIn, ZoomOut, Type, PaintBucket, Pipette
 } from "lucide-react";
 import styles from "./PhotoStudio.module.css";
+import { isDesktopApp, setDesktopContentProtection } from "./desktop-bridge";
 import { A4_HEIGHT_MM, A4_WIDTH_MM, A4_HEIGHT_PX, A4_WIDTH_PX, buildPhotoPdf, getPhotoSheetLayout } from "./photo-studio-layout";
 
 export type PreparedPhotoSheet = { file: File; sizeCode: string; photoCount: number };
@@ -70,6 +71,11 @@ function replaceEdgeBackground(canvas: HTMLCanvasElement, sourceHex: string, tar
   }
   context.putImageData(pixels,0,0);
 }
+function formatDobForPrint(value:string){
+  const match=/^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
+  return match?match[3]+"/"+match[2]+"/"+match[1]:value.trim().slice(0,24);
+}
+
 function drawPhotoSheetPage(
   context:CanvasRenderingContext2D,image:HTMLImageElement,canvasWidth:number,size:PhotoSize,copies:number,pageIndex:number,
   zoom:number,focusX:number,focusY:number,adjustments:Adjustments,
@@ -94,7 +100,7 @@ function drawPhotoSheetPage(
     context.drawImage(crop,x,y,size.widthMm,size.heightMm);
     context.save();context.strokeStyle="#7b8491";context.lineWidth=.18;context.setLineDash([.8,.8]);context.strokeRect(x,y,size.widthMm,size.heightMm);context.restore();
     if(captionHeightMm>0){
-      const lines=[caption.name.trim().slice(0,48),caption.dob.trim()?("DOB: "+caption.dob.trim().slice(0,24)):""].filter(Boolean);
+      const lines=[caption.name.trim().slice(0,48),caption.dob.trim()?("DOB: "+formatDobForPrint(caption.dob)):""].filter(Boolean);
       const fontMm=caption.fontSizePt*25.4/72;context.save();context.fillStyle=caption.color;
       context.font=`600 ${fontMm}px Arial, sans-serif`;context.textAlign="center";context.textBaseline="top";
       const lineHeight=Math.max(fontMm+.35,1.7);
@@ -183,7 +189,7 @@ export default function PhotoStudio({
   const captionFontMm=captionFontSizePt*25.4/72;
   const captionHeightMm=hasCaption?Math.max(7,captionFontMm*2+1.2):0;
   const layout=useMemo(()=>getPhotoSheetLayout(size,captionHeightMm),[size,captionHeightMm]);
-  const maxCopies=Math.min(100,layout.perSheet*20);
+  const maxCopies=Math.min(100,layout.perSheet);
   const copies = Math.max(1, Math.min(maxCopies, Number(copiesInput) || 1));
   const sheetCount = Math.ceil(copies / layout.perSheet);
   const previewCapacity = layout.perSheet;
@@ -191,6 +197,26 @@ export default function PhotoStudio({
   useEffect(() => {
     if (availableSizes.length && !availableSizes.some(item => item.id === sizeId)) setSizeId(availableSizes[0].id);
   }, [availableSizes, sizeId]);
+
+  useEffect(()=>{
+    if(!isDesktopApp())return;
+    void setDesktopContentProtection(true);
+    return ()=>{void setDesktopContentProtection(false);};
+  },[]);
+
+  useEffect(()=>{
+    const protectContextMenu=(event:globalThis.MouseEvent)=>event.preventDefault();
+    const protectShortcuts=(event:KeyboardEvent)=>{
+      const key=event.key.toLowerCase();
+      if(key==="printscreen"||((event.ctrlKey||event.metaKey)&&["s","p"].includes(key)))event.preventDefault();
+    };
+    document.addEventListener("contextmenu",protectContextMenu,true);
+    window.addEventListener("keydown",protectShortcuts,true);
+    return ()=>{
+      document.removeEventListener("contextmenu",protectContextMenu,true);
+      window.removeEventListener("keydown",protectShortcuts,true);
+    };
+  },[]);
 
   useEffect(() => {
     const url = URL.createObjectURL(source);
@@ -312,7 +338,7 @@ export default function PhotoStudio({
 
         <aside className={styles.toolPanel}>
           <div className={styles.panelHeading}>
-            <div><strong>{cropPanel?"Crop & position":lookPanel?"Photo look":textPanel?"Name & date text":backgroundPanel?"Photo background":"Photo sheet"}</strong><small>{cropPanel?"Frame the photo without changing facial features.":lookPanel?"Use subtle, print-friendly adjustments.":textPanel?"Add a name and date of birth below each photo without changing the photo's size.":backgroundPanel?"Sample a flat background from the photo and replace only the edge-connected area.":"Choose the photo size and how many copies you need."}</small></div>
+            <div><strong>{cropPanel?"Crop & position":lookPanel?"Photo look":textPanel?"Caption styling":backgroundPanel?"Photo background":"Photo sheet & form details"}</strong><small>{cropPanel?"Frame the photo without changing facial features.":lookPanel?"Use subtle, print-friendly adjustments.":textPanel?"Set how the form details appear under each photo.":backgroundPanel?"Sample a flat background from the photo and replace only the edge-connected area.":"Set the ID photo size, form details and print quantity."}</small></div>
           </div>
 
           {cropPanel && <>
@@ -334,12 +360,9 @@ export default function PhotoStudio({
           </>}
 
           {textPanel && <>
-            <label className={styles.fieldLabel}>Name (optional)<input type="text" maxLength={48} value={photoName} onChange={event=>setPhotoName(event.target.value)} placeholder="Enter name"/></label>
-            <label className={styles.fieldLabel}>Date of birth (optional)<input type="text" maxLength={24} value={dateOfBirth} onChange={event=>setDateOfBirth(event.target.value)} placeholder="DD/MM/YYYY"/></label>
             <label className={styles.fieldLabel}>Caption font size<select value={captionFontSizePt} onChange={event=>setCaptionFontSizePt(Number(event.target.value))}><option value={5}>5 pt · Compact</option><option value={6}>6 pt · Standard</option><option value={7}>7 pt · Large</option></select></label>
             <label className={styles.fieldLabel}>Caption colour<input type="color" value={captionColor} onChange={event=>setCaptionColor(event.target.value)}/></label>
-            <div className={styles.editorHelp}>The name and DOB print below each photo in a separate caption area. The selected physical photo dimensions remain exact.</div>
-            <button type="button" className={styles.secondaryButton} onClick={()=>{setPhotoName("");setDateOfBirth("");setCaptionFontSizePt(6);setCaptionColor("#202020");}}>Clear text</button>
+            <div className={styles.editorHelp}>These settings style the name and DOB printed below each photo. The photo dimensions stay unchanged.</div>
           </>}
 
           {backgroundPanel && <>
@@ -353,6 +376,13 @@ export default function PhotoStudio({
           </>}
 
           {activeTool === "sheet" && <>
+            <label className={styles.fieldLabel}>Name for form (optional)
+              <input type="text" maxLength={48} value={photoName} onChange={event=>setPhotoName(event.target.value)} placeholder="Enter the name to print below each photo"/>
+            </label>
+            <label className={styles.fieldLabel}>Date of birth (optional)
+              <input type="date" min="1900-01-01" max={new Date().toISOString().slice(0,10)} value={dateOfBirth} onChange={event=>setDateOfBirth(event.target.value)}/>
+            </label>
+            <div className={styles.editorHelp}>Name and DOB are printed directly below every ID photo for pasting into forms. Leave either field blank when it is not required.</div>
             <label className={styles.fieldLabel}>Photo size
               <select value={sizeId} onChange={event => setSizeId(event.target.value)}>
                 {availableSizes.map(item => <option key={item.id} value={item.id}>{item.label} · {item.detail} · {formatPhotoRate(photoPrices[item.id])}/photo</option>)}
@@ -385,8 +415,8 @@ export default function PhotoStudio({
           </div>
           <div className={styles.canvasViewport}>
             {pickingBackground&&<div className={styles.pickInstruction}>Click a flat background area in the photo to sample its colour.</div>}
-            <div className={styles.sheetFrame}>
-              {image ? <canvas ref={canvasRef} width={420} height={594} onClick={handleBackgroundPick} style={{cursor:pickingBackground?"crosshair":"default"}} className={styles.previewCanvas} role="img" aria-label={"A4 photo sheet preview with " + Math.min(copies, previewCapacity) + " photos"}/> : <div className={styles.loadingState}>{imageError || "Preparing your photo…"}</div>}
+            <div className={styles.sheetFrame} onContextMenu={event=>event.preventDefault()} onDragStart={event=>event.preventDefault()}>
+              {image ? <canvas ref={canvasRef} width={420} height={594} onClick={handleBackgroundPick} style={{cursor:pickingBackground?"crosshair":"default"}} className={styles.previewCanvas} draggable={false} role="img" aria-label={"A4 photo sheet preview with " + Math.min(copies, previewCapacity) + " photos"}/> : <div className={styles.loadingState}>{imageError || "Preparing your photo…"}</div>}
             </div>
           </div>
           <div className={styles.canvasFooter}>
@@ -398,11 +428,11 @@ export default function PhotoStudio({
       </div>
 
       <footer className={styles.footer}>
-        <div className={styles.footerHint}><Check size={14}/> Original photo remains unchanged until you replace it with the prepared sheets.</div>
+        <div className={styles.footerHint}><Check size={14}/> This protected preview stays in the shop workflow. The prepared sheet is uploaded for printing here; it is not offered as a customer download.</div>
         <div className={styles.footerActions}>
           <button type="button" className={styles.cancelButton} onClick={onCancel} disabled={busy}>Cancel</button>
           <button type="button" className={styles.applyButton} onClick={() => void createPrintSheets()} disabled={!image || busy || !!imageError || availableSizes.length === 0 || !Number.isInteger(Number(copiesInput)) || Number(copiesInput) < 1 || Number(copiesInput) > maxCopies}>
-            {busy ? "Preparing one PDF…" : "Create one photo PDF"} <ChevronDown size={15}/>
+            {busy ? "Preparing shop print sheet…" : "Use photo for shop printing"} <ChevronDown size={15}/>
           </button>
         </div>
       </footer>
