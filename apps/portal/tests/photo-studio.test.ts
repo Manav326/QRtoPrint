@@ -38,7 +38,7 @@ test("multiple prepared A4 pages become one multi-page PDF",()=>{
  assert.ok(value.slice(xrefOffset).startsWith("xref\n"));
  for(const match of value.slice(xrefOffset).matchAll(/(\d{10}) 00000 n/g)){
   const offset=Number(match[1]);
-  assert.match(value.slice(offset,offset+6),/^\d+ 0 obj/);
+  assert.match(value.slice(offset,offset+7),/^\d+ 0 obj/);
  }
 });
 test("photo PDF generation rejects empty or incomplete JPEG pages",()=>{

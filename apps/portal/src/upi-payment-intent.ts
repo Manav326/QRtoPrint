@@ -17,7 +17,7 @@ export function buildCustomerUpiIntent(input:CustomerUpiIntentInput):string|null
  const upiId=input.upiId?.trim();
  if(!upiId||!Number.isSafeInteger(input.amountMinor)||input.amountMinor<=0||
     input.currency.trim().toUpperCase()!=="INR")return null;
- const reference=(input.transactionReference??"").replace(/[^a-zA-Z0-9_-]/g,"").slice(0,35);
+ const reference=(input.transactionReference??"").replace(/-/g,"").replace(/[^a-zA-Z0-9_]/g,"").slice(0,35);
  if(!reference)return null;
  const query=new URLSearchParams();
  query.set("pa",upiId);
