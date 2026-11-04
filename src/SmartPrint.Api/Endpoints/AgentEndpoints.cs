@@ -22,7 +22,8 @@ public static class AgentEndpoints
         this RouteGroupBuilder agentApi,
         string signingKeyText,
         string issuer,
-        string audience)
+        string audience,
+        string[] corsOrigins)
     {
         agentApi.MapPost("/enroll", async (
             AgentEnrollmentRequest request,
@@ -140,7 +141,7 @@ public static class AgentEndpoints
             }
         
             await using var transaction = await db.Database.BeginTransactionAsync(ct);
-            var claimAccess = await GetAgentClaimAccessAsync(device.TenantId, db, ct);
+            var claimAccess = await AgentClaimAccess.GetAgentClaimAccessAsync(device.TenantId, db, ct);
             if (!claimAccess.Allowed)
             {
                 await transaction.RollbackAsync(ct);
@@ -915,7 +916,7 @@ public static class AgentEndpoints
             var onlineAfter = now.AddMinutes(-2);
             var claimed = new List<object>();
             await using var tx = await db.Database.BeginTransactionAsync(ct);
-            var claimAccess = await GetAgentClaimAccessAsync(device.TenantId, db, ct);
+            var claimAccess = await AgentClaimAccess.GetAgentClaimAccessAsync(device.TenantId, db, ct);
             if (!claimAccess.Allowed)
             {
                 await tx.RollbackAsync(ct);
@@ -1450,7 +1451,6 @@ public static class AgentEndpoints
         });
         
         
-        shop.MapShopPaymentEndpoints();
 
         return agentApi;
     }

@@ -218,7 +218,7 @@ var agentApi = app.MapGroup("/api/v1/agent").AllowAnonymous()
     .RequireRateLimiting("agent-api")
     .AddEndpointFilter((context, next) => EnforceTenantActiveAsync(context, next, allowSubscriptionRead: false));
 
-agentApi.MapAgentEndpoints(signingKeyText, issuer, audience);
+agentApi.MapAgentEndpoints(signingKeyText, issuer, audience, corsOrigins);
 
 var publicApi = app.MapGroup("/api/v1/public").AllowAnonymous()
     .RequireRateLimiting("public-api")
@@ -228,6 +228,15 @@ publicApi.MapPublicJobEndpoints();
 publicApi.MapPublicUploadEndpoints();
 publicApi.MapPublicPaymentEndpoints();
 publicApi.MapPublicSessionEndpoints();
+
+static string GetRateLimitPartitionKey(HttpContext context) =>
+    context.Connection.RemoteIpAddress?.ToString() ?? "unknown";
+
+static string GetSessionRateLimitPartitionKey(HttpContext context) =>
+    GetRateLimitPartitionKey(context);
+
+static string GetAgentRateLimitPartitionKey(HttpContext context) =>
+    GetRateLimitPartitionKey(context);
 
 static bool IsTenantRecoveryOperation(
     HttpContext context,
