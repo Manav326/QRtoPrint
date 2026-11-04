@@ -243,7 +243,7 @@ public static partial class PublicUploadEndpoints
                 if (!subscription.IsAccessActive)
                     return await RejectAndCleanAsync(Results.Problem(statusCode: StatusCodes.Status403Forbidden,
                         title: "This shop's trial or subscription period is no longer active."));
-                var recoveryAgentAvailable = await GetLocalAgentInfoAsync(
+                var recoveryAgentAvailable = await AgentEndpointInfo.GetLocalAgentInfoAsync(
                     db, ticket.TenantId, ticket.PrinterDeviceId, commitNow, ct) is not null;
                 if (!subscription.CloudAssistedPrintingEnabled && recoveryAgentAvailable)
                     return await RejectAndCleanAsync(Results.Problem(statusCode: StatusCodes.Status403Forbidden,

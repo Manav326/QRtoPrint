@@ -208,7 +208,7 @@ public static partial class PublicJobEndpoints
                 .Where(station => station.Id == session.QrStationId && station.TenantId == session.TenantId)
                 .Select(station => station.PrinterDeviceId)
                 .SingleOrDefaultAsync(ct);
-            var localAgentAvailable = await GetLocalAgentInfoAsync(
+            var localAgentAvailable = await AgentEndpointInfo.GetLocalAgentInfoAsync(
                 db, session.TenantId, stationDefaultPrinterId, now, ct) is not null;
             if (!subscription.CloudAssistedPrintingEnabled && localAgentAvailable)
             {

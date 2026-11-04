@@ -215,7 +215,7 @@ public static partial class PublicUploadEndpoints
                         ).SingleOrDefaultAsync(ct);
 
                         if (currentAgentEndpoints is not null &&
-                            AgentLocalEndpointRules.Normalize(ReadLocalAgentEndpoints(currentAgentEndpoints)).Count > 0)
+                            AgentLocalEndpointRules.Normalize(AgentLocalEndpointRules.ReadJson(currentAgentEndpoints)).Count > 0)
                         {
                             lockedTicket.ExpiresUtc = renewalNow.AddMinutes(15);
                             lockedTicket.ClaimedUtc = null;
