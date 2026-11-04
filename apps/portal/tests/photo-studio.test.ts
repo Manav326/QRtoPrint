@@ -58,3 +58,53 @@ test("name and DOB are opt-in and are absent from the default photo sheet",()=>{
  assert.match(studio,/\{includeFormDetails&&<>[\s\S]*?Name for form[\s\S]*?Date of birth/);
  assert.match(studio,/if\(!enabled\)\{setPhotoName\(""\);setDateOfBirth\(""\);\}/);
 });
+
+
+test("customer Photo Studio cannot turn an already uploaded original into a second print job",()=>{
+ const app=readFileSync(new URL("../src/App.tsx",import.meta.url),"utf8");
+ assert.match(app,/if\(uploadedFileFingerprints\.includes\(fingerprint\)\)/);
+ assert.match(app,/const photoAlreadyUploaded=Boolean\(file&&uploadedFileFingerprints\.includes\(customerFileFingerprint\(file\)\)\)/);
+ assert.match(app,/disabled=\{busy\|\|batchLockedForPayment\|\|photoAlreadyUploaded\}/);
+ assert.match(app,/This photo is already with the shop[\s\S]*?without creating another print job/);
+});
+
+test("customer photo preparation depends on configured shop pricing, not the current printer capability",()=>{
+ const app=readFileSync(new URL("../src/App.tsx",import.meta.url),"utf8");
+ assert.doesNotMatch(app,/photoStudioReady|isPhotoStudioPrinterReady/);
+ assert.match(app,/if\(!photoRatesAvailable\)/);
+ assert.match(app,/photoPricing=\{result\.photoPricing\}/);
+});
+
+test("the shared Photo Studio explains different save actions for customers and shop owners",()=>{
+ const studio=readFileSync(new URL("../src/PhotoStudio.tsx",import.meta.url),"utf8");
+ const app=readFileSync(new URL("../src/App.tsx",import.meta.url),"utf8");
+ assert.match(studio,/mode = "customer"/);
+ assert.match(studio,/mode === "shop"/);
+ assert.match(studio,/Prepare A4 sheet/);
+ assert.match(studio,/Save sheet to this job/);
+ assert.match(app,/PhotoStudio source=\{photoStudioSource\} mode="customer"/);
+ assert.match(app,/PhotoStudio source=\{shopPhotoStudio\.source\} mode="shop"/);
+});
+
+test("shop owners can inspect the actual prepared photo PDF before approving the job",()=>{
+ const app=readFileSync(new URL("../src/App.tsx",import.meta.url),"utf8");
+ assert.match(app,/isPdf&&job\.printKind==="PHOTO"\?<><iframe src=\{url\} title=\{name\}\/</);
+ assert.match(app,/SMARTPRINT · SHOP PRINT ONLY · PRIVATE PREVIEW/);
+});
+
+test("Photo Studio locks background scroll and supports accessible keyboard dismissal",()=>{
+ const studio=readFileSync(new URL("../src/PhotoStudio.tsx",import.meta.url),"utf8");
+ const css=readFileSync(new URL("../src/PhotoStudio.module.css",import.meta.url),"utf8");
+ assert.match(studio,/aria-labelledby="photo-studio-title"/);
+ assert.match(studio,/document\.body\.style\.overflow = "hidden"/);
+ assert.match(studio,/event\.key === "Escape"/);
+ assert.match(studio,/event\.key !== "Tab"/);
+ assert.match(studio,/disabled=\{busy\} aria-label="Close Photo Studio"/);
+ assert.match(css,/@media\(max-width:390px\)[\s\S]*?topbarMeta span:last-child\{display:none\}/);
+});
+
+test("a successful shop photo save is not misreported as failed when refreshing the queue fails",()=>{
+ const app=readFileSync(new URL("../src/App.tsx",import.meta.url),"utf8");
+ assert.match(app,/The enhanced A4 sheet is saved to the same print job/);
+ assert.match(app,/The A4 sheet was saved to the existing print job, but the queue could not refresh/);
+});
