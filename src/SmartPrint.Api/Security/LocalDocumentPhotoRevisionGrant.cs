@@ -5,7 +5,11 @@ using Microsoft.IdentityModel.Tokens;
 
 namespace SmartPrint.Api.Security;
 
-public sealed record LocalDocumentPhotoRevisionGrantClaims(Guid TenantId, Guid JobId, Guid AgentDeviceId, Guid? ActorUserId);
+public sealed record LocalDocumentPhotoRevisionGrantClaims(
+    Guid TenantId,
+    Guid JobId,
+    Guid AgentDeviceId,
+    Guid? ActorUserId);
 
 public static class LocalDocumentPhotoRevisionGrant
 {
@@ -62,21 +66,6 @@ public static class LocalDocumentPhotoRevisionGrant
     }
 
     public static bool TryValidate(
-        };
-        var signingCredentials = new SigningCredentials(
-            new SymmetricSecurityKey(Encoding.UTF8.GetBytes(signingKeyText)),
-            SecurityAlgorithms.HmacSha256);
-        var token = new JwtSecurityToken(
-            issuer,
-            audience,
-            claims,
-            now.AddSeconds(-5).UtcDateTime,
-            expiresUtc.UtcDateTime,
-            signingCredentials);
-        return new JwtSecurityTokenHandler().WriteToken(token);
-    }
-
-    public static bool TryValidate(
         string? token,
         string signingKeyText,
         string issuer,
@@ -84,7 +73,7 @@ public static class LocalDocumentPhotoRevisionGrant
         DateTimeOffset now,
         out LocalDocumentPhotoRevisionGrantClaims grant)
     {
-        grant = new LocalDocumentPhotoRevisionGrantClaims(Guid.Empty, Guid.Empty, Guid.Empty);
+        grant = new LocalDocumentPhotoRevisionGrantClaims(Guid.Empty, Guid.Empty, Guid.Empty, null);
         if (string.IsNullOrWhiteSpace(token) || token.Length > 4096 ||
             Encoding.UTF8.GetByteCount(signingKeyText) < 32)
             return false;
