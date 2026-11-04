@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import test from "node:test";
 
 const read = (path: string) => readFileSync(new URL(path, import.meta.url), "utf8");
+const readApi = (name: string) => read(`../../../src/SmartPrint.Api/Endpoints/${name}`);
 
 test("customer upload sends the selected file settings to both storage paths", () => {
   const api = read("../src/api.ts");
@@ -27,15 +28,16 @@ test("owner quote edits are sent through the existing print-job API", () => {
 });
 
 test("paid jobs are staged while a physical printer is offline and checked at dispatch", () => {
-  const program = read("../../../src/SmartPrint.Api/Program.cs");
-  const claimStart = program.indexOf('agentApi.MapPost("/jobs/claim"');
-  const claimEnd = program.indexOf('agentApi.MapGet("/jobs/{jobId:guid}/document"', claimStart);
-  const dispatchStart = program.indexOf('shop.MapPost("/print-jobs/{jobId:guid}/dispatch"');
-  const dispatchEnd = program.indexOf('shop.MapPost("/print-jobs/{jobId:guid}/retry-pdf-export"', dispatchStart);
+  const claimSource = readApi("AgentJobEndpoints.cs");
+  const dispatchSource = readApi("ShopPrintJobDispatchEndpoints.cs");
+  const claimStart = claimSource.indexOf('agentApi.MapPost("/jobs/claim"');
+  const claimEnd = claimSource.indexOf('agentApi.MapGet("/jobs/{jobId:guid}/document"', claimStart);
+  const dispatchStart = dispatchSource.indexOf('shop.MapPost("/print-jobs/{jobId:guid}/dispatch"');
+  const dispatchEnd = dispatchSource.indexOf('shop.MapPost("/print-jobs/{jobId:guid}/retry-pdf-export"', dispatchStart);
   assert.ok(claimStart >= 0 && claimEnd > claimStart);
   assert.ok(dispatchStart >= 0 && dispatchEnd > dispatchStart);
-  const claimRoute = program.slice(claimStart, claimEnd);
-  const dispatchRoute = program.slice(dispatchStart, dispatchEnd);
+  const claimRoute = claimSource.slice(claimStart, claimEnd);
+  const dispatchRoute = dispatchSource.slice(dispatchStart, dispatchEnd);
   assert.match(claimRoute, /printer\.IsActive/);
   assert.match(claimRoute, /printer\.QueueName != null/);
   assert.doesNotMatch(claimRoute, /printer\.Status == "Ready"/);
@@ -47,16 +49,15 @@ test("paid jobs are staged while a physical printer is offline and checked at di
 test("plan-limited HTTPS fallback is only offered when the Agent is unavailable", () => {
   const app = read("../src/App.tsx");
   const api = read("../src/api.ts");
-  const program = read("../../../src/SmartPrint.Api/Program.cs");
+  const publicUploadSource = readApi("PublicJobCreationEndpoints.cs");
   assert.match(app, /secureQueueFallbackEnabled = cloudAssistedPrintingEnabled \|\| !localAgent\?\.endpoints\.length \|\| localFallbackSuggested/);
   const directUploadStart = api.indexOf("export async function uploadCustomerDocument(");
   const directUploadEnd = api.indexOf("type CustomerLocalAgentApi", directUploadStart);
   const directUpload = api.slice(directUploadStart, directUploadEnd);
   assert.doesNotMatch(directUpload, /X-Print-Queue-Fallback/);
-  const publicUploadStart = program.indexOf('publicApi.MapPost("/sessions/current/jobs"');
-  const publicUploadEnd = program.indexOf('publicApi.MapPost("/sessions/current/local-upload-tickets"', publicUploadStart);
-  assert.ok(publicUploadStart >= 0 && publicUploadEnd > publicUploadStart);
-  const publicUpload = program.slice(publicUploadStart, publicUploadEnd);
+  const publicUploadStart = publicUploadSource.indexOf('publicApi.MapPost("/sessions/current/jobs"');
+  assert.ok(publicUploadStart >= 0);
+  const publicUpload = publicUploadSource.slice(publicUploadStart);
   assert.match(publicUpload, /!subscription\.CloudAssistedPrintingEnabled && localAgentAvailable/);
   assert.doesNotMatch(publicUpload, /queueFallbackRequested/);
   assert.doesNotMatch(program, /X-Print-Queue-Fallback|queueFallbackRequested/);
@@ -77,15 +78,15 @@ test("pre-submission printer capability blocks are explained in the shop queue",
 });
 
 test("a pre-output capability block clears the attempted spooler name so the existing job can be reassigned", () => {
-  const program = read("../../../src/SmartPrint.Api/Program.cs");
-  const blockedStart = program.indexOf('agentApi.MapPost("/jobs/{jobId:guid}/print-blocked"');
-  const blockedEnd = program.indexOf('agentApi.MapPost("/jobs/{jobId:guid}/output-unconfirmed"', blockedStart);
-  const assignmentStart = program.indexOf('shop.MapPatch("/print-jobs/{jobId:guid}/printer"');
-  const assignmentEnd = program.indexOf('shop.MapPatch("/print-jobs/{jobId:guid}/settings"', assignmentStart);
+  const blockedSource = readApi("AgentSpoolerLifecycleEndpoints.cs");
+  const assignmentSource = readApi("ShopPrintJobAssignmentEndpoints.cs");
+  const blockedStart = blockedSource.indexOf('agentApi.MapPost("/jobs/{jobId:guid}/print-blocked"');
+  const blockedEnd = blockedSource.indexOf('agentApi.MapPost("/jobs/{jobId:guid}/output-unconfirmed"', blockedStart);
+  const assignmentStart = assignmentSource.indexOf('shop.MapPatch("/print-jobs/{jobId:guid}/printer"');
   assert.ok(blockedStart >= 0 && blockedEnd > blockedStart);
-  assert.ok(assignmentStart >= 0 && assignmentEnd > assignmentStart);
-  const blocked = program.slice(blockedStart, blockedEnd);
-  const assignment = program.slice(assignmentStart, assignmentEnd);
+  assert.ok(assignmentStart >= 0);
+  const blocked = blockedSource.slice(blockedStart, blockedEnd);
+  const assignment = assignmentSource.slice(assignmentStart);
   assert.match(blocked, /job\.Status = "LOCAL_QUEUE_READY"/);
   assert.match(blocked, /job\.SpoolerJobName = null/);
   assert.match(blocked, /job\.SpoolerJobId = null/);
@@ -96,19 +97,18 @@ test("a pre-output capability block clears the attempted spooler name so the exi
 });
 
 test("reassigning a blocked queued job clears the previous printer failure", () => {
-  const program = read("../../../src/SmartPrint.Api/Program.cs");
-  const resetStart = program.indexOf("if (needsQueueReset)");
-  const failureReset = program.indexOf("batchJob.FailureCode = null;", resetStart);
-  const spoolerReset = program.indexOf("batchJob.SpoolerStatus = null;", resetStart);
+  const assignment = readApi("ShopPrintJobAssignmentEndpoints.cs");
+  const resetStart = assignment.indexOf("if (needsQueueReset)");
+  const failureReset = assignment.indexOf("batchJob.FailureCode = null;", resetStart);
+  const spoolerReset = assignment.indexOf("batchJob.SpoolerStatus = null;", resetStart);
   assert.ok(resetStart >= 0 && failureReset > resetStart && spoolerReset > failureReset);
 });
 
 test("cloud upload retries must match the original file, batch and selected print settings", () => {
-  const program = read("../../../src/SmartPrint.Api/Program.cs");
-  const routeStart = program.indexOf('publicApi.MapPost("/sessions/current/jobs"');
-  const routeEnd = program.indexOf('publicApi.MapPost("/sessions/current/local-upload-tickets"', routeStart);
-  assert.ok(routeStart >= 0 && routeEnd > routeStart);
-  const route = program.slice(routeStart, routeEnd);
+  const source = readApi("PublicJobCreationEndpoints.cs");
+  const routeStart = source.indexOf('publicApi.MapPost("/sessions/current/jobs"');
+  assert.ok(routeStart >= 0);
+  const route = source.slice(routeStart);
   const formRead = route.indexOf("await context.Request.ReadFormAsync(ct)");
   const existingLookup = route.indexOf("var existing = await db.PrintJobs.AsNoTracking()");
   const batchPaymentGate = route.indexOf("var batchCheckoutLocked =");
@@ -123,11 +123,10 @@ test("cloud upload retries must match the original file, batch and selected prin
 });
 
 test("HTTPS recovery returns the original saved print settings on new and duplicate responses", () => {
-  const program = read("../../../src/SmartPrint.Api/Program.cs");
-  const recoveryStart = program.indexOf('publicApi.MapPost("/sessions/current/local-upload-tickets/{ticketId:guid}/cloud-recovery"');
-  const recoveryEnd = program.indexOf('publicApi.MapPost("/jobs/{jobId:guid}/quote"', recoveryStart);
-  assert.ok(recoveryStart >= 0 && recoveryEnd > recoveryStart);
-  const recovery = program.slice(recoveryStart, recoveryEnd);
+  const source = readApi("PublicCloudRecoveryEndpoints.cs");
+  const recoveryStart = source.indexOf('publicApi.MapPost("/sessions/current/local-upload-tickets/{ticketId:guid}/cloud-recovery"');
+  assert.ok(recoveryStart >= 0);
+  const recovery = source.slice(recoveryStart);
   for (const entity of ["preflightJob", "existingJob", "job"]) {
     for (const property of ["ColourMode", "PaperSize", "IsDuplex", "Orientation", "PricingVersion"])
       assert.ok(recovery.includes(`${entity}.${property}`), `Recovery must return ${entity}.${property}.`);
@@ -135,12 +134,12 @@ test("HTTPS recovery returns the original saved print settings on new and duplic
 });
 
 test("local Agent completion creates the job with the customer's ticket settings", () => {
-  const program = read("../../../src/SmartPrint.Api/Program.cs");
-  const completeStart = program.indexOf('agentApi.MapPost("/local-uploads/{ticketId:guid}/complete"');
-  const jobStart = program.indexOf("var job = new PrintJob", completeStart);
-  const documentStart = program.indexOf("var printDocument = new PrintDocument", jobStart);
+  const source = readApi("AgentLocalUploadEndpoints.cs");
+  const completeStart = source.indexOf('agentApi.MapPost("/local-uploads/{ticketId:guid}/complete"');
+  const jobStart = source.indexOf("var job = new PrintJob", completeStart);
+  const documentStart = source.indexOf("var printDocument = new PrintDocument", jobStart);
   assert.ok(completeStart >= 0 && jobStart > completeStart && documentStart > jobStart);
-  const localJob = program.slice(jobStart, documentStart);
+  const localJob = source.slice(jobStart, documentStart);
   assert.match(localJob, /Copies = ticket\.Copies/);
   assert.match(localJob, /ColourMode = ticket\.ColourMode/);
   assert.match(localJob, /PaperSize = ticket\.PaperSize/);
@@ -149,14 +148,13 @@ test("local Agent completion creates the job with the customer's ticket settings
 });
 
 test("local upload ticket retries preserve batch identity and renew the same expired reservation", () => {
-  const program = read("../../../src/SmartPrint.Api/Program.cs");
+  const source = readApi("PublicUploadTicketEndpoints.cs");
   const api = read("../src/api.ts");
   const app = read("../src/App.tsx");
   const entitlements = read("../../../src/SmartPrint.Api/Services/TenantEntitlementService.cs");
-  const ticketStart = program.indexOf('publicApi.MapPost("/sessions/current/local-upload-tickets"');
-  const ticketEnd = program.indexOf('publicApi.MapPost("/sessions/current/local-upload-tickets/{ticketId:guid}/cloud-recovery"', ticketStart);
-  assert.ok(ticketStart >= 0 && ticketEnd > ticketStart);
-  const ticketRoute = program.slice(ticketStart, ticketEnd);
+  const ticketStart = source.indexOf('publicApi.MapPost("/sessions/current/local-upload-tickets"');
+  assert.ok(ticketStart >= 0);
+  const ticketRoute = source.slice(ticketStart);
   assert.match(ticketRoute, /request\.BatchId is Guid requestedBatchId && existing\.BatchId != requestedBatchId/);
   assert.match(ticketRoute, /requestedBatchName is not null && existing\.BatchName != requestedBatchName/);
   assert.match(ticketRoute, /request\.BatchId is null \|\| racedTicket\.BatchId == request\.BatchId\.Value/);
