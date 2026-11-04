@@ -3499,7 +3499,7 @@ function consumeSmartPrintNativePickerGroups():string[]|undefined {
   return Array.isArray(groups)?groups:undefined;
 }
 type CustomerSavedPrintSettings = CustomerPrintRequestSettings & { advancedEnabled?: boolean };
-type CustomerPhotoSettings = { sizeCode: string; photoCount: number; photosPerPage: number };
+type CustomerPhotoSettings = { sizeCode: string; photoCount: number; photosPerPage?: number };
 function customerPhotoSizeLabel(sizeCode?:string|null):string {
   switch(sizeCode){
     case "35x45": return "35 × 45 mm";
@@ -4082,7 +4082,7 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
             isDuplex:photoSettings?false:settings.isDuplex,
             copies:photoSettings?1:settings.copies,
             orientation:photoSettings?"AUTO":settings.orientation,
-            ...(photoSettings?{printKind:"PHOTO" as const,photoSizeCode:photoSettings.sizeCode,photoCount:photoSettings.photoCount,photosPerPage:photoSettings.photosPerPage}:{printKind:"DOCUMENT" as const})
+            ...(photoSettings?{printKind:"PHOTO" as const,photoSizeCode:photoSettings.sizeCode,photoCount:photoSettings.photoCount,photosPerPage:photoSettings.photosPerPage??photoSettings.photoCount}:{printKind:"DOCUMENT" as const})
           });
         } catch(exception) {
           failures.push(item.document.originalFileName);
