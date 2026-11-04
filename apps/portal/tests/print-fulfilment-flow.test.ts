@@ -162,6 +162,7 @@ test("local upload ticket retries preserve batch identity and renew the same exp
   assert.match(ticketRoute, /request\.BatchId is null \|\| racedTicket\.BatchId == request\.BatchId\.Value/);
   assert.match(ticketRoute, /requestedBatchName is null \|\| racedTicket\.BatchName == requestedBatchName/);
   assert.match(ticketRoute, /LocalUploadRecoveryRules\.CanRenewExpiredTicket/);
+  assert.match(ticketRoute, /existing = lockedTicket/);
   assert.match(ticketRoute, /FOR UPDATE/);
   assert.match(ticketRoute, /lockedTicket\.ExpiresUtc = renewalNow\.AddMinutes\(15\)/);
   assert.match(ticketRoute, /station\.PrinterDeviceId == lockedTicket\.PrinterDeviceId/);
