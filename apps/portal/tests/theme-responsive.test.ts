@@ -228,7 +228,7 @@ test("Android customer printing uses the same single Copies control and event ha
   assert.ok(customerFlowStart >= 0 && customerFlowEnd > customerFlowStart,
     "The shared CustomerPrintFlow component must remain present.");
   const customerFlow = app.slice(customerFlowStart, customerFlowEnd);
-  assert.ok(app.includes("<CustomerPrintFlow publicCode={publicCode}"));
+  assert.ok(app.includes("<CustomerPrintFlow dark={dark} publicCode={publicCode}"), "Customer print flow follows the saved appearance.");
   assert.ok(customerFlow.includes('navigator.userAgent.includes("SmartPrintAndroid/1")'));
   assert.equal((customerFlow.match(/customer-folder-copies/g) ?? []).length, 2,
     "There must be one folder-default Copies input and one per-file Custom override in the shared flow.");
