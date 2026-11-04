@@ -17,7 +17,13 @@ const NON_ACTIVE = new Set(["REJECTED","REFUNDED","CANCELLED"]);
 const VERIFIED = new Set(["VERIFIED","PARTIALLY_REFUNDED"]);
 
 function paymentFor(batchId: string | null, jobs: ShopPrintJob[], payments: ShopPayment[]): ShopPayment | null {
-  if (batchId) return payments.find(payment => payment.batchPaymentId === batchId) ?? null;
+  if (batchId) {
+    // A PrintBatchPayment has its own ID; it is not the customer upload BatchId.
+    // The shop payments endpoint exposes the grouped payment through one of
+    // its member PrintJob IDs, so link by the files in this journey.
+    const jobIds = new Set(jobs.map(job => job.id));
+    return payments.find(payment => !!payment.batchPaymentId && jobIds.has(payment.printJobId)) ?? null;
+  }
   const jobId = jobs[0]?.id;
   return jobId ? payments.find(payment => !payment.batchPaymentId && payment.printJobId === jobId) ?? null : null;
 }
