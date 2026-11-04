@@ -14,13 +14,15 @@ The qualification runner currently reports Windows Server 2025 x64. GitHub-hoste
 
 The version-controlled registry is `scripts/printer-qualification/printer-driver-manifest.json`.
 
+**Current gate result:** no vendor package is eligible for installation yet. Canon lists Server 2025 support but is blocked by its India license disclaimer. HP, Epson, Brother and Pantum P2503 currently lack reviewed Server 2025 support evidence; the Pantum universal package still needs an exact supported-OS declaration. The script stops before downloading a package when the vendor's listed OS does not match the runner.
+
 Initial entries:
 
-- HP Universal Print Driver PCL 6 (exact package/version pending).
+- HP Universal Print Driver PCL 6 (Windows Server 2025 support and exact package/version pending).
 - Canon Generic Plus UFR II 3.50 (blocked pending written commercial-use permission).
-- Epson Universal Print Driver 2.123.00 for the L3150 Series Windows 11 x64 support listing (87.53 MB; package extraction and license review pending).
-- Brother Universal Printer Driver 1.0.0.0 for the India DCP-J100 support page (20.37 MB; two-sided printing explicitly unsupported by this driver).
-- Pantum P2503 Windows Driver 1.0.5.
+- Epson Universal Print Driver 2.123.00 for the L3150 Series Windows 11 x64 support listing (87.53 MB; Server 2025 support, package extraction and license review pending).
+- Brother Universal Printer Driver 1.0.0.0 for the India DCP-J100 support page (20.37 MB; Server 2025 support pending; two-sided printing explicitly unsupported).
+- Pantum P2503 Windows Driver 1.0.5 (currently listed for Windows 11 x64 only; Server 2025 support pending).
 - Pantum Universal Printing Driver 1.0.6 (exact Windows OS target pending; not eligible for hosted installation yet).
 
 Official support pages are references, not permission to download or redistribute. No driver package is committed to this repository, cached in a public artifact, or published with SmartPrint releases.
