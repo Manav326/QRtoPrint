@@ -318,7 +318,7 @@ test("native customer UI follows explicit SmartPrint theme and marks selected up
 });
 
 
-test("customer print options remain selectable when printer capability is unknown", () => {
+test("customer print settings are preserved independently of printer capability reports", () => {
   const app = read("../src/App.tsx");
   const flowStart = app.indexOf("function CustomerPrintFlow(");
   const flowEnd = app.indexOf("function UploadIcon()", flowStart);
@@ -326,10 +326,40 @@ test("customer print options remain selectable when printer capability is unknow
     "The shared customer print flow must remain present.");
   const flow = app.slice(flowStart, flowEnd);
 
-  assert.ok(flow.includes("const supportsColour=!hasAssignedPrinter||printerCapabilities?.color!==false;"));
-  assert.ok(flow.includes("const supportsDuplex=!hasAssignedPrinter||printerCapabilities?.duplex!==false;"));
-  assert.ok(app.includes('color:typeof value.color==="boolean"?value.color:undefined'));
-  assert.ok(app.includes('duplex:typeof value.duplex==="boolean"?value.duplex:undefined'));
+  assert.ok(flow.includes("Customer requests are captured independently of current hardware reports."));
+  assert.ok(flow.includes("void printerCapabilitiesJson;"));
+  assert.doesNotMatch(flow, /disabled=\{!supportsColour\}|disabled=\{!supportsDuplex\}|a4NotConfirmed/);
   assert.ok(flow.includes('colourMode:photoSettings?"Colour":settings.colourMode'));
   assert.ok(flow.includes("isDuplex:photoSettings?false:settings.isDuplex"));
+  assert.ok(flow.includes('paperSize:photoSettings?"A4":settings.paperSize'));
+  assert.ok(flow.includes('orientation:photoSettings?"AUTO":settings.orientation'));
+});
+
+test("folder defaults inherit to files and advanced paper options are opt-in", () => {
+  const app = read("../src/App.tsx");
+  const flowStart = app.indexOf("function CustomerPrintFlow(");
+  const flowEnd = app.indexOf("function UploadIcon()", flowStart);
+  const flow = app.slice(flowStart, flowEnd);
+
+  assert.ok(flow.includes("advancedEnabled:false"));
+  assert.ok(flow.includes("const selected=own?.custom?{...defaults,...own}:defaults;"));
+  assert.ok(flow.includes("checked={defaults.advancedEnabled}"));
+  assert.ok(flow.includes("checked={own.advancedEnabled}"));
+  assert.ok(flow.includes("{defaults.advancedEnabled&&"));
+  assert.ok(flow.includes("{own.advancedEnabled&&"));
+  assert.ok(flow.includes('{defaults.colourMode==="Mono"'));
+  assert.ok(flow.includes('Copies · all files'));
+});
+
+test("offline requests use the existing secure queue and owner changes require customer approval", () => {
+  const app = read("../src/App.tsx");
+  const api = read("../src/api.ts");
+  const server = read("../../../src/SmartPrint.Api/Program.cs");
+
+  assert.ok(app.includes("secureQueueFallbackEnabled"));
+  assert.ok(api.includes('"X-Print-Queue-Fallback": "true"'));
+  assert.ok(server.includes('context.Request.Headers["X-Print-Queue-Fallback"]'));
+  assert.ok(server.includes('shop.MapPatch("/print-jobs/{jobId:guid}/settings"'));
+  assert.ok(server.includes('job.Status = "AWAITING_CUSTOMER_APPROVAL";'));
+  assert.ok(app.includes("onUpdateSettings={updatePrintJobSettings}"));
 });

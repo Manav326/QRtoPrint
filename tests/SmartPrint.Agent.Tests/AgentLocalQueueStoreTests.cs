@@ -55,12 +55,16 @@ public sealed class AgentLocalQueueStoreTests
                 StorageMode = "LOCAL_AGENT",
                 Copies = 1,
                 ColourMode = "Mono",
-                IsDuplex = false
+                PaperSize = "A3",
+                IsDuplex = false,
+                Orientation = "LANDSCAPE"
             };
 
             var staged = await store.EnqueueLocalUploadAsync(upload, bytes, CancellationToken.None);
 
             Assert.Equal("LOCAL_UPLOAD_STAGED", staged.State);
+            Assert.Equal("A3", staged.PaperSize);
+            Assert.Equal("LANDSCAPE", staged.Orientation);
             Assert.Empty(store.GetAcknowledgedJobs());
             Assert.Empty(store.GetPendingAcknowledgements());
             Assert.True(bytes.AsSpan().SequenceEqual(store.ReadDocument(upload.Id)));
@@ -70,7 +74,9 @@ public sealed class AgentLocalQueueStoreTests
                 Status = "LOCAL_QUEUE_CLAIMED",
                 Copies = 3,
                 ColourMode = "Colour",
+                PaperSize = "A5",
                 IsDuplex = true,
+                Orientation = "PORTRAIT",
                 QuotedAmountMinor = 900,
                 LeaseExpiresUtc = DateTimeOffset.UtcNow.AddMinutes(3)
             };
@@ -81,6 +87,8 @@ public sealed class AgentLocalQueueStoreTests
             Assert.Single(store.GetPendingAcknowledgements());
             Assert.Equal(3, refreshed.Copies);
             Assert.Equal("Colour", refreshed.ColourMode);
+            Assert.Equal("A5", refreshed.PaperSize);
+            Assert.Equal("PORTRAIT", refreshed.Orientation);
             Assert.True(refreshed.IsDuplex);
             Assert.Equal(900, refreshed.QuotedAmountMinor);
             Assert.Empty(store.GetAcknowledgedJobs());

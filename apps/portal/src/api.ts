@@ -909,6 +909,7 @@ export interface ShopPrintJob {
   paperSize: string;
   isDuplex: boolean;
   orientation?: string;
+  pricingVersion?: number;
   printKind?: string;
   photoSizeCode?: string | null;
   photoCount?: number;
@@ -950,7 +951,28 @@ export interface ShopPrintJob {
 }
 
 export interface UploadedPrintJob {
-  job: { id: string; jobNumber: string; status: string; pageCount: number; copies: number; currency: string; quotedAmountMinor: number; createdUtc: string; batchGroupName?: string | null; batchName?: string | null; batchId?: string | null; printKind?: string; photoSizeCode?: string | null; photoCount?: number; photoUnitPriceMinorSnapshot?: number };
+  job: {
+    id: string;
+    jobNumber: string;
+    status: string;
+    pageCount: number;
+    copies: number;
+    colourMode?: string;
+    paperSize?: string;
+    isDuplex?: boolean;
+    orientation?: string;
+    pricingVersion?: number;
+    currency: string;
+    quotedAmountMinor: number;
+    createdUtc: string;
+    batchGroupName?: string | null;
+    batchName?: string | null;
+    batchId?: string | null;
+    printKind?: string;
+    photoSizeCode?: string | null;
+    photoCount?: number;
+    photoUnitPriceMinorSnapshot?: number;
+  };
   document: { id: string; originalFileName: string; mediaType: string; sizeBytes: number; sha256: string; pageSizesJson: string };
   duplicateRequest: boolean;
 }
