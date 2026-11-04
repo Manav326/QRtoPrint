@@ -655,3 +655,89 @@ test("shop and customer registration routes delegate bootstrap and identity crea
   assert.match(service, /HashRefreshToken/);
   assert.match(rules, /MailAddress\.TryCreate/);
 });
+
+
+test("Agent enrollment keeps one-use codes, physical-computer identity locking and quota checks in its service", () => {
+  const endpoint = readApi("AgentEnrollmentEndpoints.cs");
+  const service = read("../../../src/SmartPrint.Api/Services/AgentEnrollmentService.cs");
+  const rules = read("../../../src/SmartPrint.Api/Domain/AgentEnrollmentRules.cs");
+  assert.match(endpoint, /enrollment\.EnrollAsync/);
+  assert.match(service, /HashOpaqueToken\(code\)/);
+  assert.match(service, /pg_advisory_xact_lock/);
+  assert.match(service, /FingerprintAlreadyEnrolled/);
+  assert.match(service, /AcquireQuotaLockAsync/);
+  assert.match(service, /item\.UsedUtc == null && item\.ExpiresUtc > now/);
+  assert.match(service, /ExecuteUpdateAsync/);
+  assert.match(service, /RandomNumberGenerator\.GetBytes\(32\)/);
+  assert.match(rules, /request\.Fingerprint/);
+});
+
+test("shop Agent pairing code creation and revocation are isolated in the management service", () => {
+  const endpoint = readApi("ShopAgentManagementEndpoints.cs");
+  const service = read("../../../src/SmartPrint.Api/Services/ShopAgentManagementService.cs");
+  assert.match(endpoint, /management\.CreateEnrollmentCodeAsync/);
+  assert.match(endpoint, /management\.RevokeAsync/);
+  assert.match(service, /AddMinutes\(10\)/);
+  assert.match(service, /HashOpaqueToken\(code\)/);
+  assert.match(service, /device\.TenantId == tenantId/);
+  assert.match(service, /printer\.Status, "AgentRevoked"/);
+  assert.match(service, /device\.RevokedUtc is null/);
+});
+
+test("shop printer creation and activation retain quota and active-output protections in the service", () => {
+  const endpoint = readApi("ShopPrinterEndpoints.cs");
+  const service = read("../../../src/SmartPrint.Api/Services/ShopPrinterService.cs");
+  const rules = read("../../../src/SmartPrint.Api/Domain/ShopPrinterRules.cs");
+  assert.match(endpoint, /printers\.CreateAsync/);
+  assert.match(endpoint, /printers\.SetActiveAsync/);
+  assert.match(service, /AcquireQuotaLockAsync/);
+  assert.match(service, /CheckCapacityAsync/);
+  assert.match(service, /LOCAL_QUEUE_CLAIMED/);
+  assert.match(service, /SPOOLER_ACCEPTED/);
+  assert.match(service, /PRINTING/);
+  assert.match(rules, /JsonDocument\.Parse/);
+  assert.match(rules, /MaximumRateMinor|ConnectionTypes/);
+});
+
+test("QR station creation and code rotation keep public URL validation and secret generation in the service", () => {
+  const endpoint = readApi("ShopStationEndpoints.cs");
+  const service = read("../../../src/SmartPrint.Api/Services/ShopStationService.cs");
+  const rules = read("../../../src/SmartPrint.Api/Domain/ShopStationRules.cs");
+  assert.match(endpoint, /stations\.CreateAsync/);
+  assert.match(endpoint, /stations\.RotateCodeAsync/);
+  assert.match(endpoint, /stations\.SetEnabledAsync/);
+  assert.match(service, /AcquireQuotaLockAsync/);
+  assert.match(service, /HashOpaqueToken\(publicCode\)/);
+  assert.match(service, /RandomNumberGenerator\.GetBytes\(24\)/);
+  assert.match(service, /printer\.TenantId == tenantId/);
+  assert.match(rules, /Uri\.UriSchemeHttps/);
+  assert.match(rules, /uri\.AbsolutePath != "\/"/);
+});
+
+test("shop pricing updates keep validated paise bounds, versioning and persistence in their service", () => {
+  const endpoint = readApi("ShopPricingEndpoints.cs");
+  const service = read("../../../src/SmartPrint.Api/Services/ShopPricingService.cs");
+  const rules = read("../../../src/SmartPrint.Api/Domain/ShopPricingRules.cs");
+  assert.match(endpoint, /pricingService\.UpdateAsync/);
+  assert.match(service, /ShopPricingRules\.IsValid/);
+  assert.match(service, /pricing\.Version\+\+/);
+  assert.match(service, /pricing\.IsConfigured = true/);
+  assert.match(service, /SaveChangesAsync/);
+  assert.match(rules, /MaximumRateMinor = 100_000/);
+  assert.match(rules, /MaximumMinimumChargeMinor = 10_000_000/);
+});
+
+test("platform tenant status mutations remain locked, audit-backed and block permanent deactivation with unresolved work", () => {
+  const endpoint = readApi("PlatformTenantStatusEndpoints.cs");
+  const service = read("../../../src/SmartPrint.Api/Services/PlatformTenantStatusService.cs");
+  const rules = read("../../../src/SmartPrint.Api/Domain/TenantStatusChangeRules.cs");
+  assert.match(endpoint, /statuses\.ChangeAsync/);
+  assert.match(service, /FOR UPDATE/);
+  assert.match(service, /TenantStatusRules\.CanTransition/);
+  assert.match(service, /unresolvedJobs/);
+  assert.match(service, /pendingPayments/);
+  assert.match(service, /outstandingRejectedRefunds/);
+  assert.match(service, /TenantStatusAudits\.Add/);
+  assert.match(service, /DuplicateRequest: true/);
+  assert.match(rules, /reason\.Length is >= 5 and <= 500/);
+});
