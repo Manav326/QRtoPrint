@@ -137,6 +137,7 @@ test("HTTPS recovery returns the original saved print settings on new and duplic
 test("local upload ticket retries preserve batch identity and renew the same expired reservation", () => {
   const program = read("../../../src/SmartPrint.Api/Program.cs");
   const api = read("../src/api.ts");
+  const app = read("../src/App.tsx");
   const entitlements = read("../../../src/SmartPrint.Api/Services/TenantEntitlementService.cs");
   const ticketStart = program.indexOf('publicApi.MapPost("/sessions/current/local-upload-tickets"');
   const ticketEnd = program.indexOf('publicApi.MapPost("/sessions/current/local-upload-tickets/{ticketId:guid}/cloud-recovery"', ticketStart);
@@ -162,5 +163,8 @@ test("local upload ticket retries preserve batch identity and renew the same exp
   assert.match(expiredRecovery, /exception\.code === "batch_upload_locked_after_payment_start"/);
   assert.match(expiredRecovery, /clearCustomerLocalUploadAttempt/);
   assert.match(expiredRecovery, /LocalUploadOutcomeUnknownError/);
+  assert.match(app, /batchCheckoutLocked=exception instanceof LocalUploadPreflightError/);
+  assert.match(app, /!batchCheckoutLocked&&canFallbackToCloudFromLocalFailure/);
+  assert.match(app, /Checkout has already started for this batch/);
   assert.match(entitlements, /!db\.PrintBatchPayments\.Any\(payment =>[\s\S]*?payment\.Status != "REJECTED"/);
 });
