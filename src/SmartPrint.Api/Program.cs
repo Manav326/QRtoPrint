@@ -6277,6 +6277,10 @@ publicApi.MapPost("/sessions/current/local-upload-tickets", async (
             var lockedTicket = lockedTickets.SingleOrDefault();
             if (lockedTicket is not null)
             {
+                // Return the authoritative row even when another retry renewed it
+                // while this request was waiting for the lock.
+                existing = lockedTicket;
+
                 // Checkout takes the same batch-job row locks. Serialise lease
                 // renewal with payment creation so a ticket cannot become active
                 // after the batch has entered checkout.
