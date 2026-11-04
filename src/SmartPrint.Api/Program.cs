@@ -5798,7 +5798,7 @@ publicApi.MapPost("/sessions/current/jobs", async (
         return Results.Problem(statusCode: StatusCodes.Status413PayloadTooLarge, title: "File size must be between 1 byte and 20 MB.");
     }
 
-    var originalName = file.FileName.Split('/', '\\\\').LastOrDefault() ?? string.Empty;
+    var originalName = file.FileName.Split('/', '\\').LastOrDefault() ?? string.Empty;
     originalName = new string(originalName.Where(character => !char.IsControl(character)).ToArray()).Trim();
     if (string.IsNullOrWhiteSpace(originalName))
         return Results.BadRequest(new { code = "invalid_file_name", message = "The uploaded file name is invalid." });
