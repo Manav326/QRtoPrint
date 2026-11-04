@@ -212,10 +212,12 @@ test("customer web upload accepts drag and drop and contains no JavaScript brows
  assert.doesNotMatch(app,/window\.(alert|confirm|prompt)\s*\(/);
 });
 
-test("photo studio's selected photo quantity is a single output file with one photo-count record",()=>{
+test("photo studio's selected photo quantity creates one multi-page file with one photo-count record",()=>{
  const app=read("../src/App.tsx");
  const studio=read("../src/PhotoStudio.tsx");
- assert.match(studio,/onApply\(\[\{file:output,sizeCode:size\.id,photoCount:parsedCopies\}\]\)/);
+ assert.match(studio,/const pages=Math\.ceil\(parsedCopies\/photosPerPage\)/);
+ assert.match(studio,/onApply\(\[\{file:output,sizeCode:size\.id,photoCount:parsedCopies,photosPerPage\}\]\)/);
+ assert.match(studio,/buildPhotoPdf\(jpegPages\)/);
  assert.match(app,/const generated=sheets\.map\(sheet=>sheet\.file\)/);
  assert.match(app,/photos\[fp\]=\{sizeCode:sheet\.sizeCode,photoCount:sheet\.photoCount\}/);
 });
@@ -254,18 +256,22 @@ test("Photo Studio uses only the uploaded source and offers no edited-photo expo
  const studioCss=read("../src/PhotoStudio.module.css");
  assert.match(studioCss,/\.previewProtection::before/);
  assert.match(studio,/mode === "shop" \? "Save sheet to this job" : "Prepare A4 sheet"/);
- assert.match(studio,/This prepared A4 sheet replaces it in your batch/);
+ assert.match(studio,/This prepared multi-page A4 photo PDF replaces it in your batch/);
  assert.match(studio,/type="date"/);
  assert.match(studio,/formatDobForPrint/);
 });
 
-test("photo quantities never exceed the one-A4-page quote limit",()=>{
+test("photo quantities support up to 100 copies and automatically paginate over A4 sheets",()=>{
  const studio=read("../src/PhotoStudio.tsx");
- assert.match(studio,/const maxCopies=Math\.min\(100,layout\.perSheet\)/);
+ assert.match(studio,/const MAX_PHOTO_COUNT = 100/);
+ assert.match(studio,/const maxCopies=MAX_PHOTO_COUNT/);
+ assert.match(studio,/const sheetCount = Math\.ceil\(copies \/ photosPerPage\)/);
+ assert.match(studio,/Photos per A4 page/);
+ assert.match(studio,/Final A4 page:/);
 });
 
  
-test("shop owner Photo Studio revisions are restricted to pending unpaid cloud image jobs",()=>{
+test("cloud shop photo revisions require an unpaid review-stage image and validate every A4 page",()=>{
  const program=read("../../../src/SmartPrint.Api/Program.cs");
  const start=program.indexOf('shop.MapPost("/print-jobs/{jobId:guid}/photo-revision"');
  const end=program.indexOf('shop.MapGet("/print-jobs/{jobId:guid}/preview-source"',start);
@@ -279,7 +285,8 @@ test("shop owner Photo Studio revisions are restricted to pending unpaid cloud i
  assert.match(route,/job\.LocalQueueReceivedUtc is not null/);
  assert.match(route,/job\.ClaimedByAgentDeviceId is not null/);
  assert.match(route,/PricingCalculator\.MaximumPhotosPerA4Sheet/);
- assert.match(route,/stored\.Analysis\.PageCount != 1/);
+ assert.match(route,/PricingCalculator\.PhotoPageCount\(photoCount, photoSizeCode, photosPerPage\)/);
+ assert.match(route,/job\.PageCount != expectedPageCount/);
  assert.match(route,/SHOP_PHOTO_ENHANCED/);
 });
 
@@ -298,7 +305,7 @@ test("customer photo previews do not expose the raw image or prepared PDF viewer
 test("the exact same Photo Studio is opened from the shop image review",()=>{
  const app=read("../src/App.tsx");
  assert.match(app,/setShopPhotoStudio\(\{source,job:preview\.job,returnPreview\}\)/);
- assert.match(app,/replaceShopPhotoDocument\(tokens\.accessToken,editor\.job\.id,sheet\.file,sheet\.sizeCode,sheet\.photoCount\)/);
+ assert.match(app,/replaceShopPhotoDocument\(tokens\.accessToken,editor\.job\.id,sheet\.file,sheet\.sizeCode,sheet\.photoCount,sheet\.photosPerPage\)/);
  assert.match(app,/shopPhotoStudio && <PhotoStudio source=\{shopPhotoStudio\.source\}/);
  assert.match(app,/Enhance photo for printing/);
 });
@@ -320,7 +327,7 @@ test("shop owner can open the same editor for cloud and local Agent images",()=>
  const api=read("../src/api.ts");
  assert.match(app,/preview\.job\.storageMode==="CLOUD"\|\|preview\.job\.storageMode==="LOCAL_AGENT"/);
  assert.match(app,/editor\.job\.storageMode==="LOCAL_AGENT"[\s\S]*?replaceShopPhotoDocumentLocally/);
- assert.match(app,/replaceShopPhotoDocument\(tokens\.accessToken,editor\.job\.id,sheet\.file,sheet\.sizeCode,sheet\.photoCount\)/);
+ assert.match(app,/replaceShopPhotoDocument\(tokens\.accessToken,editor\.job\.id,sheet\.file,sheet\.sizeCode,sheet\.photoCount,sheet\.photosPerPage\)/);
  assert.match(api,/\/api\/v1\/shop\/print-jobs\/\$\{jobId\}\/photo-revision-grant/);
  assert.match(api,/\/api\/v1\/local\/documents\/\$\{encodeURIComponent\(jobId\)\}\/photo-revision/);
 });
