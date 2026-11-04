@@ -66,7 +66,6 @@ class DocumentViewerInstrumentedTest {
         val directory = File(context.cacheDir, "customer-upload-pdf-preview")
         directory.mkdirs()
         val source = File(directory, "customer-upload-preview-${System.currentTimeMillis()}.pdf")
-        val token = "4b7b40d1-b0b1-4a6c-a1b9-1f12abcb1f30"
         createPdf(source)
 
         try {
