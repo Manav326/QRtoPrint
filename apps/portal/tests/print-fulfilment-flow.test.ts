@@ -59,6 +59,7 @@ test("plan-limited HTTPS fallback is only offered when the Agent is unavailable"
   const publicUpload = program.slice(publicUploadStart, publicUploadEnd);
   assert.match(publicUpload, /!subscription\.CloudAssistedPrintingEnabled && localAgentAvailable/);
   assert.doesNotMatch(publicUpload, /queueFallbackRequested/);
+  assert.match(app, /setCheckStatus\("unavailable"\);\s*onReady\(false\);[\s\S]*?onUnavailable\(\);/);
 });
 
 test("pre-submission printer capability blocks are explained in the shop queue", () => {
