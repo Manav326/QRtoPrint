@@ -4246,7 +4246,7 @@ function CustomerPrintFlow({publicCode,sessionToken,paymentOptions,localAgent,lo
 
   const photoPriceMap={"35x45":photoPricing?.photo35x45Minor??0,"25x35":photoPricing?.photo25x35Minor??0,"2x2":photoPricing?.photo2x2Minor??0,"4x6":photoPricing?.photo4x6Minor??0};
   return <>{photoStudioSource&&<PhotoStudio source={photoStudioSource} photoPrices={photoPriceMap} onCancel={()=>{setPhotoStudioSource(null);setPhotoStudioSourceFingerprint(null);}} onApply={applyPhotoSheets}/>}<section className="customer-print-flow">
-    <div className="customer-flow-heading"><div><span>STEP 1</span><h2>{nativeAppMode?"Add files":"Add your documents"}</h2></div><span className="upload-limit">PDF, JPG or PNG · Up to 20 files / 50 MB per batch</span></div>
+    <div className="customer-flow-heading"><div><span>STEP 1</span><h2>{nativeAppMode?"Add files":"Add documents or images"}</h2></div><span className="upload-limit">PDF documents · JPG/PNG images · Up to 20 files / 50 MB per batch</span></div>
     {(localAgent?.endpoints.length || cloudAssistedPrintingEnabled) ? <div className="customer-upload-modes">
       {Boolean(localAgent?.endpoints?.length)&&<button type="button" aria-pressed={uploadMode==="LOCAL"} className={uploadMode==="LOCAL"?"customer-upload-mode selected":"customer-upload-mode"} onClick={()=>{setUploadModeManuallySelected(true);setUploadMode("LOCAL");}}><strong>Shop Wi-Fi · local transfer</strong><small>Direct local HTTP · not encrypted in transit</small></button>}
       {cloudAssistedPrintingEnabled&&<button type="button" aria-pressed={uploadMode==="CLOUD"} className={uploadMode==="CLOUD"?"customer-upload-mode selected":"customer-upload-mode"} onClick={()=>{setUploadModeManuallySelected(true);setUploadMode("CLOUD");}}><strong>Cloud-assisted · HTTPS</strong><small>Secure transfer through the API · resumes interrupted local uploads</small></button>}
@@ -4256,8 +4256,8 @@ function CustomerPrintFlow({publicCode,sessionToken,paymentOptions,localAgent,lo
       <label className="customer-upload-zone">
         <input type="file" multiple disabled={batchLockedForPayment} accept=".pdf,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png" onChange={event=>{const selected=Array.from(event.currentTarget.files||[]);chooseFiles(selected,consumeSmartPrintNativePickerGroups(),consumeSmartPrintNativePdfPreviews());event.currentTarget.value="";}}/>
         <span className="customer-upload-icon"><FileUp size={21}/></span>
-        <strong>Select multiple files</strong>
-        <small>Choose up to 20 PDF, JPG or PNG documents at once</small>
+        <strong>Select documents or images</strong>
+        <small>Choose PDF documents or JPG/PNG images</small>
       </label>
       <label className="customer-upload-zone folder-upload-zone">
         <input type="file" multiple disabled={batchLockedForPayment} accept={nativeAppMode?"application/x-smartprint-folder-selection":".pdf,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png"} {...({webkitdirectory:"true",directory:"true"} as any)} onChange={event=>{const selected=Array.from(event.currentTarget.files||[]);chooseFiles(selected,consumeSmartPrintNativePickerGroups(),consumeSmartPrintNativePdfPreviews());event.currentTarget.value="";}}/>
