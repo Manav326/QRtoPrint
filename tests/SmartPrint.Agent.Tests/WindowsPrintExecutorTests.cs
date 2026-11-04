@@ -252,6 +252,46 @@ public sealed class PdfExportExecutorTests
     }
 
 
+    [Fact]
+    public void DoesNotRasterPaintBrandingWhenAComplexExportNeedsRebuilding()
+    {
+        using var source = new MemoryStream();
+        using (var pdf = SkiaSharp.SKDocument.CreatePdf(source))
+        {
+            var canvas = pdf.BeginPage(595.276f, 841.89f);
+            using var typeface = SkiaSharp.SKTypeface.FromFamilyName("Arial", SkiaSharp.SKFontStyle.Normal);
+            using var font = new SkiaSharp.SKFont(typeface, 14);
+            using var paint = new SkiaSharp.SKPaint { Color = SkiaSharp.SKColors.Black, IsAntialias = true };
+            canvas.DrawText("ORIGINAL DOCUMENT CONTENT", 48, 72, SkiaSharp.SKTextAlign.Left, font, paint);
+            pdf.EndPage();
+            pdf.Close();
+        }
+
+        var bytes = source.ToArray();
+        var directory = Path.Combine(Path.GetTempPath(), "smartprint-unbranded-fallback-" + Guid.NewGuid().ToString("N"));
+        var entry = new AgentLocalQueueEntry(
+            Guid.NewGuid(), "SP-UNBRANDED-FALLBACK", Guid.NewGuid(), "PDF Export",
+            "PDF Export", "original.pdf", "application/pdf",
+            Convert.ToHexString(SHA256.HashData(bytes)).ToLowerInvariant(), bytes.LongLength,
+            1, 2, "Colour", "A4", false, "INR", 100, "unused", "ACKNOWLEDGED",
+            DateTimeOffset.UtcNow, DateTimeOffset.UtcNow.AddMinutes(3),
+            OutputMode: PrinterOutputModeRules.PdfExport,
+            PdfBrandingEnabled: true);
+
+        try
+        {
+            var receipt = new WindowsPrintExecutor().ExportPdf(entry, bytes, directory, CancellationToken.None);
+            using var rendered = UglyToad.PdfPig.PdfDocument.Open(receipt.OutputPath);
+            Assert.Equal(2, rendered.NumberOfPages);
+            Assert.DoesNotContain("SmartPrint", string.Join(" ", rendered.GetPages().Select(page => page.Text)), StringComparison.Ordinal);
+        }
+        finally
+        {
+            CryptographicOperations.ZeroMemory(bytes);
+            if (Directory.Exists(directory)) Directory.Delete(directory, recursive: true);
+        }
+    }
+
 public sealed class PdfBrandingOverlayTests
 {
     [Fact]

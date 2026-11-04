@@ -45,7 +45,6 @@ public sealed class WindowsPrintExecutor
     private const int Halftone = 4;
     private const int MaxRasterDimension = 10_000;
     private const long MaxRasterPixels = 24_000_000;
-    private static readonly Lazy<byte[]> QuantaEdgeMarkBytes = new(LoadQuantaEdgeMark);
     private static readonly Lazy<bool> PdfiumInitialized = new(() =>
     {
         fpdfview.FPDF_InitLibrary();
@@ -412,19 +411,15 @@ public sealed class WindowsPrintExecutor
                         using var pdf = SKDocument.CreatePdf(output)
                             ?? throw new PrintExecutionBlockedException("PDF_EXPORT_CREATE_FAILED", "The PDF document could not be created.");
                         const int dpi = 300;
-                        var allowRasterBranding = raster is not PdfRasterDocument sourcePdf ||
-                            (!sourcePdf.HasDigitalSignatures && !sourcePdf.HasInteractiveForms);
+                        // A footer is only added by the vector PDFium overlay above.
+                        // Never raster-paint a fallback PDF: unsupported/complex PDFs
+                        // must not lose selectable text merely to show the brand mark.
                         for (var copy = 0; copy < entry.Copies; copy++)
                         {
                             foreach (var pageIndex in printablePageIndices)
                             {
                                 cancellationToken.ThrowIfCancellationRequested();
                                 using var page = raster.RenderPage(pageIndex, dpi);
-                                if (entry.PdfBrandingEnabled && allowRasterBranding &&
-                                    string.Equals(entry.MediaType, "application/pdf", StringComparison.OrdinalIgnoreCase))
-                                {
-                                    ApplySmartPrintFooter(page, entry.ColourMode == "Mono");
-                                }
                                 using var bitmap = new SKBitmap(new SKImageInfo(
                                     page.Width, page.Height, SKColorType.Bgra8888, SKAlphaType.Opaque));
                                 var pixels = bitmap.GetPixels();
@@ -528,106 +523,6 @@ public sealed class WindowsPrintExecutor
         using var memory = new MemoryStream();
         stream.CopyTo(memory);
         return memory.ToArray();
-    }
-
-    private static void ApplySmartPrintFooter(RasterPage page, bool monochrome)
-    {
-        // The original upload is never touched. A page with an occupied or uncertain
-        // bottom margin is exported unchanged, without a footer.
-        if (page.WidthPoints <= 0 || page.HeightPoints <= 0)
-            return;
-
-        var pixelsPerPoint = page.Width / page.WidthPoints;
-        var requiredBandHeight = checked((int)Math.Ceiling(PdfBrandingRules.RequiredBlankBandPoints * pixelsPerPoint));
-        if (!PdfBrandingRules.HasSafeFooterBand(page.Pixels, page.Width, page.Height, requiredBandHeight))
-            return;
-
-        using var bitmap = new SKBitmap(new SKImageInfo(
-            page.Width, page.Height, SKColorType.Bgra8888, SKAlphaType.Opaque));
-        var destinationPixels = bitmap.GetPixels();
-        if (destinationPixels == IntPtr.Zero)
-            throw new PrintExecutionBlockedException("PDF_BRANDING_BITMAP_FAILED", "The branded PDF page could not be prepared.");
-        Marshal.Copy(page.Pixels, 0, destinationPixels, page.Pixels.Length);
-
-        using var canvas = new SKCanvas(bitmap);
-        var scale = pixelsPerPoint;
-        var margin = 18f * scale;
-        var dividerY = page.Height - 15f * scale;
-        var baseline = page.Height - 4.1f * scale;
-        var logoSize = 8f * scale;
-        var gap = 2.5f * scale;
-        var wordSize = 7f * scale;
-        var bySize = 5.6f * scale;
-        var textGap = 2.2f * scale;
-
-        using var regularTypeface = SKTypeface.FromFamilyName("Arial", SKFontStyle.Normal);
-        using var boldTypeface = SKTypeface.FromFamilyName("Arial", SKFontStyle.Bold);
-        using var smartFont = new SKFont(boldTypeface, wordSize, 1f, 0f);
-        using var byFont = new SKFont(regularTypeface, bySize, 1f, 0f);
-        using var wordFont = new SKFont(boldTypeface, wordSize, 1f, 0f);
-        using var smartPaint = new SKPaint
-        {
-            IsAntialias = true,
-            Color = monochrome ? new SKColor(17, 24, 39) : new SKColor(21, 32, 56)
-        };
-        using var byPaint = new SKPaint
-        {
-            IsAntialias = true,
-            Color = monochrome ? new SKColor(75, 85, 99) : new SKColor(102, 112, 133)
-        };
-        using var quantaPaint = new SKPaint
-        {
-            IsAntialias = true,
-            Color = monochrome ? new SKColor(17, 24, 39) : new SKColor(21, 32, 56)
-        };
-        using var edgePaint = new SKPaint
-        {
-            IsAntialias = true,
-            Color = monochrome ? new SKColor(17, 24, 39) : new SKColor(249, 115, 22)
-        };
-        using var dividerPaint = new SKPaint
-        {
-            IsAntialias = true,
-            StrokeWidth = Math.Max(1f, .35f * scale),
-            Color = monochrome ? new SKColor(170, 176, 185) : new SKColor(229, 234, 243)
-        };
-
-        using var logo = SKBitmap.Decode(QuantaEdgeMarkBytes.Value);
-        if (logo is null)
-            throw new PrintExecutionBlockedException("PDF_BRANDING_ASSET_INVALID", "The official QuantaEdge logo could not be decoded.");
-        if (monochrome)
-        {
-            for (var y = 0; y < logo.Height; y++)
-            for (var pixelX = 0; pixelX < logo.Width; pixelX++)
-            {
-                var pixel = logo.GetPixel(pixelX, y);
-                if (pixel.Alpha > 0)
-                    logo.SetPixel(pixelX, y, new SKColor(17, 24, 39, pixel.Alpha));
-            }
-        }
-
-        var smartWidth = smartFont.MeasureText("SmartPrint");
-        var byWidth = byFont.MeasureText("by");
-        var quantaWidth = wordFont.MeasureText("Quanta");
-        var edgeWidth = wordFont.MeasureText("Edge");
-        var totalWidth = logoSize + gap + smartWidth + textGap + byWidth + textGap + quantaWidth + edgeWidth;
-        if (totalWidth > page.Width - (margin * 2))
-            return;
-
-        canvas.DrawLine(margin, dividerY, page.Width - margin, dividerY, dividerPaint);
-        var textX = (page.Width - totalWidth) / 2f;
-        var logoTop = baseline - (6.3f * scale);
-        canvas.DrawBitmap(logo, new SKRect(textX, logoTop, textX + logoSize, logoTop + logoSize));
-        textX += logoSize + gap;
-        canvas.DrawText("SmartPrint", textX, baseline, SKTextAlign.Left, smartFont, smartPaint);
-        textX += smartWidth + textGap;
-        canvas.DrawText("by", textX, baseline, SKTextAlign.Left, byFont, byPaint);
-        textX += byWidth + textGap;
-        canvas.DrawText("Quanta", textX, baseline, SKTextAlign.Left, wordFont, quantaPaint);
-        textX += quantaWidth;
-        canvas.DrawText("Edge", textX, baseline, SKTextAlign.Left, wordFont, edgePaint);
-        canvas.Flush();
-        Marshal.Copy(destinationPixels, page.Pixels, 0, page.Pixels.Length);
     }
 
     private static (float Width, float Height) PdfPageSize(string paperSize, bool landscape)
