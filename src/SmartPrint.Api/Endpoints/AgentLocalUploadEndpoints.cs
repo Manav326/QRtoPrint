@@ -1,7 +1,6 @@
 using System.Security.Claims;
 using System.Security.Cryptography;
 using System.Text;
-using System.Text.Json;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
@@ -159,6 +158,7 @@ public static partial class AgentEndpoints
             HttpContext context,
             SmartPrintDbContext db,
             TenantEntitlementService entitlements,
+            AgentLocalUploadCompletionService completionService,
             CancellationToken ct) =>
         {
             var device = await AgentAuthentication.AuthenticateAsync(context, db, ct);
@@ -236,32 +236,16 @@ public static partial class AgentEndpoints
                 });
             }
         
-            var sha = request.Sha256?.Trim().ToLowerInvariant();
-            if (request.PageCount is < 1 or > 500 ||
-                request.PageSizesJson is null ||
-                request.PageSizesJson.Length is < 2 or > 200_000 ||
-                !string.Equals(request.FileExtension, ticket.FileExtension, StringComparison.OrdinalIgnoreCase) ||
-                !string.Equals(request.MediaType, ticket.MediaType, StringComparison.OrdinalIgnoreCase) ||
-                request.SizeBytes != ticket.SizeBytes ||
-                !string.Equals(sha, ticket.Sha256, StringComparison.OrdinalIgnoreCase))
+            if (!LocalUploadCompletionRules.MatchesTicket(ticket, request))
             {
                 return Results.UnprocessableEntity(new { code = "local_document_validation_mismatch", message = "The local agent's file analysis does not match the document the customer authorised for upload." });
             }
-        
-            try
-            {
-                using var parsedSizes = JsonDocument.Parse(request.PageSizesJson);
-                if (parsedSizes.RootElement.ValueKind != JsonValueKind.Array ||
-                    parsedSizes.RootElement.GetArrayLength() != request.PageCount)
-                {
-                    return Results.UnprocessableEntity(new { code = "local_document_page_analysis_invalid", message = "The local agent returned invalid document page analysis." });
-                }
-            }
-            catch (JsonException)
+
+            if (!LocalUploadCompletionRules.HasValidPageAnalysis(request.PageSizesJson, request.PageCount))
             {
                 return Results.UnprocessableEntity(new { code = "local_document_page_analysis_invalid", message = "The local agent returned invalid document page analysis." });
             }
-        
+
             var now = DateTimeOffset.UtcNow;
             if (ticket.ExpiresUtc <= now || ticket.ClaimLeaseExpiresUtc is null || ticket.ClaimLeaseExpiresUtc <= now)
             {
@@ -278,28 +262,22 @@ public static partial class AgentEndpoints
                 return Results.Problem(statusCode: StatusCodes.Status413PayloadTooLarge, title: "This document exceeds the maximum size configured for this shop's plan.");
             }
         
-            await using var transaction = await db.Database.BeginTransactionAsync(ct);
-            var completed = await db.LocalPrintUploadTickets
-                .Where(item => item.Id == ticket.Id &&
-                               item.TenantId == device.TenantId &&
-                               item.AgentDeviceId == device.Id &&
-                               item.CompletedUtc == null &&
-                               item.ExpiresUtc > now &&
-                               item.ClaimLeaseExpiresUtc > now)
-                .ExecuteUpdateAsync(update => update.SetProperty(item => item.CompletedUtc, now), ct);
-        
-            if (completed != 1)
+            var completion = await completionService.CompleteAsync(ticket, device, request, now, ct);
+            if (completion.Failure == AgentLocalUploadCompletionFailure.TicketNotClaimed)
             {
-                await transaction.RollbackAsync(ct);
-                var existingJob = await db.PrintJobs.AsNoTracking()
-                    .SingleOrDefaultAsync(item => item.Id == ticket.PrintJobId && item.TenantId == device.TenantId, ct);
-                var existingDocument = await db.PrintDocuments.AsNoTracking()
-                    .SingleOrDefaultAsync(item => item.PrintJobId == ticket.PrintJobId && item.TenantId == device.TenantId, ct);
-                if (existingJob is null || existingDocument is null)
-                {
-                    return Results.Conflict(new { code = "local_upload_ticket_not_claimed", message = "The upload ticket is no longer claimable by this Agent." });
-                }
-        
+                return Results.Conflict(new { code = "local_upload_ticket_not_claimed", message = "The upload ticket is no longer claimable by this Agent." });
+            }
+
+            if (completion.Failure == AgentLocalUploadCompletionFailure.QuotaExceeded)
+            {
+                var quota = completion.Quota!;
+                return Results.Conflict(new { code = quota.Code, message = quota.Message, current = quota.Current, maximum = quota.Maximum });
+            }
+
+            var completedJob = completion.Job!;
+            var completedDocument = completion.Document!;
+            if (completion.AlreadyCompleted)
+            {
                 return Results.Ok(new
                 {
                     AlreadyCompleted = true,
@@ -307,96 +285,34 @@ public static partial class AgentEndpoints
                     {
                         Job = new
                         {
-                            existingJob.Id,
-                            existingJob.JobNumber,
-                            existingJob.Status,
-                            existingJob.PageCount,
-                            existingJob.Copies,
-                            existingJob.ColourMode,
-                            existingJob.PaperSize,
-                            existingJob.IsDuplex,
-                            existingJob.Orientation,
-                            existingJob.PricingVersion,
-                            existingJob.Currency,
-                            existingJob.QuotedAmountMinor,
-                            existingJob.CreatedUtc
+                            completedJob.Id,
+                            completedJob.JobNumber,
+                            completedJob.Status,
+                            completedJob.PageCount,
+                            completedJob.Copies,
+                            completedJob.ColourMode,
+                            completedJob.PaperSize,
+                            completedJob.IsDuplex,
+                            completedJob.Orientation,
+                            completedJob.PricingVersion,
+                            completedJob.Currency,
+                            completedJob.QuotedAmountMinor,
+                            completedJob.CreatedUtc
                         },
                         Document = new
                         {
-                            existingDocument.Id,
-                            existingDocument.OriginalFileName,
-                            existingDocument.MediaType,
-                            existingDocument.SizeBytes,
-                            existingDocument.Sha256,
-                            existingDocument.PageSizesJson
+                            completedDocument.Id,
+                            completedDocument.OriginalFileName,
+                            completedDocument.MediaType,
+                            completedDocument.SizeBytes,
+                            completedDocument.Sha256,
+                            completedDocument.PageSizesJson
                         },
                         DuplicateRequest = true
                     }
                 });
             }
-        
-            await entitlements.AcquireQuotaLockAsync(device.TenantId, TenantQuotaResource.MonthlyPrintJob, ct);
-            var quota = await entitlements.CheckCapacityAsync(device.TenantId, TenantQuotaResource.MonthlyPrintJob, ct);
-            if (!quota.Allowed)
-            {
-                await transaction.RollbackAsync(ct);
-                return Results.Conflict(new { code = quota.Code, message = quota.Message, current = quota.Current, maximum = quota.Maximum });
-            }
-        
-            var job = new PrintJob
-            {
-                Id = ticket.PrintJobId,
-                TenantId = ticket.TenantId,
-                BatchId = ticket.BatchId,
-                BatchGroupName = ticket.BatchGroupName,
-                BatchName = ticket.BatchName,
-                QrStationId = ticket.QrStationId,
-                PrinterDeviceId = ticket.PrinterDeviceId,
-                CustomerSessionId = ticket.CustomerSessionId,
-                JobNumber = ticket.JobNumber,
-                Status = "AWAITING_CONFIGURATION",
-                IdempotencyKey = $"LOCAL-{ticket.Id:N}",
-                PageCount = request.PageCount,
-                Copies = ticket.Copies,
-                ColourMode = ticket.ColourMode,
-                PaperSize = ticket.PaperSize,
-                IsDuplex = ticket.IsDuplex,
-                Orientation = ticket.Orientation,
-                Currency = "INR",
-                QuotedAmountMinor = 0,
-                CreatedUtc = now,
-                UpdatedUtc = now
-            };
-            var printDocument = new PrintDocument
-            {
-                TenantId = ticket.TenantId,
-                PrintJobId = job.Id,
-                OriginalFileName = ticket.OriginalFileName,
-                MediaType = ticket.MediaType,
-                FileExtension = ticket.FileExtension,
-                SizeBytes = ticket.SizeBytes,
-                Sha256 = ticket.Sha256,
-                StorageKey = string.Empty,
-                StorageMode = "LOCAL_AGENT",
-                AgentDeviceId = device.Id,
-                PageSizesJson = request.PageSizesJson,
-                CreatedUtc = now
-            };
-            db.PrintJobs.Add(job);
-            db.PrintDocuments.Add(printDocument);
-            db.PrintJobEvents.Add(new PrintJobEvent
-            {
-                TenantId = job.TenantId,
-                PrintJobId = job.Id,
-                PreviousStatus = null,
-                NewStatus = job.Status,
-                ActorType = "Customer",
-                ReasonCode = "DOCUMENT_UPLOADED_TO_LOCAL_AGENT",
-                CreatedUtc = now
-            });
-            await db.SaveChangesAsync(ct);
-            await transaction.CommitAsync(ct);
-        
+
             return Results.Ok(new
             {
                 AlreadyCompleted = false,
@@ -404,31 +320,31 @@ public static partial class AgentEndpoints
                 {
                     Job = new
                     {
-                        job.Id,
-                        job.BatchGroupName,
-                        job.BatchName,
-                        job.BatchId,
-                        job.JobNumber,
-                        job.Status,
-                        job.PageCount,
-                        job.Copies,
-                        job.ColourMode,
-                        job.PaperSize,
-                        job.IsDuplex,
-                        job.Orientation,
-                        job.PricingVersion,
-                        job.Currency,
-                        job.QuotedAmountMinor,
-                        job.CreatedUtc
+                        completedJob.Id,
+                        completedJob.BatchGroupName,
+                        completedJob.BatchName,
+                        completedJob.BatchId,
+                        completedJob.JobNumber,
+                        completedJob.Status,
+                        completedJob.PageCount,
+                        completedJob.Copies,
+                        completedJob.ColourMode,
+                        completedJob.PaperSize,
+                        completedJob.IsDuplex,
+                        completedJob.Orientation,
+                        completedJob.PricingVersion,
+                        completedJob.Currency,
+                        completedJob.QuotedAmountMinor,
+                        completedJob.CreatedUtc
                     },
                     Document = new
                     {
-                        printDocument.Id,
-                        printDocument.OriginalFileName,
-                        printDocument.MediaType,
-                        printDocument.SizeBytes,
-                        printDocument.Sha256,
-                        printDocument.PageSizesJson
+                        completedDocument.Id,
+                        completedDocument.OriginalFileName,
+                        completedDocument.MediaType,
+                        completedDocument.SizeBytes,
+                        completedDocument.Sha256,
+                        completedDocument.PageSizesJson
                     },
                     DuplicateRequest = false
                 }
