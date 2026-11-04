@@ -431,3 +431,54 @@ test("PDF footer branding is opt-in per batch and cannot cover source content or
   assert.ok(app.includes('Ask the shop for an unbranded, single-copy full-document export when you need the original PDF structure preserved.'));
   assert.ok(app.includes('digital-signature validation'));
 });
+
+
+test("contextual information stays concise and is accessible by hover, focus and tap", () => {
+  const app = read("../src/App.tsx");
+  const css = read("../src/styles.css");
+  assert.match(app, /function InfoTooltip/);
+  assert.match(app, /aria-describedby=\{tooltipId\}/);
+  assert.match(app, /onMouseEnter=\{\(\)=>setOpen\(true\)\}/);
+  assert.match(app, /onClick=\{\(\)=>setOpen\(true\)\}/);
+  assert.match(app, /Files stay on this computer\. Reconnect it to use its printers\./);
+  assert.match(app, /To switch computers, upload a new Cloud-assisted batch\./);
+  assert.match(app, /jobStatus\.pdfBrandingEnabled&&<div className="customer-branding-note">/);
+  assert.doesNotMatch(app, /If this request is saved as a PDF, a small SmartPrint by QuantaEdge footer/);
+  assert.match(css, /\.context-info:focus-within \.context-info-tooltip/);
+  assert.match(css, /\.context-info\.context-info-open \.context-info-tooltip/);
+});
+
+test("customer payment settings refresh without reopening the QR session and explain disabled cash", () => {
+  const app = read("../src/App.tsx");
+  const api = read("../src/api.ts");
+  const server = read("../../../src/SmartPrint.Api/Program.cs");
+  assert.match(app, /paymentOptions:session\.paymentOptions/);
+  assert.match(app, /Cash at counter unavailable/);
+  assert.match(app, /Disabled · customers will not see cash at the counter\./);
+  assert.match(api, /paymentOptions: \{ upiEnabled: boolean; upiId\?: string \| null; payeeName\?: string \| null; cashEnabled: boolean; instantPaymentEnabled: boolean \}/);
+  assert.match(server, /var paymentOptions = await db\.ShopPaymentProfiles\.AsNoTracking\(\)/);
+  assert.match(server, /PaymentOptions = paymentOptions/);
+  assert.match(server, /CashEnabled = false/);
+});
+
+test("Windows local document previews prefer the paired Agent loopback endpoint", () => {
+  const api = read("../src/api.ts");
+  const desktop = read("../../desktop/src-tauri/tauri.conf.json");
+  assert.match(api, /function isPrivateLocalPreviewEndpoint\(value: string, allowLoopback = false\)/);
+  assert.match(api, /loopbackIpv4 = endpoint\.hostname === "127\.0\.0\.1"/);
+  assert.match(api, /const endpointValues = isDesktopApp\(\)[\s\S]*\["http:\/\/127\.0\.0\.1:17842", \.\.\.source\.endpoints\]/);
+  assert.match(api, /isPrivateLocalPreviewEndpoint\(value, isDesktopApp\(\)\)/);
+  assert.match(desktop, /connect-src[^"]*http:\/\/127\.0\.0\.1:17842/);
+});
+
+test("customer uploader is centred and shared light-theme text tokens meet readable contrast", () => {
+  const css = read("../src/styles.css");
+  const desktop = read("../../desktop/src/desktop.css");
+  assert.match(css, /customer-entry-card--upload \.customer-print-flow\{width:min\(100%,1040px\);margin-inline:auto\}/);
+  assert.match(css, /customer-flow-heading\{align-items:center;justify-content:center;flex-direction:column/);
+  assert.match(css, /customer-upload-picker-grid\{width:min\(100%,860px\);margin-inline:auto\}/);
+  assert.match(css, /--faint:#5f6b80/);
+  assert.match(css, /--muted:#59677e/);
+  assert.match(desktop, /--faint: #5f6b80;/);
+  assert.match(desktop, /--muted: #59677e;/);
+});

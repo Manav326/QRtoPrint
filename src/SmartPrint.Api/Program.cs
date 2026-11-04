@@ -8817,8 +8817,19 @@ publicApi.MapPost("/sessions/current/renew", async (
         .Select(station => station.PrinterDeviceId)
         .SingleOrDefaultAsync(ct);
     var localAgent = await GetLocalAgentInfoAsync(db, session.TenantId, stationPrinterId, now, ct);
+    var paymentOptions = await db.ShopPaymentProfiles.AsNoTracking()
+        .Where(profile => profile.TenantId == session.TenantId)
+        .Select(profile => new
+        {
+            profile.UpiEnabled,
+            profile.UpiId,
+            profile.PayeeName,
+            profile.CashEnabled,
+            profile.InstantPaymentEnabled
+        })
+        .SingleAsync(ct);
 
-    return Results.Ok(new { session.ExpiresUtc, LocalAgent = localAgent });
+    return Results.Ok(new { session.ExpiresUtc, LocalAgent = localAgent, PaymentOptions = paymentOptions });
 }).RequireRateLimiting("qr-session");
 
 publicApi.MapGet("/jobs/{jobId:guid}/status", async (

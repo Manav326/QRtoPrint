@@ -854,6 +854,7 @@ export function renewCustomerPrintSession(sessionToken: string) {
   return apiRequest<{
     expiresUtc: string;
     localAgent: { agentDeviceId: string; endpoints: string[] } | null;
+    paymentOptions: { upiEnabled: boolean; upiId?: string | null; payeeName?: string | null; cashEnabled: boolean; instantPaymentEnabled: boolean };
   }>("/api/v1/public/sessions/current/renew", {
     method: "POST",
     headers: { "X-Print-Session": sessionToken }
@@ -1594,7 +1595,7 @@ export function applyShopPrintBatchReview(
   }, token);
 }
 
-function isPrivateLocalPreviewEndpoint(value: string): URL | null {
+function isPrivateLocalPreviewEndpoint(value: string, allowLoopback = false): URL | null {
   try {
     const endpoint = new URL(value);
     const octets = endpoint.hostname.split(".").map(Number);
@@ -1603,9 +1604,10 @@ function isPrivateLocalPreviewEndpoint(value: string): URL | null {
       (octets[0] === 10 ||
         (octets[0] === 172 && octets[1] >= 16 && octets[1] <= 31) ||
         (octets[0] === 192 && octets[1] === 168));
+    const loopbackIpv4 = endpoint.hostname === "127.0.0.1";
     if (endpoint.protocol !== "http:" || endpoint.port !== "17842" ||
         endpoint.username || endpoint.password || endpoint.pathname !== "/" ||
-        endpoint.search || endpoint.hash || !privateIpv4) return null;
+        endpoint.search || endpoint.hash || !(privateIpv4 || (allowLoopback && loopbackIpv4))) return null;
     return endpoint;
   } catch {
     return null;
@@ -1661,8 +1663,14 @@ export async function downloadShopDocument(
   }
 
   let lastError: Error | null = null;
-  for (const value of source.endpoints.slice(0, 8)) {
-    const endpoint = isPrivateLocalPreviewEndpoint(value);
+  // The Windows app is running on the paired shop computer itself. Prefer
+  // loopback so preview does not depend on Wi-Fi routing or firewall hairpinning.
+  // Browser clients continue to use only server-advertised private LAN endpoints.
+  const endpointValues = isDesktopApp()
+    ? ["http://127.0.0.1:17842", ...source.endpoints]
+    : source.endpoints;
+  for (const value of endpointValues.slice(0, 8)) {
+    const endpoint = isPrivateLocalPreviewEndpoint(value, isDesktopApp());
     if (!endpoint) continue;
     const controller = new AbortController();
     const timeout = window.setTimeout(() => controller.abort(), 15_000);
