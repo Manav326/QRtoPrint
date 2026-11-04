@@ -741,3 +741,60 @@ test("platform tenant status mutations remain locked, audit-backed and block per
   assert.match(service, /DuplicateRequest: true/);
   assert.match(rules, /reason\.Length is >= 5 and <= 500/);
 });
+
+
+test("single-job shop decisions preserve row-locked quote expiry, approval, rejection and audit events in a service", () => {
+  const endpoint = readApi("ShopPrintJobDecisionEndpoints.cs");
+  const service = read("../../../src/SmartPrint.Api/Services/ShopPrintJobDecisionService.cs");
+  assert.match(endpoint, /decisions\.ApproveAsync/);
+  assert.match(endpoint, /decisions\.RejectAsync/);
+  assert.match(service, /FOR UPDATE/);
+  assert.match(service, /QuoteExpiresUtc/);
+  assert.match(service, /QUOTE_EXPIRED_BEFORE_SHOP_APPROVAL/);
+  assert.match(service, /SHOP_APPROVED_AWAITING_PAYMENT/);
+  assert.match(service, /SHOP_REJECTED/);
+  assert.match(service, /DuplicateRequest: true/);
+});
+
+test("shop payment method updates keep UPI validation and payment availability rules in their service", () => {
+  const endpoint = readApi("ShopPaymentSettingsEndpoints.cs");
+  const service = read("../../../src/SmartPrint.Api/Services/ShopPaymentSettingsService.cs");
+  const rules = read("../../../src/SmartPrint.Api/Domain/ShopPaymentSettingsRules.cs");
+  assert.match(endpoint, /settingsService\.UpdateAsync/);
+  assert.match(service, /ShopPaymentSettingsRules\.Validate/);
+  assert.match(service, /settings\.InstantPaymentEnabled = request\.InstantPaymentEnabled/);
+  assert.match(service, /settings\.UpiId = request\.UpiEnabled \? upiId : null/);
+  assert.match(rules, /IsValidUpiId/);
+  assert.match(rules, /NoPaymentMethodEnabled/);
+});
+
+test("authentication session routes delegate customer login, platform/shop login, refresh rotation and logout", () => {
+  const endpoint = readApi("AuthenticationSessionEndpoints.cs");
+  const service = read("../../../src/SmartPrint.Api/Services/AuthenticationSessionService.cs");
+  assert.match(endpoint, /sessions\.CustomerLoginAsync/);
+  assert.match(endpoint, /sessions\.LoginAsync/);
+  assert.match(endpoint, /sessions\.RefreshAsync/);
+  assert.match(endpoint, /sessions\.LogoutAsync/);
+  assert.match(service, /CustomerIdentity\.IsCustomer/);
+  assert.match(service, /PlatformAdminAuthorization\.IsPlatformAdmin/);
+  assert.match(service, /CheckPasswordSignInAsync/);
+  assert.match(service, /ExecuteUpdateAsync/);
+  assert.match(service, /existing\.ReplacedByTokenId = replacement\.Id/);
+  assert.match(service, /HashRefreshToken/);
+});
+
+test("explicit Agent print-output claims preserve local-document proof, same-batch, payment, heartbeat and lease gates", () => {
+  const endpoint = readApi("AgentPrintClaimEndpoints.cs");
+  const service = read("../../../src/SmartPrint.Api/Services/AgentPrintClaimService.cs");
+  const rules = read("../../../src/SmartPrint.Api/Domain/AgentPrintClaimRules.cs");
+  assert.match(endpoint, /claims\.ClaimAsync/);
+  assert.match(service, /AgentClaimAccess\.GetAgentClaimAccessAsync/);
+  assert.match(service, /document\.Sha256 == proof\.Sha256/);
+  assert.match(service, /document\.SizeBytes == proof\.SizeBytes/);
+  assert.match(service, /other\.PrinterDeviceId != job\.PrinterDeviceId/);
+  assert.match(service, /payment\.Status == "VERIFIED"/);
+  assert.match(service, /printer\.Status == "Ready" \|\| printer\.Status == "Busy"/);
+  assert.match(service, /PrintDispatchLeaseExpiresUtc/);
+  assert.match(service, /AGENT_RECLAIMED_EXPIRED_PRINT_LEASE/);
+  assert.match(rules, /proof\.JobId != Guid.Empty/);
+});
