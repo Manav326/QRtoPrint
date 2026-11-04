@@ -18,30 +18,16 @@ public static class ShopAgentManagementEndpoints
     {
         shopAgents.MapPost("/agent-enrollment-codes", async (
             ClaimsPrincipal principal,
-            SmartPrintDbContext db,
+            ShopAgentManagementService management,
             CancellationToken ct) =>
         {
             if (!IsShopOwner(principal) || !TryGetTenantId(principal, out var tenantId))
-            {
                 return Results.Forbid();
-            }
-        
-            var now = DateTimeOffset.UtcNow;
-            var code = Microsoft.AspNetCore.WebUtilities.WebEncoders.Base64UrlEncode(RandomNumberGenerator.GetBytes(24));
-            var enrollment = new AgentEnrollmentCode
-            {
-                TenantId = tenantId,
-                CodeHash = HashOpaqueToken(code),
-                CreatedUtc = now,
-                ExpiresUtc = now.AddMinutes(10),
-                CreatedByUserId = GetActorId(principal)
-            };
-        
-            db.AgentEnrollmentCodes.Add(enrollment);
-            await db.SaveChangesAsync(ct);
-            return Results.Created("/api/v1/shop/agent-devices", new CreateAgentEnrollmentCodeResponse(code, enrollment.ExpiresUtc));
+
+            var result = await management.CreateEnrollmentCodeAsync(tenantId, GetActorId(principal), ct);
+            return Results.Created("/api/v1/shop/agent-devices", result.Response);
         });
-        
+
         shopAgents.MapGet("/agent-devices", async (
             ClaimsPrincipal principal,
             SmartPrintDbContext db,
@@ -82,31 +68,22 @@ public static class ShopAgentManagementEndpoints
         shopAgents.MapPatch("/agent-devices/{agentId:guid}/revoke", async (
             Guid agentId,
             ClaimsPrincipal principal,
-            SmartPrintDbContext db,
+            ShopAgentManagementService management,
             CancellationToken ct) =>
         {
             if (!IsShopOwner(principal) || !TryGetTenantId(principal, out var tenantId))
-            {
                 return Results.Forbid();
-            }
-        
-            var device = await db.AgentDevices.SingleOrDefaultAsync(
-                item => item.Id == agentId && item.TenantId == tenantId, ct);
-            if (device is null)
-            {
+
+            var result = await management.RevokeAsync(tenantId, agentId, ct);
+            if (result.Failure == ShopAgentManagementFailure.NotFound)
                 return Results.NotFound();
-            }
-        
-            if (device.RevokedUtc is null)
+
+            return Results.Ok(new
             {
-                device.RevokedUtc = DateTimeOffset.UtcNow;
-                device.Status = "Revoked";
-                await db.PrinterDevices.Where(printer => printer.TenantId == tenantId && printer.AgentDeviceId == agentId)
-                    .ExecuteUpdateAsync(update => update.SetProperty(printer => printer.Status, "AgentRevoked"), ct);
-                await db.SaveChangesAsync(ct);
-            }
-        
-            return Results.Ok(new { device.Id, device.Status, device.RevokedUtc });
+                Id = result.AgentDeviceId,
+                Status = result.Status,
+                RevokedUtc = result.RevokedUtc
+            });
         });
 
         return shopAgents;
