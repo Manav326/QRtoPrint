@@ -27,6 +27,7 @@ public static partial class ShopPrintJobReviewEndpoints
                 GetActorId(principal),
                 request.ReviewedJobIds,
                 request.AcceptedJobIds,
+                request.PdfBrandingEnabled,
                 ct);
 
             return MapBatchReviewResult(result);
