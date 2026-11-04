@@ -134,8 +134,9 @@ test("HTTPS recovery returns the original saved print settings on new and duplic
   }
 });
 
-test("local upload ticket retries preserve an explicitly selected batch identity and name", () => {
+test("local upload ticket retries preserve batch identity and renew the same expired reservation", () => {
   const program = read("../../../src/SmartPrint.Api/Program.cs");
+  const api = read("../src/api.ts");
   const ticketStart = program.indexOf('publicApi.MapPost("/sessions/current/local-upload-tickets"');
   const ticketEnd = program.indexOf('publicApi.MapPost("/sessions/current/local-upload-tickets/{ticketId:guid}/cloud-recovery"', ticketStart);
   assert.ok(ticketStart >= 0 && ticketEnd > ticketStart);
@@ -144,4 +145,19 @@ test("local upload ticket retries preserve an explicitly selected batch identity
   assert.match(ticketRoute, /requestedBatchName is not null && existing\.BatchName != requestedBatchName/);
   assert.match(ticketRoute, /request\.BatchId is null \|\| racedTicket\.BatchId == request\.BatchId\.Value/);
   assert.match(ticketRoute, /requestedBatchName is null \|\| racedTicket\.BatchName == requestedBatchName/);
+  assert.match(ticketRoute, /LocalUploadRecoveryRules\.CanRenewExpiredTicket/);
+  assert.match(ticketRoute, /FOR UPDATE/);
+  assert.match(ticketRoute, /lockedTicket\.ExpiresUtc = renewalNow\.AddMinutes\(15\)/);
+  assert.match(ticketRoute, /station\.PrinterDeviceId == lockedTicket\.PrinterDeviceId/);
+  assert.match(ticketRoute, /printer\.AgentDeviceId == lockedTicket\.AgentDeviceId/);
+  assert.match(ticketRoute, /agent\.LastSeenUtc >= renewalNow\.AddMinutes\(-2\)/);
+
+  const expiredStart = api.indexOf("if (isUncompletedLocalUploadTicketExpired(ticket.completed, ticket.expiresUtc))");
+  const expiredEnd = api.indexOf("if (ticket.completed)", expiredStart);
+  assert.ok(expiredStart >= 0 && expiredEnd > expiredStart);
+  const expiredRecovery = api.slice(expiredStart, expiredEnd);
+  assert.match(expiredRecovery, /uploadCustomerLocalTicketViaCloud/);
+  assert.match(expiredRecovery, /exception\.code === "local_upload_recovery_expired"/);
+  assert.match(expiredRecovery, /clearCustomerLocalUploadAttempt/);
+  assert.match(expiredRecovery, /LocalUploadOutcomeUnknownError/);
 });
