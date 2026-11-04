@@ -119,7 +119,7 @@ public sealed class PrintJobQuoteRulesTests
     [InlineData(1, "DOCUMENT", "Mono", "A4", false, 0, "AUTO", null, null, false)]
     [InlineData(1, "DOCUMENT", "Mono", "A4", false, 101, "AUTO", null, null, false)]
     [InlineData(1, "DOCUMENT", "Mono", "A4", false, 1, "SIDEWAYS", null, null, false)]
-    [InlineData(2, "PHOTO", "Colour", "A4", false, 1, "AUTO", "35x45", 1, false)]
+    [InlineData(2, "PHOTO", "Colour", "A4", false, 1, "AUTO", "35x45", 1, true)]
     [InlineData(1, "PHOTO", "Mono", "A4", false, 1, "AUTO", "35x45", 1, false)]
     [InlineData(1, "PHOTO", "Colour", "A4", true, 1, "AUTO", "35x45", 1, false)]
     [InlineData(1, "PHOTO", "Colour", "A4", false, 2, "AUTO", "35x45", 1, false)]
@@ -127,6 +127,9 @@ public sealed class PrintJobQuoteRulesTests
     [InlineData(1, "PHOTO", "Colour", "A4", false, 1, "AUTO", "35x45", 0, false)]
     [InlineData(1, "PHOTO", "Colour", "A4", false, 1, "AUTO", "35x45", 101, false)]
     [InlineData(1, "DOCUMENT", "Mono", "A4", false, 1, "AUTO", "35x45", 1, false)]
+    [InlineData(2, "PHOTO", "Colour", "A4", false, 1, "AUTO", "35x45", 30, true, 25)]
+    [InlineData(2, "PHOTO", "Colour", "A4", false, 1, "AUTO", "35x45", 30, false, 26)]
+    [InlineData(2, "PHOTO", "Colour", "A4", false, 1, "AUTO", "35x45", 30, false, 0)]
     public void ValidatePrintOptions_accepts_only_supported_document_and_photo_combinations(
         int pageCount,
         string? printKind,
@@ -137,11 +140,12 @@ public sealed class PrintJobQuoteRulesTests
         string orientation,
         string? photoSizeCode,
         int? photoCount,
-        bool expected)
+        bool expected,
+        int? photosPerPage = null)
     {
         var errors = PrintJobQuoteRules.ValidatePrintOptions(
             pageCount, printKind, colourMode, paperSize, isDuplex,
-            copies, orientation, photoSizeCode, photoCount);
+            copies, orientation, photoSizeCode, photoCount, photosPerPage);
 
         Assert.Equal(expected, errors.Count == 0);
         if (!expected)
