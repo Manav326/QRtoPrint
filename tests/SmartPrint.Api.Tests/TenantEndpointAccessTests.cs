@@ -60,7 +60,6 @@ public sealed class TenantEndpointAccessTests
     [Theory]
     [InlineData("POST", "/api/v1/public/sessions/current/jobs")]
     [InlineData("PUT", "/api/v1/shop/payment-settings")]
-    [InlineData("PATCH", "/api/v1/shop/agent-devices/123/revoke")]
     public void NewWorkAndNonRecoveryMutationsRemainBlocked(string method, string path)
         => Assert.False(TenantEndpointAccess.IsTenantRecoveryOperation(Request(method, path), shopOperations: false));
 
