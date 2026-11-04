@@ -78,14 +78,14 @@ function formatDobForPrint(value:string){
 }
 
 function drawPhotoSheetPage(
-  context:CanvasRenderingContext2D,image:HTMLImageElement,canvasWidth:number,size:PhotoSize,copies:number,pageIndex:number,
+  context:CanvasRenderingContext2D,image:HTMLImageElement,canvasWidth:number,size:PhotoSize,copies:number,photosPerPage:number,pageIndex:number,
   zoom:number,focusX:number,focusY:number,adjustments:Adjustments,
   caption:{name:string;dob:string;fontSizePt:number;color:string},
   background:{sourceColor:string|null;targetColor:string;tolerance:number},captionHeightMm:number
 ){
-  const scale=canvasWidth/A4_WIDTH_MM,layout=getPhotoSheetLayout(size,captionHeightMm);
-  const tileHeight=size.heightMm+captionHeightMm,pageStart=pageIndex*layout.perSheet;
-  const pageCopies=Math.max(0,Math.min(layout.perSheet,copies-pageStart));
+  const scale=canvasWidth/A4_WIDTH_MM,layout=getPhotoSheetLayout(size,captionHeightMm,photosPerPage);
+  const tileHeight=size.heightMm+captionHeightMm,pageStart=pageIndex*photosPerPage;
+  const pageCopies=Math.max(0,Math.min(photosPerPage,copies-pageStart));
   context.save();context.setTransform(1,0,0,1,0,0);context.fillStyle="#fff";
   context.fillRect(0,0,canvasWidth,context.canvas.height);context.scale(scale,scale);
   const source=cropSource(image,size,zoom,focusX,focusY);
@@ -93,7 +93,10 @@ function drawPhotoSheetPage(
   const photoW=Math.max(1,Math.round(size.widthMm/25.4*300)),photoH=Math.max(1,Math.round(size.heightMm/25.4*300));
   for(let index=0;index<pageCopies;index++){
     const col=index%layout.columns,row=Math.floor(index/layout.columns);
-    const x=layout.offsetXmm+col*(size.widthMm+3),y=layout.offsetYmm+row*(tileHeight+3);
+    const rowStart=row*layout.columns,rowCount=Math.min(layout.columns,pageCopies-rowStart);
+    const rowWidth=rowCount*size.widthMm+(rowCount-1)*3;
+    const rowOffset=(layout.contentWidthMm-rowWidth)/2;
+    const x=layout.offsetXmm+rowOffset+col*(size.widthMm+3),y=layout.offsetYmm+row*(tileHeight+3);
     const crop=document.createElement("canvas");crop.width=photoW;crop.height=photoH;
     const cropContext=crop.getContext("2d");if(!cropContext)throw new Error("A photo crop could not be prepared.");
     cropContext.filter=filter;cropContext.drawImage(image,source.x,source.y,source.width,source.height,0,0,photoW,photoH);cropContext.filter="none";
@@ -175,6 +178,7 @@ export default function PhotoStudio({
   const [look, setLook] = useState<LookPreset>("natural");
   const [adjustments, setAdjustments] = useState<Adjustments>(LOOKS[0].adjustments);
   const [copiesInput, setCopiesInput] = useState("8");
+  const [photosPerPageInput,setPhotosPerPageInput]=useState("auto");
   const [previewPage,setPreviewPage]=useState(0);
   const [zoom, setZoom] = useState(1);
   const [focusX, setFocusX] = useState(50);
@@ -200,13 +204,21 @@ export default function PhotoStudio({
   const hasCaption=includeFormDetails&&Boolean(photoName.trim()||dateOfBirth.trim());
   const captionFontMm=captionFontSizePt*25.4/72;
   const captionHeightMm=hasCaption?Math.max(7,captionFontMm*2+1.2):0;
-  const layout=useMemo(()=>getPhotoSheetLayout(size,captionHeightMm),[size,captionHeightMm]);
+  const maximumLayout=useMemo(()=>getPhotoSheetLayout(size,captionHeightMm),[size,captionHeightMm]);
+  const requestedPhotosPerPage=photosPerPageInput==="auto"?maximumLayout.perSheet:Number(photosPerPageInput);
+  const photosPerPage=Number.isInteger(requestedPhotosPerPage)&&requestedPhotosPerPage>=1&&requestedPhotosPerPage<=maximumLayout.perSheet
+    ? requestedPhotosPerPage : maximumLayout.perSheet;
+  const layout=useMemo(()=>getPhotoSheetLayout(size,captionHeightMm,photosPerPage),[size,captionHeightMm,photosPerPage]);
   const maxCopies=MAX_PHOTO_COUNT;
   const copies = Math.max(1, Math.min(maxCopies, Number(copiesInput) || 1));
-  const sheetCount = Math.ceil(copies / layout.perSheet);
+  const sheetCount = Math.ceil(copies / photosPerPage);
   const previewPageIndex=Math.max(0,Math.min(previewPage,sheetCount-1));
   const previewPhotoCount=Math.min(layout.perSheet,copies-previewPageIndex*layout.perSheet);
   useEffect(()=>{setPreviewPage(current=>Math.min(current,sheetCount-1));},[sheetCount]);
+  useEffect(()=>{
+    if(photosPerPageInput!=="auto"&&(!Number.isInteger(Number(photosPerPageInput))||Number(photosPerPageInput)>maximumLayout.perSheet))
+      setPhotosPerPageInput("auto");
+  },[photosPerPageInput,maximumLayout.perSheet]);
 
   useEffect(() => {
     const previousOverflow = document.body.style.overflow;
@@ -312,7 +324,7 @@ export default function PhotoStudio({
       return;
     }
     drawPhotoSheetPage(
-      context,image,canvas.width,size,copies,previewPageIndex,zoom,focusX,focusY,adjustments,
+      context,image,canvas.width,size,copies,photosPerPage,previewPageIndex,zoom,focusX,focusY,adjustments,
       {name:photoName,dob:dateOfBirth,fontSizePt:captionFontSizePt,color:captionColor},
       {sourceColor:sourceBackgroundColor,targetColor:targetBackgroundColor,tolerance:backgroundTolerance},captionHeightMm
     );
@@ -354,11 +366,11 @@ export default function PhotoStudio({
     if(!Number.isInteger(parsedCopies)||parsedCopies<1||parsedCopies>maxCopies){setError("Choose between 1 and "+maxCopies+" photos. The A4 page count is calculated automatically.");return;}
     setBusy(true);setError("");
     try{
-      const pages=Math.ceil(parsedCopies/layout.perSheet),jpegPages:Uint8Array[]=[];
+      const pages=Math.ceil(parsedCopies/photosPerPage),jpegPages:Uint8Array[]=[];
       for(let page=0;page<pages;page++){
         const canvas=document.createElement("canvas");canvas.width=A4_WIDTH_PX;canvas.height=A4_HEIGHT_PX;
         const context=canvas.getContext("2d");if(!context)throw new Error("A print canvas could not be created.");
-        drawPhotoSheetPage(context,image,canvas.width,size,parsedCopies,page,zoom,focusX,focusY,adjustments,
+        drawPhotoSheetPage(context,image,canvas.width,size,parsedCopies,photosPerPage,page,zoom,focusX,focusY,adjustments,
           {name:photoName,dob:dateOfBirth,fontSizePt:captionFontSizePt,color:captionColor},
           {sourceColor:sourceBackgroundColor,targetColor:targetBackgroundColor,tolerance:backgroundTolerance},captionHeightMm);
         let blob=await canvasToBlob(canvas,"image/jpeg",.9);
@@ -370,7 +382,7 @@ export default function PhotoStudio({
       const pdf=new Blob([buffer],{type:"application/pdf"});
       if(pdf.size>MAX_FILE_BYTES)throw new Error("The prepared photo PDF exceeds SmartPrint's 20 MB file limit. Use a smaller original photo or reduce the number of copies.");
       const output=new File([pdf],safeBaseName(source.name)+"-"+size.id+"-photos.pdf",{type:"application/pdf",lastModified:Date.now()});
-      await onApply([{file:output,sizeCode:size.id,photoCount:parsedCopies,photosPerPage:layout.perSheet}]);
+      await onApply([{file:output,sizeCode:size.id,photoCount:parsedCopies,photosPerPage}]);
     }catch(cause){setError(cause instanceof Error?cause.message:"Photo sheet creation failed. Try again with this photo.");}
     finally{setBusy(false);}
   }
@@ -468,12 +480,19 @@ export default function PhotoStudio({
             <label className={styles.fieldLabel}>Number of photos
               <input type="number" min="1" max={maxCopies} step="1" inputMode="numeric" value={copiesInput} onChange={event => setCopiesInput(event.target.value)} onBlur={() => setCopiesInput(String(copies))}/>
             </label>
+            <label className={styles.fieldLabel}>Photos per A4 page
+              <select value={photosPerPageInput} onChange={event=>setPhotosPerPageInput(event.target.value)}>
+                <option value="auto">Fit as many as possible ({maximumLayout.perSheet})</option>
+                {Array.from({length:maximumLayout.perSheet},(_,index)=>index+1).map(count=><option key={count} value={String(count)}>{count} per page</option>)}
+              </select>
+            </label>
             <div className={styles.sheetSummary}>
               <div><span>Photo dimensions</span><strong>{size.widthMm} × {size.heightMm} mm</strong></div>
               <div><span>Photos per A4 page</span><strong>{layout.perSheet}</strong></div>
               <div><span>Grid alignment</span><strong>{layout.columns} × {layout.rows}</strong></div>
               <div><span>A4 pages in this job</span><strong>{sheetCount}</strong></div>
               <div><span>Preview page</span><strong>{previewPageIndex+1} of {sheetCount}</strong></div>
+              {copies>photosPerPage&&copies%photosPerPage!==0&&<small>Final A4 page: {copies%photosPerPage} photos, with the remaining sheet area left blank.</small>}
               <small>Shop rate: {formatPhotoRate(photoPrices[size.id] ?? 0)} per photo. The server confirms the final total in your quote.</small>
             </div>
           </>}
