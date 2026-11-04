@@ -366,7 +366,8 @@ test("offline requests use the existing secure queue and owner changes require c
   const api = read("../src/api.ts");
   const recovery = read("../../../src/SmartPrint.Api/Endpoints/PublicCloudRecoveryEndpoints.cs");
   const settings = read("../../../src/SmartPrint.Api/Endpoints/ShopPrintJobSettingsEndpoints.cs");
-  const server = `${recovery}\n${settings}`;
+  const settingsService = read("../../../src/SmartPrint.Api/Services/ShopPrintJobSettingsService.cs");
+  const server = `${recovery}\n${settings}\n${settingsService}`;
 
   assert.ok(app.includes("secureQueueFallbackEnabled"));
   assert.ok(recovery.includes('publicApi.MapPost("/sessions/current/local-upload-tickets/{ticketId:guid}/cloud-recovery"'));
@@ -374,7 +375,7 @@ test("offline requests use the existing secure queue and owner changes require c
   assert.doesNotMatch(api, /X-Print-Queue-Fallback|allowQueueFallback/);
   assert.doesNotMatch(server, /X-Print-Queue-Fallback|queueFallbackRequested/);
   assert.ok(settings.includes('shop.MapPatch("/print-jobs/{jobId:guid}/settings"'));
-  assert.ok(server.includes('job.Status = "AWAITING_CUSTOMER_APPROVAL";'));
+  assert.ok(settingsService.includes('job.Status = "AWAITING_CUSTOMER_APPROVAL";'));
   assert.ok(app.includes("onUpdateSettings={updatePrintJobSettings}"));
 });
 
