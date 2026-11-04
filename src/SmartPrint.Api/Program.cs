@@ -107,19 +107,19 @@ builder.Services.AddHostedService<DocumentRetentionWorker>();
 builder.Services.AddRateLimiter(options =>
 {
     options.AddPolicy("authentication", context =>
-        RateLimitPartition.GetFixedWindowLimiter(GetRateLimitPartitionKey(context),
+        RateLimitPartition.GetFixedWindowLimiter(RateLimitPartitionKeys.GetRateLimitPartitionKey(context),
             _ => new FixedWindowRateLimiterOptions { PermitLimit = 20, Window = TimeSpan.FromMinutes(1), QueueLimit = 0 }));
     options.AddPolicy("public-api", context =>
-        RateLimitPartition.GetFixedWindowLimiter(GetRateLimitPartitionKey(context),
+        RateLimitPartition.GetFixedWindowLimiter(RateLimitPartitionKeys.GetRateLimitPartitionKey(context),
             _ => new FixedWindowRateLimiterOptions { PermitLimit = 120, Window = TimeSpan.FromMinutes(1), QueueLimit = 0 }));
     options.AddPolicy("agent-api", context =>
-        RateLimitPartition.GetFixedWindowLimiter(GetAgentRateLimitPartitionKey(context),
+        RateLimitPartition.GetFixedWindowLimiter(RateLimitPartitionKeys.GetAgentRateLimitPartitionKey(context),
             _ => new FixedWindowRateLimiterOptions { PermitLimit = 30, Window = TimeSpan.FromMinutes(1), QueueLimit = 0 }));
     options.AddPolicy("qr-session", context =>
-        RateLimitPartition.GetFixedWindowLimiter(GetRateLimitPartitionKey(context),
+        RateLimitPartition.GetFixedWindowLimiter(RateLimitPartitionKeys.GetRateLimitPartitionKey(context),
             _ => new FixedWindowRateLimiterOptions { PermitLimit = 30, Window = TimeSpan.FromMinutes(1), QueueLimit = 0 }));
     options.AddPolicy("document-upload", context =>
-        RateLimitPartition.GetFixedWindowLimiter(GetSessionRateLimitPartitionKey(context),
+        RateLimitPartition.GetFixedWindowLimiter(RateLimitPartitionKeys.GetSessionRateLimitPartitionKey(context),
             _ => new FixedWindowRateLimiterOptions { PermitLimit = 30, Window = TimeSpan.FromMinutes(1), QueueLimit = 0 }));
 });
 var configuredCorsOrigins = builder.Configuration.GetSection("Cors:AllowedOrigins")
@@ -163,79 +163,10 @@ app.UseRateLimiter();
 app.UseAuthentication();
 app.UseAuthorization();
 
-app.MapSystemEndpoints();
+app.MapApiEndpoints(signingKeyText, issuer, audience, corsOrigins);
 
-var platform = app.MapGroup("/api/v1/platform")
-    .RequireAuthorization(PlatformAdminAuthorization.PolicyName);
-
-platform.MapSubscriptionPlanEndpoints();
-platform.MapPlatformSubscriptionEndpoints();
-platform.MapPlatformOperationalSettingsEndpoints();
-
-platform.MapPlatformOverviewEndpoints();
-
-platform.MapPlatformTenantStatusEndpoints();
+await app.RunAsync();
 
 
-
-app.MapAuthenticationEndpoints();
-
-app.MapCustomerEndpoints();
-
-var shop = app.MapGroup("/api/v1/shop").RequireAuthorization()
-    .AddEndpointFilter((context, next) => TenantEndpointAccess.EnforceTenantActiveAsync(context, next, allowSubscriptionRead: true));
-
-shop.MapShopAccountEndpoints();
-
-shop.MapShopPrinterEndpoints();
-
-shop.MapShopStationEndpoints();
-
-shop.MapShopPricingEndpoints();
-
-shop.MapShopPaymentEndpoints();
-
-shop.MapShopCustomerEndpoints();
-
-shop.MapShopPrintJobQueryEndpoints();
-
-shop.MapShopReportEndpoints();
-
-shop.MapShopPrintJobReadEndpoints(signingKeyText, issuer, audience);
-
-shop.MapShopPrintJobAssignmentEndpoints();
-
-shop.MapShopPrintJobDispatchEndpoints();
-
-shop.MapShopPrintJobReviewEndpoints();
-
-var shopAgents = app.MapGroup("/api/v1/shop").RequireAuthorization()
-    .AddEndpointFilter((context, next) => TenantEndpointAccess.EnforceTenantActiveAsync(context, next, allowSubscriptionRead: false));
-
-shopAgents.MapShopAgentManagementEndpoints();
-
-var agentApi = app.MapGroup("/api/v1/agent").AllowAnonymous()
-    .RequireRateLimiting("agent-api")
-    .AddEndpointFilter((context, next) => TenantEndpointAccess.EnforceTenantActiveAsync(context, next, allowSubscriptionRead: false));
-
-agentApi.MapAgentEndpoints(signingKeyText, issuer, audience, corsOrigins);
-
-var publicApi = app.MapGroup("/api/v1/public").AllowAnonymous()
-    .RequireRateLimiting("public-api")
-    .AddEndpointFilter((context, next) => TenantEndpointAccess.EnforceTenantActiveAsync(context, next, allowSubscriptionRead: false));
-
-publicApi.MapPublicJobEndpoints();
-publicApi.MapPublicUploadEndpoints();
-publicApi.MapPublicPaymentEndpoints();
-publicApi.MapPublicSessionEndpoints();
-
-static string GetRateLimitPartitionKey(HttpContext context) =>
-    context.Connection.RemoteIpAddress?.ToString() ?? "unknown";
-
-static string GetSessionRateLimitPartitionKey(HttpContext context) =>
-    GetRateLimitPartitionKey(context);
-
-static string GetAgentRateLimitPartitionKey(HttpContext context) =>
-    GetRateLimitPartitionKey(context);await app.RunAsync();
 
 public partial class Program { }
