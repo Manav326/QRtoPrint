@@ -1702,7 +1702,19 @@ export async function downloadShopDocument(
       lastError = new ApiError(detail || `Local document preview failed (${response.status}).`, response.status);
       if ([401, 403, 404, 409, 415].includes(response.status)) break;
     } catch (exception) {
-      lastError = exception instanceof Error ? exception : new Error("Could not reach the paired shop computer.");
+      if (exception instanceof Error && exception.name === "AbortError") {
+        lastError = new ApiError(
+          "The paired shop computer did not respond. Check that the Windows Print Agent is running and connected, then try again.",
+          0
+        );
+      } else if (exception instanceof TypeError) {
+        lastError = new ApiError(
+          "Could not connect to the paired shop computer. Check that the Windows Print Agent is running and allowed through Windows Firewall.",
+          0
+        );
+      } else {
+        lastError = exception instanceof Error ? exception : new Error("Could not reach the paired shop computer.");
+      }
     } finally {
       window.clearTimeout(timeout);
     }
