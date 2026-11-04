@@ -236,11 +236,6 @@ class MainActivity : AppCompatActivity() {
         handleShareIntent(intent)
     }
 
-    override fun onDestroy() {
-        window.clearFlags(WindowManager.LayoutParams.FLAG_SECURE)
-        super.onDestroy()
-    }
-
     override fun onSaveInstanceState(outState: Bundle) {
         outState.putBoolean("pendingScanNeedsDestination", pendingScanNeedsDestination)
         outState.putString("pendingScanDestinationPath", pendingScanDestinationPath)
@@ -416,6 +411,7 @@ class MainActivity : AppCompatActivity() {
         documentViewer?.dispose()
         documentViewer = null
         clearCustomerUploadPdfPreviews()
+        window.clearFlags(WindowManager.LayoutParams.FLAG_SECURE)
         super.onDestroy()
     }
 
