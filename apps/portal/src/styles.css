@@ -2982,3 +2982,21 @@ html[data-theme="dark"] .print-kind-tag--document{color:#b9d7ff;background:#2036
 @media(max-width:560px) {
   .batch-branding-setting { align-items:flex-start; flex-direction:column; gap:11px; }
 }
+
+
+/* Customer-facing notice for a shop-selected PDF footer. */
+.customer-branding-note {
+  display:flex;
+  align-items:flex-start;
+  gap:10px;
+  margin:12px 0;
+  padding:12px 14px;
+  border:1px solid var(--border);
+  border-radius:12px;
+  background:var(--surface-2);
+  color:var(--muted);
+  font-size:11px;
+  line-height:1.55;
+}
+.customer-branding-note > svg { flex:0 0 auto; margin-top:1px; color:var(--accent); }
+.customer-branding-note strong { color:var(--text); font-weight:800; }

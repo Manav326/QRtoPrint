@@ -1440,6 +1440,7 @@ export interface CustomerJobStatus {
   quotedAmountMinor: number;
   quoteExpiresUtc?: string | null;
   rejectedPageNumbersJson?: string;
+  pdfBrandingEnabled?: boolean;
   updatedUtc: string;
   timeline?: Array<{ newStatus: string; actorType: string; createdUtc: string }>;
   payment?: CustomerPayment | null;

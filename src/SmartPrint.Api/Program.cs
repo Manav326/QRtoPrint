@@ -8137,6 +8137,7 @@ publicApi.MapGet("/jobs/{jobId:guid}/status", async (
             item.QuotedAmountMinor,
             item.QuoteExpiresUtc,
             item.RejectedPageNumbersJson,
+            item.PdfBrandingEnabled,
             item.UpdatedUtc
         })
         .SingleOrDefaultAsync(ct);
