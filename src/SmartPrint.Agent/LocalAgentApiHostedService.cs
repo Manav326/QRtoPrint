@@ -521,23 +521,47 @@ public sealed class LocalAgentApiHostedService(
                         authorization.QuotedAmountMinor,
                         async () =>
                         {
-                            using var completeRequest = new HttpRequestMessage(
-                                HttpMethod.Post,
-                                $"api/v1/agent/local-document-photo-revisions/{jobId}/complete")
+                            for (var attempt = 0; attempt < 2; attempt++)
                             {
-                                Content = JsonContent.Create(revisionRequest)
-                            };
-                            completeRequest.Headers.Add("X-Print-Agent-Id", credentials.AgentDeviceId.ToString());
-                            completeRequest.Headers.Add("X-Print-Agent-Secret", credentials.AgentSecret);
-                            completeRequest.Headers.Add("X-Print-Photo-Revision-Grant", grantToken);
-                            using var completeResponse = await client.SendAsync(completeRequest, ct);
-                            if (!completeResponse.IsSuccessStatusCode)
-                            {
-                                var detail = await completeResponse.Content.ReadAsStringAsync(ct);
-                                throw new InvalidOperationException(string.IsNullOrWhiteSpace(detail)
-                                    ? $"The cloud service rejected the local photo revision ({(int)completeResponse.StatusCode})."
-                                    : detail);
+                                using var completeRequest = new HttpRequestMessage(
+                                    HttpMethod.Post,
+                                    $"api/v1/agent/local-document-photo-revisions/{jobId}/complete")
+                                {
+                                    Content = JsonContent.Create(revisionRequest)
+                                };
+                                completeRequest.Headers.Add("X-Print-Agent-Id", credentials.AgentDeviceId.ToString());
+                                completeRequest.Headers.Add("X-Print-Agent-Secret", credentials.AgentSecret);
+                                completeRequest.Headers.Add("X-Print-Photo-Revision-Grant", grantToken);
+                                HttpResponseMessage completeResponse;
+                                try
+                                {
+                                    completeResponse = await client.SendAsync(completeRequest, ct);
+                                }
+                                catch (Exception exception) when (
+                                    attempt == 0 &&
+                                    !ct.IsCancellationRequested &&
+                                    exception is HttpRequestException or TaskCanceledException)
+                                {
+                                    logger.LogWarning("Local photo revision completion response was interrupted for job {JobId}; retrying the same idempotent request.", jobId);
+                                    continue;
+                                }
+
+                                using (completeResponse)
+                                {
+                                    if (completeResponse.IsSuccessStatusCode) return;
+                                    var detail = await completeResponse.Content.ReadAsStringAsync(ct);
+                                    if (attempt == 0 && (int)completeResponse.StatusCode >= 500)
+                                    {
+                                        logger.LogWarning("Local photo revision completion for job {JobId} returned HTTP {StatusCode}; retrying once.", jobId, (int)completeResponse.StatusCode);
+                                        continue;
+                                    }
+                                    throw new InvalidOperationException(string.IsNullOrWhiteSpace(detail)
+                                        ? $"The cloud service rejected the local photo revision ({(int)completeResponse.StatusCode})."
+                                        : detail);
+                                }
                             }
+
+                            throw new HttpRequestException("The cloud service did not confirm the local photo revision after a retry.");
                         },
                         ct);
                 }
