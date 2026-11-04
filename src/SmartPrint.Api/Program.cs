@@ -6268,7 +6268,7 @@ publicApi.MapPost("/sessions/current/local-upload-tickets", async (
         {
             await using var renewalTransaction = await db.Database.BeginTransactionAsync(ct);
             var lockedTickets = await db.LocalPrintUploadTickets.FromSqlInterpolated(
-                $"SELECT * FROM \\"LocalPrintUploadTickets\\" WHERE \\"Id\\" = {existing.Id} AND \\"TenantId\\" = {session.TenantId} AND \\"CustomerSessionId\\" = {session.Id} FOR UPDATE")
+                $"SELECT * FROM \"LocalPrintUploadTickets\" WHERE \"Id\" = {existing.Id} AND \"TenantId\" = {session.TenantId} AND \"CustomerSessionId\" = {session.Id} FOR UPDATE")
                 .ToListAsync(ct);
             var lockedTicket = lockedTickets.SingleOrDefault();
             if (lockedTicket is not null &&
