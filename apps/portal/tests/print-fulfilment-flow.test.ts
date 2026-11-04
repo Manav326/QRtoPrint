@@ -100,3 +100,34 @@ test("reassigning a blocked queued job clears the previous printer failure", () 
   const spoolerReset = program.indexOf("batchJob.SpoolerStatus = null;", resetStart);
   assert.ok(resetStart >= 0 && failureReset > resetStart && spoolerReset > failureReset);
 });
+
+test("cloud upload retries must match the original file, batch and selected print settings", () => {
+  const program = read("../../../src/SmartPrint.Api/Program.cs");
+  const routeStart = program.indexOf('publicApi.MapPost("/sessions/current/jobs"');
+  const routeEnd = program.indexOf('publicApi.MapPost("/sessions/current/local-upload-tickets"', routeStart);
+  assert.ok(routeStart >= 0 && routeEnd > routeStart);
+  const route = program.slice(routeStart, routeEnd);
+  const formRead = route.indexOf("await context.Request.ReadFormAsync(ct)");
+  const existingLookup = route.indexOf("var existing = await db.PrintJobs.AsNoTracking()");
+  const batchPaymentGate = route.indexOf("var batchCheckoutLocked =");
+  assert.ok(formRead >= 0 && existingLookup > formRead);
+  assert.ok(batchPaymentGate > existingLookup);
+  assert.match(route, /SHA256\.HashDataAsync\(existingInput, ct\)/);
+  for (const setting of ["Copies", "ColourMode", "PaperSize", "IsDuplex", "Orientation"])
+    assert.ok(route.includes("existing."+setting), `Retry must compare ${setting}.`);
+  assert.match(route, /existingDocument\.Sha256, suppliedSha/);
+  assert.match(route, /existingDocument\.OriginalFileName != originalName/);
+  assert.match(route, /existingDocument\.SizeBytes != file\.Length/);
+});
+
+test("HTTPS recovery returns the original saved print settings on new and duplicate responses", () => {
+  const program = read("../../../src/SmartPrint.Api/Program.cs");
+  const recoveryStart = program.indexOf('publicApi.MapPost("/sessions/current/local-upload-tickets/{ticketId:guid}/cloud-recovery"');
+  const recoveryEnd = program.indexOf('publicApi.MapPost("/jobs/{jobId:guid}/quote"', recoveryStart);
+  assert.ok(recoveryStart >= 0 && recoveryEnd > recoveryStart);
+  const recovery = program.slice(recoveryStart, recoveryEnd);
+  for (const entity of ["preflightJob", "existingJob", "job"]) {
+    for (const property of ["ColourMode", "PaperSize", "IsDuplex", "Orientation", "PricingVersion"])
+      assert.ok(recovery.includes(`${entity}.${property}`), `Recovery must return ${entity}.${property}.`);
+  }
+});
