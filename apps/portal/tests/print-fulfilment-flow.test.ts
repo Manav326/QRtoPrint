@@ -146,15 +146,23 @@ test("HTTPS recovery returns the original saved print settings on new and duplic
   assert.match(service, /Document: existingDocument/);
 });
 
-test("local Agent completion creates the job with the customer's ticket settings", () => {
+test("local Agent completion validates and finalizes the claimed ticket through its service", () => {
   const source = readApi("AgentLocalUploadEndpoints.cs");
   const service = read("../../../src/SmartPrint.Api/Services/AgentLocalUploadCompletionService.cs");
   const completeStart = source.indexOf('agentApi.MapPost("/local-uploads/{ticketId:guid}/complete"');
   const serviceStart = service.indexOf("public async Task<AgentLocalUploadCompletionResult> CompleteAsync");
-  const jobStart = service.indexOf("var job = new PrintJob", serviceStart);
+  const transactionStart = service.indexOf("private async Task<AgentLocalUploadCompletionResult> CommitCompletionAsync");
+  const jobStart = service.indexOf("var job = new PrintJob", transactionStart);
   const documentStart = service.indexOf("var printDocument = new PrintDocument", jobStart);
-  assert.ok(completeStart >= 0 && serviceStart >= 0 && jobStart > serviceStart && documentStart > jobStart);
-  assert.ok(source.includes("completionService.CompleteAsync(ticket, device, request, now, ct)"));
+  assert.ok(completeStart >= 0 && serviceStart >= 0 && transactionStart > serviceStart);
+  assert.ok(jobStart > transactionStart && documentStart > jobStart);
+  assert.ok(source.includes("completionService.CompleteAsync("));
+  assert.match(service, /LocalUploadGrantValidator\.IsValid/);
+  assert.match(service, /LocalUploadCompletionRules\.MatchesTicket/);
+  assert.match(service, /LocalUploadCompletionRules\.HasValidPageAnalysis/);
+  assert.match(service, /ticket\.ClaimLeaseExpiresUtc <= now/);
+  assert.match(service, /GetForTenantAsync/);
+  assert.match(service, /PlanEntitlementRules\.AllowsDocument/);
   assert.match(service, /BeginTransactionAsync\(cancellationToken\)/);
   assert.match(service, /ExecuteUpdateAsync/);
   assert.match(service, /AcquireQuotaLockAsync/);
