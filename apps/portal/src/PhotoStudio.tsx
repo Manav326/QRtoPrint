@@ -1,9 +1,10 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type MouseEvent } from "react";
 import {
   Check, ChevronDown, Crop, Image as ImageIcon, RotateCcw, SlidersHorizontal,
-  Sparkles, X, ZoomIn, ZoomOut
+  Sparkles, X, ZoomIn, ZoomOut, Type, PaintBucket, Pipette
 } from "lucide-react";
 import styles from "./PhotoStudio.module.css";
+import { A4_HEIGHT_MM, A4_WIDTH_MM, A4_HEIGHT_PX, A4_WIDTH_PX, buildPhotoPdf, getPhotoSheetLayout } from "./photo-studio-layout";
 
 export type PreparedPhotoSheet = { file: File; sizeCode: string; photoCount: number };
 
@@ -16,18 +17,13 @@ type PhotoSize = {
 };
 
 type LookPreset = "natural" | "warm" | "crisp" | "mono";
-type Tool = "crop" | "look" | "sheet";
+type Tool = "crop" | "look" | "sheet" | "text" | "background";
 
 type Adjustments = {
   brightness: number;
   contrast: number;
   saturation: number;
 };
-
-const A4_WIDTH_MM = 210;
-const A4_HEIGHT_MM = 297;
-const A4_WIDTH_PX = 2480;
-const A4_HEIGHT_PX = 3508;
 
 function formatPhotoRate(minor: number) {
   return new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 2 }).format(minor / 100);
@@ -48,12 +44,65 @@ const LOOKS: Array<{ id: LookPreset; label: string; note: string; adjustments: A
   { id: "mono", label: "Black & white", note: "Monochrome photo", adjustments: { brightness: 102, contrast: 108, saturation: 0 } }
 ];
 
-function getLayout(size: PhotoSize) {
-  const marginMm = 8;
-  const gapMm = 3;
-  const columns = Math.max(1, Math.floor((A4_WIDTH_MM - marginMm * 2 + gapMm) / (size.widthMm + gapMm)));
-  const rows = Math.max(1, Math.floor((A4_HEIGHT_MM - marginMm * 2 + gapMm) / (size.heightMm + gapMm)));
-  return { marginMm, gapMm, columns, rows, perSheet: columns * rows };
+function parseHexColor(value: string): [number, number, number] | null {
+  const match=/^#([0-9a-f]{6})$/i.exec(value);
+  if(!match)return null;
+  return [Number.parseInt(match[1].slice(0,2),16),Number.parseInt(match[1].slice(2,4),16),Number.parseInt(match[1].slice(4,6),16)];
+}
+function replaceEdgeBackground(canvas: HTMLCanvasElement, sourceHex: string, targetHex: string, tolerance: number) {
+  const source=parseHexColor(sourceHex),target=parseHexColor(targetHex);
+  if(!source||!target||tolerance<1)return;
+  const context=canvas.getContext("2d");if(!context)return;
+  const {width,height}=canvas,pixels=context.getImageData(0,0,width,height),data=pixels.data;
+  const visited=new Uint8Array(width*height),queue=new Int32Array(width*height);
+  let head=0,tail=0;const limit=tolerance*tolerance;
+  const candidate=(i:number)=>{const p=i*4,r=data[p]-source[0],g=data[p+1]-source[1],b=data[p+2]-source[2];return r*r+g*g+b*b<=limit;};
+  const add=(i:number)=>{if(visited[i]||!candidate(i))return;visited[i]=1;queue[tail++]=i;};
+  for(let x=0;x<width;x++){add(x);add((height-1)*width+x);}
+  for(let y=1;y<height-1;y++){add(y*width);add(y*width+width-1);}
+  while(head<tail){const i=queue[head++],x=i%width,y=Math.floor(i/width);if(x>0)add(i-1);if(x+1<width)add(i+1);if(y>0)add(i-width);if(y+1<height)add(i+width);}
+  for(let n=0;n<tail;n++){
+    const p=queue[n]*4,r=data[p]-source[0],g=data[p+1]-source[1],b=data[p+2]-source[2];
+    const distance=Math.sqrt(r*r+g*g+b*b),blend=Math.max(0,Math.min(1,(tolerance-distance+5)/10));
+    data[p]=Math.round(data[p]*(1-blend)+target[0]*blend);
+    data[p+1]=Math.round(data[p+1]*(1-blend)+target[1]*blend);
+    data[p+2]=Math.round(data[p+2]*(1-blend)+target[2]*blend);
+  }
+  context.putImageData(pixels,0,0);
+}
+function drawPhotoSheetPage(
+  context:CanvasRenderingContext2D,image:HTMLImageElement,canvasWidth:number,size:PhotoSize,copies:number,pageIndex:number,
+  zoom:number,focusX:number,focusY:number,adjustments:Adjustments,
+  caption:{name:string;dob:string;fontSizePt:number;color:string},
+  background:{sourceColor:string|null;targetColor:string;tolerance:number},captionHeightMm:number
+){
+  const scale=canvasWidth/A4_WIDTH_MM,layout=getPhotoSheetLayout(size,captionHeightMm);
+  const tileHeight=size.heightMm+captionHeightMm,pageStart=pageIndex*layout.perSheet;
+  const pageCopies=Math.max(0,Math.min(layout.perSheet,copies-pageStart));
+  context.save();context.setTransform(1,0,0,1,0,0);context.fillStyle="#fff";
+  context.fillRect(0,0,canvasWidth,context.canvas.height);context.scale(scale,scale);
+  const source=cropSource(image,size,zoom,focusX,focusY);
+  const filter=`brightness(${adjustments.brightness}%) contrast(${adjustments.contrast}%) saturate(${adjustments.saturation}%)`;
+  const photoW=Math.max(1,Math.round(size.widthMm/25.4*300)),photoH=Math.max(1,Math.round(size.heightMm/25.4*300));
+  for(let index=0;index<pageCopies;index++){
+    const col=index%layout.columns,row=Math.floor(index/layout.columns);
+    const x=layout.offsetXmm+col*(size.widthMm+3),y=layout.offsetYmm+row*(tileHeight+3);
+    const crop=document.createElement("canvas");crop.width=photoW;crop.height=photoH;
+    const cropContext=crop.getContext("2d");if(!cropContext)throw new Error("A photo crop could not be prepared.");
+    cropContext.filter=filter;cropContext.drawImage(image,source.x,source.y,source.width,source.height,0,0,photoW,photoH);cropContext.filter="none";
+    if(background.sourceColor)replaceEdgeBackground(crop,background.sourceColor,background.targetColor,background.tolerance);
+    context.drawImage(crop,x,y,size.widthMm,size.heightMm);
+    context.save();context.strokeStyle="#7b8491";context.lineWidth=.18;context.setLineDash([.8,.8]);context.strokeRect(x,y,size.widthMm,size.heightMm);context.restore();
+    if(captionHeightMm>0){
+      const lines=[caption.name.trim().slice(0,48),caption.dob.trim()?("DOB: "+caption.dob.trim().slice(0,24)):""].filter(Boolean);
+      const fontMm=caption.fontSizePt*25.4/72;context.save();context.fillStyle=caption.color;
+      context.font=`600 ${fontMm}px Arial, sans-serif`;context.textAlign="center";context.textBaseline="top";
+      const lineHeight=Math.max(fontMm+.35,1.7);
+      lines.forEach((line,i)=>context.fillText(line,x+size.widthMm/2,y+size.heightMm+.45+i*lineHeight,size.widthMm-1.2));
+      context.restore();
+    }
+  }
+  context.restore();
 }
 
 function cropSource(image: HTMLImageElement, size: PhotoSize, zoom: number, focusX: number, focusY: number) {
@@ -170,11 +219,22 @@ export default function PhotoStudio({
   const [focusY, setFocusY] = useState(50);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [photoName,setPhotoName]=useState("");
+  const [dateOfBirth,setDateOfBirth]=useState("");
+  const [captionFontSizePt,setCaptionFontSizePt]=useState(6);
+  const [captionColor,setCaptionColor]=useState("#202020");
+  const [targetBackgroundColor,setTargetBackgroundColor]=useState("#ffffff");
+  const [sourceBackgroundColor,setSourceBackgroundColor]=useState<string|null>(null);
+  const [backgroundTolerance,setBackgroundTolerance]=useState(30);
+  const [pickingBackground,setPickingBackground]=useState(false);
 
   const availableSizes = PHOTO_SIZES.filter(item => (photoPrices[item.id] ?? 0) > 0);
   const size = availableSizes.find(item => item.id === sizeId) ?? availableSizes[0] ?? PHOTO_SIZES[0];
-  const layout = useMemo(() => getLayout(size), [size]);
-  const maxCopies = Math.min(100, layout.perSheet * 20);
+  const hasCaption=Boolean(photoName.trim()||dateOfBirth.trim());
+  const captionFontMm=captionFontSizePt*25.4/72;
+  const captionHeightMm=hasCaption?Math.max(7,captionFontMm*2+1.2):0;
+  const layout=useMemo(()=>getPhotoSheetLayout(size,captionHeightMm),[size,captionHeightMm]);
+  const maxCopies=Math.min(100,layout.perSheet*20);
   const copies = Math.max(1, Math.min(maxCopies, Number(copiesInput) || 1));
   const sheetCount = Math.ceil(copies / layout.perSheet);
   const previewCapacity = layout.perSheet;
@@ -215,10 +275,33 @@ export default function PhotoStudio({
       return;
     }
     drawPhotoSheetPage(
-      context, image, canvas.width, size,
-      previewCapacity, 0, zoom, focusX, focusY, adjustments
+      context,image,canvas.width,size,Math.min(copies,previewCapacity),0,zoom,focusX,focusY,adjustments,
+      {name:photoName,dob:dateOfBirth,fontSizePt:captionFontSizePt,color:captionColor},
+      {sourceColor:sourceBackgroundColor,targetColor:targetBackgroundColor,tolerance:backgroundTolerance},captionHeightMm
     );
-  }, [image, size, previewCapacity, zoom, focusX, focusY, adjustments]);
+  },[image,size,previewCapacity,copies,zoom,focusX,focusY,adjustments,photoName,dateOfBirth,captionFontSizePt,captionColor,sourceBackgroundColor,targetBackgroundColor,backgroundTolerance,captionHeightMm]);
+
+  function handleBackgroundPick(event:MouseEvent<HTMLCanvasElement>){
+    if(!pickingBackground||!image)return;
+    const canvas=event.currentTarget,bounds=canvas.getBoundingClientRect();
+    if(!bounds.width||!bounds.height)return;
+    const px=(event.clientX-bounds.left)/bounds.width*canvas.width,py=(event.clientY-bounds.top)/bounds.height*canvas.height;
+    const xMm=px/(canvas.width/A4_WIDTH_MM),yMm=py/(canvas.height/A4_HEIGHT_MM);
+    const tileH=size.heightMm+captionHeightMm;
+    const col=Math.floor((xMm-layout.offsetXmm)/(size.widthMm+3)),row=Math.floor((yMm-layout.offsetYmm)/(tileH+3));
+    if(col<0||col>=layout.columns||row<0||row>=layout.rows)return;
+    const localX=xMm-layout.offsetXmm-col*(size.widthMm+3),localY=yMm-layout.offsetYmm-row*(tileH+3);
+    if(localX<0||localX>size.widthMm||localY<0||localY>size.heightMm)return;
+    const crop=cropSource(image,size,zoom,focusX,focusY);
+    const sx=Math.max(0,Math.min(image.naturalWidth-1,Math.floor(crop.x+localX/size.widthMm*crop.width)));
+    const sy=Math.max(0,Math.min(image.naturalHeight-1,Math.floor(crop.y+localY/size.heightMm*crop.height)));
+    const sampler=document.createElement("canvas");sampler.width=1;sampler.height=1;
+    const ctx=sampler.getContext("2d",{willReadFrequently:true});if(!ctx){setError("The background colour could not be sampled.");return;}
+    ctx.drawImage(image,sx,sy,1,1,0,0,1,1);
+    const [r,g,b]=ctx.getImageData(0,0,1,1).data;
+    setSourceBackgroundColor("#"+[r,g,b].map(v=>v.toString(16).padStart(2,"0")).join(""));
+    setPickingBackground(false);
+  }
 
   function selectLook(nextLook: LookPreset) {
     const preset = LOOKS.find(item => item.id === nextLook) ?? LOOKS[0];
@@ -226,54 +309,35 @@ export default function PhotoStudio({
     setAdjustments(preset.adjustments);
   }
 
-  async function createPrintSheets() {
-    if (!image || busy) return;
-    const parsedCopies = Number(copiesInput);
-    if (!Number.isInteger(parsedCopies) || parsedCopies < 1 || parsedCopies > maxCopies) {
-      setError("Choose between 1 and " + maxCopies + " photo copies so the result stays within the 20-sheet batch limit.");
-      return;
-    }
-    setBusy(true);
-    setError("");
-    try {
-      const numberOfSheets = Math.ceil(parsedCopies / layout.perSheet);
-      const outputs: PreparedPhotoSheet[] = [];
-      for (let page = 0; page < numberOfSheets; page += 1) {
-        const pageCopies = Math.min(layout.perSheet, parsedCopies - page * layout.perSheet);
-        const canvas = document.createElement("canvas");
-        canvas.width = A4_WIDTH_PX;
-        canvas.height = A4_HEIGHT_PX;
-        const context = canvas.getContext("2d");
-        if (!context) throw new Error("A print canvas could not be created.");
-        drawPhotoSheetPage(
-          context, image, canvas.width, size, parsedCopies,
-          page, zoom, focusX, focusY, adjustments
-        );
-        let blob = await canvasToBlob(canvas, "image/png");
-        let extension = "png";
-        let mediaType = "image/png";
-        if (blob.size > MAX_FILE_BYTES) {
-          blob = await canvasToBlob(canvas, "image/jpeg", 0.94);
-          extension = "jpg";
-          mediaType = "image/jpeg";
-        }
-        if (blob.size > MAX_FILE_BYTES) {
-          throw new Error("The print-ready sheet is larger than SmartPrint's 20 MB file limit. Use a smaller photo or a lower-resolution original.");
-        }
-        const name = safeBaseName(source.name) + "-" + size.id + "-sheet-" + String(page + 1).padStart(2, "0") + "." + extension;
-        outputs.push({ file: new File([blob], name, { type: mediaType, lastModified: Date.now() }), sizeCode: size.id, photoCount: pageCopies });
+  async function createPrintSheets(){
+    if(!image||busy)return;
+    const parsedCopies=Number(copiesInput);
+    if(!Number.isInteger(parsedCopies)||parsedCopies<1||parsedCopies>maxCopies){setError("Choose between 1 and "+maxCopies+" photo copies so the result stays within the 20-sheet batch limit.");return;}
+    setBusy(true);setError("");
+    try{
+      const pages=Math.ceil(parsedCopies/layout.perSheet),jpegPages:Uint8Array[]=[];
+      for(let page=0;page<pages;page++){
+        const canvas=document.createElement("canvas");canvas.width=A4_WIDTH_PX;canvas.height=A4_HEIGHT_PX;
+        const context=canvas.getContext("2d");if(!context)throw new Error("A print canvas could not be created.");
+        drawPhotoSheetPage(context,image,canvas.width,size,parsedCopies,page,zoom,focusX,focusY,adjustments,
+          {name:photoName,dob:dateOfBirth,fontSizePt:captionFontSizePt,color:captionColor},
+          {sourceColor:sourceBackgroundColor,targetColor:targetBackgroundColor,tolerance:backgroundTolerance},captionHeightMm);
+        let blob=await canvasToBlob(canvas,"image/jpeg",.9);
+        if(blob.size>MAX_FILE_BYTES)blob=await canvasToBlob(canvas,"image/jpeg",.82);
+        jpegPages.push(new Uint8Array(await blob.arrayBuffer()));
       }
-      onApply(outputs);
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Photo sheet creation failed. Try again with this photo.");
-    } finally {
-      setBusy(false);
-    }
+      const bytes=buildPhotoPdf(jpegPages);
+      const buffer=bytes.buffer.slice(bytes.byteOffset,bytes.byteOffset+bytes.byteLength) as ArrayBuffer;
+      const pdf=new Blob([buffer],{type:"application/pdf"});
+      if(pdf.size>MAX_FILE_BYTES)throw new Error("The prepared photo PDF exceeds SmartPrint's 20 MB file limit. Use a smaller original photo or reduce the number of copies.");
+      const output=new File([pdf],safeBaseName(source.name)+"-"+size.id+"-photos.pdf",{type:"application/pdf",lastModified:Date.now()});
+      onApply([{file:output,sizeCode:size.id,photoCount:parsedCopies}]);
+    }catch(cause){setError(cause instanceof Error?cause.message:"Photo sheet creation failed. Try again with this photo.");}
+    finally{setBusy(false);}
   }
 
   const resolutionMessage = image ? sourceResolutionNote(image, size) : "";
-  const cropPanel = activeTool === "crop";
-  const lookPanel = activeTool === "look";
+  const cropPanel=activeTool==="crop",lookPanel=activeTool==="look",textPanel=activeTool==="text",backgroundPanel=activeTool==="background";
 
   return (
     <div className={styles.overlay} role="dialog" aria-modal="true" aria-label="SmartPrint Photo Studio">
@@ -282,7 +346,7 @@ export default function PhotoStudio({
           <span className={styles.brandMark}><ImageIcon size={17}/></span>
           <span><strong>Photo Studio</strong><small>SMARTPRINT · PRINT PREPARATION</small></span>
         </div>
-        <div className={styles.topbarMeta}><span>A4 print sheet</span><span>300 DPI</span></div>
+        <div className={styles.topbarMeta}><span>A4 · 210 × 297 mm</span><span>300 DPI</span></div>
         <button type="button" className={styles.iconButton} onClick={onCancel} aria-label="Close Photo Studio" title="Close"><X size={18}/></button>
       </header>
 
@@ -291,11 +355,13 @@ export default function PhotoStudio({
           <button type="button" className={activeTool === "sheet" ? styles.toolActive : ""} onClick={() => setActiveTool("sheet")} aria-pressed={activeTool === "sheet"}><ImageIcon size={17}/><span>Sheet</span></button>
           <button type="button" className={activeTool === "crop" ? styles.toolActive : ""} onClick={() => setActiveTool("crop")} aria-pressed={activeTool === "crop"}><Crop size={17}/><span>Crop</span></button>
           <button type="button" className={activeTool === "look" ? styles.toolActive : ""} onClick={() => setActiveTool("look")} aria-pressed={activeTool === "look"}><Sparkles size={17}/><span>Looks</span></button>
+          <button type="button" className={activeTool==="text"?styles.toolActive:""} onClick={()=>setActiveTool("text")} aria-pressed={activeTool==="text"}><Type size={17}/><span>Text</span></button>
+          <button type="button" className={activeTool==="background"?styles.toolActive:""} onClick={()=>setActiveTool("background")} aria-pressed={activeTool==="background"}><PaintBucket size={17}/><span>Background</span></button>
         </nav>
 
         <aside className={styles.toolPanel}>
           <div className={styles.panelHeading}>
-            <div><strong>{cropPanel ? "Crop & position" : lookPanel ? "Photo look" : "Photo sheet"}</strong><small>{cropPanel ? "Frame the photo without changing facial features." : lookPanel ? "Use subtle, print-friendly adjustments." : "Choose the photo size and how many copies you need."}</small></div>
+            <div><strong>{cropPanel?"Crop & position":lookPanel?"Photo look":textPanel?"Name & date text":backgroundPanel?"Photo background":"Photo sheet"}</strong><small>{cropPanel?"Frame the photo without changing facial features.":lookPanel?"Use subtle, print-friendly adjustments.":textPanel?"Add a name and date of birth below each photo without changing the photo's size.":backgroundPanel?"Sample a flat background from the photo and replace only the edge-connected area.":"Choose the photo size and how many copies you need."}</small></div>
           </div>
 
           {cropPanel && <>
@@ -316,6 +382,25 @@ export default function PhotoStudio({
             <label className={styles.rangeControl}>Colour <output>{adjustments.saturation}%</output><input type="range" min="0" max="160" value={adjustments.saturation} onChange={event => { setLook("natural"); setAdjustments(current => ({ ...current, saturation: Number(event.target.value) })); }}/></label>
           </>}
 
+          {textPanel && <>
+            <label className={styles.fieldLabel}>Name (optional)<input type="text" maxLength={48} value={photoName} onChange={event=>setPhotoName(event.target.value)} placeholder="Enter name"/></label>
+            <label className={styles.fieldLabel}>Date of birth (optional)<input type="text" maxLength={24} value={dateOfBirth} onChange={event=>setDateOfBirth(event.target.value)} placeholder="DD/MM/YYYY"/></label>
+            <label className={styles.fieldLabel}>Caption font size<select value={captionFontSizePt} onChange={event=>setCaptionFontSizePt(Number(event.target.value))}><option value={5}>5 pt · Compact</option><option value={6}>6 pt · Standard</option><option value={7}>7 pt · Large</option></select></label>
+            <label className={styles.fieldLabel}>Caption colour<input type="color" value={captionColor} onChange={event=>setCaptionColor(event.target.value)}/></label>
+            <div className={styles.editorHelp}>The name and DOB print below each photo in a separate caption area. The selected physical photo dimensions remain exact.</div>
+            <button type="button" className={styles.secondaryButton} onClick={()=>{setPhotoName("");setDateOfBirth("");setCaptionFontSizePt(6);setCaptionColor("#202020");}}>Clear text</button>
+          </>}
+
+          {backgroundPanel && <>
+            <div className={styles.backgroundPreviewRow}><span>Sampled background</span><strong>{sourceBackgroundColor?sourceBackgroundColor.toUpperCase():"Not selected"}</strong>{sourceBackgroundColor&&<i style={{background:sourceBackgroundColor}}/>}</div>
+            <button type="button" className={styles.secondaryButton} onClick={()=>{setPickingBackground(true);setError("");}}><Pipette size={14}/>{pickingBackground?"Click the background in the preview…":"Pick background from photo"}</button>
+            <label className={styles.fieldLabel}>Replacement background<input type="color" value={targetBackgroundColor} onChange={event=>setTargetBackgroundColor(event.target.value)}/></label>
+            <div className={styles.backgroundPresets}>{["#ffffff","#f3f6fa","#dcecff","#dff3e7","#f6eadb"].map(color=><button key={color} type="button" style={{background:color}} aria-label={"Set background "+color} aria-pressed={targetBackgroundColor===color} onClick={()=>setTargetBackgroundColor(color)}/>)}</div>
+            <label className={styles.rangeControl}>Background tolerance<output>{backgroundTolerance}</output><input type="range" min="5" max="90" value={backgroundTolerance} onChange={event=>setBackgroundTolerance(Number(event.target.value))}/></label>
+            <div className={styles.editorHelp}>This replaces sampled-colour pixels connected to the photo edges. Use a plain, evenly lit background and inspect hair/shoulders. This is a colour-key tool, not AI subject segmentation.</div>
+            <button type="button" className={styles.secondaryButton} onClick={()=>{setSourceBackgroundColor(null);setPickingBackground(false);setBackgroundTolerance(30);setTargetBackgroundColor("#ffffff");}}>Reset background</button>
+          </>}
+
           {activeTool === "sheet" && <>
             <label className={styles.fieldLabel}>Photo size
               <select value={sizeId} onChange={event => setSizeId(event.target.value)}>
@@ -326,8 +411,10 @@ export default function PhotoStudio({
               <input type="number" min="1" max={maxCopies} step="1" value={copiesInput} onChange={event => setCopiesInput(event.target.value)} onBlur={() => setCopiesInput(String(copies))}/>
             </label>
             <div className={styles.sheetSummary}>
-              <div><span>Photos per A4 sheet</span><strong>{layout.perSheet}</strong></div>
-              <div><span>Print-ready sheets</span><strong>{sheetCount}</strong></div>
+              <div><span>Photo dimensions</span><strong>{size.widthMm} × {size.heightMm} mm</strong></div>
+              <div><span>Photos per A4 page</span><strong>{layout.perSheet}</strong></div>
+              <div><span>Grid alignment</span><strong>{layout.columns} × {layout.rows}</strong></div>
+              <div><span>A4 pages in one PDF</span><strong>{sheetCount}</strong></div>
               <small>Shop rate: {formatPhotoRate(photoPrices[size.id] ?? 0)} per photo. The server confirms the final total in your quote.</small>
             </div>
           </>}
@@ -346,13 +433,14 @@ export default function PhotoStudio({
             <button type="button" onClick={() => { setZoom(1); setFocusX(50); setFocusY(50); selectLook("natural"); }}><RotateCcw size={14}/> Reset</button>
           </div>
           <div className={styles.canvasViewport}>
+            {pickingBackground&&<div className={styles.pickInstruction}>Click a flat background area in the photo to sample its colour.</div>}
             <div className={styles.sheetFrame}>
-              {image ? <canvas ref={canvasRef} width={420} height={594} className={styles.previewCanvas} role="img" aria-label={"A4 photo sheet preview with " + Math.min(copies, previewCapacity) + " photos"}/> : <div className={styles.loadingState}>{imageError || "Preparing your photo…"}</div>}
+              {image ? <canvas ref={canvasRef} width={420} height={594} onClick={handleBackgroundPick} style={{cursor:pickingBackground?"crosshair":"default"}} className={styles.previewCanvas} role="img" aria-label={"A4 photo sheet preview with " + Math.min(copies, previewCapacity) + " photos"}/> : <div className={styles.loadingState}>{imageError || "Preparing your photo…"}</div>}
             </div>
           </div>
           <div className={styles.canvasFooter}>
-            <span>{size.label} · {layout.perSheet} per sheet</span>
-            <span>{copies} photo copies · {sheetCount} A4 sheet(s)</span>
+            <span>{size.label} · {size.widthMm} × {size.heightMm} mm</span>
+            <span>{copies} photo copies · {sheetCount} A4 page(s) in one PDF</span>
             {resolutionMessage && <small>{resolutionMessage}</small>}
           </div>
         </main>
@@ -363,7 +451,7 @@ export default function PhotoStudio({
         <div className={styles.footerActions}>
           <button type="button" className={styles.cancelButton} onClick={onCancel} disabled={busy}>Cancel</button>
           <button type="button" className={styles.applyButton} onClick={() => void createPrintSheets()} disabled={!image || busy || !!imageError || availableSizes.length === 0 || !Number.isInteger(Number(copiesInput)) || Number(copiesInput) < 1 || Number(copiesInput) > maxCopies}>
-            {busy ? "Preparing sheets…" : "Use photo sheets"} <ChevronDown size={15}/>
+            {busy ? "Preparing one PDF…" : "Create one photo PDF"} <ChevronDown size={15}/>
           </button>
         </div>
       </footer>
