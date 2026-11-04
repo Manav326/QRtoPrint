@@ -61,11 +61,11 @@ public sealed class PrintBatchCheckoutRulesTests
     [InlineData(-1, true)]
     [InlineData(0, true)]
     [InlineData(1, false)]
-    public void AppliesQuoteExpiryBoundary(DateTimeOffset offset, bool expected)
+    public void AppliesQuoteExpiryBoundary(int secondsFromNow, bool expected)
     {
         var now = new DateTimeOffset(2026, 11, 4, 10, 0, 0, TimeSpan.Zero);
 
-        Assert.Equal(expected, PrintBatchCheckoutRules.IsQuoteExpired(now.AddTicks(offset.Ticks), now));
+        Assert.Equal(expected, PrintBatchCheckoutRules.IsQuoteExpired(now.AddSeconds(secondsFromNow), now));
     }
 
     [Theory]
