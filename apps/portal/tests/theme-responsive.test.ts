@@ -406,6 +406,7 @@ test("PDF footer branding is opt-in per batch and cannot cover source content or
   const server = read("../../../src/SmartPrint.Api/Program.cs");
   const contracts = read("../../../src/SmartPrint.Api/Contracts/ApiContracts.cs");
   const agent = read("../../../src/SmartPrint.Agent/WindowsPrintExecutor.cs");
+  const pdfOverlay = read("../../../src/SmartPrint.Agent/PdfBrandingOverlay.cs");
   const queueModels = read("../../../src/SmartPrint.Agent/AgentQueueModels.cs");
   const safetyRules = read("../../../src/SmartPrint.Agent/PdfBrandingRules.cs");
 
@@ -423,7 +424,7 @@ test("PDF footer branding is opt-in per batch and cannot cover source content or
   assert.ok(agent.includes('PdfBrandingOverlay.TryCreate(entry, bytes, pdfRaster.HasDigitalSignatures, pdfRaster.HasInteractiveForms, cancellationToken)'));
   assert.ok(agent.includes('Never raster-paint a fallback PDF'));
   assert.ok(!agent.includes('ApplySmartPrintFooter(page'));
-  assert.ok(agent.includes('PdfBrandingRules.HasSafeFooterBand(packed, width, height, bandHeight)'));
+  assert.ok(pdfOverlay.includes('PdfBrandingRules.HasSafeFooterBand(packed, width, height, bandHeight)'));
   assert.ok(safetyRules.includes('RequiredBlankBandPoints = 20f'));
   assert.ok(server.includes('item.PdfBrandingEnabled'));
   assert.ok(app.includes('jobStatus.pdfBrandingEnabled&&<div className="customer-branding-note">'));
