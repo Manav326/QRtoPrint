@@ -240,7 +240,7 @@ test("cloud shop document preview retries the binary fetch with a refreshed acce
  assert.ok(start>=0&&end>start);
  const preview=api.slice(start,end);
  assert.match(preview,/if \(response\.status === 401\)\s*\{\s*const refreshed = await refreshStoredSession\(token\)/);
- assert.match(preview,/if\(refreshed\)response=await request\(refreshed\.accessToken\)/);
+ assert.match(preview,/if \(refreshed\) response = await request\(refreshed\.accessToken\)/);
  assert.match(preview,/Your shop session has expired/);
 });
 
@@ -356,3 +356,19 @@ test("local photo revision rejects paid, handed-off and changed originals",()=>{
  assert.match(route,/hasPayment \|\| hasBatchPayment/);
  assert.match(route,/document\.Sha256, request\.ExpectedOriginalSha256/);
 });
+
+
+test("shop-owner Photo Studio supports cloud and local storage without changing a local job into cloud storage",()=>{
+ const app=read("../src/App.tsx");
+ const api=read("../src/api.ts");
+ const program=read("../../../src/SmartPrint.Api/Program.cs");
+ const agent=read("../../../src/SmartPrint.Agent/LocalAgentApiHostedService.cs");
+ assert.match(app,/preview\.job\.storageMode==="CLOUD"\|\|preview\.job\.storageMode==="LOCAL_AGENT"/);
+ assert.match(app,/editor\.job\.storageMode==="LOCAL_AGENT"[\s\S]*?replaceShopPhotoDocumentLocally/);
+ assert.match(api,/\/api\/v1\/shop\/print-jobs\/\$\{jobId\}\/photo-revision-grant/);
+ assert.match(api,/\/api\/v1\/local\/documents\/\$\{encodeURIComponent\(jobId\)\}\/photo-revision/);
+ assert.match(program,/document\.StorageMode = previousStorageMode/);
+ assert.match(program,/document\.AgentDeviceId = device\.Id/);
+ assert.match(agent,/ReplaceStagedPhotoDocumentAsync/);
+});
+
