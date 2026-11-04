@@ -424,5 +424,6 @@ test("PDF footer branding is opt-in per batch and cannot cover source content or
   assert.ok(safetyRules.includes('RequiredBlankBandPoints = 20f'));
   assert.ok(server.includes('item.PdfBrandingEnabled'));
   assert.ok(app.includes('jobStatus.pdfBrandingEnabled&&<div className="customer-branding-note">'));
-  assert.ok(app.includes('For an unbranded PDF, please ask the shop before payment.'));
+  assert.ok(app.includes('Ask the shop for an unbranded PDF before payment if you need those features.'));
+  assert.ok(app.includes('digital-signature validation'));
 });

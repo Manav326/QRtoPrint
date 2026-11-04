@@ -2489,7 +2489,7 @@ function BatchReviewModal({jobs,busy,decisions,retrying,onDecision,onClose,onPre
       <div className="batch-branding-copy">
         <strong>SmartPrint PDF footer</strong>
         <small>Add a slim SmartPrint by QuantaEdge footer to eligible PDF exports in this batch. Only pages with a fully clear bottom margin receive the footer; pages without enough safe space are left unchanged.</small>
-        <small>Original uploaded files and normal paper printing are never modified. New batches start with branding off.</small>
+        <small>Original uploads and normal paper printing are unchanged. Branded exports are flattened print copies: selectable text, fillable fields, links and digital-signature validation are not preserved. Keep branding off for documents that need digital verification. New batches start with branding off.</small>
       </div>
       <label className="batch-branding-toggle">
         <input type="checkbox" checked={pdfBrandingEnabled} disabled={busy} onChange={event=>setPdfBrandingEnabled(event.currentTarget.checked)} aria-label="Add SmartPrint footer to PDF exports in this batch"/>
@@ -4600,7 +4600,7 @@ function CustomerPrintFlow({publicCode,sessionToken,paymentOptions,localAgent,lo
       {payment&&!!payment.refundedAmountMinor&&payment.refundedAmountMinor>0&&<div className="customer-refund-note"><Wallet size={16}/><span><strong>{formatMoney(payment.refundedAmountMinor,payment.currency)} returned</strong> for rejected pages ({rejectedPageList(jobStatus.rejectedPageNumbersJson)}). {formatMoney(Math.max(0,payment.amountMinor-payment.refundedAmountMinor),payment.currency)} remains paid; only accepted pages proceed to printing.</span></div>}
       {jobStatus.pdfBrandingEnabled&&<div className="customer-branding-note">
         <ShieldCheck size={16}/>
-        <span><strong>PDF footer selected by the shop.</strong> If this request is saved as a PDF, a small SmartPrint by QuantaEdge footer may appear only on pages with a clear blank bottom margin. Your uploaded original and physical prints are unchanged. For an unbranded PDF, please ask the shop before payment.</span>
+        <span><strong>PDF footer selected by the shop.</strong> If this request is saved as a PDF, a small SmartPrint by QuantaEdge footer may appear only on pages with a clear blank bottom margin. Your uploaded original and physical prints are unchanged. The branded copy is flattened for printing and does not retain selectable text, fillable fields, links or digital-signature validation. Ask the shop for an unbranded PDF before payment if you need those features.</span>
       </div>}
       {!!jobStatus.timeline?.length&&<div className="customer-state-timeline">{jobStatus.timeline.map((event,index)=><div key={index}><i/><span><strong>{prettyStatus(event.newStatus)}</strong><small>{event.actorType==="ShopUser"?"Shop team":event.actorType==="Customer"?"You":"System"} · {formatIstDateTime(event.createdUtc)}</small></span></div>)}</div>}
 
