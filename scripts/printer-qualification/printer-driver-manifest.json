@@ -18,13 +18,13 @@
       "family": "HP Universal Print Driver - PCL 6",
       "version": null,
       "models": [
-        "HP LaserJet models listed in the matching UPD release notes"
+        "HP printer models explicitly listed in the matching HP Universal Print Driver PCL 6 release"
       ],
       "windowsTargets": [
         "Windows 11 x64",
         "Windows Server 2025"
       ],
-      "officialSupportUrl": "https://support.hp.com/in-en/drivers/upd/model/4157320",
+      "officialSupportUrl": "https://support.hp.com/in-en/drivers/hp-universal-print-driver-series-forwindows/model/3271552",
       "packageFileName": null,
       "packageUrl": null,
       "packageSha256": null,
@@ -38,7 +38,9 @@
       ],
       "licenseReview": "pending",
       "ciApproval": "pending_package_pin_and_license_review",
-      "notes": "HP provides OS/version-specific package selection. Pin an exact India-appropriate x64 PCL 6 package and supported models before CI installation."
+      "notes": "Official HP India support page is specific to the 64-bit PCL 6 Universal Print Driver family. Select an exact release, INF and supported model list; confirm Server 2025 INF decorations before hosted-runner qualification.",
+      "githubHostedRunner": "Windows Server 2025 x64",
+      "windows11Certification": "not_established_by_github_hosted_runner"
     },
     {
       "id": "canon-generic-plus-ufr-ii-x64",
@@ -68,7 +70,9 @@
       "allowedDownloadHosts": [],
       "licenseReview": "blocked_personal_noncommercial_terms",
       "ciApproval": "blocked_pending_written_commercial_permission",
-      "notes": "Canon India lists this driver as an EXE self-extractor. Its India support disclaimer reviewed 2026-11-04 limits use to personal/non-commercial purposes and restricts transfer. Do not download or use in commercial CI without written permission or a separately approved package/license."
+      "notes": "Canon India lists this driver as an EXE self-extractor. Its India support disclaimer reviewed 2026-11-04 limits use to personal/non-commercial purposes and restricts transfer. Do not download or use in commercial CI without written permission or a separately approved package/license.",
+      "githubHostedRunner": "Windows Server 2025 x64",
+      "windows11Certification": "not_established_by_github_hosted_runner"
     },
     {
       "id": "epson-universal-print-driver-x64",
@@ -96,7 +100,9 @@
       ],
       "licenseReview": "pending",
       "ciApproval": "pending_package_extraction_and_license_review",
-      "notes": "Epson's official Download Center lists Universal Print Driver v2.123.00 dated 2026-10-23 (87.53 MB) for the L3150 Series on Windows 11 x64. The listed download is an EXE self-extractor; CI will not execute it. Approve an extracted INF/CAB/ZIP payload and use rights before installation."
+      "notes": "Epson's official Download Center lists Universal Print Driver v2.123.00 dated 2026-10-23 (87.53 MB) for the L3150 Series on Windows 11 x64. The listed download is an EXE self-extractor; CI will not execute it. Approve an extracted INF/CAB/ZIP payload and use rights before installation.",
+      "githubHostedRunner": "Windows Server 2025 x64",
+      "windows11Certification": "not_established_by_github_hosted_runner"
     },
     {
       "id": "brother-universal-printer-driver-x64",
@@ -127,7 +133,9 @@
       "notes": "Brother India lists Universal Printer Driver v1.0.0.0 dated 2026-01-15 (20.37 MB) for a range of inkjet devices. The same page explicitly says two-sided printing is not supported. Pin the official package and confirm all models before qualification.",
       "limitations": [
         "Two-sided printing is not supported by the listed Universal Printer Driver release"
-      ]
+      ],
+      "githubHostedRunner": "Windows Server 2025 x64",
+      "windows11Certification": "not_established_by_github_hosted_runner"
     },
     {
       "id": "pantum-p2503-x64",
@@ -154,7 +162,9 @@
       ],
       "licenseReview": "pending",
       "ciApproval": "pending_package_pin_and_license_review",
-      "notes": "Pantum India lists P2503 Windows Driver v1.0.5, English, 14.19 MB, Windows 11 64-bit. Confirm downloadable package, INF payload and signed catalog."
+      "notes": "Pantum India lists P2503 Windows Driver v1.0.5, English, 14.19 MB, with installation instructions limited to Windows 11 64-bit. The current GitHub-hosted runner is Windows Server 2025, so do not qualify it there as Windows 11 compatible; a Windows 11 lab is required unless Pantum confirms Server 2025 support.",
+      "githubHostedRunner": "Windows Server 2025 x64",
+      "windows11Certification": "not_established_by_github_hosted_runner"
     },
     {
       "id": "pantum-universal-printing-driver-x64",
@@ -191,7 +201,9 @@
       ],
       "licenseReview": "pending",
       "ciApproval": "pending_package_pin_and_license_review",
-      "notes": "Pantum global support lists Universal Printing Driver v1.0.6 for BP5100/BM5100/BP5200/BM5200/BM5300 families. Confirm the package's OS support, INF payload and terms before CI use. The exact Windows release target must be confirmed before this driver can be approved for CI."
+      "notes": "Pantum global support lists Universal Printing Driver v1.0.6 for BP5100/BM5100/BP5200/BM5200/BM5300 families. Confirm the package's OS support, INF payload and terms before CI use. The exact Windows release target must be confirmed before this driver can be approved for CI.",
+      "githubHostedRunner": "Windows Server 2025 x64",
+      "windows11Certification": "not_established_by_github_hosted_runner"
     }
   ]
 }
