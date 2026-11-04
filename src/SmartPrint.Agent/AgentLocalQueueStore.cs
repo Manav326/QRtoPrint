@@ -769,7 +769,6 @@ public sealed class AgentLocalQueueStore
             {
                 await SaveManifestAsync(replacementEntry, cancellationToken);
                 await commitServerRevisionAsync();
-                if (File.Exists(backupPath)) File.Delete(backupPath);
             }
             catch
             {
@@ -780,6 +779,21 @@ public sealed class AgentLocalQueueStore
                 }
                 await SaveManifestAsync(entry, CancellationToken.None);
                 throw;
+            }
+
+            // The server and manifest now point to the replacement. Cleanup
+            // failure must not roll back the file after the server has committed.
+            try
+            {
+                if (File.Exists(backupPath)) File.Delete(backupPath);
+            }
+            catch (IOException)
+            {
+                // Keep the encrypted backup for a later maintenance cleanup.
+            }
+            catch (UnauthorizedAccessException)
+            {
+                // Keep the encrypted backup for a later maintenance cleanup.
             }
         }
         finally
