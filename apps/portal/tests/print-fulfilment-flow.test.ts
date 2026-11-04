@@ -48,7 +48,7 @@ test("plan-limited HTTPS fallback is only offered when the Agent is unavailable"
   const app = read("../src/App.tsx");
   const api = read("../src/api.ts");
   const program = read("../../../src/SmartPrint.Api/Program.cs");
-  assert.match(app, /secureQueueFallbackEnabled = cloudAssistedPrintingEnabled \|\| !localAgent\?\.endpoints\.length/);
+  assert.match(app, /secureQueueFallbackEnabled = cloudAssistedPrintingEnabled \|\| !localAgent\?\.endpoints\.length \|\| localFallbackSuggested/);
   const directUploadStart = api.indexOf("export async function uploadCustomerDocument(");
   const directUploadEnd = api.indexOf("type CustomerLocalAgentApi", directUploadStart);
   const directUpload = api.slice(directUploadStart, directUploadEnd);
