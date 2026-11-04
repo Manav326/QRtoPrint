@@ -649,7 +649,9 @@ shop.MapGet("/print-jobs", async (
 
 
 
-shop.MapShopReportEndpoints();shop.MapPatch("/print-jobs/{jobId:guid}/printer", async (
+shop.MapShopReportEndpoints();
+
+shop.MapPatch("/print-jobs/{jobId:guid}/printer", async (
     Guid jobId,
     AssignPrintJobPrinterRequest request,
     ClaimsPrincipal principal,
