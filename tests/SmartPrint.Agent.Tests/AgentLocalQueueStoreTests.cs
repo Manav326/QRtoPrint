@@ -697,8 +697,7 @@ public sealed class AgentLocalQueueStoreTests
             };
             var staged = await store.EnqueueLocalUploadAsync(job, originalBytes, CancellationToken.None);
             await store.MarkLocalUploadFinalizedAsync(job.Id, CancellationToken.None);
-            var replacement = "%PDF-1.4
-shop-prepared-a4-photo-sheet"u8.ToArray();
+            var replacement = "%PDF-1.4\\nshop-prepared-a4-photo-sheet"u8.ToArray();
             var committed = false;
 
             await store.ReplaceStagedPhotoDocumentAsync(
