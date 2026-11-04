@@ -706,6 +706,7 @@ public sealed class AgentLocalQueueStoreTests
                 staged.SizeBytes,
                 "photo-sheet.pdf",
                 replacement,
+                2,
                 750,
                 () =>
                 {
@@ -721,7 +722,7 @@ public sealed class AgentLocalQueueStoreTests
             Assert.Equal("application/pdf", updated.MediaType);
             Assert.Equal(replacement.LongLength, updated.SizeBytes);
             Assert.Equal(Convert.ToHexString(SHA256.HashData(replacement)).ToLowerInvariant(), updated.Sha256);
-            Assert.Equal(1, updated.PageCount);
+            Assert.Equal(2, updated.PageCount);
             Assert.Equal(1, updated.Copies);
             Assert.Equal("Colour", updated.ColourMode);
             Assert.Equal("A4", updated.PaperSize);
@@ -763,6 +764,7 @@ public sealed class AgentLocalQueueStoreTests
                     staged.SizeBytes,
                     "photo-sheet.pdf",
                     replacement,
+                    1,
                     750,
                     () => throw new InvalidOperationException("Cloud metadata commit was rejected."),
                     CancellationToken.None));
