@@ -210,7 +210,11 @@ function ShopConsole({ tokens, onSignOut, dark, onToggleTheme }: { tokens: AuthT
   const [busy, setBusy] = useState(false);
   const [toast, setToast] = useState("");
   const [preview, setPreview] = useState<{ name: string; url: string; blob: Blob; mediaType: string; job: ShopPrintJob; readOnly: boolean } | null>(null);
-  const [shopPhotoStudio,setShopPhotoStudio]=useState<{source:File;job:ShopPrintJob}|null>(null);
+  const [shopPhotoStudio,setShopPhotoStudio]=useState<{
+    source:File;
+    job:ShopPrintJob;
+    returnPreview:{name:string;blob:Blob;mediaType:string;job:ShopPrintJob;readOnly:boolean};
+  }|null>(null);
   const [refundJob, setRefundJob] = useState<ShopPrintJob | null>(null);
   const [batchReviewJobs, setBatchReviewJobs] = useState<ShopPrintJob[] | null>(null);
   const [batchReviewDecisions, setBatchReviewDecisions] = useState<Record<string, boolean>>({});
@@ -1137,9 +1141,17 @@ function ShopConsole({ tokens, onSignOut, dark, onToggleTheme }: { tokens: AuthT
   function openShopPhotoStudio(){
     if(!preview||preview.readOnly||preview.mediaType!=="image/jpeg"&&preview.mediaType!=="image/png")return;
     const source=new File([preview.blob],preview.name,{type:preview.mediaType,lastModified:Date.now()});
+    const returnPreview={name:preview.name,blob:preview.blob,mediaType:preview.mediaType,job:preview.job,readOnly:preview.readOnly};
     URL.revokeObjectURL(preview.url);
     setPreview(null);
-    setShopPhotoStudio({source,job:preview.job});
+    setShopPhotoStudio({source,job:preview.job,returnPreview});
+  }
+
+  function cancelShopPhotoStudio(){
+    if(!shopPhotoStudio){setShopPhotoStudio(null);return;}
+    const restored=shopPhotoStudio.returnPreview;
+    setPreview({...restored,url:URL.createObjectURL(restored.blob)});
+    setShopPhotoStudio(null);
   }
 
   async function applyShopPhotoStudio(sheets:PreparedPhotoSheet[]){
@@ -1459,7 +1471,7 @@ function ShopConsole({ tokens, onSignOut, dark, onToggleTheme }: { tokens: AuthT
       {modal === "station" && <StationModal busy={busy} printers={printers.filter(printer => printer.isActive)} onClose={() => setModal(null)} onSubmit={submitStation}/>}
             {batchReviewJobs && <BatchReviewModal jobs={batchReviewJobs} busy={busyJobId==="batch-review"} decisions={batchReviewDecisions} retrying={batchReviewRetry} onDecision={(jobId,accepted)=>setBatchReviewDecisions(current=>({...current,[jobId]:accepted}))} onClose={()=>setBatchReviewJobs(null)} onPreview={job=>void previewJob(job,true)} onApply={acceptedIds=>void applyBatchReview(batchReviewJobs,acceptedIds)}/>} 
       {preview && <DocumentPreviewModal name={preview.name} url={preview.url} mediaType={preview.mediaType} job={preview.job} readOnly={preview.readOnly} onEditPhoto={preview.mediaType.startsWith("image/")&&(preview.job.storageMode==="CLOUD"||preview.job.storageMode==="LOCAL_AGENT")&&preview.job.status==="AWAITING_SHOP_APPROVAL"&&[pricing?.photo35x45Minor,pricing?.photo25x35Minor,pricing?.photo2x2Minor,pricing?.photo4x6Minor].some(rate=>(rate??0)>0)?openShopPhotoStudio:undefined} onApprove={()=>void approveJob(preview.job)} onReject={()=>void rejectJob(preview.job)} onRefund={()=>setRefundJob(preview.job)} onClose={() => { URL.revokeObjectURL(preview.url); setPreview(null); }}/>} 
-      {shopPhotoStudio && <PhotoStudio source={shopPhotoStudio.source} mode="shop" photoPrices={{"35x45":pricing?.photo35x45Minor??0,"25x35":pricing?.photo25x35Minor??0,"2x2":pricing?.photo2x2Minor??0,"4x6":pricing?.photo4x6Minor??0}} onCancel={()=>setShopPhotoStudio(null)} onApply={applyShopPhotoStudio}/>} 
+      {shopPhotoStudio && <PhotoStudio source={shopPhotoStudio.source} mode="shop" photoPrices={{"35x45":pricing?.photo35x45Minor??0,"25x35":pricing?.photo25x35Minor??0,"2x2":pricing?.photo2x2Minor??0,"4x6":pricing?.photo4x6Minor??0}} onCancel={cancelShopPhotoStudio} onApply={applyShopPhotoStudio}/>} 
       {eventHistory && <JobHistoryModal job={eventHistory.job} events={eventHistory.events} onClose={() => setEventHistory(null)}/>}
       {refundJob && <RefundModal job={refundJob} token={tokens.accessToken} busy={busyJobId===refundJob.id} onClose={()=>setRefundJob(null)} onSubmit={values=>void recordFileRefund(refundJob,values)}/>} 
       {actionDialog && <Modal title={actionDialog.title} subtitle="This action will be recorded against your shop account." onClose={closeActionDialog}>
