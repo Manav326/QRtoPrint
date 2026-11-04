@@ -333,10 +333,9 @@ public sealed class AgentLocalQueueStore
         {
             var entry = Find(jobId);
             if (entry is null) return false;
-            if (entry.State != "LOCAL_UPLOAD_STAGED")
-            {
-                throw new InvalidOperationException("Only an unfinalised local upload can be removed.");
-            }
+            // A worker may finalize the same entry after the sweep took its
+            // snapshot. Treat that stale cleanup request as a no-op.
+            if (entry.State != "LOCAL_UPLOAD_STAGED") return false;
             // Re-read the current lease while holding the same gate as renewal.
             // A stale expiry-sweep snapshot must never delete a renewed document.
             if (entry.LeaseExpiresUtc > now) return false;
