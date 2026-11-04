@@ -15,6 +15,7 @@ public static partial class AgentEndpoints
         MapAgentEnrollmentEndpoint(agentApi);
         MapAgentJobEndpoints(agentApi);
         MapAgentLocalUploadEndpoints(agentApi);
+        agentApi.MapAgentLocalPhotoRevisionEndpoints(signingKeyText, issuer, audience);
         MapAgentJobLifecycleEndpoints(agentApi, signingKeyText, issuer, audience);
         MapAgentConnectivityEndpoints(agentApi, corsOrigins);
         return agentApi;
