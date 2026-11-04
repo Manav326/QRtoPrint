@@ -116,7 +116,7 @@ public sealed class AgentConnectivityService(
                 string.Equals(printer.QueueName, discovered.QueueName, StringComparison.OrdinalIgnoreCase) &&
                 (printer.AgentDeviceId == device.Id ||
                  printer.AgentDeviceId == null ||
-                 (printer.AgentDeviceId is Guid previousAgentId && revokedAgentIds.Contains(previousAgentId))));
+                 (printer.AgentDeviceId is Guid previousAgentId && revokedAgentIds.Contains(previousAgentId)))));
         if (additionalPrinters > 0)
         {
             var quota = await entitlements.CheckCapacityAsync(
