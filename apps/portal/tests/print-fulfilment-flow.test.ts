@@ -679,7 +679,7 @@ test("shop Agent pairing code creation and revocation are isolated in the manage
   assert.match(endpoint, /management\.RevokeAsync/);
   assert.match(service, /AddMinutes\(10\)/);
   assert.match(service, /HashOpaqueToken\(code\)/);
-  assert.match(service, /device\.TenantId == tenantId/);
+  assert.match(service, /item\.TenantId == tenantId/);
   assert.match(service, /printer\.Status, "AgentRevoked"/);
   assert.match(service, /device\.RevokedUtc is null/);
 });
