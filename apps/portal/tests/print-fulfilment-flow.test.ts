@@ -94,5 +94,5 @@ test("a pre-output capability block clears the attempted spooler name so the exi
 
 test("reassigning a blocked queued job clears the previous printer failure", () => {
   const program = read("../../../src/SmartPrint.Api/Program.cs");
-  assert.match(program, /if \(needsQueueReset\) \{[\s\S]*?batchJob\.FailureCode = null;[\s\S]*?batchJob\.SpoolerStatus = null;/);
+  assert.match(program, /if \\(needsQueueReset\\)\\s*\\{[\\s\\S]*?batchJob\\.FailureCode = null;[\\s\\S]*?batchJob\\.SpoolerStatus = null;/);
 });
