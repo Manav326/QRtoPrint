@@ -414,6 +414,7 @@ test("PDF footer branding is opt-in per batch and cannot cover source content or
   const shopCustomers = read("../../../src/SmartPrint.Api/Endpoints/ShopCustomerEndpoints.cs");
   const customerStatus = read("../../../src/SmartPrint.Api/Services/PublicJobStatusService.cs");
   const agentJobs = read("../../../src/SmartPrint.Api/Endpoints/AgentJobEndpoints.cs");
+  const agentJobQueue = read("../../../src/SmartPrint.Api/Services/AgentJobQueueService.cs");
   const agent = read("../../../src/SmartPrint.Agent/WindowsPrintExecutor.cs");
   const pdfOverlay = read("../../../src/SmartPrint.Agent/PdfBrandingOverlay.cs");
   const queueModels = read("../../../src/SmartPrint.Agent/AgentQueueModels.cs");
@@ -430,7 +431,8 @@ test("PDF footer branding is opt-in per batch and cannot cover source content or
   assert.ok(shopQueue.includes('job.PdfBrandingEnabled'));
   assert.ok(shopCustomers.includes('job.PdfBrandingEnabled'));
   assert.ok(customerStatus.includes('item.PdfBrandingEnabled'));
-  assert.ok(agentJobs.includes('candidate.PdfBrandingEnabled'));
+  assert.ok(agentJobs.includes('queue.ClaimAvailableAsync'));
+  assert.ok(agentJobQueue.includes('candidate.PdfBrandingEnabled'));
   assert.ok(queueModels.includes('bool PdfBrandingEnabled = false'));
   assert.ok(agent.includes('"SMARTPRINT_BRANDED_PDF_RENDERER"'));
   assert.ok(agent.includes('PdfBrandingOverlay.TryCreate(entry, bytes, pdfRaster.HasDigitalSignatures, pdfRaster.HasInteractiveForms, cancellationToken)'));
