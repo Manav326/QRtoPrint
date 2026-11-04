@@ -415,6 +415,8 @@ test("PDF footer branding is opt-in per batch and cannot cover source content or
   assert.ok(contracts.includes('bool PdfBrandingEnabled = false'));
   assert.ok(server.includes('request.PdfBrandingEnabled'));
   assert.ok(server.includes('job.PdfBrandingEnabled = request.PdfBrandingEnabled'));
+  assert.ok(server.includes('foreach (var job in lockedJobs)\\n    {\\n        if (job.PdfBrandingEnabled'));
+  assert.ok(!server.includes('foreach (var job in allBatchJobs)\\n    {\\n        if (job.PdfBrandingEnabled'));
   assert.ok(server.includes('candidate.PdfBrandingEnabled'));
   assert.ok(queueModels.includes('bool PdfBrandingEnabled = false'));
   assert.ok(agent.includes('"SMARTPRINT_BRANDED_PDF_RENDERER"'));
