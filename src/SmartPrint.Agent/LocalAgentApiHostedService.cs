@@ -622,11 +622,32 @@ public sealed class LocalAgentApiHostedService(
                 using var authorizeResponse = await client.SendAsync(authorizeRequest, ct);
                 if (!authorizeResponse.IsSuccessStatusCode)
                 {
+                    var rawDetail = await authorizeResponse.Content.ReadAsStringAsync(ct);
+                    var detail = "";
+                    if (!string.IsNullOrWhiteSpace(rawDetail))
+                    {
+                        try
+                        {
+                            using var parsed = JsonDocument.Parse(rawDetail);
+                            if (parsed.RootElement.TryGetProperty("message", out var message) &&
+                                message.ValueKind == JsonValueKind.String)
+                                detail = message.GetString() ?? "";
+                            else if (parsed.RootElement.TryGetProperty("title", out var title) &&
+                                     title.ValueKind == JsonValueKind.String)
+                                detail = title.GetString() ?? "";
+                        }
+                        catch (JsonException)
+                        {
+                            // Do not echo unstructured upstream content into the local UI.
+                        }
+                    }
                     logger.LogWarning("Local document preview authorization for job {JobId} returned HTTP {StatusCode}.",
                         jobId, (int)authorizeResponse.StatusCode);
                     return Results.Problem(
                         statusCode: (int)authorizeResponse.StatusCode,
-                        title: "The cloud service could not authorize this local document preview.");
+                        title: string.IsNullOrWhiteSpace(detail)
+                            ? "The cloud service could not authorize this local document preview."
+                            : detail);
                 }
 
                 var authorizedDocument = await authorizeResponse.Content.ReadFromJsonAsync<LocalDocumentPreviewAuthorizationResponse>(cancellationToken: ct);
