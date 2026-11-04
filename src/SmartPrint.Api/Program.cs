@@ -5745,36 +5745,6 @@ publicApi.MapPost("/sessions/current/jobs", async (
         return Results.Unauthorized();
     }
 
-    var existing = await db.PrintJobs.AsNoTracking()
-        .Where(job => job.TenantId == session.TenantId && job.IdempotencyKey == idempotencyKey)
-        .Select(job => new { job.Id, job.BatchId, job.BatchGroupName, job.BatchName, job.CustomerSessionId, job.JobNumber, job.Status, job.PageCount, job.CreatedUtc })
-        .SingleOrDefaultAsync(ct);
-    if (existing is not null)
-    {
-        if (existing.CustomerSessionId != session.Id)
-        {
-            return Results.Conflict(new { code = "idempotency_key_reused", message = "This request key has already been used for another customer session." });
-        }
-
-        var existingDocument = await db.PrintDocuments.AsNoTracking()
-            .Where(document => document.TenantId == session.TenantId && document.PrintJobId == existing.Id)
-            .Select(document => new { document.OriginalFileName, document.MediaType, document.SizeBytes })
-            .SingleOrDefaultAsync(ct);
-        return Results.Ok(new { Job = existing, Document = existingDocument, DuplicateRequest = true });
-    }
-
-    var batchCheckoutLocked = await db.PrintBatchPayments.AsNoTracking().AnyAsync(item =>
-        item.TenantId == session.TenantId &&
-        item.CustomerSessionId == session.Id &&
-        item.BatchId == batchId &&
-        item.Status != "REJECTED", ct);
-    if (batchCheckoutLocked)
-        return Results.Conflict(new
-        {
-            code = "batch_upload_locked_after_payment_start",
-            message = "This batch has a payment attempt or a verified payment. Start a new batch for additional files so every file has a clear payment total."
-        });
-
     if (!context.Request.HasFormContentType)
     {
         return Results.BadRequest(new { code = "multipart_form_required", message = "Upload the document using multipart/form-data." });
@@ -5828,6 +5798,80 @@ publicApi.MapPost("/sessions/current/jobs", async (
         return Results.Problem(statusCode: StatusCodes.Status413PayloadTooLarge, title: "File size must be between 1 byte and 20 MB.");
     }
 
+    var originalName = file.FileName.Split('/', '\\\\').LastOrDefault() ?? string.Empty;
+    originalName = new string(originalName.Where(character => !char.IsControl(character)).ToArray()).Trim();
+    if (string.IsNullOrWhiteSpace(originalName))
+        return Results.BadRequest(new { code = "invalid_file_name", message = "The uploaded file name is invalid." });
+    originalName = originalName[..Math.Min(originalName.Length, 255)];
+
+    // A retry must be the exact original document and the exact original
+    // settings. Do not return an existing job just because its key matches;
+    // verify the body before treating this request as idempotent.
+    var existing = await db.PrintJobs.AsNoTracking()
+        .Where(job => job.TenantId == session.TenantId && job.IdempotencyKey == idempotencyKey)
+        .Select(job => new
+        {
+            job.Id, job.BatchId, job.BatchGroupName, job.BatchName, job.CustomerSessionId,
+            job.JobNumber, job.Status, job.PageCount, job.Copies, job.ColourMode,
+            job.PaperSize, job.IsDuplex, job.Orientation, job.PricingVersion,
+            job.Currency, job.QuotedAmountMinor, job.CreatedUtc
+        })
+        .SingleOrDefaultAsync(ct);
+    if (existing is not null)
+    {
+        if (existing.CustomerSessionId != session.Id)
+            return Results.Conflict(new { code = "idempotency_key_reused", message = "This request key has already been used for another customer session." });
+
+        var existingDocument = await db.PrintDocuments.AsNoTracking()
+            .Where(document => document.TenantId == session.TenantId && document.PrintJobId == existing.Id)
+            .Select(document => new
+            {
+                document.OriginalFileName, document.MediaType, document.SizeBytes,
+                document.Sha256, document.PageSizesJson
+            })
+            .SingleOrDefaultAsync(ct);
+        if (existingDocument is null)
+            return Results.Conflict(new { code = "idempotency_state_missing", message = "The original document record is unavailable. Refresh the request before retrying." });
+
+        string suppliedSha;
+        await using (var existingInput = file.OpenReadStream())
+        {
+            suppliedSha = Convert.ToHexString(await SHA256.HashDataAsync(existingInput, ct)).ToLowerInvariant();
+        }
+
+        if ((!string.IsNullOrWhiteSpace(rawBatchId) && existing.BatchId != batchId) ||
+            PrintBatchGroupRules.Normalize(existing.BatchGroupName) != batchGroupName ||
+            existing.Copies != requestedCopies ||
+            existing.ColourMode != requestedColourMode ||
+            existing.PaperSize != requestedPaperSize ||
+            existing.IsDuplex != requestedDuplex ||
+            existing.Orientation != requestedOrientation ||
+            existingDocument.OriginalFileName != originalName ||
+            existingDocument.SizeBytes != file.Length ||
+            !string.Equals(existingDocument.Sha256, suppliedSha, StringComparison.OrdinalIgnoreCase))
+        {
+            return Results.Conflict(new
+            {
+                code = "idempotency_key_reused",
+                message = "This upload key already belongs to a different file, batch or set of print options. Keep the original request unchanged or start a new upload."
+            });
+        }
+
+        return Results.Ok(new { Job = existing, Document = existingDocument, DuplicateRequest = true });
+    }
+
+    var batchCheckoutLocked = await db.PrintBatchPayments.AsNoTracking().AnyAsync(item =>
+        item.TenantId == session.TenantId &&
+        item.CustomerSessionId == session.Id &&
+        item.BatchId == batchId &&
+        item.Status != "REJECTED", ct);
+    if (batchCheckoutLocked)
+        return Results.Conflict(new
+        {
+            code = "batch_upload_locked_after_payment_start",
+            message = "This batch has a payment attempt or a verified payment. Start a new batch for additional files so every file has a clear payment total."
+        });
+
     var subscription = await entitlements.GetForTenantAsync(session.TenantId, ct);
     if (!subscription.IsAccessActive)
     {
@@ -5862,14 +5906,6 @@ publicApi.MapPost("/sessions/current/jobs", async (
     {
         return Results.Conflict(new { code = preflightQuota.Code, message = preflightQuota.Message, current = preflightQuota.Current, maximum = preflightQuota.Maximum });
     }
-
-    var originalName = file.FileName.Split('/', '\\').LastOrDefault() ?? string.Empty;
-    originalName = new string(originalName.Where(character => !char.IsControl(character)).ToArray()).Trim();
-    if (string.IsNullOrWhiteSpace(originalName))
-    {
-        return Results.BadRequest(new { code = "invalid_file_name", message = "The uploaded file name is invalid." });
-    }
-    originalName = originalName[..Math.Min(originalName.Length, 255)];
 
     var documentId = Guid.NewGuid();
     StoredDocument stored;
@@ -5932,7 +5968,8 @@ publicApi.MapPost("/sessions/current/jobs", async (
             {
                 item.Id, item.CustomerSessionId, item.BatchId, item.BatchName, item.BatchGroupName,
                 item.JobNumber, item.Status, item.PageCount, item.Copies, item.ColourMode,
-                item.PaperSize, item.IsDuplex, item.Orientation, item.CreatedUtc
+                item.PaperSize, item.IsDuplex, item.Orientation, item.PricingVersion,
+                item.Currency, item.QuotedAmountMinor, item.CreatedUtc
             })
             .SingleOrDefaultAsync(ct);
         if (racedJob is not null)
@@ -5946,7 +5983,7 @@ publicApi.MapPost("/sessions/current/jobs", async (
                 .Select(item => new { item.OriginalFileName, item.MediaType, item.SizeBytes, item.Sha256, item.PageSizesJson })
                 .SingleOrDefaultAsync(ct);
             if (racedDocument is null ||
-                racedJob.BatchId != batchId ||
+                (!string.IsNullOrWhiteSpace(rawBatchId) && racedJob.BatchId != batchId) ||
                 racedJob.BatchGroupName != batchGroupName ||
                 racedJob.Copies != requestedCopies ||
                 racedJob.ColourMode != requestedColourMode ||
@@ -6573,7 +6610,9 @@ publicApi.MapPost("/sessions/current/local-upload-tickets/{ticketId:guid}/cloud-
             Job = new
             {
                 preflightJob.Id, preflightJob.JobNumber, preflightJob.Status,
-                preflightJob.PageCount, preflightJob.Copies, preflightJob.Currency,
+                preflightJob.PageCount, preflightJob.Copies, preflightJob.ColourMode,
+                preflightJob.PaperSize, preflightJob.IsDuplex, preflightJob.Orientation,
+                preflightJob.PricingVersion, preflightJob.Currency,
                 preflightJob.QuotedAmountMinor, preflightJob.CreatedUtc,
                 preflightJob.BatchGroupName,
                 preflightJob.BatchName,
@@ -6691,7 +6730,9 @@ publicApi.MapPost("/sessions/current/local-upload-tickets/{ticketId:guid}/cloud-
                 Job = new
                 {
                     existingJob.Id, existingJob.JobNumber, existingJob.Status,
-                    existingJob.PageCount, existingJob.Copies, existingJob.Currency,
+                    existingJob.PageCount, existingJob.Copies, existingJob.ColourMode,
+                    existingJob.PaperSize, existingJob.IsDuplex, existingJob.Orientation,
+                    existingJob.PricingVersion, existingJob.Currency,
                     existingJob.QuotedAmountMinor, existingJob.CreatedUtc,
                     existingJob.BatchGroupName,
                     existingJob.BatchName,
@@ -6852,6 +6893,7 @@ publicApi.MapPost("/sessions/current/local-upload-tickets/{ticketId:guid}/cloud-
             Job = new
             {
                 job.Id, job.JobNumber, job.Status, job.PageCount, job.Copies,
+                job.ColourMode, job.PaperSize, job.IsDuplex, job.Orientation, job.PricingVersion,
                 job.Currency, job.QuotedAmountMinor, job.CreatedUtc, job.BatchGroupName, job.BatchName, job.BatchId
             },
             Document = new
