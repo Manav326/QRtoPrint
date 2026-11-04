@@ -3636,7 +3636,6 @@ function CustomerPrintFlow({publicCode,sessionToken,paymentOptions,localAgent,lo
         };
       });
       const revisedQuote:PrintQuoteResult={
-      const revisedQuote:PrintQuoteResult={
         id:candidate.id,
         batchId:uploadedBatch.find(item=>item.job.id===candidate.id)?.job.batchId??uploaded?.job.batchId??null,
         jobNumber:candidate.jobNumber,
