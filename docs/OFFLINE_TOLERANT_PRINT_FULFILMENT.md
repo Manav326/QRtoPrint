@@ -6,7 +6,7 @@ This note describes the existing QRtoPrint print-job lifecycle when a shop print
 
 The customer keeps the general choices visible: colour or black-and-white, single- or double-sided, copies, and A4. Advanced paper-size and orientation controls are opt-in. Folder defaults are applied to each file in that folder; a file can opt into its own custom values without changing sibling files or another folder.
 
-Each file's final settings are stored with its own print job and are sent through both the local-ticket and HTTPS upload paths. Retries retain the same idempotency identity and recover the same job rather than creating a duplicate.
+Each file's final settings are stored with its own print job and are sent through both the local-ticket and HTTPS upload paths. Retries retain the same idempotency identity and recover the same job rather than creating a duplicate. An expired 15-minute LAN claim keeps that same ticket and one-use grant during its 24-hour recovery window: when the original Agent is still paired and online, the API renews the same ticket only after the old claim lease ends and before checkout starts; the Agent refreshes the matching protected-queue lease. When the Agent is unavailable, the client attempts HTTPS recovery against that same ticket instead of creating a second reservation. Checkout and renewal share the batch lock; after checkout starts, unfinished files are rejected as a new-batch request and their abandoned reservation is released from monthly quota usage.
 
 ## Secure staging and readiness
 
