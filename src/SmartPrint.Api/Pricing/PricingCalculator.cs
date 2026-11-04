@@ -64,6 +64,15 @@ public static class PricingCalculator
             _ => throw new ArgumentException("Choose a supported photo size.", nameof(photoSizeCode))
         };
 
+    public static int PhotoPageCount(int photoCount, string photoSizeCode)
+    {
+        if (photoCount is < 1 or > 100)
+            throw new ArgumentOutOfRangeException(nameof(photoCount), "Photo count must be between 1 and 100.");
+
+        var photosPerPage = MaximumPhotosPerA4Sheet(photoSizeCode);
+        return checked((photoCount + photosPerPage - 1) / photosPerPage);
+    }
+
     public static long[] CalculatePageRefundAllocations(int pageCount, int copies, string colourMode, bool isDuplex, ShopPricingProfile pricing)
     {
         var total = Calculate(pageCount, copies, colourMode, isDuplex, pricing);
