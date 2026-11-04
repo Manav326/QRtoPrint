@@ -798,3 +798,78 @@ test("explicit Agent print-output claims preserve local-document proof, same-bat
   assert.match(service, /AGENT_RECLAIMED_EXPIRED_PRINT_LEASE/);
   assert.match(rules, /proof\.JobId != Guid.Empty/);
 });
+
+
+test("all API endpoint modules keep database state writes inside application services", () => {
+  const endpointModules = [
+    "AccountRegistrationEndpoints.cs",
+    "AgentConnectivityEndpoints.cs",
+    "AgentDocumentPreviewEndpoints.cs",
+    "AgentEndpointInfo.cs",
+    "AgentEndpoints.cs",
+    "AgentEnrollmentEndpoints.cs",
+    "AgentJobEndpoints.cs",
+    "AgentJobLifecycleEndpoints.cs",
+    "AgentLocalPhotoRevisionEndpoints.cs",
+    "AgentLocalUploadEndpoints.cs",
+    "AgentPrintClaimEndpoints.cs",
+    "AgentSpoolerLifecycleEndpoints.cs",
+    "ApiEndpointMappings.cs",
+    "AuthenticationEndpoints.cs",
+    "AuthenticationSessionEndpoints.cs",
+    "CustomerEndpoints.cs",
+    "PlatformOverviewEndpoints.cs",
+    "PlatformPlanEndpoints.cs",
+    "PlatformTenantStatusEndpoints.cs",
+    "PublicCloudRecoveryEndpoints.cs",
+    "PublicJobCreationEndpoints.cs",
+    "PublicJobEndpoints.cs",
+    "PublicJobQuoteEndpoints.cs",
+    "PublicJobStatusEndpoints.cs",
+    "PublicPaymentEndpoints.cs",
+    "PublicPaymentInitiationEndpoints.cs",
+    "PublicPaymentReportEndpoints.cs",
+    "PublicPaymentResponses.cs",
+    "PublicSessionEndpoints.cs",
+    "PublicUploadEndpoints.cs",
+    "PublicUploadTicketEndpoints.cs",
+    "ShopAccountEndpoints.cs",
+    "ShopAgentManagementEndpoints.cs",
+    "ShopCustomerEndpoints.cs",
+    "ShopPaymentEndpoints.cs",
+    "ShopPaymentQueryEndpoints.cs",
+    "ShopPaymentReviewEndpoints.cs",
+    "ShopPaymentSettingsEndpoints.cs",
+    "ShopPhotoRevisionEndpoints.cs",
+    "ShopPricingEndpoints.cs",
+    "ShopPrintBatchReviewEndpoints.cs",
+    "ShopPrintJobAssignmentEndpoints.cs",
+    "ShopPrintJobDecisionEndpoints.cs",
+    "ShopPrintJobDispatchEndpoints.cs",
+    "ShopPrintJobQueryEndpoints.cs",
+    "ShopPrintJobReadEndpoints.cs",
+    "ShopPrintJobRefundEndpoints.cs",
+    "ShopPrintJobReviewEndpoints.cs",
+    "ShopPrintJobSettingsEndpoints.cs",
+    "ShopPrinterEndpoints.cs",
+    "ShopReportEndpoints.cs",
+    "ShopStationEndpoints.cs",
+    "SystemEndpoints.cs"
+  ];
+
+  const directWritePatterns = [
+    /SaveChangesAsync\s*\(/,
+    /BeginTransactionAsync\s*\(/,
+    /ExecuteUpdateAsync\s*\(/,
+    /ExecuteDeleteAsync\s*\(/,
+    /ExecuteSql(?:Raw|Interpolated)(?:Async)?\s*\(/,
+    /\bdb\.\w+\.(?:Add|AddRange|Remove|RemoveRange|Update|UpdateRange|Attach)\s*\(/
+  ];
+
+  for (const moduleName of endpointModules) {
+    const source = readApi(moduleName);
+    for (const pattern of directWritePatterns) {
+      assert.doesNotMatch(source, pattern, moduleName + " must delegate database writes to an application service.");
+    }
+  }
+});
