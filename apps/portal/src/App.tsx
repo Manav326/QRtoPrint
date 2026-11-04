@@ -3293,14 +3293,17 @@ function CustomerLocalConnection({localAgent,onReady,onUnavailable,cloudAssisted
     if(generation!==checkGeneration.current)return;
     setCheckStatus("unavailable");
     onReady(false);
-    if(cloudAssistedPrintingEnabled)onUnavailable();
+    // A customer session can outlive the Agent heartbeat. Surface the existing
+    // HTTPS queue path after the local Agent endpoint is confirmed unreachable;
+    // the API still verifies the live Agent/plan boundary before accepting bytes.
+    onUnavailable();
     setMessage(nativeAppMode
       ? nativeLocalNetworkPermissionDenied
         ? "Could not reach the shop. Check that this phone is on the same Wi-Fi as the shop computer. If Android 16 local-network access is restricted, allow SmartPrint under Android Settings → Permissions → Nearby devices. Cloud-assisted upload remains available."
-        : "Shop offline · Cloud upload available."
+        : "Shop offline · Secure HTTPS queue available while the shop Agent is offline."
       : validEndpointCount===0
-        ? "The shop Agent has not announced a usable local address. The regular cloud-assisted upload remains available."
-        : "Could not reach the shop computer. Make sure this phone is connected to the same shop Wi-Fi, then ask the shop operator to check the connection. The regular cloud-assisted upload remains available.");
+        ? "The shop Agent has not announced a usable local address. Secure HTTPS queue fallback is available only while the shop Agent is offline."
+        : "Could not reach the shop computer. Make sure this phone is connected to the same shop Wi-Fi, then ask the shop operator to check the connection. Secure HTTPS queue fallback is available only while the shop Agent is offline.");
   }
 
   useEffect(()=>{
