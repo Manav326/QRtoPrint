@@ -372,3 +372,17 @@ test("shop-owner Photo Studio supports cloud and local storage without changing 
  assert.match(agent,/ReplaceStagedPhotoDocumentAsync/);
 });
 
+
+
+test("native Android protects Photo Studio from screenshots through the origin-pinned WebView bridge",()=>{
+ const studio=read("../src/PhotoStudio.tsx");
+ const activity=read("../../android/app/src/main/java/com/quantaedge/smartprint/MainActivity.kt");
+ assert.match(studio,/postMessage\("setSensitivePreview\|on"\)/);
+ assert.match(studio,/postMessage\("setSensitivePreview\|off"\)/);
+ assert.match(activity,/sourceOrigin\.scheme == trustedPage\.scheme/);
+ assert.match(activity,/sourceOrigin\.host\.equals\(trustedPage\.host, true\)/);
+ assert.match(activity,/isMainFrame/);
+ assert.match(activity,/parts\[0\] == "setSensitivePreview"/);
+ assert.match(activity,/window\.addFlags\(WindowManager\.LayoutParams\.FLAG_SECURE\)/);
+ assert.match(activity,/window\.clearFlags\(WindowManager\.LayoutParams\.FLAG_SECURE\)/);
+});
