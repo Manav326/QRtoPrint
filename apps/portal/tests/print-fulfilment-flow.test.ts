@@ -363,6 +363,8 @@ test("local photo revision rejects paid, handed-off and changed originals",()=>{
  assert.match(route,/document\.AgentDeviceId != device\.Id/);
  assert.match(route,/hasPayment \|\| hasBatchPayment/);
  assert.match(route,/document\.Sha256, request\.ExpectedOriginalSha256/);
+ assert.match(route,/request\.PhotosPerPage > PricingCalculator\.MaximumPhotosPerA4Sheet/);
+ assert.match(route,/request\.PageCount != PricingCalculator\.PhotoPageCount\(request\.PhotoCount, request\.PhotoSizeCode, request\.PhotosPerPage\)/);
 });
 
 
