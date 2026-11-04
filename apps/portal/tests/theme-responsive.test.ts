@@ -367,8 +367,10 @@ test("offline requests use the existing secure queue and owner changes require c
   const server = read("../../../src/SmartPrint.Api/Program.cs");
 
   assert.ok(app.includes("secureQueueFallbackEnabled"));
-  assert.ok(api.includes('"X-Print-Queue-Fallback": "true"'));
-  assert.ok(server.includes('context.Request.Headers["X-Print-Queue-Fallback"]'));
+  assert.ok(server.includes('publicApi.MapPost("/sessions/current/local-upload-tickets/{ticketId:guid}/cloud-recovery"'));
+  assert.ok(server.includes("if (!subscription.CloudAssistedPrintingEnabled && recoveryAgentAvailable)"));
+  assert.doesNotMatch(api, /X-Print-Queue-Fallback|allowQueueFallback/);
+  assert.doesNotMatch(server, /X-Print-Queue-Fallback|queueFallbackRequested/);
   assert.ok(server.includes('shop.MapPatch("/print-jobs/{jobId:guid}/settings"'));
   assert.ok(server.includes('job.Status = "AWAITING_CUSTOMER_APPROVAL";'));
   assert.ok(app.includes("onUpdateSettings={updatePrintJobSettings}"));
