@@ -2411,11 +2411,26 @@ function PrintQueuePage({ jobs, printers, agentDevices, searchQuery, loadingBatc
               </div>
               {editingSettingsJobId===job.id&&editingPrintSettings&&<div className="queue-settings-editor">
                 <div><strong>Review print options</strong><small>The revised quote must be approved by the customer before payment or printing.</small></div>
-                <label>Colour <select value={editingPrintSettings.colourMode} onChange={event=>setEditingPrintSettings(current=>current?{...current,colourMode:event.currentTarget.value as CustomerPrintRequestSettings["colourMode"]}:current)}><option value="Mono">B&W</option><option value="Colour">Colour</option></select></label>
-                <label>Sides <select value={editingPrintSettings.isDuplex?"DOUBLE":"SINGLE"} onChange={event=>setEditingPrintSettings(current=>current?{...current,isDuplex:event.currentTarget.value==="DOUBLE"}:current)}><option value="SINGLE">Single-sided</option><option value="DOUBLE">Double-sided</option></select></label>
-                <label>Copies <input type="number" min={1} max={100} value={editingPrintSettings.copies} onChange={event=>setEditingPrintSettings(current=>current?{...current,copies:Math.max(1,Math.min(100,Number(event.currentTarget.value)||1))}:current)}/></label>
-                <label>Paper size <select value={editingPrintSettings.paperSize} onChange={event=>setEditingPrintSettings(current=>current?{...current,paperSize:event.currentTarget.value as CustomerPrintRequestSettings["paperSize"]}:current)}><option value="A4">A4</option><option value="A3">A3</option><option value="A5">A5</option><option value="LETTER">Letter</option><option value="LEGAL">Legal</option></select></label>
-                <label>Orientation <select value={editingPrintSettings.orientation} onChange={event=>setEditingPrintSettings(current=>current?{...current,orientation:event.currentTarget.value as CustomerPrintRequestSettings["orientation"]}:current)}><option value="AUTO">Auto · follow document</option><option value="PORTRAIT">Portrait</option><option value="LANDSCAPE">Landscape</option></select></label>
+                <label>Colour <select value={editingPrintSettings.colourMode} onChange={event=>{
+                  const colourMode=event.currentTarget.value as CustomerPrintRequestSettings["colourMode"];
+                  setEditingPrintSettings(current=>current?{...current,colourMode}:current);
+                }}><option value="Mono">B&W</option><option value="Colour">Colour</option></select></label>
+                <label>Sides <select value={editingPrintSettings.isDuplex?"DOUBLE":"SINGLE"} onChange={event=>{
+                  const isDuplex=event.currentTarget.value==="DOUBLE";
+                  setEditingPrintSettings(current=>current?{...current,isDuplex}:current);
+                }}><option value="SINGLE">Single-sided</option><option value="DOUBLE">Double-sided</option></select></label>
+                <label>Copies <input type="number" min={1} max={100} value={editingPrintSettings.copies} onChange={event=>{
+                  const copies=Math.max(1,Math.min(100,Number(event.currentTarget.value)||1));
+                  setEditingPrintSettings(current=>current?{...current,copies}:current);
+                }}/></label>
+                <label>Paper size <select value={editingPrintSettings.paperSize} onChange={event=>{
+                  const paperSize=event.currentTarget.value as CustomerPrintRequestSettings["paperSize"];
+                  setEditingPrintSettings(current=>current?{...current,paperSize}:current);
+                }}><option value="A4">A4</option><option value="A3">A3</option><option value="A5">A5</option><option value="LETTER">Letter</option><option value="LEGAL">Legal</option></select></label>
+                <label>Orientation <select value={editingPrintSettings.orientation} onChange={event=>{
+                  const orientation=event.currentTarget.value as CustomerPrintRequestSettings["orientation"];
+                  setEditingPrintSettings(current=>current?{...current,orientation}:current);
+                }}><option value="AUTO">Auto · follow document</option><option value="PORTRAIT">Portrait</option><option value="LANDSCAPE">Landscape</option></select></label>
                 <div className="queue-settings-actions">
                   <button className="secondary-button" type="button" onClick={()=>{setEditingSettingsJobId(null);setEditingPrintSettings(null);}}>Cancel</button>
                   <button className="primary-button" type="button" disabled={busyJobId===job.id||!editingPrintSettings} onClick={()=>{if(editingPrintSettings)void onUpdateSettings(job,editingPrintSettings);setEditingSettingsJobId(null);setEditingPrintSettings(null);}}>Send revised quote</button>
@@ -4437,13 +4452,22 @@ function CustomerPrintFlow({publicCode,sessionToken,paymentOptions,localAgent,lo
                    setGroupSettings(current=>({...current,[group.name]:{...(current[group.name]??defaults),copies}}));
                  }}/></label>
               <div><span>Paper</span><strong className="customer-paper-default">{defaults.advancedEnabled?defaults.paperSize:"A4"}</strong></div>
-              <label className="customer-advanced-toggle"><input type="checkbox" checked={defaults.advancedEnabled} onChange={event=>setGroupSettings(current=>({...current,[group.name]:{...defaults,advancedEnabled:event.currentTarget.checked}}))}/><span>Advanced settings</span></label>
+              <label className="customer-advanced-toggle"><input type="checkbox" checked={defaults.advancedEnabled} onChange={event=>{
+                 const advancedEnabled=event.currentTarget.checked;
+                 setGroupSettings(current=>({...current,[group.name]:{...(current[group.name]??defaults),advancedEnabled}}));
+               }}/><span>Advanced settings</span></label>
             </div>
             {defaults.advancedEnabled&&<div className="customer-file-overrides customer-folder-advanced">
-              <label><span>Paper size</span><select value={defaults.paperSize} onChange={event=>setGroupSettings(current=>({...current,[group.name]:{...defaults,paperSize:event.currentTarget.value as CustomerGroupSettings["paperSize"]}}))}>
+              <label><span>Paper size</span><select value={defaults.paperSize} onChange={event=>{
+                 const paperSize=event.currentTarget.value as CustomerGroupSettings["paperSize"];
+                 setGroupSettings(current=>({...current,[group.name]:{...(current[group.name]??defaults),paperSize}}));
+               }}>
                 <option value="A4">A4</option><option value="A3">A3</option><option value="A5">A5</option><option value="LETTER">Letter</option><option value="LEGAL">Legal</option>
               </select></label>
-              <label><span>Orientation</span><select value={defaults.orientation} onChange={event=>setGroupSettings(current=>({...current,[group.name]:{...defaults,orientation:event.currentTarget.value as CustomerGroupSettings["orientation"]}}))}>
+              <label><span>Orientation</span><select value={defaults.orientation} onChange={event=>{
+                 const orientation=event.currentTarget.value as CustomerGroupSettings["orientation"];
+                 setGroupSettings(current=>({...current,[group.name]:{...(current[group.name]??defaults),orientation}}));
+               }}>
                 <option value="AUTO">Auto · follow document</option><option value="PORTRAIT">Portrait</option><option value="LANDSCAPE">Landscape</option>
               </select></label>
             </div>}
@@ -4476,12 +4500,21 @@ function CustomerPrintFlow({publicCode,sessionToken,paymentOptions,localAgent,lo
                   <button type="button" className={own.isDuplex?"customer-choice selected":"customer-choice"} onClick={()=>setFileSettings(current=>({...current,[fingerprint]:{...own,custom:true,isDuplex:true}}))}>Double</button>
                 </div>
                 <div><span>Paper</span><strong className="customer-paper-default">{own.advancedEnabled?own.paperSize:"A4"}</strong></div>
-                <label className="customer-advanced-toggle"><input type="checkbox" checked={own.advancedEnabled} onChange={event=>setFileSettings(current=>({...current,[fingerprint]:{...own,custom:true,advancedEnabled:event.currentTarget.checked}}))}/><span>Advanced settings</span></label>
+                <label className="customer-advanced-toggle"><input type="checkbox" checked={own.advancedEnabled} onChange={event=>{
+                   const advancedEnabled=event.currentTarget.checked;
+                   setFileSettings(current=>({...current,[fingerprint]:{...(current[fingerprint]??own),custom:true,advancedEnabled}}));
+                 }}/><span>Advanced settings</span></label>
                 {own.advancedEnabled&&<div className="customer-file-overrides customer-folder-advanced">
-                  <label><span>Paper size</span><select value={own.paperSize} onChange={event=>setFileSettings(current=>({...current,[fingerprint]:{...own,custom:true,paperSize:event.currentTarget.value as CustomerFileSettings["paperSize"]}}))}>
+                  <label><span>Paper size</span><select value={own.paperSize} onChange={event=>{
+                     const paperSize=event.currentTarget.value as CustomerFileSettings["paperSize"];
+                     setFileSettings(current=>({...current,[fingerprint]:{...(current[fingerprint]??own),custom:true,paperSize}}));
+                   }}>
                     <option value="A4">A4</option><option value="A3">A3</option><option value="A5">A5</option><option value="LETTER">Letter</option><option value="LEGAL">Legal</option>
                   </select></label>
-                  <label><span>Orientation</span><select value={own.orientation} onChange={event=>setFileSettings(current=>({...current,[fingerprint]:{...own,custom:true,orientation:event.currentTarget.value as CustomerFileSettings["orientation"]}}))}>
+                  <label><span>Orientation</span><select value={own.orientation} onChange={event=>{
+                     const orientation=event.currentTarget.value as CustomerFileSettings["orientation"];
+                     setFileSettings(current=>({...current,[fingerprint]:{...(current[fingerprint]??own),custom:true,orientation}}));
+                   }}>
                     <option value="AUTO">Auto · follow document</option><option value="PORTRAIT">Portrait</option><option value="LANDSCAPE">Landscape</option>
                   </select></label>
                 </div>}
