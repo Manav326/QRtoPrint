@@ -17,8 +17,13 @@
       "manufacturer": "HP",
       "family": "HP Universal Print Driver - PCL 6",
       "version": null,
-      "models": ["HP LaserJet models listed in the matching UPD release notes"],
-      "windowsTargets": ["Windows 11 x64", "Windows Server 2025"],
+      "models": [
+        "HP LaserJet models listed in the matching UPD release notes"
+      ],
+      "windowsTargets": [
+        "Windows 11 x64",
+        "Windows Server 2025"
+      ],
       "officialSupportUrl": "https://support.hp.com/in-en/drivers/upd/model/4157320",
       "packageFileName": null,
       "packageUrl": null,
@@ -27,7 +32,10 @@
       "infRelativePath": null,
       "driverName": null,
       "catalogSignerContains": null,
-      "allowedDownloadHosts": ["support.hp.com", "ftp.hp.com"],
+      "allowedDownloadHosts": [
+        "support.hp.com",
+        "ftp.hp.com"
+      ],
       "licenseReview": "pending",
       "ciApproval": "pending_package_pin_and_license_review",
       "notes": "HP provides OS/version-specific package selection. Pin an exact India-appropriate x64 PCL 6 package and supported models before CI installation."
@@ -37,8 +45,18 @@
       "manufacturer": "Canon",
       "family": "Generic Plus UFR II",
       "version": "3.50",
-      "models": ["imageCLASS MF810Cdn", "Other models listed on Canon issue 0101310501"],
-      "windowsTargets": ["Windows 11 x64", "Windows 10 x64", "Windows Server 2016 x64", "Windows Server 2019 x64", "Windows Server 2022", "Windows Server 2025"],
+      "models": [
+        "imageCLASS MF810Cdn",
+        "Other models listed on Canon issue 0101310501"
+      ],
+      "windowsTargets": [
+        "Windows 11 x64",
+        "Windows 10 x64",
+        "Windows Server 2016 x64",
+        "Windows Server 2019 x64",
+        "Windows Server 2022",
+        "Windows Server 2025"
+      ],
       "officialSupportUrl": "https://in.canon/en/support/0101310501?model=imageCLASS+MF810Cdn",
       "packageFileName": "GPlus_UFRII_Driver_V350_W64_00.exe",
       "packageUrl": null,
@@ -57,8 +75,13 @@
       "manufacturer": "Epson",
       "family": "EPSON Universal Print Driver",
       "version": "2.123.00",
-      "models": ["Epson models explicitly listed in the matching Universal Print Driver compatibility information"],
-      "windowsTargets": ["Windows 11 x64", "Windows 10 x64"],
+      "models": [
+        "Epson models explicitly listed in the matching Universal Print Driver compatibility information"
+      ],
+      "windowsTargets": [
+        "Windows 11 x64",
+        "Windows 10 x64"
+      ],
       "officialSupportUrl": "https://download-center.epson.com/softwares/?device_id=L3150+Series&os=WIN1164&region=GB",
       "packageFileName": "EUPD_x64_212300.exe",
       "packageUrl": null,
@@ -67,19 +90,27 @@
       "infRelativePath": null,
       "driverName": null,
       "catalogSignerContains": null,
-      "allowedDownloadHosts": ["download-center.epson.com", "ftp.epson.com"],
+      "allowedDownloadHosts": [
+        "download-center.epson.com",
+        "ftp.epson.com"
+      ],
       "licenseReview": "pending",
       "ciApproval": "pending_package_extraction_and_license_review",
-      "notes": "Epson Download Center listed Universal Print Driver v2.123.00 dated 2026-10-23. Official download is an EXE self-extractor; no vendor setup executable will be run by CI. Pin an approved INF/CAB/ZIP payload if Epson permits this use."
+      "notes": "Epson's official Download Center lists Universal Print Driver v2.123.00 dated 2026-10-23 (87.53 MB) for the L3150 Series on Windows 11 x64. The listed download is an EXE self-extractor; CI will not execute it. Approve an extracted INF/CAB/ZIP payload and use rights before installation."
     },
     {
       "id": "brother-universal-printer-driver-x64",
       "manufacturer": "Brother",
       "family": "Brother Universal Printer Driver",
-      "version": null,
-      "models": ["Brother models explicitly listed in the selected Universal Printer Driver release notes"],
-      "windowsTargets": ["Windows 11 x64", "Windows 10 x64"],
-      "officialSupportUrl": "https://support.brother.com/g/b/downloadtop.aspx?c=in&lang=en&prod=group2",
+      "version": "1.0.0.0",
+      "models": [
+        "Brother DCP-J100 (reference product page; other devices only where Brother's release notes list support)"
+      ],
+      "windowsTargets": [
+        "Windows 11 x64",
+        "Windows 10 x64"
+      ],
+      "officialSupportUrl": "https://support.brother.com/g/b/downloadlist.aspx?c=in&lang=en&os=10052&prod=dcpj100_all",
       "packageFileName": null,
       "packageUrl": null,
       "packageSha256": null,
@@ -87,18 +118,28 @@
       "infRelativePath": null,
       "driverName": null,
       "catalogSignerContains": null,
-      "allowedDownloadHosts": ["support.brother.com", "download.brother.com"],
+      "allowedDownloadHosts": [
+        "support.brother.com",
+        "download.brother.com"
+      ],
       "licenseReview": "pending",
       "ciApproval": "pending_exact_package_pin_and_license_review",
-      "notes": "Select the India-compatible Universal Printer Driver release and exact models from Brother's official compatibility information before qualification."
+      "notes": "Brother India lists Universal Printer Driver v1.0.0.0 dated 2026-01-15 (20.37 MB) for a range of inkjet devices. The same page explicitly says two-sided printing is not supported. Pin the official package and confirm all models before qualification.",
+      "limitations": [
+        "Two-sided printing is not supported by the listed Universal Printer Driver release"
+      ]
     },
     {
       "id": "pantum-p2503-x64",
       "manufacturer": "Pantum",
       "family": "P2503 Windows Driver",
       "version": "1.0.5",
-      "models": ["Pantum P2503"],
-      "windowsTargets": ["Windows 11 x64"],
+      "models": [
+        "Pantum P2503"
+      ],
+      "windowsTargets": [
+        "Windows 11 x64"
+      ],
       "officialSupportUrl": "https://www.pantum.in/support/download/driver/",
       "packageFileName": null,
       "packageUrl": null,
@@ -107,7 +148,10 @@
       "infRelativePath": null,
       "driverName": null,
       "catalogSignerContains": null,
-      "allowedDownloadHosts": ["pantum.in", "drivers.pantum.in"],
+      "allowedDownloadHosts": [
+        "pantum.in",
+        "drivers.pantum.in"
+      ],
       "licenseReview": "pending",
       "ciApproval": "pending_package_pin_and_license_review",
       "notes": "Pantum India lists P2503 Windows Driver v1.0.5, English, 14.19 MB, Windows 11 64-bit. Confirm downloadable package, INF payload and signed catalog."
@@ -117,8 +161,25 @@
       "manufacturer": "Pantum",
       "family": "Pantum Universal Printing Driver",
       "version": "1.0.6",
-      "models": ["BP5100DN", "BP5100DW", "BM5100ADN", "BM5100ADW", "BM5100FDN", "BM5100FDW", "BP5200DN", "BP5200DW", "BM5200ADN", "BM5200ADW", "BM5220ADN", "BM5220ADW", "BM5300ADN", "BM5300ADW"],
-      "windowsTargets": ["Windows x64; verify the exact selected OS in the package release"],
+      "models": [
+        "BP5100DN",
+        "BP5100DW",
+        "BM5100ADN",
+        "BM5100ADW",
+        "BM5100FDN",
+        "BM5100FDW",
+        "BP5200DN",
+        "BP5200DW",
+        "BM5200ADN",
+        "BM5200ADW",
+        "BM5220ADN",
+        "BM5220ADW",
+        "BM5300ADN",
+        "BM5300ADW"
+      ],
+      "windowsTargets": [
+        "Windows x64; verify the exact selected OS in the package release"
+      ],
       "officialSupportUrl": "https://global.pantum.com/p/en-us/driver",
       "packageFileName": null,
       "packageUrl": null,
@@ -127,7 +188,9 @@
       "infRelativePath": null,
       "driverName": null,
       "catalogSignerContains": null,
-      "allowedDownloadHosts": ["global.pantum.com"],
+      "allowedDownloadHosts": [
+        "global.pantum.com"
+      ],
       "licenseReview": "pending",
       "ciApproval": "pending_package_pin_and_license_review",
       "notes": "Pantum global support lists Universal Printing Driver v1.0.6 for BP5100/BM5100/BP5200/BM5200/BM5300 families. Confirm the package's OS support, INF payload and terms before CI use."
