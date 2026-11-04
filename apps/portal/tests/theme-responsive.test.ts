@@ -13,18 +13,18 @@ test("customer copy inputs capture event values before scheduling React state up
   assert.ok(labelStart >= 0 && labelEnd > labelStart, "The customer Copies input must remain present.");
   const copyLabel = app.slice(labelStart, labelEnd);
 
-  const blurStart = copyLabel.indexOf("onBlur={event => {");
-  assert.ok(blurStart >= 0, "The Copies blur handler must remain present.");
-  const changeHandler = copyLabel.slice(copyLabel.indexOf("onChange={event => {"), blurStart);
+  const blurStart = copyLabel.indexOf("onBlur={event=>");
+  assert.ok(blurStart >= 0, "The folder-default Copies blur handler must remain present.");
+  const changeHandler = copyLabel.slice(copyLabel.indexOf("onChange={event=>"), blurStart);
   const blurHandler = copyLabel.slice(blurStart);
 
   for (const [name, handler] of [["change", changeHandler], ["blur", blurHandler]] as const) {
     const captureIndex = handler.indexOf("event.currentTarget.value");
-    const updateIndex = handler.indexOf("setFileSettings(current =>");
+    const updateIndex = handler.indexOf("setGroupSettings(current=>");
     assert.ok(captureIndex >= 0 && updateIndex > captureIndex,
-      `The Copies ${name} handler must read currentTarget before scheduling the state update.`);
+      `The folder-default Copies ${name} handler must read currentTarget before scheduling the state update.`);
     assert.equal(handler.indexOf("event.currentTarget", updateIndex), -1,
-      `The Copies ${name} handler must not read currentTarget inside a state updater.`);
+      `The folder-default Copies ${name} handler must not read currentTarget inside a state updater.`);
   }
 });
 
@@ -220,8 +220,8 @@ test("Android customer printing uses the same single Copies control and event ha
   const customerFlow = app.slice(customerFlowStart, customerFlowEnd);
   assert.ok(app.includes("<CustomerPrintFlow publicCode={publicCode}"));
   assert.ok(customerFlow.includes('navigator.userAgent.includes("SmartPrintAndroid/1")'));
-  assert.equal((customerFlow.match(/customer-folder-copies/g) ?? []).length, 1,
-    "There must be one shared Copies input, not a separate Android implementation.");
+  assert.equal((customerFlow.match(/customer-folder-copies/g) ?? []).length, 2,
+    "There must be one folder-default Copies input and one per-file Custom override in the shared flow.");
   assert.ok(customerFlow.includes("onChange={event => {"));
   assert.ok(customerFlow.includes("onBlur={event => {"));
   const copiesStart = customerFlow.indexOf('<label className="customer-folder-copies">');
