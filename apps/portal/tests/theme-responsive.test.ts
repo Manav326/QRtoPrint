@@ -373,3 +373,11 @@ test("offline requests use the existing secure queue and owner changes require c
   assert.ok(server.includes('job.Status = "AWAITING_CUSTOMER_APPROVAL";'));
   assert.ok(app.includes("onUpdateSettings={updatePrintJobSettings}"));
 });
+
+test("customer paper summaries reflect advanced folder and per-file choices", () => {
+  const app = read("../src/App.tsx");
+  assert.match(app, /customer-paper-default">\{defaults\.paperSize\}/);
+  assert.match(app, /customer-paper-default">\{own\.paperSize\}/);
+  assert.match(app, /entry\.quote!\.paperSize/);
+  assert.match(app, /item\.job\.paperSize\?\?"A4"/);
+});
