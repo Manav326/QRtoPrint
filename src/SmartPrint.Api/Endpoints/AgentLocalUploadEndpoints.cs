@@ -140,110 +140,70 @@ public static partial class AgentEndpoints
             LocalPrintUploadCompletionRequest request,
             HttpContext context,
             SmartPrintDbContext db,
-            TenantEntitlementService entitlements,
             AgentLocalUploadCompletionService completionService,
             CancellationToken ct) =>
         {
             var device = await AgentAuthentication.AuthenticateAsync(context, db, ct);
             if (device is null) return Results.Unauthorized();
-        
+
             var rawGrant = context.Request.Headers["X-Print-Upload-Grant"].FirstOrDefault();
-            if (string.IsNullOrWhiteSpace(rawGrant) || rawGrant.Length is < 40 or > 128)
-            {
-                return Results.Unauthorized();
-            }
-        
-            var ticket = await db.LocalPrintUploadTickets.AsNoTracking()
-                .SingleOrDefaultAsync(item =>
-                    item.Id == ticketId &&
-                    item.TenantId == device.TenantId &&
-                    item.AgentDeviceId == device.Id, ct);
-            if (ticket is null) return Results.NotFound();
-        
-            if (!LocalUploadGrantValidator.IsValid(rawGrant, ticket.GrantHash))
-            {
-                return Results.Unauthorized();
-            }
+            var completion = await completionService.CompleteAsync(
+                ticketId,
+                device,
+                rawGrant,
+                request,
+                DateTimeOffset.UtcNow,
+                ct);
 
-            if (ticket.CompletedUtc is not null)
+            switch (completion.Failure)
             {
-                var completedJob = await db.PrintJobs.AsNoTracking()
-                    .SingleOrDefaultAsync(item => item.Id == ticket.PrintJobId && item.TenantId == device.TenantId, ct);
-                var completedDocument = await db.PrintDocuments.AsNoTracking()
-                    .SingleOrDefaultAsync(item => item.PrintJobId == ticket.PrintJobId && item.TenantId == device.TenantId, ct);
-                if (completedJob is null || completedDocument is null) return Results.Conflict();
-        
-                return Results.Ok(new
-                {
-                    AlreadyCompleted = true,
-                    UploadResult = new
+                case AgentLocalUploadCompletionFailure.NotFound:
+                    return Results.NotFound();
+                case AgentLocalUploadCompletionFailure.InvalidGrant:
+                    return Results.Unauthorized();
+                case AgentLocalUploadCompletionFailure.CompletedArtifactsMissing:
+                    return Results.Conflict();
+                case AgentLocalUploadCompletionFailure.ValidationMismatch:
+                    return Results.UnprocessableEntity(new
                     {
-                        Job = new
-                        {
-                            completedJob.Id,
-                            completedJob.JobNumber,
-                            completedJob.Status,
-                            completedJob.PageCount,
-                            completedJob.Copies,
-                            completedJob.ColourMode,
-                            completedJob.PaperSize,
-                            completedJob.IsDuplex,
-                            completedJob.Orientation,
-                            completedJob.PricingVersion,
-                            completedJob.Currency,
-                            completedJob.QuotedAmountMinor,
-                            completedJob.CreatedUtc
-                        },
-                        Document = new
-                        {
-                            completedDocument.Id,
-                            completedDocument.OriginalFileName,
-                            completedDocument.MediaType,
-                            completedDocument.SizeBytes,
-                            completedDocument.Sha256,
-                            completedDocument.PageSizesJson
-                        },
-                        DuplicateRequest = true
-                    }
-                });
-            }
-        
-            if (!LocalUploadCompletionRules.MatchesTicket(ticket, request))
-            {
-                return Results.UnprocessableEntity(new { code = "local_document_validation_mismatch", message = "The local agent's file analysis does not match the document the customer authorised for upload." });
-            }
-
-            if (!LocalUploadCompletionRules.HasValidPageAnalysis(request.PageSizesJson, request.PageCount))
-            {
-                return Results.UnprocessableEntity(new { code = "local_document_page_analysis_invalid", message = "The local agent returned invalid document page analysis." });
-            }
-
-            var now = DateTimeOffset.UtcNow;
-            if (ticket.ExpiresUtc <= now || ticket.ClaimLeaseExpiresUtc is null || ticket.ClaimLeaseExpiresUtc <= now)
-            {
-                return Results.Conflict(new { code = "local_upload_claim_expired", message = "The local upload grant expired before the document could be finalised." });
-            }
-        
-            var subscription = await entitlements.GetForTenantAsync(device.TenantId, ct);
-            if (!subscription.IsAccessActive)
-            {
-                return Results.Problem(statusCode: StatusCodes.Status403Forbidden, title: "This shop's trial or subscription period is no longer active.");
-            }
-            if (!PlanEntitlementRules.AllowsDocument(subscription.MaxDocumentBytes, ticket.SizeBytes))
-            {
-                return Results.Problem(statusCode: StatusCodes.Status413PayloadTooLarge, title: "This document exceeds the maximum size configured for this shop's plan.");
-            }
-        
-            var completion = await completionService.CompleteAsync(ticket, device, request, now, ct);
-            if (completion.Failure == AgentLocalUploadCompletionFailure.TicketNotClaimed)
-            {
-                return Results.Conflict(new { code = "local_upload_ticket_not_claimed", message = "The upload ticket is no longer claimable by this Agent." });
-            }
-
-            if (completion.Failure == AgentLocalUploadCompletionFailure.QuotaExceeded)
-            {
-                var quota = completion.Quota!;
-                return Results.Conflict(new { code = quota.Code, message = quota.Message, current = quota.Current, maximum = quota.Maximum });
+                        code = "local_document_validation_mismatch",
+                        message = "The local agent's file analysis does not match the document the customer authorised for upload."
+                    });
+                case AgentLocalUploadCompletionFailure.PageAnalysisInvalid:
+                    return Results.UnprocessableEntity(new
+                    {
+                        code = "local_document_page_analysis_invalid",
+                        message = "The local agent returned invalid document page analysis."
+                    });
+                case AgentLocalUploadCompletionFailure.ClaimExpired:
+                    return Results.Conflict(new
+                    {
+                        code = "local_upload_claim_expired",
+                        message = "The local upload grant expired before the document could be finalised."
+                    });
+                case AgentLocalUploadCompletionFailure.SubscriptionInactive:
+                    return Results.Problem(
+                        statusCode: StatusCodes.Status403Forbidden,
+                        title: "This shop's trial or subscription period is no longer active.");
+                case AgentLocalUploadCompletionFailure.DocumentTooLarge:
+                    return Results.Problem(
+                        statusCode: StatusCodes.Status413PayloadTooLarge,
+                        title: "This document exceeds the maximum size configured for this shop's plan.");
+                case AgentLocalUploadCompletionFailure.TicketNotClaimed:
+                    return Results.Conflict(new
+                    {
+                        code = "local_upload_ticket_not_claimed",
+                        message = "The upload ticket is no longer claimable by this Agent."
+                    });
+                case AgentLocalUploadCompletionFailure.QuotaExceeded:
+                    var quota = completion.Quota!;
+                    return Results.Conflict(new
+                    {
+                        code = quota.Code,
+                        message = quota.Message,
+                        current = quota.Current,
+                        maximum = quota.Maximum
+                    });
             }
 
             var finalizedJob = completion.Job!;
@@ -321,7 +281,7 @@ public static partial class AgentEndpoints
                     DuplicateRequest = false
                 }
             });
-        });
+        });;
         
         agentApi.MapGet("/local-uploads/{jobId:guid}/status", async (
             Guid jobId,
