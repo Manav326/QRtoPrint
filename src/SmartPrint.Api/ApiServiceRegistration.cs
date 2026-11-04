@@ -87,6 +87,7 @@ public static class ApiServiceRegistration
         services.AddScoped<AgentConnectivityService>();
         services.AddScoped<ShopAccountService>();
         services.AddScoped<AccountRegistrationService>();
+        services.AddScoped<AgentEnrollmentService>();
         services.AddScoped<AgentLocalUploadClaimService>();
         services.AddScoped<AgentLocalUploadCompletionService>();
         services.AddScoped<PlatformPlanService>();
