@@ -7,7 +7,7 @@ import styles from "./PhotoStudio.module.css";
 import { isDesktopApp, setDesktopContentProtection } from "./desktop-bridge";
 import { A4_HEIGHT_MM, A4_WIDTH_MM, A4_HEIGHT_PX, A4_WIDTH_PX, buildPhotoPdf, getPhotoSheetLayout } from "./photo-studio-layout";
 
-export type PreparedPhotoSheet = { file: File; sizeCode: string; photoCount: number };
+export type PreparedPhotoSheet = { file: File; sizeCode: string; photoCount: number; photosPerPage: number };
 
 type PhotoSize = {
   id: string;
@@ -370,15 +370,15 @@ export default function PhotoStudio({
       const pdf=new Blob([buffer],{type:"application/pdf"});
       if(pdf.size>MAX_FILE_BYTES)throw new Error("The prepared photo PDF exceeds SmartPrint's 20 MB file limit. Use a smaller original photo or reduce the number of copies.");
       const output=new File([pdf],safeBaseName(source.name)+"-"+size.id+"-photos.pdf",{type:"application/pdf",lastModified:Date.now()});
-      await onApply([{file:output,sizeCode:size.id,photoCount:parsedCopies}]);
+      await onApply([{file:output,sizeCode:size.id,photoCount:parsedCopies,photosPerPage:layout.perSheet}]);
     }catch(cause){setError(cause instanceof Error?cause.message:"Photo sheet creation failed. Try again with this photo.");}
     finally{setBusy(false);}
   }
 
   const resolutionMessage = image ? sourceResolutionNote(image, size) : "";
   const footerHint = mode === "shop"
-    ? "Save your prepared A4 sheet to this existing unpaid job. It returns to the review queue; printing still requires shop approval, verified payment and dispatch."
-    : "The original upload stays untouched. This prepared A4 sheet replaces it in your batch when you submit your print request.";
+    ? "Save your prepared multi-page A4 photo PDF to this existing unpaid job. It returns to the review queue; printing still requires shop approval, verified payment and dispatch."
+    : "The original upload stays untouched. This prepared multi-page A4 photo PDF replaces it in your batch when you submit your print request.";
   const actionLabel = mode === "shop" ? "Save sheet to this job" : "Prepare A4 sheet";
   const busyLabel = mode === "shop" ? "Saving to the existing job…" : "Preparing your A4 sheet…";
   const cropPanel=activeTool==="crop",lookPanel=activeTool==="look",textPanel=activeTool==="text",backgroundPanel=activeTool==="background";
