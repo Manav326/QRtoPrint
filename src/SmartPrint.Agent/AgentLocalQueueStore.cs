@@ -16,6 +16,7 @@ public sealed class AgentLocalQueueStore
 
     private readonly string queueRoot;
     private readonly bool applyWindowsAcl;
+    private readonly SemaphoreSlim stagedUploadLeaseGate = new(1, 1);
 
     public AgentLocalQueueStore(string? rootOverride = null)
     {
@@ -272,64 +273,90 @@ public sealed class AgentLocalQueueStore
         DateTimeOffset leaseExpiresUtc,
         CancellationToken cancellationToken)
     {
-        var entry = Find(jobId)
-            ?? throw new FileNotFoundException("The staged local upload is missing from the protected queue.");
-        if (!string.Equals(entry.Sha256, sha256, StringComparison.OrdinalIgnoreCase) ||
-            entry.SizeBytes != sizeBytes ||
-            !File.Exists(entry.DocumentPath))
+        await stagedUploadLeaseGate.WaitAsync(cancellationToken);
+        try
         {
-            throw new InvalidDataException("The staged local upload no longer matches its authorised document.");
-        }
-        if (entry.State != "LOCAL_UPLOAD_STAGED" || leaseExpiresUtc <= entry.LeaseExpiresUtc)
-        {
-            return;
-        }
+            var entry = Find(jobId)
+                ?? throw new FileNotFoundException("The staged local upload is missing from the protected queue.");
+            if (!string.Equals(entry.Sha256, sha256, StringComparison.OrdinalIgnoreCase) ||
+                entry.SizeBytes != sizeBytes ||
+                !File.Exists(entry.DocumentPath))
+            {
+                throw new InvalidDataException("The staged local upload no longer matches its authorised document.");
+            }
+            if (entry.State != "LOCAL_UPLOAD_STAGED" || leaseExpiresUtc <= entry.LeaseExpiresUtc)
+            {
+                return;
+            }
 
-        await SaveManifestAsync(entry with { LeaseExpiresUtc = leaseExpiresUtc }, cancellationToken);
+            await SaveManifestAsync(entry with { LeaseExpiresUtc = leaseExpiresUtc }, cancellationToken);
+        }
+        finally
+        {
+            stagedUploadLeaseGate.Release();
+        }
     }
 
     public async Task MarkLocalUploadFinalizedAsync(Guid jobId, CancellationToken cancellationToken)
     {
-        var entry = Find(jobId)
-            ?? throw new FileNotFoundException("The staged local upload is missing from the protected queue.");
-        if (!File.Exists(entry.DocumentPath))
+        await stagedUploadLeaseGate.WaitAsync(cancellationToken);
+        try
         {
-            throw new FileNotFoundException("The staged local upload document is missing.", entry.DocumentPath);
-        }
-        if (entry.State is "LOCAL_UPLOAD_PENDING_PAYMENT" or "ACK_PENDING" or "ACKNOWLEDGED" or
-            "SUBMITTING" or "SPOOLER_ACCEPTED" or "PRINTING" or "OUTPUT_UNCONFIRMED" or "OUTPUT_CONFIRMED")
-        {
-            return;
-        }
-        if (entry.State != "LOCAL_UPLOAD_STAGED")
-        {
-            throw new InvalidOperationException($"Cannot finalise a local upload in state {entry.State}.");
-        }
+            var entry = Find(jobId)
+                ?? throw new FileNotFoundException("The staged local upload is missing from the protected queue.");
+            if (!File.Exists(entry.DocumentPath))
+            {
+                throw new FileNotFoundException("The staged local upload document is missing.", entry.DocumentPath);
+            }
+            if (entry.State is "LOCAL_UPLOAD_PENDING_PAYMENT" or "ACK_PENDING" or "ACKNOWLEDGED" or
+                "SUBMITTING" or "SPOOLER_ACCEPTED" or "PRINTING" or "OUTPUT_UNCONFIRMED" or "OUTPUT_CONFIRMED")
+            {
+                return;
+            }
+            if (entry.State != "LOCAL_UPLOAD_STAGED")
+            {
+                throw new InvalidOperationException($"Cannot finalise a local upload in state {entry.State}.");
+            }
 
-        await SaveManifestAsync(entry with { State = "LOCAL_UPLOAD_PENDING_PAYMENT" }, cancellationToken);
+            await SaveManifestAsync(entry with { State = "LOCAL_UPLOAD_PENDING_PAYMENT" }, cancellationToken);
+        }
+        finally
+        {
+            stagedUploadLeaseGate.Release();
+        }
     }
 
-    public async Task DeleteExpiredLocalUploadAsync(Guid jobId, DateTimeOffset now, CancellationToken cancellationToken)
+    public async Task<bool> DeleteExpiredLocalUploadAsync(Guid jobId, DateTimeOffset now, CancellationToken cancellationToken)
     {
-        cancellationToken.ThrowIfCancellationRequested();
-        var entry = Find(jobId);
-        if (entry is null) return;
-        if (entry.State != "LOCAL_UPLOAD_STAGED" || entry.LeaseExpiresUtc > now)
+        await stagedUploadLeaseGate.WaitAsync(cancellationToken);
+        try
         {
-            throw new InvalidOperationException("Only an expired, unfinalised local upload can be removed.");
+            var entry = Find(jobId);
+            if (entry is null) return false;
+            if (entry.State != "LOCAL_UPLOAD_STAGED")
+            {
+                throw new InvalidOperationException("Only an unfinalised local upload can be removed.");
+            }
+            // Re-read the current lease while holding the same gate as renewal.
+            // A stale expiry-sweep snapshot must never delete a renewed document.
+            if (entry.LeaseExpiresUtc > now) return false;
+
+            var queueRootFull = Path.GetFullPath(queueRoot);
+            var queuePrefix = queueRootFull.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + Path.DirectorySeparatorChar;
+            var comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
+            var documentPath = Path.GetFullPath(entry.DocumentPath);
+            if (!documentPath.StartsWith(queuePrefix, comparison))
+                throw new InvalidDataException("The staged local upload document path is outside the protected queue.");
+
+            var manifestPath = GetManifestPath(jobId);
+            if (File.Exists(documentPath)) File.Delete(documentPath);
+            if (File.Exists(manifestPath)) File.Delete(manifestPath);
+            return true;
         }
-
-        var queueRootFull = Path.GetFullPath(queueRoot);
-        var queuePrefix = queueRootFull.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + Path.DirectorySeparatorChar;
-        var comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
-        var documentPath = Path.GetFullPath(entry.DocumentPath);
-        if (!documentPath.StartsWith(queuePrefix, comparison))
-            throw new InvalidDataException("The staged local upload document path is outside the protected queue.");
-
-        var manifestPath = GetManifestPath(jobId);
-        if (File.Exists(manifestPath)) File.Delete(manifestPath);
-        if (File.Exists(documentPath)) File.Delete(documentPath);
-        await Task.CompletedTask;
+        finally
+        {
+            stagedUploadLeaseGate.Release();
+        }
     }
 
     public async Task DeleteExpiredPendingPaymentUploadAsync(
@@ -385,8 +412,8 @@ public sealed class AgentLocalQueueStore
 
             if (entry.State == "LOCAL_UPLOAD_STAGED" && entry.LeaseExpiresUtc <= now)
             {
-                await DeleteExpiredLocalUploadAsync(entry.JobId, now, cancellationToken);
-                removed++;
+                if (await DeleteExpiredLocalUploadAsync(entry.JobId, now, cancellationToken))
+                    removed++;
                 continue;
             }
 
