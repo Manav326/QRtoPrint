@@ -242,3 +242,28 @@ test("customer job status remains scoped to the active customer session in its s
   assert.match(service, /PrintBatchPayments/);
   assert.match(service, /BuildUpiUri/);
 });
+
+
+test("batch review defaults every uploaded file to accepted until the shopkeeper rejects it", () => {
+  const app = read("../src/App.tsx");
+  assert.match(app, /const acceptedIds=jobs\.filter\(job=>decisions\[job\.id\]\?\?true\)\.map\(job=>job\.id\)/);
+  assert.match(app, /onDecision:\(jobId:string,accepted:boolean\)=>void/);
+  assert.match(app, /decisions\[job\.id\]\?\?true/);
+});
+
+test("customer session lifecycle remains behind thin route adapters", () => {
+  const endpoint = readApi("PublicSessionEndpoints.cs");
+  const service = read("../../../src/SmartPrint.Api/Services/PublicCustomerSessionService.cs");
+  assert.match(endpoint, /sessions\.RenewAsync/);
+  assert.match(endpoint, /sessions\.ResumeAsync/);
+  assert.match(endpoint, /sessions\.StartAsync/);
+  assert.match(endpoint, /sessions\.GetCurrentAsync/);
+  assert.match(endpoint, /\/sessions\/current\/renew/);
+  assert.match(endpoint, /\/sessions\/current\/resume/);
+  assert.match(endpoint, /\/stations\/\{publicCode\}\/sessions/);
+  assert.match(endpoint, /\/sessions\/current/);
+  assert.match(service, /CustomerUserId = customerUserId/);
+  assert.match(service, /ExpiresUtc <= now\.AddMinutes\(10\)/);
+  assert.match(service, /CloudAssistedPrintingEnabled/);
+  assert.match(service, /PhotoPricing/);
+});
