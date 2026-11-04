@@ -1,6 +1,7 @@
 package com.quantaedge.smartprint
 
 import android.content.Context
+import android.os.SystemClock
 import android.graphics.Bitmap
 import android.net.Uri
 import android.webkit.ValueCallback
@@ -22,8 +23,11 @@ import androidx.test.espresso.matcher.ViewMatchers.withId
 import androidx.test.espresso.matcher.ViewMatchers.withContentDescription
 import androidx.test.espresso.matcher.ViewMatchers.withHint
 import androidx.test.espresso.matcher.ViewMatchers.withText
+import androidx.test.espresso.matcher.RootMatchers.withDecorView
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import org.hamcrest.Matchers.allOf
+import org.hamcrest.Matchers.not
+import org.hamcrest.Matchers.sameInstance
 import org.junit.Test
 import org.junit.runner.RunWith
 import eightbitlab.com.blurview.BlurView
@@ -161,6 +165,24 @@ class MainActivityInstrumentedTest {
     @Test
     fun shopWifiVerificationUsesBrandedBottomSheet() {
         ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+            val activityDecorView = AtomicReference<View>()
+            scenario.onActivity { activity ->
+                activityDecorView.set(activity.window.decorView)
+            }
+
+            // ActivityScenario reaches RESUMED before every hosted emulator has
+            // finished assigning window focus. Do not open a dialog before the
+            // Activity window can hand focus to that dialog.
+            val activityWindow = checkNotNull(activityDecorView.get())
+            val focusDeadline = SystemClock.uptimeMillis() + 5_000L
+            while (!activityWindow.hasWindowFocus() && SystemClock.uptimeMillis() < focusDeadline) {
+                SystemClock.sleep(50)
+            }
+            assertTrue(
+                "Main Activity window must gain focus before showing the Wi-Fi result sheet",
+                activityWindow.hasWindowFocus()
+            )
+
             scenario.onActivity { activity ->
                 MainActivity::class.java.getDeclaredMethod(
                     "showShopWifiVerificationResult", String::class.java, String::class.java, Boolean::class.javaPrimitiveType!!
@@ -169,9 +191,13 @@ class MainActivityInstrumentedTest {
                     "This phone reached the shop computer over the selected network.", true
                 )
             }
-            onView(withText("Shop Wi-Fi verified")).check(matches(isDisplayed()))
-            onView(withContentDescription("Wi-Fi verified")).check(matches(isDisplayed()))
-            onView(withText("Done")).perform(click())
+
+            // The result sheet uses its own dialog window. Scope assertions to
+            // that window instead of letting Espresso pick the unfocused activity.
+            val dialogRoot = withDecorView(not(sameInstance(activityWindow)))
+            onView(withText("Shop Wi-Fi verified")).inRoot(dialogRoot).check(matches(isDisplayed()))
+            onView(withContentDescription("Wi-Fi verified")).inRoot(dialogRoot).check(matches(isDisplayed()))
+            onView(withText("Done")).inRoot(dialogRoot).perform(click())
         }
     }
 
