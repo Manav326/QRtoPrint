@@ -82,29 +82,33 @@ test("a pre-output capability block clears the attempted spooler name so the exi
   const blockedSource = readApi("AgentSpoolerLifecycleEndpoints.cs");
   const blockedService = read("../../../src/SmartPrint.Api/Services/AgentSpoolerLifecycleService.cs");
   const assignmentSource = readApi("ShopPrintJobAssignmentEndpoints.cs");
+  const assignmentService = read("../../../src/SmartPrint.Api/Services/ShopPrintJobAssignmentService.cs");
   const blockedStart = blockedSource.indexOf('agentApi.MapPost("/jobs/{jobId:guid}/print-blocked"');
   const blockedEnd = blockedSource.indexOf('agentApi.MapPost("/jobs/{jobId:guid}/output-unconfirmed"', blockedStart);
   const serviceStart = blockedService.indexOf("public async Task<AgentSpoolerLifecycleResult> ReportPrintBlockedAsync");
   const serviceEnd = blockedService.indexOf("public async Task<AgentSpoolerLifecycleResult> ReportOutputUnconfirmedAsync", serviceStart);
   const assignmentStart = assignmentSource.indexOf('shop.MapPatch("/print-jobs/{jobId:guid}/printer"');
+  const assignmentWorkflowStart = assignmentService.indexOf("public async Task<ShopPrintJobAssignmentResult> AssignAsync");
   assert.ok(blockedStart >= 0 && blockedEnd > blockedStart);
   assert.ok(serviceStart >= 0 && serviceEnd > serviceStart);
   assert.ok(assignmentStart >= 0);
+  assert.ok(assignmentWorkflowStart >= 0);
   const blocked = blockedSource.slice(blockedStart, blockedEnd);
   const blockedWorkflow = blockedService.slice(serviceStart, serviceEnd);
-  const assignment = assignmentSource.slice(assignmentStart);
+  const assignment = assignmentService.slice(assignmentWorkflowStart);
   assert.match(blocked, /spooler\.ReportPrintBlockedAsync/);
   assert.match(blockedWorkflow, /job\.Status = "LOCAL_QUEUE_READY"/);
   assert.match(blockedWorkflow, /job\.SpoolerJobName = null/);
   assert.match(blockedWorkflow, /job\.SpoolerJobId = null/);
   assert.match(blockedWorkflow, /job\.SpoolerStatus = "BLOCKED_BEFORE_SUBMISSION"/);
+  assert.match(assignmentSource, /assignment\.AssignAsync/);
   assert.match(assignment, /var readyQueueCanBeReassigned = selectedJob\.Status == "LOCAL_QUEUE_READY"/);
   assert.match(assignment, /string\.IsNullOrWhiteSpace\(selectedJob\.SpoolerJobName\)/);
   assert.match(assignment, /needsQueueReset/);
 });
 
 test("reassigning a blocked queued job clears the previous printer failure", () => {
-  const assignment = readApi("ShopPrintJobAssignmentEndpoints.cs");
+  const assignment = read("../../../src/SmartPrint.Api/Services/ShopPrintJobAssignmentService.cs");
   const resetStart = assignment.indexOf("if (needsQueueReset)");
   const failureReset = assignment.indexOf("batchJob.FailureCode = null;", resetStart);
   const spoolerReset = assignment.indexOf("batchJob.SpoolerStatus = null;", resetStart);
