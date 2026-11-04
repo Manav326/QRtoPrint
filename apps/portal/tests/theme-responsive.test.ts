@@ -376,8 +376,8 @@ test("offline requests use the existing secure queue and owner changes require c
 
 test("customer paper summaries reflect advanced folder and per-file choices", () => {
   const app = read("../src/App.tsx");
-  assert.match(app, /customer-paper-default">\{defaults\.paperSize\}/);
-  assert.match(app, /customer-paper-default">\{own\.paperSize\}/);
+  assert.match(app, /customer-paper-default">\{defaults\.advancedEnabled\?defaults\.paperSize:"A4"\}/);
+  assert.match(app, /customer-paper-default">\{own\.advancedEnabled\?own\.paperSize:"A4"\}/);
   assert.match(app, /entry\.quote!\.paperSize/);
   assert.match(app, /item\.job\.paperSize\?\?"A4"/);
 });
