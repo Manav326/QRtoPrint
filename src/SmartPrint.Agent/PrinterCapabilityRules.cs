@@ -25,4 +25,10 @@ internal static class PrinterCapabilityRules
 
         return reportedPapers.Contains(requestedPaperCode);
     }
+
+    internal static bool IsRequestedOrientationAccepted(
+        bool orientationFieldReported,
+        short actualOrientation,
+        short requestedOrientation) =>
+        orientationFieldReported && actualOrientation == requestedOrientation;
 }
