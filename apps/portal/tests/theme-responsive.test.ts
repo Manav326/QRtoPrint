@@ -8,8 +8,16 @@ const read = (path: string) => readFileSync(new URL(path, import.meta.url), "utf
 
 test("folder and per-file Copies inputs capture values before scheduling React state updates", () => {
   const app = read("../src/App.tsx");
-  const copyLabels = [...app.matchAll(/<label className="customer-folder-copies">[\\s\\S]*?<\\/label>/g)]
-    .map(match => match[0]);
+  const copyLabels: string[] = [];
+  let cursor = 0;
+  while (true) {
+    const start = app.indexOf('<label className="customer-folder-copies">', cursor);
+    if (start < 0) break;
+    const end = app.indexOf("</label>", start);
+    assert.ok(end > start, "Each Copies label must be properly closed.");
+    copyLabels.push(app.slice(start, end));
+    cursor = end + "</label>".length;
+  }
   assert.equal(copyLabels.length, 2, "The shared flow must have folder-default and per-file Copies inputs.");
 
   for (const [index, copyLabel] of copyLabels.entries()) {
