@@ -43,3 +43,20 @@ test("paid jobs are staged while a physical printer is offline and checked at di
   assert.match(dispatchRoute, /printer\.Status == "Ready"/);
   assert.match(dispatchRoute, /printer\.LastSeenUtc/);
 });
+
+test("plan-limited HTTPS fallback is only offered when the Agent is unavailable", () => {
+  const app = read("../src/App.tsx");
+  const api = read("../src/api.ts");
+  const program = read("../../../src/SmartPrint.Api/Program.cs");
+  assert.match(app, /secureQueueFallbackEnabled = cloudAssistedPrintingEnabled \|\| !localAgent\?\.endpoints\.length/);
+  const directUploadStart = api.indexOf("export async function uploadCustomerDocument(");
+  const directUploadEnd = api.indexOf("type CustomerLocalAgentApi", directUploadStart);
+  const directUpload = api.slice(directUploadStart, directUploadEnd);
+  assert.doesNotMatch(directUpload, /X-Print-Queue-Fallback/);
+  const publicUploadStart = program.indexOf('publicApi.MapPost("/sessions/current/jobs"');
+  const publicUploadEnd = program.indexOf('publicApi.MapPost("/sessions/current/local-upload-tickets"', publicUploadStart);
+  assert.ok(publicUploadStart >= 0 && publicUploadEnd > publicUploadStart);
+  const publicUpload = program.slice(publicUploadStart, publicUploadEnd);
+  assert.match(publicUpload, /!subscription\.CloudAssistedPrintingEnabled && localAgentAvailable/);
+  assert.doesNotMatch(publicUpload, /queueFallbackRequested/);
+});
