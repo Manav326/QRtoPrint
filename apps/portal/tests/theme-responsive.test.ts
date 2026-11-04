@@ -175,7 +175,10 @@ test("batch routing enforces local-computer ownership and preserves print-time a
   const css = read("../src/styles.css");
 
   assert.match(app, /Assign one printer for all files in batch/);
-  assert.match(app, /One printer applies to every active file in this batch/);
+  assert.match(app, /One printer is used for all active files/);
+  assert.match(app, /pages requested/);
+  assert.match(app, /Save as PDF/);
+  assert.match(app, /Saves a PDF, not paper/);
   assert.match(app, /requiredLocalAgentId/);
   assert.match(app, /localComputerIdentityConflict/);
   assert.match(app, /lockedPrinterOnWrongComputer/);
@@ -192,6 +195,20 @@ test("batch routing enforces local-computer ownership and preserves print-time a
   assert.match(css, /\.queue-batch-file-printer/);
   assert.match(css, /\.printer-duplicate-warning/);
   assert.match(css, /\.queue-batch-assignment-note\{font-size:12px/);
+});
+
+test("customer upload form clearly supports backend-approved image formats", () => {
+  const app = read("../src/App.tsx");
+  const customerFlowStart = app.indexOf("function CustomerPrintFlow(");
+  const customerFlowEnd = app.indexOf("function UploadIcon()", customerFlowStart);
+  assert.ok(customerFlowStart >= 0 && customerFlowEnd > customerFlowStart,
+    "The shared customer upload form must remain present.");
+  const customerFlow = app.slice(customerFlowStart, customerFlowEnd);
+  assert.ok(customerFlow.includes("Add documents or images"));
+  assert.ok(customerFlow.includes("Select documents or images"));
+  assert.ok(customerFlow.includes('accept=".pdf,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png"'));
+  assert.ok(app.includes('const supported=rootFiles.filter(candidate=>/\\.(pdf|jpe?g|png)$/i.test(candidate.name));'),
+    "The shared selection handler must retain PDF, JPG, JPEG and PNG support.");
 });
 
 test("Android customer printing uses the same single Copies control and event handlers as the browser", () => {
@@ -298,4 +315,21 @@ test("native customer UI follows explicit SmartPrint theme and marks selected up
   assert.match(css, /customer-upload-mode\.selected::after[\s\S]*?Selected/);
   assert.match(app, /aria-pressed=\{uploadMode==="LOCAL"\}/);
   assert.match(app, /aria-pressed=\{uploadMode==="CLOUD"\}/);
+});
+
+
+test("customer print options remain selectable when printer capability is unknown", () => {
+  const app = read("../src/App.tsx");
+  const flowStart = app.indexOf("function CustomerPrintFlow(");
+  const flowEnd = app.indexOf("function UploadIcon()", flowStart);
+  assert.ok(flowStart >= 0 && flowEnd > flowStart,
+    "The shared customer print flow must remain present.");
+  const flow = app.slice(flowStart, flowEnd);
+
+  assert.ok(flow.includes("const supportsColour=!hasAssignedPrinter||printerCapabilities?.color!==false;"));
+  assert.ok(flow.includes("const supportsDuplex=!hasAssignedPrinter||printerCapabilities?.duplex!==false;"));
+  assert.ok(app.includes('color:typeof value.color==="boolean"?value.color:undefined'));
+  assert.ok(app.includes('duplex:typeof value.duplex==="boolean"?value.duplex:undefined'));
+  assert.ok(flow.includes('colourMode:photoSettings?"Colour":settings.colourMode'));
+  assert.ok(flow.includes("isDuplex:photoSettings?false:settings.isDuplex"));
 });
