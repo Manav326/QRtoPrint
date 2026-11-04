@@ -64,12 +64,17 @@ function PhotoStudioBrowserFixture() {
 
   async function apply(sheets: PreparedPhotoSheet[]) {
     const sheet = sheets[0];
+    const pdfBytes = new Uint8Array(await sheet.file.arrayBuffer());
+    const pdfText = new TextDecoder("latin1").decode(pdfBytes);
+    const pageCount = Number(pdfText.match(/\\/Count (\\d+)/)?.[1] ?? 0);
     setResult(JSON.stringify({
       mode,
       mediaType: sheet.file.type,
       fileName: sheet.file.name,
       sizeCode: sheet.sizeCode,
       photoCount: sheet.photoCount,
+      photosPerPage: sheet.photosPerPage,
+      pageCount,
       bytes: sheet.file.size
     }));
     setOpen(false);
