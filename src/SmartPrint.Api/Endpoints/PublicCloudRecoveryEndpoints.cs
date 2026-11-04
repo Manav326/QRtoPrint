@@ -3,10 +3,8 @@ using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
 using SmartPrint.Api.Data;
-using SmartPrint.Documents;
 using SmartPrint.Api.Domain;
 using SmartPrint.Api.Services;
-using SmartPrint.Api.Storage;
 
 namespace SmartPrint.Api.Endpoints;
 
@@ -17,7 +15,6 @@ public static partial class PublicUploadEndpoints
         publicApi.MapPost("/sessions/current/local-upload-tickets/{ticketId:guid}/cloud-recovery", async (
             Guid ticketId,
             HttpContext context,
-            DocumentStorage storage,
             PublicCloudRecoveryService recovery,
             CancellationToken ct) =>
         {
@@ -87,35 +84,19 @@ public static partial class PublicUploadEndpoints
                 });
             }
 
-            var documentId = Guid.NewGuid();
-            StoredDocument stored;
-            try
-            {
-                await using var input = file.OpenReadStream();
-                stored = await storage.ValidateAndStoreAsync(
-                    ticket.TenantId,
-                    documentId,
-                    ticket.OriginalFileName,
-                    input,
-                    ticket.SizeBytes,
-                    ct);
-            }
-            catch (DocumentValidationException exception)
+            var result = await recovery.CompleteUploadAsync(
+                ticketId, rawToken, rawGrant, ticket, file, ct);
+            if (result.Failure == PublicCloudRecoveryFailure.DocumentValidationFailed)
             {
                 return Results.UnprocessableEntity(new
                 {
                     code = "document_not_supported",
-                    message = exception.Message
+                    message = result.Message
                 });
             }
 
-            if (!LocalUploadRecoveryRules.MatchesOriginalDocument(
-                    ticket.SizeBytes,
-                    ticket.Sha256,
-                    stored.SizeBytes,
-                    stored.Sha256))
+            if (result.Failure == PublicCloudRecoveryFailure.DocumentHashMismatch)
             {
-                await storage.DeleteAsync(stored.StorageKey);
                 return Results.UnprocessableEntity(new
                 {
                     code = "local_upload_recovery_hash_mismatch",
@@ -123,8 +104,6 @@ public static partial class PublicUploadEndpoints
                 });
             }
 
-            var result = await recovery.CompleteAsync(
-                ticketId, rawToken, rawGrant, documentId, stored, ct);
             switch (result.Failure)
             {
                 case PublicCloudRecoveryFailure.Unauthorized:
