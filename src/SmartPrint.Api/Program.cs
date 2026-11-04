@@ -6256,8 +6256,81 @@ publicApi.MapPost("/sessions/current/local-upload-tickets", async (
             return Results.Conflict(new { code = "local_upload_idempotency_conflict", message = "This upload attempt key is already associated with a different document, batch or set of print options." });
         }
 
-        // Keep the ticket identity after its LAN claim window expires. HTTPS
-        // recovery can still complete this same PrintJob for up to 24 hours.
+        // Reuse the original ticket rather than creating a second reservation
+        // when a never-completed LAN attempt's 15-minute lease has expired.
+        // This is allowed only after the old claim lease ends, while the same
+        // shop Agent remains paired/online and no PrintJob or document exists.
+        var renewalNow = DateTimeOffset.UtcNow;
+        if (LocalUploadRecoveryRules.CanRenewExpiredTicket(
+                existing.CreatedUtc, existing.ExpiresUtc, existing.ClaimLeaseExpiresUtc,
+                existing.CompletedUtc, renewalNow,
+                TimeSpan.FromHours(LocalUploadRecoveryRules.MaximumRecoveryAgeHours)))
+        {
+            await using var renewalTransaction = await db.Database.BeginTransactionAsync(ct);
+            var lockedTickets = await db.LocalPrintUploadTickets.FromSqlInterpolated(
+                $"SELECT * FROM \\"LocalPrintUploadTickets\\" WHERE \\"Id\\" = {existing.Id} AND \\"TenantId\\" = {session.TenantId} AND \\"CustomerSessionId\\" = {session.Id} FOR UPDATE")
+                .ToListAsync(ct);
+            var lockedTicket = lockedTickets.SingleOrDefault();
+            if (lockedTicket is not null &&
+                lockedTicket.IdempotencyKey == idempotencyKey &&
+                lockedTicket.CompletedUtc is null &&
+                LocalUploadRecoveryRules.CanRenewExpiredTicket(
+                    lockedTicket.CreatedUtc, lockedTicket.ExpiresUtc, lockedTicket.ClaimLeaseExpiresUtc,
+                    lockedTicket.CompletedUtc, renewalNow,
+                    TimeSpan.FromHours(LocalUploadRecoveryRules.MaximumRecoveryAgeHours)) &&
+                !await db.PrintJobs.AsNoTracking().AnyAsync(item =>
+                    item.TenantId == lockedTicket.TenantId && item.Id == lockedTicket.PrintJobId, ct) &&
+                !await db.PrintDocuments.AsNoTracking().AnyAsync(item =>
+                    item.TenantId == lockedTicket.TenantId && item.PrintJobId == lockedTicket.PrintJobId, ct) &&
+                !await db.PrintBatchPayments.AsNoTracking().AnyAsync(item =>
+                    item.TenantId == lockedTicket.TenantId &&
+                    item.CustomerSessionId == lockedTicket.CustomerSessionId &&
+                    item.BatchId == lockedTicket.BatchId &&
+                    item.Status != "REJECTED", ct))
+            {
+                var currentAgentEndpoints = await (
+                    from station in db.QrStations.AsNoTracking()
+                    join printer in db.PrinterDevices.AsNoTracking()
+                        on new { station.TenantId, PrinterId = station.PrinterDeviceId!.Value }
+                        equals new { printer.TenantId, PrinterId = printer.Id }
+                    join agent in db.AgentDevices.AsNoTracking()
+                        on new { printer.TenantId, AgentId = printer.AgentDeviceId!.Value }
+                        equals new { agent.TenantId, AgentId = agent.Id }
+                    where station.Id == lockedTicket.QrStationId &&
+                          station.TenantId == lockedTicket.TenantId &&
+                          station.IsEnabled &&
+                          station.PrinterDeviceId == lockedTicket.PrinterDeviceId &&
+                          printer.IsActive &&
+                          printer.AgentDeviceId == lockedTicket.AgentDeviceId &&
+                          !string.IsNullOrWhiteSpace(printer.QueueName) &&
+                          agent.Id == lockedTicket.AgentDeviceId &&
+                          agent.RevokedUtc == null &&
+                          agent.LastSeenUtc != null &&
+                          agent.LastSeenUtc >= renewalNow.AddMinutes(-2)
+                    select agent.LocalEndpointsJson
+                ).SingleOrDefaultAsync(ct);
+
+                if (currentAgentEndpoints is not null &&
+                    AgentLocalEndpointRules.Normalize(ReadLocalAgentEndpoints(currentAgentEndpoints)).Count > 0)
+                {
+                    lockedTicket.ExpiresUtc = renewalNow.AddMinutes(15);
+                    lockedTicket.ClaimedUtc = null;
+                    lockedTicket.ClaimLeaseExpiresUtc = null;
+                    await db.SaveChangesAsync(ct);
+                    await renewalTransaction.CommitAsync(ct);
+                    existing = lockedTicket;
+                }
+                else
+                {
+                    await renewalTransaction.RollbackAsync(ct);
+                }
+            }
+            else
+            {
+                await renewalTransaction.RollbackAsync(ct);
+            }
+        }
+
         return Results.Ok(new
         {
             existing.Id,
