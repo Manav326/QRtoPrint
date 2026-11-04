@@ -1,9 +1,11 @@
 using System.Security.Cryptography;
+using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;
 using SmartPrint.Api.Data;
 using SmartPrint.Api.Domain;
 using SmartPrint.Api.Endpoints;
 using SmartPrint.Api.Storage;
+using SmartPrint.Documents;
 using static SmartPrint.Api.Security.OpaqueTokenHasher;
 
 namespace SmartPrint.Api.Services;
@@ -20,7 +22,9 @@ public enum PublicCloudRecoveryFailure
     DocumentTooLarge,
     MonthlyQuotaExceeded,
     BatchCheckoutLocked,
-    BatchCapacityExceeded
+    BatchCapacityExceeded,
+    DocumentValidationFailed,
+    DocumentHashMismatch
 }
 
 public sealed record PublicCloudRecoveryResult(
@@ -105,6 +109,62 @@ public sealed class PublicCloudRecoveryService(
         return new PublicCloudRecoveryResult(
             PublicCloudRecoveryFailure.None,
             Ticket: ticket);
+    }
+
+    public async Task<PublicCloudRecoveryResult> CompleteUploadAsync(
+        Guid ticketId,
+        string rawSessionToken,
+        string rawGrant,
+        LocalPrintUploadTicket ticket,
+        IFormFile file,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(ticket);
+        ArgumentNullException.ThrowIfNull(file);
+
+        if (ticket.Id != ticketId || file.Length != ticket.SizeBytes ||
+            file.Length is <= 0 or > 20 * 1024 * 1024)
+        {
+            return new PublicCloudRecoveryResult(PublicCloudRecoveryFailure.DocumentHashMismatch);
+        }
+
+        var documentId = Guid.NewGuid();
+        StoredDocument stored;
+        try
+        {
+            await using var input = file.OpenReadStream();
+            stored = await storage.ValidateAndStoreAsync(
+                ticket.TenantId,
+                documentId,
+                ticket.OriginalFileName,
+                input,
+                ticket.SizeBytes,
+                cancellationToken);
+        }
+        catch (DocumentValidationException exception)
+        {
+            return new PublicCloudRecoveryResult(
+                PublicCloudRecoveryFailure.DocumentValidationFailed,
+                Message: exception.Message);
+        }
+
+        if (!LocalUploadRecoveryRules.MatchesOriginalDocument(
+                ticket.SizeBytes,
+                ticket.Sha256,
+                stored.SizeBytes,
+                stored.Sha256))
+        {
+            await storage.DeleteAsync(stored.StorageKey);
+            return new PublicCloudRecoveryResult(PublicCloudRecoveryFailure.DocumentHashMismatch);
+        }
+
+        return await CompleteAsync(
+            ticketId,
+            rawSessionToken,
+            rawGrant,
+            documentId,
+            stored,
+            cancellationToken);
     }
 
     public async Task<PublicCloudRecoveryResult> CompleteAsync(
