@@ -140,10 +140,12 @@ test("HTTPS recovery returns the original saved print settings on new and duplic
   const response = source.slice(responseStart);
   assert.match(recovery, /BuildCloudRecoveryResponse\(\s*preflight\.Job!/);
   assert.match(recovery, /BuildCloudRecoveryResponse\(\s*result\.Job!/);
-  for (const property of ["ColourMode", "PaperSize", "IsDuplex", "Orientation", "PricingVersion"]) {
+  for (const property of ["ColourMode", "PaperSize", "IsDuplex", "Orientation"]) {
     assert.ok(response.includes(`job.${property}`), `Recovery response must return job.${property}.`);
     assert.ok(service.includes(`${property} = ticket.${property}`), `Recovery service must preserve ticket ${property}.`);
   }
+  // PricingVersion belongs to the PrintJob quote snapshot; LocalPrintUploadTicket does not store it.
+  assert.ok(response.includes("job.PricingVersion"), "Recovery response must return the job's pricing version.");
   assert.match(service, /Job: existingJob/);
   assert.match(service, /Document: existingDocument/);
 });
