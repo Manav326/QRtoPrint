@@ -3384,6 +3384,22 @@ function isCustomerPdf(file:File):boolean {
   return file.type.toLowerCase()==="application/pdf"||/\.pdf$/i.test(file.name);
 }
 
+const smartPrintNativePdfPreviewTokens=new WeakMap<File,string>();
+
+function postSmartPrintNativeMessage(message:string):boolean {
+  const bridge=(window as Window & {SmartPrintNative?:{postMessage:(value:string)=>void}}).SmartPrintNative;
+  if(!bridge?.postMessage)return false;
+  try {bridge.postMessage(message);return true;}
+  catch {return false;}
+}
+
+function consumeSmartPrintNativePdfPreviews():Array<string|null>|undefined {
+  const target=window as Window & {__smartPrintNativePdfPreviews?:Array<string|null>};
+  const previews=target.__smartPrintNativePdfPreviews;
+  delete target.__smartPrintNativePdfPreviews;
+  return Array.isArray(previews)?previews:undefined;
+}
+
 function customerBatchGroupName(file:File):string {
   const relativePath=(file as File & {webkitRelativePath?:string}).webkitRelativePath??"";
   const pathParts=relativePath.split("/").filter(Boolean);
@@ -3694,6 +3710,19 @@ function CustomerPrintFlow({publicCode,sessionToken,paymentOptions,localAgent,lo
     });
     return ()=>{active=false;};
   },[sessionToken,uploaded?.job.id]);
+
+  useEffect(()=>{
+    if(!nativeAppMode)return;
+    const tokens=files
+      .map(candidate=>smartPrintNativePdfPreviewTokens.get(candidate))
+      .filter((token):token is string=>Boolean(token));
+    postSmartPrintNativeMessage("retainCustomerPdfPreviews|"+tokens.join(","));
+  },[files,nativeAppMode]);
+
+  useEffect(()=>{
+    if(!nativeAppMode)return;
+    return ()=>{postSmartPrintNativeMessage("retainCustomerPdfPreviews|");};
+  },[nativeAppMode]);
 
   useEffect(()=>{
     if(!file){setPreviewUrl(null);return;}
@@ -4012,10 +4041,24 @@ function CustomerPrintFlow({publicCode,sessionToken,paymentOptions,localAgent,lo
     setFiles(nextFiles);setSelectedFileIndex(index);setFileGroupNames(groups);setFileSettings(settings);setPhotoSettingsByFileFingerprint(photos);setPhotoStudioSource(null);setPhotoStudioSourceFingerprint(null);setError("");
   }
   function openPhotoStudio(candidate:File){if(!photoStudioReady||!photoRatesAvailable){setError("Photo printing is not available at this station yet.");return;}setPhotoStudioSource(candidate);setPhotoStudioSourceFingerprint(customerFileFingerprint(candidate));setError("");}
-  function chooseFiles(next:File[], nativeGroupNames?:string[]) {
+  function openCustomerPdfPreview(candidate:File) {
+    const token=smartPrintNativePdfPreviewTokens.get(candidate);
+    if(!token||!postSmartPrintNativeMessage("previewCustomerPdf|"+token)) {
+      setError("Please select this PDF again before opening its preview.");
+      return;
+    }
+    setError("");
+  }
+  function chooseFiles(next:File[], nativeGroupNames?:string[], nativePreviewTokens?:Array<string|null>) {
     if(batchLockedForPayment){
       setError("This batch already has a payment attempt. Start a new batch for additional files.");
       return;
+    }
+    if(nativePreviewTokens?.length===next.length) {
+      next.forEach((candidate,index)=>{
+        const token=nativePreviewTokens[index];
+        if(token&&isCustomerPdf(candidate))smartPrintNativePdfPreviewTokens.set(candidate,token);
+      });
     }
     let nestedSkipped=0;
     const rootFiles=next.filter(candidate=>{
@@ -4211,13 +4254,13 @@ function CustomerPrintFlow({publicCode,sessionToken,paymentOptions,localAgent,lo
     {customerUploadUnavailable&&<div className="customer-upload-local-note" role="status">This shop's print computer is not connected, and cloud-assisted uploads are not included in its plan. Ask the shop operator to reconnect SmartPrint.</div>}
     <div className="customer-upload-picker-grid">
       <label className="customer-upload-zone">
-        <input type="file" multiple disabled={batchLockedForPayment} accept=".pdf,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png" onChange={event=>{chooseFiles(Array.from(event.currentTarget.files||[]),consumeSmartPrintNativePickerGroups());event.currentTarget.value="";}}/>
+        <input type="file" multiple disabled={batchLockedForPayment} accept=".pdf,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png" onChange={event=>{const selected=Array.from(event.currentTarget.files||[]);chooseFiles(selected,consumeSmartPrintNativePickerGroups(),consumeSmartPrintNativePdfPreviews());event.currentTarget.value="";}}/>
         <span className="customer-upload-icon"><FileUp size={21}/></span>
         <strong>Select multiple files</strong>
         <small>Choose up to 20 PDF, JPG or PNG documents at once</small>
       </label>
       <label className="customer-upload-zone folder-upload-zone">
-        <input type="file" multiple disabled={batchLockedForPayment} accept={nativeAppMode?"application/x-smartprint-folder-selection":".pdf,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png"} {...({webkitdirectory:"true",directory:"true"} as any)} onChange={event=>{chooseFiles(Array.from(event.currentTarget.files||[]),consumeSmartPrintNativePickerGroups());event.currentTarget.value="";}}/>
+        <input type="file" multiple disabled={batchLockedForPayment} accept={nativeAppMode?"application/x-smartprint-folder-selection":".pdf,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png"} {...({webkitdirectory:"true",directory:"true"} as any)} onChange={event=>{const selected=Array.from(event.currentTarget.files||[]);chooseFiles(selected,consumeSmartPrintNativePickerGroups(),consumeSmartPrintNativePdfPreviews());event.currentTarget.value="";}}/>
         <span className="customer-upload-icon"><FolderOpen size={21}/></span>
         <strong>{nativeAppMode?"Choose folders":"Add a folder"}</strong>
         <small>{nativeAppMode?"Select multiple folders at once":"Choose one folder; select again to add another to this batch"}</small>
@@ -4289,7 +4332,7 @@ function CustomerPrintFlow({publicCode,sessionToken,paymentOptions,localAgent,lo
   />
 </label>}
 {files.length>0&&<small className="customer-upload-local-note">Folder defaults apply to every file. Set an individual file to Custom for an exception.</small>}
-    {previewUrl&&file&&<div className="customer-file-preview"><div className="customer-file-label"><FileText size={15}/><span>Preview · {file.name}</span>{file.type.startsWith("image/")&&photoStudioReady&&photoRatesAvailable&&<button type="button" className="customer-file-studio-button" disabled={busy||batchLockedForPayment} onClick={()=>openPhotoStudio(file)}><ImageIcon size={14}/> Open Photo Studio</button>}</div>{isCustomerPdf(file)?<iframe src={previewUrl} title={file.name+" preview"}/>:<img src={previewUrl} alt={file.name+" preview"}/>}</div>}
+    {previewUrl&&file&&<div className="customer-file-preview"><div className="customer-file-label"><FileText size={15}/><span>Preview · {file.name}</span>{file.type.startsWith("image/")&&photoStudioReady&&photoRatesAvailable&&<button type="button" className="customer-file-studio-button" disabled={busy||batchLockedForPayment} onClick={()=>openPhotoStudio(file)}><ImageIcon size={14}/> Open Photo Studio</button>}</div>{isCustomerPdf(file)?nativeAppMode?<button type="button" className="customer-flow-button" onClick={()=>openCustomerPdfPreview(file)}><FileText size={16}/> Preview PDF</button>:<iframe src={previewUrl} title={file.name+" preview"}/>:<img src={previewUrl} alt={file.name+" preview"}/>}</div>}
     {files.length>0&&<button className="customer-flow-button" disabled={busy||customerUploadUnavailable||pendingFilesCount===0||(uploadMode==="LOCAL"&&!localReady)} onClick={()=>void upload()}>{busy?<span className="button-spinner"/>:<><UploadIcon/>{uploadMode==="LOCAL"&&localAgent?"Upload "+pendingFilesCount+" file(s) to shop":"Upload "+pendingFilesCount+" file(s)"}</>}</button>}
     {uploadProgress&&<div className="customer-upload-progress"><span>{uploadProgress.currentFile?`Uploading ${Math.min(uploadProgress.completed+1,uploadProgress.total)} of ${uploadProgress.total}: ${uploadProgress.currentFile}`:`${uploadProgress.completed} of ${uploadProgress.total} files uploaded`}</span><div><i style={{width:`${uploadProgress.total?uploadProgress.completed/uploadProgress.total*100:0}%`}}/>{uploadProgress.currentFile&&<b aria-hidden="true"/>}</div><small>The count advances when each document finishes uploading.</small></div>}
     {files.length>0&&uploadMode==="LOCAL"&&localAgent&&<small className="customer-upload-local-note">{nativeAppMode?(localReady?"Direct shop Wi-Fi transfer uses local HTTP and is not encrypted in transit. Choose Cloud-assisted for HTTPS.":"Check shop Wi-Fi."):localReady?"Direct shop Wi-Fi transfer uses local HTTP and is not encrypted in transit. Choose Cloud-assisted for HTTPS encryption.":"Tap Check shop Wi-Fi above first to grant the browser permission."}</small>}
