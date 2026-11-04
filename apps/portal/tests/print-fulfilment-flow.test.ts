@@ -260,3 +260,53 @@ test("photo quantities never exceed the one-A4-page quote limit",()=>{
  const studio=read("../src/PhotoStudio.tsx");
  assert.match(studio,/const maxCopies=Math\.min\(100,layout\.perSheet\)/);
 });
+
+ 
+test("shop owner Photo Studio revisions are restricted to pending unpaid cloud image jobs",()=>{
+ const program=read("../../../src/SmartPrint.Api/Program.cs");
+ const start=program.indexOf('shop.MapPost("/print-jobs/{jobId:guid}/photo-revision"');
+ const end=program.indexOf('shop.MapGet("/print-jobs/{jobId:guid}/preview-source"',start);
+ assert.ok(start>=0&&end>start);
+ const route=program.slice(start,end);
+ assert.match(route,/IsShopOwner\(principal\)/);
+ assert.match(route,/job\.Status != "AWAITING_SHOP_APPROVAL"/);
+ assert.match(route,/document\.StorageMode, "CLOUD"/);
+ assert.match(route,/document\.MediaType is not \("image\/jpeg" or "image\/png"\)/);
+ assert.match(route,/hasPayment \|\| hasBatchPayment/);
+ assert.match(route,/job\.LocalQueueReceivedUtc is not null/);
+ assert.match(route,/job\.ClaimedByAgentDeviceId is not null/);
+ assert.match(route,/PricingCalculator\.MaximumPhotosPerA4Sheet/);
+ assert.match(route,/stored\.Analysis\.PageCount != 1/);
+ assert.match(route,/SHOP_PHOTO_ENHANCED/);
+});
+
+test("customer photo previews do not expose the raw image or prepared PDF viewer",()=>{
+ const app=read("../src/App.tsx");
+ const previewStart=app.indexOf("{previewUrl&&file&&");
+ const previewEnd=app.indexOf("{files.length>0&&<button className=\"customer-flow-button\"",previewStart);
+ assert.ok(previewStart>=0&&previewEnd>previewStart);
+ const preview=app.slice(previewStart,previewEnd);
+ assert.match(preview,/Photo held in the shop workflow/);
+ assert.match(preview,/Photo sheet prepared for this shop/);
+ assert.doesNotMatch(preview,/<img src=\{previewUrl\}/);
+ assert.doesNotMatch(preview,/photoSettingsByFileFingerprint\[[^\]]+\]\?<iframe/);
+});
+
+test("the exact same Photo Studio is opened from the shop image review",()=>{
+ const app=read("../src/App.tsx");
+ assert.match(app,/setShopPhotoStudio\(\{source,job:preview\.job\}\)/);
+ assert.match(app,/replaceShopPhotoDocument\(tokens\.accessToken,editor\.job\.id,sheet\.file,sheet\.sizeCode,sheet\.photoCount\)/);
+ assert.match(app,/shopPhotoStudio && <PhotoStudio source=\{shopPhotoStudio\.source\}/);
+ assert.match(app,/Enhance photo for printing/);
+});
+
+test("native Windows content capture protection covers the photo editor and image preview",()=>{
+ const studio=read("../src/PhotoStudio.tsx");
+ const app=read("../src/App.tsx");
+ const bridge=read("../src/desktop-bridge.ts");
+ const permissions=JSON.parse(read("../../desktop/src-tauri/capabilities/default.json"));
+ assert.match(studio,/setDesktopContentProtection\(true\)/);
+ assert.match(app,/setDesktopContentProtection\(true\)/);
+ assert.match(bridge,/getCurrentWindow\(\)\.setContentProtected\(enabled\)/);
+ assert.ok(permissions.permissions.includes("core:window:allow-set-content-protected"));
+});
