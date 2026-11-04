@@ -102,6 +102,7 @@ test("a pre-output capability block clears the attempted spooler name so the exi
   assert.match(blockedWorkflow, /job\.SpoolerJobId = null/);
   assert.match(blockedWorkflow, /job\.SpoolerStatus = "BLOCKED_BEFORE_SUBMISSION"/);
   assert.match(assignmentSource, /assignment\.AssignAsync/);
+  assert.match(assignmentSource, /Id = result\.JobId/);
   assert.match(assignment, /var readyQueueCanBeReassigned = selectedJob\.Status == "LOCAL_QUEUE_READY"/);
   assert.match(assignment, /string\.IsNullOrWhiteSpace\(selectedJob\.SpoolerJobName\)/);
   assert.match(assignment, /needsQueueReset/);
