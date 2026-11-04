@@ -91,6 +91,7 @@ class MainActivity : AppCompatActivity() {
         private const val MAX_TREE_DEPTH = 12
         private const val FOLDER_PICKER_ACCEPT = "application/x-smartprint-folder-selection"
         private const val MAX_CUSTOMER_UPLOAD_PREVIEW_BYTES = 20L * 1024L * 1024L
+        private const val MAX_CUSTOMER_UPLOAD_PREVIEW_BATCH_BYTES = 50L * 1024L * 1024L
     }
 
     private lateinit var store: LocalDocumentStore
@@ -3015,6 +3016,11 @@ class MainActivity : AppCompatActivity() {
         if (!name.endsWith(".pdf", true)) return null
         val directory = File(cacheDir, "customer-upload-pdf-preview")
         if (!directory.exists() && !directory.mkdirs()) return null
+        val canonicalDirectory = directory.canonicalFile
+        val existingPreviewBytes = customerUploadPdfPreviews.values.sumOf { preview ->
+            val parent = runCatching { preview.canonicalFile.parentFile }.getOrNull()
+            if (parent == canonicalDirectory) preview.length() else 0L
+        }
         val target = runCatching { File.createTempFile("upload-preview-", ".pdf", directory) }.getOrNull()
             ?: return null
         return try {
@@ -3029,6 +3035,9 @@ class MainActivity : AppCompatActivity() {
                         total += count
                         require(total <= MAX_CUSTOMER_UPLOAD_PREVIEW_BYTES) {
                             "This PDF is too large to preview."
+                        }
+                        require(existingPreviewBytes + total <= MAX_CUSTOMER_UPLOAD_PREVIEW_BATCH_BYTES) {
+                            "The selected PDFs exceed the preview limit for one batch."
                         }
                         destination.write(buffer, 0, count)
                     }
