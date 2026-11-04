@@ -2420,6 +2420,8 @@ shop.MapPatch("/print-jobs/{jobId:guid}/printer", async (
             batchJob.AgentLeaseExpiresUtc = null;
             batchJob.AgentClaimedUtc = null;
             batchJob.LocalQueueReceivedUtc = null;
+            batchJob.FailureCode = null;
+            batchJob.SpoolerStatus = null;
         }
         batchJob.UpdatedUtc = now;
         db.PrintJobEvents.Add(new PrintJobEvent
