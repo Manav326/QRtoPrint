@@ -19,6 +19,7 @@ import androidx.test.espresso.matcher.ViewMatchers.withId
 import androidx.test.espresso.matcher.ViewMatchers.withText
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import org.junit.Assert.assertTrue
+import org.junit.Assert.assertNull
 import org.junit.Test
 import org.junit.runner.RunWith
 import java.io.File
@@ -53,6 +54,48 @@ class DocumentViewerInstrumentedTest {
             }
         } finally {
             source.delete()
+        }
+    }
+
+    @Test
+    fun opensCustomerUploadPdfInTheNativeReaderAndReturnsToTheUploadPage() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val directory = File(context.cacheDir, "customer-upload-pdf-preview")
+        directory.mkdirs()
+        val source = File(directory, "customer-upload-preview-${System.currentTimeMillis()}.pdf")
+        val token = "4b7b40d1-b0b1-4a6c-a1b9-1f12abcb1f30"
+        createPdf(source)
+
+        try {
+            ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+                scenario.onActivity { activity ->
+                    @Suppress("UNCHECKED_CAST")
+                    val previews = MainActivity::class.java.getDeclaredField("customerUploadPdfPreviews")
+                        .apply { isAccessible = true }
+                        .get(activity) as MutableMap<String, File>
+                    previews[token] = source
+                    MainActivity::class.java.getDeclaredMethod(
+                        "showCustomerUploadPdfPreview",
+                        String::class.java
+                    ).apply { isAccessible = true }.invoke(activity, token)
+                }
+
+                waitForView(withText("Page 1 of 2"))
+                onView(withContentDescription("Back to upload")).perform(click())
+                scenario.onActivity { activity ->
+                    val toolbar = MainActivity::class.java.getDeclaredField("toolbar")
+                        .apply { isAccessible = true }
+                        .get(activity) as com.google.android.material.appbar.MaterialToolbar
+                    val viewer = MainActivity::class.java.getDeclaredField("documentViewer")
+                        .apply { isAccessible = true }
+                        .get(activity)
+                    assertTrue("The upload form is restored after closing PDF preview", toolbar.subtitle.toString().endsWith("PRINT"))
+                    assertNull("The native preview reader is closed", viewer)
+                }
+            }
+        } finally {
+            source.delete()
+            directory.deleteRecursively()
         }
     }
 
