@@ -685,6 +685,109 @@ public sealed class AgentLocalQueueStore
         await SaveManifestAsync(entry with { SpoolerStatus = status }, ct);
     }
 
+    public async Task ReplaceStagedPhotoDocumentAsync(
+        Guid jobId,
+        string expectedOriginalSha256,
+        long expectedOriginalSizeBytes,
+        string replacementDocumentName,
+        ReadOnlyMemory<byte> replacementBytes,
+        long quotedAmountMinor,
+        Func<Task> commitServerRevisionAsync,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(commitServerRevisionAsync);
+        if (string.IsNullOrWhiteSpace(expectedOriginalSha256) ||
+            expectedOriginalSizeBytes <= 0 ||
+            string.IsNullOrWhiteSpace(replacementDocumentName) ||
+            replacementDocumentName.Length > 255 ||
+            !string.Equals(Path.GetExtension(replacementDocumentName), ".pdf", StringComparison.OrdinalIgnoreCase) ||
+            replacementBytes.Length is <= 0 or > 20 * 1024 * 1024 ||
+            quotedAmountMinor <= 0)
+            throw new InvalidDataException("The prepared local photo revision metadata is invalid.");
+
+        await stagedUploadLeaseGate.WaitAsync(cancellationToken);
+        try
+        {
+            var entry = Find(jobId)
+                ?? throw new FileNotFoundException("The original local photo is missing from the protected queue.");
+            if (entry.State is not ("LOCAL_UPLOAD_STAGED" or "LOCAL_UPLOAD_PENDING_PAYMENT"))
+                throw new InvalidOperationException("A local photo can only be enhanced before payment and printer handoff.");
+            if (!string.Equals(entry.Sha256, expectedOriginalSha256, StringComparison.OrdinalIgnoreCase) ||
+                entry.SizeBytes != expectedOriginalSizeBytes ||
+                !File.Exists(entry.DocumentPath))
+                throw new InvalidDataException("The local original changed or is no longer available. Reopen its preview before saving.");
+
+            var newHash = Convert.ToHexString(SHA256.HashData(replacementBytes.Span)).ToLowerInvariant();
+            var plaintext = replacementBytes.ToArray();
+            byte[] protectedBytes;
+            try
+            {
+                protectedBytes = ProtectedData.Protect(plaintext, Entropy, DataProtectionScope.LocalMachine);
+            }
+            finally
+            {
+                CryptographicOperations.ZeroMemory(plaintext);
+            }
+
+            var temporaryPath = entry.DocumentPath + ".tmp";
+            var backupPath = entry.DocumentPath + ".photo-revision.bak";
+            if (File.Exists(temporaryPath)) File.Delete(temporaryPath);
+            if (File.Exists(backupPath)) File.Delete(backupPath);
+            try
+            {
+                await using (var stream = new FileStream(
+                    temporaryPath, FileMode.CreateNew, FileAccess.Write, FileShare.None,
+                    64 * 1024, FileOptions.Asynchronous | FileOptions.WriteThrough))
+                {
+                    await stream.WriteAsync(protectedBytes, cancellationToken);
+                    await stream.FlushAsync(cancellationToken);
+                }
+                File.Replace(temporaryPath, entry.DocumentPath, backupPath, ignoreMetadataErrors: true);
+            }
+            finally
+            {
+                CryptographicOperations.ZeroMemory(protectedBytes);
+                if (File.Exists(temporaryPath)) File.Delete(temporaryPath);
+            }
+
+            var replacementEntry = entry with
+            {
+                DocumentName = replacementDocumentName,
+                MediaType = "application/pdf",
+                Sha256 = newHash,
+                SizeBytes = replacementBytes.Length,
+                PageCount = 1,
+                Copies = 1,
+                ColourMode = "Colour",
+                PaperSize = "A4",
+                IsDuplex = false,
+                Orientation = "AUTO",
+                QuotedAmountMinor = quotedAmountMinor
+            };
+
+            try
+            {
+                await SaveManifestAsync(replacementEntry, cancellationToken);
+                await commitServerRevisionAsync();
+                if (File.Exists(backupPath)) File.Delete(backupPath);
+            }
+            catch
+            {
+                if (File.Exists(backupPath))
+                {
+                    if (File.Exists(entry.DocumentPath)) File.Delete(entry.DocumentPath);
+                    File.Move(backupPath, entry.DocumentPath);
+                }
+                await SaveManifestAsync(entry, CancellationToken.None);
+                throw;
+            }
+        }
+        finally
+        {
+            stagedUploadLeaseGate.Release();
+        }
+    }
+
     public byte[] ReadDocument(Guid jobId)
     {
         var entry = Find(jobId)
