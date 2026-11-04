@@ -182,6 +182,7 @@ public static class ShopCustomerEndpoints
                     job.Currency,
                     job.QuotedAmountMinor,
                     job.RejectedPageNumbersJson,
+                    job.PdfBrandingEnabled,
                     job.OutputType,
                     job.OutputConfirmedUtc,
                     job.OutputCompletedUtc,
