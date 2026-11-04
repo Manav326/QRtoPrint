@@ -267,19 +267,21 @@ public static partial class PublicJobEndpoints
                 return Results.NotFound();
             }
 
-            if (job.Status == "AWAITING_SHOP_APPROVAL")
+            var acceptanceOutcome = PrintJobQuoteRules.EvaluateAcceptance(
+                job.Status, job.QuoteExpiresUtc, now);
+            if (acceptanceOutcome == PrintJobQuoteAcceptanceOutcome.AlreadyAccepted)
             {
                 await transaction.RollbackAsync(ct);
                 return Results.Ok(new { job.Id, job.JobNumber, job.Status, job.UpdatedUtc, DuplicateRequest = true });
             }
 
-            if (job.Status != "AWAITING_CUSTOMER_APPROVAL")
+            if (acceptanceOutcome == PrintJobQuoteAcceptanceOutcome.NotAwaitingAcceptance)
             {
                 await transaction.RollbackAsync(ct);
                 return Results.Conflict(new { code = "quote_not_awaiting_acceptance", message = "This job does not have a quote awaiting your acceptance." });
             }
 
-            if (job.QuoteExpiresUtc is null || job.QuoteExpiresUtc <= now)
+            if (acceptanceOutcome == PrintJobQuoteAcceptanceOutcome.Expired)
             {
                 var expiredFromStatus = job.Status;
                 job.Status = "QUOTE_EXPIRED";
