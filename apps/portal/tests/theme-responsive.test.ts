@@ -316,3 +316,20 @@ test("native customer UI follows explicit SmartPrint theme and marks selected up
   assert.match(app, /aria-pressed=\{uploadMode==="LOCAL"\}/);
   assert.match(app, /aria-pressed=\{uploadMode==="CLOUD"\}/);
 });
+
+
+test("customer print options remain selectable when printer capability is unknown", () => {
+  const app = read("../src/App.tsx");
+  const flowStart = app.indexOf("function CustomerPrintFlow(");
+  const flowEnd = app.indexOf("function UploadIcon()", flowStart);
+  assert.ok(flowStart >= 0 && flowEnd > flowStart,
+    "The shared customer print flow must remain present.");
+  const flow = app.slice(flowStart, flowEnd);
+
+  assert.ok(flow.includes("const supportsColour=!hasAssignedPrinter||printerCapabilities?.color!==false;"));
+  assert.ok(flow.includes("const supportsDuplex=!hasAssignedPrinter||printerCapabilities?.duplex!==false;"));
+  assert.ok(app.includes('color:typeof value.color==="boolean"?value.color:undefined'));
+  assert.ok(app.includes('duplex:typeof value.duplex==="boolean"?value.duplex:undefined'));
+  assert.ok(flow.includes('colourMode:photoSettings?"Colour":settings.colourMode'));
+  assert.ok(flow.includes("isDuplex:photoSettings?false:settings.isDuplex"));
+});

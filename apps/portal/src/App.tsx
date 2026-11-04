@@ -3507,8 +3507,9 @@ function CustomerPrintFlow({publicCode,sessionToken,paymentOptions,localAgent,lo
   const a4ExplicitlyUnsupported=hasAssignedPrinter&&reportedPaperSizes.length>0&&!a4Supported;
   const a4SupportUnknown=hasAssignedPrinter&&reportedPaperSizes.length===0;
   const a4NotConfirmed=a4ExplicitlyUnsupported||a4SupportUnknown;
-  const supportsColour=!hasAssignedPrinter||printerCapabilities?.color===true;
-  const supportsDuplex=!hasAssignedPrinter||printerCapabilities?.duplex===true;
+  // Unknown driver capabilities are not the same as unsupported; the Agent validates before output.
+  const supportsColour=!hasAssignedPrinter||printerCapabilities?.color!==false;
+  const supportsDuplex=!hasAssignedPrinter||printerCapabilities?.duplex!==false;
   const photoRatesAvailable=Boolean(photoPricing&&[photoPricing.photo35x45Minor,photoPricing.photo25x35Minor,photoPricing.photo2x2Minor,photoPricing.photo4x6Minor].some(rate=>Number.isFinite(rate)&&rate>0));
   const initialDraft=readStoredCustomerDraft(publicCode,sessionToken);
   const [files,setFiles]=useState<File[]>([]);
