@@ -295,6 +295,45 @@ public sealed class PdfExportExecutorTests
 public sealed class PdfBrandingOverlayTests
 {
     [Fact]
+    public void UnbrandedSingleCopyPdfExportPreservesTheOriginalPdfBytes()
+    {
+        using var source = new MemoryStream();
+        using (var pdf = SkiaSharp.SKDocument.CreatePdf(source))
+        {
+            var canvas = pdf.BeginPage(595.276f, 841.89f);
+            using var typeface = SkiaSharp.SKTypeface.FromFamilyName("Arial", SkiaSharp.SKFontStyle.Normal);
+            using var font = new SkiaSharp.SKFont(typeface, 14);
+            using var paint = new SkiaSharp.SKPaint { Color = SkiaSharp.SKColors.Black, IsAntialias = true };
+            canvas.DrawText("ORIGINAL PDF MUST REMAIN INTACT", 48, 72, SkiaSharp.SKTextAlign.Left, font, paint);
+            pdf.EndPage();
+            pdf.Close();
+        }
+
+        var bytes = source.ToArray();
+        var directory = Path.Combine(Path.GetTempPath(), "smartprint-unbranded-original-" + Guid.NewGuid().ToString("N"));
+        var entry = new AgentLocalQueueEntry(
+            Guid.NewGuid(), "SP-UNBRANDED-ORIGINAL", Guid.NewGuid(), "PDF Export",
+            "PDF Export", "original.pdf", "application/pdf",
+            Convert.ToHexString(SHA256.HashData(bytes)).ToLowerInvariant(), bytes.LongLength,
+            1, 1, "Colour", "A4", false, "INR", 100, "unused", "ACKNOWLEDGED",
+            DateTimeOffset.UtcNow, DateTimeOffset.UtcNow.AddMinutes(3),
+            OutputMode: PrinterOutputModeRules.PdfExport,
+            PdfBrandingEnabled: false);
+
+        try
+        {
+            var receipt = new WindowsPrintExecutor().ExportPdf(entry, bytes, directory, CancellationToken.None);
+            var saved = File.ReadAllBytes(receipt.OutputPath);
+            Assert.Equal(bytes, saved);
+        }
+        finally
+        {
+            CryptographicOperations.ZeroMemory(bytes);
+            if (Directory.Exists(directory)) Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [Fact]
     public void AddsVectorFooterWithoutFlatteningSelectableOriginalText()
     {
         using var source = new MemoryStream();
