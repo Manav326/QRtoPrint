@@ -1159,8 +1159,7 @@ export async function uploadCustomerDocument(
     headers: {
       "X-Print-Session": sessionToken,
       "Idempotency-Key": idempotencyKey,
-      ...(batchId ? { "X-Print-Batch-Id": batchId } : {}),
-      ...(allowQueueFallback ? { "X-Print-Queue-Fallback": "true" } : {})
+      ...(batchId ? { "X-Print-Batch-Id": batchId } : {})
     },
     body: form
   });
