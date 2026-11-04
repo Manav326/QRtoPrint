@@ -2448,7 +2448,126 @@ shop.MapPatch("/print-jobs/{jobId:guid}/printer", async (
         AssignedJobCount = assigned,
         UpdatedUtc = now
     });
-});shop.MapPost("/print-jobs/{jobId:guid}/dispatch", async (Guid jobId, ClaimsPrincipal principal, SmartPrintDbContext db, CancellationToken ct) =>
+});shop.MapPatch("/print-jobs/{jobId:guid}/settings", async (
+    Guid jobId,
+    UpdatePrintJobSettingsRequest request,
+    ClaimsPrincipal principal,
+    SmartPrintDbContext db,
+    CancellationToken ct) =>
+{
+    if (!IsShopOwner(principal) || !TryGetTenantId(principal, out var tenantId)) return Results.Forbid();
+
+    var colourMode = request.ColourMode?.Trim();
+    var paperSize = request.PaperSize?.Trim().ToUpperInvariant();
+    var orientation = request.Orientation?.Trim().ToUpperInvariant();
+    if (colourMode is not ("Mono" or "Colour") ||
+        paperSize is not ("A4" or "A3" or "A5" or "LETTER" or "LEGAL") ||
+        request.Copies is < 1 or > 100 ||
+        orientation is not ("AUTO" or "PORTRAIT" or "LANDSCAPE"))
+        return Results.ValidationProblem(new Dictionary<string, string[]>
+        {
+            ["printOptions"] = ["Choose supported paper, orientation, colour, sides and 1–100 copies."]
+        });
+
+    await using var transaction = await db.Database.BeginTransactionAsync(ct);
+    var lockedJobs = await db.PrintJobs.FromSqlInterpolated(
+        $"SELECT * FROM \"PrintJobs\" WHERE \"Id\" = {jobId} AND \"TenantId\" = {tenantId} FOR UPDATE")
+        .ToListAsync(ct);
+    var job = lockedJobs.SingleOrDefault();
+    if (job is null)
+    {
+        await transaction.RollbackAsync(ct);
+        return Results.NotFound();
+    }
+
+    if (job.PrintKind != "DOCUMENT" ||
+        job.Status is not ("AWAITING_CONFIGURATION" or "AWAITING_CUSTOMER_APPROVAL" or
+            "AWAITING_SHOP_APPROVAL" or "AWAITING_PAYMENT" or "QUOTE_EXPIRED" or "PAYMENT_REJECTED"))
+    {
+        await transaction.RollbackAsync(ct);
+        return Results.Conflict(new
+        {
+            code = "print_settings_locked",
+            message = "Print options can only be adjusted before payment begins and before the job is handed to the Agent."
+        });
+    }
+
+    var hasStartedPayment = await db.PrintPayments.AsNoTracking().AnyAsync(payment =>
+        payment.TenantId == tenantId && payment.PrintJobId == jobId && payment.Status != "REJECTED", ct);
+    var batchPaymentStarted = job.BatchId is Guid batchId &&
+        await db.PrintBatchPayments.AsNoTracking().AnyAsync(payment =>
+            payment.TenantId == tenantId && payment.BatchId == batchId && payment.Status != "REJECTED", ct);
+    if (hasStartedPayment || batchPaymentStarted)
+    {
+        await transaction.RollbackAsync(ct);
+        return Results.Conflict(new
+        {
+            code = "payment_already_started",
+            message = "This job or its batch already has a payment attempt. Do not change its quoted settings; resolve the payment or refund first."
+        });
+    }
+
+    var pricing = await db.ShopPricingProfiles.AsNoTracking()
+        .SingleOrDefaultAsync(item => item.TenantId == tenantId && item.IsConfigured, ct);
+    if (pricing is null)
+    {
+        await transaction.RollbackAsync(ct);
+        return Results.Conflict(new { code = "shop_pricing_not_configured", message = "Configure shop print prices before revising this quote." });
+    }
+
+    long amount;
+    long[] pageRefundAllocations;
+    try
+    {
+        amount = PricingCalculator.Calculate(job.PageCount, request.Copies, colourMode, request.IsDuplex, pricing);
+        pageRefundAllocations = PricingCalculator.CalculatePageRefundAllocations(
+            job.PageCount, request.Copies, colourMode, request.IsDuplex, pricing);
+    }
+    catch (DuplexPricingNotConfiguredException exception)
+    {
+        await transaction.RollbackAsync(ct);
+        return Results.Conflict(new { code = "duplex_pricing_not_configured", message = exception.Message });
+    }
+
+    var now = DateTimeOffset.UtcNow;
+    var previousStatus = job.Status;
+    job.ColourMode = colourMode;
+    job.PaperSize = paperSize;
+    job.IsDuplex = request.IsDuplex;
+    job.Copies = request.Copies;
+    job.Orientation = orientation;
+    job.Currency = "INR";
+    job.QuotedAmountMinor = amount;
+    job.PageRefundAllocationsJson = JsonSerializer.Serialize(pageRefundAllocations);
+    job.PricingVersion = pricing.Version;
+    job.QuoteExpiresUtc = now.AddMinutes(10);
+    job.Status = "AWAITING_CUSTOMER_APPROVAL";
+    job.FailureCode = null;
+    job.UpdatedUtc = now;
+    db.PrintJobEvents.Add(new PrintJobEvent
+    {
+        TenantId = tenantId,
+        PrintJobId = job.Id,
+        PreviousStatus = previousStatus,
+        NewStatus = job.Status,
+        ActorType = "ShopUser",
+        ActorId = GetActorId(principal),
+        ReasonCode = "SHOP_REVISED_PRINT_SETTINGS_CUSTOMER_APPROVAL_REQUIRED",
+        CreatedUtc = now
+    });
+
+    await db.SaveChangesAsync(ct);
+    await transaction.CommitAsync(ct);
+    return Results.Ok(new
+    {
+        job.Id, job.JobNumber, job.Status, job.PageCount, job.Copies,
+        job.ColourMode, job.PaperSize, job.IsDuplex, job.Orientation,
+        job.Currency, job.QuotedAmountMinor, AmountMajor = amount / 100m,
+        job.PricingVersion, job.QuoteExpiresUtc, CustomerApprovalRequired = true
+    });
+});
+
+shop.MapPost("/print-jobs/{jobId:guid}/dispatch", async (Guid jobId, ClaimsPrincipal principal, SmartPrintDbContext db, CancellationToken ct) =>
 {
     if (!IsShopOwner(principal) || !TryGetTenantId(principal, out var tenantId)) return Results.Forbid();
 
@@ -3705,6 +3824,7 @@ agentApi.MapPost("/jobs/claim", async (
             candidate.ColourMode,
             candidate.PaperSize,
             candidate.IsDuplex,
+            candidate.Orientation,
             candidate.Currency,
             candidate.QuotedAmountMinor,
             candidate.PrinterDeviceId,
@@ -5631,6 +5751,23 @@ publicApi.MapPost("/sessions/current/jobs", async (
     }
 
     var file = form.Files[0];
+    var requestedColourMode = form["colourMode"].FirstOrDefault() ?? "Mono";
+    var requestedPaperSize = form["paperSize"].FirstOrDefault() ?? "A4";
+    var requestedDuplexText = form["isDuplex"].FirstOrDefault() ?? "false";
+    var requestedCopiesText = form["copies"].FirstOrDefault() ?? "1";
+    var requestedOrientation = form["orientation"].FirstOrDefault() ?? "AUTO";
+    if (requestedColourMode is not ("Mono" or "Colour") ||
+        requestedPaperSize is not ("A4" or "A3" or "A5" or "LETTER" or "LEGAL") ||
+        !bool.TryParse(requestedDuplexText, out var requestedDuplex) ||
+        !int.TryParse(requestedCopiesText, out var requestedCopies) ||
+        requestedCopies is < 1 or > 100 ||
+        requestedOrientation is not ("AUTO" or "PORTRAIT" or "LANDSCAPE"))
+    {
+        return Results.ValidationProblem(new Dictionary<string, string[]>
+        {
+            ["printOptions"] = ["Choose a supported paper size, portrait/landscape orientation, Mono/Colour, single/double-sided and 1–100 copies."]
+        });
+    }
     string batchGroupName;
     try
     {
@@ -5663,11 +5800,17 @@ publicApi.MapPost("/sessions/current/jobs", async (
             title: "This shop's trial or subscription period is no longer active.");
     }
 
-    if (!subscription.CloudAssistedPrintingEnabled)
+    var stationDefaultPrinterId = await db.QrStations.AsNoTracking()
+        .Where(station => station.Id == session.QrStationId && station.TenantId == session.TenantId)
+        .Select(station => station.PrinterDeviceId)
+        .SingleOrDefaultAsync(ct);
+    var localAgentAvailable = await GetLocalAgentInfoAsync(
+        db, session.TenantId, stationDefaultPrinterId, now, ct) is not null;
+    if (!subscription.CloudAssistedPrintingEnabled && localAgentAvailable)
     {
         return Results.Problem(
             statusCode: StatusCodes.Status403Forbidden,
-            title: "Cloud-assisted printing is not included in this shop's current plan.");
+            title: "Secure cloud uploads are not included in this shop's plan while its local Agent is available.");
     }
 
     if (!PlanEntitlementRules.AllowsDocument(subscription.MaxDocumentBytes, file.Length))
@@ -5705,11 +5848,6 @@ publicApi.MapPost("/sessions/current/jobs", async (
         return Results.UnprocessableEntity(new { code = "document_not_supported", message = exception.Message });
     }
 
-    var stationDefaultPrinterId = await db.QrStations.AsNoTracking()
-        .Where(station => station.Id == session.QrStationId && station.TenantId == session.TenantId)
-        .Select(station => station.PrinterDeviceId)
-        .SingleOrDefaultAsync(ct);
-
     var job = new PrintJob
     {
         TenantId = session.TenantId,
@@ -5723,7 +5861,11 @@ publicApi.MapPost("/sessions/current/jobs", async (
         Status = "AWAITING_CONFIGURATION",
         IdempotencyKey = idempotencyKey,
         PageCount = stored.Analysis.PageCount,
-        Copies = 1,
+        Copies = requestedCopies,
+        ColourMode = requestedColourMode,
+        PaperSize = requestedPaperSize,
+        IsDuplex = requestedDuplex,
+        Orientation = requestedOrientation,
         Currency = "INR",
         QuotedAmountMinor = 0,
         CreatedUtc = now,
@@ -5966,7 +6108,11 @@ publicApi.MapPost("/sessions/current/local-upload-tickets", async (
     };
     var sha = request.Sha256?.Trim().ToLowerInvariant();
     if (mediaType is null || request.SizeBytes is <= 0 or > 20L * 1024 * 1024 ||
-        string.IsNullOrWhiteSpace(sha) || sha.Length != 64 || sha.Any(character => !Uri.IsHexDigit(character)))
+        string.IsNullOrWhiteSpace(sha) || sha.Length != 64 || sha.Any(character => !Uri.IsHexDigit(character)) ||
+        request.ColourMode is not ("Mono" or "Colour") ||
+        request.PaperSize is not ("A4" or "A3" or "A5" or "LETTER" or "LEGAL") ||
+        request.Copies is < 1 or > 100 ||
+        request.Orientation is not ("AUTO" or "PORTRAIT" or "LANDSCAPE")
     {
         return Results.UnprocessableEntity(new { code = "document_not_supported", message = "Local upload supports PDF, JPG/JPEG and PNG files up to 20 MB with a valid SHA-256 digest." });
     }
@@ -5995,7 +6141,12 @@ publicApi.MapPost("/sessions/current/local-upload-tickets", async (
             existing.SizeBytes != request.SizeBytes ||
             !string.Equals(existing.Sha256, sha, StringComparison.OrdinalIgnoreCase) ||
             existing.OriginalFileName != originalName ||
-            PrintBatchGroupRules.Normalize(existing.BatchGroupName) != batchGroupName)
+            PrintBatchGroupRules.Normalize(existing.BatchGroupName) != batchGroupName ||
+            existing.ColourMode != request.ColourMode ||
+            existing.PaperSize != request.PaperSize ||
+            existing.IsDuplex != request.IsDuplex ||
+            existing.Copies != request.Copies ||
+            existing.Orientation != request.Orientation)
         {
             return Results.Conflict(new { code = "local_upload_idempotency_conflict", message = "This upload attempt key is already associated with a different document." });
         }
@@ -6068,20 +6219,7 @@ publicApi.MapPost("/sessions/current/local-upload-tickets", async (
         return Results.Conflict(new
         {
             code = "local_print_agent_unavailable",
-            message = "This QR station does not have a recently connected Windows Print Agent. Use cloud-assisted upload or ask the shop operator."
-        });
-    }
-
-    var stationPrinterIsAvailable = stationPrinter.OutputMode == "PDF_EXPORT" ||
-        (stationPrinter.LastSeenUtc != null &&
-         stationPrinter.LastSeenUtc >= now.AddMinutes(-2) &&
-         (stationPrinter.Status == "Ready" || stationPrinter.Status == "Busy"));
-    if (!stationPrinterIsAvailable)
-    {
-        return Results.Conflict(new
-        {
-            code = "local_print_printer_unavailable",
-            message = "The printer assigned to this QR station is offline, paused or not responding. Choose Cloud-assisted upload; the shop can then assign one available printer to the whole batch."
+            message = "The shop computer is temporarily unavailable. SmartPrint can keep this request securely online; the shop can release it when an Agent is ready."
         });
     }
 
@@ -6113,6 +6251,11 @@ publicApi.MapPost("/sessions/current/local-upload-tickets", async (
         FileExtension = extension,
         SizeBytes = request.SizeBytes,
         Sha256 = sha,
+        ColourMode = request.ColourMode,
+        PaperSize = request.PaperSize,
+        IsDuplex = request.IsDuplex,
+        Copies = request.Copies,
+        Orientation = request.Orientation,
         CreatedUtc = now,
         ExpiresUtc = now.AddMinutes(15)
     };
@@ -6507,9 +6650,11 @@ publicApi.MapPost("/sessions/current/local-upload-tickets/{ticketId:guid}/cloud-
         if (!subscription.IsAccessActive)
             return await RejectAndCleanAsync(Results.Problem(statusCode: StatusCodes.Status403Forbidden,
                 title: "This shop's trial or subscription period is no longer active."));
-        if (!subscription.CloudAssistedPrintingEnabled)
+        var recoveryAgentAvailable = await GetLocalAgentInfoAsync(
+            db, ticket.TenantId, ticket.PrinterDeviceId, commitNow, ct) is not null;
+        if (!subscription.CloudAssistedPrintingEnabled && recoveryAgentAvailable)
             return await RejectAndCleanAsync(Results.Problem(statusCode: StatusCodes.Status403Forbidden,
-                title: "Secure cloud recovery is not included in this shop's current plan. The original local upload remains available."));
+                title: "Secure HTTPS recovery is not available while the paired shop Agent is online on this plan."));
         if (!PlanEntitlementRules.AllowsDocument(subscription.MaxDocumentBytes, ticket.SizeBytes))
             return await RejectAndCleanAsync(Results.Problem(statusCode: StatusCodes.Status413PayloadTooLarge,
                 title: "This document exceeds the maximum size configured for this shop's plan."));
@@ -6586,7 +6731,11 @@ publicApi.MapPost("/sessions/current/local-upload-tickets/{ticketId:guid}/cloud-
             Status = "AWAITING_CONFIGURATION",
             IdempotencyKey = $"LOCAL-{ticket.Id:N}",
             PageCount = stored.Analysis.PageCount,
-            Copies = 1,
+            Copies = ticket.Copies,
+            ColourMode = ticket.ColourMode,
+            PaperSize = ticket.PaperSize,
+            IsDuplex = ticket.IsDuplex,
+            Orientation = ticket.Orientation,
             Currency = "INR",
             QuotedAmountMinor = 0,
             CreatedUtc = commitNow,
@@ -6723,12 +6872,14 @@ publicApi.MapPost("/jobs/{jobId:guid}/quote", async (
     if ((request.PrintKind is not null && request.PrintKind is not ("DOCUMENT" or "PHOTO")) ||
         job.PageCount is <= 0 or > 500 ||
         request.Copies is < 1 or > 100 ||
-        request.PaperSize != "A4" ||
+        request.PaperSize is not ("A4" or "A3" or "A5" or "LETTER" or "LEGAL") ||
         request.ColourMode is not ("Mono" or "Colour") ||
+        request.Orientation is not ("AUTO" or "PORTRAIT" or "LANDSCAPE") ||
         (isPhotoPrint &&
             (job.PageCount != 1 || request.Copies != 1 || request.ColourMode != "Colour" ||
              request.IsDuplex || request.PhotoSizeCode is not ("35x45" or "25x35" or "2x2" or "4x6") ||
              request.PhotoCount is null || request.PhotoCount is < 1 or > 100)) ||
+        (isPhotoPrint && (request.PaperSize != "A4" || request.Orientation != "AUTO")) ||
         (!isPhotoPrint && (request.PhotoSizeCode is not null || request.PhotoCount is not null)))
     {
         return Results.ValidationProblem(new Dictionary<string, string[]>
@@ -6798,6 +6949,7 @@ publicApi.MapPost("/jobs/{jobId:guid}/quote", async (
         job.PaperSize = request.PaperSize;
         job.IsDuplex = request.IsDuplex;
         job.Copies = request.Copies;
+        job.Orientation = request.Orientation;
         job.Currency = "INR";
         job.QuotedAmountMinor = amount;
         job.PageRefundAllocationsJson = JsonSerializer.Serialize(pageRefundAllocations);
@@ -7725,6 +7877,8 @@ publicApi.MapGet("/jobs/{jobId:guid}/status", async (
             item.ColourMode,
             item.PaperSize,
             item.IsDuplex,
+            item.Orientation,
+            item.PricingVersion,
             item.PrintKind,
             item.PhotoSizeCode,
             item.PhotoCount,

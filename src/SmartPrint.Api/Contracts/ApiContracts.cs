@@ -35,7 +35,14 @@ public sealed record ShopPricingRequest(
     long Photo2x2Minor = 0,
     long Photo4x6Minor = 0);
 
-public sealed record PrintQuoteRequest(string ColourMode, string PaperSize, bool IsDuplex, int Copies, string? PrintKind = "DOCUMENT", string? PhotoSizeCode = null, int? PhotoCount = null);
+public sealed record PrintQuoteRequest(string ColourMode, string PaperSize, bool IsDuplex, int Copies, string? PrintKind = "DOCUMENT", string? PhotoSizeCode = null, int? PhotoCount = null, string Orientation = "AUTO");
+
+public sealed record UpdatePrintJobSettingsRequest(
+    string ColourMode,
+    string PaperSize,
+    bool IsDuplex,
+    int Copies,
+    string Orientation = "AUTO");
 
 public sealed record TokenResponse(
     string TokenType,
@@ -103,7 +110,12 @@ public sealed record CreateLocalPrintUploadTicketRequest(
     string GrantToken,
     Guid? BatchId = null,
     string? BatchGroupName = null,
-    string? BatchName = null);
+    string? BatchName = null,
+    string ColourMode = "Mono",
+    string PaperSize = "A4",
+    bool IsDuplex = false,
+    int Copies = 1,
+    string Orientation = "AUTO");
 
 public sealed record RecordPrintRefundRequest(
     string RefundMethod,
