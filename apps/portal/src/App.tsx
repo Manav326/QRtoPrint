@@ -3614,6 +3614,28 @@ function CustomerPrintFlow({publicCode,sessionToken,paymentOptions,localAgent,lo
       !current||current.id!==candidate.id||Date.parse(candidate.updatedUtc)>=Date.parse(current.updatedUtc)
         ?candidate:current);
     if(candidate.pricingVersion&&candidate.quotedAmountMinor>0) {
+      const paperSize=(["A4","A3","A5","LETTER","LEGAL"].includes(candidate.paperSize)
+        ?candidate.paperSize:"A4") as CustomerPrintRequestSettings["paperSize"];
+      const orientation=(["AUTO","PORTRAIT","LANDSCAPE"].includes(candidate.orientation??"AUTO")
+        ?candidate.orientation??"AUTO":"AUTO") as CustomerPrintRequestSettings["orientation"];
+      // A shop-side quote revision is authoritative. Keep the settings shown
+      // to the customer in step with the revised amount before approval.
+      setPrintSettingsByJobId(current=>{
+        const previous=current[candidate.id];
+        return {
+          ...current,
+          [candidate.id]:{
+            ...previous,
+            copies:candidate.copies,
+            colourMode:candidate.colourMode==="Colour"?"Colour":"Mono",
+            paperSize,
+            isDuplex:candidate.isDuplex,
+            orientation,
+            advancedEnabled:Boolean(previous?.advancedEnabled)||paperSize!=="A4"||orientation!=="AUTO"
+          }
+        };
+      });
+      const revisedQuote:PrintQuoteResult={
       const revisedQuote:PrintQuoteResult={
         id:candidate.id,
         batchId:uploadedBatch.find(item=>item.job.id===candidate.id)?.job.batchId??uploaded?.job.batchId??null,
