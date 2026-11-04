@@ -271,15 +271,30 @@ test("customer session lifecycle remains behind thin route adapters", () => {
 
 test("photo quotes support multi-page sheets and page-level refund allocation", () => {
   const endpoint = readApi("PublicJobQuoteEndpoints.cs");
+  const service = read("../../../src/SmartPrint.Api/Services/PublicJobQuoteService.cs");
   const request = read("../../../src/SmartPrint.Api/Contracts/ApiContracts.cs");
   const rules = read("../../../src/SmartPrint.Api/Domain/PrintJobQuoteRules.cs");
   const pricing = read("../../../src/SmartPrint.Api/Pricing/PricingCalculator.cs");
   assert.match(request, /int\? PhotosPerPage = null/);
-  assert.match(endpoint, /request\.PhotosPerPage/);
-  assert.match(endpoint, /PricingCalculator\.PhotoPageCount/);
-  assert.match(endpoint, /PricingCalculator\.CalculatePhotoPageRefundAllocations/);
+  assert.match(endpoint, /quotes\.CreateQuoteAsync/);
+  assert.match(service, /request\.PhotosPerPage/);
+  assert.match(service, /PricingCalculator\.PhotoPageCount/);
+  assert.match(service, /PricingCalculator\.CalculatePhotoPageRefundAllocations/);
+  assert.match(service, /PageRefundAllocationsJson = JsonSerializer\.Serialize\(pageRefundAllocations\)/);
   assert.match(rules, /PricingCalculator\.MaximumPhotosPerA4Sheet/);
   assert.match(pricing, /public static long\[\] CalculatePhotoPageRefundAllocations/);
+});
+
+test("public quote acceptance remains row-locked, expiry-aware and idempotent", () => {
+  const endpoint = readApi("PublicJobQuoteEndpoints.cs");
+  const service = read("../../../src/SmartPrint.Api/Services/PublicJobQuoteService.cs");
+  assert.match(endpoint, /quotes\.AcceptQuoteAsync/);
+  assert.match(service, /FOR UPDATE/);
+  assert.match(service, /PrintJobQuoteRules\.EvaluateAcceptance/);
+  assert.match(service, /AlreadyAccepted/);
+  assert.match(service, /QUOTE_EXPIRED_BEFORE_ACCEPTANCE/);
+  assert.match(service, /CUSTOMER_ACCEPTED_QUOTE/);
+  assert.match(service, /DuplicateRequest = true/);
 });
 
 test("shop photo revision protects the original document and locks editing after payment", () => {
