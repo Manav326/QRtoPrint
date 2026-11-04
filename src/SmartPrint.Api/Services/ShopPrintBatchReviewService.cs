@@ -37,6 +37,7 @@ public sealed class ShopPrintBatchReviewService(SmartPrintDbContext db)
         Guid? actorId,
         IEnumerable<Guid>? requestedReviewedJobIds,
         IEnumerable<Guid>? requestedAcceptedJobIds,
+        bool pdfBrandingEnabled,
         CancellationToken cancellationToken)
     {
         if (!PrintBatchReviewRules.TryNormalize(
@@ -94,6 +95,27 @@ public sealed class ShopPrintBatchReviewService(SmartPrintDbContext db)
         var protectedJobIds = paymentProtectedJobIds.ToHashSet();
 
         var now = DateTimeOffset.UtcNow;
+        foreach (var job in lockedJobs)
+        {
+            if (job.PdfBrandingEnabled == pdfBrandingEnabled)
+                continue;
+
+            job.PdfBrandingEnabled = pdfBrandingEnabled;
+            db.PrintJobEvents.Add(new PrintJobEvent
+            {
+                TenantId = tenantId,
+                PrintJobId = job.Id,
+                PreviousStatus = job.Status,
+                NewStatus = job.Status,
+                ActorType = "ShopUser",
+                ActorId = actorId,
+                ReasonCode = pdfBrandingEnabled
+                    ? "SHOP_BATCH_PDF_BRANDING_ENABLED"
+                    : "SHOP_BATCH_PDF_BRANDING_DISABLED",
+                CreatedUtc = now
+            });
+        }
+
         var acceptedCount = 0;
         var rejectedCount = 0;
         var quoteRefreshRequiredCount = 0;
