@@ -1164,9 +1164,9 @@ function ShopConsole({ tokens, onSignOut, dark, onToggleTheme }: { tokens: AuthT
     setBusyJobId(editor.job.id);
     try{
       if(editor.job.storageMode==="LOCAL_AGENT") {
-        await replaceShopPhotoDocumentLocally(tokens.accessToken,editor.job.id,sheet.file,sheet.sizeCode,sheet.photoCount);
+        await replaceShopPhotoDocumentLocally(tokens.accessToken,editor.job.id,sheet.file,sheet.sizeCode,sheet.photoCount,sheet.photosPerPage);
       } else {
-        await replaceShopPhotoDocument(tokens.accessToken,editor.job.id,sheet.file,sheet.sizeCode,sheet.photoCount);
+        await replaceShopPhotoDocument(tokens.accessToken,editor.job.id,sheet.file,sheet.sizeCode,sheet.photoCount,sheet.photosPerPage);
       }
     }catch(exception){
       setError(exception instanceof Error?exception.message:"Could not save the enhanced photo sheet.");
@@ -3499,7 +3499,7 @@ function consumeSmartPrintNativePickerGroups():string[]|undefined {
   return Array.isArray(groups)?groups:undefined;
 }
 type CustomerSavedPrintSettings = CustomerPrintRequestSettings & { advancedEnabled?: boolean };
-type CustomerPhotoSettings = { sizeCode: string; photoCount: number };
+type CustomerPhotoSettings = { sizeCode: string; photoCount: number; photosPerPage: number };
 function customerPhotoSizeLabel(sizeCode?:string|null):string {
   switch(sizeCode){
     case "35x45": return "35 × 45 mm";
@@ -4082,7 +4082,7 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
             isDuplex:photoSettings?false:settings.isDuplex,
             copies:photoSettings?1:settings.copies,
             orientation:photoSettings?"AUTO":settings.orientation,
-            ...(photoSettings?{printKind:"PHOTO" as const,photoSizeCode:photoSettings.sizeCode,photoCount:photoSettings.photoCount}:{printKind:"DOCUMENT" as const})
+            ...(photoSettings?{printKind:"PHOTO" as const,photoSizeCode:photoSettings.sizeCode,photoCount:photoSettings.photoCount,photosPerPage:photoSettings.photosPerPage}:{printKind:"DOCUMENT" as const})
           });
         } catch(exception) {
           failures.push(item.document.originalFileName);
@@ -4262,7 +4262,7 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
     if(uploadedBatch.length+pending.length>20||bytes>50*1024*1024){setError("Prepared photo sheets exceed the batch limit. Reduce the copies or start a new batch.");setPhotoStudioSource(null);setPhotoStudioSourceFingerprint(null);return;}
     const group=groupNameForFile(files[index]),groups={...fileGroupNames},settings={...fileSettings},photos={...photoSettingsByFileFingerprint};
     delete groups[photoStudioSourceFingerprint];delete settings[photoStudioSourceFingerprint];delete photos[photoStudioSourceFingerprint];
-    for(const sheet of sheets){const fp=customerFileFingerprint(sheet.file);groups[fp]=group;settings[fp]={copies:"1",custom:true,colourMode:"Colour",isDuplex:false,advancedEnabled:false,paperSize:"A4",orientation:"AUTO"};photos[fp]={sizeCode:sheet.sizeCode,photoCount:sheet.photoCount};}
+    for(const sheet of sheets){const fp=customerFileFingerprint(sheet.file);groups[fp]=group;settings[fp]={copies:"1",custom:true,colourMode:"Colour",isDuplex:false,advancedEnabled:false,paperSize:"A4",orientation:"AUTO"};photos[fp]={sizeCode:sheet.sizeCode,photoCount:sheet.photoCount,photosPerPage:sheet.photosPerPage};}
     setFiles(nextFiles);setSelectedFileIndex(index);setFileGroupNames(groups);setFileSettings(settings);setPhotoSettingsByFileFingerprint(photos);setPhotoStudioSource(null);setPhotoStudioSourceFingerprint(null);setError("");
   }
   function openPhotoStudio(candidate:File){
