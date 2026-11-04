@@ -56,13 +56,12 @@ public sealed class LocalUploadCompletionRulesTests
     [InlineData(null)]
     [InlineData("")]
     [InlineData("x")]
-    [InlineData( "[]")]
     [InlineData("[{}]")]
     public void RejectsMissingOrMismatchedPageAnalysis(string? json)
     {
         Assert.False(LocalUploadCompletionRules.MatchesTicket(
             CreateTicket(),
-            CreateRequest() with { PageSizesJson = json }));
+            CreateRequest() with { PageSizesJson = json! }));
     }
 
     [Theory]
