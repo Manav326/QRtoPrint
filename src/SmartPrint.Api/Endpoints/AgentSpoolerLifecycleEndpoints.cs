@@ -174,7 +174,12 @@ public static partial class AgentEndpoints
             }
 
             var job = result.Job!;
-            return Results.Ok(new { job.Id, job.Status, job.FailureCode, DuplicateRequest = result.DuplicateRequest });
+            if (result.DuplicateRequest)
+            {
+                return Results.Ok(new { job.Id, job.Status, DuplicateRequest = true });
+            }
+
+            return Results.Ok(new { job.Id, job.Status, job.FailureCode });
         });
 
         agentApi.MapPost("/jobs/{jobId:guid}/output-unconfirmed", async (
@@ -209,14 +214,19 @@ public static partial class AgentEndpoints
             }
 
             var job = result.Job!;
-            return Results.Ok(new
+            if (result.DuplicateRequest)
             {
-                job.Id,
-                job.Status,
-                job.FailureCode,
-                job.OutputType,
-                DuplicateRequest = result.DuplicateRequest
-            });
+                return Results.Ok(new
+                {
+                    job.Id,
+                    job.Status,
+                    job.FailureCode,
+                    job.OutputType,
+                    DuplicateRequest = true
+                });
+            }
+
+            return Results.Ok(new { job.Id, job.Status, job.FailureCode });
         });
 
         agentApi.MapPost("/jobs/{jobId:guid}/spooler-status", async (
