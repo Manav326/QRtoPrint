@@ -1,5 +1,4 @@
 using System.Security.Cryptography;
-using System.Text;
 
 namespace SmartPrint.Agent.Tests;
 
@@ -87,6 +86,19 @@ public sealed class PdfExportPreviewRulesTests
             OutputFileSha256: hash,
             OutputFileSizeBytes: bytes.LongLength);
 
-    private static byte[] CreatePdf() =>
-        Encoding.ASCII.GetBytes("%PDF-1.7\n1 0 obj\n<< /Type /Catalog >>\nendobj\n%%EOF\n");
+    private static byte[] CreatePdf()
+    {
+        using var stream = new MemoryStream();
+        using (var document = SkiaSharp.SKDocument.CreatePdf(stream))
+        {
+            var canvas = document.BeginPage(595.276f, 841.89f);
+            using var typeface = SkiaSharp.SKTypeface.FromFamilyName("Arial", SkiaSharp.SKFontStyle.Normal);
+            using var font = new SkiaSharp.SKFont(typeface, 14);
+            using var paint = new SkiaSharp.SKPaint { Color = SkiaSharp.SKColors.Black, IsAntialias = true };
+            canvas.DrawText("Verified saved PDF preview fixture.", 48, 72, SkiaSharp.SKTextAlign.Left, font, paint);
+            document.EndPage();
+            document.Close();
+        }
+        return stream.ToArray();
+    }
 }
