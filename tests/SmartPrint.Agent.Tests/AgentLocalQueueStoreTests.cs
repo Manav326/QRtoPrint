@@ -153,6 +153,45 @@ public sealed class AgentLocalQueueStoreTests
     }
 
     [Fact]
+    public async Task ReassignedCloudJobRefreshesAnAcknowledgementPendingQueueTarget()
+    {
+        var root = CreateTemporaryDirectory();
+        try
+        {
+            var store = new AgentLocalQueueStore(root);
+            await store.InitializeAsync(CancellationToken.None);
+            var bytes = "Cloud-backed document awaiting queue acknowledgement"u8.ToArray();
+            var original = CreateJob(bytes) with { StorageMode = "CLOUD" };
+
+            await store.EnqueueAsync(original, bytes, CancellationToken.None);
+            Assert.Equal("ACK_PENDING", store.Find(original.Id)!.State);
+
+            var reassigned = original with
+            {
+                PrinterDeviceId = Guid.NewGuid(),
+                PrinterName = "Replacement printer",
+                QueueName = "Replacement queue",
+                Copies = 5,
+                Orientation = "LANDSCAPE",
+                LeaseExpiresUtc = DateTimeOffset.UtcNow.AddMinutes(3)
+            };
+            await store.UpdateFromClaimAsync(reassigned, CancellationToken.None);
+
+            var refreshed = store.Find(original.Id)!;
+            Assert.Equal("ACK_PENDING", refreshed.State);
+            Assert.Equal(reassigned.PrinterDeviceId, refreshed.PrinterDeviceId);
+            Assert.Equal("Replacement queue", refreshed.QueueName);
+            Assert.Equal(5, refreshed.Copies);
+            Assert.Equal("LANDSCAPE", refreshed.Orientation);
+            Assert.True(bytes.AsSpan().SequenceEqual(store.ReadDocument(original.Id)));
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
     public async Task LocalUploadCanMoveToAnotherQueueWhenTheServerAuthorisesTheSameComputer()
     {
         var root = CreateTemporaryDirectory();
