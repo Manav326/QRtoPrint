@@ -6277,7 +6277,7 @@ publicApi.MapPost("/sessions/current/local-upload-tickets", async (
                 // renewal with payment creation so a ticket cannot become active
                 // after the batch has entered checkout.
                 _ = await db.PrintJobs.FromSqlInterpolated(
-                    $"SELECT * FROM \\"PrintJobs\\" WHERE \\"TenantId\\" = {lockedTicket.TenantId} AND \\"CustomerSessionId\\" = {lockedTicket.CustomerSessionId} AND \\"BatchId\\" = {lockedTicket.BatchId} FOR UPDATE")
+                    $"SELECT * FROM \"PrintJobs\" WHERE \"TenantId\" = {lockedTicket.TenantId} AND \"CustomerSessionId\" = {lockedTicket.CustomerSessionId} AND \"BatchId\" = {lockedTicket.BatchId} FOR UPDATE")
                     .ToListAsync(ct);
             }
             if (lockedTicket is not null &&
