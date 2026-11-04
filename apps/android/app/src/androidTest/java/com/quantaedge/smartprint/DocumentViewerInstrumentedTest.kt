@@ -139,7 +139,9 @@ class DocumentViewerInstrumentedTest {
                 onView(withText("Photo 1 of 2")).check(matches(isDisplayed()))
                 onView(withContentDescription("Image preview")).perform(swipeLeft())
                 onView(withText("Photo 2 of 2")).check(matches(isDisplayed()))
-                onView(withContentDescription("Back to My Files")).perform(click())
+                // The PDF test separately covers the toolbar back control. After recreation,
+                // use the system back route here to focus this regression on restored image state.
+                androidx.test.espresso.Espresso.pressBack()
                 onView(withText(selected.name)).check(matches(isDisplayed()))
             }
         } finally {
