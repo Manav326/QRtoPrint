@@ -309,10 +309,10 @@ test("customer print options remain selectable when printer capability is unknow
     "The shared customer print flow must remain present.");
   const flow = app.slice(flowStart, flowEnd);
 
-  assert.match(flow, /const supportsColour=!hasAssignedPrinter\\|\\|printerCapabilities\\?\\.color!==false;/);
-  assert.match(flow, /const supportsDuplex=!hasAssignedPrinter\\|\\|printerCapabilities\\?\\.duplex!==false;/);
-  assert.match(app, /color:typeof value\\.color==="boolean"\\?value\\.color:undefined/);
-  assert.match(app, /duplex:typeof value\\.duplex==="boolean"\\?value\\.duplex:undefined/);
-  assert.match(flow, /colourMode:photoSettings\\?"Colour":settings\\.colourMode/);
-  assert.match(flow, /isDuplex:photoSettings\\?false:settings\\.isDuplex/);
+  assert.ok(flow.includes("const supportsColour=!hasAssignedPrinter||printerCapabilities?.color!==false;"));
+  assert.ok(flow.includes("const supportsDuplex=!hasAssignedPrinter||printerCapabilities?.duplex!==false;"));
+  assert.ok(app.includes('color:typeof value.color==="boolean"?value.color:undefined'));
+  assert.ok(app.includes('duplex:typeof value.duplex==="boolean"?value.duplex:undefined'));
+  assert.ok(flow.includes('colourMode:photoSettings?"Colour":settings.colourMode'));
+  assert.ok(flow.includes("isDuplex:photoSettings?false:settings.isDuplex"));
 });
