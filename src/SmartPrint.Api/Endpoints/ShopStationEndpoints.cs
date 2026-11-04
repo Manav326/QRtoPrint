@@ -8,6 +8,7 @@ using Microsoft.EntityFrameworkCore;
 using SmartPrint.Api.Contracts;
 using SmartPrint.Api.Data;
 using SmartPrint.Api.Domain;
+using SmartPrint.Api.Services;
 using static SmartPrint.Api.Security.EndpointIdentity;
 
 namespace SmartPrint.Api.Endpoints;
