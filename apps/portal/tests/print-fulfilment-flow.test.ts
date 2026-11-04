@@ -169,26 +169,32 @@ test("local Agent completion creates the job with the customer's ticket settings
 
 test("local upload ticket retries preserve batch identity and renew the same expired reservation", () => {
   const source = readApi("PublicUploadTicketEndpoints.cs");
+  const service = read("../../../src/SmartPrint.Api/Services/PublicLocalUploadTicketService.cs");
   const api = read("../src/api.ts");
   const app = read("../src/App.tsx");
   const entitlements = read("../../../src/SmartPrint.Api/Services/TenantEntitlementService.cs");
   const ticketStart = source.indexOf('publicApi.MapPost("/sessions/current/local-upload-tickets"');
   assert.ok(ticketStart >= 0);
   const ticketRoute = source.slice(ticketStart);
-  assert.match(ticketRoute, /request\.BatchId is Guid requestedBatchId && existing\.BatchId != requestedBatchId/);
-  assert.match(ticketRoute, /requestedBatchName is not null && existing\.BatchName != requestedBatchName/);
-  assert.match(ticketRoute, /request\.BatchId is null \|\| racedTicket\.BatchId == request\.BatchId\.Value/);
-  assert.match(ticketRoute, /requestedBatchName is null \|\| racedTicket\.BatchName == requestedBatchName/);
-  assert.match(ticketRoute, /LocalUploadRecoveryRules\.CanRenewExpiredTicket/);
-  assert.match(ticketRoute, /existing = lockedTicket/);
-  assert.match(ticketRoute, /lockedTicket\.GrantHash == originalTicket\.GrantHash/);
-  assert.match(ticketRoute, /lockedTicket\.BatchId == originalTicket\.BatchId/);
-  assert.match(ticketRoute, /lockedTicket\.BatchGroupName == originalTicket\.BatchGroupName/);
-  assert.match(ticketRoute, /FOR UPDATE/);
-  assert.match(ticketRoute, /lockedTicket\.ExpiresUtc = renewalNow\.AddMinutes\(15\)/);
-  assert.match(ticketRoute, /station\.PrinterDeviceId == lockedTicket\.PrinterDeviceId/);
-  assert.match(ticketRoute, /printer\.AgentDeviceId == lockedTicket\.AgentDeviceId/);
-  assert.match(ticketRoute, /agent\.LastSeenUtc >= renewalNow\.AddMinutes\(-2\)/);
+  assert.match(ticketRoute, /tickets\.CreateAsync/);
+  assert.match(ticketRoute, /RequireRateLimiting\("document-upload"\)/);
+  assert.match(service, /request\.BatchId is not Guid requestedBatchId \|\| existing\.BatchId == requestedBatchId/);
+  assert.match(service, /requestedBatchName is null \|\| existing\.BatchName == requestedBatchName/);
+  assert.match(service, /request\.BatchId is null \|\| racedTicket\.BatchId == request\.BatchId\.Value/);
+  assert.match(service, /requestedBatchName is null \|\| racedTicket\.BatchName == requestedBatchName/);
+  assert.match(service, /LocalUploadRecoveryRules\.CanRenewExpiredTicket/);
+  assert.match(service, /existing = lockedTicket/);
+  assert.match(service, /lockedTicket\.GrantHash == originalTicket\.GrantHash/);
+  assert.match(service, /lockedTicket\.BatchId == originalTicket\.BatchId/);
+  assert.match(service, /lockedTicket\.BatchGroupName == originalTicket\.BatchGroupName/);
+  assert.match(service, /FOR UPDATE/);
+  assert.match(service, /lockedTicket\.ExpiresUtc = renewalNow\.AddMinutes\(15\)/);
+  assert.match(service, /station\.PrinterDeviceId == lockedTicket\.PrinterDeviceId/);
+  assert.match(service, /printer\.AgentDeviceId == lockedTicket\.AgentDeviceId/);
+  assert.match(service, /agent\.LastSeenUtc >= renewalNow\.AddMinutes\(-2\)/);
+  assert.match(service, /item\.Status != "REJECTED"/);
+  assert.match(service, /BatchLocalUploadRules\.FindAgentConflict/);
+  assert.match(service, /PrintBatchCapacityRules\.CanAdd/);
 
   const expiredStart = api.indexOf("if (isUncompletedLocalUploadTicketExpired(ticket.completed, ticket.expiresUtc))");
   const expiredEnd = api.indexOf("if (ticket.completed)", expiredStart);
@@ -204,7 +210,6 @@ test("local upload ticket retries preserve batch identity and renew the same exp
   assert.match(app, /Checkout has already started for this batch/);
   assert.match(entitlements, /!db\.PrintBatchPayments\.Any\(payment =>[\s\S]*?payment\.Status != "REJECTED"/);
 });
-
 
 test("batch file review delegates to a service that keeps atomicity and payment/refund safeguards", () => {
   const endpoint = readApi("ShopPrintBatchReviewEndpoints.cs");
