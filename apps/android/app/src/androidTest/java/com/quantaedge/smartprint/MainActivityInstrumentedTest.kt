@@ -161,6 +161,9 @@ class MainActivityInstrumentedTest {
     @Test
     fun shopWifiVerificationUsesBrandedBottomSheet() {
         ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+            // ActivityScenario reaches RESUMED before Android necessarily grants its window focus.
+            // Let Espresso synchronize with the real activity window before opening the modal sheet.
+            onView(withId(android.R.id.content)).check(matches(isDisplayed()))
             scenario.onActivity { activity ->
                 MainActivity::class.java.getDeclaredMethod(
                     "showShopWifiVerificationResult", String::class.java, String::class.java, Boolean::class.javaPrimitiveType!!
