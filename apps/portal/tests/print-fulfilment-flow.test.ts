@@ -635,3 +635,23 @@ test("shop owner account and profile mutations remain tenant scoped thin adapter
   assert.match(service, /ShopProfileRules\.IsHexColor/);
   assert.match(service, /ShopOwnerAccountRules\.TryNormalizeEmail/);
 });
+
+
+test("shop and customer registration routes delegate bootstrap and identity creation to one service boundary", () => {
+  const endpoint = readApi("AccountRegistrationEndpoints.cs");
+  const service = read("../../../src/SmartPrint.Api/Services/AccountRegistrationService.cs");
+  const rules = read("../../../src/SmartPrint.Api/Domain/AccountRegistrationRules.cs");
+  assert.match(endpoint, /registration\.RegisterShopAsync/);
+  assert.match(endpoint, /registration\.RegisterCustomerAsync/);
+  assert.match(endpoint, /AllowAnonymous/);
+  assert.match(service, /TenantSlugPolicy\.Create/);
+  assert.match(service, /ShopPaymentProfiles\.Add/);
+  assert.match(service, /ShopPricingProfiles\.Add/);
+  assert.match(service, /TenantSubscriptions\.Add/);
+  assert.match(service, /BeginTransactionAsync/);
+  assert.match(service, /AddClaimAsync\(user, new Claim\("shop_role", "ShopOwner"\)\)/);
+  assert.match(service, /TenantId = null/);
+  assert.match(service, /AddClaimAsync\(user, new Claim\("customer_role", "Customer"\)\)/);
+  assert.match(service, /HashRefreshToken/);
+  assert.match(rules, /MailAddress\.TryCreate/);
+});
