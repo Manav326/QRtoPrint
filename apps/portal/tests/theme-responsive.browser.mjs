@@ -214,6 +214,9 @@ async function assertNoHorizontalOverflow(page, route, viewport) {
 
 
 async function assertRouteContrast(page, route) {
+  if (route.label === "customer-qr") {
+    await page.locator(".customer-print-flow").waitFor({ state: "visible", timeout: 15000 });
+  }
   const result = await page.evaluate(() => {
     const parse = value => {
       const normalized = value.trim();
