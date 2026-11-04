@@ -6768,9 +6768,7 @@ publicApi.MapPost("/sessions/current/local-upload-tickets/{ticketId:guid}/cloud-
                 title: "This shop's trial or subscription period is no longer active."));
         var recoveryAgentAvailable = await GetLocalAgentInfoAsync(
             db, ticket.TenantId, ticket.PrinterDeviceId, commitNow, ct) is not null;
-        var queueFallbackRequested = string.Equals(
-            context.Request.Headers["X-Print-Queue-Fallback"].FirstOrDefault(), "true", StringComparison.OrdinalIgnoreCase);
-        if (!subscription.CloudAssistedPrintingEnabled && recoveryAgentAvailable && !queueFallbackRequested)
+        if (!subscription.CloudAssistedPrintingEnabled && recoveryAgentAvailable)
             return await RejectAndCleanAsync(Results.Problem(statusCode: StatusCodes.Status403Forbidden,
                 title: "Secure HTTPS recovery is not available while the paired shop Agent is online on this plan."));
         if (!PlanEntitlementRules.AllowsDocument(subscription.MaxDocumentBytes, ticket.SizeBytes))
