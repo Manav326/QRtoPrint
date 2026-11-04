@@ -20,7 +20,7 @@ public enum ShopPrintDispatchFailure
 
 public sealed record PrintDispatchPrinterSnapshot(
     string DisplayName,
-    string QueueName,
+    string? QueueName,
     string OutputMode,
     Guid AgentId,
     string AgentName);
