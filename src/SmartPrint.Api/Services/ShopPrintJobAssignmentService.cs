@@ -15,15 +15,15 @@ public enum ShopPrintJobAssignmentFailure
 
 public sealed record ShopPrintJobAssignmentResult(
     ShopPrintJobAssignmentFailure Failure,
-    Guid? JobId = null,
+    Guid JobId = default,
     Guid? BatchId = null,
-    string? Status = null,
-    Guid? PrinterDeviceId = null,
-    string? PrinterName = null,
+    string Status = "",
+    Guid PrinterDeviceId = default,
+    string PrinterName = "",
     string? QueueName = null,
     Guid? AgentDeviceId = null,
     int AssignedJobCount = 0,
-    DateTimeOffset? UpdatedUtc = null,
+    DateTimeOffset UpdatedUtc = default,
     string? ConflictCode = null)
 {
     public bool Succeeded => Failure == ShopPrintJobAssignmentFailure.None;
