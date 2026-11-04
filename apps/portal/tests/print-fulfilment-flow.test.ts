@@ -615,3 +615,23 @@ test("Agent heartbeat and printer synchronization remain behind connectivity wor
   assert.match(rules, /ValidStatuses/);
   assert.match(rules, /GroupBy\(printer => printer\.QueueName\.Trim\(\), StringComparer\.OrdinalIgnoreCase\)/);
 });
+
+
+test("shop owner account and profile mutations remain tenant scoped thin adapters", () => {
+  const endpoint = readApi("ShopAccountEndpoints.cs");
+  const service = read("../../../src/SmartPrint.Api/Services/ShopAccountService.cs");
+  assert.match(endpoint, /accounts\.UpdateOwnerAccountAsync/);
+  assert.match(endpoint, /accounts\.UpdateProfileAsync/);
+  assert.match(endpoint, /IsShopOwner\(principal\)/);
+  assert.match(endpoint, /TryGetTenantId\(principal, out var tenantId\)/);
+  assert.match(endpoint, /RequireRateLimiting\("authentication"\)/);
+  assert.match(service, /user\.TenantId != tenantId/);
+  assert.match(service, /CheckPasswordSignInAsync/);
+  assert.match(service, /FindByEmailAsync/);
+  assert.match(service, /BeginTransactionAsync/);
+  assert.match(service, /UserManager<AppUser>/);
+  assert.match(service, /Uri\.UriSchemeHttps/);
+  assert.match(service, /plan\.WhiteLabelEnabled/);
+  assert.match(service, /ShopProfileRules\.IsHexColor/);
+  assert.match(service, /ShopOwnerAccountRules\.TryNormalizeEmail/);
+});
