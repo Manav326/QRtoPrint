@@ -61,7 +61,7 @@ internal static class PdfBrandingOverlay
                 {
                     // Rotated page coordinate systems are intentionally left alone.
                     // The original page remains present and is still rendered normally.
-                    if (fpdfview.FPDFPageGetRotation(page) != 0)
+                    if (fpdf_edit.FPDFPageGetRotation(page) != 0)
                         continue;
 
                     var pageWidth = fpdfview.FPDF_GetPageWidthF(page);
