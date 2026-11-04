@@ -417,6 +417,7 @@ export default function PhotoStudio({
             {pickingBackground&&<div className={styles.pickInstruction}>Click a flat background area in the photo to sample its colour.</div>}
             <div className={styles.sheetFrame} onContextMenu={event=>event.preventDefault()} onDragStart={event=>event.preventDefault()}>
               {image ? <canvas ref={canvasRef} width={420} height={594} onClick={handleBackgroundPick} style={{cursor:pickingBackground?"crosshair":"default"}} className={styles.previewCanvas} draggable={false} role="img" aria-label={"A4 photo sheet preview with " + Math.min(copies, previewCapacity) + " photos"}/> : <div className={styles.loadingState}>{imageError || "Preparing your photo…"}</div>}
+              <div className={styles.previewProtection} aria-hidden="true"/>
             </div>
           </div>
           <div className={styles.canvasFooter}>
