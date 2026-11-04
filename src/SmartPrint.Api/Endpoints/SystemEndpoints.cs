@@ -12,6 +12,8 @@ public static class SystemEndpoints
 {
     public static WebApplication MapSystemEndpoints(this WebApplication app)
     {
+        // Public downloads are proxied by the API and exposed only through the portal's
+        // same-origin /downloads routes. No upstream Location header reaches the browser.
         app.MapGet("/downloads/status", async (
             PublicDownloadService downloads,
             HttpContext context,
