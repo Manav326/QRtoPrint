@@ -17,7 +17,7 @@ Initial entries:
 - Epson Universal Print Driver 2.123.00 for the L3150 Series Windows 11 x64 support listing (87.53 MB; package extraction and license review pending).
 - Brother Universal Printer Driver 1.0.0.0 for the India DCP-J100 support page (20.37 MB; two-sided printing explicitly unsupported by this driver).
 - Pantum P2503 Windows Driver 1.0.5.
-- Pantum Universal Printing Driver 1.0.6.
+- Pantum Universal Printing Driver 1.0.6 (exact Windows OS target pending; not eligible for hosted installation yet).
 
 Official support pages are references, not permission to download or redistribute. No driver package is committed to this repository, cached in a public artifact, or published with SmartPrint releases.
 
@@ -59,7 +59,7 @@ The dedicated GitHub Actions workflow supports:
 - `manifest-only`: safe default; validates metadata without downloading any vendor package.
 - One explicitly selected driver ID: runs only after both approval gates have been completed in the manifest.
 
-The workflow runs on GitHub-hosted Windows VMs only. It does not use self-hosted runners or repository secrets.
+The workflow is pinned to GitHub-hosted `windows-2025` x64 (Windows Server 2025). The qualification script reads the actual OS caption and architecture and refuses to download a driver unless the exact runner target appears in that package's vendor-listed `windowsTargets`. A successful Server 2025 result is not evidence of Windows 11 x64 support. The standard hosted Windows 11 runner is ARM64, so Windows 11 x64-only packages remain unqualified on this runner until a suitable isolated test environment is available. The workflow does not use self-hosted runners or repository secrets.
 
 ## Evidence and status language
 
