@@ -3742,6 +3742,7 @@ agentApi.MapPost("/jobs/claim", async (
             job.ColourMode,
             job.PaperSize,
             job.IsDuplex,
+            job.Orientation,
             job.Currency,
             job.QuotedAmountMinor,
             job.PrinterDeviceId,
