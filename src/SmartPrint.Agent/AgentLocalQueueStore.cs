@@ -250,7 +250,8 @@ public sealed class AgentLocalQueueStore
             initialState,
             DateTimeOffset.UtcNow,
             job.LeaseExpiresUtc,
-            OutputMode: job.OutputMode);
+            OutputMode: job.OutputMode,
+            Orientation: job.Orientation);
 
         try
         {
@@ -424,6 +425,7 @@ public sealed class AgentLocalQueueStore
             ColourMode = job.ColourMode,
             PaperSize = job.PaperSize,
             IsDuplex = job.IsDuplex,
+            Orientation = job.Orientation,
             Currency = job.Currency,
             QuotedAmountMinor = job.QuotedAmountMinor,
             LeaseExpiresUtc = job.LeaseExpiresUtc,

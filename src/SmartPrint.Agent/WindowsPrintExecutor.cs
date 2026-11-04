@@ -107,7 +107,8 @@ public sealed class WindowsPrintExecutor
             if (!OpenPrinterW(entry.QueueName, out printer, IntPtr.Zero))
                 throw Blocked("PRINTER_OPEN_FAILED", "Windows could not open the assigned printer queue.");
 
-            devMode = CreateDevMode(printer, entry.QueueName, entry, raster.FirstPageLandscape);
+            devMode = CreateDevMode(printer, entry.QueueName, entry,
+                ResolveLandscape(entry.Orientation, raster.FirstPageLandscape));
             dc = CreateDCW("WINSPOOL", entry.QueueName, null, devMode);
             if (dc == IntPtr.Zero)
                 throw Blocked("PRINTER_CONTEXT_FAILED", "Windows could not create a print context for this printer.");
@@ -401,7 +402,8 @@ public sealed class WindowsPrintExecutor
                         using var image = SKImage.FromBitmap(bitmap)
                             ?? throw new PrintExecutionBlockedException("PDF_EXPORT_IMAGE_FAILED", "The rendered page could not be encoded.");
 
-                        var (paperWidth, paperHeight) = PdfPageSize(entry.PaperSize, page.Width > page.Height);
+                        var landscape = ResolveLandscape(entry.Orientation, page.Width > page.Height);
+                        var (paperWidth, paperHeight) = PdfPageSize(entry.PaperSize, landscape);
                         var canvas = pdf.BeginPage(paperWidth, paperHeight);
                         var scale = Math.Min(paperWidth / page.Width, paperHeight / page.Height);
                         var width = page.Width * scale;
@@ -482,6 +484,7 @@ public sealed class WindowsPrintExecutor
         var (width, height) = paperSize.Trim().ToUpperInvariant() switch
         {
             "A4" => (595.276f, 841.89f),
+            "A3" => (841.89f, 1190.55f),
             "A5" => (419.528f, 595.276f),
             "LETTER" => (612f, 792f),
             "LEGAL" => (612f, 1008f),
@@ -489,6 +492,14 @@ public sealed class WindowsPrintExecutor
         };
         return landscape ? (height, width) : (width, height);
     }
+
+    private static bool ResolveLandscape(string orientation, bool automaticLandscape) =>
+        orientation.Trim().ToUpperInvariant() switch
+        {
+            "LANDSCAPE" => true,
+            "PORTRAIT" => false,
+            _ => automaticLandscape
+        };
 
     private static string SafeFilePart(string value, int maximumLength)
     {
@@ -628,7 +639,7 @@ public sealed class WindowsPrintExecutor
 
     private static short PaperCode(string paper) => paper.Trim().ToUpperInvariant() switch
     {
-        "A4" => 9, "A5" => 11, "LETTER" => 1, "LEGAL" => 5,
+        "A4" => 9, "A3" => 8, "A5" => 11, "LETTER" => 1, "LEGAL" => 5,
         _ => throw new PrintExecutionBlockedException("PAPER_SIZE_UNSUPPORTED", $"Paper '{paper}' is not supported in this release.")
     };
 

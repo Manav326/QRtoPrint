@@ -619,7 +619,8 @@ public sealed class LocalAgentApiHostedService(
                             claim.SizeBytes,
                             claim.Sha256,
                             claim.ExpiresUtc,
-                            "LOCAL_AGENT");
+                            "LOCAL_AGENT",
+                            Orientation: claim.Orientation);
                         await localQueueStore.EnqueueLocalUploadAsync(stagedJob, bytes, ct);
                     }
 
@@ -716,6 +717,11 @@ public sealed class LocalAgentApiHostedService(
         string MediaType,
         long SizeBytes,
         string Sha256,
+        string ColourMode,
+        string PaperSize,
+        bool IsDuplex,
+        int Copies,
+        string Orientation,
         DateTimeOffset ExpiresUtc,
         LocalUploadedPrintResult? UploadResult);
 

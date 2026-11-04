@@ -20,7 +20,8 @@ public sealed record AgentClaimedJob(
     string Sha256,
     DateTimeOffset LeaseExpiresUtc,
     string StorageMode = "CLOUD",
-    string OutputMode = PrinterOutputModeRules.Physical);
+    string OutputMode = PrinterOutputModeRules.Physical,
+    string Orientation = "AUTO");
 
 public sealed record AgentJobClaimResponse(
     IReadOnlyList<AgentClaimedJob> Jobs,
@@ -68,7 +69,8 @@ public sealed record AgentLocalQueueEntry(
     string? OutputFileSha256 = null,
     long? OutputFileSizeBytes = null,
     IReadOnlyList<int>? RejectedPageNumbers = null,
-    DateTimeOffset? CompletedUtc = null);
+    DateTimeOffset? CompletedUtc = null,
+    string Orientation = "AUTO");
 
 public sealed record AgentLocalQueueProof(Guid JobId, string Sha256, long SizeBytes);
 public sealed record AgentPrintClaimRequest(IReadOnlyList<AgentLocalQueueProof> LocalJobs);

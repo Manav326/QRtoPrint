@@ -4119,6 +4119,11 @@ agentApi.MapPost("/local-uploads/{ticketId:guid}/claim", async (
         ticket.MediaType,
         ticket.SizeBytes,
         ticket.Sha256,
+        ticket.ColourMode,
+        ticket.PaperSize,
+        ticket.IsDuplex,
+        ticket.Copies,
+        ticket.Orientation,
         ticket.ExpiresUtc
     });
 });
