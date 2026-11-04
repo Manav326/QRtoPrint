@@ -1411,6 +1411,7 @@ export function calculateCustomerQuote(sessionToken: string, jobId: string, valu
   printKind?: "DOCUMENT" | "PHOTO";
   photoSizeCode?: string;
   photoCount?: number;
+  photosPerPage?: number;
 }) {
   return apiRequest<PrintQuoteResult>(`/api/v1/public/jobs/${jobId}/quote`, {
     method: "POST",
@@ -1700,7 +1701,8 @@ export async function replaceShopPhotoDocumentLocally(
   jobId: string,
   file: File,
   photoSizeCode: string,
-  photoCount: number
+  photoCount: number,
+  photosPerPage: number
 ) {
   const grant = await apiRequest<{
     grantToken: string;
@@ -1717,6 +1719,7 @@ export async function replaceShopPhotoDocumentLocally(
   form.append("file", file, file.name);
   form.append("photoSizeCode", photoSizeCode);
   form.append("photoCount", String(photoCount));
+  form.append("photosPerPage", String(photosPerPage));
 
   let lastError: Error | null = null;
   for (const value of grant.endpoints.slice(0, 8)) {
@@ -1746,6 +1749,7 @@ export async function replaceShopPhotoDocumentLocally(
         sha256: string;
         photoSizeCode: string;
         photoCount: number;
+        pageCount: number;
         photoUnitPriceMinor: number;
         quotedAmountMinor: number;
         pricingVersion: number;
@@ -1781,12 +1785,14 @@ export function replaceShopPhotoDocument(
   jobId: string,
   file: File,
   photoSizeCode: string,
-  photoCount: number
+  photoCount: number,
+  photosPerPage: number
 ) {
   const form = new FormData();
   form.append("file", file, file.name);
   form.append("photoSizeCode", photoSizeCode);
   form.append("photoCount", String(photoCount));
+  form.append("photosPerPage", String(photosPerPage));
   return apiRequest<{
     id: string;
     status: string;
