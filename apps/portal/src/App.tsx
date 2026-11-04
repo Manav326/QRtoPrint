@@ -3946,7 +3946,9 @@ function CustomerPrintFlow({publicCode,sessionToken,paymentOptions,localAgent,lo
       const confirmedPreTicketRejection=uploadMode==="LOCAL"&&exception instanceof LocalUploadPreflightError;
       const agentUnavailable=exception instanceof LocalUploadPreflightError&&
         ["local_print_agent_unavailable","local_print_printer_unavailable"].includes(exception.code??"");
-      const canFallbackToCloud=canFallbackToCloudFromLocalFailure(
+      const batchCheckoutLocked=exception instanceof LocalUploadPreflightError&&
+        exception.code==="batch_upload_locked_after_payment_start";
+      const canFallbackToCloud=!batchCheckoutLocked&&canFallbackToCloudFromLocalFailure(
         confirmedPreTicketRejection,
         cloudAssistedPrintingEnabled||agentUnavailable
       );
@@ -3961,7 +3963,9 @@ function CustomerPrintFlow({publicCode,sessionToken,paymentOptions,localAgent,lo
         ? cloudAssistedPrintingEnabled
           ? "Shop Wi-Fi was interrupted. Cloud-assisted upload is now selected for secure HTTPS continuation. SmartPrint has kept this file attached to its original job; tap Retry to resume that same upload without creating another print job."
           : "Shop Wi-Fi was interrupted. SmartPrint has kept this file attached to its original job. Reconnect to the shop computer and tap Retry; the same upload will resume without creating a second print job."
-        : confirmedPreTicketRejection
+        : batchCheckoutLocked
+          ? "Checkout has already started for this batch, so this unfinished file was not included. Start a new batch for this file."
+          : confirmedPreTicketRejection
           ? exception instanceof LocalUploadPreflightError && exception.code==="local_upload_ticket_expired"
             ? canFallbackToCloud
               ? "The earlier shop Wi-Fi attempt expired before a job was created. Cloud-assisted HTTPS is now selected; tap Retry to start a fresh transfer."
