@@ -225,6 +225,20 @@ async function assertNoHorizontalOverflow(page, route, viewport) {
         if (style.display === "none" || style.visibility === "hidden" || rect.width <= 0 || rect.height <= 0) return false;
         const closedDrawerItem = element.closest(".sidebar") && !element.closest(".sidebar")?.classList.contains("sidebar-open");
         if (closedDrawerItem) return false;
+        // Dense shop tables intentionally scroll horizontally inside the visible table
+        // viewport. Their off-screen cells remain reachable through that scroller;
+        // they are not clipped by the page itself.
+        let parent = element.parentElement;
+        while (parent && parent !== document.body) {
+          const parentStyle = getComputedStyle(parent);
+          const parentRect = parent.getBoundingClientRect();
+          if ((parentStyle.overflowX === "auto" || parentStyle.overflowX === "scroll") &&
+              parent.scrollWidth > parent.clientWidth + 1 &&
+              parentRect.left >= -1 && parentRect.right <= width + 1) {
+            return false;
+          }
+          parent = parent.parentElement;
+        }
         return rect.left < -1 || rect.right > width + 1;
       })
       .slice(0, 8)
