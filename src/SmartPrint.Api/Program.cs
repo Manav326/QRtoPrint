@@ -1,4 +1,5 @@
 using System.Text;
+using SmartPrint.Api;
 using Microsoft.EntityFrameworkCore;
 using SmartPrint.Api.Data;
 using SmartPrint.Api.Endpoints;
@@ -28,7 +29,7 @@ if (Encoding.UTF8.GetByteCount(signingKeyText) < 32)
 var issuer = builder.Configuration["Authentication:Issuer"] ?? "QRtoPrint";
 var audience = builder.Configuration["Authentication:Audience"] ?? "QRtoPrint.Clients";
 
-builder.Services.AddApiServices(connectionString, signingKeyText, issuer, audience, corsOrigins);
+var corsOrigins = builder.Services.AddApiServices(builder.Configuration, connectionString, signingKeyText, issuer, audience);
 
 var app = builder.Build();
 

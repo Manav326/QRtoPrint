@@ -6,6 +6,7 @@ using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Migrations;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.IdentityModel.Tokens;
 using SmartPrint.Api.Data;
@@ -18,13 +19,13 @@ namespace SmartPrint.Api;
 
 public static class ApiServiceRegistration
 {
-    public static IServiceCollection AddApiServices(
+    public static string[] AddApiServices(
         this IServiceCollection services,
+        IConfiguration configuration,
         string connectionString,
         string signingKeyText,
         string issuer,
-        string audience,
-        string[] corsOrigins)
+        string audience)
     {
         services.AddProblemDetails();
         services.AddMemoryCache();
@@ -100,7 +101,7 @@ public static class ApiServiceRegistration
                 RateLimitPartition.GetFixedWindowLimiter(RateLimitPartitionKeys.GetSessionRateLimitPartitionKey(context),
                     _ => new FixedWindowRateLimiterOptions { PermitLimit = 30, Window = TimeSpan.FromMinutes(1), QueueLimit = 0 }));
         });
-        var configuredCorsOrigins = builder.Configuration.GetSection("Cors:AllowedOrigins")
+        var configuredCorsOrigins = configuration.GetSection("Cors:AllowedOrigins")
             .Get<string[]>()?
             .Where(origin => !string.IsNullOrWhiteSpace(origin))
             .Distinct(StringComparer.OrdinalIgnoreCase)
@@ -120,6 +121,6 @@ public static class ApiServiceRegistration
             .AllowAnyHeader()
             .AllowAnyMethod()));
 
-        return services;
+        return corsOrigins;
     }
 }
