@@ -526,6 +526,6 @@ test("cloud upload keeps encrypted storage when the transaction commit outcome c
   assert.match(service, /ReconcileStoredDocumentAfterUnknownCommitAsync/);
   assert.match(service, /item\.StorageKey == storageKey/);
   assert.match(service, /if \(committed\)\s*return/);
-  assert.match(service, /Keep the encrypted object when the DB outcome cannot be checked/);
+  assert.match(service, /Retain the encrypted object when the DB outcome cannot be checked/);
   assert.match(service, /logger\.LogError/);
 });
