@@ -6271,8 +6271,28 @@ publicApi.MapPost("/sessions/current/local-upload-tickets", async (
                 $"SELECT * FROM \"LocalPrintUploadTickets\" WHERE \"Id\" = {existing.Id} AND \"TenantId\" = {session.TenantId} AND \"CustomerSessionId\" = {session.Id} FOR UPDATE")
                 .ToListAsync(ct);
             var lockedTicket = lockedTickets.SingleOrDefault();
+            if (lockedTicket is not null)
+            {
+                // Checkout takes the same batch-job row locks. Serialise lease
+                // renewal with payment creation so a ticket cannot become active
+                // after the batch has entered checkout.
+                _ = await db.PrintJobs.FromSqlInterpolated(
+                    $"SELECT * FROM \\"PrintJobs\\" WHERE \\"TenantId\\" = {lockedTicket.TenantId} AND \\"CustomerSessionId\\" = {lockedTicket.CustomerSessionId} AND \\"BatchId\\" = {lockedTicket.BatchId} FOR UPDATE")
+                    .ToListAsync(ct);
+            }
             if (lockedTicket is not null &&
                 lockedTicket.IdempotencyKey == idempotencyKey &&
+                lockedTicket.GrantHash == existing.GrantHash &&
+                lockedTicket.SizeBytes == request.SizeBytes &&
+                string.Equals(lockedTicket.Sha256, sha, StringComparison.OrdinalIgnoreCase) &&
+                lockedTicket.OriginalFileName == originalName &&
+                lockedTicket.BatchGroupName == existing.BatchGroupName &&
+                lockedTicket.BatchName == existing.BatchName &&
+                lockedTicket.ColourMode == request.ColourMode &&
+                lockedTicket.PaperSize == request.PaperSize &&
+                lockedTicket.IsDuplex == request.IsDuplex &&
+                lockedTicket.Copies == request.Copies &&
+                lockedTicket.Orientation == request.Orientation &&
                 lockedTicket.CompletedUtc is null &&
                 LocalUploadRecoveryRules.CanRenewExpiredTicket(
                     lockedTicket.CreatedUtc, lockedTicket.ExpiresUtc, lockedTicket.ClaimLeaseExpiresUtc,
