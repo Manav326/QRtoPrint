@@ -20,7 +20,7 @@ public enum AccountRegistrationFailure
 public sealed record ShopRegistrationResult(
     AccountRegistrationFailure Failure,
     RegisterShopResponse? Response = null,
-    IReadOnlyDictionary<string, string[]>? Errors = null)
+    Dictionary<string, string[]>? Errors = null)
 {
     public bool Succeeded => Failure == AccountRegistrationFailure.None;
 }
@@ -194,7 +194,7 @@ public sealed class AccountRegistrationService(
             new TokenResponse("Bearer", tokens.AccessToken, tokens.RefreshToken, tokens.AccessTokenExpiresUtc));
     }
 
-    private static IReadOnlyDictionary<string, string[]> ToErrors(IEnumerable<IdentityError> errors) =>
+    private static Dictionary<string, string[]> ToErrors(IEnumerable<IdentityError> errors) =>
         errors.GroupBy(error => error.Code)
             .ToDictionary(
                 group => group.Key,
