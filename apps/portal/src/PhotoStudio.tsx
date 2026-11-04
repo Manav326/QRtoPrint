@@ -331,7 +331,7 @@ export default function PhotoStudio({
       {name:photoName,dob:dateOfBirth,fontSizePt:captionFontSizePt,color:captionColor},
       {sourceColor:sourceBackgroundColor,targetColor:targetBackgroundColor,tolerance:backgroundTolerance},captionHeightMm
     );
-  },[image,size,copies,previewPageIndex,zoom,focusX,focusY,adjustments,photoName,dateOfBirth,captionFontSizePt,captionColor,sourceBackgroundColor,targetBackgroundColor,backgroundTolerance,captionHeightMm]);
+  },[image,size,copies,photosPerPage,previewPageIndex,zoom,focusX,focusY,adjustments,photoName,dateOfBirth,captionFontSizePt,captionColor,sourceBackgroundColor,targetBackgroundColor,backgroundTolerance,captionHeightMm]);
 
   function handleBackgroundPick(event:MouseEvent<HTMLCanvasElement>){
     if(!pickingBackground||!image)return;
