@@ -124,7 +124,7 @@ test("short portrait phones keep Photo Studio preview, controls and save actions
 test("Android image providers with blank MIME types still expose Photo Studio by supported filename",()=>{
  const app=readFileSync(new URL("../src/App.tsx",import.meta.url),"utf8");
  assert.match(app,/function isCustomerImage\(file:File\):boolean/);
- assert.ok(app.includes('|| /\.(jpe?g|png)$/i.test(file.name);'));
+ assert.ok(app.includes(String.raw`|| /\\.(jpe?g|png)$/i.test(file.name);`));
  assert.match(app,/isCustomerImage\(file\)&&photoRatesAvailable/);
 });
 
