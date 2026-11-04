@@ -4081,21 +4081,15 @@ agentApi.MapPost("/local-uploads/{ticketId:guid}/claim", async (
     var stationPrinter = await db.PrinterDevices.AsNoTracking()
         .Where(item => item.Id == ticket.PrinterDeviceId &&
                        item.TenantId == device.TenantId &&
-                       item.AgentDeviceId == device.Id &&
-                       item.IsActive &&
-                       !string.IsNullOrWhiteSpace(item.QueueName))
-        .Select(item => new { item.Id, item.DisplayName, item.QueueName, item.Status, item.LastSeenUtc, item.OutputMode })
+                       item.AgentDeviceId == device.Id)
+        .Select(item => new { item.Id, item.DisplayName, QueueName = item.QueueName ?? string.Empty, item.OutputMode })
         .SingleOrDefaultAsync(ct);
-    if (stationPrinter is null ||
-        (stationPrinter.OutputMode != "PDF_EXPORT" &&
-         (stationPrinter.LastSeenUtc is null ||
-          stationPrinter.LastSeenUtc < now.AddMinutes(-2) ||
-          (stationPrinter.Status != "Ready" && stationPrinter.Status != "Busy"))))
+    if (stationPrinter is null)
     {
         return Results.Conflict(new
         {
-            code = "local_upload_printer_unavailable",
-            message = "The QR station's assigned printer is no longer ready. Choose Cloud-assisted upload and ask the shop to assign one available printer to the whole batch."
+            code = "local_upload_printer_assignment_missing",
+            message = "The original printer assignment changed. SmartPrint will keep this request in the secure queue for the shop owner to reassign."
         });
     }
 
