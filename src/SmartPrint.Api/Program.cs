@@ -3003,7 +3003,7 @@ shop.MapPost("/print-batches/{batchId:guid}/review", async (
 
     var accepted = acceptedIds.ToHashSet();
     var now = DateTimeOffset.UtcNow;
-    foreach (var job in allBatchJobs)
+    foreach (var job in lockedJobs)
     {
         if (job.PdfBrandingEnabled == request.PdfBrandingEnabled)
             continue;
