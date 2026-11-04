@@ -4708,7 +4708,6 @@ agentApi.MapPost("/jobs/{jobId:guid}/print-blocked", async (Guid jobId, AgentPri
     job.PrinterQueueNameSnapshot = null;
     job.PrinterAgentNameSnapshot = null;
     job.PrinterSnapshotUtc = null;
-    job.OutputType = null;
     job.FailureCode = reason;
     job.SpoolerStatus = "BLOCKED_BEFORE_SUBMISSION";
     job.UpdatedUtc = DateTimeOffset.UtcNow;
