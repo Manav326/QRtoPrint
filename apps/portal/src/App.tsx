@@ -3721,7 +3721,7 @@ function CustomerPrintFlow({publicCode,sessionToken,paymentOptions,localAgent,lo
 
   useEffect(()=>{
     if(!nativeAppMode)return;
-    return ()=>{postSmartPrintNativeMessage("retainCustomerPdfPreviews|");};
+    return ()=>{postSmartPrintNativeMessage("retainCustomerPdfPreviews|none");};
   },[nativeAppMode]);
 
   useEffect(()=>{
