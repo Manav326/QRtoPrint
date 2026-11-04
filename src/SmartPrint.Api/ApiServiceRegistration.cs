@@ -92,6 +92,7 @@ public static class ApiServiceRegistration
         services.AddScoped<PublicPaymentReportService>();
         services.AddScoped<PublicCloudRecoveryService>();
         services.AddScoped<ShopPrintRefundService>();
+        services.AddScoped<ShopPrintJobDispatchService>();
         services.AddSingleton<DocumentStorage>();
         services.AddHostedService<DocumentRetentionWorker>();
         services.AddRateLimiter(options =>
