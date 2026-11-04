@@ -89,6 +89,7 @@ public static class ApiServiceRegistration
         services.AddScoped<ShopPrintJobSettingsService>();
         services.AddScoped<ShopPaymentReviewService>();
         services.AddScoped<PublicPaymentInitiationService>();
+        services.AddScoped<PublicPaymentReportService>();
         services.AddScoped<ShopPrintRefundService>();
         services.AddSingleton<DocumentStorage>();
         services.AddHostedService<DocumentRetentionWorker>();
