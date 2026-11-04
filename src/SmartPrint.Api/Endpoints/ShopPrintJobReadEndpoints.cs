@@ -105,36 +105,78 @@ public static class ShopPrintJobReadEndpoints
             HttpContext context,
             CancellationToken ct) =>
         {
-            // The short-lived Agent preview grant is a bearer credential. Never allow
-            // browsers or intermediate proxies to cache this response.
+            // Preview grants are bearer credentials; never let browsers or proxies cache them.
             context.Response.Headers.CacheControl = "private, no-store";
             context.Response.Headers.Pragma = "no-cache";
-        
+
             if (!TryGetTenantId(principal, out var tenantId))
-            {
                 return Results.Forbid();
-            }
-        
-            var document = await db.PrintDocuments.AsNoTracking()
-                .Where(item => item.TenantId == tenantId && item.PrintJobId == jobId)
-                .Select(item => new { item.StorageMode, item.AgentDeviceId })
-                .SingleOrDefaultAsync(ct);
-            if (document is null) return Results.NotFound();
-        
-            if (!string.Equals(document.StorageMode, "LOCAL_AGENT", StringComparison.Ordinal))
+
+            var variant = context.Request.Query["variant"].FirstOrDefault();
+            var outputPreview = string.Equals(variant, "output", StringComparison.OrdinalIgnoreCase);
+            if (!string.IsNullOrWhiteSpace(variant) && !outputPreview &&
+                !string.Equals(variant, "original", StringComparison.OrdinalIgnoreCase))
+                return Results.BadRequest(new { code = "local_preview_variant_invalid" });
+
+            Guid agentId;
+            if (outputPreview)
             {
-                return Results.Ok(new { Mode = "CLOUD" });
-            }
-        
-            if (document.AgentDeviceId is not Guid agentId)
-            {
-                return Results.Conflict(new
+                var output = await db.PrintJobs.AsNoTracking()
+                    .Where(job => job.Id == jobId && job.TenantId == tenantId)
+                    .Select(job => new
+                    {
+                        job.Status,
+                        job.OutputType,
+                        job.OutputFileName,
+                        job.OutputSha256,
+                        job.OutputSizeBytes,
+                        job.OutputCompletedUtc,
+                        job.ClaimedByAgentDeviceId
+                    })
+                    .SingleOrDefaultAsync(ct);
+
+                if (output is null)
+                    return Results.NotFound();
+                if (output.Status != "COMPLETED" || output.OutputType != "PDF_EXPORT" ||
+                    output.OutputCompletedUtc is null ||
+                    string.IsNullOrWhiteSpace(output.OutputFileName) ||
+                    output.OutputFileName.Length > 255 ||
+                    output.OutputFileName.Contains('/') || output.OutputFileName.Contains('\\') ||
+                    !string.Equals(Path.GetExtension(output.OutputFileName), ".pdf", StringComparison.OrdinalIgnoreCase) ||
+                    output.OutputSizeBytes is not long outputSize || outputSize <= 0 || outputSize > 100L * 1024 * 1024 ||
+                    output.OutputSha256 is not { Length: 64 } || !output.OutputSha256.All(Uri.IsHexDigit) ||
+                    output.ClaimedByAgentDeviceId is not Guid outputAgentId)
                 {
-                    code = "local_preview_agent_missing",
-                    message = "This local-only document is not associated with a paired print computer."
-                });
+                    return Results.Conflict(new
+                    {
+                        code = "pdf_export_preview_unavailable",
+                        message = "A verified, completed PDF export is not available for this job yet."
+                    });
+                }
+
+                agentId = outputAgentId;
             }
-        
+            else
+            {
+                var document = await db.PrintDocuments.AsNoTracking()
+                    .Where(item => item.TenantId == tenantId && item.PrintJobId == jobId)
+                    .Select(item => new { item.StorageMode, item.AgentDeviceId })
+                    .SingleOrDefaultAsync(ct);
+                if (document is null)
+                    return Results.NotFound();
+                if (!string.Equals(document.StorageMode, "LOCAL_AGENT", StringComparison.Ordinal))
+                    return Results.Ok(new { Mode = "CLOUD" });
+                if (document.AgentDeviceId is not Guid documentAgentId)
+                {
+                    return Results.Conflict(new
+                    {
+                        code = "local_preview_agent_missing",
+                        message = "This local-only document is not associated with a paired print computer."
+                    });
+                }
+                agentId = documentAgentId;
+            }
+
             var now = DateTimeOffset.UtcNow;
             var agent = await db.AgentDevices.AsNoTracking()
                 .Where(item => item.Id == agentId && item.TenantId == tenantId &&
@@ -150,7 +192,7 @@ public static class ShopPrintJobReadEndpoints
                     message = "The paired Windows Print Agent is offline. Reconnect it before previewing this shop-local document."
                 });
             }
-        
+
             var endpoints = AgentLocalEndpointRules.ReadJson(agent.LocalEndpointsJson);
             if (endpoints.Length == 0)
             {
@@ -160,7 +202,7 @@ public static class ShopPrintJobReadEndpoints
                     message = "The paired computer has not published a reachable local preview endpoint."
                 });
             }
-        
+
             var expiresUtc = now.AddMinutes(2);
             var grantToken = LocalDocumentPreviewGrant.Issue(
                 signingKeyText, issuer, audience, tenantId, jobId, agent.Id, now, expiresUtc);
