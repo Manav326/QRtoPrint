@@ -5,6 +5,7 @@ import android.graphics.Bitmap
 import android.graphics.Color
 import android.graphics.Paint
 import android.graphics.pdf.PdfDocument
+import android.net.Uri
 import androidx.test.core.app.ActivityScenario
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.espresso.Espresso.onView
@@ -18,8 +19,10 @@ import androidx.test.espresso.matcher.ViewMatchers.withContentDescription
 import androidx.test.espresso.matcher.ViewMatchers.withId
 import androidx.test.espresso.matcher.ViewMatchers.withText
 import androidx.test.ext.junit.runners.AndroidJUnit4
-import org.junit.Assert.assertTrue
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
 import java.io.File
@@ -69,15 +72,24 @@ class DocumentViewerInstrumentedTest {
         try {
             ActivityScenario.launch(MainActivity::class.java).use { scenario ->
                 scenario.onActivity { activity ->
+                    val previewToken = MainActivity::class.java.getDeclaredMethod(
+                        "createCustomerUploadPdfPreview",
+                        Uri::class.java
+                    ).apply { isAccessible = true }
+                        .invoke(activity, Uri.fromFile(source)) as String
+                    assertNotNull("The Android document provider PDF is copied for preview", previewToken)
                     @Suppress("UNCHECKED_CAST")
                     val previews = MainActivity::class.java.getDeclaredField("customerUploadPdfPreviews")
                         .apply { isAccessible = true }
                         .get(activity) as MutableMap<String, File>
-                    previews[token] = source
+                    val cachedPdf = previews[previewToken]
+                    assertNotNull("The preview token resolves to a cached PDF", cachedPdf)
+                    assertTrue("The preview uses a separate bounded cache copy", cachedPdf!!.canonicalPath != source.canonicalPath)
+                    assertEquals(source.length(), cachedPdf.length())
                     MainActivity::class.java.getDeclaredMethod(
                         "showCustomerUploadPdfPreview",
                         String::class.java
-                    ).apply { isAccessible = true }.invoke(activity, token)
+                    ).apply { isAccessible = true }.invoke(activity, previewToken)
                 }
 
                 waitForView(withText("Page 1 of 2"))
