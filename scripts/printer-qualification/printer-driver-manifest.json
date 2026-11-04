@@ -177,9 +177,7 @@
         "BM5300ADN",
         "BM5300ADW"
       ],
-      "windowsTargets": [
-        "Windows x64; verify the exact selected OS in the package release"
-      ],
+      "windowsTargets": [],
       "officialSupportUrl": "https://global.pantum.com/p/en-us/driver",
       "packageFileName": null,
       "packageUrl": null,
@@ -193,7 +191,7 @@
       ],
       "licenseReview": "pending",
       "ciApproval": "pending_package_pin_and_license_review",
-      "notes": "Pantum global support lists Universal Printing Driver v1.0.6 for BP5100/BM5100/BP5200/BM5200/BM5300 families. Confirm the package's OS support, INF payload and terms before CI use."
+      "notes": "Pantum global support lists Universal Printing Driver v1.0.6 for BP5100/BM5100/BP5200/BM5200/BM5300 families. Confirm the package's OS support, INF payload and terms before CI use. The exact Windows release target must be confirmed before this driver can be approved for CI."
     }
   ]
 }
