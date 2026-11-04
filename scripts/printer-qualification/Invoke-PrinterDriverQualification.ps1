@@ -294,6 +294,8 @@ try {
         "SMARTPRINT_DRIVER_QUALIFICATION_QUEUE=$queueName"
         "SMARTPRINT_DRIVER_QUALIFICATION_PORT=$portName"
         "SMARTPRINT_DRIVER_QUALIFICATION_DRIVER=$($driver.driverName)"
+        "SMARTPRINT_DRIVER_QUALIFICATION_VERSION=$($installed.DriverVersion)"
+        "SMARTPRINT_DRIVER_QUALIFICATION_MANUFACTURER=$($installed.Manufacturer)"
         "SMARTPRINT_DRIVER_QUALIFICATION_ID=$($driver.id)"
         "SMARTPRINT_DRIVER_QUALIFICATION_OUTPUT=$portName"
         "SMARTPRINT_DRIVER_QUALIFICATION_REPORT=$(Join-Path $ReportDirectory 'driver-rendering.json')"
