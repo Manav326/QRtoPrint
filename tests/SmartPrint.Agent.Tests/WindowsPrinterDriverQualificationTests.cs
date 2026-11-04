@@ -23,12 +23,16 @@ public sealed class WindowsPrinterDriverQualificationTests
         var reportPath = Environment.GetEnvironmentVariable("SMARTPRINT_DRIVER_QUALIFICATION_REPORT");
         var driverId = Environment.GetEnvironmentVariable("SMARTPRINT_DRIVER_QUALIFICATION_ID");
         var driverName = Environment.GetEnvironmentVariable("SMARTPRINT_DRIVER_QUALIFICATION_DRIVER");
+        var driverVersion = Environment.GetEnvironmentVariable("SMARTPRINT_DRIVER_QUALIFICATION_VERSION");
+        var driverManufacturer = Environment.GetEnvironmentVariable("SMARTPRINT_DRIVER_QUALIFICATION_MANUFACTURER");
 
         Assert.False(string.IsNullOrWhiteSpace(queueName), "Qualification queue was not prepared.");
         Assert.False(string.IsNullOrWhiteSpace(outputPath), "Qualification file port was not prepared.");
         Assert.False(string.IsNullOrWhiteSpace(reportPath), "Qualification report path was not prepared.");
         Assert.False(string.IsNullOrWhiteSpace(driverId), "Approved driver ID was not supplied.");
         Assert.False(string.IsNullOrWhiteSpace(driverName), "Approved driver name was not supplied.");
+        Assert.False(string.IsNullOrWhiteSpace(driverVersion), "Installed driver version was not supplied.");
+        Assert.False(string.IsNullOrWhiteSpace(driverManufacturer), "Installed driver manufacturer was not supplied.");
         Assert.False(File.Exists(outputPath), "The isolated output path must not exist before printing.");
 
         using var bitmap = new SKBitmap(180, 240);
@@ -112,6 +116,8 @@ public sealed class WindowsPrinterDriverQualificationTests
                 status = "DRIVER_RENDERED",
                 driverId,
                 driverName,
+                driverVersion,
+                driverManufacturer,
                 queueName,
                 spoolerJobId = receipt.JobId,
                 outputFileName = Path.GetFileName(outputPath!),
