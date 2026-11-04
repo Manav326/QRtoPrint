@@ -34,6 +34,77 @@ public sealed class PrintJobQuoteRulesTests
         Assert.False(PrintJobQuoteRules.CanCreateQuote(null));
     }
 
+    [Fact]
+    public void AcceptanceIsIdempotentAfterShopApprovalHasStarted()
+    {
+        var now = new DateTimeOffset(2026, 11, 4, 10, 0, 0, TimeSpan.Zero);
+
+        var outcome = PrintJobQuoteRules.EvaluateAcceptance(
+            "AWAITING_SHOP_APPROVAL",
+            now.AddMinutes(-10),
+            now);
+
+        Assert.Equal(PrintJobQuoteAcceptanceOutcome.AlreadyAccepted, outcome);
+    }
+
+    [Theory]
+    [InlineData("AWAITING_CONFIGURATION")]
+    [InlineData("AWAITING_PAYMENT")]
+    [InlineData("PAID_AUTHORISED")]
+    [InlineData("CANCELLED")]
+    public void AcceptanceRejectsJobsOutsideCustomerApproval(string status)
+    {
+        var now = new DateTimeOffset(2026, 11, 4, 10, 0, 0, TimeSpan.Zero);
+
+        var outcome = PrintJobQuoteRules.EvaluateAcceptance(
+            status,
+            now.AddMinutes(10),
+            now);
+
+        Assert.Equal(PrintJobQuoteAcceptanceOutcome.NotAwaitingAcceptance, outcome);
+    }
+
+    [Fact]
+    public void AcceptanceTreatsMissingExpiryAsExpired()
+    {
+        var now = new DateTimeOffset(2026, 11, 4, 10, 0, 0, TimeSpan.Zero);
+
+        var outcome = PrintJobQuoteRules.EvaluateAcceptance(
+            "AWAITING_CUSTOMER_APPROVAL",
+            null,
+            now);
+
+        Assert.Equal(PrintJobQuoteAcceptanceOutcome.Expired, outcome);
+    }
+
+    [Theory]
+    [InlineData(-1)]
+    [InlineData(0)]
+    public void AcceptanceTreatsPastAndExactExpiryAsExpired(int secondsFromNow)
+    {
+        var now = new DateTimeOffset(2026, 11, 4, 10, 0, 0, TimeSpan.Zero);
+
+        var outcome = PrintJobQuoteRules.EvaluateAcceptance(
+            "AWAITING_CUSTOMER_APPROVAL",
+            now.AddSeconds(secondsFromNow),
+            now);
+
+        Assert.Equal(PrintJobQuoteAcceptanceOutcome.Expired, outcome);
+    }
+
+    [Fact]
+    public void AcceptanceAllowsOnlyAnUnexpiredCustomerQuote()
+    {
+        var now = new DateTimeOffset(2026, 11, 4, 10, 0, 0, TimeSpan.Zero);
+
+        var outcome = PrintJobQuoteRules.EvaluateAcceptance(
+            "AWAITING_CUSTOMER_APPROVAL",
+            now.AddTicks(1),
+            now);
+
+        Assert.Equal(PrintJobQuoteAcceptanceOutcome.Accepted, outcome);
+    }
+
     [Theory]
     [InlineData(1, "DOCUMENT", "Mono", "A4", false, 1, "AUTO", null, null, true)]
     [InlineData(500, "DOCUMENT", "Colour", "LEGAL", true, 100, "LANDSCAPE", null, null, true)]
