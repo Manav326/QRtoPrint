@@ -7,5 +7,11 @@
   </PropertyGroup>
   <ItemGroup>
     <PackageReference Include="PdfPig" Version="0.1.16" />
+    <PackageReference Include="PDFsharp" Version="6.2.4" />
+  </ItemGroup>
+  <ItemGroup>
+    <EmbeddedResource Include="Branding/quantaedge-mark.png" />
+    <EmbeddedResource Include="Branding/smartprint-wordmark-colour.png" />
+    <EmbeddedResource Include="Branding/smartprint-wordmark-mono.png" />
   </ItemGroup>
 </Project>
