@@ -60,3 +60,14 @@ test("plan-limited HTTPS fallback is only offered when the Agent is unavailable"
   assert.match(publicUpload, /!subscription\.CloudAssistedPrintingEnabled && localAgentAvailable/);
   assert.doesNotMatch(publicUpload, /queueFallbackRequested/);
 });
+
+test("pre-submission printer capability blocks are explained in the shop queue", () => {
+  const app = read("../src/App.tsx");
+  assert.match(app, /function printBlockMessage\(code:string\):string/);
+  assert.match(app, /case "PAPER_SIZE_UNSUPPORTED"/);
+  assert.match(app, /case "COLOUR_UNSUPPORTED"/);
+  assert.match(app, /case "DUPLEX_UNSUPPORTED"/);
+  assert.match(app, /job\.status==="LOCAL_QUEUE_READY"&&job\.failureCode/);
+  assert.match(app, /Reassign this batch to a compatible printer/);
+  assert.match(app, /explicitly approved before output/);
+});
