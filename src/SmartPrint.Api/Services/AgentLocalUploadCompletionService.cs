@@ -2,12 +2,21 @@ using Microsoft.EntityFrameworkCore;
 using SmartPrint.Api.Contracts;
 using SmartPrint.Api.Data;
 using SmartPrint.Api.Domain;
+using SmartPrint.Api.Security;
 
 namespace SmartPrint.Api.Services;
 
 public enum AgentLocalUploadCompletionFailure
 {
     None,
+    NotFound,
+    InvalidGrant,
+    CompletedArtifactsMissing,
+    ValidationMismatch,
+    PageAnalysisInvalid,
+    ClaimExpired,
+    SubscriptionInactive,
+    DocumentTooLarge,
     TicketNotClaimed,
     QuotaExceeded
 }
@@ -27,16 +36,81 @@ public sealed class AgentLocalUploadCompletionService(
     TenantEntitlementService entitlements)
 {
     public async Task<AgentLocalUploadCompletionResult> CompleteAsync(
+        Guid ticketId,
+        AgentDevice device,
+        string? rawGrant,
+        LocalPrintUploadCompletionRequest request,
+        DateTimeOffset now,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(device);
+        ArgumentNullException.ThrowIfNull(request);
+
+        if (string.IsNullOrWhiteSpace(rawGrant) || rawGrant.Length is < 40 or > 128)
+            return new AgentLocalUploadCompletionResult(AgentLocalUploadCompletionFailure.InvalidGrant);
+
+        var ticket = await db.LocalPrintUploadTickets.AsNoTracking()
+            .SingleOrDefaultAsync(item =>
+                item.Id == ticketId &&
+                item.TenantId == device.TenantId &&
+                item.AgentDeviceId == device.Id,
+                cancellationToken);
+        if (ticket is null)
+            return new AgentLocalUploadCompletionResult(AgentLocalUploadCompletionFailure.NotFound);
+
+        if (!LocalUploadGrantValidator.IsValid(rawGrant, ticket.GrantHash))
+            return new AgentLocalUploadCompletionResult(AgentLocalUploadCompletionFailure.InvalidGrant);
+
+        if (ticket.CompletedUtc is not null)
+        {
+            var completedJob = await db.PrintJobs.AsNoTracking()
+                .SingleOrDefaultAsync(item =>
+                    item.Id == ticket.PrintJobId && item.TenantId == device.TenantId,
+                    cancellationToken);
+            var completedDocument = await db.PrintDocuments.AsNoTracking()
+                .SingleOrDefaultAsync(item =>
+                    item.PrintJobId == ticket.PrintJobId && item.TenantId == device.TenantId,
+                    cancellationToken);
+            if (completedJob is null || completedDocument is null)
+                return new AgentLocalUploadCompletionResult(
+                    AgentLocalUploadCompletionFailure.CompletedArtifactsMissing);
+
+            return new AgentLocalUploadCompletionResult(
+                AgentLocalUploadCompletionFailure.None,
+                completedJob,
+                completedDocument,
+                AlreadyCompleted: true);
+        }
+
+        if (!LocalUploadCompletionRules.MatchesTicket(ticket, request))
+            return new AgentLocalUploadCompletionResult(AgentLocalUploadCompletionFailure.ValidationMismatch);
+
+        if (!LocalUploadCompletionRules.HasValidPageAnalysis(request.PageSizesJson, request.PageCount))
+            return new AgentLocalUploadCompletionResult(AgentLocalUploadCompletionFailure.PageAnalysisInvalid);
+
+        if (ticket.ExpiresUtc <= now ||
+            ticket.ClaimLeaseExpiresUtc is null ||
+            ticket.ClaimLeaseExpiresUtc <= now)
+        {
+            return new AgentLocalUploadCompletionResult(AgentLocalUploadCompletionFailure.ClaimExpired);
+        }
+
+        var subscription = await entitlements.GetForTenantAsync(device.TenantId, cancellationToken);
+        if (!subscription.IsAccessActive)
+            return new AgentLocalUploadCompletionResult(AgentLocalUploadCompletionFailure.SubscriptionInactive);
+        if (!PlanEntitlementRules.AllowsDocument(subscription.MaxDocumentBytes, ticket.SizeBytes))
+            return new AgentLocalUploadCompletionResult(AgentLocalUploadCompletionFailure.DocumentTooLarge);
+
+        return await CommitCompletionAsync(ticket, device, request, now, cancellationToken);
+    }
+
+    private async Task<AgentLocalUploadCompletionResult> CommitCompletionAsync(
         LocalPrintUploadTicket ticket,
         AgentDevice device,
         LocalPrintUploadCompletionRequest request,
         DateTimeOffset now,
         CancellationToken cancellationToken)
     {
-        ArgumentNullException.ThrowIfNull(ticket);
-        ArgumentNullException.ThrowIfNull(device);
-        ArgumentNullException.ThrowIfNull(request);
-
         await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
         var completed = await db.LocalPrintUploadTickets
             .Where(item => item.Id == ticket.Id &&
@@ -51,9 +125,13 @@ public sealed class AgentLocalUploadCompletionService(
         {
             await transaction.RollbackAsync(cancellationToken);
             var existingJob = await db.PrintJobs.AsNoTracking()
-                .SingleOrDefaultAsync(item => item.Id == ticket.PrintJobId && item.TenantId == device.TenantId, cancellationToken);
+                .SingleOrDefaultAsync(item =>
+                    item.Id == ticket.PrintJobId && item.TenantId == device.TenantId,
+                    cancellationToken);
             var existingDocument = await db.PrintDocuments.AsNoTracking()
-                .SingleOrDefaultAsync(item => item.PrintJobId == ticket.PrintJobId && item.TenantId == device.TenantId, cancellationToken);
+                .SingleOrDefaultAsync(item =>
+                    item.PrintJobId == ticket.PrintJobId && item.TenantId == device.TenantId,
+                    cancellationToken);
             if (existingJob is null || existingDocument is null)
             {
                 return new AgentLocalUploadCompletionResult(
