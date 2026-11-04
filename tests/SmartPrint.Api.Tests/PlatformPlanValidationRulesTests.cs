@@ -37,7 +37,7 @@ public sealed class PlatformPlanValidationRulesTests
     public void Version_validation_rejects_invalid_currency_prices_and_quotas()
     {
         var request = new PlatformPlanVersionRequest(
-            "inr",
+            "INR1",
             -1,
             null,
             0,
@@ -57,6 +57,25 @@ public sealed class PlatformPlanValidationRulesTests
         Assert.Contains(nameof(request.MaxAgentDevices), errors.Keys);
         Assert.Contains(nameof(request.MaxMonthlyPrintJobs), errors.Keys);
         Assert.Contains("maxDocumentBytes", errors.Keys);
+    }
+
+    [Fact]
+    public void Version_validation_normalizes_lowercase_currency_codes()
+    {
+        var request = new PlatformPlanVersionRequest(
+            "inr",
+            0,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            false,
+            false,
+            false);
+
+        Assert.Empty(PlatformPlanValidationRules.ValidateVersion(request));
     }
 
     [Fact]
