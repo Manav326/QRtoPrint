@@ -93,6 +93,7 @@ public static class ApiServiceRegistration
         services.AddScoped<PublicCloudRecoveryService>();
         services.AddScoped<PublicCustomerSessionService>();
         services.AddScoped<ShopPrintBatchReviewService>();
+        services.AddScoped<PublicJobStatusService>();
         services.AddScoped<ShopPrintRefundService>();
         services.AddScoped<ShopPrintJobDispatchService>();
         services.AddScoped<AgentSpoolerLifecycleService>();

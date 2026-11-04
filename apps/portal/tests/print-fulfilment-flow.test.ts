@@ -227,3 +227,18 @@ test("batch file review delegates to a service that keeps atomicity and payment/
   assert.match(rules, /reviewed\.Length is < 1 or > 20/);
   assert.match(rules, /accepted\.Except\(reviewed\)/);
 });
+
+
+test("customer job status remains scoped to the active customer session in its service", () => {
+  const endpoint = readApi("PublicJobStatusEndpoints.cs");
+  const service = read("../../../src/SmartPrint.Api/Services/PublicJobStatusService.cs");
+  assert.match(endpoint, /status\\.GetAsync/);
+  assert.match(service, /item\\.TenantId == session\\.TenantId/);
+  assert.match(service, /item\\.CustomerSessionId == session\\.Id/);
+  assert.match(service, /item\\.RevokedUtc == null/);
+  assert.match(service, /item\\.ExpiresUtc > now/);
+  assert.match(service, /PrintJobEvents/);
+  assert.match(service, /PrintPayments/);
+  assert.match(service, /PrintBatchPayments/);
+  assert.match(service, /BuildUpiUri/);
+});
