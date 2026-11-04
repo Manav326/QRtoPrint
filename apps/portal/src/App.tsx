@@ -6,6 +6,8 @@ import {
 } from "lucide-react";
 import QRCode from "react-qr-code";
 import PhotoStudio, { type PreparedPhotoSheet } from "./PhotoStudio";
+import CustomerUpiQr from "./CustomerUpiQr";
+import { buildCustomerUpiIntent } from "./upi-payment-intent";
 import { shouldBlockBatchCheckoutForExpiredQuote } from "./batch-checkout-state";
 import { canFallbackToCloudFromLocalFailure, resolveCustomerUploadMode } from "./local-upload-routing";
 import AuthScreen from "./AuthScreen";
@@ -1114,8 +1116,16 @@ function ShopConsole({ tokens, onSignOut, dark, onToggleTheme }: { tokens: AuthT
     setError("");
     try {
       const blob = await downloadShopDocument(tokens.accessToken, job.id);
-      const url = URL.createObjectURL(blob);
-      setPreview({ name: job.document.originalFileName, url, mediaType: blob.type || job.document.mediaType, job, readOnly });
+      const supportedTypes=new Set(["application/pdf","image/jpeg","image/png"]);
+      const storedType=(job.document.mediaType||"").split(";")[0].trim().toLowerCase();
+      const responseType=(blob.type||"").split(";")[0].trim().toLowerCase();
+      const extension=job.document.originalFileName.toLowerCase().split(".").pop();
+      const extensionType=extension==="pdf"?"application/pdf":extension==="jpg"||extension==="jpeg"?"image/jpeg":extension==="png"?"image/png":"";
+      // Trust the persisted MIME type, then response headers, then the validated file extension.
+      const mediaType=supportedTypes.has(storedType)?storedType:supportedTypes.has(responseType)?responseType:extensionType;
+      const previewBlob=mediaType&&blob.type!==mediaType?new Blob([blob],{type:mediaType}):blob;
+      const url=URL.createObjectURL(previewBlob);
+      setPreview({ name: job.document.originalFileName, url, mediaType, job, readOnly });
     } catch (exception) {
       setError(exception instanceof Error ? exception.message : "Could not open the document.");
     } finally {
@@ -2499,9 +2509,13 @@ function DocumentPreviewModal({name,url,mediaType,job,readOnly=false,onClose,onA
   name:string;url:string;mediaType:string;job:ShopPrintJob;readOnly?:boolean;onClose:()=>void;onApprove:()=>void;onReject:()=>void;onRefund:()=>void;
 }) {
   const isPdf=mediaType==="application/pdf";
-  const previewSummary = job.printKind==="PHOTO" ? `${job.photoCount??0} ${job.photoSizeCode??""} photos arranged on one A4 sheet. Preview displays the uploaded original once.` : `${job.pageCount} source page(s) × ${job.copies} copy/copies = ${job.pageCount*job.copies} printed page(s). Preview displays the uploaded original once.`;
+  const isImage=mediaType==="image/jpeg"||mediaType==="image/png";
+  const photoDimensions:Record<string,string>={"35x45":"35 × 45 mm","25x35":"25 × 35 mm","2x2":"50.8 × 50.8 mm","4x6":"101.6 × 152.4 mm"};
+  const previewSummary = job.printKind==="PHOTO"
+    ? `${job.photoCount??0} ${photoDimensions[job.photoSizeCode??""]??job.photoSizeCode??""} photos · ${job.pageCount} A4 PDF page(s). Preview displays the complete prepared file.`
+    : `${job.pageCount} source page(s) × ${job.copies} copy/copies = ${job.pageCount*job.copies} printed page(s). Preview displays the uploaded original once.`;
   return <Modal title={name} subtitle={readOnly ? `Read-only preview · ${previewSummary}` : job.batchId ? `File review · Batch ${job.batchId.slice(0,8).toUpperCase()} · ${previewSummary}` : previewSummary} onClose={onClose}>
-    <div className="shop-document-preview">{isPdf?<iframe src={url} title={name}/>:<img src={url} alt={name}/>}</div>
+    <div className="shop-document-preview">{isPdf?<iframe src={url} title={name}/>:isImage?<img src={url} alt={name}/>:<div className="shop-document-preview-unavailable">Preview format is not supported. <a href={url} download={name}>Download the original file</a></div>}</div>
     {["AWAITING_SHOP_APPROVAL","AWAITING_PAYMENT"].includes(job.status)&&<div className="file-review-note"><Check size={16}/><span>{readOnly ? "This preview is part of the batch review. Keep or change this file's decision in the batch panel after closing the preview." : "Review this file independently. Accepting or rejecting it will not change any other file in the batch."}</span></div>}
     {job.status==="PAID_AUTHORISED"&&(job.payment?.status==="VERIFIED"||job.payment?.status==="PARTIALLY_REFUNDED")&&<div className="file-refund-note"><Wallet size={16}/><span>Paid amount: <strong>{formatMoney(job.payment.amountMinor,job.payment.currency)}</strong>. A refund can be recorded while this file has not yet been handed to the shop computer.</span></div>}
     <div className="modal-actions">
@@ -3069,7 +3083,7 @@ function CustomerEntry({publicCode,dark,onToggleTheme}:{publicCode:string;dark:b
   const nativeAppMode = navigator.userAgent.includes("SmartPrintAndroid/1");
   return <div className={nativeAppMode ? "customer-entry smartprint-native" : "customer-entry"}><div className="customer-entry-glow"/>
     <header className="customer-entry-brand"><div className="customer-entry-brand-lockup"><div className="brand-mark"><QrCode size={21}/></div><div><div className="brand-name">smart<span>print</span></div><div className="brand-caption">BY QUANTAEDGE</div></div></div><ThemeToggleButton dark={dark} onToggle={onToggleTheme}/></header>
-    <main className="customer-entry-card">
+    <main className={result ? "customer-entry-card customer-entry-card--upload" : "customer-entry-card"}>
       {loading?<><div className="customer-entry-spinner"><span className="button-spinner"/></div><h1>{nativeAppMode?"Connecting…":"Connecting to your print shop"}</h1>{!nativeAppMode&&<p>Creating a secure, time-limited session for this QR station.</p>}</>:
       error?<><div className="entry-error-icon"><X size={23}/></div><div className="entry-eyebrow">STATION UNAVAILABLE</div><h1>{nativeAppMode?"Shop unavailable":"This QR station can't be reached"}</h1>{!nativeAppMode&&<p>{error}</p>}<button className="primary-button" onClick={()=>window.location.reload()}>Try again</button></>:
       result?<><div className="entry-success-icon"><Check size={23}/></div><div className="entry-eyebrow">SECURE SESSION CREATED</div><h1>{nativeAppMode?result.shop.displayName:"Welcome to "+result.shop.displayName}</h1><p>{nativeAppMode?"Shop connected.":"Your phone is connected to this shop's print station."}</p>
@@ -3329,8 +3343,10 @@ function CustomerLocalConnection({localAgent,onReady,onUnavailable,cloudAssisted
     checkGeneration.current++;
     if(!localAgent?.endpoints.length) {
       onReady(false);
-      setCheckStatus("idle");
-      setMessage("");
+      onUnavailable();
+      setPermissionState("unknown");
+      setCheckStatus("unavailable");
+      setMessage("The shop's paired print computer has not reported a reachable local connection. Direct Wi-Fi transfer is temporarily unavailable. Use Secure queue · HTTPS below to submit your request when available.");
       return ()=>{checkGeneration.current++;};
     }
     onReady(false);
@@ -3390,9 +3406,8 @@ function CustomerLocalConnection({localAgent,onReady,onUnavailable,cloudAssisted
     };
   },[localAgent?.agentDeviceId,localAgent?.endpoints.join("|"),onReady,onUnavailable]);
 
-  if(!localAgent?.endpoints.length)return null;
-
-  const label=checkStatus==="checking"?"Checking…":
+  const label=!localAgent?.endpoints.length?"Temporarily unavailable":
+    checkStatus==="checking"?"Checking…":
     checkStatus==="connected"?(nativeAppMode?"Connected":"Shop computer reachable"):
     checkStatus==="unverified"?"Connected · health details unavailable":
     checkStatus==="recovering"?"Print pipeline recovering":
@@ -3410,7 +3425,9 @@ function CustomerLocalConnection({localAgent,onReady,onUnavailable,cloudAssisted
       <Status label={label} tone={tone}/>
     </div>
     {!nativeAppMode&&<p>Check whether this phone can reach the shop's local print computer. This check does not upload your document.</p>}
-    {checkStatus==="insecure"
+    {!localAgent?.endpoints.length
+      ? <div className="entry-local-agent-message" role="status"><strong>Direct transfer is temporarily unavailable.</strong> {message}</div>
+      : checkStatus==="insecure"
       ? <div className="entry-local-agent-message">
           <small>{message}</small>
           {securePortalUrl&&<a className="customer-flow-button" href={securePortalUrl}>{nativeAppMode?"Open HTTPS":"Open secure HTTPS shop page"}</a>}
@@ -4412,11 +4429,15 @@ function CustomerPrintFlow({publicCode,sessionToken,paymentOptions,localAgent,lo
   return <>{photoStudioSource&&<PhotoStudio source={photoStudioSource} photoPrices={photoPriceMap} onCancel={()=>{setPhotoStudioSource(null);setPhotoStudioSourceFingerprint(null);}} onApply={applyPhotoSheets}/>}<section className="customer-print-flow">
     <div className="customer-flow-heading"><div><span>STEP 1</span><h2>{nativeAppMode?"Add files":"Add documents or images"}</h2></div><span className="upload-limit">PDF documents · JPG/PNG images · Up to 20 files / 50 MB per batch</span></div>
     {(localAgent?.endpoints.length || secureQueueFallbackEnabled) ? <div className="customer-upload-modes">
-      {Boolean(localAgent?.endpoints?.length)&&<button type="button" aria-pressed={uploadMode==="LOCAL"} className={uploadMode==="LOCAL"?"customer-upload-mode selected":"customer-upload-mode"} onClick={()=>{setUploadModeManuallySelected(true);setUploadMode("LOCAL");}}><strong>Shop Wi-Fi · local transfer</strong><small>Direct local HTTP · not encrypted in transit</small></button>}
+      {localAgent?.endpoints.length
+        ? <button type="button" aria-pressed={uploadMode==="LOCAL"} className={uploadMode==="LOCAL"?"customer-upload-mode selected":"customer-upload-mode"} onClick={()=>{setUploadModeManuallySelected(true);setUploadMode("LOCAL");}}><strong>Shop Wi-Fi · local transfer</strong><small>Direct local HTTP · not encrypted in transit</small></button>
+        : <button type="button" className="customer-upload-mode customer-upload-mode-unavailable" disabled aria-disabled="true"><strong>Shop Wi-Fi · local transfer</strong><small>Temporarily unavailable · the shop computer has not reported a reachable local connection</small></button>}
       {secureQueueFallbackEnabled&&<button type="button" aria-pressed={uploadMode==="CLOUD"} className={uploadMode==="CLOUD"?"customer-upload-mode selected":"customer-upload-mode"} onClick={()=>{setUploadModeManuallySelected(true);setUploadMode("CLOUD");}}><strong>{cloudAssistedPrintingEnabled?"Cloud-assisted · HTTPS":"Secure queue · HTTPS"}</strong><small>Upload securely now; the shop can print when its Agent and printer are ready</small></button>}
     </div>:null}
     {customerUploadUnavailable&&<div className="customer-upload-local-note" role="status">Secure upload is temporarily unavailable. Please ask the shop to reconnect its print service.</div>}
-    <div className="customer-upload-picker-grid">
+    <div className="customer-upload-picker-grid"
+      onDragOver={event=>{if(!batchLockedForPayment)event.preventDefault();}}
+      onDrop={event=>{event.preventDefault();if(batchLockedForPayment)return;chooseFiles(Array.from(event.dataTransfer.files||[]));}}>
       <label className="customer-upload-zone">
         <input type="file" multiple disabled={batchLockedForPayment} accept=".pdf,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png" onChange={event=>{const selected=Array.from(event.currentTarget.files||[]);chooseFiles(selected,consumeSmartPrintNativePickerGroups(),consumeSmartPrintNativePdfPreviews());event.currentTarget.value="";}}/>
         <span className="customer-upload-icon"><FileUp size={21}/></span>
@@ -4596,15 +4617,25 @@ function CustomerPrintFlow({publicCode,sessionToken,paymentOptions,localAgent,lo
       </div>}
       {legacyIndividualPayment&&payment&&payment.status!=="REJECTED"&&<div className="customer-pay-panel">
         <div className="customer-pay-heading"><span>{payment.method==="UPI"?"UPI PAYMENT":"CASH AT COUNTER"}</span><strong>{formatMoney(Math.max(0,payment.amountMinor-(payment.refundedAmountMinor??0)),payment.currency)}</strong></div>
-        {payment.method==="UPI"&&payment.status==="AWAITING_CUSTOMER_PAYMENT"&&<div className="customer-upi-details">
-          <div className="customer-upi-qr"><QRCode value={payment.upiUri||"upi://pay?pa="+encodeURIComponent(payment.upiIdSnapshot||"")} size={158}/></div>
-          <strong>{payment.payeeNameSnapshot||paymentOptions.payeeName||"Shop"}</strong>
-          <span>{payment.upiIdSnapshot||paymentOptions.upiId}</span>
-          <a href={payment.upiUri||"#"} className="customer-flow-button customer-upi-open">Open UPI app</a>
-          <label className="customer-reference-field">{nativeAppMode?"UTR":"UPI transaction reference / UTR"}<input value={paymentReference} maxLength={100} onChange={event=>setPaymentReference(event.target.value)} placeholder={nativeAppMode?"Enter UTR":"Enter UTR after paying"}/></label>
-          <button className="customer-flow-button" disabled={busy||paymentReference.trim().length<4} onClick={()=>void submitPaymentReference()}>{busy?<span className="button-spinner"/>:nativeAppMode?"Submit UTR":"Submit payment reference"}</button>
-          <small className="customer-payment-warning">{nativeAppMode?"UTR isn't proof. Shop verifies.":"Submitting a UTR is not proof of payment. The shop verifies it in its own UPI/bank app."}</small>
-        </div>}
+        {payment.method==="UPI"&&payment.status==="AWAITING_CUSTOMER_PAYMENT"&&<>
+          <CustomerUpiQr
+            uri={buildCustomerUpiIntent({
+              serverUri:payment.upiUri,upiId:payment.upiIdSnapshot||paymentOptions.upiId,
+              payeeName:payment.payeeNameSnapshot||paymentOptions.payeeName,amountMinor:payment.amountMinor,
+              currency:payment.currency,transactionReference:payment.id,
+              description:"SmartPrint "+(uploaded?.job.jobNumber||"print payment")
+            })}
+            payeeName={payment.payeeNameSnapshot||paymentOptions.payeeName||"Shop"}
+            upiId={payment.upiIdSnapshot||paymentOptions.upiId||""}
+            amount={formatMoney(payment.amountMinor,payment.currency)}
+            fileName={"smartprint-payment-"+payment.id.slice(0,12)+".png"}
+          />
+          <div className="customer-payment-reference">
+            <label className="customer-reference-field">{nativeAppMode?"UTR":"UPI transaction reference / UTR"}<input value={paymentReference} maxLength={100} onChange={event=>setPaymentReference(event.target.value)} placeholder={nativeAppMode?"Enter UTR":"Enter UTR after paying"}/></label>
+            <button className="customer-flow-button" disabled={busy||paymentReference.trim().length<4} onClick={()=>void submitPaymentReference()}>{busy?<span className="button-spinner"/>:nativeAppMode?"Submit UTR":"Submit payment reference"}</button>
+            <small className="customer-payment-warning">UPI transfers can still be declined by the bank or UPI provider. A downloaded QR offers a scan-from-image route; it does not bypass payment security checks.</small>
+          </div>
+        </>}
         {payment.method==="CASH"&&payment.status==="CASH_AWAITING_PAYMENT"&&<p>{nativeAppMode?"Pay at counter · Await confirmation.":"Pay at the shop counter. The shop will confirm receipt before authorising the job."}</p>}
         {payment.status==="CUSTOMER_REPORTED"&&<p>{nativeAppMode?"Reference received · Verification pending.":"Your payment reference was received. The shop still needs to verify the transaction."}</p>}
         {payment.status==="VERIFIED"&&<p>{nativeAppMode?"Payment verified · Printing pending.":"Payment verified by the shop. The print job is authorised, but not yet physically printed."}</p>}
@@ -4641,15 +4672,25 @@ function CustomerPrintFlow({publicCode,sessionToken,paymentOptions,localAgent,lo
         </button>
         {!paymentOptions.upiEnabled&&!paymentOptions.cashEnabled&&<p className="customer-flow-error">{nativeAppMode?"No payment method. Ask shop.":"The shop has not configured a payment method yet. Please speak to the shop operator."}</p>}
       </>}
-      {batchCheckoutUsesPayment&&batchPaymentAllocationComplete&&batchPayment?.method==="UPI"&&batchPayment.status==="AWAITING_CUSTOMER_PAYMENT"&&<div className="customer-upi-details">
-        <div className="customer-upi-qr"><QRCode value={batchPayment.upiUri||"upi://pay?pa="+encodeURIComponent(batchPayment.upiIdSnapshot||"")} size={158}/></div>
-        <strong>{batchPayment.payeeNameSnapshot||paymentOptions.payeeName||"Shop"}</strong>
-        <span>{batchPayment.upiIdSnapshot||paymentOptions.upiId}</span>
-        <a href={batchPayment.upiUri||"#"} className="customer-flow-button customer-upi-open">Open UPI app</a>
-        <label className="customer-reference-field">{nativeAppMode?"UTR":"UPI transaction reference / UTR"}<input value={paymentReference} maxLength={100} onChange={event=>setPaymentReference(event.target.value)} placeholder={nativeAppMode?"Enter UTR":"Enter UTR after paying"}/></label>
-        <button className="customer-flow-button" disabled={busy||paymentReference.trim().length<4} onClick={()=>void submitPaymentReference()}>{busy?<span className="button-spinner"/>:nativeAppMode?"Submit UTR":"Submit batch payment reference"}</button>
-        <small className="customer-payment-warning">{nativeAppMode?"UTR isn't proof. Shop verifies.":"Submitting a UTR is not proof of payment. The shop verifies the full batch amount in its own UPI/bank app."}</small>
-      </div>}
+      {batchCheckoutUsesPayment&&batchPaymentAllocationComplete&&batchPayment?.method==="UPI"&&batchPayment.status==="AWAITING_CUSTOMER_PAYMENT"&&<>
+        <CustomerUpiQr
+          uri={buildCustomerUpiIntent({
+            serverUri:batchPayment.upiUri,upiId:batchPayment.upiIdSnapshot||paymentOptions.upiId,
+            payeeName:batchPayment.payeeNameSnapshot||paymentOptions.payeeName,amountMinor:batchPayment.amountMinor,
+            currency:batchPayment.currency,transactionReference:batchPayment.id,
+            description:"SmartPrint batch "+batchPayment.batchId.slice(0,8).toUpperCase()
+          })}
+          payeeName={batchPayment.payeeNameSnapshot||paymentOptions.payeeName||"Shop"}
+          upiId={batchPayment.upiIdSnapshot||paymentOptions.upiId||""}
+          amount={formatMoney(batchPayment.amountMinor,batchPayment.currency)}
+          fileName={"smartprint-batch-payment-"+batchPayment.id.slice(0,12)+".png"}
+        />
+        <div className="customer-payment-reference">
+          <label className="customer-reference-field">{nativeAppMode?"UTR":"UPI transaction reference / UTR"}<input value={paymentReference} maxLength={100} onChange={event=>setPaymentReference(event.target.value)} placeholder={nativeAppMode?"Enter UTR":"Enter UTR after paying"}/></label>
+          <button className="customer-flow-button" disabled={busy||paymentReference.trim().length<4} onClick={()=>void submitPaymentReference()}>{busy?<span className="button-spinner"/>:nativeAppMode?"Submit UTR":"Submit batch payment reference"}</button>
+          <small className="customer-payment-warning">The shop verifies the actual UPI credit. A downloaded QR offers an alternative scan route; it cannot override a bank or UPI security decline.</small>
+        </div>
+      </>}
       {batchCheckoutUsesPayment&&batchPaymentAllocationComplete&&batchPayment?.method==="CASH"&&batchPayment.status==="CASH_AWAITING_PAYMENT"&&<p>Pay the displayed batch total at the shop counter. The shop will confirm receipt before authorising the accepted files.</p>}
       {batchCheckoutUsesPayment&&batchPayment?.status==="CUSTOMER_REPORTED"&&<p>Your batch payment reference was received. The shop must verify the full amount before any accepted file is authorised.</p>}
       {batchCheckoutUsesPayment&&batchPayment?.status==="VERIFIED"&&<div className="payment-verified-note"><Check size={14}/> Batch payment verified. Accepted files are authorised for the shop's print queue.</div>}

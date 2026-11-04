@@ -186,3 +186,36 @@ test("local upload ticket retries preserve batch identity and renew the same exp
   assert.match(app, /Checkout has already started for this batch/);
   assert.match(entitlements, /!db\.PrintBatchPayments\.Any\(payment =>[\s\S]*?payment\.Status != "REJECTED"/);
 });
+
+
+test("customer local transfer remains visible with a clear unavailable state when no Agent endpoint exists",()=>{
+ const app=read("../src/App.tsx");
+ const start=app.indexOf("function CustomerLocalConnection("),end=app.indexOf("type CustomerGroupSettings",start);
+ const connection=app.slice(start,end);
+ assert.match(connection,/if\(!localAgent\?\.endpoints\.length\)[\s\S]*?setCheckStatus\("unavailable"\)/);
+ assert.doesNotMatch(connection,/if\(!localAgent\?\.endpoints\.length\)return null/);
+ assert.match(connection,/Direct transfer is temporarily unavailable/);
+ assert.match(app,/customer-upload-mode-unavailable/);
+});
+
+test("owner preview selects the persisted supported MIME type before the blob response type",()=>{
+ const app=read("../src/App.tsx");
+ assert.match(app,/const storedType=\(job\.document\.mediaType\|\|""\)/);
+ assert.match(app,/supportedTypes\.has\(storedType\)[\s\S]*?supportedTypes\.has\(responseType\)/);
+ assert.match(app,/Preview format is not supported/);
+});
+
+test("customer web upload accepts drag and drop and contains no JavaScript browser alert dialogs",()=>{
+ const app=read("../src/App.tsx");
+ assert.match(app,/onDragOver=\{event=>\{if\(!batchLockedForPayment\)event\.preventDefault\(\);\}\}/);
+ assert.match(app,/onDrop=\{event=>\{event\.preventDefault\(\);if\(batchLockedForPayment\)return;chooseFiles\(Array\.from\(event\.dataTransfer\.files\|\|\[\]\)\);\}\}/);
+ assert.doesNotMatch(app,/window\.(alert|confirm|prompt)\s*\(/);
+});
+
+test("photo studio's selected photo quantity is a single output file with one photo-count record",()=>{
+ const app=read("../src/App.tsx");
+ const studio=read("../src/PhotoStudio.tsx");
+ assert.match(studio,/onApply\(\[\{file:output,sizeCode:size\.id,photoCount:parsedCopies\}\]\)/);
+ assert.match(app,/const generated=sheets\.map\(sheet=>sheet\.file\)/);
+ assert.match(app,/photos\[fp\]=\{sizeCode:sheet\.sizeCode,photoCount:sheet\.photoCount\}/);
+});
