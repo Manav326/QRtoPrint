@@ -92,6 +92,8 @@ public static class ApiServiceRegistration
         services.AddScoped<PublicPaymentReportService>();
         services.AddScoped<PublicCloudRecoveryService>();
         services.AddScoped<PublicCustomerSessionService>();
+        services.AddScoped<ShopPhotoRevisionService>();
+        services.AddScoped<AgentLocalPhotoRevisionService>();
         services.AddScoped<ShopPrintBatchReviewService>();
         services.AddScoped<PublicJobStatusService>();
         services.AddScoped<ShopPrintRefundService>();
