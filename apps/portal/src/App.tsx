@@ -22,12 +22,12 @@ import {
   downloadShopDocument, getCustomerJobStatus, getShopAgentDevices, getShopJobEvents, getShopPrinters, getShopPrintJobsPage, getShopPrintBatchJobs, loadShopData,
   logout, readStoredTokens, rejectShopPrintJob, rejectShopPayment, revokeAgentDevice,
   reportCustomerBatchPayment, reportCustomerUpiPayment, renewCustomerPrintSession, getNativeCustomerPrintSession, saveNativeCustomerPrintSession, saveNativeCustomerShopProfile, clearNativeCustomerPrintSession, resumeCustomerSession, rotateStationCode, startCustomerBatchPayment, startCustomerPayment, storeTokens,
-  updatePrinterActive, updateShopPaymentSettings, updateShopPricing,
+  updatePrinterActive, updateShopPaymentSettings, updateShopPricing, updateShopPrintJobSettings,
   updateShopOwnerAccount, updateShopProfile, updateStationEnabled, uploadCustomerDocument, uploadCustomerDocumentLocally,
   verifyShopPayment, retryShopPdfExport, recordShopPrintRefund, previewShopPrintRefund, type CustomerBatchPayment, type CustomerPayment, type CustomerPhotoPricing, type ShopPayment, type ShopPaymentSettings, type ShopRefund,
   type AgentDevice, type AuthTokens, type CustomerJobStatus, type PrinterDevice, type PrintQuoteResult, type ShopJobEvent,
   type QrStation, type ShopCustomer, type ShopCustomerHistory, type ShopCustomerPage, type ShopPricingProfile, type ShopPrintJob, type ShopProfile, type ShopReportSummary, type ShopSubscriptionSummary,
-  type UploadedPrintJob
+  type UploadedPrintJob, type CustomerPrintRequestSettings
 } from "./api";
 import {
   enrollLocalAgent, getLocalAgentStatus, getLocalNetworkSnapshot, selectLocalNetwork, startLocalPhoneTest,
@@ -3342,8 +3342,15 @@ function CustomerLocalConnection({localAgent,onReady,onUnavailable,cloudAssisted
 }
 
 
-type CustomerGroupSettings = { colourMode: "Mono" | "Colour"; isDuplex: boolean };
-type CustomerFileSettings = { copies: string; custom: boolean; colourMode: "Mono" | "Colour"; isDuplex: boolean };
+type CustomerGroupSettings = {
+  copies: string;
+  colourMode: "Mono" | "Colour";
+  isDuplex: boolean;
+  advancedEnabled: boolean;
+  paperSize: CustomerPrintRequestSettings["paperSize"];
+  orientation: CustomerPrintRequestSettings["orientation"];
+};
+type CustomerFileSettings = CustomerGroupSettings & { custom: boolean };
 
 function consumeSmartPrintNativePickerGroups():string[]|undefined {
   const target=window as Window & {__smartPrintNativePickerGroups?:string[]};
@@ -3351,7 +3358,7 @@ function consumeSmartPrintNativePickerGroups():string[]|undefined {
   delete target.__smartPrintNativePickerGroups;
   return Array.isArray(groups)?groups:undefined;
 }
-type CustomerSavedPrintSettings = { copies: number; colourMode: "Mono" | "Colour"; isDuplex: boolean };
+type CustomerSavedPrintSettings = CustomerPrintRequestSettings & { advancedEnabled?: boolean };
 type CustomerPhotoSettings = { sizeCode: string; photoCount: number };
 function customerPhotoSizeLabel(sizeCode?:string|null):string {
   switch(sizeCode){
@@ -3501,15 +3508,12 @@ function smartPrintNativeBoundary(status:string|undefined,hasQuote:boolean):stri
 
 function CustomerPrintFlow({publicCode,sessionToken,paymentOptions,localAgent,localReady,localFallbackSuggested,cloudAssistedPrintingEnabled,photoPricing,hasAssignedPrinter,printerCapabilitiesJson,photoStudioReady}:{publicCode:string;sessionToken:string;paymentOptions:{upiEnabled:boolean;upiId?:string|null;payeeName?:string|null;cashEnabled:boolean;instantPaymentEnabled:boolean};localAgent:CustomerLocalAgent|null;localReady:boolean;localFallbackSuggested:boolean;cloudAssistedPrintingEnabled:boolean;photoPricing:CustomerPhotoPricing|null;hasAssignedPrinter:boolean;printerCapabilitiesJson?:string|null;photoStudioReady:boolean}) {
   const nativeAppMode = navigator.userAgent.includes("SmartPrintAndroid/1");
-  const printerCapabilities=parseCustomerPrinterCapabilities(printerCapabilitiesJson);
-  const reportedPaperSizes=printerCapabilities?.paperSizes??[];
-  const a4Supported=reportedPaperSizes.some(p=>p.code===9||p.name?.trim().toUpperCase()==="A4");
-  const a4ExplicitlyUnsupported=hasAssignedPrinter&&reportedPaperSizes.length>0&&!a4Supported;
-  const a4SupportUnknown=hasAssignedPrinter&&reportedPaperSizes.length===0;
-  const a4NotConfirmed=a4ExplicitlyUnsupported||a4SupportUnknown;
-  // Unknown driver capabilities are not the same as unsupported; the Agent validates before output.
-  const supportsColour=!hasAssignedPrinter||printerCapabilities?.color!==false;
-  const supportsDuplex=!hasAssignedPrinter||printerCapabilities?.duplex!==false;
+  // Customer requests are captured independently of current hardware reports.
+  // The shop may wait, reassign, or request an approved change before dispatch.
+  const supportsColour=true;
+  const supportsDuplex=true;
+  void hasAssignedPrinter;
+  void printerCapabilitiesJson;
   const photoRatesAvailable=Boolean(photoPricing&&[photoPricing.photo35x45Minor,photoPricing.photo25x35Minor,photoPricing.photo2x2Minor,photoPricing.photo4x6Minor].some(rate=>Number.isFinite(rate)&&rate>0));
   const initialDraft=readStoredCustomerDraft(publicCode,sessionToken);
   const [files,setFiles]=useState<File[]>([]);
@@ -3584,25 +3588,27 @@ function CustomerPrintFlow({publicCode,sessionToken,paymentOptions,localAgent,lo
   );
   const [uploadModeManuallySelected,setUploadModeManuallySelected]=useState(false);
 
+  const secureQueueFallbackEnabled = cloudAssistedPrintingEnabled || !localAgent?.endpoints.length;
+
   useEffect(()=>{
     setUploadMode(current=>resolveCustomerUploadMode(
       current,
       Boolean(localAgent?.endpoints?.length),
-      cloudAssistedPrintingEnabled,
+      secureQueueFallbackEnabled,
       uploadModeManuallySelected
     ));
-  },[cloudAssistedPrintingEnabled,localAgent?.endpoints.join("|"),uploadModeManuallySelected]);
+  },[secureQueueFallbackEnabled,localAgent?.endpoints.join("|"),uploadModeManuallySelected]);
 
   useEffect(()=>{
     if(uploadModeManuallySelected)return;
-    if(localFallbackSuggested&&cloudAssistedPrintingEnabled) {
+    if(localFallbackSuggested&&secureQueueFallbackEnabled) {
       setUploadMode("CLOUD");
     } else if(!localFallbackSuggested&&localReady&&localAgent?.endpoints.length) {
       setUploadMode("LOCAL");
     }
-  },[localFallbackSuggested,localReady,localAgent?.endpoints.length,cloudAssistedPrintingEnabled,uploadModeManuallySelected]);
+  },[localFallbackSuggested,localReady,localAgent?.endpoints.length,secureQueueFallbackEnabled,uploadModeManuallySelected]);
 
-  const customerUploadUnavailable = !cloudAssistedPrintingEnabled && !localAgent?.endpoints.length;
+  const customerUploadUnavailable = !secureQueueFallbackEnabled && !localAgent?.endpoints.length;
 
   useEffect(()=>{
     if(!paymentOptions.upiEnabled&&paymentOptions.cashEnabled)setPaymentMethod("CASH");
@@ -3637,23 +3643,27 @@ function CustomerPrintFlow({publicCode,sessionToken,paymentOptions,localAgent,lo
   const batchStatusKey=batchItemsForStatus.map(item=>item.job.id).join("|");
   const groupNameForFile=(candidate:File)=>fileGroupNames[customerFileFingerprint(candidate)]??customerBatchGroupName(candidate);
   const defaultsForGroup=(name:string):CustomerGroupSettings=>{
-    const settings=groupSettings[name]??{colourMode:"Mono",isDuplex:false};
-    return {
-      ...settings,
-      colourMode:supportsColour?settings.colourMode:"Mono",
-      isDuplex:supportsDuplex?settings.isDuplex:false
+    const baseline:CustomerGroupSettings={
+      copies:"1",colourMode:"Mono",isDuplex:false,advancedEnabled:false,paperSize:"A4",orientation:"AUTO"
     };
+    return {...baseline,...(groupSettings[name]??{})};
   };
-  const settingsForFile=(candidate:File)=> {
+  const settingsForFile=(candidate:File):CustomerSavedPrintSettings=> {
     const fingerprint=customerFileFingerprint(candidate);
     const defaults=defaultsForGroup(groupNameForFile(candidate));
     const own=fileSettings[fingerprint];
-    if(photoSettingsByFileFingerprint[fingerprint])return {colourMode:"Colour" as const,isDuplex:false,copies:1};
+    if(photoSettingsByFileFingerprint[fingerprint])return {
+      copies:1,colourMode:"Colour",paperSize:"A4",isDuplex:false,orientation:"AUTO",advancedEnabled:false
+    };
+    const selected=own?.custom?{...defaults,...own}:defaults;
     return {
-      colourMode:supportsColour?(own?.custom?own.colourMode:defaults.colourMode):"Mono",
-      isDuplex:supportsDuplex?(own?.custom?own.isDuplex:defaults.isDuplex):false,
-      copies:Number(normalizeCustomerCopies(own?.copies??"1"))
-    } as CustomerSavedPrintSettings;
+      copies:Number(normalizeCustomerCopies(selected.copies)),
+      colourMode:selected.colourMode,
+      isDuplex:selected.isDuplex,
+      paperSize:selected.advancedEnabled?selected.paperSize:"A4",
+      orientation:selected.advancedEnabled?selected.orientation:"AUTO",
+      advancedEnabled:selected.advancedEnabled
+    };
   };
 
   useEffect(()=>{
@@ -3770,8 +3780,8 @@ function CustomerPrintFlow({publicCode,sessionToken,paymentOptions,localAgent,lo
         const batchGroupName=groupNameForFile(candidate);
         const settings=settingsForFile(candidate);
         const created=uploadMode==="LOCAL"&&localAgent
-          ? await uploadCustomerDocumentLocally(sessionToken,candidate,localAgent,currentBatchId,batchGroupName,currentBatchName||undefined,cloudAssistedPrintingEnabled)
-          : await uploadCustomerDocument(sessionToken,candidate,currentBatchId,batchGroupName,currentBatchName||undefined);
+          ? await uploadCustomerDocumentLocally(sessionToken,candidate,localAgent,currentBatchId,batchGroupName,currentBatchName||undefined,cloudAssistedPrintingEnabled,settings)
+          : await uploadCustomerDocument(sessionToken,candidate,currentBatchId,batchGroupName,currentBatchName||undefined,settings);
         if(created.job.batchId&&created.job.batchId!==currentBatchId) {
           if(results.length>0) {
             throw new ApiError("This file belongs to an earlier batch. Refresh the original print request before adding more files; SmartPrint will not mix two batches.",409);
@@ -3807,7 +3817,12 @@ function CustomerPrintFlow({publicCode,sessionToken,paymentOptions,localAgent,lo
       setUploadedFileFingerprints([...completedFingerprints]);
       if(results.length>0)setUploaded(results[0]);
       const confirmedPreTicketRejection=uploadMode==="LOCAL"&&exception instanceof LocalUploadPreflightError;
-      const canFallbackToCloud=canFallbackToCloudFromLocalFailure(confirmedPreTicketRejection,cloudAssistedPrintingEnabled);
+      const agentUnavailable=exception instanceof LocalUploadPreflightError&&
+        ["local_print_agent_unavailable","local_print_printer_unavailable"].includes(exception.code??"");
+      const canFallbackToCloud=canFallbackToCloudFromLocalFailure(
+        confirmedPreTicketRejection,
+        cloudAssistedPrintingEnabled||agentUnavailable
+      );
       if(canFallbackToCloud){setUploadModeManuallySelected(true);setUploadMode("CLOUD");}
       if(exception instanceof LocalUploadOutcomeUnknownError&&uploadMode==="LOCAL"&&cloudAssistedPrintingEnabled) {
         // Local ticket and grant are preserved. The next retry will resume that
@@ -3842,7 +3857,6 @@ function CustomerPrintFlow({publicCode,sessionToken,paymentOptions,localAgent,lo
   }
 
   async function getQuote(itemsOverride?:UploadedPrintJob[],settingsOverride?:Record<string,CustomerSavedPrintSettings>,photoSettingsOverride?:Record<string,CustomerPhotoSettings>) {
-    if(a4NotConfirmed){setError(a4ExplicitlyUnsupported?"The selected printer does not report A4 paper support. The shop team needs to select an A4-capable printer before requesting a quote.":"The shop printer has not reported its paper sizes yet. The shop team needs to check the printer before an A4 quote can be prepared.");return;}
     const items=itemsOverride??(uploadedBatch.length?uploadedBatch:(uploaded?[uploaded]:[]));
     if(items.length===0)return;
     setBusy(true);setError("");setJobStatus(null);
@@ -3860,11 +3874,17 @@ function CustomerPrintFlow({publicCode,sessionToken,paymentOptions,localAgent,lo
           ? !["QUOTE_EXPIRED","AWAITING_CUSTOMER_APPROVAL","AWAITING_SHOP_APPROVAL","AWAITING_PAYMENT","PAYMENT_REJECTED"].includes(status)
           : !["AWAITING_CONFIGURATION","UPLOADED","Uploaded"].includes(status))continue;
         const requestedSettings=settingsOverride?.[item.job.id]??printSettingsByJobId[item.job.id]??{colourMode:"Mono" as const,isDuplex:false,copies:1};
-        const settings={...requestedSettings,colourMode:supportsColour?requestedSettings.colourMode:"Mono" as const,isDuplex:supportsDuplex?requestedSettings.isDuplex:false};
+        const settings=requestedSettings;
         const photoSettings=photoSettingsOverride?.[item.job.id]??photoSettingsByJobId[item.job.id];
-        if(photoSettings&&!supportsColour){failures.push(item.document.originalFileName+" (colour not supported)");continue;}
         try {
-          nextQuotes[item.job.id]=await calculateCustomerQuote(sessionToken,item.job.id,{colourMode:photoSettings?"Colour":settings.colourMode,paperSize:"A4",isDuplex:photoSettings?false:settings.isDuplex,copies:photoSettings?1:settings.copies,...(photoSettings?{printKind:"PHOTO" as const,photoSizeCode:photoSettings.sizeCode,photoCount:photoSettings.photoCount}:{printKind:"DOCUMENT" as const})});
+          nextQuotes[item.job.id]=await calculateCustomerQuote(sessionToken,item.job.id,{
+            colourMode:photoSettings?"Colour":settings.colourMode,
+            paperSize:photoSettings?"A4":settings.paperSize,
+            isDuplex:photoSettings?false:settings.isDuplex,
+            copies:photoSettings?1:settings.copies,
+            orientation:photoSettings?"AUTO":settings.orientation,
+            ...(photoSettings?{printKind:"PHOTO" as const,photoSizeCode:photoSettings.sizeCode,photoCount:photoSettings.photoCount}:{printKind:"DOCUMENT" as const})
+          });
         } catch(exception) {
           failures.push(item.document.originalFileName);
         }
@@ -4105,7 +4125,7 @@ function CustomerPrintFlow({publicCode,sessionToken,paymentOptions,localAgent,lo
       for(const candidate of supported) {
         const nativeGroup=nativeGroupNames?.[next.indexOf(candidate)]?.trim();
         const group=nativeGroup||customerBatchGroupName(candidate);
-        if(!updated[group])updated[group]={colourMode:"Mono",isDuplex:false};
+        if(!updated[group])updated[group]={copies:"1",colourMode:"Mono",isDuplex:false,advancedEnabled:false,paperSize:"A4",orientation:"AUTO"};
       }
       return updated;
     });
@@ -4113,7 +4133,7 @@ function CustomerPrintFlow({publicCode,sessionToken,paymentOptions,localAgent,lo
       const updated={...current};
       for(const candidate of supported) {
         const key=customerFileFingerprint(candidate);
-        if(!updated[key])updated[key]={copies:"1",custom:false,colourMode:"Mono",isDuplex:false};
+        if(!updated[key])updated[key]={...defaultsForGroup(fileGroupNames[key]??customerBatchGroupName(candidate)),custom:false};
       }
       return updated;
     });
