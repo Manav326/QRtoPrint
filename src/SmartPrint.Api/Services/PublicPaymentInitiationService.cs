@@ -1,5 +1,4 @@
 using Microsoft.EntityFrameworkCore;
-using SmartPrint.Api.Contracts;
 using SmartPrint.Api.Data;
 using SmartPrint.Api.Domain;
 using static SmartPrint.Api.Security.OpaqueTokenHasher;
@@ -168,7 +167,6 @@ public sealed class PublicPaymentInitiationService(
             return new PublicPaymentInitiationResult(PublicPaymentInitiationFailure.BatchQuoteInvalid);
         }
 
-        var payableJobIds = payableJobs.Select(job => job.Id).ToArray();
         var batchJobIds = jobs.Select(job => job.Id).ToArray();
         var unresolvedIndividualPayment = await db.PrintPayments.AsNoTracking().AnyAsync(
             item => item.TenantId == session.TenantId &&
