@@ -378,6 +378,8 @@ export default function PhotoStudio({
     setBusy(true);setError("");
     try{
       const pages=Math.ceil(parsedCopies/photosPerPage),jpegPages:Uint8Array[]=[];
+      let jpegByteLength=0;
+      const pdfStructureAllowance=4096+pages*1024;
       for(let page=0;page<pages;page++){
         const canvas=document.createElement("canvas");canvas.width=A4_WIDTH_PX;canvas.height=A4_HEIGHT_PX;
         const context=canvas.getContext("2d");if(!context)throw new Error("A print canvas could not be created.");
@@ -386,6 +388,9 @@ export default function PhotoStudio({
           {sourceColor:sourceBackgroundColor,targetColor:targetBackgroundColor,tolerance:backgroundTolerance},captionHeightMm);
         let blob=await canvasToBlob(canvas,"image/jpeg",.9);
         if(blob.size>MAX_FILE_BYTES)blob=await canvasToBlob(canvas,"image/jpeg",.82);
+        jpegByteLength+=blob.size;
+        if(jpegByteLength+pdfStructureAllowance>MAX_FILE_BYTES)
+          throw new Error("The prepared photo PDF would exceed SmartPrint's 20 MB file limit. Use a smaller original photo, choose fewer photos per job, or split the order into smaller batches.");
         jpegPages.push(new Uint8Array(await blob.arrayBuffer()));
       }
       const bytes=buildPhotoPdf(jpegPages);
