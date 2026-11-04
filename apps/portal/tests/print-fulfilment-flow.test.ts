@@ -208,3 +208,22 @@ test("local upload ticket retries preserve batch identity and renew the same exp
   assert.match(app, /Checkout has already started for this batch/);
   assert.match(entitlements, /!db\.PrintBatchPayments\.Any\(payment =>[\s\S]*?payment\.Status != "REJECTED"/);
 });
+
+
+test("batch file review delegates to a service that keeps atomicity and payment/refund safeguards", () => {
+  const endpoint = readApi("ShopPrintBatchReviewEndpoints.cs");
+  const service = read("../../../src/SmartPrint.Api/Services/ShopPrintBatchReviewService.cs");
+  const rules = read("../../../src/SmartPrint.Api/Domain/PrintBatchReviewRules.cs");
+  assert.match(endpoint, /IsShopOwner\(principal\)/);
+  assert.match(endpoint, /batchReview\.ApplyAsync/);
+  assert.match(service, /FOR UPDATE/);
+  assert.match(service, /CustomerSessionId/);
+  assert.match(service, /PrintBatchPayments/);
+  assert.match(service, /PAYMENT_REJECTED/);
+  assert.match(service, /PARTIALLY_REFUNDED/);
+  assert.match(service, /SHOP_REJECTED_BATCH_FILE/);
+  assert.match(service, /DbUpdateConcurrencyException/);
+  assert.match(service, /FileRequiresRefundReview/);
+  assert.match(rules, /reviewed\.Length is < 1 or > 20/);
+  assert.match(rules, /accepted\.Except\(reviewed\)/);
+});
