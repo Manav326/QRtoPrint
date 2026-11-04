@@ -3671,7 +3671,7 @@ function CustomerPrintFlow({publicCode,sessionToken,paymentOptions,localAgent,lo
   );
   const [uploadModeManuallySelected,setUploadModeManuallySelected]=useState(false);
 
-  const secureQueueFallbackEnabled = cloudAssistedPrintingEnabled || !localReady || !localAgent?.endpoints.length;
+  const secureQueueFallbackEnabled = cloudAssistedPrintingEnabled || !localAgent?.endpoints.length;
 
   useEffect(()=>{
     setUploadMode(current=>resolveCustomerUploadMode(
