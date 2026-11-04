@@ -174,7 +174,7 @@ export class ApiError extends Error {
   }
 }
 
-/** An explicit API rejection received before a local upload ticket was created. */
+/** A known API rejection with a safe next step; no print output was authorised. */
 export class LocalUploadPreflightError extends ApiError {
   constructor(message: string, status: number, code: string | null) {
     super(message, status, code);
