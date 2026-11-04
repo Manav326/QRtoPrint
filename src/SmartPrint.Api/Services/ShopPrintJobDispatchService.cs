@@ -29,6 +29,7 @@ public sealed record ShopPrintDispatchResult(
     ShopPrintDispatchFailure Failure,
     PrintJob? Job = null,
     PrintDispatchPrinterSnapshot? Printer = null,
+    string? OutputDestinationName = null,
     bool DuplicateRequest = false);
 
 public sealed class ShopPrintJobDispatchService(SmartPrintDbContext db)
@@ -261,8 +262,7 @@ public sealed class ShopPrintJobDispatchService(SmartPrintDbContext db)
         return new ShopPrintDispatchResult(
             ShopPrintDispatchFailure.None,
             Job: job,
-            Printer: new PrintDispatchPrinterSnapshot(
-                output, string.Empty, "PDF_EXPORT", agentId, string.Empty));
+            OutputDestinationName: output);
     }
 
     public async Task<ShopPrintDispatchResult> ConfirmOutputAsync(
