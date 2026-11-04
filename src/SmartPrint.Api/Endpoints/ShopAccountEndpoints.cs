@@ -177,9 +177,7 @@ public static class ShopAccountEndpoints
         shop.MapPut("/account", async (
             ShopOwnerAccountRequest request,
             ClaimsPrincipal principal,
-            SmartPrintDbContext db,
-            UserManager<AppUser> userManager,
-            SignInManager<AppUser> signInManager,
+            ShopAccountService accounts,
             CancellationToken ct) =>
         {
             if (!IsShopOwner(principal) || !TryGetTenantId(principal, out var tenantId) ||
@@ -188,8 +186,8 @@ public static class ShopAccountEndpoints
                 return Results.Forbid();
             }
 
-            if (!ShopOwnerAccountRules.TryNormalizeOwnerName(request.OwnerName, out var ownerName) ||
-                !ShopOwnerAccountRules.TryNormalizeEmail(request.Email, out var email))
+            var result = await accounts.UpdateOwnerAccountAsync(tenantId, userId, request, ct);
+            if (result.Failure == ShopOwnerAccountUpdateFailure.InvalidInput)
             {
                 return Results.ValidationProblem(new Dictionary<string, string[]>
                 {
@@ -197,91 +195,63 @@ public static class ShopAccountEndpoints
                 });
             }
 
-            var user = await userManager.FindByIdAsync(userId.ToString());
-            if (user is null || user.TenantId != tenantId)
-            {
+            if (result.Failure == ShopOwnerAccountUpdateFailure.OwnerNotFound)
                 return Results.Forbid();
-            }
 
-            var emailChanged = ShopOwnerAccountRules.EmailChanged(user.Email, email);
-            if (emailChanged)
+            if (result.Failure == ShopOwnerAccountUpdateFailure.CurrentPasswordRequired)
             {
-                if (string.IsNullOrWhiteSpace(request.CurrentPassword))
+                return Results.ValidationProblem(new Dictionary<string, string[]>
                 {
-                    return Results.ValidationProblem(new Dictionary<string, string[]>
-                    {
-                        ["currentPassword"] = ["Enter your current password to change your sign-in email."]
-                    });
-                }
-
-                var passwordCheck = await signInManager.CheckPasswordSignInAsync(
-                    user, request.CurrentPassword, lockoutOnFailure: true);
-                if (passwordCheck.IsLockedOut)
-                {
-                    return Results.Problem(statusCode: StatusCodes.Status423Locked,
-                        title: "This account is temporarily locked after repeated password attempts. Try again later.");
-                }
-
-                if (!passwordCheck.Succeeded)
-                {
-                    return Results.ValidationProblem(new Dictionary<string, string[]>
-                    {
-                        ["currentPassword"] = ["The current password is incorrect."]
-                    });
-                }
-
-                var existingUser = await userManager.FindByEmailAsync(email);
-                if (existingUser is not null && existingUser.Id != user.Id)
-                {
-                    return Results.Conflict(new
-                    {
-                        code = "email_already_registered",
-                        message = "That email address is already used by another account."
-                    });
-                }
+                    ["currentPassword"] = ["Enter your current password to change your sign-in email."]
+                });
             }
 
-            await using var transaction = await db.Database.BeginTransactionAsync(ct);
-            user.DisplayName = ownerName;
-            if (emailChanged)
+            if (result.Failure == ShopOwnerAccountUpdateFailure.AccountLocked)
             {
-                user.Email = email;
-                user.UserName = email;
+                return Results.Problem(statusCode: StatusCodes.Status423Locked,
+                    title: "This account is temporarily locked after repeated password attempts. Try again later.");
             }
 
-            var update = await userManager.UpdateAsync(user);
-            if (!update.Succeeded)
+            if (result.Failure == ShopOwnerAccountUpdateFailure.InvalidCurrentPassword)
             {
-                await transaction.RollbackAsync(ct);
-                return Results.ValidationProblem(update.Errors
-                    .GroupBy(error => error.Code)
-                    .ToDictionary(group => group.Key, group => group.Select(error => error.Description).ToArray()));
+                return Results.ValidationProblem(new Dictionary<string, string[]>
+                {
+                    ["currentPassword"] = ["The current password is incorrect."]
+                });
             }
 
-            await transaction.CommitAsync(ct);
+            if (result.Failure == ShopOwnerAccountUpdateFailure.EmailAlreadyRegistered)
+            {
+                return Results.Conflict(new
+                {
+                    code = "email_already_registered",
+                    message = "That email address is already used by another account."
+                });
+            }
+
+            if (result.Failure == ShopOwnerAccountUpdateFailure.IdentityUpdateFailed)
+                return Results.ValidationProblem(result.Errors ?? new Dictionary<string, string[]>());
+
+            var owner = result.User!;
             return Results.Ok(new
             {
-                OwnerName = user.DisplayName,
-                OwnerEmail = user.Email ?? string.Empty,
-                EmailChanged = emailChanged
+                OwnerName = owner.DisplayName,
+                OwnerEmail = owner.Email ?? string.Empty,
+                EmailChanged = result.EmailChanged
             });
         }).RequireRateLimiting("authentication");
 
         shop.MapPut("/profile", async (
             ShopProfileRequest request,
             ClaimsPrincipal principal,
-            SmartPrintDbContext db,
-            TenantEntitlementService entitlements,
+            ShopAccountService accounts,
             CancellationToken ct) =>
         {
             if (!IsShopOwner(principal) || !TryGetTenantId(principal, out var tenantId))
-            {
                 return Results.Forbid();
-            }
 
-            if (string.IsNullOrWhiteSpace(request.DisplayName) || request.DisplayName.Trim().Length > 180 ||
-                !IsHexColor(request.AccentColor) ||
-                (request.LogoUrl is not null && (!Uri.TryCreate(request.LogoUrl, UriKind.Absolute, out var logoUri) || logoUri.Scheme != Uri.UriSchemeHttps)))
+            var result = await accounts.UpdateProfileAsync(tenantId, request, ct);
+            if (result.Failure == ShopProfileUpdateFailure.InvalidInput)
             {
                 return Results.ValidationProblem(new Dictionary<string, string[]>
                 {
@@ -289,27 +259,23 @@ public static class ShopAccountEndpoints
                 });
             }
 
-            var plan = await entitlements.GetForTenantAsync(tenantId, ct);
-            var requestsCustomBranding = request.LogoUrl is not null ||
-                !string.Equals(request.AccentColor, "#7662E8", StringComparison.OrdinalIgnoreCase);
-            if (requestsCustomBranding && !plan.WhiteLabelEnabled)
+            if (result.Failure == ShopProfileUpdateFailure.CustomBrandingNotIncluded)
             {
                 return Results.Problem(statusCode: StatusCodes.Status403Forbidden,
                     title: "Custom shop branding is not included in this shop's current plan.");
             }
 
-            var profile = await db.ShopProfiles.SingleOrDefaultAsync(x => x.TenantId == tenantId, ct);
-            if (profile is null)
-            {
+            if (result.Failure == ShopProfileUpdateFailure.NotFound)
                 return Results.NotFound();
-            }
 
-            profile.DisplayName = request.DisplayName.Trim();
-            profile.LogoUrl = request.LogoUrl;
-            profile.AccentColor = request.AccentColor.ToUpperInvariant();
-            profile.UpdatedUtc = DateTimeOffset.UtcNow;
-            await db.SaveChangesAsync(ct);
-            return Results.Ok(new { profile.DisplayName, profile.LogoUrl, profile.AccentColor, profile.UpdatedUtc });
+            var profile = result.Profile!;
+            return Results.Ok(new
+            {
+                profile.DisplayName,
+                profile.LogoUrl,
+                profile.AccentColor,
+                profile.UpdatedUtc
+            });
         });
 
         return shop;
