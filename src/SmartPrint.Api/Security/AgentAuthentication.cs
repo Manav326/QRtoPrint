@@ -18,13 +18,13 @@ public static class AgentAuthentication
         {
             return null;
         }
-    
+
         var secret = context.Request.Headers["X-Print-Agent-Secret"].FirstOrDefault();
         if (string.IsNullOrWhiteSpace(secret) || secret.Length > 256)
         {
             return null;
         }
-    
+
         var device = await db.AgentDevices.SingleOrDefaultAsync(
             item => item.Id == agentId && item.RevokedUtc == null && item.Status != "Revoked",
             cancellationToken);
@@ -32,4 +32,9 @@ public static class AgentAuthentication
         {
             return null;
         }
+
+        var suppliedHash = Convert.FromHexString(HashOpaqueToken(secret));
+        var storedHash = Convert.FromHexString(device.SecretHash);
+        return CryptographicOperations.FixedTimeEquals(suppliedHash, storedHash) ? device : null;
+    }
 }

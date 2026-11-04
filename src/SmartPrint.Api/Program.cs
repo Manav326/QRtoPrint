@@ -2852,11 +2852,6 @@ static async Task<object?> GetLocalAgentInfoAsync(
 
 
 
-    var suppliedHash = Convert.FromHexString(HashOpaqueToken(secret));
-    var storedHash = Convert.FromHexString(device.SecretHash);
-    return CryptographicOperations.FixedTimeEquals(suppliedHash, storedHash) ? device : null;
-}
-
 static string? BuildUpiUri(Guid paymentId, string method, string? upiId, string? payeeName, long amountMinor, string currency, string jobNumber)
 {
     if (method != "UPI" || string.IsNullOrWhiteSpace(upiId))
