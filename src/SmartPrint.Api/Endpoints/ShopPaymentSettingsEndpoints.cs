@@ -45,18 +45,14 @@ public static partial class ShopPaymentEndpoints
         shop.MapPut("/payment-settings", async (
             ShopPaymentSettingsRequest request,
             ClaimsPrincipal principal,
-            SmartPrintDbContext db,
+            ShopPaymentSettingsService settingsService,
             CancellationToken ct) =>
         {
             if (!IsShopOwner(principal) || !TryGetTenantId(principal, out var tenantId))
-            {
                 return Results.Forbid();
-            }
 
-            var upiId = request.UpiId?.Trim();
-            var payeeName = request.PayeeName?.Trim();
-            if (request.UpiEnabled &&
-                (!IsValidUpiId(upiId) || string.IsNullOrWhiteSpace(payeeName) || payeeName.Length > 120))
+            var result = await settingsService.UpdateAsync(tenantId, request, ct);
+            if (result.Failure == ShopPaymentSettingsUpdateFailure.InvalidUpiConfiguration)
             {
                 return Results.ValidationProblem(new Dictionary<string, string[]>
                 {
@@ -64,7 +60,7 @@ public static partial class ShopPaymentEndpoints
                 });
             }
 
-            if (upiId is { Length: > 160 })
+            if (result.Failure == ShopPaymentSettingsUpdateFailure.UpiIdTooLong)
             {
                 return Results.ValidationProblem(new Dictionary<string, string[]>
                 {
@@ -72,7 +68,7 @@ public static partial class ShopPaymentEndpoints
                 });
             }
 
-            if (!request.UpiEnabled && !request.CashEnabled)
+            if (result.Failure == ShopPaymentSettingsUpdateFailure.NoPaymentMethodEnabled)
             {
                 return Results.ValidationProblem(new Dictionary<string, string[]>
                 {
@@ -80,21 +76,10 @@ public static partial class ShopPaymentEndpoints
                 });
             }
 
-            var settings = await db.ShopPaymentProfiles.SingleOrDefaultAsync(
-                item => item.TenantId == tenantId, ct);
-            if (settings is null)
-            {
+            if (result.Failure == ShopPaymentSettingsUpdateFailure.NotFound)
                 return Results.NotFound();
-            }
 
-            settings.UpiEnabled = request.UpiEnabled;
-            settings.UpiId = request.UpiEnabled ? upiId : null;
-            settings.PayeeName = request.UpiEnabled ? payeeName : null;
-            settings.CashEnabled = request.CashEnabled;
-            settings.InstantPaymentEnabled = request.InstantPaymentEnabled;
-            settings.UpdatedUtc = DateTimeOffset.UtcNow;
-            await db.SaveChangesAsync(ct);
-
+            var settings = result.Settings!;
             return Results.Ok(new
             {
                 settings.UpiEnabled,
@@ -105,5 +90,6 @@ public static partial class ShopPaymentEndpoints
                 settings.UpdatedUtc
             });
         });
+
     }
 }
