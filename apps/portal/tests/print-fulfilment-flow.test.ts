@@ -19,7 +19,7 @@ test("owner quote edits are sent through the existing print-job API", () => {
   const api = read("../src/api.ts");
   assert.match(app, /updateShopPrintJobSettings\(tokens\.accessToken,job\.id,settings\)/);
   assert.match(api, /\/api\/v1\/shop\/print-jobs\/\$\{jobId\}\/settings/);
-  assert.match(app, /revised quote .* sent to the customer for approval/);
+  assert.match(app, /Revised quote .* sent to the customer for approval/);
   assert.match(app, /setPrintSettingsByJobId\(current=>/);
   assert.match(app, /copies:candidate\.copies/);
   assert.match(app, /paperSize,/);
