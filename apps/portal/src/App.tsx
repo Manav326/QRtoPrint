@@ -1128,7 +1128,7 @@ function ShopConsole({ tokens, onSignOut, dark, onToggleTheme }: { tokens: AuthT
       const blob = await downloadShopDocument(tokens.accessToken, job.id, variant);
       const isSavedOutput = variant === "output";
       const supportedTypes = new Set(["application/pdf", "image/jpeg", "image/png"]);
-      const storedType = isSavedOutput ? "application/pdf" : (job.document.mediaType || "").split(";")[0].trim().toLowerCase();
+      const storedType=(job.document.mediaType||"").split(";")[0].trim().toLowerCase();
       const responseType = (blob.type || "").split(";")[0].trim().toLowerCase();
       const extension = job.document.originalFileName.toLowerCase().split(".").pop();
       const extensionType = extension === "pdf" ? "application/pdf" : extension === "jpg" || extension === "jpeg" ? "image/jpeg" : extension === "png" ? "image/png" : "";
