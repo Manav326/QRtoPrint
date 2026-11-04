@@ -206,6 +206,7 @@ export default function PhotoStudio({
 
   useEffect(() => {
     const previousOverflow = document.body.style.overflow;
+    const previouslyFocused = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     document.body.style.overflow = "hidden";
     const focusableSelector = 'button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
     const focusableElements = () => Array.from(dialogRef.current?.querySelectorAll<HTMLElement>(focusableSelector) ?? []);
@@ -239,6 +240,7 @@ export default function PhotoStudio({
     return () => {
       document.removeEventListener("keydown", handleDialogKeydown, true);
       document.body.style.overflow = previousOverflow;
+      previouslyFocused?.focus();
     };
   }, []);
 
