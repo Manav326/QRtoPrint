@@ -125,6 +125,11 @@ public sealed class AgentLocalQueueStoreTests
             await store.RefreshStagedLocalUploadLeaseAsync(
                 job.Id, job.Sha256, job.SizeBytes, renewedLease, CancellationToken.None);
 
+            // Simulate the background sweep acting on its earlier expired snapshot.
+            // The store must re-read the manifest and leave the renewed file intact.
+            Assert.False(await store.DeleteExpiredLocalUploadAsync(
+                job.Id, expiredLease.AddSeconds(5), CancellationToken.None));
+
             var refreshed = store.Find(job.Id)!;
             Assert.Equal(renewedLease, refreshed.LeaseExpiresUtc);
             Assert.Equal("LOCAL_UPLOAD_STAGED", refreshed.State);
