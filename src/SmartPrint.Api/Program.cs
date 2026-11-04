@@ -5829,9 +5829,7 @@ publicApi.MapPost("/sessions/current/jobs", async (
         .SingleOrDefaultAsync(ct);
     var localAgentAvailable = await GetLocalAgentInfoAsync(
         db, session.TenantId, stationDefaultPrinterId, now, ct) is not null;
-    var queueFallbackRequested = string.Equals(
-        context.Request.Headers["X-Print-Queue-Fallback"].FirstOrDefault(), "true", StringComparison.OrdinalIgnoreCase);
-    if (!subscription.CloudAssistedPrintingEnabled && localAgentAvailable && !queueFallbackRequested)
+    if (!subscription.CloudAssistedPrintingEnabled && localAgentAvailable)
     {
         return Results.Problem(
             statusCode: StatusCodes.Status403Forbidden,
