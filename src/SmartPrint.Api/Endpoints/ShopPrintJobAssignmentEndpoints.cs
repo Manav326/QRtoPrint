@@ -67,7 +67,7 @@ public static class ShopPrintJobAssignmentEndpoints
 
             return Results.Ok(new
             {
-                result.JobId,
+                Id = result.JobId,
                 result.BatchId,
                 Status = result.Status,
                 PrinterDeviceId = result.PrinterDeviceId,
