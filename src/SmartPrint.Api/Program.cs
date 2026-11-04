@@ -398,6 +398,8 @@ shop.MapShopCustomerEndpoints();
 
 shop.MapShopPrintJobQueryEndpoints();
 
+shop.MapShopReportEndpoints();
+
 shop.MapShopPrintJobReadEndpoints();
 
 shop.MapShopPrintJobAssignmentEndpoints();
