@@ -47,30 +47,14 @@ public static class ShopPricingEndpoints
         shop.MapPut("/pricing", async (
             ShopPricingRequest request,
             ClaimsPrincipal principal,
-            SmartPrintDbContext db,
+            ShopPricingService pricingService,
             CancellationToken ct) =>
         {
             if (!IsShopOwner(principal) || !TryGetTenantId(principal, out var tenantId))
-            {
                 return Results.Forbid();
-            }
 
-            const long maximumRateMinor = 100_000;
-            const long maximumMinimumChargeMinor = 10_000_000;
-            var rates = new[]
-            {
-                request.MonoPerSideMinor,
-                request.ColourPerSideMinor,
-                request.MonoDuplexPerSheetMinor,
-                request.ColourDuplexPerSheetMinor,
-                request.Photo35x45Minor,
-                request.Photo25x35Minor,
-                request.Photo2x2Minor,
-                request.Photo4x6Minor
-            };
-            if (rates.Any(amount => amount < 0 || amount > maximumRateMinor) ||
-                request.MinimumChargeMinor < 0 || request.MinimumChargeMinor > maximumMinimumChargeMinor ||
-                request.MonoPerSideMinor == 0 || request.ColourPerSideMinor == 0)
+            var result = await pricingService.UpdateAsync(tenantId, request, ct);
+            if (result.Failure == ShopPricingUpdateFailure.InvalidPricing)
             {
                 return Results.ValidationProblem(new Dictionary<string, string[]>
                 {
@@ -78,26 +62,10 @@ public static class ShopPricingEndpoints
                 });
             }
 
-            var pricing = await db.ShopPricingProfiles.SingleOrDefaultAsync(item => item.TenantId == tenantId, ct);
-            if (pricing is null)
-            {
+            if (result.Failure == ShopPricingUpdateFailure.NotFound)
                 return Results.NotFound();
-            }
 
-            pricing.MonoPerSideMinor = request.MonoPerSideMinor;
-            pricing.ColourPerSideMinor = request.ColourPerSideMinor;
-            pricing.MonoDuplexPerSheetMinor = request.MonoDuplexPerSheetMinor;
-            pricing.ColourDuplexPerSheetMinor = request.ColourDuplexPerSheetMinor;
-            pricing.MinimumChargeMinor = request.MinimumChargeMinor;
-            pricing.Photo35x45Minor = request.Photo35x45Minor;
-            pricing.Photo25x35Minor = request.Photo25x35Minor;
-            pricing.Photo2x2Minor = request.Photo2x2Minor;
-            pricing.Photo4x6Minor = request.Photo4x6Minor;
-            pricing.IsConfigured = true;
-            pricing.Version++;
-            pricing.UpdatedUtc = DateTimeOffset.UtcNow;
-            await db.SaveChangesAsync(ct);
-
+            var pricing = result.Pricing!;
             return Results.Ok(new
             {
                 pricing.IsConfigured,
@@ -106,10 +74,10 @@ public static class ShopPricingEndpoints
                 pricing.MonoDuplexPerSheetMinor,
                 pricing.ColourDuplexPerSheetMinor,
                 pricing.MinimumChargeMinor,
-                    pricing.Photo35x45Minor,
-                    pricing.Photo25x35Minor,
-                    pricing.Photo2x2Minor,
-                    pricing.Photo4x6Minor,
+                pricing.Photo35x45Minor,
+                pricing.Photo25x35Minor,
+                pricing.Photo2x2Minor,
+                pricing.Photo4x6Minor,
                 pricing.Version,
                 pricing.UpdatedUtc
             });
