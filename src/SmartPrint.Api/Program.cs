@@ -5846,6 +5846,7 @@ publicApi.MapPost("/sessions/current/jobs", async (
             existing.PaperSize != requestedPaperSize ||
             existing.IsDuplex != requestedDuplex ||
             existing.Orientation != requestedOrientation ||
+            (requestedBatchName is not null && existing.BatchName != requestedBatchName) ||
             existingDocument.OriginalFileName != originalName ||
             existingDocument.SizeBytes != file.Length ||
             !string.Equals(existingDocument.Sha256, suppliedSha, StringComparison.OrdinalIgnoreCase))
@@ -5990,6 +5991,7 @@ publicApi.MapPost("/sessions/current/jobs", async (
                 racedJob.PaperSize != requestedPaperSize ||
                 racedJob.IsDuplex != requestedDuplex ||
                 racedJob.Orientation != requestedOrientation ||
+                (requestedBatchName is not null && racedJob.BatchName != requestedBatchName) ||
                 racedDocument.OriginalFileName != originalName ||
                 racedDocument.SizeBytes != file.Length ||
                 !string.Equals(racedDocument.Sha256, stored.Sha256, StringComparison.OrdinalIgnoreCase))
@@ -6242,6 +6244,8 @@ publicApi.MapPost("/sessions/current/local-upload-tickets", async (
             existing.SizeBytes != request.SizeBytes ||
             !string.Equals(existing.Sha256, sha, StringComparison.OrdinalIgnoreCase) ||
             existing.OriginalFileName != originalName ||
+            (request.BatchId is Guid requestedBatchId && existing.BatchId != requestedBatchId) ||
+            (requestedBatchName is not null && existing.BatchName != requestedBatchName) ||
             PrintBatchGroupRules.Normalize(existing.BatchGroupName) != batchGroupName ||
             existing.ColourMode != request.ColourMode ||
             existing.PaperSize != request.PaperSize ||
@@ -6249,7 +6253,7 @@ publicApi.MapPost("/sessions/current/local-upload-tickets", async (
             existing.Copies != request.Copies ||
             existing.Orientation != request.Orientation)
         {
-            return Results.Conflict(new { code = "local_upload_idempotency_conflict", message = "This upload attempt key is already associated with a different document." });
+            return Results.Conflict(new { code = "local_upload_idempotency_conflict", message = "This upload attempt key is already associated with a different document, batch or set of print options." });
         }
 
         // Keep the ticket identity after its LAN claim window expires. HTTPS
@@ -6407,7 +6411,8 @@ publicApi.MapPost("/sessions/current/local-upload-tickets", async (
     if (racedTicket is not null)
     {
         await transaction.RollbackAsync(ct);
-        var sameRequest = racedTicket.BatchId == batchId &&
+        var sameRequest = (request.BatchId is null || racedTicket.BatchId == request.BatchId.Value) &&
+            (requestedBatchName is null || racedTicket.BatchName == requestedBatchName) &&
             racedTicket.SizeBytes == request.SizeBytes &&
             string.Equals(racedTicket.Sha256, sha, StringComparison.OrdinalIgnoreCase) &&
             racedTicket.OriginalFileName == originalName &&
