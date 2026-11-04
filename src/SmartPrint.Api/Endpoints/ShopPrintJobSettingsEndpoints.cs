@@ -1,13 +1,9 @@
-using System.Security.Claims;
-using System.Text.Json;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
-using Microsoft.EntityFrameworkCore;
 using SmartPrint.Api.Contracts;
-using SmartPrint.Api.Data;
 using SmartPrint.Api.Domain;
-using SmartPrint.Api.Pricing;
+using SmartPrint.Api.Services;
 using static SmartPrint.Api.Security.EndpointIdentity;
 
 namespace SmartPrint.Api.Endpoints;
@@ -20,39 +16,42 @@ public static class ShopPrintJobSettingsEndpoints
             Guid jobId,
             UpdatePrintJobSettingsRequest request,
             ClaimsPrincipal principal,
-            SmartPrintDbContext db,
+            ShopPrintJobSettingsService settingsService,
             CancellationToken ct) =>
         {
-            if (!IsShopOwner(principal) || !TryGetTenantId(principal, out var tenantId)) return Results.Forbid();
+            if (!IsShopOwner(principal) || !TryGetTenantId(principal, out var tenantId))
+            {
+                return Results.Forbid();
+            }
 
-            var colourMode = request.ColourMode?.Trim();
-            var paperSize = request.PaperSize?.Trim().ToUpperInvariant();
-            var orientation = request.Orientation?.Trim().ToUpperInvariant();
-            if (colourMode is not ("Mono" or "Colour") ||
-                paperSize is not ("A4" or "A3" or "A5" or "LETTER" or "LEGAL") ||
-                request.Copies is < 1 or > 100 ||
-                orientation is not ("AUTO" or "PORTRAIT" or "LANDSCAPE"))
+            if (!PrintJobSettingsRules.TryNormalize(
+                    request.ColourMode,
+                    request.PaperSize,
+                    request.IsDuplex,
+                    request.Copies,
+                    request.Orientation,
+                    out var settings))
+            {
                 return Results.ValidationProblem(new Dictionary<string, string[]>
                 {
                     ["printOptions"] = ["Choose supported paper, orientation, colour, sides and 1–100 copies."]
                 });
+            }
 
-            await using var transaction = await db.Database.BeginTransactionAsync(ct);
-            var lockedJobs = await db.PrintJobs.FromSqlInterpolated(
-                $"SELECT * FROM \"PrintJobs\" WHERE \"Id\" = {jobId} AND \"TenantId\" = {tenantId} FOR UPDATE")
-                .ToListAsync(ct);
-            var job = lockedJobs.SingleOrDefault();
-            if (job is null)
+            var result = await settingsService.ReviseAsync(
+                tenantId,
+                GetActorId(principal),
+                jobId,
+                settings,
+                ct);
+
+            if (result.Failure == ShopPrintJobSettingsFailure.NotFound)
             {
-                await transaction.RollbackAsync(ct);
                 return Results.NotFound();
             }
 
-            if (job.PrintKind != "DOCUMENT" ||
-                job.Status is not ("AWAITING_CONFIGURATION" or "AWAITING_CUSTOMER_APPROVAL" or
-                    "AWAITING_SHOP_APPROVAL" or "AWAITING_PAYMENT" or "QUOTE_EXPIRED" or "PAYMENT_REJECTED"))
+            if (result.Failure == ShopPrintJobSettingsFailure.Locked)
             {
-                await transaction.RollbackAsync(ct);
                 return Results.Conflict(new
                 {
                     code = "print_settings_locked",
@@ -60,14 +59,8 @@ public static class ShopPrintJobSettingsEndpoints
                 });
             }
 
-            var hasStartedPayment = await db.PrintPayments.AsNoTracking().AnyAsync(payment =>
-                payment.TenantId == tenantId && payment.PrintJobId == jobId && payment.Status != "REJECTED", ct);
-            var batchPaymentStarted = job.BatchId is Guid batchId &&
-                await db.PrintBatchPayments.AsNoTracking().AnyAsync(payment =>
-                    payment.TenantId == tenantId && payment.BatchId == batchId && payment.Status != "REJECTED", ct);
-            if (hasStartedPayment || batchPaymentStarted)
+            if (result.Failure == ShopPrintJobSettingsFailure.PaymentAlreadyStarted)
             {
-                await transaction.RollbackAsync(ct);
                 return Results.Conflict(new
                 {
                     code = "payment_already_started",
@@ -75,63 +68,42 @@ public static class ShopPrintJobSettingsEndpoints
                 });
             }
 
-            var pricing = await db.ShopPricingProfiles.AsNoTracking()
-                .SingleOrDefaultAsync(item => item.TenantId == tenantId && item.IsConfigured, ct);
-            if (pricing is null)
+            if (result.Failure == ShopPrintJobSettingsFailure.PricingNotConfigured)
             {
-                await transaction.RollbackAsync(ct);
-                return Results.Conflict(new { code = "shop_pricing_not_configured", message = "Configure shop print prices before revising this quote." });
+                return Results.Conflict(new
+                {
+                    code = "shop_pricing_not_configured",
+                    message = "Configure shop print prices before revising this quote."
+                });
             }
 
-            long amount;
-            long[] pageRefundAllocations;
-            try
+            if (result.Failure == ShopPrintJobSettingsFailure.DuplexPricingNotConfigured)
             {
-                amount = PricingCalculator.Calculate(job.PageCount, request.Copies, colourMode, request.IsDuplex, pricing);
-                pageRefundAllocations = PricingCalculator.CalculatePageRefundAllocations(
-                    job.PageCount, request.Copies, colourMode, request.IsDuplex, pricing);
-            }
-            catch (DuplexPricingNotConfiguredException exception)
-            {
-                await transaction.RollbackAsync(ct);
-                return Results.Conflict(new { code = "duplex_pricing_not_configured", message = exception.Message });
+                return Results.Conflict(new
+                {
+                    code = "duplex_pricing_not_configured",
+                    message = result.Message ?? "Duplex printing is not currently priced by this shop."
+                });
             }
 
-            var now = DateTimeOffset.UtcNow;
-            var previousStatus = job.Status;
-            job.ColourMode = colourMode;
-            job.PaperSize = paperSize;
-            job.IsDuplex = request.IsDuplex;
-            job.Copies = request.Copies;
-            job.Orientation = orientation;
-            job.Currency = "INR";
-            job.QuotedAmountMinor = amount;
-            job.PageRefundAllocationsJson = JsonSerializer.Serialize(pageRefundAllocations);
-            job.PricingVersion = pricing.Version;
-            job.QuoteExpiresUtc = now.AddMinutes(10);
-            job.Status = "AWAITING_CUSTOMER_APPROVAL";
-            job.FailureCode = null;
-            job.UpdatedUtc = now;
-            db.PrintJobEvents.Add(new PrintJobEvent
-            {
-                TenantId = tenantId,
-                PrintJobId = job.Id,
-                PreviousStatus = previousStatus,
-                NewStatus = job.Status,
-                ActorType = "ShopUser",
-                ActorId = GetActorId(principal),
-                ReasonCode = "SHOP_REVISED_PRINT_SETTINGS_CUSTOMER_APPROVAL_REQUIRED",
-                CreatedUtc = now
-            });
-
-            await db.SaveChangesAsync(ct);
-            await transaction.CommitAsync(ct);
+            var job = result.Job!;
             return Results.Ok(new
             {
-                job.Id, job.JobNumber, job.Status, job.PageCount, job.Copies,
-                job.ColourMode, job.PaperSize, job.IsDuplex, job.Orientation,
-                job.Currency, job.QuotedAmountMinor, AmountMajor = amount / 100m,
-                job.PricingVersion, job.QuoteExpiresUtc, CustomerApprovalRequired = true
+                job.Id,
+                job.JobNumber,
+                job.Status,
+                job.PageCount,
+                job.Copies,
+                job.ColourMode,
+                job.PaperSize,
+                job.IsDuplex,
+                job.Orientation,
+                job.Currency,
+                job.QuotedAmountMinor,
+                AmountMajor = job.QuotedAmountMinor / 100m,
+                job.PricingVersion,
+                job.QuoteExpiresUtc,
+                CustomerApprovalRequired = true
             });
         });
 
