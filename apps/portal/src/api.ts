@@ -594,6 +594,10 @@ export function getShopSubscription(token: string) {
   return apiRequest<ShopSubscriptionSummary>("/api/v1/shop/subscription", {}, token);
 }
 
+export function getShopPayments(token: string) {
+  return apiRequest<ShopPayment[]>("/api/v1/shop/payments", {}, token);
+}
+
 export async function loadShopData(token: string, queueSearch = "") {
   const [profile, printers, stations, pricing, printJobs, agentDevices, paymentSettings, payments, refunds, subscription] = await Promise.all([
     apiRequest<ShopProfile>("/api/v1/shop/profile", {}, token),
@@ -603,7 +607,7 @@ export async function loadShopData(token: string, queueSearch = "") {
     getShopPrintJobsPage(token, 0, 100, queueSearch),
     getShopAgentDevices(token),
     apiRequest<ShopPaymentSettings>("/api/v1/shop/payment-settings", {}, token),
-    apiRequest<ShopPayment[]>("/api/v1/shop/payments", {}, token),
+    getShopPayments(token),
     apiRequest<ShopRefund[]>("/api/v1/shop/refunds", {}, token),
     getShopSubscription(token)
   ]);

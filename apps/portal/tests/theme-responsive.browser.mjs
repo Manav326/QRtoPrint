@@ -81,30 +81,109 @@ async function preparePage(context, route) {
       timeZone: "Asia/Kolkata",
       whiteLabelEnabled: false
     };
+    const sampleJobs = [
+      { id: "10000000-0000-4000-8000-000000000001", jobNumber: "SP-5101",
+        status: "UPLOADED", pageCount: 4, copies: 1, colourMode: "Mono", paperSize: "A4", isDuplex: false,
+        currency: "INR", quotedAmountMinor: 1200, createdUtc: "2026-11-04T15:10:00Z",
+        document: { originalFileName: "Office application.pdf", mediaType: "application/pdf", sizeBytes: 182400 } },
+      { id: "10000000-0000-4000-8000-000000000002", jobNumber: "SP-5201",
+        batchId: "20000000-0000-4000-8000-000000000001", batchName: "Exam preparation",
+        status: "AWAITING_SHOP_APPROVAL", pageCount: 3, copies: 1, colourMode: "Mono", paperSize: "A4", isDuplex: false,
+        currency: "INR", quotedAmountMinor: 900, createdUtc: "2026-11-04T14:55:00Z",
+        document: { originalFileName: "Question paper.pdf", mediaType: "application/pdf", sizeBytes: 140000 } },
+      { id: "10000000-0000-4000-8000-000000000003", jobNumber: "SP-5202",
+        batchId: "20000000-0000-4000-8000-000000000001", batchName: "Exam preparation",
+        status: "AWAITING_SHOP_APPROVAL", pageCount: 2, copies: 1, colourMode: "Mono", paperSize: "A4", isDuplex: true,
+        currency: "INR", quotedAmountMinor: 500, createdUtc: "2026-11-04T14:56:00Z",
+        document: { originalFileName: "Answer sheet.pdf", mediaType: "application/pdf", sizeBytes: 92000 } },
+      { id: "10000000-0000-4000-8000-000000000004", jobNumber: "SP-5301",
+        batchId: "20000000-0000-4000-8000-000000000002", batchName: "Student documents",
+        status: "AWAITING_CUSTOMER_PAYMENT", pageCount: 2, copies: 1, colourMode: "Colour", paperSize: "A4", isDuplex: false,
+        currency: "INR", quotedAmountMinor: 1600, createdUtc: "2026-11-04T14:40:00Z",
+        document: { originalFileName: "ID card.pdf", mediaType: "application/pdf", sizeBytes: 81000 } },
+      { id: "10000000-0000-4000-8000-000000000005", jobNumber: "SP-5302",
+        batchId: "20000000-0000-4000-8000-000000000002", batchName: "Student documents",
+        status: "AWAITING_CUSTOMER_PAYMENT", pageCount: 1, copies: 1, colourMode: "Colour", paperSize: "A4", isDuplex: false,
+        currency: "INR", quotedAmountMinor: 900, createdUtc: "2026-11-04T14:41:00Z",
+        document: { originalFileName: "Application.pdf", mediaType: "application/pdf", sizeBytes: 65000 } },
+      { id: "10000000-0000-4000-8000-000000000006", jobNumber: "SP-5401",
+        status: "SPOOLER_ACCEPTED", pageCount: 6, copies: 1, colourMode: "Mono", paperSize: "A4", isDuplex: true,
+        currency: "INR", quotedAmountMinor: 1800, createdUtc: "2026-11-04T14:20:00Z",
+        printerDeviceId: "30000000-0000-4000-8000-000000000001", printerName: "HP LaserJet Pro MFP",
+        document: { originalFileName: "Science revision.pdf", mediaType: "application/pdf", sizeBytes: 270000 } },
+      { id: "10000000-0000-4000-8000-000000000008", jobNumber: "SP-5402",
+        status: "OUTPUT_UNCONFIRMED", failureCode: "OUTPUT_NOT_OBSERVED",
+        pageCount: 2, copies: 1, colourMode: "Mono", paperSize: "A4", isDuplex: false,
+        currency: "INR", quotedAmountMinor: 600, createdUtc: "2026-11-04T14:15:00Z",
+        printerDeviceId: "30000000-0000-4000-8000-000000000001", printerName: "HP LaserJet Pro MFP",
+        document: { originalFileName: "Receipt copy.pdf", mediaType: "application/pdf", sizeBytes: 72000 } },
+      { id: "10000000-0000-4000-8000-000000000007", jobNumber: "SP-5501",
+        status: "COMPLETED", pageCount: 2, copies: 1, colourMode: "Colour", paperSize: "A4", isDuplex: false,
+        currency: "INR", quotedAmountMinor: 1000, createdUtc: "2026-11-04T13:50:00Z",
+        outputType: "PHYSICAL", outputConfirmedUtc: "2026-11-04T14:05:00Z",
+        document: { originalFileName: "Event flyer.pdf", mediaType: "application/pdf", sizeBytes: 112000 } }
+    ];
+    const samplePayments = [
+      { id: "40000000-0000-4000-8000-000000000001",
+        printJobId: "10000000-0000-4000-8000-000000000004",
+        jobNumber: "Batch · SP-5301", documentName: "ID card.pdf, Application.pdf",
+        batchPaymentId: "40000000-0000-4000-8000-000000000001", batchFileCount: 2,
+        method: "UPI", status: "CUSTOMER_REPORTED", amountMinor: 2500, refundedAmountMinor: 0,
+        currency: "INR", paymentReference: "UPI-REF-2048",
+        createdUtc: "2026-11-04T14:42:00Z", updatedUtc: "2026-11-04T14:42:00Z" },
+      { id: "40000000-0000-4000-8000-000000000002",
+        printJobId: "10000000-0000-4000-8000-000000000006",
+        jobNumber: "SP-5401", documentName: "Science revision.pdf",
+        batchPaymentId: null, batchFileCount: null,
+        method: "UPI", status: "VERIFIED", amountMinor: 1800, refundedAmountMinor: 0,
+        currency: "INR", paymentReference: "UPI-REF-2039",
+        createdUtc: "2026-11-04T14:10:00Z", updatedUtc: "2026-11-04T14:12:00Z",
+        verifiedUtc: "2026-11-04T14:12:00Z" }
+    ];
+    const samplePrinters = [{
+      id: "30000000-0000-4000-8000-000000000001",
+      displayName: "HP LaserJet Pro MFP", manufacturer: "HP", model: "MFP M428",
+      connectionType: "USB", outputMode: "PHYSICAL", connectionAddress: null, queueName: "HP LaserJet Pro MFP",
+      capabilitiesJson: "{}", status: "Ready", isActive: true, isDefault: true,
+      agentDeviceId: "50000000-0000-4000-8000-000000000001", lastSeenUtc: new Date().toISOString()
+    }];
+    const sampleAgents = [{
+      id: "50000000-0000-4000-8000-000000000001", deviceName: "Front desk PC",
+      status: "Online", createdUtc: "2026-11-01T09:00:00Z", lastSeenUtc: new Date().toISOString(),
+      revokedUtc: null, printerCount: 1, localEndpoints: []
+    }];
     await page.route("**/api/v1/shop/**", async request => {
       const path = new URL(request.request().url()).pathname;
       const value = path.endsWith("/profile")
         ? profile
-        : path.endsWith("/customers")
-          ? { page: 1, pageSize: 20, totalCount: 0, items: [] }
-          : path.endsWith("/reports/summary")
-            ? {
-                periodDays: 30,
-                fromUtc: "2026-01-01T00:00:00Z",
-                toUtc: "2026-01-31T00:00:00Z",
-                generatedUtc: "2026-01-31T00:00:00Z",
-                totalJobs: 0,
-                completedJobs: 0,
-                outputUnconfirmedJobs: 0,
-                pagesRequested: 0,
-                pendingPaymentCount: 0,
-                jobsByStatus: [],
-                verifiedCollectionsByMethod: [],
-                refundsRecordedByMethod: []
-              }
-            : path.endsWith("/pricing") || path.endsWith("/payment-settings") || path.endsWith("/subscription")
-              ? null
-              : [];
+        : path.endsWith("/print-jobs")
+          ? sampleJobs
+          : path.endsWith("/payments")
+            ? samplePayments
+            : path.endsWith("/printers")
+              ? samplePrinters
+              : path.endsWith("/agent-devices")
+                ? sampleAgents
+                : path.endsWith("/customers")
+                  ? { page: 1, pageSize: 20, totalCount: 0, items: [] }
+                  : path.endsWith("/reports/summary")
+                    ? {
+                        periodDays: 30,
+                        fromUtc: "2026-01-01T00:00:00Z",
+                        toUtc: "2026-01-31T00:00:00Z",
+                        generatedUtc: "2026-01-31T00:00:00Z",
+                        totalJobs: 0,
+                        completedJobs: 0,
+                        outputUnconfirmedJobs: 0,
+                        pagesRequested: 0,
+                        pendingPaymentCount: 0,
+                        jobsByStatus: [],
+                        verifiedCollectionsByMethod: [],
+                        refundsRecordedByMethod: []
+                      }
+                    : path.endsWith("/pricing") || path.endsWith("/payment-settings") || path.endsWith("/subscription")
+                      ? null
+                      : [];
       await request.fulfill({
         status: 200,
         contentType: "application/json",
@@ -146,6 +225,20 @@ async function assertNoHorizontalOverflow(page, route, viewport) {
         if (style.display === "none" || style.visibility === "hidden" || rect.width <= 0 || rect.height <= 0) return false;
         const closedDrawerItem = element.closest(".sidebar") && !element.closest(".sidebar")?.classList.contains("sidebar-open");
         if (closedDrawerItem) return false;
+        // Dense shop tables intentionally scroll horizontally inside the visible table
+        // viewport. Their off-screen cells remain reachable through that scroller;
+        // they are not clipped by the page itself.
+        let parent = element.parentElement;
+        while (parent && parent !== document.body) {
+          const parentStyle = getComputedStyle(parent);
+          const parentRect = parent.getBoundingClientRect();
+          if ((parentStyle.overflowX === "auto" || parentStyle.overflowX === "scroll") &&
+              parent.scrollWidth > parent.clientWidth + 1 &&
+              parentRect.left >= -1 && parentRect.right <= width + 1) {
+            return false;
+          }
+          parent = parent.parentElement;
+        }
         return rect.left < -1 || rect.right > width + 1;
       })
       .slice(0, 8)
@@ -295,12 +388,20 @@ async function assertRouteContrast(page, route) {
 async function exerciseWorkspaceSections(page, route, viewport, themeLabel) {
   if (!route.auth) return;
   const sections = route.auth === "shop"
-    ? ["Overview", "Print Queue", "Customers", "Printers", "QR Stations", "Print Agent", "Pricing", "Payments", "Reports"]
+    ? ["Order Journey", "Overview", "Print Queue", "Customers", "Printers", "QR Stations", "Print Agent", "Pricing", "Payments", "Reports"]
     : ["Overview", "Shop tenants", "Plans & entitlements", "Shop subscriptions", "Operations & retention"];
   for (const section of sections) {
     if (viewport.width <= 850) await page.getByRole("button", { name: "Open navigation" }).click();
     const destination = page.locator(".sidebar").getByRole("button", { name: section, exact: true });
     await destination.click();
+    if (section === "Order Journey") {
+      await page.getByRole("heading", { name: "From customer upload to print handover." }).waitFor({ state: "visible" });
+      const stageCounts = await page.locator("section[aria-label='The order process'] [class*='flowStepCopy'] small").allTextContents();
+      assert.deepEqual(stageCounts, ["1 order", "1 order", "1 order", "2 orders", "1 order"],
+        "The five process stages should count new, review, payment, printing and ready orders independently.");
+      assert.equal(await page.getByRole("article").count(), 6,
+        "The two multi-file customer batches should each appear as one order card.");
+    }
     // The native desktop shell intentionally hides the web breadcrumb; verify
     // the selected navigation item instead of waiting for hidden header text.
     console.log(`[workspace QA] ${route.label} / ${section} / ${viewport.width}px / ${themeLabel}`);
