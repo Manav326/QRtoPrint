@@ -171,8 +171,8 @@ class MainActivityInstrumentedTest {
             }
 
             // ActivityScenario reaches RESUMED before every hosted emulator has
-            // finished assigning window focus. Do not open a dialog before the
-            // Activity window can hand focus to that dialog.
+            // finished assigning window focus. Wait for the real window, rather
+            // than treating lifecycle state alone as proof that Espresso can tap it.
             val activityWindow = checkNotNull(activityDecorView.get())
             val focusDeadline = SystemClock.uptimeMillis() + 5_000L
             while (!activityWindow.hasWindowFocus() && SystemClock.uptimeMillis() < focusDeadline) {
