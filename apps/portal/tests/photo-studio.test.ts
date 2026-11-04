@@ -174,3 +174,17 @@ test("50 photos can be laid out as nine per A4 page with a partially filled fina
  assert.equal(pageCount,6);
  assert.equal(photoCount-(pageCount-1)*layout.perSheet,5);
 });
+
+test("manual photo density validates against physical page capacity",()=>{
+ assert.equal(getPhotoSheetLayout({widthMm:35,heightMm:45},0,9).perSheet,9);
+ assert.throws(()=>getPhotoSheetLayout({widthMm:35,heightMm:45},0,26),/Photos per A4 page/);
+ assert.throws(()=>getPhotoSheetLayout({widthMm:35,heightMm:45},0,0),/Photos per A4 page/);
+});
+
+test("50 photos at nine per page build one six-page A4 PDF",()=>{
+ const jpeg=new Uint8Array([0xff,0xd8,0xff,0xd9]);
+ const pdf=buildPhotoPdf(Array.from({length:6},()=>jpeg));
+ const value=new TextDecoder("latin1").decode(pdf);
+ assert.match(value,/\/Count 6/);
+ assert.equal((value.match(/\/Type \/Page \/Parent 2 0 R/g)??[]).length,6);
+});
