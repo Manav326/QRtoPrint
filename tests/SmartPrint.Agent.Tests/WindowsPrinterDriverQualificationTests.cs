@@ -37,8 +37,10 @@ public sealed class WindowsPrinterDriverQualificationTests
         using (var paint = new SKPaint { Color = new SKColor(32, 96, 180), IsAntialias = true })
         {
             canvas.DrawRect(new SKRect(18, 18, 162, 222), paint);
-            using var textPaint = new SKPaint { Color = SKColors.Black, TextSize = 12, IsAntialias = true };
-            canvas.DrawText("SmartPrint driver QA", 20, 34, textPaint);
+            using var typeface = SKTypeface.FromFamilyName("Arial", SKFontStyle.Normal);
+            using var textFont = new SKFont(typeface, 12);
+            using var textPaint = new SKPaint { Color = SKColors.Black, IsAntialias = true };
+            canvas.DrawText("SmartPrint driver QA", 20, 34, SKTextAlign.Left, textFont, textPaint);
         }
 
         using var image = SKImage.FromBitmap(bitmap);
