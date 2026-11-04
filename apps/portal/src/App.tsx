@@ -210,6 +210,7 @@ function ShopConsole({ tokens, onSignOut, dark, onToggleTheme }: { tokens: AuthT
   const [busy, setBusy] = useState(false);
   const [toast, setToast] = useState("");
   const [preview, setPreview] = useState<{ name: string; url: string; blob: Blob; mediaType: string; job: ShopPrintJob; readOnly: boolean } | null>(null);
+  const [focusShopPhotoEdit,setFocusShopPhotoEdit]=useState(false);
   const [shopPhotoStudio,setShopPhotoStudio]=useState<{
     source:File;
     job:ShopPrintJob;
@@ -1144,6 +1145,7 @@ function ShopConsole({ tokens, onSignOut, dark, onToggleTheme }: { tokens: AuthT
     const returnPreview={name:preview.name,blob:preview.blob,mediaType:preview.mediaType,job:preview.job,readOnly:preview.readOnly};
     URL.revokeObjectURL(preview.url);
     setPreview(null);
+    setFocusShopPhotoEdit(false);
     setShopPhotoStudio({source,job:preview.job,returnPreview});
   }
 
@@ -1151,6 +1153,7 @@ function ShopConsole({ tokens, onSignOut, dark, onToggleTheme }: { tokens: AuthT
     if(!shopPhotoStudio){setShopPhotoStudio(null);return;}
     const restored=shopPhotoStudio.returnPreview;
     setPreview({...restored,url:URL.createObjectURL(restored.blob)});
+    setFocusShopPhotoEdit(true);
     setShopPhotoStudio(null);
   }
 
@@ -1171,6 +1174,7 @@ function ShopConsole({ tokens, onSignOut, dark, onToggleTheme }: { tokens: AuthT
     }
 
     setShopPhotoStudio(null);
+    setFocusShopPhotoEdit(false);
     setToast("The enhanced A4 sheet is saved to the same print job and its photo price has been recalculated.");
     try{
       await reload();
@@ -1470,7 +1474,7 @@ function ShopConsole({ tokens, onSignOut, dark, onToggleTheme }: { tokens: AuthT
       {modal === "printer" && <PrinterModal busy={busy} onClose={() => setModal(null)} onSubmit={submitPrinter}/>}
       {modal === "station" && <StationModal busy={busy} printers={printers.filter(printer => printer.isActive)} onClose={() => setModal(null)} onSubmit={submitStation}/>}
             {batchReviewJobs && <BatchReviewModal jobs={batchReviewJobs} busy={busyJobId==="batch-review"} decisions={batchReviewDecisions} retrying={batchReviewRetry} onDecision={(jobId,accepted)=>setBatchReviewDecisions(current=>({...current,[jobId]:accepted}))} onClose={()=>setBatchReviewJobs(null)} onPreview={job=>void previewJob(job,true)} onApply={acceptedIds=>void applyBatchReview(batchReviewJobs,acceptedIds)}/>} 
-      {preview && <DocumentPreviewModal name={preview.name} url={preview.url} mediaType={preview.mediaType} job={preview.job} readOnly={preview.readOnly} onEditPhoto={preview.mediaType.startsWith("image/")&&(preview.job.storageMode==="CLOUD"||preview.job.storageMode==="LOCAL_AGENT")&&preview.job.status==="AWAITING_SHOP_APPROVAL"&&[pricing?.photo35x45Minor,pricing?.photo25x35Minor,pricing?.photo2x2Minor,pricing?.photo4x6Minor].some(rate=>(rate??0)>0)?openShopPhotoStudio:undefined} onApprove={()=>void approveJob(preview.job)} onReject={()=>void rejectJob(preview.job)} onRefund={()=>setRefundJob(preview.job)} onClose={() => { URL.revokeObjectURL(preview.url); setPreview(null); }}/>} 
+      {preview && <DocumentPreviewModal name={preview.name} url={preview.url} mediaType={preview.mediaType} job={preview.job} readOnly={preview.readOnly} focusEditOnMount={focusShopPhotoEdit} onEditPhoto={preview.mediaType.startsWith("image/")&&(preview.job.storageMode==="CLOUD"||preview.job.storageMode==="LOCAL_AGENT")&&preview.job.status==="AWAITING_SHOP_APPROVAL"&&[pricing?.photo35x45Minor,pricing?.photo25x35Minor,pricing?.photo2x2Minor,pricing?.photo4x6Minor].some(rate=>(rate??0)>0)?openShopPhotoStudio:undefined} onApprove={()=>void approveJob(preview.job)} onReject={()=>void rejectJob(preview.job)} onRefund={()=>setRefundJob(preview.job)} onClose={() => { URL.revokeObjectURL(preview.url); setPreview(null); }}/>} 
       {shopPhotoStudio && <PhotoStudio source={shopPhotoStudio.source} mode="shop" dark={dark} photoPrices={{"35x45":pricing?.photo35x45Minor??0,"25x35":pricing?.photo25x35Minor??0,"2x2":pricing?.photo2x2Minor??0,"4x6":pricing?.photo4x6Minor??0}} onCancel={cancelShopPhotoStudio} onApply={applyShopPhotoStudio}/>} 
       {eventHistory && <JobHistoryModal job={eventHistory.job} events={eventHistory.events} onClose={() => setEventHistory(null)}/>}
       {refundJob && <RefundModal job={refundJob} token={tokens.accessToken} busy={busyJobId===refundJob.id} onClose={()=>setRefundJob(null)} onSubmit={values=>void recordFileRefund(refundJob,values)}/>} 
@@ -2554,11 +2558,15 @@ function JobHistoryModal({job,events,onClose}:{job:ShopPrintJob;events:ShopJobEv
   </Modal>;
 }
 
-function DocumentPreviewModal({name,url,mediaType,job,readOnly=false,onClose,onApprove,onReject,onRefund,onEditPhoto}:{
-  name:string;url:string;mediaType:string;job:ShopPrintJob;readOnly?:boolean;onClose:()=>void;onApprove:()=>void;onReject:()=>void;onRefund:()=>void;onEditPhoto?:()=>void;
+function DocumentPreviewModal({name,url,mediaType,job,readOnly=false,focusEditOnMount=false,onClose,onApprove,onReject,onRefund,onEditPhoto}:{
+  name:string;url:string;mediaType:string;job:ShopPrintJob;readOnly?:boolean;focusEditOnMount?:boolean;onClose:()=>void;onApprove:()=>void;onReject:()=>void;onRefund:()=>void;onEditPhoto?:()=>void;
 }) {
+  const editPhotoButtonRef=useRef<HTMLButtonElement|null>(null);
   const isPdf=mediaType==="application/pdf";
   const isImage=mediaType==="image/jpeg"||mediaType==="image/png";
+  useEffect(()=>{
+    if(focusEditOnMount)editPhotoButtonRef.current?.focus();
+  },[focusEditOnMount]);
   useEffect(()=>{
     if(!isDesktopApp()||(!isImage&&job.printKind!=="PHOTO"))return;
     void setDesktopContentProtection(true);
@@ -2572,7 +2580,7 @@ function DocumentPreviewModal({name,url,mediaType,job,readOnly=false,onClose,onA
     <div className="shop-document-preview" onContextMenu={event=>{if(isImage||job.printKind==="PHOTO")event.preventDefault();}} onDragStart={event=>{if(isImage||job.printKind==="PHOTO")event.preventDefault();}}>
       {isPdf&&job.printKind==="PHOTO"?<><iframe src={url} title={name}/><span className="shop-photo-preview-watermark" aria-hidden="true">SMARTPRINT · SHOP PRINT ONLY · PRIVATE PREVIEW</span></>:isPdf?<iframe src={url} title={name}/>:isImage?<><img src={url} alt={name} draggable={false}/><span className="shop-photo-preview-watermark" aria-hidden="true">SMARTPRINT · PRIVATE SHOP PREVIEW</span></>:<div className="shop-document-preview-unavailable">Preview format is not supported. <a href={url} download={name}>Download the original file</a></div>}
     </div>
-    {onEditPhoto&&<div className="file-review-note"><ImageIcon size={16}/><span>Open the same Photo Studio used by customers to crop, improve the background, add form details and prepare this photo for shop printing.</span><button className="secondary-button" onClick={onEditPhoto}>Enhance photo for printing</button></div>}
+    {onEditPhoto&&<div className="file-review-note"><ImageIcon size={16}/><span>Open the same Photo Studio used by customers to crop, improve the background, add form details and prepare this photo for shop printing.</span><button ref={editPhotoButtonRef} className="secondary-button" onClick={onEditPhoto}>Enhance photo for printing</button></div>}
     {!readOnly&&isImage&&job.status==="AWAITING_SHOP_APPROVAL"&&job.storageMode==="LOCAL_AGENT"&&<div className="file-review-note"><ShieldCheck size={16}/><span>This original is stored only on the paired shop computer. It remains local; this version does not copy it to cloud storage for editing.</span></div>}
     {["AWAITING_SHOP_APPROVAL","AWAITING_PAYMENT"].includes(job.status)&&<div className="file-review-note"><Check size={16}/><span>{readOnly ? "This preview is part of the batch review. Keep or change this file's decision in the batch panel after closing the preview." : "Review this file independently. Accepting or rejecting it will not change any other file in the batch."}</span></div>}
     {job.status==="PAID_AUTHORISED"&&(job.payment?.status==="VERIFIED"||job.payment?.status==="PARTIALLY_REFUNDED")&&<div className="file-refund-note"><Wallet size={16}/><span>Paid amount: <strong>{formatMoney(job.payment.amountMinor,job.payment.currency)}</strong>. A refund can be recorded while this file has not yet been handed to the shop computer.</span></div>}
