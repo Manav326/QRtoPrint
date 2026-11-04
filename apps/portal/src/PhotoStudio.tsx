@@ -121,57 +121,6 @@ function cropSource(image: HTMLImageElement, size: PhotoSize, zoom: number, focu
   return { x, y, width, height };
 }
 
-function drawPhotoSheetPage(
-  context: CanvasRenderingContext2D,
-  image: HTMLImageElement,
-  canvasWidth: number,
-  size: PhotoSize,
-  copies: number,
-  pageIndex: number,
-  zoom: number,
-  focusX: number,
-  focusY: number,
-  adjustments: Adjustments
-) {
-  const scale = canvasWidth / A4_WIDTH_MM;
-  const layout = getLayout(size);
-  const pageStart = pageIndex * layout.perSheet;
-  const pageCopies = Math.max(0, Math.min(layout.perSheet, copies - pageStart));
-  context.save();
-  context.setTransform(1, 0, 0, 1, 0, 0);
-  context.fillStyle = "#ffffff";
-  context.fillRect(0, 0, canvasWidth, context.canvas.height);
-  context.scale(scale, scale);
-
-  const source = cropSource(image, size, zoom, focusX, focusY);
-  const filter = "brightness(" + adjustments.brightness + "%) contrast(" + adjustments.contrast + "%) saturate(" + adjustments.saturation + "%)";
-  for (let index = 0; index < pageCopies; index += 1) {
-    const column = index % layout.columns;
-    const row = Math.floor(index / layout.columns);
-    const x = layout.marginMm + column * (size.widthMm + layout.gapMm);
-    const y = layout.marginMm + row * (size.heightMm + layout.gapMm);
-    context.save();
-    context.beginPath();
-    context.rect(x, y, size.widthMm, size.heightMm);
-    context.clip();
-    context.filter = filter;
-    context.drawImage(
-      image,
-      source.x, source.y, source.width, source.height,
-      x, y, size.widthMm, size.heightMm
-    );
-    context.restore();
-
-    context.save();
-    context.strokeStyle = "#8a929e";
-    context.lineWidth = 0.18;
-    context.setLineDash([0.8, 0.8]);
-    context.strokeRect(x, y, size.widthMm, size.heightMm);
-    context.restore();
-  }
-  context.restore();
-}
-
 function canvasToBlob(canvas: HTMLCanvasElement, type: string, quality?: number) {
   return new Promise<Blob>((resolve, reject) => {
     canvas.toBlob(blob => blob ? resolve(blob) : reject(new Error("The photo sheet could not be rendered.")), type, quality);
