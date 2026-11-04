@@ -5,6 +5,7 @@ using SmartPrint.Api.Domain;
 using SmartPrint.Api.Pricing;
 using SmartPrint.Api.Security;
 using SmartPrint.Api.Storage;
+using SmartPrint.Documents;
 
 namespace SmartPrint.Api.Services;
 
