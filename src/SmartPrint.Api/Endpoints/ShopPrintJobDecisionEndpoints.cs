@@ -18,34 +18,18 @@ public static partial class ShopPrintJobReviewEndpoints
         shop.MapPost("/print-jobs/{jobId:guid}/approve", async (
             Guid jobId,
             ClaimsPrincipal principal,
-            SmartPrintDbContext db,
+            ShopPrintJobDecisionService decisions,
             CancellationToken ct) =>
         {
             if (!IsShopOwner(principal) || !TryGetTenantId(principal, out var tenantId))
-            {
                 return Results.Forbid();
-            }
 
-            await using var transaction = await db.Database.BeginTransactionAsync(ct);
-            var lockedJobs = await db.PrintJobs.FromSqlInterpolated(
-                $"SELECT * FROM \"PrintJobs\" WHERE \"Id\" = {jobId} AND \"TenantId\" = {tenantId} FOR UPDATE")
-                .ToListAsync(ct);
-            var job = lockedJobs.SingleOrDefault();
-            if (job is null)
-            {
-                await transaction.RollbackAsync(ct);
+            var result = await decisions.ApproveAsync(tenantId, GetActorId(principal), jobId, ct);
+            if (result.Failure == ShopPrintJobDecisionFailure.NotFound)
                 return Results.NotFound();
-            }
 
-            if (job.Status == "AWAITING_PAYMENT")
+            if (result.Failure == ShopPrintJobDecisionFailure.NotReadyForApproval)
             {
-                await transaction.RollbackAsync(ct);
-                return Results.Ok(new { job.Id, job.JobNumber, job.Status, job.UpdatedUtc, DuplicateRequest = true });
-            }
-
-            if (job.Status != "AWAITING_SHOP_APPROVAL")
-            {
-                await transaction.RollbackAsync(ct);
                 return Results.Conflict(new
                 {
                     code = "job_not_ready_for_shop_approval",
@@ -53,61 +37,36 @@ public static partial class ShopPrintJobReviewEndpoints
                 });
             }
 
-            var now = DateTimeOffset.UtcNow;
-            if (job.QuoteExpiresUtc is null || job.QuoteExpiresUtc <= now)
+            if (result.Failure == ShopPrintJobDecisionFailure.QuoteExpired)
             {
-                var expiredFromStatus = job.Status;
-                job.Status = "QUOTE_EXPIRED";
-                job.UpdatedUtc = now;
-                db.PrintJobEvents.Add(new PrintJobEvent
+                return Results.Conflict(new
                 {
-                    TenantId = job.TenantId,
-                    PrintJobId = job.Id,
-                    PreviousStatus = expiredFromStatus,
-                    NewStatus = job.Status,
-                    ActorType = "ShopUser",
-                    ActorId = GetActorId(principal),
-                    ReasonCode = "QUOTE_EXPIRED_BEFORE_SHOP_APPROVAL",
-                    CreatedUtc = now
+                    code = "quote_expired",
+                    message = "The customer must request a new quote before this job can proceed."
                 });
-                await db.SaveChangesAsync(ct);
-                await transaction.CommitAsync(ct);
-                return Results.Conflict(new { code = "quote_expired", message = "The customer must request a new quote before this job can proceed." });
             }
 
-            var previousStatus = job.Status;
-            job.Status = "AWAITING_PAYMENT";
-            job.UpdatedUtc = now;
-            db.PrintJobEvents.Add(new PrintJobEvent
+            if (result.DuplicateRequest)
             {
-                TenantId = job.TenantId,
-                PrintJobId = job.Id,
-                PreviousStatus = previousStatus,
-                NewStatus = job.Status,
-                ActorType = "ShopUser",
-                ActorId = GetActorId(principal),
-                ReasonCode = "SHOP_APPROVED_AWAITING_PAYMENT",
-                CreatedUtc = now
-            });
-            await db.SaveChangesAsync(ct);
-            await transaction.CommitAsync(ct);
-
-            var paymentSettings = await db.ShopPaymentProfiles.AsNoTracking()
-                .SingleOrDefaultAsync(item => item.TenantId == tenantId, ct);
-            var hasConfiguredPaymentMethod = paymentSettings?.CashEnabled == true ||
-                (paymentSettings?.UpiEnabled == true &&
-                 !string.IsNullOrWhiteSpace(paymentSettings.UpiId) &&
-                 !string.IsNullOrWhiteSpace(paymentSettings.PayeeName));
+                return Results.Ok(new
+                {
+                    Id = result.JobId,
+                    result.JobNumber,
+                    result.Status,
+                    result.UpdatedUtc,
+                    result.DuplicateRequest
+                });
+            }
 
             return Results.Ok(new
             {
-                job.Id,
-                job.JobNumber,
-                job.Status,
-                job.Currency,
-                job.QuotedAmountMinor,
-                job.UpdatedUtc,
-                NextStep = hasConfiguredPaymentMethod
+                Id = result.JobId,
+                result.JobNumber,
+                result.Status,
+                result.Currency,
+                result.QuotedAmountMinor,
+                result.UpdatedUtc,
+                NextStep = result.HasConfiguredPaymentMethod
                     ? "Quote approved. The customer can now choose an enabled shop payment method. Verify payment before assigning a printer."
                     : "Quote approved, but no shop payment method is enabled. Configure UPI or cash at counter in Payments before the customer can proceed."
             });
@@ -116,34 +75,18 @@ public static partial class ShopPrintJobReviewEndpoints
         shop.MapPost("/print-jobs/{jobId:guid}/reject", async (
             Guid jobId,
             ClaimsPrincipal principal,
-            SmartPrintDbContext db,
+            ShopPrintJobDecisionService decisions,
             CancellationToken ct) =>
         {
             if (!IsShopOwner(principal) || !TryGetTenantId(principal, out var tenantId))
-            {
                 return Results.Forbid();
-            }
 
-            await using var transaction = await db.Database.BeginTransactionAsync(ct);
-            var lockedJobs = await db.PrintJobs.FromSqlInterpolated(
-                $"SELECT * FROM \"PrintJobs\" WHERE \"Id\" = {jobId} AND \"TenantId\" = {tenantId} FOR UPDATE")
-                .ToListAsync(ct);
-            var job = lockedJobs.SingleOrDefault();
-            if (job is null)
-            {
-                await transaction.RollbackAsync(ct);
+            var result = await decisions.RejectAsync(tenantId, GetActorId(principal), jobId, ct);
+            if (result.Failure == ShopPrintJobDecisionFailure.NotFound)
                 return Results.NotFound();
-            }
 
-            if (job.Status == "REJECTED")
+            if (result.Failure == ShopPrintJobDecisionFailure.NotReadyForRejection)
             {
-                await transaction.RollbackAsync(ct);
-                return Results.Ok(new { job.Id, job.JobNumber, job.Status, DuplicateRequest = true });
-            }
-
-            if (job.Status is not ("AWAITING_SHOP_APPROVAL" or "AWAITING_PAYMENT"))
-            {
-                await transaction.RollbackAsync(ct);
                 return Results.Conflict(new
                 {
                     code = "job_not_ready_for_rejection",
@@ -151,25 +94,24 @@ public static partial class ShopPrintJobReviewEndpoints
                 });
             }
 
-            var previousStatus = job.Status;
-            var now = DateTimeOffset.UtcNow;
-            job.Status = "REJECTED";
-            job.FailureCode = "SHOP_REJECTED";
-            job.UpdatedUtc = now;
-            db.PrintJobEvents.Add(new PrintJobEvent
+            if (result.DuplicateRequest)
             {
-                TenantId = job.TenantId,
-                PrintJobId = job.Id,
-                PreviousStatus = previousStatus,
-                NewStatus = job.Status,
-                ActorType = "ShopUser",
-                ActorId = GetActorId(principal),
-                ReasonCode = "SHOP_REJECTED",
-                CreatedUtc = now
+                return Results.Ok(new
+                {
+                    Id = result.JobId,
+                    result.JobNumber,
+                    result.Status,
+                    result.DuplicateRequest
+                });
+            }
+
+            return Results.Ok(new
+            {
+                Id = result.JobId,
+                result.JobNumber,
+                result.Status,
+                result.UpdatedUtc
             });
-            await db.SaveChangesAsync(ct);
-            await transaction.CommitAsync(ct);
-            return Results.Ok(new { job.Id, job.JobNumber, job.Status, job.UpdatedUtc });
         });
     }
 }
