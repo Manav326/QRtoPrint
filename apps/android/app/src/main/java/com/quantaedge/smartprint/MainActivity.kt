@@ -2275,9 +2275,28 @@ class MainActivity : AppCompatActivity() {
                             else runCatching { replyProxy.postMessage("localNetworkAccess:denied") }
                         }
                     } else {
-                        Thread {
+                        val parts = message.data.orEmpty().split("|", limit = 3)
+                        when {
+                            parts.size == 2 && parts[0] == "previewCustomerPdf" &&
+                                isCustomerUploadPdfPreviewToken(parts[1]) -> {
+                                val token = parts[1]
+                                runOnUiThread {
+                                    if (!isFinishing && !isDestroyed) {
+                                        showCustomerUploadPdfPreview(token)
+                                        replyProxy.postMessage("OK")
+                                    }
+                                }
+                            }
+                            parts.size == 2 && parts[0] == "retainCustomerPdfPreviews" -> {
+                                runOnUiThread {
+                                    if (!isFinishing && !isDestroyed) {
+                                        retainCustomerUploadPdfPreviews(parts[1])
+                                        replyProxy.postMessage("OK")
+                                    }
+                                }
+                            }
+                            else -> Thread {
                         val response = try {
-                            val parts = message.data.orEmpty().split("|", limit = 3)
                             when {
                                 message.data == "getCustomerAccessToken" -> {
                                     var auth = customerAccountStore.read()
@@ -2303,18 +2322,6 @@ class MainActivity : AppCompatActivity() {
                                     runOnUiThread { SmartPrintThemePreference.save(this@MainActivity, selected) }
                                     "OK"
                                 }
-                                parts.size == 2 && parts[0] == "previewCustomerPdf" &&
-                                    isCustomerUploadPdfPreviewToken(parts[1]) -> {
-                                    val token = parts[1]
-                                    runOnUiThread {
-                                        if (!isFinishing && !isDestroyed) showCustomerUploadPdfPreview(token)
-                                    }
-                                    "OK"
-                                }
-                                parts.size == 2 && parts[0] == "retainCustomerPdfPreviews" -> {
-                                    retainCustomerUploadPdfPreviews(parts[1])
-                                    "OK"
-                                }
                                 else -> ""
                             }
                         } catch (_: Exception) { "" }
@@ -2322,6 +2329,7 @@ class MainActivity : AppCompatActivity() {
                             if (!isFinishing && !isDestroyed) replyProxy.postMessage(response)
                         }
                         }.start()
+                        }
                     }
                 }
             }
