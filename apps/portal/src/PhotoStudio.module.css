@@ -3,7 +3,7 @@
 .brand{display:flex;align-items:center;gap:10px;min-width:0}.brand>span:last-child{display:grid;gap:3px}.brand strong{font-size:13px;font-weight:800;letter-spacing:-.2px}.brand small{color:#9dabc0;font-size:8px;font-weight:800;letter-spacing:1.15px}
 .brandMark{display:grid;place-items:center;width:34px;height:34px;border:1px solid #bdb1ff55;border-radius:10px;background:#7765e522;color:#c8bcff}
 .topbarMeta{display:flex;align-items:center;gap:8px;margin-left:auto;color:#b8c4d5;font-size:9px;font-weight:750}.topbarMeta span{padding:6px 9px;border:1px solid #ffffff1c;border-radius:7px;background:#ffffff0a}
-.iconButton{display:grid;place-items:center;width:34px;height:34px;border:1px solid #ffffff24;border-radius:8px;background:#ffffff0a;color:#eef3fb;cursor:pointer}.iconButton:hover{background:#ffffff19}.iconButton:focus-visible,.toolRail button:focus-visible,.contextToolbar button:focus-visible,.footer button:focus-visible{outline:3px solid #b9acff;outline-offset:2px}
+.iconButton{display:grid;place-items:center;width:34px;height:34px;border:1px solid #ffffff24;border-radius:8px;background:#ffffff0a;color:#eef3fb;cursor:pointer}.iconButton:hover{background:#ffffff19}.iconButton:disabled{opacity:.5;cursor:not-allowed}.iconButton:focus-visible,.toolRail button:focus-visible,.contextToolbar button:focus-visible,.footer button:focus-visible{outline:3px solid #b9acff;outline-offset:2px}
 .editor{display:grid;grid-template-columns:64px 260px minmax(0,1fr);min-height:0;min-width:0;position:relative}
 .toolRail{z-index:4;display:flex;flex-direction:column;align-items:center;gap:7px;padding:12px 6px;background:#202e44;color:#c4d0e1}
 .toolRail button{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:5px;width:50px;min-height:52px;padding:7px 3px;border:1px solid transparent;border-radius:9px;background:transparent;color:#b8c6d9;font:650 9px system-ui,sans-serif;cursor:pointer}.toolRail button:hover{background:#ffffff12;color:#fff}.toolRail button.toolActive{border-color:#d6cbff66;background:#ebe6ff;color:#5742aa}.toolRail button span{font-size:9px}
@@ -39,7 +39,7 @@
  .toolPanel{grid-template-columns:1fr 1fr}
  .panelHeading,.sheetSummary,.privacyNote,.lookGrid,.editorHelp,.backgroundPresets,.backgroundPreviewRow{grid-column:1/-1}
 }
-@media(max-width:390px){.toolPanel{grid-template-columns:1fr}}
+@media(max-width:390px){.toolPanel{grid-template-columns:1fr}.topbar{gap:6px;padding:0 7px}.brand{gap:7px}.brand small{letter-spacing:.75px}.topbarMeta span:last-child{display:none}.topbarMeta span{padding:4px 6px}}
 
 /* The watermark deters casual capture on web and complements native desktop protection. */
 .sheetFrame{position:relative;overflow:hidden;user-select:none;-webkit-user-select:none}
