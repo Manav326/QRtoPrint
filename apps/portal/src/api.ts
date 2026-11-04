@@ -1094,8 +1094,7 @@ async function uploadCustomerLocalTicketViaCloud(
   sessionToken: string,
   file: File,
   ticket: CustomerLocalUploadTicket,
-  grantToken: string,
-  allowQueueFallback = false
+  grantToken: string
 ): Promise<UploadedPrintJob> {
   const form = ticket.completed ? undefined : new FormData();
   if (form) form.append("file", file, file.name);
@@ -1105,8 +1104,7 @@ async function uploadCustomerLocalTicketViaCloud(
       method: "POST",
       headers: {
         "X-Print-Session": sessionToken,
-        "X-Print-Upload-Grant": grantToken,
-        ...(allowQueueFallback ? { "X-Print-Queue-Fallback": "true" } : {})
+        "X-Print-Upload-Grant": grantToken
       },
       body: form
     }
@@ -1119,8 +1117,7 @@ export async function uploadCustomerDocument(
   batchId?: string,
   batchGroupName?: string,
   batchName?: string,
-  settings: CustomerPrintRequestSettings = { copies: 1, colourMode: "Mono", paperSize: "A4", isDuplex: false, orientation: "AUTO" },
-  allowQueueFallback = false
+  settings: CustomerPrintRequestSettings = { copies: 1, colourMode: "Mono", paperSize: "A4", isDuplex: false, orientation: "AUTO" }
 ) {
   const localKeys = customerLocalUploadAttemptStorageKeys(sessionToken, file);
   const pendingLocalIdempotency = sessionStorage.getItem(localKeys.idempotency);
@@ -1132,7 +1129,7 @@ export async function uploadCustomerDocument(
       sessionToken, file, batchId, batchGroupName, batchName, pendingLocalIdempotency, pendingLocalGrant, settings
     );
     const recovered = await uploadCustomerLocalTicketViaCloud(
-      sessionToken, file, ticket, pendingLocalGrant, allowQueueFallback
+      sessionToken, file, ticket, pendingLocalGrant
     );
     // Release the retry-only grant after a confirmed recovery. The customer
     // draft stores the canonical job, and a later intentional reprint needs a
@@ -1267,7 +1264,7 @@ export async function uploadCustomerDocumentLocally(
     // API without retransmitting bytes or requiring Cloud-assisted new uploads.
     try {
       const completed = await uploadCustomerLocalTicketViaCloud(
-        sessionToken, file, ticket, grantToken, !cloudAssistedPrintingEnabled
+        sessionToken, file, ticket, grantToken
       );
       clearCustomerLocalUploadAttempt(sessionToken, file);
       return {
@@ -1342,7 +1339,7 @@ export async function uploadCustomerDocumentLocally(
   // HTTPS recovery reconciles this exact ticket and can never create another PrintJob.
   try {
       const recovered = await uploadCustomerLocalTicketViaCloud(
-        sessionToken, file, ticket, grantToken, !cloudAssistedPrintingEnabled
+        sessionToken, file, ticket, grantToken
       );
       clearCustomerLocalUploadAttempt(sessionToken, file);
       return {
