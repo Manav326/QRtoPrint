@@ -552,6 +552,14 @@ public sealed class LocalAgentApiHostedService(
                         return Results.Conflict(new { code = "local_upload_recovery_conflict", message = "The local queue already contains different or incomplete data for this upload." });
                     }
 
+                    if (existing.State == "LOCAL_UPLOAD_STAGED")
+                    {
+                        // A retried ticket may have received a new LAN lease.
+                        // Refresh the staged manifest before the periodic expiry
+                        // sweep can remove the same original protected document.
+                        await localQueueStore.RefreshStagedLocalUploadLeaseAsync(
+                            claim.PrintJobId, claim.Sha256, claim.SizeBytes, claim.ExpiresUtc, ct);
+                    }
                     bytes = localQueueStore.ReadDocument(claim.PrintJobId);
                 }
                 else
