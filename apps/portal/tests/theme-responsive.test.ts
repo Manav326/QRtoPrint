@@ -381,3 +381,18 @@ test("customer paper summaries reflect advanced folder and per-file choices", ()
   assert.match(app, /entry\.quote!\.paperSize/);
   assert.match(app, /item\.job\.paperSize\?\?"A4"/);
 });
+
+test("all print settings controls capture React event values before state updaters", () => {
+  const app = read("../src/App.tsx");
+  const setters = ["setGroupSettings(current=>","setFileSettings(current=>","setEditingPrintSettings(current=>"];
+  for (const setter of setters) {
+    const lines = app.split("\n").filter(line => line.includes(setter));
+    assert.ok(lines.length > 0, `${setter} must remain part of the shared print settings flow.`);
+    assert.ok(lines.every(line => !line.includes("event.currentTarget") && !line.includes("event.target")),
+      `${setter} must use values captured before entering the state updater.`);
+  }
+  assert.match(app, /const advancedEnabled=event\.currentTarget\.checked/);
+  assert.match(app, /const paperSize=event\.currentTarget\.value/);
+  assert.match(app, /const orientation=event\.currentTarget\.value/);
+  assert.match(app, /const copies=Math\.max\(1,Math\.min\(100,Number\(event\.currentTarget\.value\)\|\|1\)\)/);
+});
