@@ -287,7 +287,7 @@ public sealed class LocalAgentApiHostedService(
             {
                 policy.SetIsOriginAllowed(state.IsOriginAllowed)
                     .WithMethods("GET", "POST")
-                    .WithHeaders("Content-Type", "X-Print-Upload-Grant", "X-Print-Preview-Grant")
+                    .WithHeaders("Content-Type", "X-Print-Upload-Grant", "X-Print-Preview-Grant", "X-Print-Photo-Revision-Grant")
                     .SetPreflightMaxAge(TimeSpan.FromMinutes(10));
             }));
 
