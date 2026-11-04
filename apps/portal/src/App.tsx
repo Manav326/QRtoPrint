@@ -4273,11 +4273,11 @@ function CustomerPrintFlow({publicCode,sessionToken,paymentOptions,localAgent,lo
   const photoPriceMap={"35x45":photoPricing?.photo35x45Minor??0,"25x35":photoPricing?.photo25x35Minor??0,"2x2":photoPricing?.photo2x2Minor??0,"4x6":photoPricing?.photo4x6Minor??0};
   return <>{photoStudioSource&&<PhotoStudio source={photoStudioSource} photoPrices={photoPriceMap} onCancel={()=>{setPhotoStudioSource(null);setPhotoStudioSourceFingerprint(null);}} onApply={applyPhotoSheets}/>}<section className="customer-print-flow">
     <div className="customer-flow-heading"><div><span>STEP 1</span><h2>{nativeAppMode?"Add files":"Add documents or images"}</h2></div><span className="upload-limit">PDF documents · JPG/PNG images · Up to 20 files / 50 MB per batch</span></div>
-    {(localAgent?.endpoints.length || cloudAssistedPrintingEnabled) ? <div className="customer-upload-modes">
+    {(localAgent?.endpoints.length || secureQueueFallbackEnabled) ? <div className="customer-upload-modes">
       {Boolean(localAgent?.endpoints?.length)&&<button type="button" aria-pressed={uploadMode==="LOCAL"} className={uploadMode==="LOCAL"?"customer-upload-mode selected":"customer-upload-mode"} onClick={()=>{setUploadModeManuallySelected(true);setUploadMode("LOCAL");}}><strong>Shop Wi-Fi · local transfer</strong><small>Direct local HTTP · not encrypted in transit</small></button>}
-      {cloudAssistedPrintingEnabled&&<button type="button" aria-pressed={uploadMode==="CLOUD"} className={uploadMode==="CLOUD"?"customer-upload-mode selected":"customer-upload-mode"} onClick={()=>{setUploadModeManuallySelected(true);setUploadMode("CLOUD");}}><strong>Cloud-assisted · HTTPS</strong><small>Secure transfer through the API · resumes interrupted local uploads</small></button>}
+      {secureQueueFallbackEnabled&&<button type="button" aria-pressed={uploadMode==="CLOUD"} className={uploadMode==="CLOUD"?"customer-upload-mode selected":"customer-upload-mode"} onClick={()=>{setUploadModeManuallySelected(true);setUploadMode("CLOUD");}}><strong>{cloudAssistedPrintingEnabled?"Cloud-assisted · HTTPS":"Secure queue · HTTPS"}</strong><small>Upload securely now; the shop can print when its Agent and printer are ready</small></button>}
     </div>:null}
-    {customerUploadUnavailable&&<div className="customer-upload-local-note" role="status">This shop's print computer is not connected, and cloud-assisted uploads are not included in its plan. Ask the shop operator to reconnect SmartPrint.</div>}
+    {customerUploadUnavailable&&<div className="customer-upload-local-note" role="status">Secure upload is temporarily unavailable. Please ask the shop to reconnect its print service.</div>}
     <div className="customer-upload-picker-grid">
       <label className="customer-upload-zone">
         <input type="file" multiple disabled={batchLockedForPayment} accept=".pdf,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png" onChange={event=>{const selected=Array.from(event.currentTarget.files||[]);chooseFiles(selected,consumeSmartPrintNativePickerGroups(),consumeSmartPrintNativePdfPreviews());event.currentTarget.value="";}}/>
@@ -4302,53 +4302,60 @@ function CustomerPrintFlow({publicCode,sessionToken,paymentOptions,localAgent,lo
             <div className="customer-folder-defaults">
               <div><span>Colour</span><div className="customer-choice-row">
                 <button type="button" className={defaults.colourMode==="Mono"?"customer-choice selected":"customer-choice"} onClick={()=>setGroupSettings(current=>({...current,[group.name]:{...defaults,colourMode:"Mono"}}))}>B&W</button>
-                <button type="button" className={defaults.colourMode==="Colour"?"customer-choice selected":"customer-choice"} disabled={!supportsColour} title={!supportsColour?"Colour is unavailable until the shop printer confirms support":undefined} onClick={()=>setGroupSettings(current=>({...current,[group.name]:{...defaults,colourMode:"Colour"}}))}>Colour</button>
+                <button type="button" className={defaults.colourMode==="Colour"?"customer-choice selected":"customer-choice"} onClick={()=>setGroupSettings(current=>({...current,[group.name]:{...defaults,colourMode:"Colour"}}))}>Colour</button>
               </div></div>
               <div><span>Sides</span><div className="customer-choice-row">
                 <button type="button" className={!defaults.isDuplex?"customer-choice selected":"customer-choice"} onClick={()=>setGroupSettings(current=>({...current,[group.name]:{...defaults,isDuplex:false}}))}>Single</button>
-                <button type="button" className={defaults.isDuplex?"customer-choice selected":"customer-choice"} disabled={!supportsDuplex} title={!supportsDuplex?"Double-sided printing is unavailable until the shop printer confirms support":undefined} onClick={()=>setGroupSettings(current=>({...current,[group.name]:{...defaults,isDuplex:true}}))}>Double</button>
+                <button type="button" className={defaults.isDuplex?"customer-choice selected":"customer-choice"} onClick={()=>setGroupSettings(current=>({...current,[group.name]:{...defaults,isDuplex:true}}))}>Double</button>
               </div></div>
+              <label className="customer-folder-copies"><span>Copies · all files</span><input type="text" inputMode="numeric" pattern="[0-9]*" maxLength={3} value={defaults.copies} onChange={event=>setGroupSettings(current=>({...current,[group.name]:{...defaults,copies:event.currentTarget.value.replace(/\D/g,"").slice(0,3)}}))} onBlur={event=>setGroupSettings(current=>({...current,[group.name]:{...defaults,copies:normalizeCustomerCopies(event.currentTarget.value)}}))}/></label>
+              <div><span>Paper</span><strong className="customer-paper-default">A4</strong></div>
+              <label className="customer-advanced-toggle"><input type="checkbox" checked={defaults.advancedEnabled} onChange={event=>setGroupSettings(current=>({...current,[group.name]:{...defaults,advancedEnabled:event.currentTarget.checked}}))}/><span>Advanced settings</span></label>
             </div>
+            {defaults.advancedEnabled&&<div className="customer-file-overrides customer-folder-advanced">
+              <label><span>Paper size</span><select value={defaults.paperSize} onChange={event=>setGroupSettings(current=>({...current,[group.name]:{...defaults,paperSize:event.currentTarget.value as CustomerGroupSettings["paperSize"]}}))}>
+                <option value="A4">A4</option><option value="A3">A3</option><option value="A5">A5</option><option value="LETTER">Letter</option><option value="LEGAL">Legal</option>
+              </select></label>
+              <label><span>Orientation</span><select value={defaults.orientation} onChange={event=>setGroupSettings(current=>({...current,[group.name]:{...defaults,orientation:event.currentTarget.value as CustomerGroupSettings["orientation"]}}))}>
+                <option value="AUTO">Auto · follow document</option><option value="PORTRAIT">Portrait</option><option value="LANDSCAPE">Landscape</option>
+              </select></label>
+            </div>}
           </div>
           <div className="customer-folder-file-list">{group.files.map(selected=>{
             const fingerprint=customerFileFingerprint(selected);
-            const savedOwn=fileSettings[fingerprint]??{copies:"1",custom:false,colourMode:defaults.colourMode,isDuplex:defaults.isDuplex};
-            const own={...savedOwn,colourMode:supportsColour?savedOwn.colourMode:"Mono" as const,isDuplex:supportsDuplex?savedOwn.isDuplex:false};
+            const savedOwn=fileSettings[fingerprint]??{...defaults,custom:false};
+            const own={...defaults,...savedOwn};
             const index=files.findIndex(candidate=>customerFileFingerprint(candidate)===fingerprint);
             return <div className={selectedFileIndex===index?"customer-folder-file-row selected":"customer-folder-file-row"} key={fingerprint}>
               <button type="button" className="customer-folder-file-name" onClick={()=>setSelectedFileIndex(index)}><FileText size={15}/><span><strong>{selected.name}</strong><small>{formatBytes(selected.size)}</small></span><PrintKindTag printKind={photoSettingsByFileFingerprint[fingerprint]?"PHOTO":"DOCUMENT"}/></button>
-              <label className="customer-folder-copies"><span>Copies</span><input type="text" inputMode="numeric" pattern="[0-9]*" maxLength={3} value={own.copies} onChange={event => {
-                const copies = event.currentTarget.value.replace(/\D/g, "").slice(0, 3);
-                setFileSettings(current => ({
-                  ...current,
-                  [fingerprint]: { ...(current[fingerprint] ?? own), copies }
-                }));
-              }} onBlur={event => {
-                const copies = normalizeCustomerCopies(event.currentTarget.value);
-                setFileSettings(current => ({
-                  ...current,
-                  [fingerprint]: { ...(current[fingerprint] ?? own), copies }
-                }));
-              }}/></label>
-              <button type="button" className={own.custom?"customer-file-custom active":"customer-file-custom"} onClick={()=>setFileSettings(current=>({...current,[fingerprint]:{...(current[fingerprint]??own),custom:!own.custom,colourMode:own.custom?own.colourMode:defaults.colourMode,isDuplex:own.custom?own.isDuplex:defaults.isDuplex}}))}>{own.custom?"Custom":"Folder"}</button>
+              <button type="button" className={own.custom?"customer-file-custom active":"customer-file-custom"} onClick={()=>setFileSettings(current=>({...current,[fingerprint]:{...defaults,...(current[fingerprint]??{}),custom:!own.custom,...(!own.custom?{copies:defaults.copies,colourMode:defaults.colourMode,isDuplex:defaults.isDuplex,advancedEnabled:defaults.advancedEnabled,paperSize:defaults.paperSize,orientation:defaults.orientation}:{})}}))}>{own.custom?"Custom":"Folder"}</button>
               <button type="button" className="customer-file-remove" aria-label={`Remove ${selected.name} from this selection`} title="Remove from this selection" disabled={busy} onClick={()=>removeSelectedFile(fingerprint)}><X size={13}/><span>Remove</span></button>
               {own.custom&&<div className="customer-file-overrides">
+                <label className="customer-folder-copies"><span>Copies</span><input type="text" inputMode="numeric" pattern="[0-9]*" maxLength={3} value={own.copies} onChange={event=>setFileSettings(current=>({...current,[fingerprint]:{...own,custom:true,copies:event.currentTarget.value.replace(/\D/g,"").slice(0,3)}}))} onBlur={event=>setFileSettings(current=>({...current,[fingerprint]:{...own,custom:true,copies:normalizeCustomerCopies(event.currentTarget.value)}}))}/></label>
                 <div className="customer-choice-row">
                   <button type="button" className={own.colourMode==="Mono"?"customer-choice selected":"customer-choice"} onClick={()=>setFileSettings(current=>({...current,[fingerprint]:{...own,custom:true,colourMode:"Mono"}}))}>B&W</button>
-                  <button type="button" className={own.colourMode==="Colour"?"customer-choice selected":"customer-choice"} disabled={!supportsColour} title={!supportsColour?"Colour is unavailable until the shop printer confirms support":undefined} onClick={()=>setFileSettings(current=>({...current,[fingerprint]:{...own,custom:true,colourMode:"Colour"}}))}>Colour</button>
+                  <button type="button" className={own.colourMode==="Colour"?"customer-choice selected":"customer-choice"} onClick={()=>setFileSettings(current=>({...current,[fingerprint]:{...own,custom:true,colourMode:"Colour"}}))}>Colour</button>
                 </div>
                 <div className="customer-choice-row">
                   <button type="button" className={!own.isDuplex?"customer-choice selected":"customer-choice"} onClick={()=>setFileSettings(current=>({...current,[fingerprint]:{...own,custom:true,isDuplex:false}}))}>Single</button>
-                  <button type="button" className={own.isDuplex?"customer-choice selected":"customer-choice"} disabled={!supportsDuplex} title={!supportsDuplex?"Double-sided printing is unavailable until the shop printer confirms support":undefined} onClick={()=>setFileSettings(current=>({...current,[fingerprint]:{...own,custom:true,isDuplex:true}}))}>Double</button>
+                  <button type="button" className={own.isDuplex?"customer-choice selected":"customer-choice"} onClick={()=>setFileSettings(current=>({...current,[fingerprint]:{...own,custom:true,isDuplex:true}}))}>Double</button>
                 </div>
+                <div><span>Paper</span><strong className="customer-paper-default">A4</strong></div>
+                <label className="customer-advanced-toggle"><input type="checkbox" checked={own.advancedEnabled} onChange={event=>setFileSettings(current=>({...current,[fingerprint]:{...own,custom:true,advancedEnabled:event.currentTarget.checked}}))}/><span>Advanced settings</span></label>
+                {own.advancedEnabled&&<div className="customer-file-overrides customer-folder-advanced">
+                  <label><span>Paper size</span><select value={own.paperSize} onChange={event=>setFileSettings(current=>({...current,[fingerprint]:{...own,custom:true,paperSize:event.currentTarget.value as CustomerFileSettings["paperSize"]}}))}>
+                    <option value="A4">A4</option><option value="A3">A3</option><option value="A5">A5</option><option value="LETTER">Letter</option><option value="LEGAL">Legal</option>
+                  </select></label>
+                  <label><span>Orientation</span><select value={own.orientation} onChange={event=>setFileSettings(current=>({...current,[fingerprint]:{...own,custom:true,orientation:event.currentTarget.value as CustomerFileSettings["orientation"]}}))}>
+                    <option value="AUTO">Auto · follow document</option><option value="PORTRAIT">Portrait</option><option value="LANDSCAPE">Landscape</option>
+                  </select></label>
+                </div>}
               </div>}
             </div>;
           })}</div>
         </section>;
       })}</div>
     </div>}
-    {a4ExplicitlyUnsupported&&<p className="customer-upload-local-note" role="status">The selected printer reports no A4 paper support. The shop team needs to select an A4-capable printer before a quote can be prepared.</p>}
-    {a4SupportUnknown&&<p className="customer-upload-local-note" role="status">The shop printer has not confirmed its supported paper sizes yet. The shop team needs to check the printer before an A4 quote can be prepared.</p>}
     {files.length>0&&<label className="customer-batch-name-field">
   <span>Give this batch a name <small>Optional · the shop will see it in the print queue</small></span>
   <input type="text" value={batchName} maxLength={50}
@@ -4362,7 +4369,7 @@ function CustomerPrintFlow({publicCode,sessionToken,paymentOptions,localAgent,lo
     {files.length>0&&<button className="customer-flow-button" disabled={busy||customerUploadUnavailable||pendingFilesCount===0||(uploadMode==="LOCAL"&&!localReady)} onClick={()=>void upload()}>{busy?<span className="button-spinner"/>:<><UploadIcon/>{uploadMode==="LOCAL"&&localAgent?"Upload "+pendingFilesCount+" file(s) to shop":"Upload "+pendingFilesCount+" file(s)"}</>}</button>}
     {uploadProgress&&<div className="customer-upload-progress"><span>{uploadProgress.currentFile?`Uploading ${Math.min(uploadProgress.completed+1,uploadProgress.total)} of ${uploadProgress.total}: ${uploadProgress.currentFile}`:`${uploadProgress.completed} of ${uploadProgress.total} files uploaded`}</span><div><i style={{width:`${uploadProgress.total?uploadProgress.completed/uploadProgress.total*100:0}%`}}/>{uploadProgress.currentFile&&<b aria-hidden="true"/>}</div><small>The count advances when each document finishes uploading.</small></div>}
     {files.length>0&&uploadMode==="LOCAL"&&localAgent&&<small className="customer-upload-local-note">{nativeAppMode?(localReady?"Direct shop Wi-Fi transfer uses local HTTP and is not encrypted in transit. Choose Cloud-assisted for HTTPS.":"Check shop Wi-Fi."):localReady?"Direct shop Wi-Fi transfer uses local HTTP and is not encrypted in transit. Choose Cloud-assisted for HTTPS encryption.":"Tap Check shop Wi-Fi above first to grant the browser permission."}</small>}
-    {files.length>0&&uploadMode==="CLOUD"&&localAgent&&<small className="customer-upload-local-note">{nativeAppMode?"Encrypted HTTPS cloud transfer.":"HTTPS cloud-assisted transfer: files are encrypted in transit to the API and then transferred securely to the shop computer."}</small>}
+    {files.length>0&&uploadMode==="CLOUD"&&<small className="customer-upload-local-note">{nativeAppMode?"Encrypted HTTPS secure upload.":"Files are encrypted in transit and stored securely in the existing print queue until the shop computer is ready."}</small>}
     {uploaded&&<>
       {uploadedBatch.length>0&&<div className="customer-uploaded-batch">
         <div className="customer-uploaded-batch-head"><strong>{batchName.trim()?"Batch · "+batchName.trim():"Batch · "+uploadedBatch.length+" files"}</strong><span>{uploadedBatch[0]?.job.jobNumber?"First job · "+uploadedBatch[0].job.jobNumber+" · ":""}Select a file to view its status. Pay once for all accepted files.</span></div>
@@ -4384,7 +4391,7 @@ function CustomerPrintFlow({publicCode,sessionToken,paymentOptions,localAgent,lo
       {batchId&&hasLegacyIndividualPayment&&<p className="customer-payment-warning">A file in this batch already has a separate individual payment. Complete or resolve that attempt before starting another payment for this batch. A second collection path is blocked to prevent duplicate charges.</p>}
       {canCalculateBatch&&<div className="customer-batch-quote-action">
         <div className="customer-flow-heading customer-config-heading"><div><span>STEP 2</span><h2>Review batch settings</h2></div><small>{quoteItems.length} files</small></div>
-        <button className="customer-flow-button" disabled={busy||a4NotConfirmed} onClick={()=>void getQuote()}>{busy?<span className="button-spinner"/>:"Calculate batch quote"}</button>
+        <button className="customer-flow-button" disabled={busy} onClick={()=>void getQuote()}>{busy?<span className="button-spinner"/>:"Calculate batch quote"}</button>
       </div>}
     </>}
     {error&&<div className="customer-flow-error" role="alert">{error}</div>}
