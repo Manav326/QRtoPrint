@@ -10,8 +10,13 @@ public sealed class WindowsPrinterDriverQualificationTests
     [Fact]
     public async Task ApprovedVendorDriverDiscoversCapabilitiesAndRendersToAnIsolatedFilePort()
     {
-        if (!OperatingSystem.IsWindows())
+        if (!string.Equals(
+                Environment.GetEnvironmentVariable("SMARTPRINT_RUN_DRIVER_QUALIFICATION"),
+                "1",
+                StringComparison.Ordinal))
             return;
+
+        Assert.True(OperatingSystem.IsWindows(), "Driver qualification requires a Windows runner.");
 
         var queueName = Environment.GetEnvironmentVariable("SMARTPRINT_DRIVER_QUALIFICATION_QUEUE");
         var outputPath = Environment.GetEnvironmentVariable("SMARTPRINT_DRIVER_QUALIFICATION_OUTPUT");
