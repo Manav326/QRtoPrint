@@ -83,6 +83,7 @@ public static class ApiServiceRegistration
         services.AddScoped<TenantEntitlementService>();
 
         // Application workflows coordinate state changes outside the HTTP endpoint modules.
+        services.AddScoped<AgentJobQueueService>();
         services.AddScoped<AgentLocalUploadClaimService>();
         services.AddScoped<AgentLocalUploadCompletionService>();
         services.AddScoped<PlatformPlanService>();
