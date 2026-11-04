@@ -2993,15 +2993,7 @@ shop.MapPost("/print-jobs/{jobId:guid}/photo-revision", async (
         });
     }
 
-    var maximumPhotos = PricingCalculator.MaximumPhotosPerA4Sheet(photoSizeCode);
-    if (photoCount > maximumPhotos)
-    {
-        await transaction.RollbackAsync(ct);
-        return Results.ValidationProblem(new Dictionary<string, string[]>
-        {
-            ["photoCount"] = [$"This A4 layout supports at most {maximumPhotos} photos of the selected size."]
-        });
-    }
+    var expectedPageCount = PricingCalculator.PhotoPageCount(photoCount, photoSizeCode);
 
     var pricing = await db.ShopPricingProfiles.AsNoTracking()
         .SingleOrDefaultAsync(item => item.TenantId == tenantId && item.IsConfigured, ct);
@@ -3038,14 +3030,14 @@ shop.MapPost("/print-jobs/{jobId:guid}/photo-revision", async (
         return Results.UnprocessableEntity(new { code = "photo_sheet_not_supported", message = exception.Message });
     }
 
-    if (stored.Analysis.PageCount != 1)
+    if (stored.Analysis.PageCount != expectedPageCount)
     {
         await storage.DeleteAsync(stored.StorageKey);
         await transaction.RollbackAsync(ct);
         return Results.UnprocessableEntity(new
         {
-            code = "photo_sheet_must_be_one_page",
-            message = "A photo print is one A4 sheet per job. Reduce the quantity or start another photo-print job."
+            code = "photo_sheet_page_count_mismatch",
+            message = $"The prepared PDF must contain exactly {expectedPageCount} A4 page(s) for {photoCount} photos of the selected size."
         });
     }
 
@@ -3062,7 +3054,7 @@ shop.MapPost("/print-jobs/{jobId:guid}/photo-revision", async (
     document.PageSizesJson = stored.Analysis.PageSizesJson;
     document.PurgedUtc = null;
 
-    job.PageCount = 1;
+    job.PageCount = expectedPageCount;
     job.Copies = 1;
     job.ColourMode = "Colour";
     job.PaperSize = "A4";
@@ -5161,7 +5153,7 @@ agentApi.MapPost("/local-document-photo-revisions/{jobId:guid}/authorize", async
         document.SizeBytes != request.ExpectedOriginalSizeBytes)
         return Results.Conflict(new { code = "photo_revision_original_changed", message = "The local original no longer matches the document registered by the shop service. Reopen its preview." });
 
-    if (request.PageCount != 1 || request.SizeBytes is <= 0 or > 20 * 1024 * 1024 ||
+    if (request.PageCount is < 1 or > 100 || request.SizeBytes is <= 0 or > 20 * 1024 * 1024 ||
         string.IsNullOrWhiteSpace(request.Sha256) || request.Sha256.Length != 64 || !request.Sha256.All(Uri.IsHexDigit) ||
         string.IsNullOrWhiteSpace(request.PageSizesJson) || request.PageSizesJson.Length > 4000 || !IsValidPageSizesJson(request.PageSizesJson))
         return Results.ValidationProblem(new Dictionary<string, string[]>
@@ -5187,10 +5179,11 @@ agentApi.MapPost("/local-document-photo-revisions/{jobId:guid}/authorize", async
     long unitPrice;
     try
     {
-        if (request.PhotoCount > PricingCalculator.MaximumPhotosPerA4Sheet(request.PhotoSizeCode))
+        var expectedPageCount = PricingCalculator.PhotoPageCount(request.PhotoCount, request.PhotoSizeCode);
+        if (request.PageCount != expectedPageCount)
             return Results.ValidationProblem(new Dictionary<string, string[]>
             {
-                ["photoCount"] = ["The selected photo quantity does not fit on one A4 sheet."]
+                ["pageCount"] = [$"The prepared PDF must contain exactly {expectedPageCount} A4 page(s) for this photo quantity."]
             });
         unitPrice = PricingCalculator.PhotoUnitRate(request.PhotoSizeCode, pricing);
         amount = PricingCalculator.CalculatePhoto(request.PhotoCount, request.PhotoSizeCode, pricing);
@@ -5262,7 +5255,7 @@ agentApi.MapPost("/local-document-photo-revisions/{jobId:guid}/complete", async 
         string.Equals(document.Sha256, request.Sha256, StringComparison.OrdinalIgnoreCase) &&
         document.SizeBytes == request.SizeBytes &&
         job.PrintKind == "PHOTO" &&
-        job.PageCount == 1 &&
+        job.PageCount == request.PageCount &&
         job.PhotoSizeCode == request.PhotoSizeCode &&
         job.PhotoCount == request.PhotoCount &&
         string.Equals(document.PageSizesJson, request.PageSizesJson, StringComparison.Ordinal))
@@ -5320,7 +5313,7 @@ agentApi.MapPost("/local-document-photo-revisions/{jobId:guid}/complete", async 
         return Results.Conflict(new { code = "photo_revision_payment_started", message = "A payment attempt started before the revision could be saved. The local original has been restored." });
     }
 
-    if (request.PageCount != 1 || request.SizeBytes is <= 0 or > 20 * 1024 * 1024 ||
+    if (request.PageCount is < 1 or > 100 || request.SizeBytes is <= 0 or > 20 * 1024 * 1024 ||
         request.Sha256.Length != 64 || !request.Sha256.All(Uri.IsHexDigit) ||
         string.IsNullOrWhiteSpace(request.PageSizesJson) || request.PageSizesJson.Length > 4000)
     {
@@ -5340,8 +5333,9 @@ agentApi.MapPost("/local-document-photo-revisions/{jobId:guid}/complete", async 
     long unitPrice;
     try
     {
-        if (request.PhotoCount > PricingCalculator.MaximumPhotosPerA4Sheet(request.PhotoSizeCode))
-            throw new ArgumentOutOfRangeException(nameof(request.PhotoCount), "The selected photo quantity does not fit on one A4 sheet.");
+        var expectedPageCount = PricingCalculator.PhotoPageCount(request.PhotoCount, request.PhotoSizeCode);
+        if (request.PageCount != expectedPageCount)
+            throw new ArgumentException($"The prepared PDF must contain exactly {expectedPageCount} A4 page(s) for this photo quantity.", nameof(request.PageCount));
         unitPrice = PricingCalculator.PhotoUnitRate(request.PhotoSizeCode, pricing);
         amount = PricingCalculator.CalculatePhoto(request.PhotoCount, request.PhotoSizeCode, pricing);
     }
@@ -5364,7 +5358,7 @@ agentApi.MapPost("/local-document-photo-revisions/{jobId:guid}/complete", async 
     document.StorageMode = previousStorageMode;
     document.AgentDeviceId = device.Id;
 
-    job.PageCount = 1;
+    job.PageCount = request.PageCount;
     job.Copies = 1;
     job.ColourMode = "Colour";
     job.PaperSize = "A4";
@@ -7763,12 +7757,12 @@ publicApi.MapPost("/jobs/{jobId:guid}/quote", async (
         {
             var photoSizeCode = request.PhotoSizeCode!;
             var photoCount = request.PhotoCount!.Value;
-            var maximumPhotos = PricingCalculator.MaximumPhotosPerA4Sheet(photoSizeCode);
-            if (photoCount > maximumPhotos)
+            var expectedPageCount = PricingCalculator.PhotoPageCount(photoCount, photoSizeCode);
+            if (job.PageCount != expectedPageCount)
             {
                 return Results.ValidationProblem(new Dictionary<string, string[]>
                 {
-                    ["photoCount"] = [$"This A4 layout supports at most {maximumPhotos} photos of the selected size per sheet."]
+                    ["pageCount"] = [$"The prepared PDF must contain exactly {expectedPageCount} A4 page(s) for {photoCount} photos of the selected size."]
                 });
             }
 
