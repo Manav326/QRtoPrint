@@ -108,3 +108,13 @@ test("a successful shop photo save is not misreported as failed when refreshing 
  assert.match(app,/The enhanced A4 sheet is saved to the same print job/);
  assert.match(app,/The A4 sheet was saved to the existing print job, but the queue could not refresh/);
 });
+
+
+test("short portrait phones keep Photo Studio preview, controls and save actions usable",()=>{
+ const css=readFileSync(new URL("../src/PhotoStudio.module.css",import.meta.url),"utf8");
+ assert.match(css,/@media\(max-width:720px\) and \(max-height:620px\)/);
+ assert.match(css,/grid-template-rows:40px minmax\(160px,1fr\) auto/);
+ assert.match(css,/\.toolPanel\{max-height:26vh;[^}]*overflow:auto/);
+ assert.match(css,/\.canvasWorkspace\{grid-template-rows:32px minmax\(0,1fr\) 26px/);
+ assert.match(css,/\.footerActions button\{min-height:34px\}/);
+});
