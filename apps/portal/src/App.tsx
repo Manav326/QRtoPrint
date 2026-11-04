@@ -4407,7 +4407,7 @@ function CustomerPrintFlow({publicCode,sessionToken,paymentOptions,localAgent,lo
                    const copies=normalizeCustomerCopies(event.currentTarget.value);
                    setGroupSettings(current=>({...current,[group.name]:{...(current[group.name]??defaults),copies}}));
                  }}/></label>
-              <div><span>Paper</span><strong className="customer-paper-default">{defaults.paperSize}</strong></div>
+              <div><span>Paper</span><strong className="customer-paper-default">{defaults.advancedEnabled?defaults.paperSize:"A4"}</strong></div>
               <label className="customer-advanced-toggle"><input type="checkbox" checked={defaults.advancedEnabled} onChange={event=>setGroupSettings(current=>({...current,[group.name]:{...defaults,advancedEnabled:event.currentTarget.checked}}))}/><span>Advanced settings</span></label>
             </div>
             {defaults.advancedEnabled&&<div className="customer-file-overrides customer-folder-advanced">
@@ -4446,7 +4446,7 @@ function CustomerPrintFlow({publicCode,sessionToken,paymentOptions,localAgent,lo
                   <button type="button" className={!own.isDuplex?"customer-choice selected":"customer-choice"} onClick={()=>setFileSettings(current=>({...current,[fingerprint]:{...own,custom:true,isDuplex:false}}))}>Single</button>
                   <button type="button" className={own.isDuplex?"customer-choice selected":"customer-choice"} onClick={()=>setFileSettings(current=>({...current,[fingerprint]:{...own,custom:true,isDuplex:true}}))}>Double</button>
                 </div>
-                <div><span>Paper</span><strong className="customer-paper-default">{own.paperSize}</strong></div>
+                <div><span>Paper</span><strong className="customer-paper-default">{own.advancedEnabled?own.paperSize:"A4"}</strong></div>
                 <label className="customer-advanced-toggle"><input type="checkbox" checked={own.advancedEnabled} onChange={event=>setFileSettings(current=>({...current,[fingerprint]:{...own,custom:true,advancedEnabled:event.currentTarget.checked}}))}/><span>Advanced settings</span></label>
                 {own.advancedEnabled&&<div className="customer-file-overrides customer-folder-advanced">
                   <label><span>Paper size</span><select value={own.paperSize} onChange={event=>setFileSettings(current=>({...current,[fingerprint]:{...own,custom:true,paperSize:event.currentTarget.value as CustomerFileSettings["paperSize"]}}))}>
