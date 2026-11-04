@@ -5,7 +5,7 @@ using Microsoft.IdentityModel.Tokens;
 
 namespace SmartPrint.Api.Security;
 
-public sealed record LocalDocumentPhotoRevisionGrantClaims(Guid TenantId, Guid JobId, Guid AgentDeviceId);
+public sealed record LocalDocumentPhotoRevisionGrantClaims(Guid TenantId, Guid JobId, Guid AgentDeviceId, Guid? ActorUserId);
 
 public static class LocalDocumentPhotoRevisionGrant
 {
@@ -27,6 +27,7 @@ public static class LocalDocumentPhotoRevisionGrant
         Guid tenantId,
         Guid jobId,
         Guid agentDeviceId,
+        Guid? actorUserId,
         DateTimeOffset now,
         DateTimeOffset expiresUtc)
     {
@@ -37,12 +38,30 @@ public static class LocalDocumentPhotoRevisionGrant
         if (expiresUtc <= now || expiresUtc - now > TimeSpan.FromMinutes(2))
             throw new ArgumentOutOfRangeException(nameof(expiresUtc), "Photo revision grants may live for no more than two minutes.");
 
-        var claims = new[]
+        var claims = new List<Claim>
         {
-            new Claim("grant_type", GrantType),
-            new Claim("tenant_id", tenantId.ToString("D")),
-            new Claim("photo_revision_job_id", jobId.ToString("D")),
-            new Claim("photo_revision_agent_id", agentDeviceId.ToString("D"))
+            new("grant_type", GrantType),
+            new("tenant_id", tenantId.ToString("D")),
+            new("photo_revision_job_id", jobId.ToString("D")),
+            new("photo_revision_agent_id", agentDeviceId.ToString("D"))
+        };
+        if (actorUserId is Guid actorId)
+            claims.Add(new Claim("photo_revision_actor_id", actorId.ToString("D")));
+
+        var signingCredentials = new SigningCredentials(
+            new SymmetricSecurityKey(Encoding.UTF8.GetBytes(signingKeyText)),
+            SecurityAlgorithms.HmacSha256);
+        var token = new JwtSecurityToken(
+            issuer,
+            audience,
+            claims,
+            now.AddSeconds(-5).UtcDateTime,
+            expiresUtc.UtcDateTime,
+            signingCredentials);
+        return new JwtSecurityTokenHandler().WriteToken(token);
+    }
+
+    public static bool TryValidate(
         };
         var signingCredentials = new SigningCredentials(
             new SymmetricSecurityKey(Encoding.UTF8.GetBytes(signingKeyText)),
@@ -95,7 +114,10 @@ public static class LocalDocumentPhotoRevisionGrant
                 !Guid.TryParse(principal.FindFirst("photo_revision_agent_id")?.Value, out var agentId))
                 return false;
 
-            grant = new LocalDocumentPhotoRevisionGrantClaims(tenantId, jobId, agentId);
+            var actorUserId = Guid.TryParse(principal.FindFirst("photo_revision_actor_id")?.Value, out var parsedActorId)
+                ? parsedActorId
+                : (Guid?)null;
+            grant = new LocalDocumentPhotoRevisionGrantClaims(tenantId, jobId, agentId, actorUserId);
             return true;
         }
         catch (Exception exception) when (exception is SecurityTokenException or ArgumentException or FormatException)
