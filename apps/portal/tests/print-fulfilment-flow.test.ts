@@ -267,3 +267,46 @@ test("customer session lifecycle remains behind thin route adapters", () => {
   assert.match(service, /CloudAssistedPrintingEnabled/);
   assert.match(service, /PhotoPricing/);
 });
+
+test("photo quotes support multi-page sheets and page-level refund allocation", () => {
+  const endpoint = readApi("PublicJobQuoteEndpoints.cs");
+  const request = read("../../../src/SmartPrint.Api/Contracts/ApiContracts.cs");
+  const rules = read("../../../src/SmartPrint.Api/Domain/PrintJobQuoteRules.cs");
+  const pricing = read("../../../src/SmartPrint.Api/Pricing/PricingCalculator.cs");
+  assert.match(request, /int\? PhotosPerPage = null/);
+  assert.match(endpoint, /request\.PhotosPerPage/);
+  assert.match(endpoint, /PricingCalculator\.PhotoPageCount/);
+  assert.match(endpoint, /PricingCalculator\.CalculatePhotoPageRefundAllocations/);
+  assert.match(rules, /PricingCalculator\.MaximumPhotosPerA4Sheet/);
+  assert.match(pricing, /public static long\[\] CalculatePhotoPageRefundAllocations/);
+});
+
+test("shop photo revision protects the original document and locks editing after payment", () => {
+  const endpoint = readApi("ShopPhotoRevisionEndpoints.cs");
+  const service = read("../../../src/SmartPrint.Api/Services/ShopPhotoRevisionService.cs");
+  assert.match(endpoint, /MapShopPhotoRevisionEndpoints/);
+  assert.match(endpoint, /photo-revision-grant/);
+  assert.match(endpoint, /photo-revision/);
+  assert.match(service, /Status != "AWAITING_SHOP_APPROVAL"/);
+  assert.match(service, /item\.Status != "REJECTED" && item\.Status != "REFUNDED"/);
+  assert.match(service, /document\.MediaType is not \("image\/jpeg" or "image\/png"\)/);
+  assert.match(service, /CalculatePhotoPageRefundAllocations/);
+  assert.match(service, /newRevisionIsCommitted/);
+});
+
+test("local Agent photo revision is scoped to its grant and idempotent after commit", () => {
+  const endpoint = readApi("AgentLocalPhotoRevisionEndpoints.cs");
+  const service = read("../../../src/SmartPrint.Api/Services/AgentLocalPhotoRevisionService.cs");
+  const grant = read("../../../src/SmartPrint.Api/Security/LocalDocumentPhotoRevisionGrant.cs");
+  assert.match(endpoint, /AgentAuthentication\.AuthenticateAsync/);
+  assert.match(endpoint, /revisions\.AuthorizeAsync/);
+  assert.match(endpoint, /revisions\.CompleteAsync/);
+  assert.match(service, /LocalDocumentPhotoRevisionGrant\.IsFor/);
+  assert.match(service, /item\.TenantId == device\.TenantId/);
+  assert.match(service, /item\.AgentDeviceId == device\.Id/);
+  assert.match(service, /MatchesCommittedRevision/);
+  assert.match(service, /DuplicateRequest = true/);
+  assert.match(grant, /photo_revision_agent_id/);
+  assert.match(grant, /TimeSpan\.FromMinutes\(2\)/);
+});
+
