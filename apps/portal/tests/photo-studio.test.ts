@@ -156,3 +156,9 @@ test("Photo Studio restores focus to the customer or shop control after it close
  assert.match(studio,/const previouslyFocused = document\.activeElement instanceof HTMLElement/);
  assert.match(studio,/previouslyFocused\?\.focus\(\)/);
 });
+
+test("customers are told when the shop has not enabled photo printing",()=>{
+ const app=readFileSync(new URL("../src/App.tsx",import.meta.url),"utf8");
+ assert.match(app,/Photo printing is not enabled at this shop yet/);
+ assert.match(app,/Ask the shop owner to configure photo sizes and rates/);
+});
