@@ -51,10 +51,9 @@ public static class PrintJobQuoteRules
         var invalidPhotoLayout = isPhotoPrint &&
             (photoSizeCode is not ("35x45" or "25x35" or "2x2" or "4x6") ||
              photoCount is null || photoCount is < 1 or > 100 ||
-             photosPerPage is <= 0 ||
              (photosPerPage is int pageCapacity &&
-              photoSizeCode is not null &&
-              pageCapacity > PricingCalculator.MaximumPhotosPerA4Sheet(photoSizeCode)));
+              (pageCapacity <= 0 ||
+               pageCapacity > PricingCalculator.MaximumPhotosPerA4Sheet(photoSizeCode!))));
         var isInvalid =
             (printKind is not null && printKind is not ("DOCUMENT" or "PHOTO")) ||
             pageCount is <= 0 or > 500 ||
