@@ -81,6 +81,7 @@ public static class ApiServiceRegistration
         });
         services.AddScoped<TokenIssuer>();
         services.AddScoped<TenantEntitlementService>();
+        services.AddScoped<PlatformPlanService>();
         services.AddScoped<ShopPrintJobSettingsService>();
         services.AddSingleton<DocumentStorage>();
         services.AddHostedService<DocumentRetentionWorker>();
