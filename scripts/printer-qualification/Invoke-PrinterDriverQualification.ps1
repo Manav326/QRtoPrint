@@ -123,6 +123,9 @@ foreach ($item in $manifest.drivers) {
             [string]::IsNullOrWhiteSpace([string]$item.driverName) -or
             [string]::IsNullOrWhiteSpace([string]$item.catalogSignerContains) -or
             @($item.allowedDownloadHosts).Count -eq 0 -or
+            @($item.windowsTargets | Where-Object {
+                $_ -in @("Windows Server 2025", "Windows Server 2022", "Windows 11 x64", "Windows 10 x64")
+            }).Count -eq 0 -or
             $item.licenseReview -ne "approved") {
             throw "Approved driver '$($item.id)' lacks a pinned URL/hash, ZIP/CAB format, INF, driver name, trusted signer, host allowlist or license approval."
         }
@@ -150,6 +153,28 @@ if ($driver.ciApproval -ne "approved" -or $driver.licenseReview -ne "approved") 
 
 if (-not (Test-AllowedVendorUri -Uri ([uri]$driver.packageUrl) -AllowedHosts @($driver.allowedDownloadHosts))) {
     throw "Package URL must use HTTPS and an explicitly approved vendor host."
+}
+
+$os = Get-CimInstance -ClassName Win32_OperatingSystem -ErrorAction Stop
+$runnerOsCaption = [string]$os.Caption
+$runnerArchitecture = [string]$env:PROCESSOR_ARCHITECTURE
+$runnerTarget = if ($runnerOsCaption -match "Windows Server 2025" -and $runnerArchitecture -eq "AMD64") {
+    "Windows Server 2025"
+} elseif ($runnerOsCaption -match "Windows Server 2022" -and $runnerArchitecture -eq "AMD64") {
+    "Windows Server 2022"
+} elseif ($runnerOsCaption -match "Windows 11" -and $runnerArchitecture -eq "AMD64") {
+    "Windows 11 x64"
+} elseif ($runnerOsCaption -match "Windows 10" -and $runnerArchitecture -eq "AMD64") {
+    "Windows 10 x64"
+} else {
+    $null
+}
+
+if (-not $runnerTarget) {
+    throw "Unsupported qualification runner OS/architecture: '$runnerOsCaption' / '$runnerArchitecture'. No vendor package was downloaded."
+}
+if (@($driver.windowsTargets) -notcontains $runnerTarget) {
+    throw "Driver '$DriverId' is not listed by the vendor for '$runnerTarget'. Listed targets: $(@($driver.windowsTargets) -join ', '). No package was downloaded."
 }
 
 if ([System.IO.Path]::IsPathRooted([string]$driver.infRelativePath) -or
@@ -258,12 +283,13 @@ try {
         queueName = $queue.Name
         portName = $queue.PortName
         windowsVersion = [System.Environment]::OSVersion.Version.ToString()
+        windowsCaption = $runnerOsCaption
+        runnerArchitecture = $runnerArchitecture
+        vendorListedRunnerTarget = $runnerTarget
         qualificationScope = "SIGNED_DRIVER_INSTALL_AND_VIRTUAL_SPOOLER_RENDERING"
         physicalPrinterVerified = $false
         completedAtUtc = [DateTimeOffset]::UtcNow
     }
-    Write-Report -Path (Join-Path $ReportDirectory "driver-install.json") -Value $installReport
-
     @(
         "SMARTPRINT_DRIVER_QUALIFICATION_QUEUE=$queueName"
         "SMARTPRINT_DRIVER_QUALIFICATION_PORT=$portName"
@@ -272,6 +298,8 @@ try {
         "SMARTPRINT_DRIVER_QUALIFICATION_OUTPUT=$portName"
         "SMARTPRINT_DRIVER_QUALIFICATION_REPORT=$(Join-Path $ReportDirectory 'driver-rendering.json')"
     ) | Add-Content -LiteralPath $env:GITHUB_ENV -Encoding utf8
+
+    Write-Report -Path (Join-Path $ReportDirectory "driver-install.json") -Value $installReport
 
     Write-Host "Installed approved driver '$($driver.driverName)' and created isolated queue '$queueName'."
     Write-Host "No physical printer was contacted; the following test renders to a local file-backed port."
