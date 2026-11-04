@@ -29,25 +29,30 @@ test("owner quote edits are sent through the existing print-job API", () => {
 
 test("paid jobs are staged while a physical printer is offline and checked at dispatch", () => {
   const claimSource = readApi("AgentJobEndpoints.cs");
+  const claimService = read("../../../src/SmartPrint.Api/Services/AgentJobQueueService.cs");
   const dispatchSource = readApi("ShopPrintJobDispatchEndpoints.cs");
   const dispatchService = read("../../../src/SmartPrint.Api/Services/ShopPrintJobDispatchService.cs");
   const claimStart = claimSource.indexOf('agentApi.MapPost("/jobs/claim"');
   const claimEnd = claimSource.indexOf('agentApi.MapGet("/jobs/{jobId:guid}/document"', claimStart);
+  const claimWorkflowStart = claimService.indexOf("public async Task<AgentJobClaimResult> ClaimAvailableAsync");
+  const claimWorkflowEnd = claimService.indexOf("public async Task<AgentJobDocumentResult> GetDocumentAsync", claimWorkflowStart);
   const dispatchStart = dispatchSource.indexOf('shop.MapPost("/print-jobs/{jobId:guid}/dispatch"');
   const dispatchEnd = dispatchSource.indexOf('shop.MapPost("/print-jobs/{jobId:guid}/retry-pdf-export"', dispatchStart);
   assert.ok(claimStart >= 0 && claimEnd > claimStart);
+  assert.ok(claimWorkflowStart >= 0 && claimWorkflowEnd > claimWorkflowStart);
   assert.ok(dispatchStart >= 0 && dispatchEnd > dispatchStart);
   const claimRoute = claimSource.slice(claimStart, claimEnd);
+  const claimWorkflow = claimService.slice(claimWorkflowStart, claimWorkflowEnd);
   const dispatchRoute = dispatchSource.slice(dispatchStart, dispatchEnd);
-  assert.match(claimRoute, /printer\.IsActive/);
-  assert.match(claimRoute, /printer\.QueueName != null/);
-  assert.doesNotMatch(claimRoute, /printer\.Status == "Ready"/);
-  assert.doesNotMatch(claimRoute, /printer\.LastSeenUtc/);
+  assert.match(claimRoute, /queue\.ClaimAvailableAsync/);
+  assert.match(claimWorkflow, /printer\.IsActive/);
+  assert.match(claimWorkflow, /printer\.QueueName != null/);
+  assert.doesNotMatch(claimWorkflow, /printer\.Status == "Ready"/);
+  assert.doesNotMatch(claimWorkflow, /printer\.LastSeenUtc/);
   assert.match(dispatchRoute, /dispatch\.DispatchAsync/);
   assert.match(dispatchService, /printer\.Status == "Ready"/);
   assert.match(dispatchService, /printer\.LastSeenUtc/);
 });
-
 test("plan-limited HTTPS fallback is only offered when the Agent is unavailable", () => {
   const app = read("../src/App.tsx");
   const api = read("../src/api.ts");
@@ -561,4 +566,33 @@ test("cloud upload keeps encrypted storage when the transaction commit outcome c
   assert.match(service, /if \(committed\)\s*return/);
   assert.match(service, /Retain the encrypted object when the DB outcome cannot be checked/);
   assert.match(service, /logger\.LogError/);
+});
+
+
+test("Agent job document downloads are limited to the active device lease and preserve private response headers", () => {
+  const endpoint = readApi("AgentJobEndpoints.cs");
+  const service = read("../../../src/SmartPrint.Api/Services/AgentJobQueueService.cs");
+  assert.match(endpoint, /queue\.GetDocumentAsync/);
+  assert.match(endpoint, /Cache-Control.*private, no-store/);
+  assert.match(endpoint, /X-Content-Type-Options.*nosniff/);
+  assert.match(endpoint, /X-Document-SHA256/);
+  assert.match(service, /job\.TenantId == device\.TenantId/);
+  assert.match(service, /job\.ClaimedByAgentDeviceId == device\.Id/);
+  assert.match(service, /job\.AgentLeaseExpiresUtc > now/);
+  assert.match(service, /AgentJobDocumentFailure\.StoredOnLocalAgent/);
+});
+
+test("Agent local receipt acknowledgement stays idempotent and checks the original document hash and lease", () => {
+  const endpoint = readApi("AgentJobEndpoints.cs");
+  const service = read("../../../src/SmartPrint.Api/Services/AgentJobQueueService.cs");
+  const rules = read("../../../src/SmartPrint.Api/Domain/AgentJobReceivedRules.cs");
+  assert.match(endpoint, /queue\.AcknowledgeReceivedAsync/);
+  assert.match(service, /AgentJobReceivedRules\.TryNormalize/);
+  assert.match(service, /document\.Sha256, sha/);
+  assert.match(service, /document\.SizeBytes != request\.SizeBytes/);
+  assert.match(service, /job\.ClaimedByAgentDeviceId != device\.Id/);
+  assert.match(service, /AgentJobReceiptFailure\.LeaseExpired/);
+  assert.match(service, /DuplicateRequest: true/);
+  assert.match(service, /AGENT_CONFIRMED_LOCAL_QUEUE_RECEIPT/);
+  assert.match(rules, /MaximumDocumentBytes = 20L \* 1024 \* 1024/);
 });
