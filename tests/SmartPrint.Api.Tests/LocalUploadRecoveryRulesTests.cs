@@ -54,6 +54,30 @@ public sealed class LocalUploadRecoveryRulesTests
             now.AddMinutes(-5), now.AddMinutes(-1), now, RecoveryWindow));
     }
 
+    [Fact]
+    public void RenewsOnlyExpiredUncompletedTicketAfterItsClaimLeaseEnds()
+    {
+        var now = new DateTimeOffset(2026, 11, 2, 12, 0, 0, TimeSpan.Zero);
+        Assert.True(LocalUploadRecoveryRules.CanRenewExpiredTicket(
+            now.AddMinutes(-20), now.AddMinutes(-5), now.AddMinutes(-5), null, now, RecoveryWindow));
+        Assert.True(LocalUploadRecoveryRules.CanRenewExpiredTicket(
+            now.AddMinutes(-20), now.AddMinutes(-5), null, null, now, RecoveryWindow));
+    }
+
+    [Fact]
+    public void DoesNotRenewActiveCompletedOrTooOldTickets()
+    {
+        var now = new DateTimeOffset(2026, 11, 2, 12, 0, 0, TimeSpan.Zero);
+        Assert.False(LocalUploadRecoveryRules.CanRenewExpiredTicket(
+            now.AddMinutes(-20), now.AddMinutes(1), now.AddMinutes(1), null, now, RecoveryWindow));
+        Assert.False(LocalUploadRecoveryRules.CanRenewExpiredTicket(
+            now.AddMinutes(-20), now.AddMinutes(-5), now.AddMinutes(1), null, now, RecoveryWindow));
+        Assert.False(LocalUploadRecoveryRules.CanRenewExpiredTicket(
+            now.AddMinutes(-20), now.AddMinutes(-5), now.AddMinutes(-5), now.AddMinutes(-1), now, RecoveryWindow));
+        Assert.False(LocalUploadRecoveryRules.CanRenewExpiredTicket(
+            now.AddHours(-25), now.AddMinutes(-5), now.AddMinutes(-5), null, now, RecoveryWindow));
+    }
+
     [Theory]
     [InlineData(1024, 1024, true)]
     [InlineData(1024, 1023, false)]
