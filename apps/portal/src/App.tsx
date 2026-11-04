@@ -2246,13 +2246,13 @@ function PrintQueuePage({ jobs, printers, agentDevices, searchQuery, loadingBatc
   const queueBatches=Array.from(batchMap.values());
 
   return <section className="panel queue-panel live-queue-panel">
-    <div className="collection-header"><div><h2>Customer print jobs</h2><p>Review every file separately, but assign one printer to the entire batch. Every accepted file in that batch will use that same printer.</p></div><div className="queue-header-actions"><span className="setup-count">{queueBatches.length} batches shown</span><form className="queue-search-form" onSubmit={event=>{event.preventDefault();void onSearch(searchInput);}}><input aria-label="Search all print jobs" type="search" maxLength={120} placeholder="Job, file or printer" value={searchInput} onChange={event=>setSearchInput(event.target.value)}/><button className="secondary-button" type="submit"><Search size={13}/> Search</button></form><button className="secondary-button queue-refresh-button" onClick={()=>void refreshQueue()} disabled={refreshRunning.current}><Activity size={13}/> Refresh queue</button></div></div>
+    <div className="collection-header"><div><h2>Customer print jobs</h2><p>Review files individually; one printer is used for the whole batch.</p></div><div className="queue-header-actions"><span className="setup-count">{queueBatches.length} batches shown</span><form className="queue-search-form" onSubmit={event=>{event.preventDefault();void onSearch(searchInput);}}><input aria-label="Search all print jobs" type="search" maxLength={120} placeholder="Job, file or printer" value={searchInput} onChange={event=>setSearchInput(event.target.value)}/><button className="secondary-button" type="submit"><Search size={13}/> Search</button></form><button className="secondary-button queue-refresh-button" onClick={()=>void refreshQueue()} disabled={refreshRunning.current}><Activity size={13}/> Refresh queue</button></div></div>
     <div className="queue-refresh-controls">
       <label className="queue-auto-toggle"><input type="checkbox" checked={autoRefresh} onChange={event=>setAutoRefresh(event.target.checked)}/><span className="queue-toggle-track"/><strong>Auto refresh</strong><small>{autoRefresh?"On":"Off"}</small></label>
       <label className="queue-refresh-interval">Refresh every <input type="number" min={5} max={3600} step={1} value={refreshSeconds} onChange={event=>setRefreshSeconds(Math.max(5,Math.min(3600,Number(event.target.value)||5)))}/> seconds</label>
       <span className="queue-refresh-note">{autoRefresh?"Queue refreshes automatically while this page is open.":"Automatic refresh is off. Use Refresh queue whenever needed."}</span>
     </div>
-    {reviewBatches.length>0&&<div className="batch-review-strip"><div><strong>{reviewBatches.length} batch(es) with files waiting for review</strong><span>Review loads every eligible file in a batch, even when this queue is searched or paginated. New files start accepted; previously rejected files stay unchecked until restored.</span></div>{reviewBatches.map(batchId=><button key={batchId} className="secondary-button" disabled={loadingBatchId===batchId||!!loadingBatchId} onClick={()=>onReviewBatch(batchId)}>{loadingBatchId===batchId?<><span className="button-spinner"/>Loading full batch…</>:<>Review batch · {jobs.filter(job=>job.batchId===batchId&&reviewableBatchFileStatuses.has(job.status)).length} shown</>}</button>)}</div>}
+    {reviewBatches.length>0&&<div className="batch-review-strip"><div><strong>{reviewBatches.length} {reviewBatches.length===1?"batch":"batches"} need review</strong><span>Review includes every file in the batch. New files start accepted; rejected files stay excluded until restored.</span></div>{reviewBatches.map(batchId=><button key={batchId} className="secondary-button" disabled={loadingBatchId===batchId||!!loadingBatchId} onClick={()=>onReviewBatch(batchId)}>{loadingBatchId===batchId?<><span className="button-spinner"/>Loading full batch…</>:<>Review batch · {jobs.filter(job=>job.batchId===batchId&&reviewableBatchFileStatuses.has(job.status)).length} shown</>}</button>)}</div>}
     {jobs.length===0 ? <EmptyModule icon={<FileText size={24}/>} title="Your queue is clear" text="When a customer uploads a document through one of your QR stations, the job and its current state will appear here."/> :
       <div className="table-scroll queue-table-scroll"><table className="queue-jobs-table"><thead><tr><th>JOB</th><th>DOCUMENT</th><th>PRINT SETTINGS</th><th>QUOTE</th><th>PRINTER / LOCAL QUEUE</th><th>STATUS</th><th>CREATED</th><th>ACTIONS</th></tr></thead><tbody>
         {queueBatches.map(batch=>{
@@ -2261,11 +2261,13 @@ function PrintQueuePage({ jobs, printers, agentDevices, searchQuery, loadingBatc
           const documentJobs=batch.jobs.filter(job=>job.printKind!=="PHOTO");
           const waiting=batch.jobs.filter(job=>reviewableBatchFileStatuses.has(job.status));
           const folders=Array.from(new Set(batch.jobs.map(job=>job.batchGroupName??"Loose files")));
+          const fileCountLabel=`${batch.jobs.length} ${batch.jobs.length===1?"file":"files"}`;
+          const folderGroupLabel=`${folders.length} ${folders.length===1?"folder group":"folder groups"}`;
           const statusLabels=Array.from(new Set(batch.jobs.map(job=>job.status)));
           const payableJobs=batch.jobs.filter(job=>job.status!=="REJECTED"&&job.status!=="REFUNDED");
-          const totalPrintedPages=payableJobs.reduce((sum,job)=>sum+job.pageCount*job.copies,0);
-          const monoPrintedPages=payableJobs.reduce((sum,job)=>sum+(job.colourMode==="Mono"?job.pageCount*job.copies:0),0);
-          const colourPrintedPages=payableJobs.reduce((sum,job)=>sum+(job.colourMode==="Colour"?job.pageCount*job.copies:0),0);
+          const totalRequestedPages=payableJobs.reduce((sum,job)=>sum+job.pageCount*job.copies,0);
+          const monoRequestedPages=payableJobs.reduce((sum,job)=>sum+(job.colourMode==="Mono"?job.pageCount*job.copies:0),0);
+          const colourRequestedPages=payableJobs.reduce((sum,job)=>sum+(job.colourMode==="Colour"?job.pageCount*job.copies:0),0);
           const totalAmount=payableJobs.reduce((sum,job)=>sum+Math.max(0,job.quotedAmountMinor),0);
           const activeBatchJobs=batch.jobs.filter(job=>job.status!=="REJECTED"&&job.status!=="REFUNDED");
           const localStorageJobs=activeBatchJobs.filter(job=>job.storageMode==="LOCAL_AGENT");
@@ -2289,6 +2291,7 @@ function PrintQueuePage({ jobs, printers, agentDevices, searchQuery, loadingBatc
           const batchAssignmentIncomplete=assignedPrinterIds.length!==1||batchHasUnassignedFiles;
           const currentBatchPrinterId=!batchAssignmentIncomplete&&assignedPrinterIds.length===1?assignedPrinterIds[0]:"";
           const batchPrinter=printers.find(printer=>printer.id===currentBatchPrinterId);
+          const batchPrinterDisplayName=batchPrinter?.outputMode==="PDF_EXPORT"?"Save as PDF":batchPrinter?.displayName||activeBatchJobs.find(job=>job.printerDeviceId===currentBatchPrinterId)?.printerName||"Assigned printer";
           const assignmentJob=batch.jobs.find(job=>
             job.status==="PAID_AUTHORISED" ||
             (job.status==="LOCAL_QUEUE_CLAIMED"&&!job.localQueueReceivedUtc&&
@@ -2310,17 +2313,18 @@ function PrintQueuePage({ jobs, printers, agentDevices, searchQuery, loadingBatc
           const tone=statusLabels.every(status=>status==="COMPLETED"||status==="LOCAL_QUEUE_READY")?"green":statusLabels.some(status=>reviewableBatchFileStatuses.has(status)||status==="AWAITING_CUSTOMER_APPROVAL"||status==="OUTPUT_UNCONFIRMED")?"amber":"blue";
           return <Fragment key={batch.key}>
             <tr className="queue-batch-summary-row">
-              <td><strong className="job-id">{customerBatchName??(batch.batchId?"Batch · "+first.jobNumber:first.jobNumber)}</strong><small className="batch-summary-sub">{batch.batchId?"First job · "+first.jobNumber+" · "+batch.jobs.length+" file(s) shown":batch.jobs.length+" file(s) shown"}</small><div className="queue-print-kind-summary">{photoJobs.length>0&&<PrintKindTag printKind="PHOTO" count={photoJobs.length}/>}{documentJobs.length>0&&<PrintKindTag printKind="DOCUMENT" count={documentJobs.length}/>}</div></td>
-              <td><div className="customer-cell"><strong>{folders.length} folder group(s)</strong><span>{folders.slice(0,3).join(" · ")}{folders.length>3?" · +"+(folders.length-3):""}</span></div></td>
-              <td><div className="detail-cell"><strong>{totalPrintedPages} printed pages</strong><span>{monoPrintedPages} B&W · {colourPrintedPages} Colour</span></div></td>
-              <td className="amount-cell">{totalAmount>0?formatMoney(totalAmount,first.currency):"Not quoted"}</td>
+              <td><strong className="job-id">{customerBatchName??(batch.batchId?"Batch · "+first.jobNumber:first.jobNumber)}</strong><small className="batch-summary-sub">{batch.batchId?"First job · "+first.jobNumber+" · "+fileCountLabel:fileCountLabel}</small><div className="queue-print-kind-summary">{photoJobs.length>0&&<PrintKindTag printKind="PHOTO" count={photoJobs.length}/>}{documentJobs.length>0&&<PrintKindTag printKind="DOCUMENT" count={documentJobs.length}/>}</div></td>
+              <td><div className="customer-cell"><strong>{folderGroupLabel}</strong><span>{folders.slice(0,3).join(" · ")}{folders.length>3?" · +"+(folders.length-3):""}</span></div></td>
+              <td><div className="detail-cell"><strong>{totalRequestedPages} pages requested</strong><span>{monoRequestedPages} B&W · {colourRequestedPages} Colour</span></div></td>
+              <td className="amount-cell">{totalAmount>0?formatMoney(totalAmount,first.currency):"Quote pending"}</td>
               <td><div className="queue-printer-cell">
                 {singleSavedPdfPath ? <>
                   <strong>PDF saved</strong>
                   <small className="queue-pdf-path">{singleSavedPdfPath}</small>
                 </> : <>
-                  <strong>{batchPrinterConflict?"Conflicting printer assignments":batchAssignmentIncomplete?(assignedPrinterIds.length?"Choose one printer for batch":"Not assigned"):batchPrinter?.displayName||activeBatchJobs.find(job=>job.printerDeviceId===currentBatchPrinterId)?.printerName||"Assigned printer"}</strong>
-                  <small>{lockedPrinterIds.length===1?"Locked to the printer already receiving this batch":waiting.length+" file(s) awaiting review"}</small>
+                  <strong>{batchPrinterConflict?"Multiple printer assignments":batchAssignmentIncomplete?(assignedPrinterIds.length?"Choose one printer":"Printer not assigned"):batchPrinterDisplayName}</strong>
+                  <small>{lockedPrinterIds.length===1?"Locked to the printer already used for this batch":waiting.length===0?"No files awaiting review":`${waiting.length} ${waiting.length===1?"file":"files"} awaiting review`}</small>
+                  {batchPrinter?.outputMode==="PDF_EXPORT"&&<small>Saves a PDF, not paper</small>}
                 </>}
                 {assignmentJob&&<select
                   aria-label="Assign one printer for all files in batch"
@@ -2328,13 +2332,13 @@ function PrintQueuePage({ jobs, printers, agentDevices, searchQuery, loadingBatc
                   disabled={!!busyJobId||batchPrinterConflict||availableBatchPrinters.length===0}
                   onChange={event=>onAssignPrinter(assignmentJob,event.target.value)}>
                   <option value="">{availableBatchPrinters.length===0?"No available printer":"Choose one printer for this batch"}</option>
-                  {availableBatchPrinters.map(printer=><option key={printer.id} value={printer.id}>{printer.outputMode==="PDF_EXPORT"?"Save PDF · ":""}{printer.displayName} · {agentDevices.find(agent=>agent.id===printer.agentDeviceId)?.deviceName||"Shop computer"} · {printer.status}</option>)}
+                  {availableBatchPrinters.map(printer=><option key={printer.id} value={printer.id}>{printer.outputMode==="PDF_EXPORT"?"Save as PDF · ":""}{printer.displayName} · {agentDevices.find(agent=>agent.id===printer.agentDeviceId)?.deviceName||"Shop computer"} · {printer.status}</option>)}
                 </select>}
-                {assignmentJob&&<small className="queue-batch-assignment-note">One printer applies to every active file in this batch.</small>}
-                {requiredLocalAgentId&&!localComputerIdentityConflict&&<small className="queue-batch-assignment-note">Direct-upload files are stored on {localComputerName||"the original shop computer"}. Only printers on that computer are offered. Reconnect it if offline. To switch computers, start a new batch and upload every file through Cloud-assisted upload.</small>}
-                {multipleOrUnknownLocalComputers&&<small className="queue-batch-printer-lock">This batch contains local-only files from different or unidentified computers. Do not start output. Verify whether any pages have printed; then create a new Cloud-assisted batch with every file.</small>}
-                {lockedPrinterOnWrongComputer&&<small className="queue-batch-printer-lock">This batch is locked to a printer on another computer, while some original files remain on {localComputerName||"the original shop computer"}. Do not retry or reroute output. Check which files already printed and have the shop operator reconcile the batch before resubmission.</small>}
-                {batchPrinterConflict&&<small className="queue-batch-printer-lock">This batch has already started on more than one printer. New output is blocked; review the affected files.</small>}
+                {assignmentJob&&<small className="queue-batch-assignment-note">One printer is used for all active files.</small>}
+                {requiredLocalAgentId&&!localComputerIdentityConflict&&<small className="queue-batch-assignment-note">Files are stored on {localComputerName||"the original shop computer"}. Use its printers and reconnect it if offline. To use another computer, upload all files in a new Cloud-assisted batch.</small>}
+                {multipleOrUnknownLocalComputers&&<small className="queue-batch-printer-lock">Files are stored on different or unknown computers. Do not start output. Check for existing output, then upload all files in a new Cloud-assisted batch.</small>}
+                {lockedPrinterOnWrongComputer&&<small className="queue-batch-printer-lock">Files are on {localComputerName||"the original shop computer"}, but this printer is on another computer. Stop; do not retry or switch printers. Check existing output before resubmitting.</small>}
+                {batchPrinterConflict&&<small className="queue-batch-printer-lock">This batch uses multiple printers. New output is blocked. Review the affected files.</small>}
               </div></td>
               <td><Status label={label} tone={tone}/></td>
               <td className="time-cell">{formatIstDateTime(first.createdUtc)}</td>
@@ -2345,17 +2349,18 @@ function PrintQueuePage({ jobs, printers, agentDevices, searchQuery, loadingBatc
             </tr>
             {expanded&&<tr className="queue-batch-detail-row"><td colSpan={8}><div className="queue-batch-files">{batch.jobs.map(job=><article className="queue-batch-file-card" key={job.id}>
               <div className="queue-batch-file-main">
-                <div><div className="queue-batch-file-title"><strong>{job.document.originalFileName}</strong><PrintKindTag printKind={job.printKind}/></div><small>{job.printKind==="PHOTO" ? `${job.photoCount??0} photos · ${job.photoSizeCode??""} · A4 photo sheet` : `${job.batchGroupName??"Loose files"} · ${job.pageCount} source pages × ${job.copies} = ${job.pageCount*job.copies} printed · ${job.colourMode} · ${job.isDuplex?"Double-sided":"Single-sided"}`}</small></div>
+                <div><div className="queue-batch-file-title"><strong>{job.document.originalFileName}</strong><PrintKindTag printKind={job.printKind}/></div><small>{job.printKind==="PHOTO" ? `${job.photoCount??0} photos · ${job.photoSizeCode??""} · A4 photo sheet` : `${job.batchGroupName??"Loose files"} · ${job.pageCount} pages × ${job.copies} copies = ${job.pageCount*job.copies} pages requested · ${job.colourMode} · ${job.isDuplex?"Double-sided":"Single-sided"}`}</small></div>
                 <Status label={prettyStatus(job.status)} tone={job.status==="REJECTED"?"red":job.status==="COMPLETED"||job.status==="LOCAL_QUEUE_READY"?"green":job.status==="AWAITING_SHOP_APPROVAL"?"amber":"blue"}/>
                 <strong className="amount-cell">{job.quotedAmountMinor>0?formatMoney(job.quotedAmountMinor,job.currency):"—"}</strong>
               </div>
               {job.printerName&&<div className="queue-batch-file-printer">
                 <Printer size={13}/>
-                <strong>{job.outputMode==="PDF_EXPORT"?"PDF export":job.outputConfirmedUtc||job.status==="COMPLETED"?"Printed on":job.spoolerJobId?"Sent to":"Assigned printer"}</strong>
-                <span>{job.printerName}</span>
+                <strong>{job.outputMode==="PDF_EXPORT"?"Save as PDF":job.outputConfirmedUtc||job.status==="COMPLETED"?"Printed on":job.spoolerJobId?"Sent to":"Assigned printer"}</strong>
+                <span>{job.outputMode==="PDF_EXPORT"?job.printerAgentName||"Shop computer":job.printerName}</span>
+                {job.outputMode==="PDF_EXPORT"&&<small>Virtual printer: {job.printerName}</small>}
                 {job.queueName&&job.queueName!==job.printerName&&<small>Windows queue: {job.queueName}</small>}
-                {job.printerAgentName&&<small>Shop computer: {job.printerAgentName}</small>}
-                {job.printerSnapshotUtc&&<small>Print-time identity recorded: {formatIstDateTime(job.printerSnapshotUtc)}</small>}
+                {job.printerAgentName&&job.outputMode!=="PDF_EXPORT"&&<small>Shop computer: {job.printerAgentName}</small>}
+                {job.printerSnapshotUtc&&<small>Output destination recorded: {formatIstDateTime(job.printerSnapshotUtc)}</small>}
                 {job.outputConfirmedUtc&&job.outputType!=="PDF_EXPORT"&&<small>Paper output manually confirmed by {job.outputConfirmedByName||"shop operator"} at {formatIstDateTime(job.outputConfirmedUtc)}</small>}
               </div>}
               {!job.printerName&&job.storageMode==="LOCAL_AGENT"&&job.documentAgentDeviceName&&<div className="queue-batch-file-printer"><Printer size={13}/><strong>Stored on</strong><span>{job.documentAgentDeviceName}</span></div>}
@@ -2402,11 +2407,11 @@ function BatchReviewModal({jobs,busy,decisions,retrying,onDecision,onClose,onPre
   const quoteRefreshRequiredCount=acceptedJobs.filter(quoteExpired).length;
   const acceptedTotal=acceptedJobs.filter(job=>!quoteExpired(job))
     .reduce((sum,job)=>sum+Math.max(0,job.quotedAmountMinor),0);
-  const acceptedPrintedPages=acceptedJobs.reduce((sum,job)=>sum+job.pageCount*job.copies,0);
+  const acceptedRequestedPages=acceptedJobs.reduce((sum,job)=>sum+job.pageCount*job.copies,0);
   const acceptedMonoPages=acceptedJobs.reduce((sum,job)=>sum+(job.colourMode==="Mono"?job.pageCount*job.copies:0),0);
   const acceptedColourPages=acceptedJobs.reduce((sum,job)=>sum+(job.colourMode==="Colour"?job.pageCount*job.copies:0),0);
   const folders=Array.from(new Set(jobs.map(job=>job.batchGroupName??"Loose files")));
-  return <Modal title={retrying?"Retry batch review":"Review batch"} subtitle={retrying?"Retry the review. Rejected files stay unchecked; tick one to restore it before the next checkout.":"New files start accepted. Uncheck files to exclude them; rejected files remain unchecked until you restore them before checkout."} onClose={onClose}>
+  return <Modal title={retrying?"Retry batch review":"Review batch"} subtitle={retrying?"Retry review. Rejected files stay excluded until restored.":"Files start accepted. Uncheck a file to exclude it; recheck it to restore it."} onClose={onClose}>
     <div className="batch-review-list">{folders.map(folderName=><section className="batch-review-folder" key={folderName}>
       <div className="batch-review-folder-head"><FolderOpen size={15}/><strong>{folderName}</strong><small>{jobs.filter(job=>(job.batchGroupName??"Loose files")===folderName).length} files</small></div>
       {jobs.filter(job=>(job.batchGroupName??"Loose files")===folderName).map((job,index)=>{
@@ -2415,12 +2420,12 @@ function BatchReviewModal({jobs,busy,decisions,retrying,onDecision,onClose,onPre
         return <div className={accepted?"batch-review-row accepted":"batch-review-row rejected"} key={job.id}>
           <label className="batch-review-checkbox"><input type="checkbox" checked={accepted} disabled={busy} onChange={event=>onDecision(job.id,event.target.checked)}/></label>
           <span className="batch-review-index">{index+1}</span>
-          <div className="batch-review-file"><div className="queue-batch-file-title"><strong>{job.document.originalFileName}</strong><PrintKindTag printKind={job.printKind}/></div><small>{job.printKind==="PHOTO" ? `${job.photoCount??0} photos · ${job.photoSizeCode??""} · A4 photo sheet` : `${job.pageCount} source pages × ${job.copies} = ${job.pageCount*job.copies} printed · ${job.colourMode} · ${job.isDuplex?"Double-sided":"Single-sided"}`} · {needsFreshQuote?"Previous quote expired · fresh quote required":formatMoney(job.quotedAmountMinor,job.currency)}</small><Status label={!accepted?"Marked for rejection":needsFreshQuote?"Accepted · re-quote needed":"Accepted"} tone={!accepted?"red":needsFreshQuote?"amber":"green"}/></div>
+          <div className="batch-review-file"><div className="queue-batch-file-title"><strong>{job.document.originalFileName}</strong><PrintKindTag printKind={job.printKind}/></div><small>{job.printKind==="PHOTO" ? `${job.photoCount??0} photos · ${job.photoSizeCode??""} · A4 photo sheet` : `${job.pageCount} pages × ${job.copies} copies = ${job.pageCount*job.copies} pages requested · ${job.colourMode} · ${job.isDuplex?"Double-sided":"Single-sided"}`} · {needsFreshQuote?"Previous quote expired · fresh quote required":formatMoney(job.quotedAmountMinor,job.currency)}</small><Status label={!accepted?"Marked for rejection":needsFreshQuote?"Accepted · re-quote needed":"Accepted"} tone={!accepted?"red":needsFreshQuote?"amber":"green"}/></div>
           <button className="subtle-button" type="button" disabled={busy} onClick={()=>onPreview(job)}>Preview</button>
         </div>;
       })}
     </section>)}</div>
-    <div className="batch-review-summary"><span><strong>{acceptedCount}</strong> accepted</span><span><strong>{rejectedCount}</strong> rejected</span><span><strong>{acceptedPrintedPages}</strong> printed pages</span><span><strong>{acceptedMonoPages}</strong> B&W · <strong>{acceptedColourPages}</strong> Colour</span><span><strong>{formatMoney(acceptedTotal,jobs[0]?.currency??"INR")}</strong> accepted value with valid quotes</span>{quoteRefreshRequiredCount>0&&<span><strong>{quoteRefreshRequiredCount}</strong> need a fresh quote</span>}<small>Printed pages = source pages × copies. Expired amounts are not included in accepted value and must be recalculated before checkout. Reject before checkout to exclude a file; once payment starts, use the file-level refund workflow.</small></div>
+    <div className="batch-review-summary"><span><strong>{acceptedCount}</strong> accepted</span><span><strong>{rejectedCount}</strong> rejected</span><span><strong>{acceptedRequestedPages}</strong> pages requested</span><span><strong>{acceptedMonoPages}</strong> B&W · <strong>{acceptedColourPages}</strong> Colour</span><span><strong>{formatMoney(acceptedTotal,jobs[0]?.currency??"INR")}</strong> accepted value with valid quotes</span>{quoteRefreshRequiredCount>0&&<span><strong>{quoteRefreshRequiredCount}</strong> need a fresh quote</span>}<small>Page count = source pages × copies. Refresh expired quotes before checkout. Reject files before checkout; after payment starts, use the file-level refund action.</small></div>
     <div className="modal-actions"><button className="secondary-button" onClick={onClose} disabled={busy}>Keep reviewing</button><button className="primary-button" disabled={busy||jobs.length===0} onClick={()=>onApply(acceptedIds)}>{busy?<span className="button-spinner"/>:"Apply review"}</button></div>
   </Modal>;
 }
@@ -3464,7 +3469,7 @@ function smartPrintNativeStatus(status:string):string {
     case "PRINT_SUBMITTING": return "Sending to printer.";
     case "SPOOLER_ACCEPTED": return "Queue accepted · Paper unconfirmed.";
     case "PRINTING": return "Printing in progress.";
-    case "OUTPUT_UNCONFIRMED": return "Shop checking printed pages.";
+    case "OUTPUT_UNCONFIRMED": return "Shop confirming print output.";
     case "COMPLETED": return "Ready for collection.";
     case "REJECTED": return "Shop rejected request.";
     case "QUOTE_EXPIRED": return "Quote expired.";
@@ -4344,7 +4349,7 @@ function CustomerPrintFlow({publicCode,sessionToken,paymentOptions,localAgent,lo
         {Array.from(new Set(uploadedBatch.map(item=>item.job.batchGroupName??"Loose files"))).map(groupName=><section className="customer-uploaded-folder" key={groupName}>
           <strong>{groupName}</strong>
           {uploadedBatch.filter(item=>(item.job.batchGroupName??"Loose files")===groupName).map(item=><button type="button" key={item.job.id} className={uploaded.job.id===item.job.id?"customer-uploaded-batch-item active":"customer-uploaded-batch-item"} onClick={()=>selectUploadedFile(item)}>
-            <span className="batch-file-index"><FileText size={14}/></span><span className="batch-file-copy"><span className="batch-file-title-row"><strong>{item.document.originalFileName}</strong><PrintKindTag printKind={(photoSettingsByJobId[item.job.id]||batchStatuses[item.job.id]?.printKind==="PHOTO"||item.job.printKind==="PHOTO")?"PHOTO":"DOCUMENT"}/></span><small>{(photoSettingsByJobId[item.job.id]||batchStatuses[item.job.id]?.printKind==="PHOTO"||item.job.printKind==="PHOTO")?`${photoSettingsByJobId[item.job.id]?.photoCount??batchStatuses[item.job.id]?.photoCount??item.job.photoCount??0} photos · ${photoSettingsByJobId[item.job.id]?.sizeCode??batchStatuses[item.job.id]?.photoSizeCode??item.job.photoSizeCode??""} · A4 photo sheet`:`${item.job.pageCount} source pages × ${printSettingsByJobId[item.job.id]?.copies??item.job.copies} = ${item.job.pageCount*(printSettingsByJobId[item.job.id]?.copies??item.job.copies)} printed · ${printSettingsByJobId[item.job.id]?.colourMode??"Mono"} · ${(printSettingsByJobId[item.job.id]?.isDuplex??false)?"Double-sided":"Single-sided"}`} · {(batchStatuses[item.job.id]?.quotedAmountMinor??item.job.quotedAmountMinor)>0?formatMoney(batchStatuses[item.job.id]?.quotedAmountMinor??item.job.quotedAmountMinor,item.job.currency):"Awaiting quote"}</small></span>
+            <span className="batch-file-index"><FileText size={14}/></span><span className="batch-file-copy"><span className="batch-file-title-row"><strong>{item.document.originalFileName}</strong><PrintKindTag printKind={(photoSettingsByJobId[item.job.id]||batchStatuses[item.job.id]?.printKind==="PHOTO"||item.job.printKind==="PHOTO")?"PHOTO":"DOCUMENT"}/></span><small>{(photoSettingsByJobId[item.job.id]||batchStatuses[item.job.id]?.printKind==="PHOTO"||item.job.printKind==="PHOTO")?`${photoSettingsByJobId[item.job.id]?.photoCount??batchStatuses[item.job.id]?.photoCount??item.job.photoCount??0} photos · ${photoSettingsByJobId[item.job.id]?.sizeCode??batchStatuses[item.job.id]?.photoSizeCode??item.job.photoSizeCode??""} · A4 photo sheet`:`${item.job.pageCount} pages × ${printSettingsByJobId[item.job.id]?.copies??item.job.copies} copies = ${item.job.pageCount*(printSettingsByJobId[item.job.id]?.copies??item.job.copies)} pages requested · ${printSettingsByJobId[item.job.id]?.colourMode??"Mono"} · ${(printSettingsByJobId[item.job.id]?.isDuplex??false)?"Double-sided":"Single-sided"}`} · {(batchStatuses[item.job.id]?.quotedAmountMinor??item.job.quotedAmountMinor)>0?formatMoney(batchStatuses[item.job.id]?.quotedAmountMinor??item.job.quotedAmountMinor,item.job.currency):"Awaiting quote"}</small></span>
             <Status
               label={quoteExpiredForBatchItem(item)&&!["REJECTED","REFUNDED"].includes(statusForBatchItem(item))?"Quote expired":prettyStatus(batchStatuses[item.job.id]?.status??item.job.status??"UPLOADED")}
               tone={quoteExpiredForBatchItem(item)&&!["REJECTED","REFUNDED"].includes(statusForBatchItem(item))?"amber":

@@ -175,7 +175,10 @@ test("batch routing enforces local-computer ownership and preserves print-time a
   const css = read("../src/styles.css");
 
   assert.match(app, /Assign one printer for all files in batch/);
-  assert.match(app, /One printer applies to every active file in this batch/);
+  assert.match(app, /One printer is used for all active files/);
+  assert.match(app, /pages requested/);
+  assert.match(app, /Save as PDF/);
+  assert.match(app, /Saves a PDF, not paper/);
   assert.match(app, /requiredLocalAgentId/);
   assert.match(app, /localComputerIdentityConflict/);
   assert.match(app, /lockedPrinterOnWrongComputer/);
