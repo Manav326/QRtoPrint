@@ -64,20 +64,14 @@ public static class ShopPrinterEndpoints
         shop.MapPost("/printers", async (
             CreatePrinterRequest request,
             ClaimsPrincipal principal,
-            SmartPrintDbContext db,
-            TenantEntitlementService entitlements,
+            ShopPrinterService printers,
             CancellationToken ct) =>
         {
             if (!IsShopOwner(principal) || !TryGetTenantId(principal, out var tenantId))
-            {
                 return Results.Forbid();
-            }
 
-            var connectionTypes = new[] { "USB", "LAN", "IPP", "WindowsQueue" };
-            if (string.IsNullOrWhiteSpace(request.DisplayName) || request.DisplayName.Trim().Length > 160 ||
-                string.IsNullOrWhiteSpace(request.Manufacturer) || request.Manufacturer.Trim().Length > 80 ||
-                string.IsNullOrWhiteSpace(request.Model) || request.Model.Trim().Length > 120 ||
-                !connectionTypes.Contains(request.ConnectionType, StringComparer.OrdinalIgnoreCase))
+            var result = await printers.CreateAsync(tenantId, request, ct);
+            if (result.Failure == ShopPrinterMutationFailure.InvalidPrinter)
             {
                 return Results.ValidationProblem(new Dictionary<string, string[]>
                 {
@@ -85,16 +79,7 @@ public static class ShopPrinterEndpoints
                 });
             }
 
-            var capabilities = request.CapabilitiesJson ?? "{}";
-            try
-            {
-                using var parsed = JsonDocument.Parse(capabilities);
-                if (parsed.RootElement.ValueKind != JsonValueKind.Object || capabilities.Length > 16000)
-                {
-                    throw new JsonException();
-                }
-            }
-            catch (JsonException)
+            if (result.Failure == ShopPrinterMutationFailure.InvalidCapabilities)
             {
                 return Results.ValidationProblem(new Dictionary<string, string[]>
                 {
@@ -102,31 +87,18 @@ public static class ShopPrinterEndpoints
                 });
             }
 
-            await using var transaction = await db.Database.BeginTransactionAsync(ct);
-            await entitlements.AcquireQuotaLockAsync(tenantId, TenantQuotaResource.Printer, ct);
-            var quota = await entitlements.CheckCapacityAsync(tenantId, TenantQuotaResource.Printer, ct);
-            if (!quota.Allowed)
+            if (result.Failure == ShopPrinterMutationFailure.QuotaExceeded)
             {
-                await transaction.RollbackAsync(ct);
-                return Results.Conflict(new { code = quota.Code, message = quota.Message, current = quota.Current, maximum = quota.Maximum });
+                return Results.Conflict(new
+                {
+                    code = result.QuotaCode,
+                    message = result.QuotaMessage,
+                    current = result.QuotaCurrent,
+                    maximum = result.QuotaMaximum
+                });
             }
 
-            var printer = new PrinterDevice
-            {
-                TenantId = tenantId,
-                DisplayName = request.DisplayName.Trim(),
-                Manufacturer = request.Manufacturer.Trim(),
-                Model = request.Model.Trim(),
-                ConnectionType = connectionTypes.Single(value => value.Equals(request.ConnectionType, StringComparison.OrdinalIgnoreCase)),
-                ConnectionAddress = string.IsNullOrWhiteSpace(request.ConnectionAddress) ? null : request.ConnectionAddress.Trim(),
-                QueueName = string.IsNullOrWhiteSpace(request.QueueName) ? null : request.QueueName.Trim(),
-                CapabilitiesJson = capabilities,
-                Status = "Unknown",
-                IsActive = true
-            };
-            db.PrinterDevices.Add(printer);
-            await db.SaveChangesAsync(ct);
-            await transaction.CommitAsync(ct);
+            var printer = result.Printer!;
             return Results.Created($"/api/v1/shop/printers/{printer.Id}", new
             {
                 printer.Id,
@@ -147,48 +119,26 @@ public static class ShopPrinterEndpoints
             Guid printerId,
             bool isActive,
             ClaimsPrincipal principal,
-            SmartPrintDbContext db,
+            ShopPrinterService printers,
             CancellationToken ct) =>
         {
             if (!IsShopOwner(principal) || !TryGetTenantId(principal, out var tenantId))
-            {
                 return Results.Forbid();
-            }
 
-            var printer = await db.PrinterDevices.SingleOrDefaultAsync(x => x.Id == printerId && x.TenantId == tenantId, ct);
-            if (printer is null)
-            {
+            var result = await printers.SetActiveAsync(tenantId, printerId, isActive, ct);
+            if (result.Failure == ShopPrinterMutationFailure.NotFound)
                 return Results.NotFound();
-            }
 
-            if (!isActive)
+            if (result.Failure == ShopPrinterMutationFailure.ActiveOutput)
             {
-                var activeJobNumber = await db.PrintJobs.AsNoTracking()
-                    .Where(job => job.TenantId == tenantId &&
-                                  job.PrinterDeviceId == printerId &&
-                                  (job.Status == "LOCAL_QUEUE_CLAIMED" ||
-                                   job.Status == "LOCAL_QUEUE_READY" ||
-                                   job.Status == "PRINT_AUTHORISED" ||
-                                   job.Status == "PRINT_SUBMITTING" ||
-                                   job.Status == "SPOOLER_ACCEPTED" ||
-                                   job.Status == "PRINTING"))
-                    .OrderByDescending(job => job.CreatedUtc)
-                    .Select(job => job.JobNumber)
-                    .FirstOrDefaultAsync(ct);
-
-                if (!string.IsNullOrWhiteSpace(activeJobNumber))
+                return Results.Conflict(new
                 {
-                    return Results.Conflict(new
-                    {
-                        code = "printer_has_active_output",
-                        message = $"Printer cannot be disabled while job {activeJobNumber} is active in the Windows Agent or spooler. Resolve that same job first; disabling it does not cancel Windows output."
-                    });
-                }
+                    code = "printer_has_active_output",
+                    message = $"Printer cannot be disabled while job {result.ActiveJobNumber} is active in the Windows Agent or spooler. Resolve that same job first; disabling it does not cancel Windows output."
+                });
             }
 
-            printer.IsActive = isActive;
-            printer.UpdatedUtc = DateTimeOffset.UtcNow;
-            await db.SaveChangesAsync(ct);
+            var printer = result.Printer!;
             return Results.Ok(new { printer.Id, printer.IsActive, printer.UpdatedUtc });
         });
 
