@@ -1,5 +1,4 @@
 using System.Security.Claims;
-using System.Security.Cryptography;
 using System.Text;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
@@ -11,7 +10,6 @@ using SmartPrint.Api.Domain;
 using SmartPrint.Api.Security;
 using SmartPrint.Api.Services;
 using SmartPrint.Api.Storage;
-using static SmartPrint.Api.Security.OpaqueTokenHasher;
 
 namespace SmartPrint.Api.Endpoints;
 
@@ -23,48 +21,58 @@ public static partial class AgentEndpoints
             Guid ticketId,
             HttpContext context,
             SmartPrintDbContext db,
+            AgentLocalUploadClaimService claimService,
             CancellationToken ct) =>
         {
             var device = await AgentAuthentication.AuthenticateAsync(context, db, ct);
             if (device is null) return Results.Unauthorized();
-        
+
             var rawGrant = context.Request.Headers["X-Print-Upload-Grant"].FirstOrDefault();
-            if (string.IsNullOrWhiteSpace(rawGrant) || rawGrant.Length is < 40 or > 128)
-            {
-                return Results.Unauthorized();
-            }
-        
-            var ticket = await db.LocalPrintUploadTickets.SingleOrDefaultAsync(
-                item => item.Id == ticketId &&
-                        item.TenantId == device.TenantId &&
-                        item.AgentDeviceId == device.Id,
+            var result = await claimService.ClaimAsync(
+                ticketId,
+                device.TenantId,
+                device.Id,
+                rawGrant,
+                DateTimeOffset.UtcNow,
                 ct);
-            if (ticket is null) return Results.NotFound();
-        
-            byte[] suppliedGrantHash;
-            byte[] storedGrantHash;
-            try
+
+            if (result.Failure == AgentLocalUploadClaimFailure.NotFound)
             {
-                suppliedGrantHash = Convert.FromHexString(HashOpaqueToken(rawGrant));
-                storedGrantHash = Convert.FromHexString(ticket.GrantHash);
+                return Results.NotFound();
             }
-            catch (FormatException)
+
+            if (result.Failure == AgentLocalUploadClaimFailure.InvalidGrant)
             {
                 return Results.Unauthorized();
             }
-            if (!CryptographicOperations.FixedTimeEquals(suppliedGrantHash, storedGrantHash))
+
+            if (result.Failure == AgentLocalUploadClaimFailure.CompletedArtifactsMissing)
             {
-                return Results.Unauthorized();
+                return Results.Conflict();
             }
-        
-            if (ticket.CompletedUtc is not null)
+
+            if (result.Failure == AgentLocalUploadClaimFailure.Expired)
             {
-                var completedJob = await db.PrintJobs.AsNoTracking()
-                    .SingleOrDefaultAsync(item => item.Id == ticket.PrintJobId && item.TenantId == device.TenantId, ct);
-                var completedDocument = await db.PrintDocuments.AsNoTracking()
-                    .SingleOrDefaultAsync(item => item.PrintJobId == ticket.PrintJobId && item.TenantId == device.TenantId, ct);
-                if (completedJob is null || completedDocument is null) return Results.Conflict();
-        
+                return Results.Conflict(new
+                {
+                    code = "local_upload_ticket_expired",
+                    message = "The upload ticket expired. Ask the customer to start a new upload."
+                });
+            }
+
+            if (result.Failure == AgentLocalUploadClaimFailure.PrinterAssignmentMissing)
+            {
+                return Results.Conflict(new
+                {
+                    code = "local_upload_printer_assignment_missing",
+                    message = "The original printer assignment changed. SmartPrint will keep this request in the secure queue for the shop owner to reassign."
+                });
+            }
+
+            if (result.AlreadyCompleted)
+            {
+                var completedJob = result.Job!;
+                var completedDocument = result.Document!;
                 return Results.Ok(new
                 {
                     AlreadyCompleted = true,
@@ -100,33 +108,8 @@ public static partial class AgentEndpoints
                     }
                 });
             }
-        
-            var now = DateTimeOffset.UtcNow;
-            if (ticket.ExpiresUtc <= now)
-            {
-                return Results.Conflict(new { code = "local_upload_ticket_expired", message = "The upload ticket expired. Ask the customer to start a new upload." });
-            }
-        
-            var stationPrinter = await db.PrinterDevices.AsNoTracking()
-                .Where(item => item.Id == ticket.PrinterDeviceId &&
-                               item.TenantId == device.TenantId &&
-                               item.AgentDeviceId == device.Id)
-                .Select(item => new { item.Id, item.DisplayName, QueueName = item.QueueName ?? string.Empty, item.OutputMode })
-                .SingleOrDefaultAsync(ct);
-            if (stationPrinter is null)
-            {
-                return Results.Conflict(new
-                {
-                    code = "local_upload_printer_assignment_missing",
-                    message = "The original printer assignment changed. SmartPrint will keep this request in the secure queue for the shop owner to reassign."
-                });
-            }
 
-        
-            ticket.ClaimedUtc ??= now;
-            ticket.ClaimLeaseExpiresUtc = ticket.ExpiresUtc;
-            await db.SaveChangesAsync(ct);
-        
+            var ticket = result.Ticket!;
             return Results.Ok(new
             {
                 AlreadyCompleted = false,
@@ -135,9 +118,9 @@ public static partial class AgentEndpoints
                 ticket.BatchGroupName,
                 ticket.JobNumber,
                 ticket.AgentDeviceId,
-                PrinterDeviceId = stationPrinter.Id,
-                PrinterName = stationPrinter.DisplayName,
-                QueueName = stationPrinter.QueueName,
+                PrinterDeviceId = result.PrinterDeviceId,
+                PrinterName = result.PrinterName,
+                QueueName = result.QueueName,
                 ticket.OriginalFileName,
                 ticket.FileExtension,
                 ticket.MediaType,
@@ -151,7 +134,7 @@ public static partial class AgentEndpoints
                 ticket.ExpiresUtc
             });
         });
-        
+
         agentApi.MapPost("/local-uploads/{ticketId:guid}/complete", async (
             Guid ticketId,
             LocalPrintUploadCompletionRequest request,
@@ -177,22 +160,11 @@ public static partial class AgentEndpoints
                     item.AgentDeviceId == device.Id, ct);
             if (ticket is null) return Results.NotFound();
         
-            byte[] suppliedGrantHash;
-            byte[] storedGrantHash;
-            try
-            {
-                suppliedGrantHash = Convert.FromHexString(HashOpaqueToken(rawGrant));
-                storedGrantHash = Convert.FromHexString(ticket.GrantHash);
-            }
-            catch (FormatException)
+            if (!LocalUploadGrantValidator.IsValid(rawGrant, ticket.GrantHash))
             {
                 return Results.Unauthorized();
             }
-            if (!CryptographicOperations.FixedTimeEquals(suppliedGrantHash, storedGrantHash))
-            {
-                return Results.Unauthorized();
-            }
-        
+
             if (ticket.CompletedUtc is not null)
             {
                 var completedJob = await db.PrintJobs.AsNoTracking()

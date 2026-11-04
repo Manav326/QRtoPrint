@@ -84,6 +84,7 @@ public static class ApiServiceRegistration
         services.AddScoped<PlatformPlanService>();
         services.AddScoped<ShopPrintJobSettingsService>();
         services.AddScoped<AgentLocalUploadCompletionService>();
+        services.AddScoped<AgentLocalUploadClaimService>();
         services.AddSingleton<DocumentStorage>();
         services.AddHostedService<DocumentRetentionWorker>();
         services.AddRateLimiter(options =>
