@@ -1695,6 +1695,37 @@ export async function downloadShopDocument(token: string, jobId: string): Promis
   );
 }
 
+export function replaceShopPhotoDocument(
+  token: string,
+  jobId: string,
+  file: File,
+  photoSizeCode: string,
+  photoCount: number
+) {
+  const form = new FormData();
+  form.append("file", file, file.name);
+  form.append("photoSizeCode", photoSizeCode);
+  form.append("photoCount", String(photoCount));
+  return apiRequest<{
+    id: string;
+    status: string;
+    pageCount: number;
+    printKind: "PHOTO";
+    photoSizeCode: string;
+    photoCount: number;
+    photoUnitPriceMinorSnapshot: number;
+    quotedAmountMinor: number;
+    pricingVersion: number;
+    quoteExpiresUtc: string;
+    originalFileName: string;
+    mediaType: string;
+    sizeBytes: number;
+  }>(`/api/v1/shop/print-jobs/${jobId}/photo-revision`, {
+    method: "POST",
+    body: form
+  }, token);
+}
+
 export function createAgentEnrollmentCode(token: string) {
   return apiRequest<{ code: string; expiresUtc: string }>("/api/v1/shop/agent-enrollment-codes", {
     method: "POST"
