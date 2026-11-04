@@ -48,6 +48,49 @@ public static partial class AgentEndpoints
                 }, statusCode: StatusCodes.Status401Unauthorized);
             }
 
+            var variant = context.Request.Query["variant"].FirstOrDefault();
+            var outputPreview = string.Equals(variant, "output", StringComparison.OrdinalIgnoreCase);
+            if (!string.IsNullOrWhiteSpace(variant) && !outputPreview &&
+                !string.Equals(variant, "original", StringComparison.OrdinalIgnoreCase))
+                return Results.BadRequest(new { code = "local_preview_variant_invalid" });
+
+            if (outputPreview)
+            {
+                var output = await db.PrintJobs.AsNoTracking()
+                    .Where(job => job.Id == jobId && job.TenantId == device.TenantId &&
+                                  job.ClaimedByAgentDeviceId == device.Id)
+                    .Select(job => new
+                    {
+                        job.Status,
+                        job.OutputType,
+                        job.OutputFileName,
+                        job.OutputSizeBytes,
+                        job.OutputSha256,
+                        job.OutputCompletedUtc
+                    })
+                    .SingleOrDefaultAsync(ct);
+
+                if (output is null)
+                    return Results.NotFound();
+                if (output.Status != "COMPLETED" || output.OutputType != "PDF_EXPORT" ||
+                    output.OutputCompletedUtc is null ||
+                    string.IsNullOrWhiteSpace(output.OutputFileName) ||
+                    output.OutputFileName.Length > 255 ||
+                    output.OutputFileName.Contains('/') || output.OutputFileName.Contains('\\') ||
+                    !string.Equals(Path.GetExtension(output.OutputFileName), ".pdf", StringComparison.OrdinalIgnoreCase) ||
+                    output.OutputSizeBytes is not long outputSize || outputSize <= 0 || outputSize > 100L * 1024 * 1024 ||
+                    output.OutputSha256 is not { Length: 64 } || !output.OutputSha256.All(Uri.IsHexDigit))
+                    return Results.Conflict(new { code = "pdf_export_preview_unavailable" });
+
+                return Results.Ok(new
+                {
+                    MediaType = "application/pdf",
+                    OriginalFileName = output.OutputFileName,
+                    SizeBytes = outputSize,
+                    Sha256 = output.OutputSha256
+                });
+            }
+
             var document = await (
                 from job in db.PrintJobs.AsNoTracking()
                 join item in db.PrintDocuments.AsNoTracking()
@@ -65,6 +108,6 @@ public static partial class AgentEndpoints
                 document.SizeBytes,
                 document.Sha256
             });
-        });
+        });;
     }
 }
