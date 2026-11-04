@@ -365,9 +365,10 @@ test("offline requests use the existing secure queue and owner changes require c
   const app = read("../src/App.tsx");
   const api = read("../src/api.ts");
   const recovery = read("../../../src/SmartPrint.Api/Endpoints/PublicCloudRecoveryEndpoints.cs");
+  const recoveryService = read("../../../src/SmartPrint.Api/Services/PublicCloudRecoveryService.cs");
   const settings = read("../../../src/SmartPrint.Api/Endpoints/ShopPrintJobSettingsEndpoints.cs");
   const settingsService = read("../../../src/SmartPrint.Api/Services/ShopPrintJobSettingsService.cs");
-  const server = `${recovery}\n${settings}\n${settingsService}`;
+  const server = `${recovery}\n${recoveryService}\n${settings}\n${settingsService}`;
 
   assert.ok(app.includes("secureQueueFallbackEnabled"));
   assert.ok(recovery.includes('publicApi.MapPost("/sessions/current/local-upload-tickets/{ticketId:guid}/cloud-recovery"'));
