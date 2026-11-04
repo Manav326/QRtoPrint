@@ -22,7 +22,7 @@ public sealed record ShopOwnerAccountUpdateResult(
     ShopOwnerAccountUpdateFailure Failure,
     AppUser? User = null,
     bool EmailChanged = false,
-    IReadOnlyDictionary<string, string[]>? Errors = null)
+    Dictionary<string, string[]>? Errors = null)
 {
     public bool Succeeded => Failure == ShopOwnerAccountUpdateFailure.None;
 }
