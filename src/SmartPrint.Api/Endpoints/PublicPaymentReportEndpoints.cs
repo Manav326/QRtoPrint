@@ -37,10 +37,9 @@ public static partial class PublicPaymentEndpoints
             switch (result.Failure)
             {
                 case PublicPaymentReportFailure.SessionNotFound:
+                    return Results.Unauthorized();
                 case PublicPaymentReportFailure.BatchPaymentNotFound:
-                    return result.Failure == PublicPaymentReportFailure.SessionNotFound
-                        ? Results.Unauthorized()
-                        : Results.NotFound();
+                    return Results.NotFound();
                 case PublicPaymentReportFailure.BatchPaymentNotAwaitingReference:
                     return Results.Conflict(new
                     {
