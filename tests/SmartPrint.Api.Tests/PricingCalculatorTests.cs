@@ -89,6 +89,34 @@ public sealed class PricingCalculatorTests
         Assert.Equal(1, PricingCalculator.MaximumPhotosPerA4Sheet("4x6"));
     }
 
+    [Theory]
+    [InlineData(1, "35x45", 25, 1)]
+    [InlineData(26, "35x45", 25, 2)]
+    [InlineData(50, "35x45", 25, 2)]
+    [InlineData(51, "35x45", 25, 3)]
+    [InlineData(50, "25x35", 49, 2)]
+    public void PhotoPageCountSupportsMultipleA4Sheets(
+        int photoCount, string size, int photosPerPage, int expectedPages)
+    {
+        Assert.Equal(expectedPages, PricingCalculator.PhotoPageCount(photoCount, size, photosPerPage));
+    }
+
+    [Fact]
+    public void PhotoPageRefundAllocationsFollowThePreparedSheetLayoutAndSumToQuote()
+    {
+        var allocations = PricingCalculator.CalculatePhotoPageRefundAllocations(50, "35x45", 25, 175);
+
+        Assert.Equal(new long[] { 4_375, 4_375 }, allocations);
+        Assert.Equal(8_750, allocations.Sum());
+    }
+
+    [Fact]
+    public void PhotoPageCountRejectsLayoutsAboveThePhysicalA4Capacity()
+    {
+        Assert.Throws<ArgumentOutOfRangeException>(() =>
+            PricingCalculator.PhotoPageCount(30, "35x45", 26));
+    }
+
     private static ShopPricingProfile ConfiguredPricing(long minimum = 0) => new()
     {
         TenantId = Guid.NewGuid(), IsConfigured = true,
