@@ -66,31 +66,19 @@ public static partial class PublicUploadEndpoints
                 return Results.BadRequest(new { code = "invalid_batch_name", message = exception.Message });
             }
 
-            var originalName = request.OriginalFileName?.Split('/', '\\').LastOrDefault() ?? string.Empty;
-            originalName = new string(originalName.Where(character => !char.IsControl(character)).ToArray()).Trim();
-            if (string.IsNullOrWhiteSpace(originalName))
+            if (!LocalUploadTicketRequestRules.TryNormalizeFileName(request.OriginalFileName, out var originalName))
             {
                 return Results.BadRequest(new { code = "invalid_file_name", message = "The uploaded document name is invalid." });
             }
-            originalName = originalName[..Math.Min(originalName.Length, 255)];
-            var extension = Path.GetExtension(originalName).ToLowerInvariant();
-            var mediaType = extension switch
-            {
-                ".pdf" => "application/pdf",
-                ".jpg" or ".jpeg" => "image/jpeg",
-                ".png" => "image/png",
-                _ => null
-            };
-            var sha = request.Sha256?.Trim().ToLowerInvariant();
-            if (mediaType is null || request.SizeBytes is <= 0 or > 20L * 1024 * 1024 ||
-                string.IsNullOrWhiteSpace(sha) || sha.Length != 64 || sha.Any(character => !Uri.IsHexDigit(character)) ||
-                request.ColourMode is not ("Mono" or "Colour") ||
-                request.PaperSize is not ("A4" or "A3" or "A5" or "LETTER" or "LEGAL") ||
-                request.Copies is < 1 or > 100 ||
-                request.Orientation is not ("AUTO" or "PORTRAIT" or "LANDSCAPE"))
+
+            if (!LocalUploadTicketRequestRules.TryNormalizeDocument(request, originalName, out var normalizedDocument))
             {
                 return Results.UnprocessableEntity(new { code = "document_not_supported", message = "Local upload supports PDF, JPG/JPEG and PNG files up to 20 MB with a valid SHA-256 digest." });
             }
+
+            var extension = normalizedDocument.FileExtension;
+            var mediaType = normalizedDocument.MediaType;
+            var sha = normalizedDocument.Sha256;
 
             var batchId = request.BatchId ?? Guid.NewGuid();
             var now = DateTimeOffset.UtcNow;
@@ -329,16 +317,16 @@ public static partial class PublicUploadEndpoints
                 JobNumber = $"SP-{now:yyMMdd}-{Guid.NewGuid().ToString("N")[..8].ToUpperInvariant()}",
                 IdempotencyKey = idempotencyKey,
                 GrantHash = grantHash,
-                OriginalFileName = originalName,
-                MediaType = mediaType,
-                FileExtension = extension,
-                SizeBytes = request.SizeBytes,
-                Sha256 = sha,
-                ColourMode = request.ColourMode,
-                PaperSize = request.PaperSize,
-                IsDuplex = request.IsDuplex,
-                Copies = request.Copies,
-                Orientation = request.Orientation,
+                OriginalFileName = normalizedDocument.OriginalFileName,
+                MediaType = normalizedDocument.MediaType,
+                FileExtension = normalizedDocument.FileExtension,
+                SizeBytes = normalizedDocument.SizeBytes,
+                Sha256 = normalizedDocument.Sha256,
+                ColourMode = normalizedDocument.ColourMode,
+                PaperSize = normalizedDocument.PaperSize,
+                IsDuplex = normalizedDocument.IsDuplex,
+                Copies = normalizedDocument.Copies,
+                Orientation = normalizedDocument.Orientation,
                 CreatedUtc = now,
                 ExpiresUtc = now.AddMinutes(15)
             };
