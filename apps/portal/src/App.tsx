@@ -2385,7 +2385,11 @@ function PrintQueuePage({ jobs, printers, agentDevices, searchQuery, loadingBatc
                 <span>Saved PDF location</span>
                 <code>{verifiedPdfExportPath(job)}</code>
               </div>}
-              <div className="queue-batch-file-actions">
+              {job.status==="LOCAL_QUEUE_READY"&&job.failureCode&&<div className="printer-duplicate-warning" role="status">
+                 <strong>Printing paused before submission</strong>
+                 <span>{printBlockMessage(job.failureCode)} The original document and requested settings remain unchanged. Reassign this batch to a compatible printer, or resolve the issue with the customer before changing any setting. A settings change must be sent as a revised quote and explicitly approved before output.</span>
+               </div>}
+               <div className="queue-batch-file-actions">
                 {job.printKind!=="PHOTO"&&["AWAITING_CONFIGURATION","AWAITING_CUSTOMER_APPROVAL","AWAITING_SHOP_APPROVAL","AWAITING_PAYMENT","QUOTE_EXPIRED","PAYMENT_REJECTED"].includes(job.status)&&<button className="subtle-button" disabled={busyJobId===job.id} onClick={()=>{
                   setEditingSettingsJobId(job.id);
                   setEditingPrintSettings({
@@ -2633,6 +2637,25 @@ function prettyStatus(status:string) {
   };
   return names[status] || status.replaceAll("_"," ").toLowerCase().replace(/\\b\\w/g,letter=>letter.toUpperCase());
 }
+function printBlockMessage(code:string):string {
+  switch(code) {
+    case "PAPER_SIZE_UNSUPPORTED":
+    case "PAPER_SIZE_REJECTED":
+      return "The selected printer did not confirm the requested paper size.";
+    case "LANDSCAPE_UNSUPPORTED":
+    case "ORIENTATION_UNCONFIRMED":
+      return "The selected printer did not confirm the requested page orientation.";
+    case "COLOUR_UNSUPPORTED":
+    case "COLOUR_REJECTED":
+      return "The selected printer did not confirm colour output.";
+    case "DUPLEX_UNSUPPORTED":
+    case "DUPLEX_REJECTED":
+      return "The selected printer did not confirm double-sided output.";
+    default:
+      return "The Windows Agent could not confirm the requested settings with this output device.";
+  }
+}
+
 function isPrinterAvailable(printer: PrinterDevice, onlineAgentIds: ReadonlySet<string>, now = Date.now()) {
   if (!printer.isActive || !printer.agentDeviceId || !onlineAgentIds.has(printer.agentDeviceId)) return false;
   if (printer.outputMode === "PDF_EXPORT") return true;
