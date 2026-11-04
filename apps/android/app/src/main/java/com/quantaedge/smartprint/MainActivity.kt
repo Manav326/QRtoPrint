@@ -2333,6 +2333,9 @@ class MainActivity : AppCompatActivity() {
                     "upi", "tel", "mailto" -> { launchExternal(uri); true }
                     "intent" -> { launchIntent(uri.toString()); true }
                     "http" -> !(allowedAgentLocalEndpoint(uri, request.method, request.requestHeaders) || allowedLocalDevelopmentEndpoint(uri))
+                    // The customer form previews PDFs from a blob: iframe. Permit
+                    // only subframes whose blob origin exactly matches this page.
+                    "blob" -> request.isForMainFrame || !isSameOriginBlobFrame(uri, view.url)
                     "about" -> false
                     else -> true
                 }
@@ -2529,6 +2532,27 @@ class MainActivity : AppCompatActivity() {
             .remove("shopLogoUrl")
             .remove("shopAccentColor")
             .apply()
+    }
+
+    private fun isSameOriginBlobFrame(blobUri: Uri, pageUrl: String?): Boolean {
+        if (!blobUri.scheme.equals("blob", true) || pageUrl.isNullOrBlank()) return false
+        val blobOrigin = runCatching { Uri.parse(blobUri.schemeSpecificPart) }.getOrNull() ?: return false
+        val page = runCatching { Uri.parse(pageUrl) }.getOrNull() ?: return false
+        if (blobOrigin.userInfo != null || page.userInfo != null) return false
+
+        val blobScheme = blobOrigin.scheme?.lowercase(Locale.ROOT)
+        val pageScheme = page.scheme?.lowercase(Locale.ROOT)
+        if (blobScheme !in setOf("http", "https") || blobScheme != pageScheme) return false
+
+        fun effectivePort(candidate: Uri): Int =
+            candidate.port.takeIf { it >= 0 } ?: when (candidate.scheme?.lowercase(Locale.ROOT)) {
+                "https" -> 443
+                "http" -> 80
+                else -> -1
+            }
+
+        return blobOrigin.host?.equals(page.host, true) == true &&
+            effectivePort(blobOrigin) == effectivePort(page)
     }
 
     private fun allowedAgentLocalEndpoint(uri: Uri, method: String, headers: Map<String, String>): Boolean {
