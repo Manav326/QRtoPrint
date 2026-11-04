@@ -5205,6 +5205,7 @@ agentApi.MapPost("/local-document-photo-revisions/{jobId:guid}/authorize", async
         NewSizeBytes = request.SizeBytes,
         request.PhotoSizeCode,
         request.PhotoCount,
+        request.PageCount,
         request.PhotosPerPage,
         PhotoUnitPriceMinor = unitPrice,
         QuotedAmountMinor = amount,
@@ -5262,6 +5263,11 @@ agentApi.MapPost("/local-document-photo-revisions/{jobId:guid}/complete", async 
         job.PageCount == request.PageCount &&
         job.PhotoSizeCode == request.PhotoSizeCode &&
         job.PhotoCount == request.PhotoCount &&
+        string.Equals(
+            job.PageRefundAllocationsJson,
+            JsonSerializer.Serialize(PricingCalculator.CalculatePhotoPageRefundAllocations(
+                request.PhotoCount, request.PhotoSizeCode, request.PhotosPerPage, job.PhotoUnitPriceMinorSnapshot)),
+            StringComparison.Ordinal) &&
         string.Equals(document.PageSizesJson, request.PageSizesJson, StringComparison.Ordinal))
     {
         var duplicateHasPayment = await db.PrintPayments.AnyAsync(item =>
