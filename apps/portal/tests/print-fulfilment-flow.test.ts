@@ -596,3 +596,22 @@ test("Agent local receipt acknowledgement stays idempotent and checks the origin
   assert.match(service, /AGENT_CONFIRMED_LOCAL_QUEUE_RECEIPT/);
   assert.match(rules, /MaximumDocumentBytes = 20L \* 1024 \* 1024/);
 });
+
+
+test("Agent heartbeat and printer synchronization remain behind connectivity workflow services", () => {
+  const endpoint = readApi("AgentConnectivityEndpoints.cs");
+  const service = read("../../../src/SmartPrint.Api/Services/AgentConnectivityService.cs");
+  const rules = read("../../../src/SmartPrint.Api/Domain/AgentPrinterSyncRules.cs");
+  assert.match(endpoint, /connectivity\.HeartbeatAsync/);
+  assert.match(endpoint, /connectivity\.SyncPrintersAsync/);
+  assert.match(service, /AgentLocalEndpointRules\.Normalize/);
+  assert.match(service, /device\.LastSeenUtc = now/);
+  assert.match(service, /AgentPrinterSyncRules\.Validate/);
+  assert.match(service, /BeginTransactionAsync/);
+  assert.match(service, /AcquireQuotaLockAsync/);
+  assert.match(service, /CheckCapacityAsync/);
+  assert.match(service, /previousAgent\.RevokedUtc != null/);
+  assert.match(service, /printer\.Status = "Unavailable"/);
+  assert.match(rules, /ValidStatuses/);
+  assert.match(rules, /GroupBy\(printer => printer\.QueueName\.Trim\(\), StringComparer\.OrdinalIgnoreCase\)/);
+});
