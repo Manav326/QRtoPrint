@@ -12,15 +12,25 @@ export type PhotoSheetLayout = {
 };
 
 /** captionHeightMm adds a label region without shrinking the physical photo. */
-export function getPhotoSheetLayout(size: PhotoSheetSize, captionHeightMm = 0): PhotoSheetLayout {
+export function getPhotoSheetLayout(size: PhotoSheetSize, captionHeightMm = 0, requestedPhotosPerPage?: number): PhotoSheetLayout {
   const margin = 8, gap = 3, tileHeight = size.heightMm + captionHeightMm;
   const usableW = A4_WIDTH_MM - margin * 2, usableH = A4_HEIGHT_MM - margin * 2;
-  const columns = Math.max(1, Math.floor((usableW + gap) / (size.widthMm + gap)));
-  const rows = Math.max(1, Math.floor((usableH + gap) / (tileHeight + gap)));
+  const maximumColumns = Math.max(1, Math.floor((usableW + gap) / (size.widthMm + gap)));
+  const maximumRows = Math.max(1, Math.floor((usableH + gap) / (tileHeight + gap)));
+  const maximumPhotos = maximumColumns * maximumRows;
+  if (requestedPhotosPerPage !== undefined &&
+      (!Number.isInteger(requestedPhotosPerPage) || requestedPhotosPerPage < 1 || requestedPhotosPerPage > maximumPhotos)) {
+    throw new RangeError(`Photos per A4 page must be between 1 and ${maximumPhotos} for this layout.`);
+  }
+
+  // Keep the requested density, while ensuring every photo still fits at its exact physical size.
+  const perSheet = requestedPhotosPerPage ?? maximumPhotos;
+  const columns = Math.min(maximumColumns, perSheet);
+  const rows = Math.max(1, Math.ceil(perSheet / columns));
   const contentWidthMm = columns * size.widthMm + (columns - 1) * gap;
   const contentHeightMm = rows * tileHeight + (rows - 1) * gap;
   return {
-    columns, rows, perSheet: columns * rows,
+    columns, rows, perSheet,
     offsetXmm: Math.max(margin, (A4_WIDTH_MM - contentWidthMm) / 2),
     offsetYmm: Math.max(margin, (A4_HEIGHT_MM - contentHeightMm) / 2),
     contentWidthMm, contentHeightMm
