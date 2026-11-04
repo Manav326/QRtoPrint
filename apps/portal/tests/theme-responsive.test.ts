@@ -197,6 +197,20 @@ test("batch routing enforces local-computer ownership and preserves print-time a
   assert.match(css, /\.queue-batch-assignment-note\{font-size:12px/);
 });
 
+test("customer upload form clearly supports backend-approved image formats", () => {
+  const app = read("../src/App.tsx");
+  const customerFlowStart = app.indexOf("function CustomerPrintFlow(");
+  const customerFlowEnd = app.indexOf("function UploadIcon()", customerFlowStart);
+  assert.ok(customerFlowStart >= 0 && customerFlowEnd > customerFlowStart,
+    "The shared customer upload form must remain present.");
+  const customerFlow = app.slice(customerFlowStart, customerFlowEnd);
+  assert.ok(customerFlow.includes("Add documents or images"));
+  assert.ok(customerFlow.includes("Select documents or images"));
+  assert.ok(customerFlow.includes('accept=".pdf,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png"'));
+  assert.ok(app.includes('const supported=rootFiles.filter(candidate=>/\\.(pdf|jpe?g|png)$/i.test(candidate.name));'),
+    "The shared selection handler must retain PDF, JPG, JPEG and PNG support.");
+});
+
 test("Android customer printing uses the same single Copies control and event handlers as the browser", () => {
   const app = read("../src/App.tsx");
   const customerFlowStart = app.indexOf("function CustomerPrintFlow(");
