@@ -99,9 +99,9 @@ public static partial class ShopPrintJobReviewEndpoints
                 GetActorId(principal),
                 request,
                 reason,
-                method,
+                method!,
                 string.IsNullOrWhiteSpace(reference) ? null : reference,
-                key,
+                key!,
                 ct);
             switch (result.Failure)
             {
