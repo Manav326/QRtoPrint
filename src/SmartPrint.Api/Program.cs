@@ -3677,13 +3677,14 @@ agentApi.MapPost("/jobs/claim", async (
 
     var now = DateTimeOffset.UtcNow;
     var onlineAfter = now.AddMinutes(-2);
+    // Queue staging secures a paid document on the paired shop computer; it
+    // must not require the physical printer to be Ready. The owner explicitly
+    // releases output later, and the dispatch route rechecks live hardware.
     var availablePrinterIds = await db.PrinterDevices.AsNoTracking()
         .Where(printer => printer.TenantId == device.TenantId &&
                           printer.AgentDeviceId == device.Id &&
                           printer.IsActive &&
-                          (printer.OutputMode == "PDF_EXPORT" ||
-                           (printer.LastSeenUtc != null && printer.LastSeenUtc >= onlineAfter &&
-                            (printer.Status == "Ready" || printer.Status == "Busy"))) &&
+                          printer.QueueName != null && printer.QueueName != "" &&
                           db.AgentDevices.Any(agent =>
                               agent.Id == device.Id && agent.TenantId == device.TenantId &&
                               agent.RevokedUtc == null && agent.Status != "Revoked" &&
@@ -3777,9 +3778,7 @@ agentApi.MapPost("/jobs/claim", async (
                               printer.TenantId == device.TenantId &&
                               printer.AgentDeviceId == device.Id &&
                               printer.IsActive &&
-                              (printer.OutputMode == "PDF_EXPORT" ||
-                               (printer.LastSeenUtc != null && printer.LastSeenUtc >= onlineAfter &&
-                                (printer.Status == "Ready" || printer.Status == "Busy")))) &&
+                              printer.QueueName != null && printer.QueueName != "") &&
                           db.AgentDevices.Any(agent =>
                               agent.Id == device.Id &&
                               agent.TenantId == device.TenantId &&
