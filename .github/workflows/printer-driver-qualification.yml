@@ -42,6 +42,28 @@ jobs:
         run: ./scripts/printer-qualification/Invoke-PrinterDriverQualification.ps1 -DriverId manifest-only
 
 
+
+  vendor-package-audit:
+    name: Audit official Ricoh and Kyocera packages without execution
+    if: github.event_name == 'pull_request'
+    needs: manifest
+    runs-on: windows-2025
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v7
+      - name: Download, hash, extract and inspect official driver packages
+        shell: pwsh
+        run: ./scripts/printer-qualification/Invoke-VendorPackageAudit.ps1
+      - name: Upload package metadata only (never vendor binaries)
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: printer-vendor-package-audit
+          path: artifacts/printer-driver-package-audit/*.json
+          if-no-files-found: warn
+          retention-days: 14
+
+
   virtual-fixture:
     name: Exercise Agent with isolated file-backed printer port
     needs: manifest
