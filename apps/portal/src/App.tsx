@@ -244,13 +244,18 @@ function ShopConsole({ tokens, onSignOut, dark, onToggleTheme }: { tokens: AuthT
     setLoading(true);
     setError("");
     try {
-      const snapshot = await loadShopData(tokens.accessToken, queueSearch);
+      const [snapshot, unfilteredJourneyJobs] = await Promise.all([
+        loadShopData(tokens.accessToken, queueSearch),
+        queueSearch.trim()
+          ? getShopPrintJobsPage(tokens.accessToken, 0, 100)
+          : Promise.resolve(null)
+      ]);
       setProfile(snapshot.profile);
       setPrinters(snapshot.printers);
       setStations(snapshot.stations);
       setPricing(snapshot.pricing);
       setPrintJobs(snapshot.printJobs);
-      setJourneyJobs(snapshot.printJobs);
+      setJourneyJobs(unfilteredJourneyJobs ?? snapshot.printJobs);
       setJourneyPayments(snapshot.payments);
       queueFirstPageIds.current = new Set(snapshot.printJobs.map(job => job.id));
       setHasMoreQueueJobs(snapshot.printJobs.length === 100);
