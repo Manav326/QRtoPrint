@@ -461,7 +461,7 @@ shop.MapGet("/print-jobs/{jobId:guid}/preview-source", async (
         });
     }
 
-    var endpoints = ReadLocalAgentEndpoints(agent.LocalEndpointsJson);
+    var endpoints = AgentLocalEndpointRules.ReadJson(agent.LocalEndpointsJson);
     if (endpoints.Length == 0)
     {
         return Results.Conflict(new
@@ -545,7 +545,7 @@ shopAgents.MapGet("/agent-devices", async (
     {
         device.Id, device.DeviceName, device.Status, device.CreatedUtc,
         device.LastSeenUtc, device.RevokedUtc, device.PrinterCount,
-        LocalEndpoints = ReadLocalAgentEndpoints(device.LocalEndpointsJson)
+        LocalEndpoints = AgentLocalEndpointRules.ReadJson(device.LocalEndpointsJson)
     }));
 });
 
@@ -2527,7 +2527,7 @@ publicApi.MapPost("/sessions/current/local-upload-tickets", async (
     ).SingleOrDefaultAsync(ct);
 
     if (stationPrinter is null ||
-        AgentLocalEndpointRules.Normalize(ReadLocalAgentEndpoints(stationPrinter.LocalEndpointsJson)).Count == 0)
+        AgentLocalEndpointRules.Normalize(AgentLocalEndpointRules.ReadJson(stationPrinter.LocalEndpointsJson)).Count == 0)
     {
         return Results.Conflict(new
         {
@@ -4619,19 +4619,6 @@ static async ValueTask<object?> EnforceTenantActiveAsync(
     return await next(context);
 }
 
-static string[] ReadLocalAgentEndpoints(string? json)
-{
-    try
-    {
-        return JsonSerializer.Deserialize<string[]>(string.IsNullOrWhiteSpace(json) ? "[]" : json)
-            ?? Array.Empty<string>();
-    }
-    catch (JsonException)
-    {
-        return Array.Empty<string>();
-    }
-}
-
 static async Task<object?> GetLocalAgentInfoAsync(
     SmartPrintDbContext db, Guid tenantId, Guid? printerDeviceId, DateTimeOffset now, CancellationToken ct)
 {
@@ -4650,7 +4637,7 @@ static async Task<object?> GetLocalAgentInfoAsync(
     ).SingleOrDefaultAsync(ct);
 
     if (agent is null) return null;
-    var endpoints = ReadLocalAgentEndpoints(agent.LocalEndpointsJson);
+    var endpoints = AgentLocalEndpointRules.ReadJson(agent.LocalEndpointsJson);
     return endpoints.Length == 0 ? null : new { AgentDeviceId = agent.Id, Endpoints = endpoints };
 }
 
