@@ -1249,14 +1249,36 @@ export async function uploadCustomerDocumentLocally(
   }
 
   if (isUncompletedLocalUploadTicketExpired(ticket.completed, ticket.expiresUtc)) {
-    // The 15-minute LAN lease has expired and the server confirms no upload was
-    // finalized. Release only this dead attempt so the customer can start fresh.
-    clearCustomerLocalUploadAttempt(sessionToken, file);
-    throw new LocalUploadPreflightError(
-      "The previous shop Wi-Fi upload attempt expired before it was confirmed. Retry the same file to start a fresh upload.",
-      409,
-      "local_upload_ticket_expired"
-    );
+    // Keep the original ticket/grant: its monthly quota and batch capacity are
+    // still reserved during the 24-hour recovery window. First let the API
+    // recover this exact file over HTTPS if the paired Agent is unavailable or
+    // the shop has cloud-assisted printing. If the Agent is still online on a
+    // plan without that entitlement, the ticket endpoint renews its LAN lease.
+    try {
+      const recovered = await uploadCustomerLocalTicketViaCloud(
+        sessionToken, file, ticket, grantToken
+      );
+      clearCustomerLocalUploadAttempt(sessionToken, file);
+      return recovered;
+    } catch (exception) {
+      if (exception instanceof ApiError &&
+          exception.status === 409 &&
+          exception.code === "local_upload_recovery_expired") {
+        // The server's 24-hour recovery reservation has ended; this identity
+        // can no longer materialize a job, so it is safe to start a new attempt.
+        clearCustomerLocalUploadAttempt(sessionToken, file);
+        throw new LocalUploadPreflightError(
+          "The previous shop Wi-Fi upload attempt is too old to recover. Retry this file to start a fresh upload.",
+          409,
+          "local_upload_ticket_expired"
+        );
+      }
+      // A network interruption or reconciliation conflict is not proof that
+      // the original ticket is dead. Preserve its idempotency key and grant.
+      throw new LocalUploadOutcomeUnknownError(
+        "SmartPrint is checking the original upload. Its ticket and secure retry identity are preserved; retry this same file to continue without creating a second print job."
+      );
+    }
   }
 
   if (ticket.completed) {
