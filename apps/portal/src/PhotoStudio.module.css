@@ -54,3 +54,42 @@
 .captionOptIn strong{font-size:10px;line-height:1.4}
 .captionOptIn small{color:#718097;font-size:9px;font-weight:500;line-height:1.45}
 @media(max-width:720px){.captionOptIn{grid-column:1/-1}}
+
+
+/* Follow the application's saved dark appearance while keeping the printable
+   A4 page itself white so customers and operators judge the real output. */
+.dark{background:#111722;color:#e6ebf3}
+.dark .toolPanel{border-right-color:#303b4d;background:#1a2331}
+.dark .panelHeading{border-bottom-color:#303b4d}
+.dark .panelHeading strong{color:#edf2f9}
+.dark .panelHeading small,.dark .sheetSummary span,.dark .sheetSummary small{color:#a9b5c7}
+.dark .fieldLabel,.dark .rangeControl{color:#c7d1df}
+.dark .fieldLabel select,.dark .fieldLabel input{border-color:#3b485d;background:#121a27;color:#edf2f9;color-scheme:dark}
+.dark .fieldLabel select:focus,.dark .fieldLabel input:focus{border-color:#9c8bf0;box-shadow:0 0 0 3px #9c8bf026}
+.dark .lookButton,.dark .lookActive{border-color:#3a475b;background:#202b3b;color:#e3eaf4}
+.dark .lookButton small,.dark .lookActive small{color:#a9b5c7}
+.dark .lookActive{border-color:#9b8bed;background:#2a2545}
+.dark .secondaryButton{border-color:#3b485d;background:#202b3b;color:#d6dfeb}
+.dark .sheetSummary{border-color:#39465a;background:#202b3b}
+.dark .sheetSummary strong{color:#f1f4fa}
+.dark .privacyNote{border-color:#49436f;background:#28243d;color:#c7bff2}
+.dark .canvasWorkspace{background:#151e2c}
+.dark .contextToolbar,.dark .canvasFooter{border-color:#344155;background:#1c2737;color:#bac6d7}
+.dark .contextToolbar button{color:#d0d9e6}
+.dark .contextToolbar button:hover{border-color:#43516a;background:#2a374b;color:#fff}
+.dark .toolbarDivider{background:#3d4a5e}
+.dark .zoomLabel{color:#d3dbea}
+.dark .canvasViewport{background-color:#192333;background-image:linear-gradient(45deg,#222e40 25%,transparent 25%),linear-gradient(-45deg,#222e40 25%,transparent 25%),linear-gradient(45deg,transparent 75%,#222e40 75%),linear-gradient(-45deg,transparent 75%,#222e40 75%)}
+.dark .sheetFrame{border-color:#4a5669;background:#fff}
+.dark .footer{border-top-color:#344155;background:#1a2331;color:#aebbd0}
+.dark .footerHint{color:#b8c4d5}
+.dark .cancelButton{border-color:#3c4a60;background:#222e40;color:#e0e7f1}
+.dark .applyButton{border-color:#7f70d6}
+.dark .captionOptIn{border-color:#3a485d;background:#222d3e;color:#e1e9f4}
+.dark .captionOptIn small{color:#b3bfd1}
+.dark .editorHelp{border-color:#3a485d;background:#222d3e;color:#b7c4d6}
+.dark .backgroundPreviewRow{color:#b5c1d2}
+.dark .backgroundPreviewRow strong{color:#e5ebf5}
+.dark .backgroundPresets button{border-color:#64728a}
+.dark .pickInstruction{border-color:#8b7cdb;background:#302a4d;color:#e1dcff}
+.dark .errorToast{border-color:#874f56;background:#351f26;color:#ffd7da}
