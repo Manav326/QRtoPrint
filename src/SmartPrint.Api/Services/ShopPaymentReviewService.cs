@@ -83,21 +83,21 @@ public sealed class ShopPaymentReviewService(SmartPrintDbContext db)
                 filePayment.VerifiedByUserId = actorId;
                 filePayment.VerifiedUtc = now;
                 filePayment.UpdatedUtc = now;
-                var job = jobsById[filePayment.PrintJobId];
-                var previousStatus = job.Status;
-                var fileWasRejected = ShopPaymentReviewRules.MustPreserveRejectedJobStatus(job.Status);
+                var batchJob = jobsById[filePayment.PrintJobId];
+                var batchPreviousStatus = batchJob.Status;
+                var fileWasRejected = ShopPaymentReviewRules.MustPreserveRejectedJobStatus(batchJob.Status);
                 if (!fileWasRejected)
                 {
-                    job.Status = "PAID_AUTHORISED";
-                    job.UpdatedUtc = now;
+                    batchJob.Status = "PAID_AUTHORISED";
+                    batchJob.UpdatedUtc = now;
                 }
 
                 db.PrintJobEvents.Add(new PrintJobEvent
                 {
                     TenantId = tenantId,
-                    PrintJobId = job.Id,
-                    PreviousStatus = previousStatus,
-                    NewStatus = job.Status,
+                    PrintJobId = batchJob.Id,
+                    PreviousStatus = batchPreviousStatus,
+                    NewStatus = batchJob.Status,
                     ActorType = "ShopUser",
                     ActorId = actorId,
                     ReasonCode = fileWasRejected
@@ -256,18 +256,18 @@ public sealed class ShopPaymentReviewService(SmartPrintDbContext db)
                 filePayment.Status = "REJECTED";
                 filePayment.RejectionReason = reason;
                 filePayment.UpdatedUtc = now;
-                var job = jobsById[filePayment.PrintJobId];
-                if (!ShopPaymentReviewRules.MustPreserveRejectedJobStatus(job.Status))
+                var batchJob = jobsById[filePayment.PrintJobId];
+                if (!ShopPaymentReviewRules.MustPreserveRejectedJobStatus(batchJob.Status))
                 {
-                    var previousStatus = job.Status;
-                    job.Status = "PAYMENT_REJECTED";
-                    job.UpdatedUtc = now;
+                    var batchPreviousStatus = batchJob.Status;
+                    batchJob.Status = "PAYMENT_REJECTED";
+                    batchJob.UpdatedUtc = now;
                     db.PrintJobEvents.Add(new PrintJobEvent
                     {
                         TenantId = tenantId,
-                        PrintJobId = job.Id,
-                        PreviousStatus = previousStatus,
-                        NewStatus = job.Status,
+                        PrintJobId = batchJob.Id,
+                        PreviousStatus = batchPreviousStatus,
+                        NewStatus = batchJob.Status,
                         ActorType = "ShopUser",
                         ActorId = actorId,
                         ReasonCode = "SHOP_REJECTED_BATCH_PAYMENT_REPORT",
