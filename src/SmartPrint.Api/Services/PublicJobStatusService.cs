@@ -67,6 +67,7 @@ public sealed class PublicJobStatusService(SmartPrintDbContext db)
                 item.QuotedAmountMinor,
                 item.QuoteExpiresUtc,
                 item.RejectedPageNumbersJson,
+                item.PdfBrandingEnabled,
                 item.UpdatedUtc
             })
             .SingleOrDefaultAsync(cancellationToken);
