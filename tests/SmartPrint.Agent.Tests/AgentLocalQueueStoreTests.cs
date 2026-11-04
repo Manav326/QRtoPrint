@@ -312,8 +312,8 @@ public sealed class AgentLocalQueueStoreTests
             Assert.Equal("LOCAL_UPLOAD_PENDING_PAYMENT", store.Find(job.Id)!.State);
             Assert.Empty(store.GetStagedLocalUploads());
 
-            await Assert.ThrowsAsync<InvalidOperationException>(() =>
-                store.DeleteExpiredLocalUploadAsync(job.Id, DateTimeOffset.UtcNow, CancellationToken.None));
+            Assert.False(await store.DeleteExpiredLocalUploadAsync(
+                job.Id, DateTimeOffset.UtcNow, CancellationToken.None));
             Assert.True(bytes.AsSpan().SequenceEqual(store.ReadDocument(job.Id)));
         }
         finally
