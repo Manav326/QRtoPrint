@@ -341,7 +341,7 @@ export default function PhotoStudio({
           <button type="button" className={activeTool === "sheet" ? styles.toolActive : ""} onClick={() => setActiveTool("sheet")} aria-pressed={activeTool === "sheet"}><ImageIcon size={17}/><span>Sheet</span></button>
           <button type="button" className={activeTool === "crop" ? styles.toolActive : ""} onClick={() => setActiveTool("crop")} aria-pressed={activeTool === "crop"}><Crop size={17}/><span>Crop</span></button>
           <button type="button" className={activeTool === "look" ? styles.toolActive : ""} onClick={() => setActiveTool("look")} aria-pressed={activeTool === "look"}><Sparkles size={17}/><span>Looks</span></button>
-          <button type="button" className={activeTool==="text"?styles.toolActive:""} onClick={()=>setActiveTool("text")} aria-pressed={activeTool==="text"}><Type size={17}/><span>Text</span></button>
+          <button type="button" className={activeTool==="text"?styles.toolActive:""} onClick={()=>setActiveTool("text")} aria-pressed={activeTool==="text"} disabled={!includeFormDetails} title={includeFormDetails?"Style the optional form details":"Enable form details in Sheet to style printed text"}><Type size={17}/><span>Text</span></button>
           <button type="button" className={activeTool==="background"?styles.toolActive:""} onClick={()=>setActiveTool("background")} aria-pressed={activeTool==="background"}><PaintBucket size={17}/><span>Background</span></button>
         </nav>
 
