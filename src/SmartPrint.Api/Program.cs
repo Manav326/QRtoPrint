@@ -6260,6 +6260,7 @@ publicApi.MapPost("/sessions/current/local-upload-tickets", async (
             return Results.Conflict(new { code = "local_upload_idempotency_conflict", message = "This upload attempt key is already associated with a different document, batch or set of print options." });
         }
 
+        var originalTicket = existing;
         // Reuse the original ticket rather than creating a second reservation
         // when a never-completed LAN attempt's 15-minute lease has expired.
         // This is allowed only after the old claim lease ends, while the same
@@ -6290,12 +6291,19 @@ publicApi.MapPost("/sessions/current/local-upload-tickets", async (
             }
             if (lockedTicket is not null &&
                 lockedTicket.IdempotencyKey == idempotencyKey &&
-                lockedTicket.GrantHash == existing.GrantHash &&
+                lockedTicket.TenantId == originalTicket.TenantId &&
+                lockedTicket.CustomerSessionId == originalTicket.CustomerSessionId &&
+                lockedTicket.PrintJobId == originalTicket.PrintJobId &&
+                lockedTicket.BatchId == originalTicket.BatchId &&
+                lockedTicket.QrStationId == originalTicket.QrStationId &&
+                lockedTicket.PrinterDeviceId == originalTicket.PrinterDeviceId &&
+                lockedTicket.AgentDeviceId == originalTicket.AgentDeviceId &&
+                lockedTicket.GrantHash == originalTicket.GrantHash &&
                 lockedTicket.SizeBytes == request.SizeBytes &&
                 string.Equals(lockedTicket.Sha256, sha, StringComparison.OrdinalIgnoreCase) &&
                 lockedTicket.OriginalFileName == originalName &&
-                lockedTicket.BatchGroupName == existing.BatchGroupName &&
-                lockedTicket.BatchName == existing.BatchName &&
+                lockedTicket.BatchGroupName == originalTicket.BatchGroupName &&
+                lockedTicket.BatchName == originalTicket.BatchName &&
                 lockedTicket.ColourMode == request.ColourMode &&
                 lockedTicket.PaperSize == request.PaperSize &&
                 lockedTicket.IsDuplex == request.IsDuplex &&
