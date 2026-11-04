@@ -3136,7 +3136,7 @@ function CustomerEntry({publicCode,dark,onToggleTheme}:{publicCode:string;dark:b
         <div className="entry-printer-card"><div className="entry-printer-icon"><Printer size={20}/></div><div><strong>{result.printer?.displayName||"Shop print counter"}</strong><span>{nativeAppMode?(result.printer?.status||"Printer not selected"):result.printer?result.printer.manufacturer+" · "+result.printer.model:"The shop will select a printer for your job."}</span></div><Status label={result.printer?.status||"Session ready"} tone="blue"/></div>
         <div className="entry-session-note"><ShieldCheck size={16}/><span>{nativeAppMode?"Secure session · Expires "+formatIstTime(result.expiresUtc):"This session expires at "+formatIstTime(result.expiresUtc)+". Your document access stays limited to this shop session."}</span></div>
         <CustomerLocalConnection localAgent={result.localAgent} onReady={handleLocalReady} onUnavailable={handleLocalUnavailable} cloudAssistedPrintingEnabled={result.cloudAssistedPrintingEnabled}/>
-        <CustomerPrintFlow publicCode={publicCode} sessionToken={result.sessionToken} paymentOptions={result.paymentOptions} localAgent={result.localAgent} localReady={localReady} localFallbackSuggested={localFallbackSuggested} cloudAssistedPrintingEnabled={result.cloudAssistedPrintingEnabled} photoPricing={result.photoPricing} hasAssignedPrinter={Boolean(result.printer)} printerCapabilitiesJson={result.printer?.capabilitiesJson} photoStudioReady={isPhotoStudioPrinterReady(result.printer?.capabilitiesJson)}/>
+        <CustomerPrintFlow publicCode={publicCode} sessionToken={result.sessionToken} paymentOptions={result.paymentOptions} localAgent={result.localAgent} localReady={localReady} localFallbackSuggested={localFallbackSuggested} cloudAssistedPrintingEnabled={result.cloudAssistedPrintingEnabled} photoPricing={result.photoPricing} hasAssignedPrinter={Boolean(result.printer)} printerCapabilitiesJson={result.printer?.capabilitiesJson}/>
       </>:null}
     </main>
     <footer className="customer-entry-footer">© 2026 SmartPrint by QuantaEdge · Secure customer printing</footer>
@@ -3144,32 +3144,6 @@ function CustomerEntry({publicCode,dark,onToggleTheme}:{publicCode:string;dark:b
 }
 
 
-type CustomerPrinterCapabilities = {
-  color?: boolean;
-  duplex?: boolean;
-  paperSizes?: Array<{ code?: number; name?: string }>;
-};
-function parseCustomerPrinterCapabilities(capabilitiesJson?:string|null):CustomerPrinterCapabilities|null {
-  if(!capabilitiesJson)return null;
-  try {
-    const value=JSON.parse(capabilitiesJson) as Record<string,unknown>;
-    if(!value||typeof value!=="object"||Array.isArray(value))return null;
-    const paperSizes=Array.isArray(value.paperSizes)?value.paperSizes.flatMap(item=>{
-      if(!item||typeof item!=="object"||Array.isArray(item))return [];
-      const paper=item as Record<string,unknown>;
-      return [{code:typeof paper.code==="number"?paper.code:undefined,name:typeof paper.name==="string"?paper.name:undefined}];
-    }):undefined;
-    return {
-      color:typeof value.color==="boolean"?value.color:undefined,
-      duplex:typeof value.duplex==="boolean"?value.duplex:undefined,
-      paperSizes
-    };
-  } catch { return null; }
-}
-function isPhotoStudioPrinterReady(capabilitiesJson?:string|null):boolean{
-  const capabilities=parseCustomerPrinterCapabilities(capabilitiesJson);
-  return capabilities?.color===true&&(capabilities.paperSizes??[]).some(p=>p.code===9||p.name?.trim().toUpperCase()==="A4");
-}
 type CustomerLocalAgent = NonNullable<Awaited<ReturnType<typeof createCustomerSession>>["localAgent"]>;
 type LocalAgentCheckStatus = "idle" | "checking" | "connected" | "unverified" | "recovering" | "unavailable" | "denied" | "insecure";
 
@@ -3652,7 +3626,7 @@ function smartPrintNativeBoundary(status:string|undefined,hasQuote:boolean):stri
   }
 }
 
-function CustomerPrintFlow({publicCode,sessionToken,paymentOptions,localAgent,localReady,localFallbackSuggested,cloudAssistedPrintingEnabled,photoPricing,hasAssignedPrinter,printerCapabilitiesJson,photoStudioReady}:{publicCode:string;sessionToken:string;paymentOptions:{upiEnabled:boolean;upiId?:string|null;payeeName?:string|null;cashEnabled:boolean;instantPaymentEnabled:boolean};localAgent:CustomerLocalAgent|null;localReady:boolean;localFallbackSuggested:boolean;cloudAssistedPrintingEnabled:boolean;photoPricing:CustomerPhotoPricing|null;hasAssignedPrinter:boolean;printerCapabilitiesJson?:string|null;photoStudioReady:boolean}) {
+function CustomerPrintFlow({publicCode,sessionToken,paymentOptions,localAgent,localReady,localFallbackSuggested,cloudAssistedPrintingEnabled,photoPricing,hasAssignedPrinter,printerCapabilitiesJson,photoStudioReady}:{publicCode:string;sessionToken:string;paymentOptions:{upiEnabled:boolean;upiId?:string|null;payeeName?:string|null;cashEnabled:boolean;instantPaymentEnabled:boolean};localAgent:CustomerLocalAgent|null;localReady:boolean;localFallbackSuggested:boolean;cloudAssistedPrintingEnabled:boolean;photoPricing:CustomerPhotoPricing|null;hasAssignedPrinter:boolean;printerCapabilitiesJson?:string|null}) {
   const nativeAppMode = navigator.userAgent.includes("SmartPrintAndroid/1");
   // Customer requests are captured independently of current hardware reports.
   // The shop may wait, reassign, or request an approved change before dispatch.
@@ -4273,7 +4247,7 @@ function CustomerPrintFlow({publicCode,sessionToken,paymentOptions,localAgent,lo
       setError("This photo has already been sent to the shop. The shop can prepare it from the review queue; reopening it here would create a duplicate print request.");
       return;
     }
-    if(!photoStudioReady||!photoRatesAvailable){setError("Photo printing is not available at this station yet.");return;}
+    if(!photoRatesAvailable){setError("Photo printing is not configured at this shop yet. Please ask the shop owner to enable photo pricing.");return;}
     setPhotoStudioSource(candidate);
     setPhotoStudioSourceFingerprint(fingerprint);
     setError("");
@@ -4615,7 +4589,7 @@ function CustomerPrintFlow({publicCode,sessionToken,paymentOptions,localAgent,lo
   />
 </label>}
 {files.length>0&&<small className="customer-upload-local-note">Folder defaults apply to every file. Set an individual file to Custom for an exception.</small>}
-    {previewUrl&&file&&<div className="customer-file-preview"><div className="customer-file-label"><FileText size={15}/><span>{photoSettingsByFileFingerprint[customerFileFingerprint(file)]?"Prepared photo sheet":"Selected document"} · {file.name}</span>{file.type.startsWith("image/")&&photoStudioReady&&photoRatesAvailable&&<button type="button" className="customer-file-studio-button" disabled={busy||batchLockedForPayment||photoAlreadyUploaded} title={photoAlreadyUploaded?"This photo has already been submitted to the shop.":"Open Photo Studio"} onClick={()=>openPhotoStudio(file)}><ImageIcon size={14}/> {photoAlreadyUploaded?"Already sent to shop":"Open Photo Studio"}</button>}</div>{isCustomerPdf(file)?photoSettingsByFileFingerprint[customerFileFingerprint(file)]?<div className="customer-private-photo-preview"><ShieldCheck size={20}/><strong>Photo sheet prepared for this shop</strong><span>It will be uploaded with your print request. The finished sheet is not available as a separate download.</span></div>:nativeAppMode?smartPrintNativePdfPreviewTokens.has(file)?<button type="button" className="customer-flow-button" onClick={()=>openCustomerPdfPreview(file)}><FileText size={16}/> Preview PDF</button>:<small className="customer-upload-local-note">PDF selected. Preview is unavailable for this file, but you can still upload it.</small>:<iframe src={previewUrl} title={file.name+" preview"}/>:<div className="customer-private-photo-preview"><ShieldCheck size={20}/><strong>Photo held in the shop workflow</strong><span>Open Photo Studio to view and prepare this image. The original is not displayed as a downloadable preview.</span></div>}</div>}
+    {previewUrl&&file&&<div className="customer-file-preview"><div className="customer-file-label"><FileText size={15}/><span>{photoSettingsByFileFingerprint[customerFileFingerprint(file)]?"Prepared photo sheet":"Selected document"} · {file.name}</span>{file.type.startsWith("image/")&&photoRatesAvailable&&<button type="button" className="customer-file-studio-button" disabled={busy||batchLockedForPayment||photoAlreadyUploaded} title={photoAlreadyUploaded?"This photo has already been submitted to the shop.":"Open Photo Studio"} onClick={()=>openPhotoStudio(file)}><ImageIcon size={14}/> {photoAlreadyUploaded?"Already sent to shop":"Open Photo Studio"}</button>}</div>{file.type.startsWith("image/")&&photoAlreadyUploaded&&photoRatesAvailable&&<small className="customer-upload-local-note">This photo is already with the shop. The shop owner can prepare it from the review queue without creating another print job.</small>}{isCustomerPdf(file)?photoSettingsByFileFingerprint[customerFileFingerprint(file)]?<div className="customer-private-photo-preview"><ShieldCheck size={20}/><strong>Photo sheet prepared for this shop</strong><span>It will be uploaded with your print request. The finished sheet is not available as a separate download.</span></div>:nativeAppMode?smartPrintNativePdfPreviewTokens.has(file)?<button type="button" className="customer-flow-button" onClick={()=>openCustomerPdfPreview(file)}><FileText size={16}/> Preview PDF</button>:<small className="customer-upload-local-note">PDF selected. Preview is unavailable for this file, but you can still upload it.</small>:<iframe src={previewUrl} title={file.name+" preview"}/>:<div className="customer-private-photo-preview"><ShieldCheck size={20}/><strong>Photo held in the shop workflow</strong><span>Open Photo Studio to view and prepare this image. The original is not displayed as a downloadable preview.</span></div>}</div>}
     {files.length>0&&<button className="customer-flow-button" disabled={busy||customerUploadUnavailable||pendingFilesCount===0||(uploadMode==="LOCAL"&&!localReady)} onClick={()=>void upload()}>{busy?<span className="button-spinner"/>:<><UploadIcon/>{uploadMode==="LOCAL"&&localAgent?"Upload "+pendingFilesCount+" file(s) to shop":"Upload "+pendingFilesCount+" file(s)"}</>}</button>}
     {uploadProgress&&<div className="customer-upload-progress"><span>{uploadProgress.currentFile?`Uploading ${Math.min(uploadProgress.completed+1,uploadProgress.total)} of ${uploadProgress.total}: ${uploadProgress.currentFile}`:`${uploadProgress.completed} of ${uploadProgress.total} files uploaded`}</span><div><i style={{width:`${uploadProgress.total?uploadProgress.completed/uploadProgress.total*100:0}%`}}/>{uploadProgress.currentFile&&<b aria-hidden="true"/>}</div><small>The count advances when each document finishes uploading.</small></div>}
     {files.length>0&&uploadMode==="LOCAL"&&localAgent&&<small className="customer-upload-local-note">{nativeAppMode?(localReady?"Direct shop Wi-Fi transfer uses local HTTP and is not encrypted in transit. Choose Cloud-assisted for HTTPS.":"Check shop Wi-Fi."):localReady?"Direct shop Wi-Fi transfer uses local HTTP and is not encrypted in transit. Choose Cloud-assisted for HTTPS encryption.":"Tap Check shop Wi-Fi above first to grant the browser permission."}</small>}
