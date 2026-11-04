@@ -117,7 +117,7 @@ export default function OrderJourneyPage({jobs,payments,printers,agents,refreshi
     printing:journeys.filter(j=>j.stage==="printing"&&!j.isClosed).length,
     ready:journeys.filter(j=>j.stage==="ready").length
   }),[journeys]);
-  const attention=journeys.reduce((n,j)=>n+j.attentionJobs.length,0),agentsOnline=agents.filter(isAgentOnline).length;
+  const agentsOnline=agents.filter(isAgentOnline).length;
   const reachable=printers.filter(p=>p.isActive&&!!p.agentDeviceId&&agents.some(a=>a.id===p.agentDeviceId&&isAgentOnline(a))).length;
   const inMotion=journeys.filter(j=>!j.isClosed).length;
   const visualJourney=journeys.find(j=>j.attentionJobs.length>0)??journeys.find(j=>j.stage==="printing")??journeys[0];
