@@ -4695,6 +4695,18 @@ agentApi.MapPost("/jobs/{jobId:guid}/print-blocked", async (Guid jobId, AgentPri
     var previous = job.Status;
     job.Status = "LOCAL_QUEUE_READY";
     job.PrintDispatchLeaseExpiresUtc = null;
+    // This failure is reported before StartDoc/StartPage. Remove the attempted
+    // spooler name and dispatch snapshot so the owner can safely reassign the
+    // same protected local document to another compatible queue.
+    job.SpoolerJobName = null;
+    job.SpoolerJobId = null;
+    job.SpoolerSubmittedUtc = null;
+    job.SpoolerObservedUtc = null;
+    job.PrinterNameSnapshot = null;
+    job.PrinterQueueNameSnapshot = null;
+    job.PrinterAgentNameSnapshot = null;
+    job.PrinterSnapshotUtc = null;
+    job.OutputType = null;
     job.FailureCode = reason;
     job.SpoolerStatus = "BLOCKED_BEFORE_SUBMISSION";
     job.UpdatedUtc = DateTimeOffset.UtcNow;
