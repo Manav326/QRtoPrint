@@ -312,3 +312,47 @@ test("native Windows content capture protection covers the photo editor and imag
  assert.match(bridge,/getCurrentWindow\(\)\.setContentProtected\(enabled\)/);
  assert.ok(permissions.permissions.includes("core:window:allow-set-content-protected"));
 });
+
+ 
+test("shop owner can open the same editor for cloud and local Agent images",()=>{
+ const app=read("../src/App.tsx");
+ const api=read("../src/api.ts");
+ assert.match(app,/preview\.job\.storageMode==="CLOUD"\|\|preview\.job\.storageMode==="LOCAL_AGENT"/);
+ assert.match(app,/editor\.job\.storageMode==="LOCAL_AGENT"[\s\S]*?replaceShopPhotoDocumentLocally/);
+ assert.match(app,/replaceShopPhotoDocument\(tokens\.accessToken,editor\.job\.id,sheet\.file,sheet\.sizeCode,sheet\.photoCount\)/);
+ assert.match(api,/\/api\/v1\/shop\/print-jobs\/\$\{jobId\}\/photo-revision-grant/);
+ assert.match(api,/\/api\/v1\/local\/documents\/\$\{encodeURIComponent\(jobId\)\}\/photo-revision/);
+});
+
+test("local photo revisions use a purpose-bound grant and preserve local storage",()=>{
+ const program=read("../../../src/SmartPrint.Api/Program.cs");
+ const agent=read("../../../src/SmartPrint.Agent/LocalAgentApiHostedService.cs");
+ const queue=read("../../../src/SmartPrint.Agent/AgentLocalQueueStore.cs");
+ const grant=read("../../../src/SmartPrint.Api/Security/LocalDocumentPhotoRevisionGrant.cs");
+ assert.match(program,/LocalDocumentPhotoRevisionGrant\.Issue\([\s\S]*?GetActorId\(principal\)/);
+ assert.match(program,/LocalDocumentPhotoRevisionGrant\.TryValidate/);
+ assert.match(program,/document\.StorageMode != "LOCAL_AGENT" \|\| document\.AgentDeviceId != device\.Id/);
+ assert.match(program,/document\.StorageMode = previousStorageMode/);
+ assert.match(program,/ActorId = grant\.ActorUserId/);
+ assert.match(agent,/X-Print-Photo-Revision-Grant/);
+ assert.match(agent,/ReplaceStagedPhotoDocumentAsync/);
+ assert.match(agent,/local-document-photo-revisions\/\{jobId\}\/complete/);
+ assert.match(queue,/await commitServerRevisionAsync\(\)/);
+ assert.match(queue,/File\.Move\(backupPath, entry\.DocumentPath\)/);
+ assert.match(grant,/local_document_photo_revision/);
+});
+
+test("local photo revision rejects paid, handed-off and changed originals",()=>{
+ const program=read("../../../src/SmartPrint.Api/Program.cs");
+ const start=program.indexOf('agentApi.MapPost("/local-document-photo-revisions/{jobId:guid}/complete"');
+ const end=program.indexOf('agentApi.MapGet("/local-document-previews/{jobId:guid}/authorize"',start);
+ assert.ok(start>=0&&end>start);
+ const route=program.slice(start,end);
+ assert.match(route,/job\.Status != "AWAITING_SHOP_APPROVAL"/);
+ assert.match(route,/job\.LocalQueueReceivedUtc is not null/);
+ assert.match(route,/job\.ClaimedByAgentDeviceId is not null/);
+ assert.match(route,/document\.StorageMode != "LOCAL_AGENT"/);
+ assert.match(route,/document\.AgentDeviceId != device\.Id/);
+ assert.match(route,/hasPayment \|\| hasBatchPayment/);
+ assert.match(route,/document\.Sha256, request\.ExpectedOriginalSha256/);
+});
