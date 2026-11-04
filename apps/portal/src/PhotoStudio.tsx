@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type MouseEvent } from "react";
 import {
-  Check, Crop, Image as ImageIcon, RotateCcw, SlidersHorizontal,
+  Check, ChevronLeft, ChevronRight, Crop, Image as ImageIcon, RotateCcw, SlidersHorizontal,
   Sparkles, X, ZoomIn, ZoomOut, Type, PaintBucket, Pipette
 } from "lucide-react";
 import styles from "./PhotoStudio.module.css";
@@ -30,6 +30,7 @@ function formatPhotoRate(minor: number) {
   return new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 2 }).format(minor / 100);
 }
 const MAX_FILE_BYTES = 20 * 1024 * 1024;
+const MAX_PHOTO_COUNT = 100;
 
 const PHOTO_SIZES: PhotoSize[] = [
   { id: "35x45", label: "35 × 45 mm", detail: "Portrait ID photo", widthMm: 35, heightMm: 45 },
@@ -174,6 +175,7 @@ export default function PhotoStudio({
   const [look, setLook] = useState<LookPreset>("natural");
   const [adjustments, setAdjustments] = useState<Adjustments>(LOOKS[0].adjustments);
   const [copiesInput, setCopiesInput] = useState("8");
+  const [previewPage,setPreviewPage]=useState(0);
   const [zoom, setZoom] = useState(1);
   const [focusX, setFocusX] = useState(50);
   const [focusY, setFocusY] = useState(50);
@@ -199,10 +201,12 @@ export default function PhotoStudio({
   const captionFontMm=captionFontSizePt*25.4/72;
   const captionHeightMm=hasCaption?Math.max(7,captionFontMm*2+1.2):0;
   const layout=useMemo(()=>getPhotoSheetLayout(size,captionHeightMm),[size,captionHeightMm]);
-  const maxCopies=Math.min(100,layout.perSheet);
+  const maxCopies=MAX_PHOTO_COUNT;
   const copies = Math.max(1, Math.min(maxCopies, Number(copiesInput) || 1));
   const sheetCount = Math.ceil(copies / layout.perSheet);
-  const previewCapacity = layout.perSheet;
+  const previewPageIndex=Math.max(0,Math.min(previewPage,sheetCount-1));
+  const previewPhotoCount=Math.min(layout.perSheet,copies-previewPageIndex*layout.perSheet);
+  useEffect(()=>{setPreviewPage(current=>Math.min(current,sheetCount-1));},[sheetCount]);
 
   useEffect(() => {
     const previousOverflow = document.body.style.overflow;
@@ -308,11 +312,11 @@ export default function PhotoStudio({
       return;
     }
     drawPhotoSheetPage(
-      context,image,canvas.width,size,Math.min(copies,previewCapacity),0,zoom,focusX,focusY,adjustments,
+      context,image,canvas.width,size,copies,previewPageIndex,zoom,focusX,focusY,adjustments,
       {name:photoName,dob:dateOfBirth,fontSizePt:captionFontSizePt,color:captionColor},
       {sourceColor:sourceBackgroundColor,targetColor:targetBackgroundColor,tolerance:backgroundTolerance},captionHeightMm
     );
-  },[image,size,previewCapacity,copies,zoom,focusX,focusY,adjustments,photoName,dateOfBirth,captionFontSizePt,captionColor,sourceBackgroundColor,targetBackgroundColor,backgroundTolerance,captionHeightMm]);
+  },[image,size,copies,previewPageIndex,zoom,focusX,focusY,adjustments,photoName,dateOfBirth,captionFontSizePt,captionColor,sourceBackgroundColor,targetBackgroundColor,backgroundTolerance,captionHeightMm]);
 
   function handleBackgroundPick(event:MouseEvent<HTMLCanvasElement>){
     if(!pickingBackground||!image)return;
@@ -347,7 +351,7 @@ export default function PhotoStudio({
   async function createPrintSheets(){
     if(!image||busy)return;
     const parsedCopies=Number(copiesInput);
-    if(!Number.isInteger(parsedCopies)||parsedCopies<1||parsedCopies>maxCopies){setError("Choose between 1 and "+maxCopies+" photos so the selected size fits on one A4 sheet.");return;}
+    if(!Number.isInteger(parsedCopies)||parsedCopies<1||parsedCopies>maxCopies){setError("Choose between 1 and "+maxCopies+" photos. The A4 page count is calculated automatically.");return;}
     setBusy(true);setError("");
     try{
       const pages=Math.ceil(parsedCopies/layout.perSheet),jpegPages:Uint8Array[]=[];
@@ -462,13 +466,14 @@ export default function PhotoStudio({
               </select>
             </label>
             <label className={styles.fieldLabel}>Number of photos
-              <input type="number" min="1" max={maxCopies} step="1" value={copiesInput} onChange={event => setCopiesInput(event.target.value)} onBlur={() => setCopiesInput(String(copies))}/>
+              <input type="number" min="1" max={maxCopies} step="1" inputMode="numeric" value={copiesInput} onChange={event => setCopiesInput(event.target.value)} onBlur={() => setCopiesInput(String(copies))}/>
             </label>
             <div className={styles.sheetSummary}>
               <div><span>Photo dimensions</span><strong>{size.widthMm} × {size.heightMm} mm</strong></div>
               <div><span>Photos per A4 page</span><strong>{layout.perSheet}</strong></div>
               <div><span>Grid alignment</span><strong>{layout.columns} × {layout.rows}</strong></div>
-              <div><span>A4 sheets in this job</span><strong>{sheetCount}</strong></div>
+              <div><span>A4 pages in this job</span><strong>{sheetCount}</strong></div>
+              <div><span>Preview page</span><strong>{previewPageIndex+1} of {sheetCount}</strong></div>
               <small>Shop rate: {formatPhotoRate(photoPrices[size.id] ?? 0)} per photo. The server confirms the final total in your quote.</small>
             </div>
           </>}
@@ -479,6 +484,11 @@ export default function PhotoStudio({
         <main className={styles.canvasWorkspace}>
           <div className={styles.contextToolbar}>
             <span>PRINT SHEET PREVIEW</span>
+            {sheetCount>1&&<div className={styles.pageNavigator}>
+              <button type="button" aria-label="Previous A4 page" onClick={()=>setPreviewPage(current=>Math.max(0,current-1))} disabled={previewPageIndex===0}><ChevronLeft size={14}/></button>
+              <span>Page {previewPageIndex+1} of {sheetCount}</span>
+              <button type="button" aria-label="Next A4 page" onClick={()=>setPreviewPage(current=>Math.min(sheetCount-1,current+1))} disabled={previewPageIndex>=sheetCount-1}><ChevronRight size={14}/></button>
+            </div>}
             <span className={styles.toolbarDivider}/>
             <button type="button" onClick={() => setZoom(value => Math.max(1, Number((value - 0.1).toFixed(2))))} disabled={zoom <= 1} aria-label="Zoom out"><ZoomOut size={15}/></button>
             <span className={styles.zoomLabel}>{zoom.toFixed(1)}×</span>
@@ -489,13 +499,14 @@ export default function PhotoStudio({
           <div className={styles.canvasViewport}>
             {pickingBackground&&<div className={styles.pickInstruction}>Click a flat background area in the photo to sample its colour.</div>}
             <div className={styles.sheetFrame} onContextMenu={event=>event.preventDefault()} onDragStart={event=>event.preventDefault()}>
-              {image ? <canvas ref={canvasRef} width={420} height={594} onClick={handleBackgroundPick} style={{cursor:pickingBackground?"crosshair":"default"}} className={styles.previewCanvas} draggable={false} role="img" aria-label={"A4 photo sheet preview with " + Math.min(copies, previewCapacity) + " photos"}/> : <div className={styles.loadingState}>{imageError || "Preparing your photo…"}</div>}
+              {image ? <canvas ref={canvasRef} width={420} height={594} onClick={handleBackgroundPick} style={{cursor:pickingBackground?"crosshair":"default"}} className={styles.previewCanvas} draggable={false} role="img" aria-label={"A4 page "+(previewPageIndex+1)+" of "+sheetCount+" with "+previewPhotoCount+" photos"}/> : <div className={styles.loadingState}>{imageError || "Preparing your photo…"}</div>}
               <div className={styles.previewProtection} aria-hidden="true"/>
             </div>
           </div>
           <div className={styles.canvasFooter}>
             <span>{size.label} · {size.widthMm} × {size.heightMm} mm</span>
-            <span>{copies} photos · {sheetCount} A4 sheet for this job</span>
+            <span>{copies} photos · {sheetCount} A4 pages</span>
+            <small>Page {previewPageIndex+1}: {previewPhotoCount} photos</small>
             {resolutionMessage && <small>{resolutionMessage}</small>}
           </div>
         </main>
