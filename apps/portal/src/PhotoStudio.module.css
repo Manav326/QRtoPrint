@@ -46,3 +46,10 @@
 .previewProtection{position:absolute;inset:0;z-index:2;pointer-events:none;overflow:hidden;display:grid;place-items:center;background:repeating-linear-gradient(135deg,transparent 0 44px,rgba(32,45,70,.025) 44px 46px)}
 .previewProtection::before{content:"SMARTPRINT · SHOP PRINT ONLY · PRIVATE PREVIEW";position:absolute;inset:-30%;display:grid;place-items:center;transform:rotate(-28deg);font-size:clamp(9px,1.8vw,16px);font-weight:800;letter-spacing:.18em;color:rgba(44,59,84,.14);text-align:center;white-space:normal;line-height:8}
 .previewCanvas{user-select:none;-webkit-user-select:none;-webkit-user-drag:none}
+
+.captionOptIn{display:flex;align-items:flex-start;gap:9px;padding:11px;border:1px solid #dce3ed;border-radius:9px;background:#f7f8fc;color:#34455e;cursor:pointer}
+.captionOptIn input{flex:none;width:16px;height:16px;margin:1px 0 0;accent-color:#7866db}
+.captionOptIn span{display:grid;gap:4px;min-width:0}
+.captionOptIn strong{font-size:10px;line-height:1.4}
+.captionOptIn small{color:#718097;font-size:9px;font-weight:500;line-height:1.45}
+@media(max-width:720px){.captionOptIn{grid-column:1/-1}}
