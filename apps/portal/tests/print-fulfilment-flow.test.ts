@@ -131,3 +131,15 @@ test("HTTPS recovery returns the original saved print settings on new and duplic
       assert.ok(recovery.includes(`${entity}.${property}`), `Recovery must return ${entity}.${property}.`);
   }
 });
+
+test("local upload ticket retries preserve an explicitly selected batch identity and name", () => {
+  const program = read("../../../src/SmartPrint.Api/Program.cs");
+  const ticketStart = program.indexOf('publicApi.MapPost("/sessions/current/local-upload-tickets"');
+  const ticketEnd = program.indexOf('agentApi.MapPost("/local-uploads/{ticketId:guid}/claim"', ticketStart);
+  assert.ok(ticketStart >= 0 && ticketEnd > ticketStart);
+  const ticketRoute = program.slice(ticketStart, ticketEnd);
+  assert.match(ticketRoute, /request\.BatchId is Guid requestedBatchId && existing\.BatchId != requestedBatchId/);
+  assert.match(ticketRoute, /requestedBatchName is not null && existing\.BatchName != requestedBatchName/);
+  assert.match(ticketRoute, /request\.BatchId is null \|\| racedTicket\.BatchId == request\.BatchId\.Value/);
+  assert.match(ticketRoute, /requestedBatchName is null \|\| racedTicket\.BatchName == requestedBatchName/);
+});
