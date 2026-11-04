@@ -43,6 +43,12 @@ test("maps the lifecycle to received, review, payment, printing and ready",()=>{
     ["PRINTING","printing"],["COMPLETED","ready"],["PDF_EXPORTED","ready"]];
   for(const [status,expected] of cases) assert.equal(buildShopOrderJourneys([job({id:status,jobNumber:status,status})],[])[0].stage,expected,status);
 });
+test("UPI and cash checkout waiting states stay in the payment stage when the payment read is temporarily unavailable",()=>{
+  for(const status of ["AWAITING_CUSTOMER_PAYMENT","AWAITING_COUNTER_PAYMENT"]) {
+    const order=buildShopOrderJourneys([job({id:status,jobNumber:status,status})],[])[0];
+    assert.equal(order.stage,"payment",status);
+  }
+});
 test("one rejected file does not hide accepted files still printing",()=>{
   const order=buildShopOrderJourneys([job({id:"a",jobNumber:"SP-1",batchId:"b",status:"REJECTED"}),
     job({id:"b",jobNumber:"SP-2",batchId:"b",status:"PRINTING"})],[])[0];
