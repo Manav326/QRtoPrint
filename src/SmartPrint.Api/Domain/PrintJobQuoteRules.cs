@@ -1,9 +1,37 @@
 namespace SmartPrint.Api.Domain;
 
+public enum PrintJobQuoteAcceptanceOutcome
+{
+    AlreadyAccepted,
+    NotAwaitingAcceptance,
+    Expired,
+    Accepted
+}
+
 public static class PrintJobQuoteRules
 {
     public static bool CanCreateQuote(string? status) =>
         status is "AWAITING_CONFIGURATION" or "QUOTE_EXPIRED" or "Uploaded" or "UPLOADED";
+
+    public static PrintJobQuoteAcceptanceOutcome EvaluateAcceptance(
+        string? status,
+        DateTimeOffset? quoteExpiresUtc,
+        DateTimeOffset now)
+    {
+        if (status == "AWAITING_SHOP_APPROVAL")
+        {
+            return PrintJobQuoteAcceptanceOutcome.AlreadyAccepted;
+        }
+
+        if (status != "AWAITING_CUSTOMER_APPROVAL")
+        {
+            return PrintJobQuoteAcceptanceOutcome.NotAwaitingAcceptance;
+        }
+
+        return quoteExpiresUtc is null || quoteExpiresUtc <= now
+            ? PrintJobQuoteAcceptanceOutcome.Expired
+            : PrintJobQuoteAcceptanceOutcome.Accepted;
+    }
 
     public static Dictionary<string, string[]> ValidatePrintOptions(
         int pageCount,
