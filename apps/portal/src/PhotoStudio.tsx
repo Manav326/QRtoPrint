@@ -159,7 +159,7 @@ export default function PhotoStudio({
   source: File;
   onCancel: () => void;
   photoPrices: Record<string, number>;
-  onApply: (sheets: PreparedPhotoSheet[]) => void;
+  onApply: (sheets: PreparedPhotoSheet[]) => void | Promise<void>;
 }) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const [image, setImage] = useState<HTMLImageElement | null>(null);
@@ -308,7 +308,7 @@ export default function PhotoStudio({
       const pdf=new Blob([buffer],{type:"application/pdf"});
       if(pdf.size>MAX_FILE_BYTES)throw new Error("The prepared photo PDF exceeds SmartPrint's 20 MB file limit. Use a smaller original photo or reduce the number of copies.");
       const output=new File([pdf],safeBaseName(source.name)+"-"+size.id+"-photos.pdf",{type:"application/pdf",lastModified:Date.now()});
-      onApply([{file:output,sizeCode:size.id,photoCount:parsedCopies}]);
+      await onApply([{file:output,sizeCode:size.id,photoCount:parsedCopies}]);
     }catch(cause){setError(cause instanceof Error?cause.message:"Photo sheet creation failed. Try again with this photo.");}
     finally{setBusy(false);}
   }
