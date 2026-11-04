@@ -2984,7 +2984,9 @@ shop.MapPost("/print-jobs/{jobId:guid}/photo-revision", async (
     var photoSizeCode = form["photoSizeCode"].FirstOrDefault() ?? string.Empty;
     if (photoSizeCode is not ("35x45" or "25x35" or "2x2" or "4x6") ||
         !int.TryParse(form["photoCount"].FirstOrDefault(), out var photoCount) ||
-        photoCount is < 1 or > 100)
+        photoCount is < 1 or > 100 ||
+        !int.TryParse(form["photosPerPage"].FirstOrDefault(), out var photosPerPage) ||
+        photosPerPage < 1 || photosPerPage > PricingCalculator.MaximumPhotosPerA4Sheet(photoSizeCode))
     {
         await transaction.RollbackAsync(ct);
         return Results.ValidationProblem(new Dictionary<string, string[]>
@@ -2993,7 +2995,7 @@ shop.MapPost("/print-jobs/{jobId:guid}/photo-revision", async (
         });
     }
 
-    var expectedPageCount = PricingCalculator.PhotoPageCount(photoCount, photoSizeCode);
+    var expectedPageCount = PricingCalculator.PhotoPageCount(photoCount, photoSizeCode, photosPerPage);
 
     var pricing = await db.ShopPricingProfiles.AsNoTracking()
         .SingleOrDefaultAsync(item => item.TenantId == tenantId && item.IsConfigured, ct);
@@ -3066,7 +3068,8 @@ shop.MapPost("/print-jobs/{jobId:guid}/photo-revision", async (
     job.PhotoUnitPriceMinorSnapshot = unitPrice;
     job.Currency = "INR";
     job.QuotedAmountMinor = amount;
-    job.PageRefundAllocationsJson = JsonSerializer.Serialize(new[] { amount });
+    job.PageRefundAllocationsJson = JsonSerializer.Serialize(
+        PricingCalculator.CalculatePhotoPageRefundAllocations(photoCount, photoSizeCode, photosPerPage, unitPrice));
     job.PricingVersion = pricing.Version;
     job.QuoteExpiresUtc = now.AddMinutes(10);
     job.UpdatedUtc = now;
@@ -5179,7 +5182,7 @@ agentApi.MapPost("/local-document-photo-revisions/{jobId:guid}/authorize", async
     long unitPrice;
     try
     {
-        var expectedPageCount = PricingCalculator.PhotoPageCount(request.PhotoCount, request.PhotoSizeCode);
+        var expectedPageCount = PricingCalculator.PhotoPageCount(request.PhotoCount, request.PhotoSizeCode, request.PhotosPerPage);
         if (request.PageCount != expectedPageCount)
             return Results.ValidationProblem(new Dictionary<string, string[]>
             {
@@ -5202,6 +5205,7 @@ agentApi.MapPost("/local-document-photo-revisions/{jobId:guid}/authorize", async
         NewSizeBytes = request.SizeBytes,
         request.PhotoSizeCode,
         request.PhotoCount,
+        request.PhotosPerPage,
         PhotoUnitPriceMinor = unitPrice,
         QuotedAmountMinor = amount,
         PricingVersion = pricing.Version
@@ -5333,7 +5337,7 @@ agentApi.MapPost("/local-document-photo-revisions/{jobId:guid}/complete", async 
     long unitPrice;
     try
     {
-        var expectedPageCount = PricingCalculator.PhotoPageCount(request.PhotoCount, request.PhotoSizeCode);
+        var expectedPageCount = PricingCalculator.PhotoPageCount(request.PhotoCount, request.PhotoSizeCode, request.PhotosPerPage);
         if (request.PageCount != expectedPageCount)
             throw new ArgumentException($"The prepared PDF must contain exactly {expectedPageCount} A4 page(s) for this photo quantity.", nameof(request.PageCount));
         unitPrice = PricingCalculator.PhotoUnitRate(request.PhotoSizeCode, pricing);
@@ -5370,7 +5374,9 @@ agentApi.MapPost("/local-document-photo-revisions/{jobId:guid}/complete", async 
     job.PhotoUnitPriceMinorSnapshot = unitPrice;
     job.Currency = "INR";
     job.QuotedAmountMinor = amount;
-    job.PageRefundAllocationsJson = JsonSerializer.Serialize(new[] { amount });
+    job.PageRefundAllocationsJson = JsonSerializer.Serialize(
+        PricingCalculator.CalculatePhotoPageRefundAllocations(
+            request.PhotoCount, request.PhotoSizeCode, request.PhotosPerPage, unitPrice));
     job.PricingVersion = pricing.Version;
     job.QuoteExpiresUtc = now.AddMinutes(10);
     job.UpdatedUtc = now;
@@ -7721,11 +7727,12 @@ publicApi.MapPost("/jobs/{jobId:guid}/quote", async (
         request.ColourMode is not ("Mono" or "Colour") ||
         request.Orientation is not ("AUTO" or "PORTRAIT" or "LANDSCAPE") ||
         (isPhotoPrint &&
-            (job.PageCount != 1 || request.Copies != 1 || request.ColourMode != "Colour" ||
+            (request.Copies != 1 || request.ColourMode != "Colour" ||
              request.IsDuplex || request.PhotoSizeCode is not ("35x45" or "25x35" or "2x2" or "4x6") ||
-             request.PhotoCount is null || request.PhotoCount is < 1 or > 100)) ||
+             request.PhotoCount is null || request.PhotoCount is < 1 or > 100 ||
+             request.PhotosPerPage is null or < 1)) ||
         (isPhotoPrint && (request.PaperSize != "A4" || request.Orientation != "AUTO")) ||
-        (!isPhotoPrint && (request.PhotoSizeCode is not null || request.PhotoCount is not null)))
+        (!isPhotoPrint && (request.PhotoSizeCode is not null || request.PhotoCount is not null || request.PhotosPerPage is not null)))
     {
         return Results.ValidationProblem(new Dictionary<string, string[]>
         {
@@ -7757,7 +7764,7 @@ publicApi.MapPost("/jobs/{jobId:guid}/quote", async (
         {
             var photoSizeCode = request.PhotoSizeCode!;
             var photoCount = request.PhotoCount!.Value;
-            var expectedPageCount = PricingCalculator.PhotoPageCount(photoCount, photoSizeCode);
+            var expectedPageCount = PricingCalculator.PhotoPageCount(photoCount, photoSizeCode, request.PhotosPerPage!.Value);
             if (job.PageCount != expectedPageCount)
             {
                 return Results.ValidationProblem(new Dictionary<string, string[]>
@@ -7768,7 +7775,8 @@ publicApi.MapPost("/jobs/{jobId:guid}/quote", async (
 
             photoUnitPriceMinor = PricingCalculator.PhotoUnitRate(photoSizeCode, pricing);
             amount = PricingCalculator.CalculatePhoto(photoCount, photoSizeCode, pricing);
-            pageRefundAllocations = [amount];
+            pageRefundAllocations = PricingCalculator.CalculatePhotoPageRefundAllocations(
+                photoCount, photoSizeCode, request.PhotosPerPage!.Value, photoUnitPriceMinor);
             job.PrintKind = "PHOTO";
             job.PhotoSizeCode = photoSizeCode;
             job.PhotoCount = photoCount;
