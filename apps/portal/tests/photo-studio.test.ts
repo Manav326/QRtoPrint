@@ -119,3 +119,37 @@ test("short portrait phones keep Photo Studio preview, controls and save actions
  assert.match(css,/\.canvasWorkspace\{grid-template-rows:32px minmax\(0,1fr\) 26px/);
  assert.match(css,/\.footerActions button\{min-height:34px\}/);
 });
+
+
+test("Android image providers with blank MIME types still expose Photo Studio by supported filename",()=>{
+ const app=readFileSync(new URL("../src/App.tsx",import.meta.url),"utf8");
+ assert.match(app,/function isCustomerImage\(file:File\):boolean/);
+ assert.match(app,/file\.type\.toLowerCase\(\)\.startsWith\("image\/"\) \|\| \/\\\.\(jpe\?g\|png\)\//);
+ assert.match(app,/isCustomerImage\(file\)&&photoRatesAvailable/);
+});
+
+test("shop cancellation returns to the original document preview",()=>{
+ const app=readFileSync(new URL("../src/App.tsx",import.meta.url),"utf8");
+ assert.match(app,/returnPreview:\{name:string;blob:Blob;mediaType:string;job:ShopPrintJob;readOnly:boolean\}/);
+ assert.match(app,/function cancelShopPhotoStudio\(\)[\s\S]*?URL\.createObjectURL\(restored\.blob\)[\s\S]*?setPreview/);
+ assert.match(app,/onCancel=\{cancelShopPhotoStudio\}/);
+});
+
+test("Photo Studio follows the saved light or dark appearance in both customer and shop routes",()=>{
+ const app=readFileSync(new URL("../src/App.tsx",import.meta.url),"utf8");
+ const studio=readFileSync(new URL("../src/PhotoStudio.tsx",import.meta.url),"utf8");
+ const css=readFileSync(new URL("../src/PhotoStudio.module.css",import.meta.url),"utf8");
+ assert.match(app,/<CustomerPrintFlow dark=\{dark\}/);
+ assert.match(app,/PhotoStudio source=\{photoStudioSource\} mode="customer" dark=\{dark\}/);
+ assert.match(app,/PhotoStudio source=\{shopPhotoStudio\.source\} mode="shop" dark=\{dark\}/);
+ assert.match(studio,/dark = false/);
+ assert.match(studio,/dark \? " " \+ styles\.dark/);
+ for(const selector of [".dark .toolPanel",".dark .fieldLabel",".dark .canvasWorkspace",".dark .footer",".dark .captionOptIn"])
+  assert.ok(css.includes(selector),"Missing dark Photo Studio styling: "+selector);
+});
+
+test("Photo Studio restores focus to the customer or shop control after it closes",()=>{
+ const studio=readFileSync(new URL("../src/PhotoStudio.tsx",import.meta.url),"utf8");
+ assert.match(studio,/const previouslyFocused = document\.activeElement instanceof HTMLElement/);
+ assert.match(studio,/previouslyFocused\?\.focus\(\)/);
+});
