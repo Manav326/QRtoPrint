@@ -4398,7 +4398,15 @@ function CustomerPrintFlow({publicCode,sessionToken,paymentOptions,localAgent,lo
                 <button type="button" className={!defaults.isDuplex?"customer-choice selected":"customer-choice"} onClick={()=>setGroupSettings(current=>({...current,[group.name]:{...defaults,isDuplex:false}}))}>Single</button>
                 <button type="button" className={defaults.isDuplex?"customer-choice selected":"customer-choice"} onClick={()=>setGroupSettings(current=>({...current,[group.name]:{...defaults,isDuplex:true}}))}>Double</button>
               </div></div>
-              <label className="customer-folder-copies"><span>Copies · all files</span><input type="text" inputMode="numeric" pattern="[0-9]*" maxLength={3} value={defaults.copies} onChange={event=>setGroupSettings(current=>({...current,[group.name]:{...defaults,copies:event.currentTarget.value.replace(/\D/g,"").slice(0,3)}}))} onBlur={event=>setGroupSettings(current=>({...current,[group.name]:{...defaults,copies:normalizeCustomerCopies(event.currentTarget.value)}}))}/></label>
+              <label className="customer-folder-copies"><span>Copies · all files</span><input type="text" inputMode="numeric" pattern="[0-9]*" maxLength={3} value={defaults.copies}
+                 onChange={event=>{
+                   const copies=event.currentTarget.value.replace(/\D/g,"").slice(0,3);
+                   setGroupSettings(current=>({...current,[group.name]:{...(current[group.name]??defaults),copies}}));
+                 }}
+                 onBlur={event=>{
+                   const copies=normalizeCustomerCopies(event.currentTarget.value);
+                   setGroupSettings(current=>({...current,[group.name]:{...(current[group.name]??defaults),copies}}));
+                 }}/></label>
               <div><span>Paper</span><strong className="customer-paper-default">A4</strong></div>
               <label className="customer-advanced-toggle"><input type="checkbox" checked={defaults.advancedEnabled} onChange={event=>setGroupSettings(current=>({...current,[group.name]:{...defaults,advancedEnabled:event.currentTarget.checked}}))}/><span>Advanced settings</span></label>
             </div>
@@ -4421,7 +4429,15 @@ function CustomerPrintFlow({publicCode,sessionToken,paymentOptions,localAgent,lo
               <button type="button" className={own.custom?"customer-file-custom active":"customer-file-custom"} onClick={()=>setFileSettings(current=>({...current,[fingerprint]:{...defaults,...(current[fingerprint]??{}),custom:!own.custom,...(!own.custom?{copies:defaults.copies,colourMode:defaults.colourMode,isDuplex:defaults.isDuplex,advancedEnabled:defaults.advancedEnabled,paperSize:defaults.paperSize,orientation:defaults.orientation}:{})}}))}>{own.custom?"Custom":"Folder"}</button>
               <button type="button" className="customer-file-remove" aria-label={`Remove ${selected.name} from this selection`} title="Remove from this selection" disabled={busy} onClick={()=>removeSelectedFile(fingerprint)}><X size={13}/><span>Remove</span></button>
               {own.custom&&<div className="customer-file-overrides">
-                <label className="customer-folder-copies"><span>Copies</span><input type="text" inputMode="numeric" pattern="[0-9]*" maxLength={3} value={own.copies} onChange={event=>setFileSettings(current=>({...current,[fingerprint]:{...own,custom:true,copies:event.currentTarget.value.replace(/\D/g,"").slice(0,3)}}))} onBlur={event=>setFileSettings(current=>({...current,[fingerprint]:{...own,custom:true,copies:normalizeCustomerCopies(event.currentTarget.value)}}))}/></label>
+                <label className="customer-folder-copies"><span>Copies</span><input type="text" inputMode="numeric" pattern="[0-9]*" maxLength={3} value={own.copies}
+                   onChange={event=>{
+                     const copies=event.currentTarget.value.replace(/\D/g,"").slice(0,3);
+                     setFileSettings(current=>({...current,[fingerprint]:{...(current[fingerprint]??own),custom:true,copies}}));
+                   }}
+                   onBlur={event=>{
+                     const copies=normalizeCustomerCopies(event.currentTarget.value);
+                     setFileSettings(current=>({...current,[fingerprint]:{...(current[fingerprint]??own),custom:true,copies}}));
+                   }}/></label>
                 <div className="customer-choice-row">
                   <button type="button" className={own.colourMode==="Mono"?"customer-choice selected":"customer-choice"} onClick={()=>setFileSettings(current=>({...current,[fingerprint]:{...own,custom:true,colourMode:"Mono"}}))}>B&W</button>
                   <button type="button" className={own.colourMode==="Colour"?"customer-choice selected":"customer-choice"} onClick={()=>setFileSettings(current=>({...current,[fingerprint]:{...own,custom:true,colourMode:"Colour"}}))}>Colour</button>
