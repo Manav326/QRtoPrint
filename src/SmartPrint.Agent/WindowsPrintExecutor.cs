@@ -406,6 +406,17 @@ public sealed class WindowsPrintExecutor
                         output.Write(vectorBranding.Bytes);
                         output.Flush(true);
                     }
+                    else if (!entry.PdfBrandingEnabled &&
+                             string.Equals(entry.MediaType, "application/pdf", StringComparison.OrdinalIgnoreCase) &&
+                             entry.Copies == 1 &&
+                             (entry.RejectedPageNumbers?.Count ?? 0) == 0)
+                    {
+                        // With branding off, a normal single-copy full-document PDF
+                        // export is the uploaded PDF itself. Do not needlessly rebuild
+                        // it as a raster copy and discard its text, forms or PDF objects.
+                        output.Write(bytes);
+                        output.Flush(true);
+                    }
                     else
                     {
                         using var pdf = SKDocument.CreatePdf(output)
