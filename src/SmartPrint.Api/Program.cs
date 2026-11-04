@@ -5433,21 +5433,6 @@ static async Task<AgentDevice?> AuthenticateAgentAsync(
     return CryptographicOperations.FixedTimeEquals(suppliedHash, storedHash) ? device : null;
 }
 
-static bool IsValidUpiId(string? value)
-{
-    if (string.IsNullOrWhiteSpace(value) || value.Length > 160)
-    {
-        return false;
-    }
-
-    var parts = value.Split('@');
-    return parts.Length == 2 &&
-           parts[0].Length is >= 2 and <= 128 &&
-           parts[1].Length is >= 2 and <= 64 &&
-           parts[0].All(character => char.IsLetterOrDigit(character) || character is '.' or '_' or '-') &&
-           parts[1].All(character => char.IsLetterOrDigit(character) || character is '.' or '-');
-}
-
 static string? BuildUpiUri(Guid paymentId, string method, string? upiId, string? payeeName, long amountMinor, string currency, string jobNumber)
 {
     if (method != "UPI" || string.IsNullOrWhiteSpace(upiId))
