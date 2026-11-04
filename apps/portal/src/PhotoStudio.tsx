@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type MouseEvent } from "react";
 import {
-  Check, ChevronDown, Crop, Image as ImageIcon, RotateCcw, SlidersHorizontal,
+  Check, Crop, Image as ImageIcon, RotateCcw, SlidersHorizontal,
   Sparkles, X, ZoomIn, ZoomOut, Type, PaintBucket, Pipette
 } from "lucide-react";
 import styles from "./PhotoStudio.module.css";
@@ -464,7 +464,7 @@ export default function PhotoStudio({
               <div><span>Photo dimensions</span><strong>{size.widthMm} × {size.heightMm} mm</strong></div>
               <div><span>Photos per A4 page</span><strong>{layout.perSheet}</strong></div>
               <div><span>Grid alignment</span><strong>{layout.columns} × {layout.rows}</strong></div>
-              <div><span>A4 pages in one PDF</span><strong>{sheetCount}</strong></div>
+              <div><span>A4 sheets in this job</span><strong>{sheetCount}</strong></div>
               <small>Shop rate: {formatPhotoRate(photoPrices[size.id] ?? 0)} per photo. The server confirms the final total in your quote.</small>
             </div>
           </>}
