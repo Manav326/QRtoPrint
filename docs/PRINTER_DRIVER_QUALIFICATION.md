@@ -14,8 +14,8 @@ Initial entries:
 
 - HP Universal Print Driver PCL 6 (exact package/version pending).
 - Canon Generic Plus UFR II 3.50 (blocked pending written commercial-use permission).
-- Epson Universal Print Driver 2.123.00 (package extraction and license review pending).
-- Brother Universal Printer Driver (exact package/version pending).
+- Epson Universal Print Driver 2.123.00 for the L3150 Series Windows 11 x64 support listing (87.53 MB; package extraction and license review pending).
+- Brother Universal Printer Driver 1.0.0.0 for the India DCP-J100 support page (20.37 MB; two-sided printing explicitly unsupported by this driver).
 - Pantum P2503 Windows Driver 1.0.5.
 - Pantum Universal Printing Driver 1.0.6.
 
@@ -35,7 +35,7 @@ A driver is eligible for a runner only when all of these are present and reviewe
 
 The harness accepts only ZIP and CAB packages. It never executes vendor setup EXEs, scripts or custom installer binaries. If a package is available only as an EXE, it remains pending until a vendor-approved extraction route is established.
 
-Canon's India Generic Plus UFR II support page currently carries restrictive personal/non-commercial-use language in its disclaimer. This entry is blocked from commercial CI pending written permission or an alternate license.
+Canon's India Generic Plus UFR II V3.50 support page currently carries restrictive personal/non-commercial-use language and prohibits transfer, redistribution and modification. This entry is blocked from commercial CI pending written permission or an alternate license. Brother's India support listing states that its Universal Printer Driver 1.0.0.0 does not support two-sided printing; this limitation must be carried into any model-specific compatibility result.
 
 ## How the hosted test works
 
