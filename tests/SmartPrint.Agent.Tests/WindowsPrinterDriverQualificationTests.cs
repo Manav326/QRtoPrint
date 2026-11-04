@@ -75,7 +75,7 @@ public sealed class WindowsPrinterDriverQualificationTests
                 {
                     if (File.Exists(outputPath))
                     {
-                        var candidate = await File.ReadAllBytesAsync(outputPath);
+                        var candidate = await File.ReadAllBytesAsync(outputPath!);
                         if (candidate.Length > 128)
                         {
                             rendered = candidate;
@@ -107,7 +107,7 @@ public sealed class WindowsPrinterDriverQualificationTests
                 driverName,
                 queueName,
                 spoolerJobId = receipt.JobId,
-                outputFileName = Path.GetFileName(outputPath),
+                outputFileName = Path.GetFileName(outputPath!),
                 outputSizeBytes = rendered.Length,
                 outputSha256 = Convert.ToHexString(SHA256.HashData(rendered)).ToLowerInvariant(),
                 outputHeaderHex = Convert.ToHexString(rendered.AsSpan(0, Math.Min(32, rendered.Length))),
@@ -128,7 +128,7 @@ public sealed class WindowsPrinterDriverQualificationTests
         {
             CryptographicOperations.ZeroMemory(bytes);
             if (File.Exists(outputPath))
-                File.Delete(outputPath);
+                File.Delete(outputPath!);
         }
     }
 }
