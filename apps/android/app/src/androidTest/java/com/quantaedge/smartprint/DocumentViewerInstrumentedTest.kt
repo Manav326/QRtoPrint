@@ -5,6 +5,7 @@ import android.graphics.Bitmap
 import android.graphics.Color
 import android.graphics.Paint
 import android.graphics.pdf.PdfDocument
+import android.net.Uri
 import androidx.test.core.app.ActivityScenario
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.espresso.Espresso.onView
@@ -18,6 +19,9 @@ import androidx.test.espresso.matcher.ViewMatchers.withContentDescription
 import androidx.test.espresso.matcher.ViewMatchers.withId
 import androidx.test.espresso.matcher.ViewMatchers.withText
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -53,6 +57,55 @@ class DocumentViewerInstrumentedTest {
             }
         } finally {
             source.delete()
+        }
+    }
+
+    @Test
+    fun opensCustomerUploadPdfInTheNativeReaderAndReturnsToTheUploadPage() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val previewDirectory = File(context.cacheDir, "customer-upload-pdf-preview")
+        val source = File(context.cacheDir, "CI-customer-upload-preview-${System.currentTimeMillis()}.pdf")
+        createPdf(source)
+
+        try {
+            ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+                scenario.onActivity { activity ->
+                    val previewToken = MainActivity::class.java.getDeclaredMethod(
+                        "createCustomerUploadPdfPreview",
+                        Uri::class.java
+                    ).apply { isAccessible = true }
+                        .invoke(activity, Uri.fromFile(source)) as String
+                    assertNotNull("The Android document provider PDF is copied for preview", previewToken)
+                    @Suppress("UNCHECKED_CAST")
+                    val previews = MainActivity::class.java.getDeclaredField("customerUploadPdfPreviews")
+                        .apply { isAccessible = true }
+                        .get(activity) as MutableMap<String, File>
+                    val cachedPdf = previews[previewToken]
+                    assertNotNull("The preview token resolves to a cached PDF", cachedPdf)
+                    assertTrue("The preview uses a separate bounded cache copy", cachedPdf!!.canonicalPath != source.canonicalPath)
+                    assertEquals(source.length(), cachedPdf.length())
+                    MainActivity::class.java.getDeclaredMethod(
+                        "showCustomerUploadPdfPreview",
+                        String::class.java
+                    ).apply { isAccessible = true }.invoke(activity, previewToken)
+                }
+
+                waitForView(withText("Page 1 of 2"))
+                onView(withContentDescription("Back to upload")).perform(click())
+                scenario.onActivity { activity ->
+                    val toolbar = MainActivity::class.java.getDeclaredField("toolbar")
+                        .apply { isAccessible = true }
+                        .get(activity) as com.google.android.material.appbar.MaterialToolbar
+                    val viewer = MainActivity::class.java.getDeclaredField("documentViewer")
+                        .apply { isAccessible = true }
+                        .get(activity)
+                    assertTrue("The upload form is restored after closing PDF preview", toolbar.subtitle.toString().endsWith("PRINT"))
+                    assertNull("The native preview reader is closed", viewer)
+                }
+            }
+        } finally {
+            source.delete()
+            previewDirectory.deleteRecursively()
         }
     }
 
