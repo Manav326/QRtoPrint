@@ -88,7 +88,7 @@ test("the shared Photo Studio explains different save actions for customers and 
 
 test("shop owners can inspect the actual prepared photo PDF before approving the job",()=>{
  const app=readFileSync(new URL("../src/App.tsx",import.meta.url),"utf8");
- assert.match(app,/isPdf&&job\.printKind==="PHOTO"\?<><iframe src=\{url\} title=\{name\}\/</);
+ assert.match(app,/isPdf&&job\.printKind==="PHOTO"[\s\S]*?<iframe src=\{url\} title=\{name\}\//);
  assert.match(app,/SMARTPRINT · SHOP PRINT ONLY · PRIVATE PREVIEW/);
 });
 
@@ -114,7 +114,8 @@ test("short portrait phones keep Photo Studio preview, controls and save actions
  const css=readFileSync(new URL("../src/PhotoStudio.module.css",import.meta.url),"utf8");
  assert.match(css,/@media\(max-width:720px\) and \(max-height:620px\)/);
  assert.match(css,/grid-template-rows:40px minmax\(160px,1fr\) auto/);
- assert.match(css,/\.toolPanel\{max-height:26vh;[^}]*overflow:auto/);
+ assert.match(css,/\.toolPanel\{grid-row:3;[^}]*max-height:34vh;[^}]*overflow:auto/);
+ assert.match(css,/\.toolPanel\{max-height:26vh/);
  assert.match(css,/\.canvasWorkspace\{grid-template-rows:32px minmax\(0,1fr\) 26px/);
  assert.match(css,/\.footerActions button\{min-height:34px\}/);
 });
