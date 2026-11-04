@@ -66,7 +66,7 @@ function PhotoStudioBrowserFixture() {
     const sheet = sheets[0];
     const pdfBytes = new Uint8Array(await sheet.file.arrayBuffer());
     const pdfText = new TextDecoder("latin1").decode(pdfBytes);
-    const pageCount = Number(pdfText.match(/\\/Count (\\d+)/)?.[1] ?? 0);
+    const pageCount = Number(pdfText.match(/\/Count (\d+)/)?.[1] ?? 0);
     setResult(JSON.stringify({
       mode,
       mediaType: sheet.file.type,
