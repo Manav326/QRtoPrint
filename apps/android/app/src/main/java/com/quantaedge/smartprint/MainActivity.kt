@@ -16,6 +16,7 @@ import android.view.Menu
 import android.content.res.ColorStateList
 import android.view.View
 import android.view.ViewGroup
+import android.view.WindowManager
 import android.webkit.CookieManager
 import android.webkit.SslErrorHandler
 import android.webkit.ValueCallback
@@ -233,6 +234,11 @@ class MainActivity : AppCompatActivity() {
             showProfile()
         }
         handleShareIntent(intent)
+    }
+
+    override fun onDestroy() {
+        window.clearFlags(WindowManager.LayoutParams.FLAG_SECURE)
+        super.onDestroy()
     }
 
     override fun onSaveInstanceState(outState: Bundle) {
@@ -2277,6 +2283,19 @@ class MainActivity : AppCompatActivity() {
                     } else {
                         val parts = message.data.orEmpty().split("|", limit = 3)
                         when {
+                            parts.size == 2 && parts[0] == "setSensitivePreview" &&
+                                parts[1] in setOf("on", "off") -> {
+                                runOnUiThread {
+                                    if (!isFinishing && !isDestroyed) {
+                                        if (parts[1] == "on") {
+                                            window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
+                                        } else {
+                                            window.clearFlags(WindowManager.LayoutParams.FLAG_SECURE)
+                                        }
+                                        replyProxy.postMessage("OK")
+                                    }
+                                }
+                            }
                             parts.size == 2 && parts[0] == "previewCustomerPdf" &&
                                 isCustomerUploadPdfPreviewToken(parts[1]) -> {
                                 val token = parts[1]
