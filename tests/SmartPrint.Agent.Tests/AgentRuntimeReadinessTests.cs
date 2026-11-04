@@ -5,45 +5,46 @@ namespace SmartPrint.Agent.Tests;
 public sealed class AgentRuntimeReadinessTests
 {
     [Fact]
-    public void LocalUploadRequiresEveryPipelineSignalToBeFreshAndReady()
+    public void LocalUploadRequiresAnInitializedProtectedQueueAndFreshAgentIdentity()
     {
         var now = DateTimeOffset.UtcNow;
         var readiness = new AgentRuntimeReadiness();
 
-        readiness.SetQueueInitialized(true);
-        readiness.SetPrintWorkerRunning(true);
         readiness.MarkHeartbeatSuccess(now);
+        readiness.SetPrintWorkerRunning(true);
         readiness.MarkPrinterInventorySuccess(2, now);
 
+        Assert.False(readiness.GetSnapshot(now).LocalUploadReady);
+
+        readiness.SetQueueInitialized(true);
         var snapshot = readiness.GetSnapshot(now);
 
         Assert.True(snapshot.QueueInitialized);
-        Assert.True(snapshot.PrintWorkerRunning);
         Assert.True(snapshot.HeartbeatFresh);
-        Assert.True(snapshot.PrinterInventoryFresh);
-        Assert.Equal(2, snapshot.DiscoveredPrinterCount);
         Assert.True(snapshot.LocalUploadReady);
     }
 
     [Fact]
-    public void LocalUploadRemainsBlockedWhenProtectedQueueOrWorkerIsNotReady()
+    public void LocalUploadCanBeAcceptedWhilePrintWorkerOrPrinterInventoryIsRecovering()
     {
         var now = DateTimeOffset.UtcNow;
         var readiness = new AgentRuntimeReadiness();
-        readiness.MarkHeartbeatSuccess(now);
-        readiness.MarkPrinterInventorySuccess(1, now);
-        readiness.SetPrintWorkerRunning(true);
-
-        Assert.False(readiness.GetSnapshot(now).LocalUploadReady);
 
         readiness.SetQueueInitialized(true);
+        readiness.MarkHeartbeatSuccess(now);
+        readiness.MarkPrinterInventoryFailure("printer_discovery_failed");
         readiness.SetPrintWorkerRunning(false);
 
-        Assert.False(readiness.GetSnapshot(now).LocalUploadReady);
+        var snapshot = readiness.GetSnapshot(now);
+
+        Assert.False(snapshot.PrintWorkerRunning);
+        Assert.False(snapshot.PrinterInventoryFresh);
+        Assert.Equal("printer_discovery_failed", snapshot.LastFailureCode);
+        Assert.True(snapshot.LocalUploadReady);
     }
 
     [Fact]
-    public void LocalUploadRequiresFreshHeartbeatAndPrinterInventory()
+    public void LocalUploadRequiresFreshAuthenticatedAgentHeartbeat()
     {
         var now = DateTimeOffset.UtcNow;
         var readiness = new AgentRuntimeReadiness();
@@ -57,7 +58,9 @@ public sealed class AgentRuntimeReadinessTests
         readiness.MarkHeartbeatSuccess(now);
         readiness.MarkPrinterInventorySuccess(1, now.AddMinutes(-3));
 
-        Assert.False(readiness.GetSnapshot(now).LocalUploadReady);
+        var snapshot = readiness.GetSnapshot(now);
+        Assert.False(snapshot.PrinterInventoryFresh);
+        Assert.True(snapshot.LocalUploadReady);
     }
 
     [Fact]

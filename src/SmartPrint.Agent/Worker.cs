@@ -469,7 +469,7 @@ public sealed class Worker(
                         throw new FileNotFoundException("The local queue manifest exists but its protected document is missing.", existing.DocumentPath);
                     }
                     if (job.StorageMode == "LOCAL_AGENT" ||
-                        existing.State is "LOCAL_UPLOAD_STAGED" or "LOCAL_UPLOAD_PENDING_PAYMENT")
+                        existing.State is "LOCAL_UPLOAD_STAGED" or "LOCAL_UPLOAD_PENDING_PAYMENT" or "ACK_PENDING" or "ACKNOWLEDGED")
                     {
                         // An HTTPS recovery can complete the same ticket while the
                         // Agent still holds the original protected LAN copy. Promote
@@ -573,8 +573,10 @@ public sealed class Worker(
                 }
                 else if (status.ExpiresUtc <= DateTimeOffset.UtcNow)
                 {
-                    await localQueueStore.DeleteExpiredLocalUploadAsync(entry.JobId, DateTimeOffset.UtcNow, cancellationToken);
-                    logger.LogInformation("Removed expired unfinalised local upload {JobNumber} from the protected queue.", entry.JobNumber);
+                    if (await localQueueStore.DeleteExpiredLocalUploadAsync(entry.JobId, DateTimeOffset.UtcNow, cancellationToken))
+                    {
+                        logger.LogInformation("Removed expired unfinalised local upload {JobNumber} from the protected queue.", entry.JobNumber);
+                    }
                 }
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)

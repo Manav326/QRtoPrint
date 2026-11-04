@@ -248,6 +248,7 @@ public sealed class PrintJob
     public string ColourMode { get; set; } = "Mono";
     public string PaperSize { get; set; } = "A4";
     public bool IsDuplex { get; set; }
+    public string Orientation { get; set; } = "AUTO";
     public string PrintKind { get; set; } = "DOCUMENT";
     public string? PhotoSizeCode { get; set; }
     public int PhotoCount { get; set; }
@@ -317,6 +318,11 @@ public sealed class LocalPrintUploadTicket
     public string FileExtension { get; set; } = string.Empty;
     public long SizeBytes { get; set; }
     public string Sha256 { get; set; } = string.Empty;
+    public string ColourMode { get; set; } = "Mono";
+    public string PaperSize { get; set; } = "A4";
+    public bool IsDuplex { get; set; }
+    public int Copies { get; set; } = 1;
+    public string Orientation { get; set; } = "AUTO";
     public DateTimeOffset CreatedUtc { get; set; } = DateTimeOffset.UtcNow;
     public DateTimeOffset ExpiresUtc { get; set; } = DateTimeOffset.UtcNow.AddMinutes(10);
     public DateTimeOffset? ClaimedUtc { get; set; }

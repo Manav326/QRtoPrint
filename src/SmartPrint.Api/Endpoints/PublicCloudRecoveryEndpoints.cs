@@ -92,7 +92,9 @@ public static partial class PublicUploadEndpoints
                     Job = new
                     {
                         preflightJob.Id, preflightJob.JobNumber, preflightJob.Status,
-                        preflightJob.PageCount, preflightJob.Copies, preflightJob.Currency,
+                        preflightJob.PageCount, preflightJob.Copies, preflightJob.ColourMode,
+                        preflightJob.PaperSize, preflightJob.IsDuplex, preflightJob.Orientation,
+                        preflightJob.PricingVersion, preflightJob.Currency,
                         preflightJob.QuotedAmountMinor, preflightJob.CreatedUtc,
                         preflightJob.BatchGroupName,
                         preflightJob.BatchName,
@@ -210,7 +212,9 @@ public static partial class PublicUploadEndpoints
                         Job = new
                         {
                             existingJob.Id, existingJob.JobNumber, existingJob.Status,
-                            existingJob.PageCount, existingJob.Copies, existingJob.Currency,
+                            existingJob.PageCount, existingJob.Copies, existingJob.ColourMode,
+                            existingJob.PaperSize, existingJob.IsDuplex, existingJob.Orientation,
+                            existingJob.PricingVersion, existingJob.Currency,
                             existingJob.QuotedAmountMinor, existingJob.CreatedUtc,
                             existingJob.BatchGroupName,
                             existingJob.BatchName,
@@ -239,9 +243,11 @@ public static partial class PublicUploadEndpoints
                 if (!subscription.IsAccessActive)
                     return await RejectAndCleanAsync(Results.Problem(statusCode: StatusCodes.Status403Forbidden,
                         title: "This shop's trial or subscription period is no longer active."));
-                if (!subscription.CloudAssistedPrintingEnabled)
+                var recoveryAgentAvailable = await GetLocalAgentInfoAsync(
+                    db, ticket.TenantId, ticket.PrinterDeviceId, commitNow, ct) is not null;
+                if (!subscription.CloudAssistedPrintingEnabled && recoveryAgentAvailable)
                     return await RejectAndCleanAsync(Results.Problem(statusCode: StatusCodes.Status403Forbidden,
-                        title: "Secure cloud recovery is not included in this shop's current plan. The original local upload remains available."));
+                        title: "Secure HTTPS recovery is not available while the paired shop Agent is online on this plan."));
                 if (!PlanEntitlementRules.AllowsDocument(subscription.MaxDocumentBytes, ticket.SizeBytes))
                     return await RejectAndCleanAsync(Results.Problem(statusCode: StatusCodes.Status413PayloadTooLarge,
                         title: "This document exceeds the maximum size configured for this shop's plan."));
@@ -318,7 +324,11 @@ public static partial class PublicUploadEndpoints
                     Status = "AWAITING_CONFIGURATION",
                     IdempotencyKey = $"LOCAL-{ticket.Id:N}",
                     PageCount = stored.Analysis.PageCount,
-                    Copies = 1,
+                    Copies = ticket.Copies,
+                    ColourMode = ticket.ColourMode,
+                    PaperSize = ticket.PaperSize,
+                    IsDuplex = ticket.IsDuplex,
+                    Orientation = ticket.Orientation,
                     Currency = "INR",
                     QuotedAmountMinor = 0,
                     CreatedUtc = commitNow,
@@ -363,6 +373,7 @@ public static partial class PublicUploadEndpoints
                     Job = new
                     {
                         job.Id, job.JobNumber, job.Status, job.PageCount, job.Copies,
+                        job.ColourMode, job.PaperSize, job.IsDuplex, job.Orientation, job.PricingVersion,
                         job.Currency, job.QuotedAmountMinor, job.CreatedUtc, job.BatchGroupName, job.BatchName, job.BatchId
                     },
                     Document = new

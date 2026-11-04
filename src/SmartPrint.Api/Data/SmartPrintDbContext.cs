@@ -320,6 +320,7 @@ public sealed class SmartPrintDbContext(DbContextOptions<SmartPrintDbContext> op
             entity.Property(x => x.IdempotencyKey).HasMaxLength(100).IsRequired();
             entity.Property(x => x.ColourMode).HasMaxLength(12).IsRequired();
             entity.Property(x => x.PaperSize).HasMaxLength(12).IsRequired();
+            entity.Property(x => x.Orientation).HasMaxLength(16).IsRequired();
             entity.Property(x => x.PrintKind).HasMaxLength(16).IsRequired();
             entity.Property(x => x.PhotoSizeCode).HasMaxLength(12);
             entity.Property(x => x.Currency).HasMaxLength(3).IsRequired();
@@ -500,6 +501,9 @@ public sealed class SmartPrintDbContext(DbContextOptions<SmartPrintDbContext> op
             entity.Property(x => x.MediaType).HasMaxLength(100).IsRequired();
             entity.Property(x => x.FileExtension).HasMaxLength(8).IsRequired();
             entity.Property(x => x.Sha256).HasMaxLength(64).IsRequired();
+            entity.Property(x => x.ColourMode).HasMaxLength(12).IsRequired();
+            entity.Property(x => x.PaperSize).HasMaxLength(12).IsRequired();
+            entity.Property(x => x.Orientation).HasMaxLength(16).IsRequired();
             entity.HasIndex(x => x.GrantHash).IsUnique();
             entity.HasIndex(x => new { x.TenantId, x.CustomerSessionId, x.IdempotencyKey }).IsUnique();
             entity.HasIndex(x => new { x.TenantId, x.PrintJobId }).IsUnique();

@@ -174,7 +174,7 @@ export class ApiError extends Error {
   }
 }
 
-/** An explicit API rejection received before a local upload ticket was created. */
+/** A known API rejection with a safe next step; no print output was authorised. */
 export class LocalUploadPreflightError extends ApiError {
   constructor(message: string, status: number, code: string | null) {
     super(message, status, code);
@@ -908,6 +908,8 @@ export interface ShopPrintJob {
   colourMode: string;
   paperSize: string;
   isDuplex: boolean;
+  orientation?: string;
+  pricingVersion?: number;
   printKind?: string;
   photoSizeCode?: string | null;
   photoCount?: number;
@@ -949,7 +951,28 @@ export interface ShopPrintJob {
 }
 
 export interface UploadedPrintJob {
-  job: { id: string; jobNumber: string; status: string; pageCount: number; copies: number; currency: string; quotedAmountMinor: number; createdUtc: string; batchGroupName?: string | null; batchName?: string | null; batchId?: string | null; printKind?: string; photoSizeCode?: string | null; photoCount?: number; photoUnitPriceMinorSnapshot?: number };
+  job: {
+    id: string;
+    jobNumber: string;
+    status: string;
+    pageCount: number;
+    copies: number;
+    colourMode?: string;
+    paperSize?: string;
+    isDuplex?: boolean;
+    orientation?: string;
+    pricingVersion?: number;
+    currency: string;
+    quotedAmountMinor: number;
+    createdUtc: string;
+    batchGroupName?: string | null;
+    batchName?: string | null;
+    batchId?: string | null;
+    printKind?: string;
+    photoSizeCode?: string | null;
+    photoCount?: number;
+    photoUnitPriceMinorSnapshot?: number;
+  };
   document: { id: string; originalFileName: string; mediaType: string; sizeBytes: number; sha256: string; pageSizesJson: string };
   duplicateRequest: boolean;
 }
@@ -964,6 +987,7 @@ export interface PrintQuoteResult {
   colourMode: string;
   paperSize: string;
   isDuplex: boolean;
+  orientation?: string;
   printKind?: "DOCUMENT" | "PHOTO";
   photoSizeCode?: string | null;
   photoCount?: number;
@@ -1011,6 +1035,14 @@ function customerUploadAttemptStorageKey(sessionToken: string, file: File): stri
   return `qrtoprint.customer-upload-attempt.${sessionToken.slice(0, 16)}.${fingerprint}`;
 }
 
+export interface CustomerPrintRequestSettings {
+  copies: number;
+  colourMode: "Mono" | "Colour";
+  paperSize: "A4" | "A3" | "A5" | "LETTER" | "LEGAL";
+  isDuplex: boolean;
+  orientation: "AUTO" | "PORTRAIT" | "LANDSCAPE";
+}
+
 type CustomerLocalUploadTicket = {
   id: string;
   printJobId: string;
@@ -1030,7 +1062,8 @@ async function requestCustomerLocalUploadTicket(
   batchGroupName: string | undefined,
   batchName: string | undefined,
   idempotencyKey: string,
-  grantToken: string
+  grantToken: string,
+  settings: CustomerPrintRequestSettings
 ): Promise<CustomerLocalUploadTicket> {
   const digest = await crypto.subtle.digest("SHA-256", await file.arrayBuffer());
   const sha256 = Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, "0")).join("");
@@ -1047,7 +1080,12 @@ async function requestCustomerLocalUploadTicket(
       grantToken,
       batchId: batchId ?? null,
       batchGroupName: batchGroupName ?? null,
-      batchName: batchName?.trim() || null
+      batchName: batchName?.trim() || null,
+      colourMode: settings.colourMode,
+      paperSize: settings.paperSize,
+      isDuplex: settings.isDuplex,
+      copies: settings.copies,
+      orientation: settings.orientation
     })
   });
 }
@@ -1073,7 +1111,14 @@ async function uploadCustomerLocalTicketViaCloud(
   );
 }
 
-export async function uploadCustomerDocument(sessionToken: string, file: File, batchId?: string, batchGroupName?: string, batchName?: string) {
+export async function uploadCustomerDocument(
+  sessionToken: string,
+  file: File,
+  batchId?: string,
+  batchGroupName?: string,
+  batchName?: string,
+  settings: CustomerPrintRequestSettings = { copies: 1, colourMode: "Mono", paperSize: "A4", isDuplex: false, orientation: "AUTO" }
+) {
   const localKeys = customerLocalUploadAttemptStorageKeys(sessionToken, file);
   const pendingLocalIdempotency = sessionStorage.getItem(localKeys.idempotency);
   const pendingLocalGrant = sessionStorage.getItem(localKeys.grant);
@@ -1081,7 +1126,7 @@ export async function uploadCustomerDocument(sessionToken: string, file: File, b
     // The local request may have reached the Agent. Recover that exact ticket
     // using HTTPS, retaining its PrintJob ID and one-use grant.
     const ticket = await requestCustomerLocalUploadTicket(
-      sessionToken, file, batchId, batchGroupName, batchName, pendingLocalIdempotency, pendingLocalGrant
+      sessionToken, file, batchId, batchGroupName, batchName, pendingLocalIdempotency, pendingLocalGrant, settings
     );
     const recovered = await uploadCustomerLocalTicketViaCloud(
       sessionToken, file, ticket, pendingLocalGrant
@@ -1101,6 +1146,11 @@ export async function uploadCustomerDocument(sessionToken: string, file: File, b
   form.append("file", file, file.name);
   if (batchGroupName) form.append("batchGroupName", batchGroupName);
   if (batchName?.trim()) form.append("batchName", batchName.trim());
+  form.append("colourMode", settings.colourMode);
+  form.append("paperSize", settings.paperSize);
+  form.append("isDuplex", String(settings.isDuplex));
+  form.append("copies", String(settings.copies));
+  form.append("orientation", settings.orientation);
   const uploaded = await apiRequest<UploadedPrintJob>("/api/v1/public/sessions/current/jobs", {
     method: "POST",
     headers: {
@@ -1165,7 +1215,8 @@ export async function uploadCustomerDocumentLocally(
   batchId?: string,
   batchGroupName?: string,
   batchName?: string,
-  cloudAssistedPrintingEnabled = false
+  cloudAssistedPrintingEnabled = false,
+  settings: CustomerPrintRequestSettings = { copies: 1, colourMode: "Mono", paperSize: "A4", isDuplex: false, orientation: "AUTO" }
 ): Promise<UploadedPrintJob> {
   const keys = customerLocalUploadAttemptStorageKeys(sessionToken, file);
   const idempotencyKey = sessionStorage.getItem(keys.idempotency) || crypto.randomUUID();
@@ -1176,11 +1227,11 @@ export async function uploadCustomerDocumentLocally(
   let ticket: CustomerLocalUploadTicket;
   try {
     ticket = await requestCustomerLocalUploadTicket(
-      sessionToken, file, batchId, batchGroupName, batchName, idempotencyKey, grantToken
+      sessionToken, file, batchId, batchGroupName, batchName, idempotencyKey, grantToken, settings
     );
   } catch (exception) {
     if (exception instanceof ApiError && exception.status === 409 &&
-        ["local_print_agent_unavailable", "local_print_printer_unavailable", "local_upload_printer_unavailable", "batch_local_agent_mismatch"].includes(exception.code ?? "")) {
+        ["local_print_agent_unavailable", "local_print_printer_unavailable", "local_upload_printer_unavailable", "local_upload_printer_assignment_missing", "batch_local_agent_mismatch"].includes(exception.code ?? "")) {
       // These are explicit preflight rejections; the API did not issue a ticket.
       sessionStorage.removeItem(keys.idempotency);
       sessionStorage.removeItem(keys.grant);
@@ -1198,14 +1249,48 @@ export async function uploadCustomerDocumentLocally(
   }
 
   if (isUncompletedLocalUploadTicketExpired(ticket.completed, ticket.expiresUtc)) {
-    // The 15-minute LAN lease has expired and the server confirms no upload was
-    // finalized. Release only this dead attempt so the customer can start fresh.
-    clearCustomerLocalUploadAttempt(sessionToken, file);
-    throw new LocalUploadPreflightError(
-      "The previous shop Wi-Fi upload attempt expired before it was confirmed. Retry the same file to start a fresh upload.",
-      409,
-      "local_upload_ticket_expired"
-    );
+    // Keep the original ticket/grant: its monthly quota and batch capacity are
+    // still reserved during the 24-hour recovery window. First let the API
+    // recover this exact file over HTTPS if the paired Agent is unavailable or
+    // the shop has cloud-assisted printing. If the Agent is still online on a
+    // plan without that entitlement, the ticket endpoint renews its LAN lease.
+    try {
+      const recovered = await uploadCustomerLocalTicketViaCloud(
+        sessionToken, file, ticket, grantToken
+      );
+      clearCustomerLocalUploadAttempt(sessionToken, file);
+      return recovered;
+    } catch (exception) {
+      if (exception instanceof ApiError &&
+          exception.status === 409 &&
+          exception.code === "local_upload_recovery_expired") {
+        // The server's 24-hour recovery reservation has ended; this identity
+        // can no longer materialize a job, so it is safe to start a new attempt.
+        clearCustomerLocalUploadAttempt(sessionToken, file);
+        throw new LocalUploadPreflightError(
+          "The previous shop Wi-Fi upload attempt is too old to recover. Retry this file to start a fresh upload.",
+          409,
+          "local_upload_ticket_expired"
+        );
+      }
+      if (exception instanceof ApiError &&
+          exception.status === 409 &&
+          exception.code === "batch_upload_locked_after_payment_start") {
+        // Checkout intentionally excludes this unfinished file. Do not keep
+        // offering it as part of a batch whose payment total is already locked.
+        clearCustomerLocalUploadAttempt(sessionToken, file);
+        throw new LocalUploadPreflightError(
+          "Checkout has already started for this batch, so this unfinished file was not included. Start a new batch for this file.",
+          409,
+          "batch_upload_locked_after_payment_start"
+        );
+      }
+      // A network interruption or reconciliation conflict is not proof that
+      // the original ticket is dead. Preserve its idempotency key and grant.
+      throw new LocalUploadOutcomeUnknownError(
+        "SmartPrint is checking the original upload. Its ticket and secure retry identity are preserved; retry this same file to continue without creating a second print job."
+      );
+    }
   }
 
   if (ticket.completed) {
@@ -1286,8 +1371,7 @@ export async function uploadCustomerDocumentLocally(
 
   // A LAN response can be lost after the Agent has safely staged the bytes.
   // HTTPS recovery reconciles this exact ticket and can never create another PrintJob.
-  if (cloudAssistedPrintingEnabled) {
-    try {
+  try {
       const recovered = await uploadCustomerLocalTicketViaCloud(
         sessionToken, file, ticket, grantToken
       );
@@ -1307,9 +1391,10 @@ export async function uploadCustomerDocumentLocally(
         : " HTTPS continuation could not be confirmed.";
       throw new LocalUploadOutcomeUnknownError(
         "The shop Wi-Fi connection was interrupted."+detail+
-        " SmartPrint retained the original upload ticket and is ready to resume the same file. Select Cloud-assisted · HTTPS or retry this file in the same batch; no second print job will be created."
+        " SmartPrint retained the original upload ticket and is ready to resume the same file. "+
+        (cloudAssistedPrintingEnabled ? "HTTPS recovery was attempted. " : "Secure online recovery was attempted. ")+
+        "Retry this file in the same batch; no second print job will be created."
       );
-    }
   }
 
   throw new LocalUploadOutcomeUnknownError(
@@ -1319,9 +1404,10 @@ export async function uploadCustomerDocumentLocally(
 
 export function calculateCustomerQuote(sessionToken: string, jobId: string, values: {
   colourMode: "Mono" | "Colour";
-  paperSize: "A4";
+  paperSize: "A4" | "A3" | "A5" | "LETTER" | "LEGAL";
   isDuplex: boolean;
   copies: number;
+  orientation?: "AUTO" | "PORTRAIT" | "LANDSCAPE";
   printKind?: "DOCUMENT" | "PHOTO";
   photoSizeCode?: string;
   photoCount?: number;
@@ -1342,6 +1428,8 @@ export interface CustomerJobStatus {
   colourMode: string;
   paperSize: string;
   isDuplex: boolean;
+  orientation?: string;
+  pricingVersion?: number;
   // Photo quotes retain the configured per-photo rate used at quote time.
   printKind?: string;
   photoSizeCode?: string | null;
@@ -1401,6 +1489,23 @@ export function assignShopPrintJobPrinter(token: string, jobId: string, printerD
   }, token);
 }
 
+
+export function updateShopPrintJobSettings(token: string, jobId: string, values: {
+  colourMode: "Mono" | "Colour";
+  paperSize: "A4" | "A3" | "A5" | "LETTER" | "LEGAL";
+  isDuplex: boolean;
+  copies: number;
+  orientation: "AUTO" | "PORTRAIT" | "LANDSCAPE";
+}) {
+  return apiRequest<{
+    id: string; jobNumber: string; status: string; pageCount: number; copies: number;
+    colourMode: string; paperSize: string; isDuplex: boolean; orientation: string;
+    currency: string; quotedAmountMinor: number; amountMajor: number; pricingVersion: number;
+    quoteExpiresUtc: string; customerApprovalRequired: boolean;
+  }>(`/api/v1/shop/print-jobs/${jobId}/settings`, {
+    method: "PATCH", body: JSON.stringify(values)
+  }, token);
+}
 
 export function dispatchShopPrintJob(token: string, jobId: string) {
   return apiRequest<{ id: string; jobNumber: string; status: string; printerName: string; queueName: string; agentId: string; spoolerJobName: string }>(

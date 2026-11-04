@@ -53,6 +53,8 @@ public static class ShopPrintJobQueryEndpoints
                     job.ColourMode,
                     job.PaperSize,
                     job.IsDuplex,
+                    job.Orientation,
+                    job.PricingVersion,
                     job.PrintKind,
                     job.PhotoSizeCode,
                     job.PhotoCount,

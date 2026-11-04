@@ -68,36 +68,6 @@ public static partial class PublicJobEndpoints
                 return Results.Unauthorized();
             }
 
-            var existing = await db.PrintJobs.AsNoTracking()
-                .Where(job => job.TenantId == session.TenantId && job.IdempotencyKey == idempotencyKey)
-                .Select(job => new { job.Id, job.BatchId, job.BatchGroupName, job.BatchName, job.CustomerSessionId, job.JobNumber, job.Status, job.PageCount, job.CreatedUtc })
-                .SingleOrDefaultAsync(ct);
-            if (existing is not null)
-            {
-                if (existing.CustomerSessionId != session.Id)
-                {
-                    return Results.Conflict(new { code = "idempotency_key_reused", message = "This request key has already been used for another customer session." });
-                }
-
-                var existingDocument = await db.PrintDocuments.AsNoTracking()
-                    .Where(document => document.TenantId == session.TenantId && document.PrintJobId == existing.Id)
-                    .Select(document => new { document.OriginalFileName, document.MediaType, document.SizeBytes })
-                    .SingleOrDefaultAsync(ct);
-                return Results.Ok(new { Job = existing, Document = existingDocument, DuplicateRequest = true });
-            }
-
-            var batchCheckoutLocked = await db.PrintBatchPayments.AsNoTracking().AnyAsync(item =>
-                item.TenantId == session.TenantId &&
-                item.CustomerSessionId == session.Id &&
-                item.BatchId == batchId &&
-                item.Status != "REJECTED", ct);
-            if (batchCheckoutLocked)
-                return Results.Conflict(new
-                {
-                    code = "batch_upload_locked_after_payment_start",
-                    message = "This batch has a payment attempt or a verified payment. Start a new batch for additional files so every file has a clear payment total."
-                });
-
             if (!context.Request.HasFormContentType)
             {
                 return Results.BadRequest(new { code = "multipart_form_required", message = "Upload the document using multipart/form-data." });
@@ -110,6 +80,23 @@ public static partial class PublicJobEndpoints
             }
 
             var file = form.Files[0];
+            var requestedColourMode = form["colourMode"].FirstOrDefault() ?? "Mono";
+            var requestedPaperSize = form["paperSize"].FirstOrDefault() ?? "A4";
+            var requestedDuplexText = form["isDuplex"].FirstOrDefault() ?? "false";
+            var requestedCopiesText = form["copies"].FirstOrDefault() ?? "1";
+            var requestedOrientation = form["orientation"].FirstOrDefault() ?? "AUTO";
+            if (requestedColourMode is not ("Mono" or "Colour") ||
+                requestedPaperSize is not ("A4" or "A3" or "A5" or "LETTER" or "LEGAL") ||
+                !bool.TryParse(requestedDuplexText, out var requestedDuplex) ||
+                !int.TryParse(requestedCopiesText, out var requestedCopies) ||
+                requestedCopies is < 1 or > 100 ||
+                requestedOrientation is not ("AUTO" or "PORTRAIT" or "LANDSCAPE"))
+            {
+                return Results.ValidationProblem(new Dictionary<string, string[]>
+                {
+                    ["printOptions"] = ["Choose a supported paper size, portrait/landscape orientation, Mono/Colour, single/double-sided and 1–100 copies."]
+                });
+            }
             string batchGroupName;
             try
             {
@@ -134,6 +121,81 @@ public static partial class PublicJobEndpoints
                 return Results.Problem(statusCode: StatusCodes.Status413PayloadTooLarge, title: "File size must be between 1 byte and 20 MB.");
             }
 
+            var originalName = file.FileName.Split('/', '\\').LastOrDefault() ?? string.Empty;
+            originalName = new string(originalName.Where(character => !char.IsControl(character)).ToArray()).Trim();
+            if (string.IsNullOrWhiteSpace(originalName))
+                return Results.BadRequest(new { code = "invalid_file_name", message = "The uploaded file name is invalid." });
+            originalName = originalName[..Math.Min(originalName.Length, 255)];
+
+            // A retry must be the exact original document and the exact original
+            // settings. Do not return an existing job just because its key matches;
+            // verify the body before treating this request as idempotent.
+            var existing = await db.PrintJobs.AsNoTracking()
+                .Where(job => job.TenantId == session.TenantId && job.IdempotencyKey == idempotencyKey)
+                .Select(job => new
+                {
+                    job.Id, job.BatchId, job.BatchGroupName, job.BatchName, job.CustomerSessionId,
+                    job.JobNumber, job.Status, job.PageCount, job.Copies, job.ColourMode,
+                    job.PaperSize, job.IsDuplex, job.Orientation, job.PricingVersion,
+                    job.Currency, job.QuotedAmountMinor, job.CreatedUtc
+                })
+                .SingleOrDefaultAsync(ct);
+            if (existing is not null)
+            {
+                if (existing.CustomerSessionId != session.Id)
+                    return Results.Conflict(new { code = "idempotency_key_reused", message = "This request key has already been used for another customer session." });
+
+                var existingDocument = await db.PrintDocuments.AsNoTracking()
+                    .Where(document => document.TenantId == session.TenantId && document.PrintJobId == existing.Id)
+                    .Select(document => new
+                    {
+                        document.OriginalFileName, document.MediaType, document.SizeBytes,
+                        document.Sha256, document.PageSizesJson
+                    })
+                    .SingleOrDefaultAsync(ct);
+                if (existingDocument is null)
+                    return Results.Conflict(new { code = "idempotency_state_missing", message = "The original document record is unavailable. Refresh the request before retrying." });
+
+                string suppliedSha;
+                await using (var existingInput = file.OpenReadStream())
+                {
+                    suppliedSha = Convert.ToHexString(await SHA256.HashDataAsync(existingInput, ct)).ToLowerInvariant();
+                }
+
+                if ((!string.IsNullOrWhiteSpace(rawBatchId) && existing.BatchId != batchId) ||
+                    PrintBatchGroupRules.Normalize(existing.BatchGroupName) != batchGroupName ||
+                    existing.Copies != requestedCopies ||
+                    existing.ColourMode != requestedColourMode ||
+                    existing.PaperSize != requestedPaperSize ||
+                    existing.IsDuplex != requestedDuplex ||
+                    existing.Orientation != requestedOrientation ||
+                    (requestedBatchName is not null && existing.BatchName != requestedBatchName) ||
+                    existingDocument.OriginalFileName != originalName ||
+                    existingDocument.SizeBytes != file.Length ||
+                    !string.Equals(existingDocument.Sha256, suppliedSha, StringComparison.OrdinalIgnoreCase))
+                {
+                    return Results.Conflict(new
+                    {
+                        code = "idempotency_key_reused",
+                        message = "This upload key already belongs to a different file, batch or set of print options. Keep the original request unchanged or start a new upload."
+                    });
+                }
+
+                return Results.Ok(new { Job = existing, Document = existingDocument, DuplicateRequest = true });
+            }
+
+            var batchCheckoutLocked = await db.PrintBatchPayments.AsNoTracking().AnyAsync(item =>
+                item.TenantId == session.TenantId &&
+                item.CustomerSessionId == session.Id &&
+                item.BatchId == batchId &&
+                item.Status != "REJECTED", ct);
+            if (batchCheckoutLocked)
+                return Results.Conflict(new
+                {
+                    code = "batch_upload_locked_after_payment_start",
+                    message = "This batch has a payment attempt or a verified payment. Start a new batch for additional files so every file has a clear payment total."
+                });
+
             var subscription = await entitlements.GetForTenantAsync(session.TenantId, ct);
             if (!subscription.IsAccessActive)
             {
@@ -142,11 +204,17 @@ public static partial class PublicJobEndpoints
                     title: "This shop's trial or subscription period is no longer active.");
             }
 
-            if (!subscription.CloudAssistedPrintingEnabled)
+            var stationDefaultPrinterId = await db.QrStations.AsNoTracking()
+                .Where(station => station.Id == session.QrStationId && station.TenantId == session.TenantId)
+                .Select(station => station.PrinterDeviceId)
+                .SingleOrDefaultAsync(ct);
+            var localAgentAvailable = await GetLocalAgentInfoAsync(
+                db, session.TenantId, stationDefaultPrinterId, now, ct) is not null;
+            if (!subscription.CloudAssistedPrintingEnabled && localAgentAvailable)
             {
                 return Results.Problem(
                     statusCode: StatusCodes.Status403Forbidden,
-                    title: "Cloud-assisted printing is not included in this shop's current plan.");
+                    title: "Secure cloud uploads are not included in this shop's plan while its local Agent is available.");
             }
 
             if (!PlanEntitlementRules.AllowsDocument(subscription.MaxDocumentBytes, file.Length))
@@ -163,14 +231,6 @@ public static partial class PublicJobEndpoints
                 return Results.Conflict(new { code = preflightQuota.Code, message = preflightQuota.Message, current = preflightQuota.Current, maximum = preflightQuota.Maximum });
             }
 
-            var originalName = file.FileName.Split('/', '\\').LastOrDefault() ?? string.Empty;
-            originalName = new string(originalName.Where(character => !char.IsControl(character)).ToArray()).Trim();
-            if (string.IsNullOrWhiteSpace(originalName))
-            {
-                return Results.BadRequest(new { code = "invalid_file_name", message = "The uploaded file name is invalid." });
-            }
-            originalName = originalName[..Math.Min(originalName.Length, 255)];
-
             var documentId = Guid.NewGuid();
             StoredDocument stored;
             try
@@ -183,11 +243,6 @@ public static partial class PublicJobEndpoints
             {
                 return Results.UnprocessableEntity(new { code = "document_not_supported", message = exception.Message });
             }
-
-            var stationDefaultPrinterId = await db.QrStations.AsNoTracking()
-                .Where(station => station.Id == session.QrStationId && station.TenantId == session.TenantId)
-                .Select(station => station.PrinterDeviceId)
-                .SingleOrDefaultAsync(ct);
 
             var job = new PrintJob
             {
@@ -202,7 +257,11 @@ public static partial class PublicJobEndpoints
                 Status = "AWAITING_CONFIGURATION",
                 IdempotencyKey = idempotencyKey,
                 PageCount = stored.Analysis.PageCount,
-                Copies = 1,
+                Copies = requestedCopies,
+                ColourMode = requestedColourMode,
+                PaperSize = requestedPaperSize,
+                IsDuplex = requestedDuplex,
+                Orientation = requestedOrientation,
                 Currency = "INR",
                 QuotedAmountMinor = 0,
                 CreatedUtc = now,
@@ -229,7 +288,13 @@ public static partial class PublicJobEndpoints
                 await entitlements.AcquireQuotaLockAsync(session.TenantId, TenantQuotaResource.MonthlyPrintJob, ct);
                 var racedJob = await db.PrintJobs.AsNoTracking()
                     .Where(item => item.TenantId == session.TenantId && item.IdempotencyKey == idempotencyKey)
-                    .Select(item => new { item.Id, item.CustomerSessionId, item.BatchId, item.BatchName, item.JobNumber, item.Status, item.PageCount, item.CreatedUtc })
+                    .Select(item => new
+                    {
+                        item.Id, item.CustomerSessionId, item.BatchId, item.BatchName, item.BatchGroupName,
+                        item.JobNumber, item.Status, item.PageCount, item.Copies, item.ColourMode,
+                        item.PaperSize, item.IsDuplex, item.Orientation, item.PricingVersion,
+                        item.Currency, item.QuotedAmountMinor, item.CreatedUtc
+                    })
                     .SingleOrDefaultAsync(ct);
                 if (racedJob is not null)
                 {
@@ -241,8 +306,28 @@ public static partial class PublicJobEndpoints
                         .Where(item => item.TenantId == session.TenantId && item.PrintJobId == racedJob.Id)
                         .Select(item => new { item.OriginalFileName, item.MediaType, item.SizeBytes, item.Sha256, item.PageSizesJson })
                         .SingleOrDefaultAsync(ct);
+                    if (racedDocument is null ||
+                        (!string.IsNullOrWhiteSpace(rawBatchId) && racedJob.BatchId != batchId) ||
+                        racedJob.BatchGroupName != batchGroupName ||
+                        racedJob.Copies != requestedCopies ||
+                        racedJob.ColourMode != requestedColourMode ||
+                        racedJob.PaperSize != requestedPaperSize ||
+                        racedJob.IsDuplex != requestedDuplex ||
+                        racedJob.Orientation != requestedOrientation ||
+                        (requestedBatchName is not null && racedJob.BatchName != requestedBatchName) ||
+                        racedDocument.OriginalFileName != originalName ||
+                        racedDocument.SizeBytes != file.Length ||
+                        !string.Equals(racedDocument.Sha256, stored.Sha256, StringComparison.OrdinalIgnoreCase))
+                    {
+                        return Results.Conflict(new
+                        {
+                            code = "idempotency_key_reused",
+                            message = "This upload key already belongs to a different file or set of print options. Refresh the request instead of changing the original job."
+                        });
+                    }
                     return Results.Ok(new { Job = racedJob, Document = racedDocument, DuplicateRequest = true });
                 }
+
 
                 var batchIdOwnedByAnotherSession =
                     await db.PrintJobs.AsNoTracking().AnyAsync(item =>
@@ -373,6 +458,11 @@ public static partial class PublicJobEndpoints
                     job.Status,
                     job.PageCount,
                     job.Copies,
+                    job.ColourMode,
+                    job.PaperSize,
+                    job.IsDuplex,
+                    job.Orientation,
+                    job.PricingVersion,
                     job.Currency,
                     job.QuotedAmountMinor,
                     job.CreatedUtc

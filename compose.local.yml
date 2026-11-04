@@ -34,6 +34,7 @@ services:
       Database__ApplyMigrationsOnStartup: "true"
       ASPNETCORE_FORWARDEDHEADERS_ENABLED: "true"
       PublicPortal__BaseUrl: ${PUBLIC_BASE_URL:?Set PUBLIC_BASE_URL in .env.local}
+      PublicDownloads__GitHubRepository: ${GITHUB_REPOSITORY:-Manav326/QRtoPrint}
       Cors__AllowedOrigins__0: ${PUBLIC_BASE_URL:?Set PUBLIC_BASE_URL in .env.local}
       Cors__AllowedOrigins__1: "http://localhost:3000"
     ports:

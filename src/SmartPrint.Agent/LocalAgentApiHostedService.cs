@@ -552,6 +552,14 @@ public sealed class LocalAgentApiHostedService(
                         return Results.Conflict(new { code = "local_upload_recovery_conflict", message = "The local queue already contains different or incomplete data for this upload." });
                     }
 
+                    if (existing.State == "LOCAL_UPLOAD_STAGED")
+                    {
+                        // A retried ticket may have received a new LAN lease.
+                        // Refresh the staged manifest before the periodic expiry
+                        // sweep can remove the same original protected document.
+                        await localQueueStore.RefreshStagedLocalUploadLeaseAsync(
+                            claim.PrintJobId, claim.Sha256, claim.SizeBytes, claim.ExpiresUtc, ct);
+                    }
                     bytes = localQueueStore.ReadDocument(claim.PrintJobId);
                 }
                 else
@@ -605,10 +613,10 @@ public sealed class LocalAgentApiHostedService(
                             claim.JobNumber,
                             "LOCAL_UPLOAD_STAGED",
                             analysis.PageCount,
-                            1,
-                            "Mono",
-                            "A4",
-                            false,
+                            claim.Copies,
+                            claim.ColourMode,
+                            claim.PaperSize,
+                            claim.IsDuplex,
                             "INR",
                             0,
                             claim.PrinterDeviceId,
@@ -619,7 +627,8 @@ public sealed class LocalAgentApiHostedService(
                             claim.SizeBytes,
                             claim.Sha256,
                             claim.ExpiresUtc,
-                            "LOCAL_AGENT");
+                            "LOCAL_AGENT",
+                            Orientation: claim.Orientation);
                         await localQueueStore.EnqueueLocalUploadAsync(stagedJob, bytes, ct);
                     }
 
@@ -716,6 +725,11 @@ public sealed class LocalAgentApiHostedService(
         string MediaType,
         long SizeBytes,
         string Sha256,
+        string ColourMode,
+        string PaperSize,
+        bool IsDuplex,
+        int Copies,
+        string Orientation,
         DateTimeOffset ExpiresUtc,
         LocalUploadedPrintResult? UploadResult);
 
@@ -730,7 +744,9 @@ public sealed class LocalAgentApiHostedService(
 
     private sealed record LocalUploadedJob(
         Guid Id, string JobNumber, string Status, int PageCount, int Copies,
-        string Currency, long QuotedAmountMinor, DateTimeOffset CreatedUtc);
+        string Currency, long QuotedAmountMinor, DateTimeOffset CreatedUtc,
+        string ColourMode = "Mono", string PaperSize = "A4", bool IsDuplex = false,
+        string Orientation = "AUTO", int PricingVersion = 1);
 
     private sealed record LocalUploadedDocument(
         Guid Id, string OriginalFileName, string MediaType, long SizeBytes,

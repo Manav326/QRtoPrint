@@ -78,6 +78,11 @@ public static partial class AgentEndpoints
                             completedJob.Status,
                             completedJob.PageCount,
                             completedJob.Copies,
+                            completedJob.ColourMode,
+                            completedJob.PaperSize,
+                            completedJob.IsDuplex,
+                            completedJob.Orientation,
+                            completedJob.PricingVersion,
                             completedJob.Currency,
                             completedJob.QuotedAmountMinor,
                             completedJob.CreatedUtc
@@ -106,23 +111,18 @@ public static partial class AgentEndpoints
             var stationPrinter = await db.PrinterDevices.AsNoTracking()
                 .Where(item => item.Id == ticket.PrinterDeviceId &&
                                item.TenantId == device.TenantId &&
-                               item.AgentDeviceId == device.Id &&
-                               item.IsActive &&
-                               !string.IsNullOrWhiteSpace(item.QueueName))
-                .Select(item => new { item.Id, item.DisplayName, item.QueueName, item.Status, item.LastSeenUtc, item.OutputMode })
+                               item.AgentDeviceId == device.Id)
+                .Select(item => new { item.Id, item.DisplayName, QueueName = item.QueueName ?? string.Empty, item.OutputMode })
                 .SingleOrDefaultAsync(ct);
-            if (stationPrinter is null ||
-                (stationPrinter.OutputMode != "PDF_EXPORT" &&
-                 (stationPrinter.LastSeenUtc is null ||
-                  stationPrinter.LastSeenUtc < now.AddMinutes(-2) ||
-                  (stationPrinter.Status != "Ready" && stationPrinter.Status != "Busy"))))
+            if (stationPrinter is null)
             {
                 return Results.Conflict(new
                 {
-                    code = "local_upload_printer_unavailable",
-                    message = "The QR station's assigned printer is no longer ready. Choose Cloud-assisted upload and ask the shop to assign one available printer to the whole batch."
+                    code = "local_upload_printer_assignment_missing",
+                    message = "The original printer assignment changed. SmartPrint will keep this request in the secure queue for the shop owner to reassign."
                 });
             }
+
         
             ticket.ClaimedUtc ??= now;
             ticket.ClaimLeaseExpiresUtc = ticket.ExpiresUtc;
@@ -144,6 +144,11 @@ public static partial class AgentEndpoints
                 ticket.MediaType,
                 ticket.SizeBytes,
                 ticket.Sha256,
+                ticket.ColourMode,
+                ticket.PaperSize,
+                ticket.IsDuplex,
+                ticket.Copies,
+                ticket.Orientation,
                 ticket.ExpiresUtc
             });
         });
@@ -208,6 +213,11 @@ public static partial class AgentEndpoints
                             completedJob.Status,
                             completedJob.PageCount,
                             completedJob.Copies,
+                            completedJob.ColourMode,
+                            completedJob.PaperSize,
+                            completedJob.IsDuplex,
+                            completedJob.Orientation,
+                            completedJob.PricingVersion,
                             completedJob.Currency,
                             completedJob.QuotedAmountMinor,
                             completedJob.CreatedUtc
@@ -302,6 +312,11 @@ public static partial class AgentEndpoints
                             existingJob.Status,
                             existingJob.PageCount,
                             existingJob.Copies,
+                            existingJob.ColourMode,
+                            existingJob.PaperSize,
+                            existingJob.IsDuplex,
+                            existingJob.Orientation,
+                            existingJob.PricingVersion,
                             existingJob.Currency,
                             existingJob.QuotedAmountMinor,
                             existingJob.CreatedUtc
@@ -342,7 +357,11 @@ public static partial class AgentEndpoints
                 Status = "AWAITING_CONFIGURATION",
                 IdempotencyKey = $"LOCAL-{ticket.Id:N}",
                 PageCount = request.PageCount,
-                Copies = 1,
+                Copies = ticket.Copies,
+                ColourMode = ticket.ColourMode,
+                PaperSize = ticket.PaperSize,
+                IsDuplex = ticket.IsDuplex,
+                Orientation = ticket.Orientation,
                 Currency = "INR",
                 QuotedAmountMinor = 0,
                 CreatedUtc = now,
@@ -393,6 +412,11 @@ public static partial class AgentEndpoints
                         job.Status,
                         job.PageCount,
                         job.Copies,
+                        job.ColourMode,
+                        job.PaperSize,
+                        job.IsDuplex,
+                        job.Orientation,
+                        job.PricingVersion,
                         job.Currency,
                         job.QuotedAmountMinor,
                         job.CreatedUtc

@@ -191,6 +191,8 @@ public static class ShopPrintJobAssignmentEndpoints
                     batchJob.AgentLeaseExpiresUtc = null;
                     batchJob.AgentClaimedUtc = null;
                     batchJob.LocalQueueReceivedUtc = null;
+                    batchJob.FailureCode = null;
+                    batchJob.SpoolerStatus = null;
                 }
                 batchJob.UpdatedUtc = now;
                 db.PrintJobEvents.Add(new PrintJobEvent

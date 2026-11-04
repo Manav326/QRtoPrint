@@ -54,6 +54,7 @@ public static class ApiEndpointMappings
         shop.MapShopPrintJobReadEndpoints(signingKeyText, issuer, audience);
         
         shop.MapShopPrintJobAssignmentEndpoints();
+        shop.MapShopPrintJobSettingsEndpoints();
         
         shop.MapShopPrintJobDispatchEndpoints();
         

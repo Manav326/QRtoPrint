@@ -67,6 +67,8 @@ public static partial class PublicJobEndpoints
                     item.ColourMode,
                     item.PaperSize,
                     item.IsDuplex,
+                    item.Orientation,
+                    item.PricingVersion,
                     item.PrintKind,
                     item.PhotoSizeCode,
                     item.PhotoCount,

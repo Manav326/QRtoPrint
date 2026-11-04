@@ -1,9 +1,10 @@
 namespace SmartPrint.Agent;
 
 /// <summary>
-/// Separates the Agent's cloud presence from the local print pipeline. A fresh
-/// heartbeat alone must never be presented as proof that local uploads can be
-/// safely accepted and handed to the print worker.
+/// Separates secure upload intake from physical print fulfilment. Customer
+/// uploads require a ready protected queue and a fresh authenticated Agent
+/// heartbeat; printer inventory and print-worker health must not block intake
+/// during printer maintenance or a temporary output-worker recovery.
 /// </summary>
 public sealed class AgentRuntimeReadiness
 {
@@ -87,7 +88,11 @@ public sealed class AgentRuntimeReadiness
             var now = nowUtc ?? DateTimeOffset.UtcNow;
             var heartbeatFresh = IsFresh(lastHeartbeatUtc, now);
             var inventoryFresh = IsFresh(lastPrinterInventoryUtc, now);
-            var workerReady = queueInitialized && printWorkerRunning;
+            // Printer discovery and print-worker health govern fulfilment, not
+            // intake. The local listener can securely stage a ticket while the
+            // physical printer is being repaired; the worker will resume the
+            // same persisted job when output is available again.
+            var localUploadReady = queueInitialized && agentIdentityReady && heartbeatFresh;
             return new AgentRuntimeReadinessSnapshot(
                 queueInitialized,
                 printWorkerRunning,
@@ -98,7 +103,7 @@ public sealed class AgentRuntimeReadiness
                 discoveredPrinterCount,
                 lastPrintWorkCycleUtc,
                 lastFailureCode,
-                workerReady && agentIdentityReady && heartbeatFresh && inventoryFresh);
+                localUploadReady);
         }
     }
 
