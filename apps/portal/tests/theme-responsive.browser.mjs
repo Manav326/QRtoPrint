@@ -511,6 +511,24 @@ async function exercisePhotoStudioBrowser() {
       await reopened.getByLabel("Date of birth (optional)").fill("2000-01-02");
       assert.equal(await reopened.locator('input[type="date"]').count(), 1);
     }
+
+    const largePhotoBatch = item.mode === "shop" && item.width === 768;
+    if (largePhotoBatch) {
+      await reopened.getByLabel("Number of photos").fill("50");
+      await reopened.getByLabel("Photos per A4 page").selectOption("9");
+      const pageSummary = reopened.locator("[class*='sheetSummary'] > div").filter({ hasText: "A4 pages in this job" }).locator("strong");
+      await page.waitForFunction(() => {
+        const summary = Array.from(document.querySelectorAll("[class*='sheetSummary'] > div"));
+        return summary.some(row => row.textContent?.includes("A4 pages in this job") && row.querySelector("strong")?.textContent === "6");
+      });
+      assert.equal(await pageSummary.innerText(), "6");
+      assert.equal(await reopened.locator("[class*='sheetSummary'] small").filter({ hasText: "Final A4 page: 5 photos" }).count(), 1);
+      for (let pageIndex = 0; pageIndex < 5; pageIndex += 1)
+        await reopened.getByRole("button", { name: "Next A4 page" }).click();
+      assert.equal(await reopened.getByText("Page 6 of 6").count(), 1);
+      assert.match(await reopened.locator("[class*='canvasFooter']").innerText(), /Page 6: 5 photos/);
+    }
+
     const actionLabel = item.mode === "shop" ? "Save sheet to this job" : "Prepare A4 sheet";
     await reopened.getByRole("button", { name: actionLabel }).click();
     await page.waitForFunction(() => {
@@ -520,13 +538,18 @@ async function exercisePhotoStudioBrowser() {
     const output = JSON.parse(await page.locator("#photo-studio-result").innerText());
     assert.equal(output.mode, item.mode);
     assert.equal(output.mediaType, "application/pdf");
-    assert.equal(output.photoCount, 8);
+    assert.equal(output.photoCount, largePhotoBatch ? 50 : 8);
+    assert.equal(output.photosPerPage, largePhotoBatch ? 9 : 25);
+    assert.equal(output.pageCount, largePhotoBatch ? 6 : 1);
     assert.ok(output.bytes > 0 && output.bytes <= 20 * 1024 * 1024);
     await context.close();
     results.push({
       check: `Photo Studio ${item.mode} / ${item.theme} / ${item.width}x${item.height}`,
       passed: true,
-      outputSizeBytes: output.bytes
+      outputSizeBytes: output.bytes,
+      photoCount: output.photoCount,
+      photosPerPage: output.photosPerPage,
+      pdfPageCount: output.pageCount
     });
   }
 }
