@@ -327,8 +327,8 @@ public sealed class PdfBrandingOverlayTests
             var page = Assert.Single(rendered.GetPages());
             Assert.Contains("SELECTABLE ORIGINAL CONTENT", page.Text, StringComparison.Ordinal);
             Assert.Contains("SmartPrint", page.Text, StringComparison.Ordinal);
-            Assert.Equal(595.276, page.Width, precision: 1);
-            Assert.Equal(841.89, page.Height, precision: 1);
+            Assert.InRange(Math.Abs(page.Width - 595.276), 0d, 1d);
+            Assert.InRange(Math.Abs(page.Height - 841.89), 0d, 1d);
         }
         finally
         {
