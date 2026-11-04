@@ -189,7 +189,12 @@ public sealed class TenantEntitlementService(SmartPrintDbContext db)
                     item.CreatedUtc < periodEnd &&
                     item.CreatedUtc >= now.AddHours(-24) &&
                     item.CompletedUtc == null &&
-                    !db.PrintJobs.Any(job => job.TenantId == item.TenantId && job.Id == item.PrintJobId),
+                    !db.PrintJobs.Any(job => job.TenantId == item.TenantId && job.Id == item.PrintJobId) &&
+                    !db.PrintBatchPayments.Any(payment =>
+                        payment.TenantId == item.TenantId &&
+                        payment.CustomerSessionId == item.CustomerSessionId &&
+                        payment.BatchId == item.BatchId &&
+                        payment.Status != "REJECTED"),
             cancellationToken);
         return checked(createdJobs + unmaterializedLocalReservations);
     }
