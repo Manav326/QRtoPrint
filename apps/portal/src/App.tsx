@@ -918,6 +918,20 @@ function ShopConsole({ tokens, onSignOut, dark, onToggleTheme }: { tokens: AuthT
   }
 
 
+  async function updatePrintJobSettings(job:ShopPrintJob,settings:CustomerPrintRequestSettings) {
+    setBusyJobId(job.id);
+    setError("");
+    try {
+      const revised=await updateShopPrintJobSettings(tokens.accessToken,job.id,settings);
+      setToast(`Revised quote ${formatMoney(revised.quotedAmountMinor,revised.currency)} sent to the customer for approval. Printing remains paused until approval and release.`);
+      await reload();
+    } catch(exception) {
+      setError(exception instanceof Error?exception.message:"Could not revise this print request.");
+    } finally {
+      setBusyJobId(null);
+    }
+  }
+
   async function dispatchPrintJob(job: ShopPrintJob) {
     const pdfExport = job.outputMode === "PDF_EXPORT";
     const ok = await confirmInApp(pdfExport
@@ -1385,7 +1399,7 @@ function ShopConsole({ tokens, onSignOut, dark, onToggleTheme }: { tokens: AuthT
           {active === "Subscription" && subscription && <SubscriptionPage summary={subscription}/>}
           {active === "Payments" && paymentSettings && <PaymentsPage settings={paymentSettings} payments={payments} refunds={refunds} onSave={savePaymentSettings} onVerify={verifyPayment} onReject={rejectPayment} busy={busy} busyJobId={busyJobId}/>}
           {active === "Settings" && profile && <SettingsPage profile={profile} onSave={saveProfile} busy={busy}/>}
-          {active === "Print Queue" && <PrintQueuePage jobs={printJobs} printers={printers} agentDevices={agentDevices} searchQuery={queueSearch} loadingBatchId={batchReviewLoadingId} onSearch={searchPrintQueue} onPreview={previewJob} onApprove={approveJob} onReject={rejectJob} onRefund={job=>setRefundJob(job)} onReviewBatch={openBatchReview} onHistory={viewJobHistory} onAssignPrinter={assignPrinter} onDispatch={dispatchPrintJob} onConfirmOutput={confirmPrintedOutput} onRetryPdfExport={retryPdfExport} onRefresh={refreshPrintQueue} onLoadOlder={loadOlderQueueJobs} hasMoreJobs={hasMoreQueueJobs} loadingOlderJobs={loadingOlderQueueJobs} busyJobId={busyJobId}/>} 
+          {active === "Print Queue" && <PrintQueuePage jobs={printJobs} printers={printers} agentDevices={agentDevices} searchQuery={queueSearch} loadingBatchId={batchReviewLoadingId} onSearch={searchPrintQueue} onPreview={previewJob} onApprove={approveJob} onReject={rejectJob} onRefund={job=>setRefundJob(job)} onReviewBatch={openBatchReview} onHistory={viewJobHistory} onAssignPrinter={assignPrinter} onUpdateSettings={updatePrintJobSettings} onDispatch={dispatchPrintJob} onConfirmOutput={confirmPrintedOutput} onRetryPdfExport={retryPdfExport} onRefresh={refreshPrintQueue} onLoadOlder={loadOlderQueueJobs} hasMoreJobs={hasMoreQueueJobs} loadingOlderJobs={loadingOlderQueueJobs} busyJobId={busyJobId}/>} 
           {active === "Customers" && <CustomersPage token={tokens.accessToken}/>}
           {active === "Reports" && <ReportsPage token={tokens.accessToken}/>} 
 
@@ -2182,7 +2196,7 @@ function PaymentsPage({settings,payments,refunds,onSave,onVerify,onReject,busy,b
   </div>;
 }
 
-function PrintQueuePage({ jobs, printers, agentDevices, searchQuery, loadingBatchId, onSearch, onPreview, onApprove, onReject, onRefund, onReviewBatch, onHistory, onAssignPrinter, onDispatch, onConfirmOutput, onRetryPdfExport, onRefresh, onLoadOlder, hasMoreJobs, loadingOlderJobs, busyJobId }: {
+function PrintQueuePage({ jobs, printers, agentDevices, searchQuery, loadingBatchId, onSearch, onPreview, onApprove, onReject, onRefund, onReviewBatch, onHistory, onAssignPrinter, onUpdateSettings, onDispatch, onConfirmOutput, onRetryPdfExport, onRefresh, onLoadOlder, hasMoreJobs, loadingOlderJobs, busyJobId }: {
   jobs: ShopPrintJob[];
   printers: PrinterDevice[];
   agentDevices: AgentDevice[];
@@ -2196,6 +2210,7 @@ function PrintQueuePage({ jobs, printers, agentDevices, searchQuery, loadingBatc
   onReviewBatch: (batchId: string) => void;
   onHistory: (job: ShopPrintJob) => void;
   onAssignPrinter: (job: ShopPrintJob, printerDeviceId: string) => void;
+  onUpdateSettings: (job:ShopPrintJob,settings:CustomerPrintRequestSettings) => Promise<void> | void;
   onDispatch: (job: ShopPrintJob) => void;
   onConfirmOutput: (job: ShopPrintJob) => void;
   onRetryPdfExport: (job: ShopPrintJob) => void;
@@ -2209,6 +2224,8 @@ function PrintQueuePage({ jobs, printers, agentDevices, searchQuery, loadingBatc
   const [refreshSeconds,setRefreshSeconds]=useState(10);
   const [searchInput,setSearchInput]=useState(searchQuery);
   const [expandedBatchKeys,setExpandedBatchKeys]=useState<Set<string>>(()=>new Set());
+  const [editingSettingsJobId,setEditingSettingsJobId]=useState<string|null>(null);
+  const [editingPrintSettings,setEditingPrintSettings]=useState<CustomerPrintRequestSettings|null>(null);
   useEffect(()=>setSearchInput(searchQuery),[searchQuery]);
   const refreshRunning=useRef(false);
   const refreshCallback=useRef(onRefresh);
@@ -2349,7 +2366,7 @@ function PrintQueuePage({ jobs, printers, agentDevices, searchQuery, loadingBatc
             </tr>
             {expanded&&<tr className="queue-batch-detail-row"><td colSpan={8}><div className="queue-batch-files">{batch.jobs.map(job=><article className="queue-batch-file-card" key={job.id}>
               <div className="queue-batch-file-main">
-                <div><div className="queue-batch-file-title"><strong>{job.document.originalFileName}</strong><PrintKindTag printKind={job.printKind}/></div><small>{job.printKind==="PHOTO" ? `${job.photoCount??0} photos · ${job.photoSizeCode??""} · A4 photo sheet` : `${job.batchGroupName??"Loose files"} · ${job.pageCount} pages × ${job.copies} copies = ${job.pageCount*job.copies} pages requested · ${job.colourMode} · ${job.isDuplex?"Double-sided":"Single-sided"}`}</small></div>
+                <div><div className="queue-batch-file-title"><strong>{job.document.originalFileName}</strong><PrintKindTag printKind={job.printKind}/></div><small>{job.printKind==="PHOTO" ? `${job.photoCount??0} photos · ${job.photoSizeCode??""} · A4 photo sheet` : `${job.batchGroupName??"Loose files"} · ${job.pageCount} pages × ${job.copies} copies = ${job.pageCount*job.copies} pages requested · ${job.colourMode} · ${job.isDuplex?"Double-sided":"Single-sided"} · ${job.paperSize||"A4"} · ${job.orientation??"AUTO"}`}</small></div>
                 <Status label={prettyStatus(job.status)} tone={job.status==="REJECTED"?"red":job.status==="COMPLETED"||job.status==="LOCAL_QUEUE_READY"?"green":job.status==="AWAITING_SHOP_APPROVAL"?"amber":"blue"}/>
                 <strong className="amount-cell">{job.quotedAmountMinor>0?formatMoney(job.quotedAmountMinor,job.currency):"—"}</strong>
               </div>
@@ -2369,6 +2386,16 @@ function PrintQueuePage({ jobs, printers, agentDevices, searchQuery, loadingBatc
                 <code>{verifiedPdfExportPath(job)}</code>
               </div>}
               <div className="queue-batch-file-actions">
+                {job.printKind!=="PHOTO"&&["AWAITING_CONFIGURATION","AWAITING_CUSTOMER_APPROVAL","AWAITING_SHOP_APPROVAL","AWAITING_PAYMENT","QUOTE_EXPIRED","PAYMENT_REJECTED"].includes(job.status)&&<button className="subtle-button" disabled={busyJobId===job.id} onClick={()=>{
+                  setEditingSettingsJobId(job.id);
+                  setEditingPrintSettings({
+                    copies:job.copies,
+                    colourMode:job.colourMode==="Colour"?"Colour":"Mono",
+                    paperSize:(["A4","A3","A5","LETTER","LEGAL"].includes(job.paperSize)?job.paperSize:"A4") as CustomerPrintRequestSettings["paperSize"],
+                    isDuplex:job.isDuplex,
+                    orientation:(["AUTO","PORTRAIT","LANDSCAPE"].includes(job.orientation??"AUTO")?job.orientation??"AUTO":"AUTO") as CustomerPrintRequestSettings["orientation"]
+                  });
+                }}>Adjust options</button>}
                 <button className="subtle-button" disabled={busyJobId===job.id} onClick={()=>onPreview(job)}>Preview</button>
                 <button className="subtle-button" disabled={busyJobId===job.id} onClick={()=>onHistory(job)}>History</button>
                 {job.status==="AWAITING_SHOP_APPROVAL"&&<button className="subtle-button approve-action" disabled={busyJobId===job.id} onClick={()=>onApprove(job)}>Accept</button>}
@@ -2378,6 +2405,18 @@ function PrintQueuePage({ jobs, printers, agentDevices, searchQuery, loadingBatc
                 {job.status==="OUTPUT_UNCONFIRMED"&&job.outputMode==="PDF_EXPORT"&&<button className="subtle-button approve-action" disabled={busyJobId===job.id} onClick={()=>onRetryPdfExport(job)}>Save PDF again</button>}
                 {(job.status==="SPOOLER_ACCEPTED"||job.status==="PRINTING"||(job.status==="OUTPUT_UNCONFIRMED"&&job.outputMode!=="PDF_EXPORT"))&&<button className="subtle-button approve-action" disabled={busyJobId===job.id||(job.status!=="OUTPUT_UNCONFIRMED"&&!!spoolerStatusWarning(job.spoolerStatus,job.printerStatus))} onClick={()=>onConfirmOutput(job)}>Confirm output</button>}
               </div>
+              {editingSettingsJobId===job.id&&editingPrintSettings&&<div className="queue-settings-editor">
+                <div><strong>Review print options</strong><small>The revised quote must be approved by the customer before payment or printing.</small></div>
+                <label>Colour <select value={editingPrintSettings.colourMode} onChange={event=>setEditingPrintSettings(current=>current?{...current,colourMode:event.currentTarget.value as CustomerPrintRequestSettings["colourMode"]}:current)}><option value="Mono">B&W</option><option value="Colour">Colour</option></select></label>
+                <label>Sides <select value={editingPrintSettings.isDuplex?"DOUBLE":"SINGLE"} onChange={event=>setEditingPrintSettings(current=>current?{...current,isDuplex:event.currentTarget.value==="DOUBLE"}:current)}><option value="SINGLE">Single-sided</option><option value="DOUBLE">Double-sided</option></select></label>
+                <label>Copies <input type="number" min={1} max={100} value={editingPrintSettings.copies} onChange={event=>setEditingPrintSettings(current=>current?{...current,copies:Math.max(1,Math.min(100,Number(event.currentTarget.value)||1))}:current)}/></label>
+                <label>Paper size <select value={editingPrintSettings.paperSize} onChange={event=>setEditingPrintSettings(current=>current?{...current,paperSize:event.currentTarget.value as CustomerPrintRequestSettings["paperSize"]}:current)}><option value="A4">A4</option><option value="A3">A3</option><option value="A5">A5</option><option value="LETTER">Letter</option><option value="LEGAL">Legal</option></select></label>
+                <label>Orientation <select value={editingPrintSettings.orientation} onChange={event=>setEditingPrintSettings(current=>current?{...current,orientation:event.currentTarget.value as CustomerPrintRequestSettings["orientation"]}:current)}><option value="AUTO">Auto · follow document</option><option value="PORTRAIT">Portrait</option><option value="LANDSCAPE">Landscape</option></select></label>
+                <div className="queue-settings-actions">
+                  <button className="secondary-button" type="button" onClick={()=>{setEditingSettingsJobId(null);setEditingPrintSettings(null);}}>Cancel</button>
+                  <button className="primary-button" type="button" disabled={busyJobId===job.id||!editingPrintSettings} onClick={()=>{if(editingPrintSettings)void onUpdateSettings(job,editingPrintSettings);setEditingSettingsJobId(null);setEditingPrintSettings(null);}}>Send revised quote</button>
+                </div>
+              </div>}
             </article>)}</div></td></tr>}
           </Fragment>;
         })}
@@ -3804,7 +3843,7 @@ function CustomerPrintFlow({publicCode,sessionToken,paymentOptions,localAgent,lo
         const settings=settingsForFile(candidate);
         const created=uploadMode==="LOCAL"&&localAgent
           ? await uploadCustomerDocumentLocally(sessionToken,candidate,localAgent,currentBatchId,batchGroupName,currentBatchName||undefined,cloudAssistedPrintingEnabled,settings)
-          : await uploadCustomerDocument(sessionToken,candidate,currentBatchId,batchGroupName,currentBatchName||undefined,settings);
+          : await uploadCustomerDocument(sessionToken,candidate,currentBatchId,batchGroupName,currentBatchName||undefined,settings,uploadMode==="CLOUD"&&!cloudAssistedPrintingEnabled);
         if(created.job.batchId&&created.job.batchId!==currentBatchId) {
           if(results.length>0) {
             throw new ApiError("This file belongs to an earlier batch. Refresh the original print request before adding more files; SmartPrint will not mix two batches.",409);
