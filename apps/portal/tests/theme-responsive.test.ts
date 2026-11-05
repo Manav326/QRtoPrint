@@ -464,14 +464,16 @@ test("customer payment settings refresh without reopening the QR session and exp
 
 test("Windows local document previews prefer the paired Agent loopback endpoint", () => {
   const api = read("../src/api.ts");
+  const routing = read("../src/local-preview-routing.ts");
   const desktop = read("../../desktop/src-tauri/tauri.conf.json");
-  assert.match(api, /function isPrivateLocalPreviewEndpoint\(value: string, allowLoopback = false\)/);
-  assert.match(api, /loopbackIpv4 = endpoint\.hostname === "127\.0\.0\.1"/);
-  assert.match(api, /const endpointValues = isDesktopApp\(\)[\s\S]*\["http:\/\/127\.0\.0\.1:17842", \.\.\.source\.endpoints\]/);
-  assert.match(api, /isPrivateLocalPreviewEndpoint\(value, isDesktopApp\(\)\)/);
-  assert.match(desktop, /connect-src[^"]*http:\/\/127\.0\.0\.1:17842/);
-  assert.match(api, /The paired shop computer did not respond\. Check that the Windows Print Agent is running and connected/);
-  assert.match(api, /Could not connect to the paired shop computer\. Check that the Windows Print Agent is running and allowed through Windows Firewall/);
+  assert.match(routing, /function isPrivateLocalPreviewEndpoint\\(value: string, allowLoopback = false\\)/);
+  assert.match(routing, /loopbackIpv4 = endpoint\\.hostname === "127\\.0\\.0\\.1"/);
+  assert.match(routing, /LOCAL_AGENT_PREVIEW_ENDPOINT = "http:\\/\\/127\\.0\\.0\\.1:17842"/);
+  assert.match(api, /getLocalPreviewEndpointCandidates\\(isDesktopApp\\(\\), source\\.endpoints\\)/);
+  assert.match(api, /isPrivateLocalPreviewEndpoint\\(value, isDesktopApp\\(\\)\\)/);
+  assert.match(desktop, /connect-src[^"]*http:\\/\\/127\\.0\\.0\\.1:17842/);
+  assert.match(api, /The paired shop computer did not respond\\. Check that the Windows Print Agent is running and connected/);
+  assert.match(api, /Could not connect to the paired shop computer\\. Check that the Windows Print Agent is running and allowed through Windows Firewall/);
 });
 
 test("customer uploader is centred and shared light-theme text tokens meet readable contrast", () => {
