@@ -247,6 +247,8 @@ public sealed class ApiWorkflowIntegrationTests
                 Assert.True(json.RootElement.GetProperty("duplicateRequest").GetBoolean());
             }
 
+            client.DefaultRequestHeaders.Authorization =
+                new AuthenticationHeaderValue("Bearer", shop.AccessToken);
             using (var approval = await client.PostAsync(
                 $"/api/v1/shop/print-jobs/{jobId}/approve",
                 content: null))
