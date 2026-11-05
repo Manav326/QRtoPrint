@@ -1,8 +1,8 @@
-import { Fragment, useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import { Fragment, useCallback, useEffect, useId, useRef, useState, type ReactNode } from "react";
 import {
   Activity, ArrowRight, Check, Clock3, Copy, CreditCard, FileText, FileUp, FolderOpen, LayoutDashboard,
   ChevronDown, LifeBuoy, LogOut, Menu, Monitor, Plus, Printer, QrCode, Search, Settings, Wifi, Image as ImageIcon, UserRound,
-  ShieldCheck, Users, Wallet, X, PanelLeftClose, PanelLeftOpen, RotateCcw, Zap
+  ShieldCheck, Users, Wallet, X, PanelLeftClose, PanelLeftOpen, RotateCcw, Zap, Info
 } from "lucide-react";
 import QRCode from "react-qr-code";
 import PhotoStudio, { type PreparedPhotoSheet } from "./PhotoStudio";
@@ -2293,7 +2293,7 @@ function PaymentsPage({settings,payments,refunds,onSave,onVerify,onReject,busy,b
         </div>}
       </div>
       <div className="payment-method-card">
-        <div className="payment-method-heading"><div className="payment-method-icon"><Printer size={19}/></div><div><strong>Cash at counter</strong><small>Allow customers to select cash and pay in person.</small></div><label className="switch"><input type="checkbox" checked={cashEnabled} onChange={event=>setCashEnabled(event.target.checked)}/><span/></label></div>
+        <div className="payment-method-heading"><div className="payment-method-icon"><Printer size={19}/></div><div><strong>Cash at counter</strong><small>{cashEnabled?"Enabled · customers can pay at the counter.":"Disabled · customers will not see cash at the counter."}</small></div><label className="switch"><input type="checkbox" checked={cashEnabled} onChange={event=>setCashEnabled(event.target.checked)}/><span/></label></div>
       </div>
       <div className="payment-method-card instant-payment-setting">
         <div className="payment-method-heading"><div className="payment-method-icon"><Zap size={19}/></div><div><strong>Instant payment after upload</strong><small>Customers can pay as soon as the rate-card quote is calculated, without a separate shop pre-approval. Once payment starts, file decisions are locked; after payment is verified, refund rejected files before printer handoff.</small></div><label className="switch"><input type="checkbox" checked={instantPaymentEnabled} onChange={event=>setInstantPaymentEnabled(event.target.checked)}/><span/></label></div>
@@ -2483,7 +2483,7 @@ function PrintQueuePage({ jobs, printers, agentDevices, searchQuery, loadingBatc
                   {availableBatchPrinters.map(printer=><option key={printer.id} value={printer.id}>{printer.outputMode==="PDF_EXPORT"?"Save as PDF · ":""}{printer.displayName} · {agentDevices.find(agent=>agent.id===printer.agentDeviceId)?.deviceName||"Shop computer"} · {printer.status}</option>)}
                 </select>}
                 {assignmentJob&&<small className="queue-batch-assignment-note">One printer is used for all active files.</small>}
-                {requiredLocalAgentId&&!localComputerIdentityConflict&&<small className="queue-batch-assignment-note">Files are stored on {localComputerName||"the original shop computer"}. Use its printers and reconnect it if offline. To use another computer, upload all files in a new Cloud-assisted batch.</small>}
+                {requiredLocalAgentId&&!localComputerIdentityConflict&&<small className="queue-batch-assignment-note"><span>Stored on {localComputerName||"the original shop computer"}.</span> <InfoTooltip label="Shop computer storage details"><span>Files stay on this computer. Reconnect it to use its printers.</span><span>To switch computers, upload a new Cloud-assisted batch.</span></InfoTooltip></small>}
                 {multipleOrUnknownLocalComputers&&<small className="queue-batch-printer-lock">Files are stored on different or unknown computers. Do not start output. Check for existing output, then upload all files in a new Cloud-assisted batch.</small>}
                 {lockedPrinterOnWrongComputer&&<small className="queue-batch-printer-lock">Files are on {localComputerName||"the original shop computer"}, but this printer is on another computer. Stop; do not retry or switch printers. Check existing output before resubmitting.</small>}
                 {batchPrinterConflict&&<small className="queue-batch-printer-lock">This batch uses multiple printers. New output is blocked. Review the affected files.</small>}
@@ -2618,9 +2618,8 @@ function BatchReviewModal({jobs,busy,decisions,retrying,onDecision,onClose,onPre
     </section>)}</div>
     <div className="batch-branding-setting">
       <div className="batch-branding-copy">
-        <strong>SmartPrint PDF footer</strong>
-        <small>Add a slim SmartPrint by QuantaEdge footer to eligible PDF exports in this batch. Only pages with a fully clear bottom margin receive the footer; pages without enough safe space are left unchanged.</small>
-        <small>Original uploads and normal paper printing are unchanged. With branding off, a single-copy full-document PDF export is saved byte-for-byte from the upload. When enabled, the footer is added as a separate PDF layer only when a blank footer band is verified; digitally signed and interactive-form PDFs are left unchanged and unbranded. Multi-copy, rejected-page or paper-size reformatting exports may require a flattened print copy. New batches start with branding off.</small>
+        <strong>SmartPrint PDF footer <InfoTooltip label="PDF footer details"><span>Footer only appears on PDFs with a verified blank bottom margin.</span><span>Digitally signed or interactive PDFs remain unchanged.</span><span>Original uploads and physical prints are never altered.</span><span>Image-to-PDF exports currently remain unbranded.</span><span>Branding off preserves a single-copy full-document PDF byte-for-byte.</span><span>Multi-copy or reformatted exports may be flattened.</span></InfoTooltip></strong>
+        <small>Add a footer only to eligible PDFs with clear bottom margins. New batches start off.</small>
       </div>
       <label className="batch-branding-toggle">
         <input type="checkbox" checked={pdfBrandingEnabled} disabled={busy} onChange={event=>setPdfBrandingEnabled(event.currentTarget.checked)} aria-label="Add SmartPrint footer to PDF exports in this batch"/>
@@ -3147,6 +3146,36 @@ async function copyText(value:string) {
   try { document.execCommand("copy"); } finally { helper.remove(); }
 }
 
+function InfoTooltip({label,children}:{label:string;children:ReactNode}) {
+  const tooltipId=useId();
+  const rootRef=useRef<HTMLSpanElement>(null);
+  const [open,setOpen]=useState(false);
+  useEffect(()=>{
+    if(!open)return;
+    const dismissOutside=(event:PointerEvent)=>{
+      if(!rootRef.current?.contains(event.target as Node))setOpen(false);
+    };
+    document.addEventListener("pointerdown",dismissOutside);
+    return ()=>document.removeEventListener("pointerdown",dismissOutside);
+  },[open]);
+  return <span ref={rootRef}
+    className={open?"context-info context-info-open":"context-info"}
+    onMouseEnter={()=>setOpen(true)}
+    onMouseLeave={()=>setOpen(false)}
+    onBlur={event=>{
+      const nextTarget=event.relatedTarget;
+      if(!(nextTarget instanceof Node)||!event.currentTarget.contains(nextTarget))setOpen(false);
+    }}
+  >
+    <button type="button" className="context-info-trigger" aria-label={label}
+      aria-expanded={open} aria-describedby={tooltipId}
+      onFocus={()=>setOpen(true)} onClick={()=>setOpen(true)}
+      onKeyDown={event=>{if(event.key==="Escape"){setOpen(false);event.currentTarget.blur();}}}
+    ><Info size={14} strokeWidth={2}/></button>
+    <span id={tooltipId} className="context-info-tooltip" role="tooltip" aria-hidden={!open}>{children}</span>
+  </span>;
+}
+
 function CustomerEntry({publicCode,dark,onToggleTheme}:{publicCode:string;dark:boolean;onToggleTheme:()=>void}) {
   const [result,setResult]=useState<Awaited<ReturnType<typeof createCustomerSession>>|null>(null);
   const [error,setError]=useState("");
@@ -3208,7 +3237,7 @@ function CustomerEntry({publicCode,dark,onToggleTheme}:{publicCode:string;dark:b
         .then(session=>{
           if(active){
             setResult(current=>current?.sessionToken===result.sessionToken
-              ? {...current,expiresUtc:session.expiresUtc,localAgent:session.localAgent}
+              ? {...current,expiresUtc:session.expiresUtc,localAgent:session.localAgent,paymentOptions:session.paymentOptions}
               : current);
           }
         })
@@ -4748,12 +4777,14 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
       {payment&&!!payment.refundedAmountMinor&&payment.refundedAmountMinor>0&&<div className="customer-refund-note"><Wallet size={16}/><span><strong>{formatMoney(payment.refundedAmountMinor,payment.currency)} returned</strong> for rejected pages ({rejectedPageList(jobStatus.rejectedPageNumbersJson)}). {formatMoney(Math.max(0,payment.amountMinor-payment.refundedAmountMinor),payment.currency)} remains paid; only accepted pages proceed to printing.</span></div>}
       {jobStatus.pdfBrandingEnabled&&<div className="customer-branding-note">
         <ShieldCheck size={16}/>
-        <span><strong>PDF footer selected by the shop.</strong> If this request is saved as a PDF, a small SmartPrint by QuantaEdge footer may be added as a separate PDF layer only where a blank footer band is verified. Your uploaded original and normal physical prints are unchanged. With branding off, a single-copy full-document PDF export preserves the original file bytes. PDFs with digital signatures or interactive forms are left unbranded so digital-signature validation remains intact. Multiple copies, page removal or paper-size reformatting may create a flattened print copy. Ask the shop for an unbranded, single-copy full-document export when you need the original PDF structure preserved.</span>
+        <span><strong>PDF footer selected by the shop.</strong> <InfoTooltip label="PDF footer details"><span>Footer only appears on PDFs with a verified blank bottom margin.</span><span>Digitally signed or interactive PDFs remain unchanged.</span><span>Original uploads and physical prints are never altered.</span><span>Image-to-PDF exports currently remain unbranded.</span><span>Branding off preserves a single-copy full-document PDF byte-for-byte.</span><span>Reformatted or multi-copy exports may be flattened.</span><span>Ask for an unbranded single-copy export when PDF structure matters.</span></InfoTooltip></span>
       </div>}
       {!!jobStatus.timeline?.length&&<div className="customer-state-timeline">{jobStatus.timeline.map((event,index)=><div key={index}><i/><span><strong>{prettyStatus(event.newStatus)}</strong><small>{event.actorType==="ShopUser"?"Shop team":event.actorType==="Customer"?"You":"System"} · {formatIstDateTime(event.createdUtc)}</small></span></div>)}</div>}
 
       {legacyIndividualPayment&&(jobStatus.status==="AWAITING_PAYMENT"||jobStatus.status==="PAYMENT_REJECTED")&&<div className="customer-pay-panel">
         <div className="customer-pay-heading"><span>PAY THE SHOP</span><strong>{formatMoney(jobStatus.quotedAmountMinor,jobStatus.currency)}</strong></div>
+        {!paymentOptions.cashEnabled&&paymentOptions.upiEnabled&&<small className="customer-payment-method-note">Cash at counter unavailable. <InfoTooltip label="Why cash is unavailable"><span>The shop must enable Cash at counter in Payments settings.</span></InfoTooltip></small>}
+        {!paymentOptions.cashEnabled&&!paymentOptions.upiEnabled&&<small className="customer-payment-method-note">The shop has not enabled UPI or cash payment. Please contact the shop to arrange payment.</small>}
         {paymentOptions.upiEnabled&&<button className={paymentMethod==="UPI"?"customer-choice selected":"customer-choice"} onClick={()=>setPaymentMethod("UPI")}>UPI payment</button>}
         {paymentOptions.cashEnabled&&<button className={paymentMethod==="CASH"?"customer-choice selected":"customer-choice"} onClick={()=>setPaymentMethod("CASH")}>Cash at counter</button>}
         <button className="customer-flow-button" disabled={busy||(!paymentOptions.upiEnabled&&!paymentOptions.cashEnabled)} onClick={()=>void beginPayment(paymentMethod)}>{busy?<span className="button-spinner"/>:nativeAppMode?"Continue":"Continue with "+(paymentMethod==="UPI"?"UPI":"cash at counter")}</button>
@@ -4809,6 +4840,8 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
       {batchCheckoutUsesPayment&&batchPaymentAllocationComplete&&batchPaymentRefundedTotal>0&&<p className="customer-payment-warning">Recorded file refunds: {formatMoney(batchPaymentRefundedTotal,batchCheckoutCurrency)}. Remaining amount after those returns: {formatMoney(Math.max(0,batchPayment!.amountMinor-batchPaymentRefundedTotal),batchCheckoutCurrency)}.</p>}
       {!batchCheckoutUsesPayment&&<>
         {batchPayment?.status==="REJECTED"&&<p className="customer-flow-error">The previous batch payment was rejected. {batchPayment.rejectionReason||"Check with the shop before trying again."}</p>}
+        {!paymentOptions.cashEnabled&&paymentOptions.upiEnabled&&<small className="customer-payment-method-note">Cash at counter unavailable. <InfoTooltip label="Why cash is unavailable"><span>The shop must enable Cash at counter in Payments settings.</span></InfoTooltip></small>}
+        {!paymentOptions.cashEnabled&&!paymentOptions.upiEnabled&&<small className="customer-payment-method-note">The shop has not enabled UPI or cash payment. Please contact the shop to arrange payment.</small>}
         {paymentOptions.upiEnabled&&<button className={paymentMethod==="UPI"?"customer-choice selected":"customer-choice"} onClick={()=>setPaymentMethod("UPI")}>UPI payment</button>}
         {paymentOptions.cashEnabled&&<button className={paymentMethod==="CASH"?"customer-choice selected":"customer-choice"} onClick={()=>setPaymentMethod("CASH")}>Cash at counter</button>}
         <button className="customer-flow-button" disabled={busy||(!paymentOptions.upiEnabled&&!paymentOptions.cashEnabled)||batchPayableItems.length===0} onClick={()=>void beginPayment(paymentMethod,true)}>

@@ -191,6 +191,24 @@ async function preparePage(context, route) {
       });
     });
   }
+  if (route.label === "customer-qr") {
+    await page.route("**/api/v1/public/stations/SMOKE123/sessions", request => request.fulfill({
+      status: 201,
+      contentType: "application/json",
+      body: JSON.stringify({
+        id: "e2e-customer-session",
+        status: "Active",
+        expiresUtc: "2099-01-01T00:15:00.000Z",
+        sessionToken: "visual-qa-customer-session-token",
+        shop: { displayName: "Example Print Shop", logoUrl: null, accentColor: "#7662E8", currency: "INR" },
+        paymentOptions: { upiEnabled: true, upiId: "shop@example", payeeName: "Example Print Shop", cashEnabled: false, instantPaymentEnabled: false },
+        printer: null,
+        photoPricing: null,
+        localAgent: null,
+        cloudAssistedPrintingEnabled: true
+      })
+    }));
+  }
   if (route.auth) {
     const key = route.auth === "admin" ? "qrtoprint.auth.admin" : "qrtoprint.auth.shop";
     const token = route.auth === "admin" ? adminToken : shopToken;
@@ -289,6 +307,9 @@ async function assertNoHorizontalOverflow(page, route, viewport) {
 
 
 async function assertRouteContrast(page, route) {
+  if (route.label === "customer-qr") {
+    await page.locator(".customer-print-flow").waitFor({ state: "visible", timeout: 15000 });
+  }
   const result = await page.evaluate(() => {
     const parse = value => {
       const normalized = value.trim();
@@ -349,7 +370,12 @@ async function assertRouteContrast(page, route) {
         [".customer-entry-brand .brand-caption", pageStyle.getPropertyValue("--entry-bg")],
         [".customer-entry-footer", pageStyle.getPropertyValue("--entry-bg")],
         [".customer-entry-card h1", cardStyle?.backgroundColor],
-        [".customer-entry-card>p", cardStyle?.backgroundColor]
+        [".customer-entry-card>p", cardStyle?.backgroundColor],
+        [".customer-flow-heading h2", cardStyle?.backgroundColor],
+        [".customer-upload-zone strong", getComputedStyle(customer.querySelector(".customer-upload-zone"))?.backgroundColor],
+        [".customer-upload-zone small", getComputedStyle(customer.querySelector(".customer-upload-zone"))?.backgroundColor],
+        [".customer-upload-mode strong", getComputedStyle(customer.querySelector(".customer-upload-mode"))?.backgroundColor],
+        [".customer-upload-mode small", getComputedStyle(customer.querySelector(".customer-upload-mode"))?.backgroundColor]
       ];
       for (const [selector, background] of samples) {
         const element = customer.querySelector(selector);
@@ -358,6 +384,8 @@ async function assertRouteContrast(page, route) {
           scope: "customer QR",
           foreground: selector,
           background: selector.includes("customer-entry-card") ? "customer card" : "customer page",
+          foregroundColor: getComputedStyle(element).color,
+          backgroundColor: background,
           ratio: contrast(getComputedStyle(element).color, background)
         });
       }
@@ -383,6 +411,21 @@ async function assertRouteContrast(page, route) {
       check.ratio !== null && check.ratio >= 4.5,
       `${route.label} has insufficient ${check.scope} ${check.foreground} contrast against ${check.background}: ${JSON.stringify(check)}`
     );
+  }
+  if (route.label === "customer-qr") {
+    const alignment = await page.evaluate(() => {
+      const form = document.querySelector(".customer-print-flow");
+      const card = document.querySelector(".customer-entry-card--upload");
+      if (!form || !card) return null;
+      const formRect = form.getBoundingClientRect();
+      const cardRect = card.getBoundingClientRect();
+      return {
+        formWidth: formRect.width,
+        centerDelta: Math.abs((formRect.left + formRect.right) / 2 - (cardRect.left + cardRect.right) / 2)
+      };
+    });
+    assert.ok(alignment && alignment.formWidth <= 1041, `Customer uploader must keep a readable centred width: ${JSON.stringify(alignment)}`);
+    assert.ok(alignment && alignment.centerDelta <= 2, `Customer uploader is not centrally aligned: ${JSON.stringify(alignment)}`);
   }
 }
 async function exerciseWorkspaceSections(page, route, viewport, themeLabel) {

@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 import { readDarkModePreference } from "../src/ui-preferences.ts";
+import { getLocalPreviewEndpointCandidates, isPrivateLocalPreviewEndpoint } from "../src/local-preview-routing.ts";
 
 const read = (path: string) => readFileSync(new URL(path, import.meta.url), "utf8");
 
@@ -428,6 +429,107 @@ test("PDF footer branding is opt-in per batch and cannot cover source content or
   assert.ok(safetyRules.includes('RequiredBlankBandPoints = 20f'));
   assert.ok(server.includes('item.PdfBrandingEnabled'));
   assert.ok(app.includes('jobStatus.pdfBrandingEnabled&&<div className="customer-branding-note">'));
-  assert.ok(app.includes('Ask the shop for an unbranded, single-copy full-document export when you need the original PDF structure preserved.'));
-  assert.ok(app.includes('digital-signature validation'));
+  assert.ok(app.includes('Footer only appears on PDFs with a verified blank bottom margin.'));
+  assert.ok(app.includes('Digitally signed or interactive PDFs remain unchanged.'));
+});
+
+
+test("contextual information stays concise and is accessible by hover, focus and tap", () => {
+  const app = read("../src/App.tsx");
+  const css = read("../src/styles.css");
+  assert.match(app, /function InfoTooltip/);
+  assert.match(app, /aria-describedby=\{tooltipId\}/);
+  assert.match(app, /onMouseEnter=\{\(\)=>setOpen\(true\)\}/);
+  assert.match(app, /onClick=\{\(\)=>setOpen\(true\)\}/);
+  assert.match(app, /Files stay on this computer\. Reconnect it to use its printers\./);
+  assert.match(app, /To switch computers, upload a new Cloud-assisted batch\./);
+  assert.match(app, /jobStatus\.pdfBrandingEnabled&&<div className="customer-branding-note">/);
+  assert.doesNotMatch(app, /If this request is saved as a PDF, a small SmartPrint by QuantaEdge footer/);
+  assert.match(css, /\.context-info:focus-within \.context-info-tooltip/);
+  assert.match(css, /\.context-info\.context-info-open \.context-info-tooltip/);
+});
+
+test("customer payment settings refresh without reopening the QR session and explain disabled cash", () => {
+  const app = read("../src/App.tsx");
+  const api = read("../src/api.ts");
+  const server = read("../../../src/SmartPrint.Api/Program.cs");
+  assert.match(app, /paymentOptions:session\.paymentOptions/);
+  assert.match(app, /Cash at counter unavailable/);
+  assert.match(app, /Disabled · customers will not see cash at the counter\./);
+  assert.match(api, /paymentOptions: \{ upiEnabled: boolean; upiId\?: string \| null; payeeName\?: string \| null; cashEnabled: boolean; instantPaymentEnabled: boolean \}/);
+  assert.match(server, /var paymentOptions = await db\.ShopPaymentProfiles\.AsNoTracking\(\)/);
+  assert.match(server, /PaymentOptions = paymentOptions/);
+  assert.match(server, /CashEnabled = false/);
+});
+
+test("Windows local document previews prefer the paired Agent loopback endpoint", () => {
+  const api = read("../src/api.ts");
+  const routing = read("../src/local-preview-routing.ts");
+  const desktop = read("../../desktop/src-tauri/tauri.conf.json");
+  assert.ok(routing.includes("function isPrivateLocalPreviewEndpoint(value: string, allowLoopback = false)"));
+  assert.ok(routing.includes('loopbackIpv4 = endpoint.hostname === "127.0.0.1"'));
+  assert.ok(routing.includes('LOCAL_AGENT_PREVIEW_ENDPOINT = "http://127.0.0.1:17842"'));
+  assert.ok(api.includes("getLocalPreviewEndpointCandidates(isDesktopApp(), source.endpoints)"));
+  assert.ok(api.includes("isPrivateLocalPreviewEndpoint(value, isDesktopApp())"));
+  assert.ok(desktop.includes("http://127.0.0.1:17842"));
+  assert.ok(api.includes("The paired shop computer did not respond. Check that the Windows Print Agent is running and connected"));
+  assert.ok(api.includes("Could not connect to the paired shop computer. Check that the Windows Print Agent is running and allowed through Windows Firewall"));
+});
+
+test("customer uploader is centred and shared light-theme text tokens meet readable contrast", () => {
+  const css = read("../src/styles.css");
+  const uploaderThemeGuard = css.slice(css.indexOf("Theme foreground and surface must change together"));
+  assert.ok(uploaderThemeGuard.includes(".customer-entry:not(.smartprint-native) .customer-upload-zone {"));
+  assert.ok(uploaderThemeGuard.includes("transition: border-color .18s;"));
+  const desktop = read("../../desktop/src/desktop.css");
+  assert.match(css, /customer-entry-card--upload \.customer-print-flow\{width:min\(100%,1040px\);margin-inline:auto\}/);
+  assert.match(css, /customer-flow-heading\{align-items:center;justify-content:center;flex-direction:column/);
+  assert.match(css, /customer-upload-picker-grid\{width:min\(100%,860px\);margin-inline:auto\}/);
+  assert.match(css, /--faint:#5f6b80/);
+  assert.match(css, /--muted:#59677e/);
+  assert.match(desktop, /--faint: #5f6b80;/);
+  assert.match(desktop, /--muted: #59677e;/);
+});
+
+
+test("native Windows preview tries loopback first and retains advertised LAN fallback", () => {
+  const advertised = ["http://192.168.1.20:17842/", "http://10.0.0.8:17842/"];
+  assert.deepEqual(getLocalPreviewEndpointCandidates(true, advertised), ["http://127.0.0.1:17842", ...advertised]);
+  assert.equal(isPrivateLocalPreviewEndpoint("http://127.0.0.1:17842", true)?.origin, "http://127.0.0.1:17842");
+});
+
+test("browser preview cannot add or target loopback, and public endpoints are rejected", () => {
+  const advertised = ["http://192.168.1.20:17842/"];
+  assert.deepEqual(getLocalPreviewEndpointCandidates(false, advertised), advertised);
+  assert.equal(isPrivateLocalPreviewEndpoint("http://127.0.0.1:17842", false), null);
+  assert.equal(isPrivateLocalPreviewEndpoint("http://8.8.8.8:17842/"), null);
+  assert.equal(isPrivateLocalPreviewEndpoint("http://localhost:17842/"), null);
+  assert.equal(isPrivateLocalPreviewEndpoint("https://192.168.1.20:17842/"), null);
+  assert.equal(isPrivateLocalPreviewEndpoint("http://192.168.1.20:17842/extra"), null);
+  assert.equal(isPrivateLocalPreviewEndpoint("http://user@192.168.1.20:17842/"), null);
+});
+
+test("local preview endpoint candidates are deduplicated and bounded", () => {
+  const advertised = Array.from({length: 10}, (_, index) => `http://192.168.1.${index + 1}:17842/`);
+  const candidates = getLocalPreviewEndpointCandidates(true, [advertised[0], ...advertised]);
+  assert.equal(candidates.length, 8);
+  assert.equal(candidates[0], "http://127.0.0.1:17842");
+  assert.equal(candidates.filter(value => value === advertised[0]).length, 1);
+});
+
+test("session renewal refreshes customer payment choices and explains unavailable payment methods", () => {
+  const app = read("../src/App.tsx");
+  const api = read("../src/api.ts");
+  const backend = read("../../../src/SmartPrint.Api/Program.cs");
+  assert.match(api, /paymentOptions: \{ upiEnabled: boolean; upiId\?: string \| null; payeeName\?: string \| null; cashEnabled: boolean; instantPaymentEnabled: boolean \}/);
+  assert.match(app, /paymentOptions:session\.paymentOptions/);
+  assert.match(backend, /PaymentOptions = paymentOptions/);
+  assert.equal((app.match(/The shop has not enabled UPI or cash payment/g) ?? []).length, 2);
+});
+
+test("contextual help supports outside-click and Escape dismissal", () => {
+  const app = read("../src/App.tsx");
+  assert.match(app, /document\.addEventListener\("pointerdown",dismissOutside\)/);
+  assert.match(app, /event\.key==="Escape"/);
+  assert.match(app, /aria-expanded=\{open\}/);
 });

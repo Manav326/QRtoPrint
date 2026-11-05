@@ -25,7 +25,7 @@ body[data-app-shell="desktop"] .app-shell {
   --border-soft: #202938;
   --text: #f0f3fa;
   --muted: #8b96a9;
-  --faint: #657187;
+  --faint: #9aa6bb;
   --accent: #9b8cff;
   --accent-strong: #826eff;
   --accent-soft: rgba(145, 124, 255, .13);
@@ -51,15 +51,15 @@ body[data-app-shell="desktop"] .app-shell.light {
   --border: #e5e9f0;
   --border-soft: #edf0f5;
   --text: #202638;
-  --muted: #69758a;
-  --faint: #8d97a8;
-  --accent: #7258e8;
+  --muted: #59677e;
+  --faint: #5f6b80;
+  --accent: #6247d6;
   --accent-strong: #6247d6;
   --accent-soft: rgba(114, 88, 232, .1);
-  --green: #168c63;
-  --amber: #a56b13;
-  --red: #cb4d5b;
-  --blue: #3976d3;
+  --green: #147a56;
+  --amber: #87550a;
+  --red: #ad3445;
+  --blue: #245fb8;
   background: radial-gradient(ellipse at 72% -14%, rgba(124, 108, 225, .11), transparent 42%), var(--bg);
 }
 
