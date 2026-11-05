@@ -42,6 +42,7 @@ export function authStorageKey(scope: AuthScope): string {
 
 
 export type ShopSection =
+  | "Order Journey"
   | "Overview"
   | "Print Queue"
   | "Printers"
@@ -55,7 +56,8 @@ export type ShopSection =
   | "Settings";
 
 const shopSectionPaths: Record<ShopSection, string> = {
-  "Overview": "/shop",
+  "Order Journey": "/shop",
+  "Overview": "/shop/overview",
   "Print Queue": "/shop/queue",
   "Printers": "/shop/printers",
   "QR Stations": "/shop/qr-stations",

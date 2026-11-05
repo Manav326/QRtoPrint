@@ -21,7 +21,7 @@ import {
   ApiError, LocalUploadOutcomeUnknownError, LocalUploadPreflightError, isPlatformAdminSession, acceptCustomerQuote, applyShopPrintBatchReview, approveShopPrintJob, assignShopPrintJobPrinter, calculateCustomerQuote, getShopCustomerHistory, getShopCustomers, getShopReportSummary,
   confirmShopPrintOutput, dispatchShopPrintJob,
   createAgentEnrollmentCode, createCustomerSession, createPrinter, createStation,
-  downloadShopDocument, replaceShopPhotoDocument, replaceShopPhotoDocumentLocally, getCustomerJobStatus, getShopAgentDevices, getShopJobEvents, getShopPrinters, getShopPrintJobsPage, getShopPrintBatchJobs, loadShopData,
+  downloadShopDocument, replaceShopPhotoDocument, replaceShopPhotoDocumentLocally, getCustomerJobStatus, getShopAgentDevices, getShopJobEvents, getShopPrinters, getShopPrintJobsPage, getShopPrintBatchJobs, getShopPayments, loadShopData,
   logout, readStoredTokens, rejectShopPrintJob, rejectShopPayment, revokeAgentDevice,
   reportCustomerBatchPayment, reportCustomerUpiPayment, renewCustomerPrintSession, getNativeCustomerPrintSession, saveNativeCustomerPrintSession, saveNativeCustomerShopProfile, clearNativeCustomerPrintSession, resumeCustomerSession, rotateStationCode, startCustomerBatchPayment, startCustomerPayment, storeTokens,
   updatePrinterActive, updateShopPaymentSettings, updateShopPricing, updateShopPrintJobSettings,
@@ -38,12 +38,14 @@ import {
 import { verifiedPdfExportPath } from "./print-output";
 import { applyThemePreference, readDarkModePreference, readSidebarCollapsedPreference, saveDarkModePreference, saveSidebarCollapsedPreference } from "./ui-preferences";
 import ThemeToggleButton from "./ThemeToggleButton";
+import OrderJourneyPage from "./OrderJourneyPage";
 import { IST_TIME_ZONE, formatIstDate, formatIstDateTime, formatIstTime, istDateKey } from "./date-time";
 
-type Section = "Overview" | "Print Queue" | "Printers" | "QR Stations" | "Print Agent" | "Pricing" | "Subscription" | "Payments" | "Customers" | "Reports" | "Settings";
+type Section = "Order Journey" | "Overview" | "Print Queue" | "Printers" | "QR Stations" | "Print Agent" | "Pricing" | "Subscription" | "Payments" | "Customers" | "Reports" | "Settings";
 type Modal = "printer" | "station" | null;
 
 const sections: { label: Section; icon: typeof LayoutDashboard }[] = [
+  { label: "Order Journey", icon: Activity },
   { label: "Overview", icon: LayoutDashboard },
   { label: "Print Queue", icon: FileText },
   { label: "Printers", icon: Printer },
@@ -58,7 +60,7 @@ const sections: { label: Section; icon: typeof LayoutDashboard }[] = [
 ];
 
 const sectionGroups: { label: string; items: Section[] }[] = [
-  { label: "DAILY WORK", items: ["Overview", "Print Queue", "Customers"] },
+  { label: "DAILY WORK", items: ["Order Journey", "Overview", "Print Queue", "Customers"] },
   { label: "DEVICES & CONNECTIVITY", items: ["Printers", "QR Stations", "Print Agent"] },
   { label: "BUSINESS", items: ["Pricing", "Payments"] },
   { label: "INSIGHTS", items: ["Reports"] }
@@ -186,6 +188,10 @@ function ShopConsole({ tokens, onSignOut, dark, onToggleTheme }: { tokens: AuthT
   const [stations, setStations] = useState<QrStation[]>([]);
   const [pricing, setPricing] = useState<ShopPricingProfile | null>(null);
   const [printJobs, setPrintJobs] = useState<ShopPrintJob[]>([]);
+  const [journeyJobs, setJourneyJobs] = useState<ShopPrintJob[]>([]);
+  const [journeyPayments, setJourneyPayments] = useState<ShopPayment[]>([]);
+  const [journeyRefreshing, setJourneyRefreshing] = useState(false);
+  const journeyRefreshInFlight = useRef(false);
   const [hasMoreQueueJobs, setHasMoreQueueJobs] = useState(false);
   const [loadingOlderQueueJobs, setLoadingOlderQueueJobs] = useState(false);
   const loadingOlderQueueJobsRef = useRef(false);
@@ -238,12 +244,19 @@ function ShopConsole({ tokens, onSignOut, dark, onToggleTheme }: { tokens: AuthT
     setLoading(true);
     setError("");
     try {
-      const snapshot = await loadShopData(tokens.accessToken, queueSearch);
+      const [snapshot, unfilteredJourneyJobs] = await Promise.all([
+        loadShopData(tokens.accessToken, queueSearch),
+        queueSearch.trim()
+          ? getShopPrintJobsPage(tokens.accessToken, 0, 100)
+          : Promise.resolve(null)
+      ]);
       setProfile(snapshot.profile);
       setPrinters(snapshot.printers);
       setStations(snapshot.stations);
       setPricing(snapshot.pricing);
       setPrintJobs(snapshot.printJobs);
+      setJourneyJobs(unfilteredJourneyJobs ?? snapshot.printJobs);
+      setJourneyPayments(snapshot.payments);
       queueFirstPageIds.current = new Set(snapshot.printJobs.map(job => job.id));
       setHasMoreQueueJobs(snapshot.printJobs.length === 100);
       setQueueApiOffset(snapshot.printJobs.length);
@@ -370,6 +383,26 @@ function ShopConsole({ tokens, onSignOut, dark, onToggleTheme }: { tokens: AuthT
     }
   }
 
+  async function refreshOrderJourney() {
+    if (journeyRefreshInFlight.current) return;
+    journeyRefreshInFlight.current = true;
+    setJourneyRefreshing(true);
+    try {
+      const [latestJobs, latestPayments] = await Promise.all([
+        getShopPrintJobsPage(tokens.accessToken, 0, 100),
+        getShopPayments(tokens.accessToken)
+      ]);
+      setJourneyJobs(latestJobs);
+      setJourneyPayments(latestPayments);
+      setApiConnectionState("connected");
+    } catch (exception) {
+      handleShopApiError(exception, "Could not refresh the order journey.");
+    } finally {
+      journeyRefreshInFlight.current = false;
+      setJourneyRefreshing(false);
+    }
+  }
+
   function requestActionDialog(options: { title: string; message: string; inputLabel?: string; confirmLabel?: string }): Promise<string | null> {
     return new Promise(resolve => {
       setActionDialogValue("");
@@ -455,6 +488,15 @@ function ShopConsole({ tokens, onSignOut, dark, onToggleTheme }: { tokens: AuthT
       mounted = false;
       window.clearInterval(timer);
     };
+  }, [active, tokens.accessToken]);
+
+  useEffect(() => {
+    if (active !== "Order Journey") return;
+    void refreshOrderJourney();
+    const timer = window.setInterval(() => void refreshOrderJourney(), 15_000);
+    return () => window.clearInterval(timer);
+    // The refresh callback is scoped to the active shop session.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [active, tokens.accessToken]);
 
   const activeAgentCount = agentDevices.filter(agent => !agent.revokedUtc).length;
@@ -1467,6 +1509,17 @@ function ShopConsole({ tokens, onSignOut, dark, onToggleTheme }: { tokens: AuthT
           {error && <div className="inline-error" role="alert"><span>{error}</span><button onClick={() => setError("")} aria-label="Dismiss error"><X size={15}/></button></div>}
           {toast && <div className="inline-success" role="status"><Check size={15}/><span>{toast}</span><button onClick={() => setToast("")} aria-label="Dismiss message"><X size={15}/></button></div>}
 
+          {active === "Order Journey" && <OrderJourneyPage
+            jobs={journeyJobs}
+            payments={journeyPayments}
+            printers={printers}
+            agents={agentDevices}
+            refreshing={journeyRefreshing}
+            onRefresh={() => void refreshOrderJourney()}
+            onNavigate={navAction}
+            onReviewBatch={openBatchReview}
+            onVerifyPayment={verifyPayment}
+          />}
           {active === "Overview" && <Overview profile={profile} printers={printers} stations={stations} printJobs={printJobs} pricing={pricing} agentDevices={agentDevices} paymentSettings={paymentSettings} onNavigate={navAction}/>}
           {active === "Printers" && <PrintersPage printers={printers} busyResourceId={busyResourceId} onAdd={() => setModal("printer")} onToggle={togglePrinter}/>}
           {active === "QR Stations" && <StationsPage stations={stations} profile={profile} busyResourceId={busyResourceId} onAdd={() => setModal("station")} onToggle={toggleStation} onGenerate={createFreshStationCode}/>}
@@ -3060,6 +3113,7 @@ function FeatureLine({ label, enabled }: { label: string; enabled: boolean }) {
 
 function pageDescription(section:Section) {
   const descriptions:Record<Section,string> = {
+    "Order Journey":"See every customer order move from upload through review, payment and printing to handover.",
     "Overview":"Your shop setup and operations, all in one place.",
     "Print Queue":"Review real customer uploads and server-calculated print quotes.",
     "Printers":"Manage connected devices, capabilities and health.",
