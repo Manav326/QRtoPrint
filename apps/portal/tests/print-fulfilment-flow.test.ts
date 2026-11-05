@@ -73,14 +73,14 @@ test("plan-limited HTTPS fallback is only offered when the Agent is unavailable"
 });
 
 test("pre-submission printer capability blocks are explained in the shop queue", () => {
-  const app = read("../src/App.tsx");
-  assert.match(app, /function printBlockMessage\(code:string\):string/);
-  assert.match(app, /case "PAPER_SIZE_UNSUPPORTED"/);
-  assert.match(app, /case "COLOUR_UNSUPPORTED"/);
-  assert.match(app, /case "DUPLEX_UNSUPPORTED"/);
-  assert.match(app, /job\.status==="LOCAL_QUEUE_READY"&&job\.failureCode/);
-  assert.match(app, /Reassign this batch to a compatible printer/);
-  assert.match(app, /explicitly approved before output/);
+  const queue = read("../src/features/shop/queue/PrintQueuePage.tsx");
+  assert.match(queue, /function printBlockMessage\(code:string\):string/);
+  assert.match(queue, /case "PAPER_SIZE_UNSUPPORTED"/);
+  assert.match(queue, /case "COLOUR_UNSUPPORTED"/);
+  assert.match(queue, /case "DUPLEX_UNSUPPORTED"/);
+  assert.match(queue, /job\.status==="LOCAL_QUEUE_READY"&&job\.failureCode/);
+  assert.match(queue, /Reassign this batch to a compatible printer/);
+  assert.match(queue, /explicitly approved before output/);
 });
 
 test("a pre-output capability block clears the attempted spooler name so the existing job can be reassigned", () => {

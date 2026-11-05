@@ -184,24 +184,25 @@ test("QR station poster has a clear three-step hierarchy and scan-first customer
 
 test("batch routing enforces local-computer ownership and preserves print-time audit identity", () => {
   const app = read("../src/App.tsx");
+  const queue = read("../src/features/shop/queue/PrintQueuePage.tsx");
   const api = read("../src/api.ts");
   const css = read("../src/styles.css");
 
-  assert.match(app, /Assign one printer for all files in batch/);
-  assert.match(app, /One printer is used for all active files/);
-  assert.match(app, /pages requested/);
-  assert.match(app, /Save as PDF/);
-  assert.match(app, /Saves a PDF, not paper/);
-  assert.match(app, /requiredLocalAgentId/);
-  assert.match(app, /localComputerIdentityConflict/);
-  assert.match(app, /lockedPrinterOnWrongComputer/);
-  assert.match(app, /Shop computer:/);
-  assert.match(app, /Paper output manually confirmed by/);
+  assert.match(queue, /Assign one printer for all files in batch/);
+  assert.match(queue, /One printer is used for all active files/);
+  assert.match(queue, /pages requested/);
+  assert.match(queue, /Save as PDF/);
+  assert.match(queue, /Saves a PDF, not paper/);
+  assert.match(queue, /requiredLocalAgentId/);
+  assert.match(queue, /localComputerIdentityConflict/);
+  assert.match(queue, /lockedPrinterOnWrongComputer/);
+  assert.match(queue, /Shop computer:/);
+  assert.match(queue, /Paper output manually confirmed by/);
   assert.match(app, /Cloud-assisted upload is now selected/);
   assert.match(app, /attached to its original job/);
   assert.match(app, /resume that same upload without creating another print job/);
   assert.match(api, /local-upload-tickets.*cloud-recovery/);
-  assert.doesNotMatch(app, /aria-label=\{"Assign printer for "\+job\.jobNumber\}/);
+  assert.doesNotMatch(queue, /aria-label=\{"Assign printer for "\+job\.jobNumber\}/);
   assert.match(api, /printerAgentName\?: string \| null/);
   assert.match(api, /outputConfirmedByName\?: string \| null/);
   assert.match(api, /documentAgentDeviceId\?: string \| null/);
@@ -390,9 +391,11 @@ test("customer paper summaries reflect advanced folder and per-file choices", ()
 
 test("all print settings controls capture React event values before state updaters", () => {
   const app = read("../src/App.tsx");
+  const queue = read("../src/features/shop/queue/PrintQueuePage.tsx");
   const setters = ["setGroupSettings(current=>","setFileSettings(current=>","setEditingPrintSettings(current=>"];
   for (const setter of setters) {
-    const lines = app.split("\n").filter(line => line.includes(setter));
+    const source = setter === "setEditingPrintSettings(current=>" ? queue : app;
+    const lines = source.split("\n").filter(line => line.includes(setter));
     assert.ok(lines.length > 0, `${setter} must remain part of the shared print settings flow.`);
     assert.ok(lines.every(line => !line.includes("event.currentTarget") && !line.includes("event.target")),
       `${setter} must use values captured before entering the state updater.`);

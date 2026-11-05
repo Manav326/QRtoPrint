@@ -5,6 +5,7 @@ import { verifiedPdfExportPath } from "../src/print-output.ts";
 
 const styles = readFileSync(new URL("../src/styles.css", import.meta.url), "utf8");
 const app = readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8");
+const queue = readFileSync(new URL("../src/features/shop/queue/PrintQueuePage.tsx", import.meta.url), "utf8");
 
 test("generic portal tables allow long values to wrap inside their own cells", () => {
   const globalTableRule = styles.match(/(?:^|})table\{([^}]*)\}/)?.[1] ?? "";
@@ -15,17 +16,17 @@ test("generic portal tables allow long values to wrap inside their own cells", (
 });
 
 test("print queue columns stay constrained and scroll inside their own viewport", () => {
-  assert.match(app, /className="table-scroll queue-table-scroll"><table className="queue-jobs-table">/);
-  assert.match(app, /const singleSavedPdfPath = batch\.jobs\.length === 1 \? verifiedPdfExportPath\(first\) : null;/);
-  assert.match(app, /className="queue-pdf-path"/);
+  assert.match(queue, /className="table-scroll queue-table-scroll"><table className="queue-jobs-table">/);
+  assert.match(queue, /const singleSavedPdfPath = batch\.jobs\.length === 1 \? verifiedPdfExportPath\(first\) : null;/);
+  assert.match(queue, /className="queue-pdf-path"/);
   assert.match(styles, /\.queue-jobs-table\s*\{[^}]*min-width:\s*1100px[^}]*table-layout:\s*fixed/s);
   assert.match(styles, /\.queue-table-scroll\s*\{[^}]*overflow-x:\s*auto/s);
   assert.match(styles, /\.queue-jobs-table \.queue-actions\s*\{[^}]*flex-wrap:\s*wrap/s);
 });
 
 test("confirmed PDF export locations are shown as a separate, wrapping detail", () => {
-  assert.match(app, /verifiedPdfExportPath\(job\) && <div className="queue-batch-file-output"/);
-  assert.match(app, /<span>Saved PDF location<\/span>/);
+  assert.match(queue, /verifiedPdfExportPath\(job\) && <div className="queue-batch-file-output"/);
+  assert.match(queue, /<span>Saved PDF location<\/span>/);
   assert.match(styles, /\.queue-batch-file-output code\s*\{[^}]*overflow-wrap:\s*anywhere/s);
 });
 
