@@ -41,7 +41,8 @@
       "githubHostedRunner": "Windows Server 2025 x64",
       "windows11Certification": "not_established_by_github_hosted_runner",
       "runnerEligibility": "blocked_until_vendor_confirms_windows_server_2025",
-      "catalogSignerThumbprint": null
+      "catalogSignerThumbprint": null,
+      "packageSignerContains": null
     },
     {
       "id": "canon-generic-plus-ufr-ii-x64",
@@ -75,7 +76,8 @@
       "githubHostedRunner": "Windows Server 2025 x64",
       "windows11Certification": "not_established_by_github_hosted_runner",
       "runnerEligibility": "windows_server_2025_supported_but_license_blocked",
-      "catalogSignerThumbprint": null
+      "catalogSignerThumbprint": null,
+      "packageSignerContains": null
     },
     {
       "id": "epson-universal-print-driver-x64",
@@ -107,7 +109,8 @@
       "githubHostedRunner": "Windows Server 2025 x64",
       "windows11Certification": "not_established_by_github_hosted_runner",
       "runnerEligibility": "blocked_until_vendor_confirms_windows_server_2025",
-      "catalogSignerThumbprint": null
+      "catalogSignerThumbprint": null,
+      "packageSignerContains": null
     },
     {
       "id": "brother-universal-printer-driver-x64",
@@ -142,7 +145,8 @@
       "githubHostedRunner": "Windows Server 2025 x64",
       "windows11Certification": "not_established_by_github_hosted_runner",
       "runnerEligibility": "blocked_until_vendor_confirms_windows_server_2025",
-      "catalogSignerThumbprint": null
+      "catalogSignerThumbprint": null,
+      "packageSignerContains": null
     },
     {
       "id": "pantum-p2503-x64",
@@ -173,7 +177,8 @@
       "githubHostedRunner": "Windows Server 2025 x64",
       "windows11Certification": "not_established_by_github_hosted_runner",
       "runnerEligibility": "blocked_until_vendor_confirms_windows_server_2025",
-      "catalogSignerThumbprint": null
+      "catalogSignerThumbprint": null,
+      "packageSignerContains": null
     },
     {
       "id": "pantum-universal-printing-driver-x64",
@@ -214,7 +219,8 @@
       "githubHostedRunner": "Windows Server 2025 x64",
       "windows11Certification": "not_established_by_github_hosted_runner",
       "runnerEligibility": "blocked_until_exact_windows_support_is_confirmed",
-      "catalogSignerThumbprint": null
+      "catalogSignerThumbprint": null,
+      "packageSignerContains": null
     },
     {
       "id": "ricoh-universal-pcl6-x64",
@@ -250,7 +256,8 @@
       "githubHostedRunner": "Windows Server 2025 x64",
       "windows11Certification": "not_established_by_github_hosted_runner",
       "runnerEligibility": "pending_nonexecuting_package_audit",
-      "catalogSignerThumbprint": null
+      "catalogSignerThumbprint": null,
+      "packageSignerContains": "RICOH"
     },
     {
       "id": "kyocera-kx-universal-x64",
@@ -278,7 +285,8 @@
       "githubHostedRunner": "Windows Server 2025 x64",
       "windows11Certification": "not_established_by_github_hosted_runner",
       "runnerEligibility": "pending_nonexecuting_package_audit",
-      "catalogSignerThumbprint": null
+      "catalogSignerThumbprint": null,
+      "packageSignerContains": null
     }
   ]
 }
