@@ -192,12 +192,22 @@ foreach ($driverId in $DriverIds) {
                 status = [string]$signature.Status
                 signer = if ($signature.SignerCertificate) { $signature.SignerCertificate.Subject } else { $null }
                 thumbprint = if ($signature.SignerCertificate) { $signature.SignerCertificate.Thumbprint } else { $null }
-                signerMatchesVendor = ($null -ne $signature.SignerCertificate -and $signature.SignerCertificate.Subject -match [regex]::Escape([string]$driver.catalogSignerContains))
+                signerMatchesVendor = (
+                    -not [string]::IsNullOrWhiteSpace([string]$driver.catalogSignerContains) -and
+                    $null -ne $signature.SignerCertificate -and
+                    $signature.SignerCertificate.Subject -match [regex]::Escape([string]$driver.catalogSignerContains)
+                )
+                signerMatchesPinnedThumbprint = (
+                    -not [string]::IsNullOrWhiteSpace([string]$driver.catalogSignerThumbprint) -and
+                    $null -ne $signature.SignerCertificate -and
+                    $signature.SignerCertificate.Thumbprint -ieq [string]$driver.catalogSignerThumbprint
+                )
             }
         })
 
         $validSignedCatalogs = @($catalogs | Where-Object { $_.status -eq "Valid" })
         $validVendorCatalogs = @($validSignedCatalogs | Where-Object { $_.signerMatchesVendor })
+        $validPinnedCatalogs = @($validSignedCatalogs | Where-Object { $_.signerMatchesPinnedThumbprint })
         $packageSignerMatchesVendor = $true
         if (-not [string]::IsNullOrWhiteSpace([string]$driver.packageSignerContains)) {
             $packageSignerMatchesVendor = (
@@ -229,6 +239,7 @@ foreach ($driverId in $DriverIds) {
             catalogCount = $catalogs.Count
             validSignedCatalogCount = $validSignedCatalogs.Count
             validVendorCatalogCount = $validVendorCatalogs.Count
+            validPinnedCatalogCount = $validPinnedCatalogs.Count
             catalogs = $catalogs
             physicalPrinterVerified = $false
             packageExecuted = $false
@@ -236,7 +247,7 @@ foreach ($driverId in $DriverIds) {
         }
         $result | ConvertTo-Json -Depth 20 | Set-Content -LiteralPath $reportPath -Encoding utf8
         Write-Host "$driverId package SHA-256: $hash"
-        Write-Host "$driverId extraction: $extractStatus; INF files: $($infs.Count); valid signed catalogs: $($validSignedCatalogs.Count); vendor catalogs: $($validVendorCatalogs.Count)"
+        Write-Host "$driverId extraction: $extractStatus; INF files: $($infs.Count); valid signed catalogs: $($validSignedCatalogs.Count); vendor catalogs: $($validVendorCatalogs.Count); pinned catalogs: $($validPinnedCatalogs.Count)"
 
         if ($extractStatus -notin @("EXTRACTED", "EXTRACTED_WITH_7ZIP") -or
             $infs.Count -eq 0 -or
@@ -246,6 +257,13 @@ foreach ($driverId in $DriverIds) {
         if (-not [string]::IsNullOrWhiteSpace([string]$driver.catalogSignerContains) -and
             $validVendorCatalogs.Count -eq 0) {
             $failures += "$driverId did not produce a valid catalog signed by the expected catalog publisher."
+        }
+        if (-not [string]::IsNullOrWhiteSpace([string]$driver.catalogSignerThumbprint) -and
+            [string]$driver.catalogSignerThumbprint -notmatch '^[A-Fa-f0-9]{40}$') {
+            $failures += "$driverId manifest catalog signer thumbprint must contain exactly 40 hexadecimal characters."
+        } elseif (-not [string]::IsNullOrWhiteSpace([string]$driver.catalogSignerThumbprint) -and
+            $validPinnedCatalogs.Count -eq 0) {
+            $failures += "$driverId did not produce a valid catalog signed by the pinned certificate thumbprint."
         }
         if (-not $packageSignerMatchesVendor) {
             $failures += "$driverId package Authenticode signer did not match the expected package publisher."
