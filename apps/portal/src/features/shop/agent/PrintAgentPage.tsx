@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import {
-  Check, Clock3, Copy, Monitor, Plus, RotateCcw, ShieldCheck, Wifi
+  Check, Clock3, Copy, Monitor, Plus, QrCode, RotateCcw, ShieldCheck, Wifi
 } from "lucide-react";
 import QRCode from "react-qr-code";
 import type { AgentDevice } from "../../../api";
