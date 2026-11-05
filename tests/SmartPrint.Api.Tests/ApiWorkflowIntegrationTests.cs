@@ -728,6 +728,249 @@ public sealed class ApiWorkflowIntegrationTests
         }
     }
 
+    [Fact]
+    public async Task Agent_enrollment_heartbeat_printer_sync_and_paid_job_queue_remain_operational()
+    {
+        var database = await ApiIntegrationTestDatabase.TryCreateAsync();
+        if (database is null)
+            return;
+
+        await using (database)
+        {
+            var storageRoot = Path.Combine(
+                Path.GetTempPath(),
+                "qrtoprint-api-agent-integration",
+                database.DatabaseName);
+            using var factory = new ApiIntegrationWebApplicationFactory(
+                database.ConnectionString,
+                storageRoot);
+            using var client = factory.CreateClient();
+
+            var shop = await RegisterShopAsync(client, "Agent Integration Shop");
+            client.DefaultRequestHeaders.Authorization =
+                new AuthenticationHeaderValue("Bearer", shop.AccessToken);
+
+            using var enrollmentCodeResponse = await client.PostAsync(
+                "/api/v1/shop/agent-enrollment-codes",
+                content: null);
+            using var enrollmentCodeJson = await ReadExpectedJsonAsync(
+                enrollmentCodeResponse, HttpStatusCode.Created);
+            var enrollmentCode = enrollmentCodeJson.RootElement.GetProperty("code").GetString();
+            Assert.False(string.IsNullOrWhiteSpace(enrollmentCode));
+
+            const string fingerprint = "integration-agent-computer-fingerprint-001";
+            using var enrollmentResponse = await client.PostAsJsonAsync("/api/v1/agent/enroll", new
+            {
+                code = enrollmentCode,
+                fingerprint,
+                deviceName = "Integration Windows Computer"
+            });
+            using var enrollmentJson = await ReadExpectedJsonAsync(
+                enrollmentResponse, HttpStatusCode.Created);
+            var agentId = enrollmentJson.RootElement.GetProperty("agentDeviceId").GetGuid();
+            var agentSecret = enrollmentJson.RootElement.GetProperty("agentSecret").GetString();
+            Assert.False(string.IsNullOrWhiteSpace(agentSecret));
+
+            using (var heartbeat = await SendWithAgentJsonAsync(
+                client,
+                "/api/v1/agent/heartbeat",
+                agentId,
+                agentSecret!,
+                new
+                {
+                    version = "integration-test",
+                    operatingSystem = "Windows",
+                    localEndpoints = Array.Empty<string>()
+                }))
+            {
+                using var json = await ReadExpectedJsonAsync(heartbeat, HttpStatusCode.OK);
+                Assert.Equal(agentId, json.RootElement.GetProperty("id").GetGuid());
+                Assert.Equal("Online", json.RootElement.GetProperty("status").GetString());
+            }
+
+            using (var printerSync = await SendWithAgentJsonAsync(
+                client,
+                "/api/v1/agent/printers/sync",
+                agentId,
+                agentSecret!,
+                new
+                {
+                    printers = new[]
+                    {
+                        new
+                        {
+                            queueName = "QRTP-AGENT-INTEGRATION-QUEUE",
+                            driverName = "Integration Test Driver",
+                            portName = "INTEGRATION-PORT",
+                            status = "Ready",
+                            isDefault = true,
+                            outputMode = "PHYSICAL",
+                            capabilitiesJson = "{}"
+                        }
+                    }
+                }))
+            {
+                using var json = await ReadExpectedJsonAsync(printerSync, HttpStatusCode.OK);
+                Assert.Equal(1, json.RootElement.GetProperty("created").GetInt32());
+                Assert.Equal(1, json.RootElement.GetProperty("discovered").GetInt32());
+            }
+
+            Guid printerId;
+            await using (var scope = factory.Services.CreateAsyncScope())
+            {
+                var db = scope.ServiceProvider.GetRequiredService<SmartPrintDbContext>();
+                printerId = await db.PrinterDevices
+                    .Where(item => item.TenantId == shop.TenantId && item.AgentDeviceId == agentId)
+                    .Select(item => item.Id)
+                    .SingleAsync();
+            }
+
+            using var stationResponse = await client.PostAsJsonAsync("/api/v1/shop/qr-stations", new
+            {
+                displayName = "Agent Integration Counter",
+                printerDeviceId = printerId
+            });
+            using var stationJson = await ReadExpectedJsonAsync(stationResponse, HttpStatusCode.Created);
+            var publicUrl = stationJson.RootElement.GetProperty("publicUrl").GetString();
+            Assert.False(string.IsNullOrWhiteSpace(publicUrl));
+            var publicCode = new Uri(publicUrl!).AbsolutePath.Split('/', StringSplitOptions.RemoveEmptyEntries).Last();
+
+            var customer = await RegisterCustomerAsync(client, "Agent Queue Customer");
+            client.DefaultRequestHeaders.Authorization =
+                new AuthenticationHeaderValue("Bearer", customer.AccessToken);
+            using var sessionResponse = await client.PostAsync(
+                $"/api/v1/public/stations/{Uri.EscapeDataString(publicCode)}/sessions",
+                content: null);
+            using var sessionJson = await ReadExpectedJsonAsync(sessionResponse, HttpStatusCode.Created);
+            var sessionId = sessionJson.RootElement.GetProperty("id").GetGuid();
+
+            var jobId = Guid.NewGuid();
+            var now = DateTimeOffset.UtcNow;
+            const string documentSha = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+            await using (var scope = factory.Services.CreateAsyncScope())
+            {
+                var db = scope.ServiceProvider.GetRequiredService<SmartPrintDbContext>();
+                db.PrintJobs.Add(new PrintJob
+                {
+                    Id = jobId,
+                    TenantId = shop.TenantId,
+                    QrStationId = stationJson.RootElement.GetProperty("id").GetGuid(),
+                    PrinterDeviceId = printerId,
+                    CustomerSessionId = sessionId,
+                    JobNumber = $"SP-AGENT-IT-{Guid.NewGuid():N}"[..24],
+                    IdempotencyKey = $"AGENT-INTEGRATION-{Guid.NewGuid():N}",
+                    Status = "PAID_AUTHORISED",
+                    PageCount = 1,
+                    Copies = 1,
+                    ColourMode = "Mono",
+                    PaperSize = "A4",
+                    IsDuplex = false,
+                    Orientation = "AUTO",
+                    Currency = "INR",
+                    QuotedAmountMinor = 100,
+                    CreatedUtc = now,
+                    UpdatedUtc = now
+                });
+                db.PrintDocuments.Add(new PrintDocument
+                {
+                    TenantId = shop.TenantId,
+                    PrintJobId = jobId,
+                    OriginalFileName = "agent-integration.pdf",
+                    MediaType = "application/pdf",
+                    FileExtension = ".pdf",
+                    SizeBytes = 1024,
+                    Sha256 = documentSha,
+                    StorageKey = $"agent-integration/{jobId:N}.pdf",
+                    StorageMode = "CLOUD",
+                    PageSizesJson = "[\"A4\"]",
+                    CreatedUtc = now
+                });
+                db.PrintPayments.Add(new PrintPayment
+                {
+                    TenantId = shop.TenantId,
+                    PrintJobId = jobId,
+                    Method = "UPI",
+                    Status = "VERIFIED",
+                    AmountMinor = 100,
+                    Currency = "INR",
+                    PaymentReference = "AGENT-INTEGRATION-PAID",
+                    VerifiedUtc = now,
+                    CreatedUtc = now,
+                    UpdatedUtc = now
+                });
+                await db.SaveChangesAsync();
+            }
+
+            using var claimResponse = await SendWithAgentAsync(
+                client,
+                "/api/v1/agent/jobs/claim",
+                agentId,
+                agentSecret!);
+            using var claimJson = await ReadExpectedJsonAsync(claimResponse, HttpStatusCode.OK);
+            var claimed = claimJson.RootElement.GetProperty("jobs").EnumerateArray().ToArray();
+            var claimedJob = Assert.Single(claimed);
+            Assert.Equal(jobId, claimedJob.GetProperty("id").GetGuid());
+            Assert.Equal("LOCAL_QUEUE_CLAIMED", claimedJob.GetProperty("status").GetString());
+
+            using (var received = await SendWithAgentJsonAsync(
+                client,
+                $"/api/v1/agent/jobs/{jobId}/received",
+                agentId,
+                agentSecret!,
+                new { sha256 = documentSha, sizeBytes = 1024 }))
+            {
+                using var json = await ReadExpectedJsonAsync(received, HttpStatusCode.OK);
+                Assert.Equal("LOCAL_QUEUE_READY", json.RootElement.GetProperty("status").GetString());
+                Assert.False(json.RootElement.GetProperty("duplicateRequest").GetBoolean());
+            }
+
+            using (var duplicateReceived = await SendWithAgentJsonAsync(
+                client,
+                $"/api/v1/agent/jobs/{jobId}/received",
+                agentId,
+                agentSecret!,
+                new { sha256 = documentSha, sizeBytes = 1024 }))
+            {
+                using var json = await ReadExpectedJsonAsync(duplicateReceived, HttpStatusCode.OK);
+                Assert.True(json.RootElement.GetProperty("duplicateRequest").GetBoolean());
+            }
+
+            await using (var verificationScope = factory.Services.CreateAsyncScope())
+            {
+                var db = verificationScope.ServiceProvider.GetRequiredService<SmartPrintDbContext>();
+                var job = await db.PrintJobs.SingleAsync(item => item.Id == jobId);
+                var agent = await db.AgentDevices.SingleAsync(item => item.Id == agentId);
+                var printer = await db.PrinterDevices.SingleAsync(item => item.Id == printerId);
+                Assert.Equal("LOCAL_QUEUE_READY", job.Status);
+                Assert.Equal(agentId, job.ClaimedByAgentDeviceId);
+                Assert.NotNull(job.LocalQueueReceivedUtc);
+                Assert.Equal("Online", agent.Status);
+                Assert.True(printer.IsActive);
+                Assert.Equal("QRTP-AGENT-INTEGRATION-QUEUE", printer.QueueName);
+            }
+
+            client.DefaultRequestHeaders.Authorization =
+                new AuthenticationHeaderValue("Bearer", shop.AccessToken);
+            using (var revoke = await client.PatchAsync(
+                $"/api/v1/shop/agent-devices/{agentId}/revoke",
+                content: null))
+                Assert.Equal(HttpStatusCode.OK, revoke.StatusCode);
+
+            using (var revokedHeartbeat = await SendWithAgentJsonAsync(
+                client,
+                "/api/v1/agent/heartbeat",
+                agentId,
+                agentSecret!,
+                new
+                {
+                    version = "integration-test",
+                    operatingSystem = "Windows",
+                    localEndpoints = Array.Empty<string>()
+                }))
+                Assert.Equal(HttpStatusCode.Unauthorized, revokedHeartbeat.StatusCode);
+        }
+    }
+
     private static async Task<ShopCredentials> RegisterShopAsync(HttpClient client, string businessName)
     {
         var email = $"owner-{Guid.NewGuid():N}@integration.example";
@@ -817,6 +1060,34 @@ public sealed class ApiWorkflowIntegrationTests
             Content = JsonContent.Create(body)
         };
         request.Headers.Add("X-Print-Session", sessionToken);
+        return client.SendAsync(request);
+    }
+
+    private static Task<HttpResponseMessage> SendWithAgentAsync(
+        HttpClient client,
+        string path,
+        Guid agentId,
+        string agentSecret)
+    {
+        var request = new HttpRequestMessage(HttpMethod.Post, path);
+        request.Headers.Add("X-Print-Agent-Id", agentId.ToString());
+        request.Headers.Add("X-Print-Agent-Secret", agentSecret);
+        return client.SendAsync(request);
+    }
+
+    private static Task<HttpResponseMessage> SendWithAgentJsonAsync(
+        HttpClient client,
+        string path,
+        Guid agentId,
+        string agentSecret,
+        object body)
+    {
+        var request = new HttpRequestMessage(HttpMethod.Post, path)
+        {
+            Content = JsonContent.Create(body)
+        };
+        request.Headers.Add("X-Print-Agent-Id", agentId.ToString());
+        request.Headers.Add("X-Print-Agent-Secret", agentSecret);
         return client.SendAsync(request);
     }
 
