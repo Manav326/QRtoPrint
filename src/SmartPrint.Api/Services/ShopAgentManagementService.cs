@@ -78,4 +78,40 @@ public sealed class ShopAgentManagementService(SmartPrintDbContext db)
             device.Status,
             device.RevokedUtc);
     }
+
+    public async Task<object> ListAsync(Guid tenantId, CancellationToken cancellationToken)
+    {
+        var now = DateTimeOffset.UtcNow;
+        var onlineAfter = now.AddMinutes(-2);
+        var devices = await db.AgentDevices.AsNoTracking()
+            .Where(device => device.TenantId == tenantId)
+            .OrderByDescending(device => device.LastSeenUtc)
+            .Select(device => new
+            {
+                device.Id,
+                device.DeviceName,
+                Status = device.RevokedUtc != null ? "Revoked" :
+                    device.LastSeenUtc != null && device.LastSeenUtc >= onlineAfter ? "Online" : "Offline",
+                device.CreatedUtc,
+                device.LastSeenUtc,
+                device.RevokedUtc,
+                device.LocalEndpointsJson,
+                PrinterCount = db.PrinterDevices.Count(printer =>
+                    printer.TenantId == tenantId && printer.AgentDeviceId == device.Id)
+            })
+            .ToListAsync(cancellationToken);
+
+        return devices.Select(device => new
+        {
+            device.Id,
+            device.DeviceName,
+            device.Status,
+            device.CreatedUtc,
+            device.LastSeenUtc,
+            device.RevokedUtc,
+            device.PrinterCount,
+            LocalEndpoints = AgentLocalEndpointRules.ReadJson(device.LocalEndpointsJson)
+        }).ToArray();
+    }
+
 }

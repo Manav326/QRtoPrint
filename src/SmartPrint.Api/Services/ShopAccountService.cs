@@ -6,6 +6,17 @@ using SmartPrint.Api.Domain;
 
 namespace SmartPrint.Api.Services;
 
+public enum ShopAccountProfileReadFailure
+{
+    None,
+    OwnerNotFound,
+    NotFound
+}
+
+public sealed record ShopAccountProfileReadResult(
+    ShopAccountProfileReadFailure Failure,
+    object? Profile = null);
+
 public enum ShopOwnerAccountUpdateFailure
 {
     None,
@@ -151,4 +162,42 @@ public sealed class ShopAccountService(
 
         return new ShopProfileUpdateResult(ShopProfileUpdateFailure.None, profile);
     }
+
+    public async Task<ShopAccountProfileReadResult> GetProfileAsync(
+        Guid tenantId,
+        Guid userId,
+        CancellationToken cancellationToken)
+    {
+        var owner = await userManager.FindByIdAsync(userId.ToString());
+        if (owner is null || owner.TenantId != tenantId)
+        {
+            return new(ShopAccountProfileReadFailure.OwnerNotFound);
+        }
+
+        var profile = await db.ShopProfiles.AsNoTracking()
+            .SingleOrDefaultAsync(item => item.TenantId == tenantId, cancellationToken);
+        var tenant = await db.Tenants.AsNoTracking()
+            .SingleOrDefaultAsync(item => item.Id == tenantId && item.Status == "Active", cancellationToken);
+        if (profile is null || tenant is null)
+        {
+            return new(ShopAccountProfileReadFailure.NotFound);
+        }
+
+        return new(ShopAccountProfileReadFailure.None, new
+        {
+            tenant.Id,
+            tenant.Slug,
+            tenant.BusinessName,
+            tenant.Status,
+            OwnerName = owner.DisplayName,
+            OwnerEmail = owner.Email ?? string.Empty,
+            profile.DisplayName,
+            profile.LogoUrl,
+            profile.AccentColor,
+            profile.Currency,
+            profile.TimeZone,
+            profile.WhiteLabelEnabled
+        });
+    }
+
 }

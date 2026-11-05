@@ -51,4 +51,31 @@ public sealed class ShopPricingService(SmartPrintDbContext db)
 
         return new ShopPricingUpdateResult(ShopPricingUpdateFailure.None, pricing);
     }
+
+    public async Task<object?> GetAsync(Guid tenantId, CancellationToken cancellationToken)
+    {
+        var pricing = await db.ShopPricingProfiles.AsNoTracking()
+            .SingleOrDefaultAsync(item => item.TenantId == tenantId, cancellationToken);
+        if (pricing is null)
+        {
+            return null;
+        }
+
+        return new
+        {
+            pricing.IsConfigured,
+            pricing.MonoPerSideMinor,
+            pricing.ColourPerSideMinor,
+            pricing.MonoDuplexPerSheetMinor,
+            pricing.ColourDuplexPerSheetMinor,
+            pricing.MinimumChargeMinor,
+            pricing.Photo35x45Minor,
+            pricing.Photo25x35Minor,
+            pricing.Photo2x2Minor,
+            pricing.Photo4x6Minor,
+            pricing.Version,
+            pricing.UpdatedUtc
+        };
+    }
+
 }

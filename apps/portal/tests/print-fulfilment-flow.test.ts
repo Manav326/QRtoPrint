@@ -877,3 +877,22 @@ test("remaining workflow-heavy reads stay outside HTTP endpoint handlers", () =>
   const shopReport = readApi("ShopReportEndpoints.cs");
   assert.match(shopReport, /reportService\.GetSummaryAsync/);
 });
+
+
+test("shop resource reads delegate their persistence queries to feature services", () => {
+  const expectations = [
+    ["ShopAccountEndpoints.cs", "accounts.GetProfileAsync(tenantId, userId, ct)"],
+    ["ShopAgentManagementEndpoints.cs", "management.ListAsync(tenantId, ct)"],
+    ["ShopPaymentSettingsEndpoints.cs", "settingsService.GetAsync(tenantId, ct)"],
+    ["ShopPricingEndpoints.cs", "pricingService.GetAsync(tenantId, ct)"],
+    ["ShopPrinterEndpoints.cs", "printers.ListAsync(tenantId, ct)"],
+    ["ShopStationEndpoints.cs", "stations.ListAsync("]
+  ];
+
+  for (const [moduleName, delegation] of expectations) {
+    const source = readApi(moduleName);
+    assert.ok(source.includes(delegation), moduleName + " must delegate its data read to the feature service");
+    assert.doesNotMatch(source, /SmartPrintDbContext|\\bdb\\./,
+      moduleName + " must not compose database queries in the endpoint.");
+  }
+});

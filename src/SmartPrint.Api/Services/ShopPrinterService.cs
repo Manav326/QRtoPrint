@@ -113,4 +113,45 @@ public sealed class ShopPrinterService(
         await db.SaveChangesAsync(cancellationToken);
         return new ShopPrinterMutationResult(ShopPrinterMutationFailure.None, printer);
     }
+
+    public async Task<object> ListAsync(Guid tenantId, CancellationToken cancellationToken)
+    {
+        var onlineAfter = DateTimeOffset.UtcNow.AddMinutes(-2);
+        var printers = await db.PrinterDevices.AsNoTracking()
+            .Where(printer => printer.TenantId == tenantId)
+            .OrderBy(printer => printer.DisplayName)
+            .Select(printer => new
+            {
+                printer.Id,
+                printer.DisplayName,
+                printer.Manufacturer,
+                printer.Model,
+                printer.ConnectionType,
+                printer.OutputMode,
+                printer.ConnectionAddress,
+                printer.QueueName,
+                printer.IsDefault,
+                printer.AgentDeviceId,
+                printer.CapabilitiesJson,
+                Status = printer.Status == "AgentRevoked"
+                    ? "AgentRevoked"
+                    : printer.AgentDeviceId != null &&
+                      !db.AgentDevices.AsNoTracking().Any(agent =>
+                          agent.Id == printer.AgentDeviceId && agent.TenantId == tenantId &&
+                          agent.RevokedUtc == null && agent.Status != "Revoked" &&
+                          agent.LastSeenUtc != null && agent.LastSeenUtc >= onlineAfter)
+                        ? "AgentOffline"
+                        : printer.AgentDeviceId != null && printer.OutputMode == "PDF_EXPORT"
+                            ? "Ready"
+                            : printer.AgentDeviceId != null &&
+                              (printer.LastSeenUtc == null || printer.LastSeenUtc < onlineAfter)
+                                ? "InventoryStale"
+                                : printer.Status,
+                printer.IsActive,
+                printer.LastSeenUtc
+            })
+            .ToListAsync(cancellationToken);
+        return printers;
+    }
+
 }

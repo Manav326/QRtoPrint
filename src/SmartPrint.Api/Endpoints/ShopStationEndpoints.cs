@@ -1,13 +1,8 @@
 using System.Security.Claims;
-using System.Security.Cryptography;
-using static SmartPrint.Api.Security.OpaqueTokenHasher;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
-using Microsoft.EntityFrameworkCore;
 using SmartPrint.Api.Contracts;
-using SmartPrint.Api.Data;
-using SmartPrint.Api.Domain;
 using SmartPrint.Api.Services;
 using static SmartPrint.Api.Security.EndpointIdentity;
 
@@ -17,38 +12,20 @@ public static class ShopStationEndpoints
 {
     public static RouteGroupBuilder MapShopStationEndpoints(this RouteGroupBuilder shop)
     {
-        shop.MapGet("/qr-stations", async (ClaimsPrincipal principal, SmartPrintDbContext db, IConfiguration configuration, CancellationToken ct) =>
+        shop.MapGet("/qr-stations", async (
+            ClaimsPrincipal principal,
+            IConfiguration configuration,
+            ShopStationService stations,
+            CancellationToken ct) =>
         {
             if (!TryGetTenantId(principal, out var tenantId))
             {
                 return Results.Forbid();
             }
 
-            var stations = await db.QrStations.AsNoTracking()
-                .Where(station => station.TenantId == tenantId)
-                .OrderBy(station => station.DisplayName)
-                .Select(station => new
-                {
-                    station.Id,
-                    station.PrinterDeviceId,
-                    station.DisplayName,
-                    station.PublicCodeHint,
-                    station.PublicCode,
-                    station.IsEnabled,
-                    station.CreatedUtc
-                })
-                .ToListAsync(ct);
-            var portalBase = (configuration["PublicPortal:BaseUrl"] ?? string.Empty).TrimEnd('/');
-            return Results.Ok(stations.Select(station => new
-            {
-                station.Id,
-                station.PrinterDeviceId,
-                station.DisplayName,
-                station.PublicCodeHint,
-                station.IsEnabled,
-                station.CreatedUtc,
-                PublicUrl = station.PublicCode is not null ? $"{portalBase}/s/{station.PublicCode}" : null
-            }));
+            var result = await stations.ListAsync(
+                tenantId, configuration["PublicPortal:BaseUrl"], ct);
+            return Results.Ok(result);
         });
 
         shop.MapPost("/qr-stations", async (

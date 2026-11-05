@@ -1,16 +1,11 @@
 using System.Security.Claims;
 using System.IdentityModel.Tokens.Jwt;
-using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.RateLimiting;
 using SmartPrint.Api.Services;
-using static SmartPrint.Api.Domain.ShopProfileRules;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
-using Microsoft.EntityFrameworkCore;
 using SmartPrint.Api.Contracts;
-using SmartPrint.Api.Data;
-using SmartPrint.Api.Domain;
 using static SmartPrint.Api.Security.EndpointIdentity;
 
 namespace SmartPrint.Api.Endpoints;
@@ -35,42 +30,27 @@ public static class ShopAccountEndpoints
 
         shop.MapGet("/profile", async (
             ClaimsPrincipal principal,
-            SmartPrintDbContext db,
-            UserManager<AppUser> userManager,
+            ShopAccountService accounts,
             CancellationToken ct) =>
         {
-            if (!principal.FindAll("shop_role").Any(claim => claim.Value == "ShopOwner") ||
+            if (!IsShopOwner(principal) ||
                 !TryGetTenantId(principal, out var tenantId) ||
                 !Guid.TryParse(principal.FindFirstValue(JwtRegisteredClaimNames.Sub), out var userId))
             {
                 return Results.Forbid();
             }
 
-            var owner = await userManager.FindByIdAsync(userId.ToString());
-            if (owner is null || owner.TenantId != tenantId)
+            var result = await accounts.GetProfileAsync(tenantId, userId, ct);
+            if (result.Failure == ShopAccountProfileReadFailure.OwnerNotFound)
             {
                 return Results.Forbid();
             }
+            if (result.Failure == ShopAccountProfileReadFailure.NotFound)
+            {
+                return Results.NotFound();
+            }
 
-            var profile = await db.ShopProfiles.AsNoTracking().SingleOrDefaultAsync(x => x.TenantId == tenantId, ct);
-            var tenant = await db.Tenants.AsNoTracking().SingleOrDefaultAsync(x => x.Id == tenantId && x.Status == "Active", ct);
-            return profile is null || tenant is null
-                ? Results.NotFound()
-                : Results.Ok(new
-                {
-                    tenant.Id,
-                    tenant.Slug,
-                    tenant.BusinessName,
-                    tenant.Status,
-                    OwnerName = owner.DisplayName,
-                    OwnerEmail = owner.Email ?? string.Empty,
-                    profile.DisplayName,
-                    profile.LogoUrl,
-                    profile.AccentColor,
-                    profile.Currency,
-                    profile.TimeZone,
-                    profile.WhiteLabelEnabled
-                });
+            return Results.Ok(result.Profile);
         });
 
         shop.MapPut("/account", async (

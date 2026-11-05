@@ -1,13 +1,9 @@
 using System.Security.Claims;
-using System.Text.Json;
 using SmartPrint.Api.Services;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
-using Microsoft.EntityFrameworkCore;
 using SmartPrint.Api.Contracts;
-using SmartPrint.Api.Data;
-using SmartPrint.Api.Domain;
 using static SmartPrint.Api.Security.EndpointIdentity;
 
 namespace SmartPrint.Api.Endpoints;
@@ -16,49 +12,18 @@ public static class ShopPrinterEndpoints
 {
     public static RouteGroupBuilder MapShopPrinterEndpoints(this RouteGroupBuilder shop)
     {
-        shop.MapGet("/printers", async (ClaimsPrincipal principal, SmartPrintDbContext db, CancellationToken ct) =>
+        shop.MapGet("/printers", async (
+            ClaimsPrincipal principal,
+            ShopPrinterService printers,
+            CancellationToken ct) =>
         {
             if (!TryGetTenantId(principal, out var tenantId))
             {
                 return Results.Forbid();
             }
 
-            var onlineAfter = DateTimeOffset.UtcNow.AddMinutes(-2);
-            var printers = await db.PrinterDevices.AsNoTracking()
-                .Where(printer => printer.TenantId == tenantId)
-                .OrderBy(printer => printer.DisplayName)
-                .Select(printer => new
-                {
-                    printer.Id,
-                    printer.DisplayName,
-                    printer.Manufacturer,
-                    printer.Model,
-                    printer.ConnectionType,
-                    printer.OutputMode,
-                    printer.ConnectionAddress,
-                    printer.QueueName,
-                    printer.IsDefault,
-                    printer.AgentDeviceId,
-                    printer.CapabilitiesJson,
-                    Status = printer.Status == "AgentRevoked"
-                        ? "AgentRevoked"
-                        : printer.AgentDeviceId != null &&
-                          !db.AgentDevices.AsNoTracking().Any(agent =>
-                              agent.Id == printer.AgentDeviceId && agent.TenantId == tenantId &&
-                              agent.RevokedUtc == null && agent.Status != "Revoked" &&
-                              agent.LastSeenUtc != null && agent.LastSeenUtc >= onlineAfter)
-                            ? "AgentOffline"
-                            : printer.AgentDeviceId != null && printer.OutputMode == "PDF_EXPORT"
-                                ? "Ready"
-                                : printer.AgentDeviceId != null &&
-                                  (printer.LastSeenUtc == null || printer.LastSeenUtc < onlineAfter)
-                                    ? "InventoryStale"
-                                    : printer.Status,
-                    printer.IsActive,
-                    printer.LastSeenUtc
-                })
-                .ToListAsync(ct);
-            return Results.Ok(printers);
+            var result = await printers.ListAsync(tenantId, ct);
+            return Results.Ok(result);
         });
 
         shop.MapPost("/printers", async (

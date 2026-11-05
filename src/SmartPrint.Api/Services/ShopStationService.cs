@@ -132,4 +132,37 @@ public sealed class ShopStationService(
         await db.SaveChangesAsync(cancellationToken);
         return new ShopStationMutationResult(ShopStationMutationFailure.None, station);
     }
+
+    public async Task<object> ListAsync(
+        Guid tenantId,
+        string? configuredPublicBaseUrl,
+        CancellationToken cancellationToken)
+    {
+        var stations = await db.QrStations.AsNoTracking()
+            .Where(station => station.TenantId == tenantId)
+            .OrderBy(station => station.DisplayName)
+            .Select(station => new
+            {
+                station.Id,
+                station.PrinterDeviceId,
+                station.DisplayName,
+                station.PublicCodeHint,
+                station.PublicCode,
+                station.IsEnabled,
+                station.CreatedUtc
+            })
+            .ToListAsync(cancellationToken);
+        var portalBase = (configuredPublicBaseUrl ?? string.Empty).TrimEnd('/');
+        return stations.Select(station => new
+        {
+            station.Id,
+            station.PrinterDeviceId,
+            station.DisplayName,
+            station.PublicCodeHint,
+            station.IsEnabled,
+            station.CreatedUtc,
+            PublicUrl = station.PublicCode is not null ? $"{portalBase}/s/{station.PublicCode}" : null
+        }).ToArray();
+    }
+
 }

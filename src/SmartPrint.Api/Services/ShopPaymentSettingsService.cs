@@ -56,4 +56,25 @@ public sealed class ShopPaymentSettingsService(SmartPrintDbContext db)
 
         return new ShopPaymentSettingsUpdateResult(ShopPaymentSettingsUpdateFailure.None, settings);
     }
+
+    public async Task<object?> GetAsync(Guid tenantId, CancellationToken cancellationToken)
+    {
+        var settings = await db.ShopPaymentProfiles.AsNoTracking()
+            .SingleOrDefaultAsync(item => item.TenantId == tenantId, cancellationToken);
+        if (settings is null)
+        {
+            return null;
+        }
+
+        return new
+        {
+            settings.UpiEnabled,
+            settings.UpiId,
+            settings.PayeeName,
+            settings.CashEnabled,
+            settings.InstantPaymentEnabled,
+            settings.UpdatedUtc
+        };
+    }
+
 }

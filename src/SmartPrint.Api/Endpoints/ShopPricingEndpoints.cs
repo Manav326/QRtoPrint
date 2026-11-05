@@ -1,11 +1,9 @@
-using SmartPrint.Api.Services;
 using System.Security.Claims;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
-using Microsoft.EntityFrameworkCore;
 using SmartPrint.Api.Contracts;
-using SmartPrint.Api.Data;
+using SmartPrint.Api.Services;
 using static SmartPrint.Api.Security.EndpointIdentity;
 
 namespace SmartPrint.Api.Endpoints;
@@ -16,7 +14,7 @@ public static class ShopPricingEndpoints
     {
         shop.MapGet("/pricing", async (
             ClaimsPrincipal principal,
-            SmartPrintDbContext db,
+            ShopPricingService pricingService,
             CancellationToken ct) =>
         {
             if (!TryGetTenantId(principal, out var tenantId))
@@ -24,25 +22,8 @@ public static class ShopPricingEndpoints
                 return Results.Forbid();
             }
 
-            var pricing = await db.ShopPricingProfiles.AsNoTracking()
-                .SingleOrDefaultAsync(item => item.TenantId == tenantId, ct);
-            return pricing is null
-                ? Results.NotFound()
-                : Results.Ok(new
-                {
-                    pricing.IsConfigured,
-                    pricing.MonoPerSideMinor,
-                    pricing.ColourPerSideMinor,
-                    pricing.MonoDuplexPerSheetMinor,
-                    pricing.ColourDuplexPerSheetMinor,
-                    pricing.MinimumChargeMinor,
-                    pricing.Photo35x45Minor,
-                    pricing.Photo25x35Minor,
-                    pricing.Photo2x2Minor,
-                    pricing.Photo4x6Minor,
-                    pricing.Version,
-                    pricing.UpdatedUtc
-                });
+            var pricing = await pricingService.GetAsync(tenantId, ct);
+            return pricing is null ? Results.NotFound() : Results.Ok(pricing);
         });
 
         shop.MapPut("/pricing", async (
@@ -62,9 +43,10 @@ public static class ShopPricingEndpoints
                     ["pricing"] = ["Set positive mono and colour per-side prices, non-negative duplex prices and a valid minimum charge. Prices use paise for INR."]
                 });
             }
-
             if (result.Failure == ShopPricingUpdateFailure.NotFound)
+            {
                 return Results.NotFound();
+            }
 
             var pricing = result.Pricing!;
             return Results.Ok(new
