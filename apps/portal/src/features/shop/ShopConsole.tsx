@@ -6,6 +6,7 @@ import { createShopBillingActions } from "./shop-billing-actions";
 import { useShopPrintActions } from "./useShopPrintActions";
 import { useShopDialogs } from "./useShopDialogs";
 import { useShopNavigation } from "./useShopNavigation";
+import { shopSectionFromPath } from "../../portal-routing";
 import type { ShopModal, ShopSection } from "./shop-types";
 import OverviewPage from "./OverviewPage";
 import { BatchReviewModal, JobHistoryModal, DocumentPreviewModal, RefundModal, ShopOwnerAccountModal, HelpSupportModal, PrinterModal, StationModal } from "./ShopOverlays";
@@ -71,7 +72,7 @@ export default function ShopConsole({ tokens, onSignOut, dark, onToggleTheme }: 
     sidebarOpen,setSidebarOpen,sidebarCollapsed,setSidebarCollapsed,accountMenuOpen,setAccountMenuOpen,
     helpOpen,setHelpOpen,ownerAccountOpen,setOwnerAccountOpen,accountMenuRef,modal,setModal,
     navAction,toggleSidebarCollapsed
-  } = useShopNavigation({active,setActive,setError});
+  } = useShopNavigation({setActive,setError});
 
 
 
