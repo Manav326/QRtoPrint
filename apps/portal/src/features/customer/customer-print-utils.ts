@@ -1,6 +1,6 @@
 import type { CustomerPrintRequestSettings, PrintQuoteResult, UploadedPrintJob } from "../../api";
 
-export export type CustomerLocalAgent = NonNullable<Awaited<ReturnType<typeof import("../../api").createCustomerSession>>["localAgent"]>;
+export type CustomerLocalAgent = NonNullable<Awaited<ReturnType<typeof import("../../api").createCustomerSession>>["localAgent"]>;
 
 export function rejectedPageList(json?:string) {
   try {
@@ -73,7 +73,7 @@ export function isCustomerPdf(file:File):boolean {
   return file.type.toLowerCase()==="application/pdf"||/\.pdf$/i.test(file.name);
 }
 
-const smartPrintNativePdfPreviewTokens=new WeakMap<File,string>();
+export const smartPrintNativePdfPreviewTokens=new WeakMap<File,string>();
 
 export function postSmartPrintNativeMessage(message:string):boolean {
   const bridge=(window as Window & {SmartPrintNative?:{postMessage:(value:string)=>void}}).SmartPrintNative;

@@ -1,3 +1,24 @@
+import { useEffect, useState } from "react";
+import {
+  Check, FileText, FileUp, FolderOpen, Printer, Image as ImageIcon, ShieldCheck, Wallet, X
+} from "lucide-react";
+import PhotoStudio, { type PreparedPhotoSheet } from "../../PhotoStudio";
+import CustomerUpiQr from "../../CustomerUpiQr";
+import { buildCustomerUpiIntent } from "../../upi-payment-intent";
+import { shouldBlockBatchCheckoutForExpiredQuote } from "../../batch-checkout-state";
+import { canFallbackToCloudFromLocalFailure, resolveCustomerUploadMode } from "../../local-upload-routing";
+import {
+  ApiError, LocalUploadOutcomeUnknownError, LocalUploadPreflightError, acceptCustomerQuote,
+  calculateCustomerQuote, getCustomerJobStatus, reportCustomerBatchPayment, reportCustomerUpiPayment,
+  startCustomerBatchPayment, startCustomerPayment, uploadCustomerDocument, uploadCustomerDocumentLocally,
+  type CustomerBatchPayment, type CustomerPayment, type CustomerPhotoPricing, type CustomerJobStatus,
+  type PrintQuoteResult, type UploadedPrintJob, type CustomerPrintRequestSettings
+} from "../../api";
+import Status from "../../shared/ui/Status";
+import PrintKindTag from "../../shared/ui/PrintKindTag";
+import { formatMoney, prettyStatus } from "../../shared/lib/formatting";
+import InfoTooltip from "../../shared/ui/InfoTooltip";
+import { formatIstDateTime } from "../../date-time";
 import {
   rejectedPageList, formatBytes, consumeSmartPrintNativePickerGroups, customerPhotoSizeLabel,
   isCustomerImage, customerFileFingerprint, isCustomerPdf, smartPrintNativePdfPreviewTokens,
