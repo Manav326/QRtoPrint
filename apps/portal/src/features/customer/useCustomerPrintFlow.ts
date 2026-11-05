@@ -2,6 +2,7 @@ import {
   useEffect,
   useState } from "react";
 import { useCustomerPrintStatus } from "./useCustomerPrintStatus";
+import { useCustomerPrintUpload } from "./useCustomerPrintUpload";
 import {
   ApiError,
   acceptCustomerQuote,
@@ -15,7 +16,6 @@ import {
   type UploadedPrintJob
 } from "../../api";
 import { deriveCustomerPrintSummary } from "./customer-print-summary";
-import { useCustomerPrintUpload } from "./useCustomerPrintUpload";
 import { resolveCustomerUploadMode } from "../../local-upload-routing";
 import {
   customerFileFingerprint, isCustomerPdf, smartPrintNativePdfPreviewTokens, postSmartPrintNativeMessage,
@@ -191,9 +191,8 @@ export function useCustomerPrintFlow(props:CustomerPrintFlowProps) {
     return ()=>URL.revokeObjectURL(url);
   },[file]);
 
-  async function upload() {
-    if(batchLockedForPayment){
-      setError("This batch already has a payment attempt. StaretJobStatus(null);setPayment(null);setPaymentReference("");setError("");
+  function selectUploadedFile(item:UploadedPrintJob) {
+    setUploaded(item);setQuote(quotesByJobId[item.job.id]??null);setJobStatus(null);setPayment(null);setPaymentReference("");setError("");
   }
 
   async function getQuote(itemsOverride?:UploadedPrintJob[],settingsOverride?:Record<string,CustomerSavedPrintSettings>,photoSettingsOverride?:Record<string,CustomerPhotoSettings>) {
@@ -356,24 +355,6 @@ export function useCustomerPrintFlow(props:CustomerPrintFlowProps) {
     } finally {setBusy(false);}
   }
 
-  function applyPhotoSheets(sheets:PreparedPhotoSheet[]) {
-    if(!photoStudioSourceFingerprint||!sheets.length)return;
- d, batchPayment,
-    payment, jobStatus, batchStatuses, quotesByJobId, photoPricing, groupNameForFile
-  });
-
-  const {
-    pendingFilesCount, uploadGroups, quoteItems, batchLockedForPayment, statusForBatchItem,
-    quoteExpiredForBatchItem, batchPayableItems, batchPayableTotal, hasLegacyIndividualPayment,
-    hasSelectedLegacyIndividualPayment, batchPaymentStarted, acceptedQuoteExpired,
-    batchCheckoutVisible, batchCheckoutUsesPayment, legacyIndividualPayment, batchCheckoutAmount,
-    batchCheckoutFileCount, batchCheckoutCurrency, customerPaymentForBatchItem,
-    batchCheckoutLineItems, batchPaymentRefundedTotal, batchPaymentAllocationComplete,
-    batchCheckoutHeading, quoteEntries, acceptedQuoteEntries, batchQuoteTotal,
-    batchDocumentSourcePages, batchPhotoCount, batchPhotoAmount, batchMonoPrintedPages,
-    batchColourPrintedPages, batchPrintedPages, batchMonoAmount, batchColourAmount,
-    canSendBatch, canCalculateBatch, photoPriceMap, photoAlreadyUploaded
-  } = summary;
 
 
   return {

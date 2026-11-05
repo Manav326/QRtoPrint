@@ -1,6 +1,6 @@
 import { useCustomerPrintFlow } from "./useCustomerPrintFlow";
 import {
-  Check, FileText, FileUp, FolderOpen, Printer, Image as ImageIcon, ShieldCheck, Wallet, X
+  Check, FileText, FileUp, FolderOpen, Image as ImageIcon, ShieldCheck, Wallet, X
 } from "lucide-react";
 import PhotoStudio from "../../PhotoStudio";
 import CustomerUpiQr from "../../CustomerUpiQr";

@@ -3,7 +3,7 @@ import type { Dispatch, SetStateAction } from "react";
 import {
   ApiError, LocalUploadOutcomeUnknownError, LocalUploadPreflightError,
   uploadCustomerDocument, uploadCustomerDocumentLocally,
-  type UploadedPrintJob, type CustomerPrintRequestSettings
+  type UploadedPrintJob
 } from "../../api";
 import { canFallbackToCloudFromLocalFailure } from "../../local-upload-routing";
 import {
