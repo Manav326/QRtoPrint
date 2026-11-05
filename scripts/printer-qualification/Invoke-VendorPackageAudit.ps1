@@ -185,6 +185,25 @@ foreach ($driverId in $DriverIds) {
         if ($escapedFiles.Count -gt 0) { throw "Archive extracted a file outside the isolated extraction directory." }
 
         $infs = @($files | Where-Object { $_.Extension -ieq ".inf" } | ForEach-Object { Get-InfSummary -Path $_.FullName -Root $extractRoot })
+        $infDriverVersions = @(
+            foreach ($inf in $infs) {
+                foreach ($metadata in $inf.metadata) {
+                    if ($metadata.key -match '^DriverVer(?:\.[A-Za-z0-9_]+)?$') {
+                        $parts = ([string]$metadata.value) -split ',', 2
+                        if ($parts.Count -eq 2) { $parts[1].Trim() }
+                    }
+                }
+            }
+        ) | Select-Object -Unique
+        $manifestVersionMatches = [string]::IsNullOrWhiteSpace([string]$driver.version) -or
+            @($infDriverVersions | Where-Object { $_ -ceq [string]$driver.version }).Count -gt 0
+        $packageHashMatchesPinned = $true
+        if (-not [string]::IsNullOrWhiteSpace([string]$driver.packageSha256)) {
+            $packageHashMatchesPinned = (
+                [string]$driver.packageSha256 -match '^[A-Fa-f0-9]{64}$' -and
+                $hash -ieq [string]$driver.packageSha256
+            )
+        }
         $catalogs = @($files | Where-Object { $_.Extension -ieq ".cat" } | ForEach-Object {
             $signature = Get-AuthenticodeSignature -LiteralPath $_.FullName
             [pscustomobject]@{
@@ -223,9 +242,12 @@ foreach ($driverId in $DriverIds) {
             manufacturer = $driver.manufacturer
             family = $driver.family
             version = $driver.version
+            infDriverVersions = $infDriverVersions
+            manifestVersionMatchesInf = $manifestVersionMatches
             packageFileName = $fileInfo.Name
             packageSizeBytes = $fileInfo.Length
             packageSha256 = $hash
+            packageHashMatchesPinned = $packageHashMatchesPinned
             packageUrl = $download.finalUrl
             packageContentType = $download.contentType
             embeddedAuthenticode = [string]$packageSignature.Status
@@ -246,7 +268,7 @@ foreach ($driverId in $DriverIds) {
             completedAtUtc = [DateTimeOffset]::UtcNow
         }
         $result | ConvertTo-Json -Depth 20 | Set-Content -LiteralPath $reportPath -Encoding utf8
-        Write-Host "$driverId package SHA-256: $hash"
+        Write-Host "$driverId package SHA-256: $hash; pinned hash match: $packageHashMatchesPinned; INF versions: $($infDriverVersions -join ","); manifest version match: $manifestVersionMatches"
         Write-Host "$driverId extraction: $extractStatus; INF files: $($infs.Count); valid signed catalogs: $($validSignedCatalogs.Count); vendor catalogs: $($validVendorCatalogs.Count); pinned catalogs: $($validPinnedCatalogs.Count)"
 
         if ($extractStatus -notin @("EXTRACTED", "EXTRACTED_WITH_7ZIP") -or
@@ -264,6 +286,12 @@ foreach ($driverId in $DriverIds) {
         } elseif (-not [string]::IsNullOrWhiteSpace([string]$driver.catalogSignerThumbprint) -and
             $validPinnedCatalogs.Count -eq 0) {
             $failures += "$driverId did not produce a valid catalog signed by the pinned certificate thumbprint."
+        }
+        if (-not $manifestVersionMatches) {
+            $failures += "$driverId manifest version '$($driver.version)' did not match any printer INF DriverVer found in the downloaded package: $($infDriverVersions -join ', ')."
+        }
+        if (-not $packageHashMatchesPinned) {
+            $failures += "$driverId downloaded package SHA-256 did not match the pinned manifest hash '$($driver.packageSha256)'."
         }
         if (-not $packageSignerMatchesVendor) {
             $failures += "$driverId package Authenticode signer did not match the expected package publisher."
