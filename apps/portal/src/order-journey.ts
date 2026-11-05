@@ -115,3 +115,24 @@ export function orderJourneyStatusLabel(status: string): string {
   };
   return labels[status] ?? status.replaceAll("_"," ").toLowerCase().replace(/\b\w/g, letter=>letter.toUpperCase());
 }
+
+
+export function filterShopOrderJourneys(
+  journeys: ShopOrderJourney[],
+  stage: OrderJourneyStage | "all",
+  query: string
+): ShopOrderJourney[] {
+  const needle = query.trim().toLocaleLowerCase();
+  return journeys.filter(order => {
+    if (stage !== "all" && order.stage !== stage) return false;
+    if (!needle) return true;
+    const searchable = [
+      order.key, order.batchId ?? "", order.name, order.reference,
+      ...order.jobs.flatMap(job => [
+        job.jobNumber, job.batchId ?? "", job.batchName ?? "",
+        job.batchGroupName ?? "", job.document.originalFileName
+      ])
+    ].join(" ").toLocaleLowerCase();
+    return searchable.includes(needle);
+  });
+}
