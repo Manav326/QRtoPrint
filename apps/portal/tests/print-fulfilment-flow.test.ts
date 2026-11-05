@@ -22,7 +22,7 @@ test("owner quote edits are sent through the existing print-job API", () => {
   assert.match(shop, /updateShopPrintJobSettings\(tokens\.accessToken,job\.id,settings\)/);
   assert.match(api, /\/api\/v1\/shop\/print-jobs\/\$\{jobId\}\/settings/);
   assert.match(shop, /Revised quote .* sent to the customer for approval/);
-  assert.match(app, /setPrintSettingsByJobId\(current=>/);
+  assert.match(customer, /setPrintSettingsByJobId\(current=>/);
   assert.match(customer, /copies:candidate\.copies/);
   assert.match(customer, /paperSize,/);
   assert.match(customer, /orientation,/);
@@ -191,7 +191,7 @@ test("local upload ticket retries preserve batch identity and renew the same exp
   const source = readApi("PublicUploadTicketEndpoints.cs");
   const service = read("../../../src/SmartPrint.Api/Services/PublicLocalUploadTicketService.cs");
   const api = read("../src/api.ts");
-  const app = read("../src/App.tsx");
+  const customer = read("../src/features/customer/CustomerPrintFlow.tsx");
   const entitlements = read("../../../src/SmartPrint.Api/Services/TenantEntitlementService.cs");
   const ticketStart = source.indexOf('publicApi.MapPost("/sessions/current/local-upload-tickets"');
   assert.ok(ticketStart >= 0);
@@ -225,9 +225,9 @@ test("local upload ticket retries preserve batch identity and renew the same exp
   assert.match(expiredRecovery, /exception\.code === "batch_upload_locked_after_payment_start"/);
   assert.match(expiredRecovery, /clearCustomerLocalUploadAttempt/);
   assert.match(expiredRecovery, /LocalUploadOutcomeUnknownError/);
-  assert.match(app, /batchCheckoutLocked=exception instanceof LocalUploadPreflightError/);
-  assert.match(app, /!batchCheckoutLocked&&canFallbackToCloudFromLocalFailure/);
-  assert.match(app, /Checkout has already started for this batch/);
+  assert.match(customer, /batchCheckoutLocked=exception instanceof LocalUploadPreflightError/);
+  assert.match(customer, /!batchCheckoutLocked&&canFallbackToCloudFromLocalFailure/);
+  assert.match(customer, /Checkout has already started for this batch/);
   assert.match(entitlements, /!db\.PrintBatchPayments\.Any\(payment =>[\s\S]*?payment\.Status != "REJECTED"/);
 });
 
