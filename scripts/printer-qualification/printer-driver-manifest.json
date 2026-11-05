@@ -241,7 +241,7 @@
       "officialSupportUrl": "https://support.ricoh.com/bb/html/dr_ut_e/re2/model/p410a/p410aen.htm",
       "packageFileName": "z07510L24.exe",
       "packageUrl": "https://support.ricoh.com/bb/pub_e/dr_ut_e/0001346/0001346104/V44600/z07510L24.exe",
-      "packageSha256": null,
+      "packageSha256": "b84d2a7592bd8ef8ef220cfab1fe258271186edf6bc59e6bc35769ce9d45cf5b",
       "packageFormat": "exe-archive",
       "infRelativePath": null,
       "driverName": null,
@@ -263,7 +263,7 @@
       "id": "kyocera-kx-universal-x64",
       "manufacturer": "Kyocera",
       "family": "KX Universal Printer Driver",
-      "version": "8.6.1022",
+      "version": "8.7.0422.0",
       "models": [
         "Kyocera universal driver model coverage as listed in the official KX v8.6 release notes; model exclusions recorded by Kyocera"
       ],
@@ -271,7 +271,7 @@
       "officialSupportUrl": "https://www.kyoceradocumentsolutions.us/content/dam/download-center-americas-cf/us/drivers/drivers/KXv8_6_1022ENRM.download.pdf",
       "packageFileName": "KX_Universal_Printer_Driver_zip.download.zip",
       "packageUrl": "https://www.kyoceradocumentsolutions.eu/content/dam/download-center-cf/eu/drivers/all/KX_Universal_Printer_Driver_zip.download.zip",
-      "packageSha256": null,
+      "packageSha256": "8d8052d26269b47afc6d2b9066670bccd13977d13e586af15f4e302c5d28cd8e",
       "packageFormat": "zip",
       "infRelativePath": null,
       "driverName": null,
@@ -281,11 +281,11 @@
       ],
       "licenseReview": "pending_package_license_review",
       "ciApproval": "pending_package_hash_signature_and_os_review",
-      "notes": "Official Kyocera release notes identify KX Driver 8.6.1022 and a broad model set; Kyocera's security advisory says the older 8.3.3520 package is affected by CVE-2023-38634 and version 8.4.1716 fixes it. This latest package is recorded for non-executing audit only. Confirm the exact OS matrix for 8.6.1022 and verify hashes/catalog signatures before any installation.",
+      "notes": "Official Kyocera KX Universal Printer Driver package downloaded for non-executing audit reports printer INF DriverVer 8.7.0422.0 (04/22/2026) in x64/ARM64/32-bit INF files. The x64 OEMSETUP.INF references KYOMITA.CAT signed by Kyocera certificate AA2098F3E70AC791261FF95930AE4C981B28C0D3; ARM64 catalog is WHCP-signed. Package SHA-256 is pinned from the official package audit. Exact supported OS target, model scope, license terms, selected driver name and install approval still require review.",
       "githubHostedRunner": "Windows Server 2025 x64",
       "windows11Certification": "not_established_by_github_hosted_runner",
       "runnerEligibility": "pending_nonexecuting_package_audit",
-      "catalogSignerThumbprint": null,
+      "catalogSignerThumbprint": "AA2098F3E70AC791261FF95930AE4C981B28C0D3",
       "packageSignerContains": null
     }
   ]
