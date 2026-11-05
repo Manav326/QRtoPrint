@@ -911,3 +911,20 @@ test("local Agent endpoint discovery is implemented in the application service l
     assert.doesNotMatch(source, /AgentEndpointInfo\.GetLocalAgentInfoAsync/);
   }
 });
+
+
+test("endpoint modules do not compose EF queries outside the database health endpoint", () => {
+  const endpointModules = readdirSync(
+    new URL("../../../src/SmartPrint.Api/Endpoints/", import.meta.url)
+  ).filter((fileName) => fileName.endsWith(".cs"));
+
+  for (const moduleName of endpointModules) {
+    if (moduleName === "SystemEndpoints.cs") {
+      continue;
+    }
+
+    const source = readApi(moduleName);
+    assert.doesNotMatch(source, /\bdb\./,
+      moduleName + " must delegate feature queries to an application service.");
+  }
+});
