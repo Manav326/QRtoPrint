@@ -44,6 +44,10 @@ import EmptyModule from "./shared/ui/EmptyModule";
 import Status from "./shared/ui/Status";
 import PrintersPage from "./features/shop/printers/PrintersPage";
 import StationsPage from "./features/shop/stations/StationsPage";
+import CustomersPage from "./features/shop/customers/CustomersPage";
+import Modal from "./shared/ui/Modal";
+import PrintKindTag from "./shared/ui/PrintKindTag";
+import { formatMoney, prettyStatus } from "./shared/lib/formatting";
 import PricingPage from "./features/shop/pricing/PricingPage";
 import SettingsPage from "./features/shop/settings/SettingsPage";
 import { IST_TIME_ZONE, formatIstDate, formatIstDateTime, formatIstTime, istDateKey } from "./date-time";
@@ -1560,187 +1564,6 @@ function ShopConsole({ tokens, onSignOut, dark, onToggleTheme }: { tokens: AuthT
   );
 }
 
-function CustomersPage({ token }: { token: string }) {
-  const [searchDraft, setSearchDraft] = useState("");
-  const [search, setSearch] = useState("");
-  const [page, setPage] = useState(1);
-  const [refreshKey, setRefreshKey] = useState(0);
-  const [result, setResult] = useState<ShopCustomerPage | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState("");
-  const [selectedCustomer, setSelectedCustomer] = useState<ShopCustomer | null>(null);
-  const [history, setHistory] = useState<ShopCustomerHistory | null>(null);
-  const [historyLoading, setHistoryLoading] = useState(false);
-  const [historyError, setHistoryError] = useState("");
-  const historyRequest = useRef(0);
-  const pageSize = 20;
-
-  useEffect(() => {
-    let current = true;
-    setLoading(true);
-    setError("");
-    void getShopCustomers(token, { search, page, pageSize })
-      .then(value => { if (current) setResult(value); })
-      .catch(exception => {
-        if (current) setError(exception instanceof Error ? exception.message : "Could not load shop customers.");
-      })
-      .finally(() => { if (current) setLoading(false); });
-    return () => { current = false; };
-  }, [token, search, page, pageSize, refreshKey]);
-
-  async function openHistory(customer: ShopCustomer) {
-    const request = ++historyRequest.current;
-    setSelectedCustomer(customer);
-    setHistory(null);
-    setHistoryError("");
-    setHistoryLoading(true);
-    try {
-      const value = await getShopCustomerHistory(token, customer.id);
-      if (request === historyRequest.current) setHistory(value);
-    } catch (exception) {
-      if (request === historyRequest.current) {
-        setHistoryError(exception instanceof Error ? exception.message : "Could not load this customer's print history.");
-      }
-    } finally {
-      if (request === historyRequest.current) setHistoryLoading(false);
-    }
-  }
-
-  function closeHistory() {
-    historyRequest.current++;
-    setSelectedCustomer(null);
-    setHistory(null);
-    setHistoryError("");
-    setHistoryLoading(false);
-  }
-
-  const totalPages = Math.max(1, Math.ceil((result?.totalCount ?? 0) / pageSize));
-  const firstRow = result?.totalCount ? (page - 1) * pageSize + 1 : 0;
-  const lastRow = Math.min(page * pageSize, result?.totalCount ?? 0);
-
-  return (
-    <section className="customers-workspace">
-      <div className="customers-intro">
-        <div>
-          <span className="reports-eyebrow">SHOP RELATIONSHIPS</span>
-          <h2>Customer directory</h2>
-          <p>Signed-in SmartPrint customers who have connected to this shop. Guest sessions stay anonymous.</p>
-        </div>
-        <div className="customers-total">
-          <strong>{result?.totalCount ?? "—"}</strong>
-          <span>linked customers</span>
-        </div>
-      </div>
-
-      <form className="customers-toolbar" onSubmit={event => {
-        event.preventDefault();
-        setPage(1);
-        setSearch(searchDraft.trim());
-      }}>
-        <label className="search-field customers-search">
-          <Search size={14}/>
-          <input value={searchDraft} onChange={event => setSearchDraft(event.target.value)}
-            placeholder="Search customer name or email" aria-label="Search customer name or email"/>
-        </label>
-        <button className="primary-button" type="submit"><Search size={14}/> Search</button>
-        <button className="secondary-button" type="button" onClick={() => setRefreshKey(value => value + 1)} disabled={loading}>
-          <Activity size={14}/> Refresh
-        </button>
-      </form>
-
-      {error && <div className="inline-error" role="alert">{error}</div>}
-      {loading && !result ? <div className="panel reports-loading"><span className="button-spinner"/> Loading customers…</div> : null}
-      {!loading && !error && result?.items.length === 0 && (
-        <div className="panel customers-empty">
-          <span className="customers-empty-icon"><Users size={24}/></span>
-          <h3>{search ? "No matching customers" : "No signed-in customers yet"}</h3>
-          <p>{search
-            ? "Try another name or email search."
-            : "When a customer signs in before scanning this shop's QR code, their shop-specific activity will appear here. Guest jobs are intentionally not identified or linked."}</p>
-        </div>
-      )}
-
-      {result && result.items.length > 0 && (
-        <div className="panel customers-table-panel">
-          <div className="panel-heading customers-panel-heading">
-            <div><h2>Customers connected to this shop</h2><p>Only activity created through this shop's QR sessions is included.</p></div>
-            <span className="neutral-chip">{result.totalCount} total</span>
-          </div>
-          <div className="table-scroll">
-            <table className="customers-table">
-              <thead><tr><th>CUSTOMER</th><th>PRINT JOBS</th><th>COMPLETED</th><th>LAST QR SESSION</th><th>HISTORY</th></tr></thead>
-              <tbody>
-                {result.items.map(customer => (
-                  <tr key={customer.id}>
-                    <td><div className="customer-cell"><strong>{customer.displayName || "SmartPrint customer"}</strong><span>{customer.maskedEmail}</span></div></td>
-                    <td><strong className="customers-number">{customer.printJobCount}</strong><small className="customers-subvalue">{customer.sessionCount} QR sessions</small></td>
-                    <td><strong className="customers-number">{customer.completedJobCount}</strong><small className="customers-subvalue">output confirmed</small></td>
-                    <td><span className="customers-date">{formatIstDateTime(customer.lastSeenUtc)}</span></td>
-                    <td><button type="button" className="customers-history-button" onClick={() => void openHistory(customer)}>View history <ArrowRight size={13}/></button></td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-          <div className="table-footer customers-pagination">
-            <span>Showing <strong>{firstRow}–{lastRow}</strong> of <strong>{result.totalCount}</strong></span>
-            <div><button type="button" disabled={page <= 1 || loading} onClick={() => setPage(value => Math.max(1, value - 1))}>← Previous</button>
-              <span>{page} / {totalPages}</span>
-              <button type="button" disabled={page >= totalPages || loading} onClick={() => setPage(value => Math.min(totalPages, value + 1))}>Next →</button></div>
-          </div>
-        </div>
-      )}
-
-      {selectedCustomer && (
-        <Modal title={selectedCustomer.displayName || "SmartPrint customer"}
-          subtitle={selectedCustomer.maskedEmail + " · Only this shop's print history"}
-          onClose={closeHistory}>
-          <div className="customer-history-modal">
-            {historyLoading && <div className="reports-loading"><span className="button-spinner"/> Loading print history…</div>}
-            {historyError && <div className="inline-error" role="alert">{historyError}</div>}
-            {history && (
-              <>
-                <div className="customer-history-summary"><strong>{history.totalJobs}</strong><span>print jobs at this shop</span></div>
-                {history.jobs.length === 0
-                  ? <div className="empty-search">No print jobs are available for this customer yet.</div>
-                  : <div className="customer-history-list">
-                    {history.jobs.map(job => {
-                      const netPaid = job.payment
-                        ? Math.max(0, job.payment.amountMinor - job.payment.refundedAmountMinor)
-                        : 0;
-                      const tone = job.status === "COMPLETED" ? "green"
-                        : job.status.includes("REJECT") || job.status === "FAILED" ? "red"
-                        : job.status.includes("AWAITING") ? "amber" : "blue";
-                      return (
-                        <article className="customer-history-row" key={job.id}>
-                          <div className="customer-history-heading">
-                            <div><strong>{job.document.originalFileName}</strong><PrintKindTag printKind={job.printKind}/><span>{job.jobNumber} · {formatIstDateTime(job.createdUtc)}</span></div>
-                            <Status label={prettyStatus(job.status)} tone={tone}/>
-                          </div>
-                          <div className="customer-history-facts">
-                            <span>{job.printKind==="PHOTO"?`Photo sheet · ${job.photoCount??0} × ${job.photoSizeCode??"photo"} · ${job.pageCount} A4 pages`:`${job.pageCount} pages · ${job.copies} copies`}</span>
-                            <strong>{formatMoney(job.quotedAmountMinor, job.currency)}</strong>
-                          </div>
-                          {job.payment && <div className="customer-history-payment">
-                            {job.payment.status.replaceAll("_", " ")} · {job.payment.method} · Net recorded: {formatMoney(netPaid, job.payment.currency)}
-                            {job.payment.refundedAmountMinor > 0 ? " · Refund recorded" : ""}
-                          </div>}
-                          <div className="customer-history-output">{job.outputType === "PDF_EXPORT"
-                            ? (job.outputCompletedUtc ? "PDF export created and verified" : "PDF export not yet completed")
-                            : (job.outputConfirmedUtc ? "Shop confirmed physical output" : "Physical output not yet confirmed")}</div>
-                        </article>
-                      );
-                    })}
-                  </div>}
-              </>
-            )}
-          </div>
-        </Modal>
-      )}
-    </section>
-  );
-}
-
 function ReportsPage({ token }: { token: string }) {
   const [days, setDays] = useState<7 | 30 | 90>(30);
   const [summary, setSummary] = useState<ShopReportSummary | null>(null);
@@ -2640,40 +2463,6 @@ function spoolerStatusWarning(status?: string | null, printerStatus?: string | n
     return "The printer requires attention. Resolve the prompt at the device before checking the same queued job.";
   return "";
 }
-function prettyStatus(status:string) {
-  const names:Record<string,string>={
-    AWAITING_CONFIGURATION:"Configure options",
-    AWAITING_CUSTOMER_APPROVAL:"Quote awaiting customer",
-    QUOTE_EXPIRED:"Quote expired",
-    AWAITING_SHOP_APPROVAL:"Awaiting shop approval",
-    REJECTED:"Rejected",
-    REFUNDED:"Fully refunded",
-    PARTIALLY_REFUNDED:"Partially refunded",
-
-    UPLOADED:"Uploaded",
-    VALIDATING:"Validating",
-    ANALYSING:"Analysing",
-    AWAITING_PAYMENT:"Awaiting payment",
-    AWAITING_COUNTER_PAYMENT:"Pay at counter",
-    AUTHORISED:"Authorised",
-    PAID_AUTHORISED:"Paid · authorised",
-    LOCAL_QUEUE_CLAIMED:"Transferring locally",
-    LOCAL_QUEUE_READY:"Local copy secured",
-    PRINT_AUTHORISED:"Ready to print",
-    PRINT_SUBMITTING:"Sending to printer",
-    SPOOLER_ACCEPTED:"Accepted by spooler",
-    PRINTING:"Printing",
-    OUTPUT_UNCONFIRMED:"Output unconfirmed",
-    PDF_EXPORTING:"Creating PDF",
-    PDF_EXPORTED:"PDF saved",
-    QUEUED:"Queued",
-    SUBMITTING_TO_SPOOLER:"Sending to printer",
-    COMPLETED:"Completed",
-    FAILED:"Failed",
-    CANCELLED:"Cancelled"
-  };
-  return names[status] || status.replaceAll("_"," ").toLowerCase().replace(/\\b\\w/g,letter=>letter.toUpperCase());
-}
 function printBlockMessage(code:string):string {
   switch(code) {
     case "PAPER_SIZE_UNSUPPORTED":
@@ -2701,9 +2490,6 @@ function isPrinterAvailable(printer: PrinterDevice, onlineAgentIds: ReadonlySet<
     (printer.status === "Ready" || printer.status === "Busy");
 }
 
-function formatMoney(minor:number,currency:string) {
-  return new Intl.NumberFormat("en-IN",{style:"currency",currency,minimumFractionDigits:2}).format(minor/100);
-}
 function formatBytes(bytes:number) {
   return bytes<1024*1024?`${(bytes/1024).toFixed(0)} KB`:`${(bytes/(1024*1024)).toFixed(2)} MB`;
 }
@@ -2830,10 +2616,6 @@ function StationModal({ busy, printers, onClose, onSubmit }: {
   </Modal>;
 }
 
-function Modal({title,subtitle,children,onClose}:{title:string;subtitle:string;children:ReactNode;onClose:()=>void}) {
-  return <div className="modal-scrim" onMouseDown={e=>{if(e.target===e.currentTarget)onClose();}}><section className="modal-card" role="dialog" aria-modal="true" aria-label={title}><div className="modal-heading"><div><h2>{title}</h2><p>{subtitle}</p></div><button className="icon-button" onClick={onClose} aria-label="Close"><X size={18}/></button></div>{children}</section></div>;
-}
-
 function SetupCheck({complete,title,detail,onClick}:{complete:boolean;title:string;detail:string;onClick:()=>void}) {
   return <button className="setup-check" onClick={onClick}><span className={complete?"check-circle complete":"check-circle"}>{complete?<Check size={14}/>:null}</span><span className="setup-check-copy"><strong>{title}</strong><small>{detail}</small></span><ArrowRight size={16}/></button>;
 }
@@ -2842,12 +2624,6 @@ function Metric({icon,label,value,note,accent}:{icon:ReactNode;label:string;valu
 }
 function Device({name,detail,state,tone}:{name:string;detail:string;state:string;tone:string}) {
   return <div className="device-row"><div className="device-glyph"><Printer size={16}/></div><div className="device-copy"><strong>{name}</strong><span>{detail}</span></div><Status label={state} tone={tone}/></div>;
-}
-function PrintKindTag({printKind,count}:{printKind?:string|null;count?:number}) {
-  const isPhoto=printKind==="PHOTO";
-  const label=isPhoto?"Photo":"Document";
-  const countLabel=typeof count==="number"&&count>1?` · ${count}`:"";
-  return <span className={`print-kind-tag print-kind-tag--${isPhoto?"photo":"document"}`} title={isPhoto?"Photo printing job":"Document printing job"}>{label}{countLabel}</span>;
 }
 function initials(value:string) { return value.trim().split(/\s+/).slice(0,2).map(part=>part[0]?.toUpperCase()||"").join("") || "SP"; }
 function pageDescription(section:Section) {
