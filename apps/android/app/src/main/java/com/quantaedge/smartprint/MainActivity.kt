@@ -1213,7 +1213,9 @@ class MainActivity : AppCompatActivity() {
                         results.removeAllViews()
                         val needle = query.text.toString().trim().lowercase(Locale.ROOT)
                         val matches = grouped.filter { batch ->
-                            val dateMatch = selectedDate == null || batch.any { it.createdUtc.startsWith(selectedDate!!) }
+                            val dateMatch = selectedDate == null || batch.any { job ->
+                                runCatching { Instant.parse(job.createdUtc).atZone(ZoneId.systemDefault()).toLocalDate().toString() == selectedDate }.getOrDefault(false)
+                            }
                             val searchMatch = needle.isBlank() || batch.any { job ->
                                 listOf(job.batchId.orEmpty(), job.batchName.orEmpty(), job.batchGroupName.orEmpty(),
                                     job.jobNumber, job.originalFileName, job.shopName)
