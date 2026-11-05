@@ -8,6 +8,7 @@ import InfoTooltip from "../../../shared/ui/InfoTooltip";
 import PrintKindTag from "../../../shared/ui/PrintKindTag";
 import Status from "../../../shared/ui/Status";
 import { isPrinterAvailable } from "../../../shared/lib/printers";
+import { verifiedPdfExportPath } from "../../../print-output";
 
 function spoolerStatusWarning(status?: string | null, printerStatus?: string | null) {
   const spooler = (status || "").toUpperCase();

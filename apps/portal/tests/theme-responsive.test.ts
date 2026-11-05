@@ -449,11 +449,12 @@ test("PDF footer branding is opt-in per batch and cannot cover source content or
 });
 test("contextual information stays concise and is accessible by hover, focus and tap", () => {
   const app = read("../src/App.tsx");
+  const tooltip = read("../src/shared/ui/InfoTooltip.tsx");
   const css = read("../src/styles.css");
-  assert.match(app, /function InfoTooltip/);
-  assert.match(app, /aria-describedby=\{tooltipId\}/);
-  assert.match(app, /onMouseEnter=\{\(\)=>setOpen\(true\)\}/);
-  assert.match(app, /onClick=\{\(\)=>setOpen\(true\)\}/);
+  assert.match(tooltip, /function InfoTooltip/);
+  assert.match(tooltip, /aria-describedby=\{tooltipId\}/);
+  assert.match(tooltip, /onMouseEnter=\{\(\)=>setOpen\(true\)\}/);
+  assert.match(tooltip, /onClick=\{\(\)=>setOpen\(true\)\}/);
   assert.match(app, /Files stay on this computer\. Reconnect it to use its printers\./);
   assert.match(app, /To switch computers, upload a new Cloud-assisted batch\./);
   assert.match(app, /jobStatus\.pdfBrandingEnabled&&<div className="customer-branding-note">/);
@@ -543,8 +544,8 @@ test("session renewal refreshes customer payment choices and explains unavailabl
   assert.equal((app.match(/The shop has not enabled UPI or cash payment/g) ?? []).length, 2);
 });
 test("contextual help supports outside-click and Escape dismissal", () => {
-  const app = read("../src/App.tsx");
-  assert.match(app, /document\.addEventListener\("pointerdown",dismissOutside\)/);
-  assert.match(app, /event\.key==="Escape"/);
-  assert.match(app, /aria-expanded=\{open\}/);
+  const tooltip = read("../src/shared/ui/InfoTooltip.tsx");
+  assert.match(tooltip, /document\.addEventListener\("pointerdown",dismissOutside\)/);
+  assert.match(tooltip, /event\.key==="Escape"/);
+  assert.match(tooltip, /aria-expanded=\{open\}/);
 });

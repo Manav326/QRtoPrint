@@ -1,7 +1,7 @@
-import { Fragment, useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   Activity, ArrowRight, Check, Clock3, CreditCard, FileText, FileUp, FolderOpen, LayoutDashboard,
-  ChevronDown, LifeBuoy, LogOut, Menu, Monitor, Plus, Printer, QrCode, Search, Settings, Image as ImageIcon, UserRound,
+  ChevronDown, LifeBuoy, LogOut, Menu, Monitor, Plus, Printer, QrCode, Settings, Image as ImageIcon, UserRound,
   ShieldCheck, Users, Wallet, X, PanelLeftClose, PanelLeftOpen, RotateCcw
 } from "lucide-react";
 import PhotoStudio, { type PreparedPhotoSheet } from "./PhotoStudio";
@@ -32,12 +32,10 @@ import {
   enrollLocalAgent, getLocalAgentStatus,
   isDesktopApp, setDesktopContentProtection, type DesktopAgentStatus
 } from "./desktop-bridge";
-import { verifiedPdfExportPath } from "./print-output";
 import { applyThemePreference, readDarkModePreference, readSidebarCollapsedPreference, saveDarkModePreference, saveSidebarCollapsedPreference } from "./ui-preferences";
 import ThemeToggleButton from "./ThemeToggleButton";
 import OrderJourneyPage from "./OrderJourneyPage";
 import SubscriptionPage from "./features/subscription/SubscriptionPage";
-import EmptyModule from "./shared/ui/EmptyModule";
 import Status from "./shared/ui/Status";
 import PrintersPage from "./features/shop/printers/PrintersPage";
 import StationsPage from "./features/shop/stations/StationsPage";
