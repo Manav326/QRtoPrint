@@ -8,15 +8,15 @@ const read = (path: string) => readFileSync(new URL(path, import.meta.url), "utf
 
 
 test("folder and per-file Copies inputs capture values before scheduling React state updates", () => {
-  const app = read("../src/App.tsx");
+  const customer = read("../src/features/customer/CustomerPrintFlow.tsx");
   const copyLabels: string[] = [];
   let cursor = 0;
   while (true) {
-    const start = app.indexOf('<label className="customer-folder-copies">', cursor);
+    const start = customer.indexOf('<label className="customer-folder-copies">', cursor);
     if (start < 0) break;
-    const end = app.indexOf("</label>", start);
+    const end = customer.indexOf("</label>", start);
     assert.ok(end > start, "Each Copies label must be properly closed.");
-    copyLabels.push(app.slice(start, end));
+    copyLabels.push(customer.slice(start, end));
     cursor = end + "</label>".length;
   }
   assert.equal(copyLabels.length, 2, "The shared flow must have folder-default and per-file Copies inputs.");
@@ -60,6 +60,7 @@ test("first web visit is light and saved selection is restored before rendering"
 test("one accessible theme control is available to all application route families", () => {
   const toggle = read("../src/ThemeToggleButton.tsx");
   const app = read("../src/App.tsx");
+  const customerEntry = read("../src/features/customer/CustomerEntry.tsx");
   const publicPage = read("../src/PublicLandingPage.tsx");
   const shopAuth = read("../src/AuthScreen.tsx");
   const adminAuth = read("../src/PlatformAdminAuthScreen.tsx");
@@ -453,19 +454,19 @@ test("PDF footer branding is opt-in per batch and cannot cover source content or
 });
 test("contextual information stays concise and is accessible by hover, focus and tap", () => {
   const customer = read("../src/features/customer/CustomerPrintFlow.tsx");
-  const queue = read("../src/features/shop/queue/PrintQueuePage.tsx");
+  const shop = read("../src/features/shop/ShopConsole.tsx");
   const tooltip = read("../src/shared/ui/InfoTooltip.tsx");
   const css = read("../src/styles.css");
   assert.match(tooltip, /function InfoTooltip/);
   assert.match(tooltip, /aria-describedby=\{tooltipId\}/);
   assert.match(tooltip, /onMouseEnter=\{\(\)=>setOpen\(true\)\}/);
   assert.match(tooltip, /onClick=\{\(\)=>setOpen\(true\)\}/);
-  assert.match(queue, /<InfoTooltip label="PDF footer details">/);
-  assert.match(queue, /Footer only appears on PDFs with a verified blank bottom margin\./);
+  assert.match(shop, /<InfoTooltip label="PDF footer details">/);
+  assert.match(shop, /Footer only appears on PDFs with a verified blank bottom margin\./);
   assert.match(customer, /<InfoTooltip label="Why cash is unavailable">/);
   assert.match(customer, /The shop must enable Cash at counter in Payments settings\./);
   assert.match(customer, /jobStatus\.pdfBrandingEnabled&&<div className="customer-branding-note">/);
-  assert.doesNotMatch(queue+customer, /If this request is saved as a PDF, a small SmartPrint by QuantaEdge footer/);
+  assert.doesNotMatch(shop+customer, /If this request is saved as a PDF, a small SmartPrint by QuantaEdge footer/);
   assert.match(css, /\.context-info:focus-within \.context-info-tooltip/);
   assert.match(css, /\.context-info\.context-info-open \.context-info-tooltip/);
 });
