@@ -266,7 +266,7 @@ test("customer job status remains scoped to the active customer session in its s
 
 
 test("batch review defaults every uploaded file to accepted until the shopkeeper rejects it", () => {
-  const shop = read("../src/features/shop/ShopOverlays.tsx");
+  const shop = read("../src/features/shop/modals/BatchReviewModal.tsx");
   assert.match(shop, /const acceptedIds=jobs\.filter\(job=>decisions\[job\.id\]\?\?true\)\.map\(job=>job\.id\)/);
   assert.match(shop, /onDecision:\(jobId:string,accepted:boolean\)=>void/);
   assert.match(shop, /decisions\[job\.id\]\?\?true/);
@@ -357,7 +357,7 @@ test("customer local transfer remains visible with a clear unavailable state whe
 
 test("owner preview selects the persisted supported MIME type before the blob response type",()=>{
  const actions=read("../src/features/shop/useShopPrintActions.ts");
- const overlays=read("../src/features/shop/ShopOverlays.tsx");
+ const overlays=read("../src/features/shop/modals/DocumentPreviewModal.tsx");
  assert.match(actions,/const storedType=\(job\.document\.mediaType\|\|""\)/);
  assert.match(actions,/supportedTypes\.has\(storedType\)[\s\S]*?supportedTypes\.has\(responseType\)/);
  assert.match(overlays,/Preview format is not supported/);
@@ -458,7 +458,7 @@ test("customer photo previews do not expose the raw image or prepared PDF viewer
 
 test("the exact same Photo Studio is opened from the shop image review",()=>{
  const shop=read("../src/features/shop/ShopConsole.tsx");
- const overlays=read("../src/features/shop/ShopOverlays.tsx");
+ const overlays=read("../src/features/shop/modals/DocumentPreviewModal.tsx");
  const actions=read("../src/features/shop/useShopPrintActions.ts");
  assert.match(actions,/setShopPhotoStudio\(\{source,job:preview\.job,returnPreview\}\)/);
  assert.match(actions,/replaceShopPhotoDocument\(accessToken,editor\.job\.id,sheet\.file,sheet\.sizeCode,sheet\.photoCount,sheet\.photosPerPage\)/);
@@ -468,7 +468,7 @@ test("the exact same Photo Studio is opened from the shop image review",()=>{
 
 test("native Windows content capture protection covers the photo editor and image preview",()=>{
  const studio=read("../src/PhotoStudio.tsx");
- const overlays=read("../src/features/shop/ShopOverlays.tsx");
+ const overlays=read("../src/features/shop/modals/DocumentPreviewModal.tsx");
  const bridge=read("../src/desktop-bridge.ts");
  const permissions=JSON.parse(read("../../desktop/src-tauri/capabilities/default.json"));
  assert.match(studio,/setDesktopContentProtection\(true\)/);

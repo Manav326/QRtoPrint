@@ -299,12 +299,9 @@ test("shop workspace content expands into the space left after the sidebar", () 
 
 test("shop owner personal details are editable from the account menu without mixing shop branding", () => {
   const shop = read("../src/features/shop/ShopConsole.tsx");
-  const overlays = read("../src/features/shop/ShopOverlays.tsx");
+  const modal = read("../src/features/shop/modals/ShopOwnerAccountModal.tsx");
   const settings = read("../src/features/shop/settings/SettingsPage.tsx");
   const api = read("../src/api/shop.ts");
-  const modalStart = overlays.indexOf("function ShopOwnerAccountModal");
-  const modalEnd = overlays.indexOf("function HelpSupportModal", modalStart);
-  const modal = overlays.slice(modalStart, modalEnd);
 
   assert.match(shop, /Personal details/);
   assert.match(shop, /ownerAccountOpen/);
@@ -412,7 +409,7 @@ test("all print settings controls capture React event values before state update
 
 
 test("PDF footer branding is opt-in per batch and cannot cover source content or paper output", () => {
-  const overlays = read("../src/features/shop/ShopOverlays.tsx");
+  const overlays = read("../src/features/shop/modals/BatchReviewModal.tsx");
   const customer = read("../src/features/customer/CustomerPrintFlow.tsx");
   const api = read("../src/api/shop.ts");
   const reviewEndpoint = read("../../../src/SmartPrint.Api/Endpoints/ShopPrintBatchReviewEndpoints.cs");
@@ -454,7 +451,7 @@ test("PDF footer branding is opt-in per batch and cannot cover source content or
 });
 test("contextual information stays concise and is accessible by hover, focus and tap", () => {
   const customer = read("../src/features/customer/CustomerPrintFlow.tsx");
-  const overlays = read("../src/features/shop/ShopOverlays.tsx");
+  const overlays = read("../src/features/shop/modals/BatchReviewModal.tsx");
   const tooltip = read("../src/shared/ui/InfoTooltip.tsx");
   const css = read("../src/styles.css");
   assert.match(tooltip, /function InfoTooltip/);
