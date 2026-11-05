@@ -140,11 +140,13 @@ test("workspace styles retain one authoritative appearance palette", () => {
 
 test("QR station poster renders one canonical QR in an isolated single-page A5 print surface", () => {
   const app = read("../src/App.tsx");
+  const stations = read("../src/features/shop/stations/StationsPage.tsx");
   const poster = read("../src/QrStationPrintDocument.tsx");
   const css = read("../src/styles.css");
 
-  assert.match(app, /<QrStationPrintDocument station=\{stations\.find\(station => station\.id === printingStationId\)/);
-  assert.match(app, /querySelectorAll<HTMLImageElement>\("\.qr-print-document img"\)/);
+  assert.match(app, /import StationsPage from "\.\/features\/shop\/stations\/StationsPage"/);
+  assert.match(stations, /<QrStationPrintDocument station=\{stations\.find\(station => station\.id === printingStationId\)/);
+  assert.match(stations, /querySelectorAll<HTMLImageElement>\("\.qr-print-document img"\)/);
   assert.match(poster, /createPortal\([\s\S]*document\.body/);
   assert.match(poster, /<QRCode value=\{station\.publicUrl\}/);
   assert.equal((poster.match(/<QRCode\b/g) ?? []).length, 1);
