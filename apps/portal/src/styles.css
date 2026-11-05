@@ -3208,3 +3208,8 @@ html[data-theme="dark"] .customer-entry:not(.smartprint-native) .customer-upload
 html[data-theme="dark"] .customer-entry:not(.smartprint-native) .customer-upload-mode.selected strong {
   color: #ded7ff;
 }
+
+/* Theme foreground and surface must change together; animate only the border. */
+.customer-entry:not(.smartprint-native) .customer-upload-zone {
+  transition: border-color .18s;
+}

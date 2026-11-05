@@ -478,6 +478,7 @@ test("Windows local document previews prefer the paired Agent loopback endpoint"
 
 test("customer uploader is centred and shared light-theme text tokens meet readable contrast", () => {
   const css = read("../src/styles.css");
+  assert.match(css, /customer-entry:not\\(\\.smartprint-native\\) \\.customer-upload-zone \\{\\s*transition: border-color \\.18s;/);
   const desktop = read("../../desktop/src/desktop.css");
   assert.match(css, /customer-entry-card--upload \.customer-print-flow\{width:min\(100%,1040px\);margin-inline:auto\}/);
   assert.match(css, /customer-flow-heading\{align-items:center;justify-content:center;flex-direction:column/);
