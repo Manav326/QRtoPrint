@@ -468,11 +468,11 @@ test("the exact same Photo Studio is opened from the shop image review",()=>{
 
 test("native Windows content capture protection covers the photo editor and image preview",()=>{
  const studio=read("../src/PhotoStudio.tsx");
- const shop=read("../src/features/shop/ShopConsole.tsx");
+ const overlays=read("../src/features/shop/ShopOverlays.tsx");
  const bridge=read("../src/desktop-bridge.ts");
  const permissions=JSON.parse(read("../../desktop/src-tauri/capabilities/default.json"));
  assert.match(studio,/setDesktopContentProtection\(true\)/);
- assert.match(shop,/setDesktopContentProtection\(true\)/);
+ assert.match(overlays,/setDesktopContentProtection\(true\)/);
  assert.match(bridge,/getCurrentWindow\(\)\.setContentProtected\(enabled\)/);
  assert.ok(permissions.permissions.includes("core:window:allow-set-content-protected"));
 });
