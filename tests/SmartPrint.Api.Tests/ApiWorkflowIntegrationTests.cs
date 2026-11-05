@@ -203,6 +203,8 @@ public sealed class ApiWorkflowIntegrationTests
                 await db.SaveChangesAsync();
             }
 
+            client.DefaultRequestHeaders.Authorization =
+                new AuthenticationHeaderValue("Bearer", customer.AccessToken);
             using (var customerJobsAfterUpload = await client.GetAsync("/api/v1/customer/jobs"))
             {
                 using var json = await ReadExpectedJsonAsync(customerJobsAfterUpload, HttpStatusCode.OK);
@@ -496,6 +498,233 @@ public sealed class ApiWorkflowIntegrationTests
                 "/api/v1/auth/refresh",
                 new { refreshToken = replacementRefreshToken }))
                 Assert.Equal(HttpStatusCode.Unauthorized, revokedReplay.StatusCode);
+        }
+    }
+
+    [Fact]
+    public async Task Batch_review_and_checkout_exclude_rejected_files_from_payment_and_authorisation()
+    {
+        var database = await ApiIntegrationTestDatabase.TryCreateAsync();
+        if (database is null)
+            return;
+
+        await using (database)
+        {
+            var storageRoot = Path.Combine(
+                Path.GetTempPath(),
+                "qrtoprint-api-batch-integration",
+                database.DatabaseName);
+            using var factory = new ApiIntegrationWebApplicationFactory(
+                database.ConnectionString,
+                storageRoot);
+            using var client = factory.CreateClient();
+
+            var shop = await RegisterShopAsync(client, "Batch Integration Shop");
+            client.DefaultRequestHeaders.Authorization =
+                new AuthenticationHeaderValue("Bearer", shop.AccessToken);
+
+            using (var pricing = await client.PutAsJsonAsync("/api/v1/shop/pricing", new
+            {
+                monoPerSideMinor = 100,
+                colourPerSideMinor = 200,
+                monoDuplexPerSheetMinor = 50,
+                colourDuplexPerSheetMinor = 100,
+                minimumChargeMinor = 100
+            }))
+                Assert.Equal(HttpStatusCode.OK, pricing.StatusCode);
+
+            using (var paymentSettings = await client.PutAsJsonAsync("/api/v1/shop/payment-settings", new
+            {
+                upiEnabled = true,
+                upiId = "batch-integration@bank",
+                payeeName = "Batch Integration Shop",
+                cashEnabled = true,
+                instantPaymentEnabled = false
+            }))
+                Assert.Equal(HttpStatusCode.OK, paymentSettings.StatusCode);
+
+            using var printerResponse = await client.PostAsJsonAsync("/api/v1/shop/printers", new
+            {
+                displayName = "Batch Integration Printer",
+                manufacturer = "Test Manufacturer",
+                model = "Batch Queue",
+                connectionType = "WindowsQueue",
+                connectionAddress = (string?)null,
+                queueName = "QRTP-BATCH-INTEGRATION",
+                capabilitiesJson = "{}"
+            });
+            using var printerJson = await ReadExpectedJsonAsync(printerResponse, HttpStatusCode.Created);
+            var printerId = printerJson.RootElement.GetProperty("id").GetGuid();
+
+            using var stationResponse = await client.PostAsJsonAsync("/api/v1/shop/qr-stations", new
+            {
+                displayName = "Batch Integration Counter",
+                printerDeviceId = printerId
+            });
+            using var stationJson = await ReadExpectedJsonAsync(stationResponse, HttpStatusCode.Created);
+            var publicUrl = stationJson.RootElement.GetProperty("publicUrl").GetString();
+            Assert.False(string.IsNullOrWhiteSpace(publicUrl));
+            var publicCode = new Uri(publicUrl!).AbsolutePath.Split('/', StringSplitOptions.RemoveEmptyEntries).Last();
+
+            var customer = await RegisterCustomerAsync(client, "Batch Integration Customer");
+            client.DefaultRequestHeaders.Authorization =
+                new AuthenticationHeaderValue("Bearer", customer.AccessToken);
+            using var sessionResponse = await client.PostAsync(
+                $"/api/v1/public/stations/{Uri.EscapeDataString(publicCode)}/sessions",
+                content: null);
+            using var sessionJson = await ReadExpectedJsonAsync(sessionResponse, HttpStatusCode.Created);
+            var sessionId = sessionJson.RootElement.GetProperty("id").GetGuid();
+            var sessionToken = sessionJson.RootElement.GetProperty("sessionToken").GetString();
+            Assert.False(string.IsNullOrWhiteSpace(sessionToken));
+
+            var batchId = Guid.NewGuid();
+            var acceptedJobId = Guid.NewGuid();
+            var rejectedJobId = Guid.NewGuid();
+            var now = DateTimeOffset.UtcNow;
+            await using (var scope = factory.Services.CreateAsyncScope())
+            {
+                var db = scope.ServiceProvider.GetRequiredService<SmartPrintDbContext>();
+                db.PrintJobs.AddRange(
+                    new PrintJob
+                    {
+                        Id = acceptedJobId,
+                        TenantId = shop.TenantId,
+                        QrStationId = stationJson.RootElement.GetProperty("id").GetGuid(),
+                        CustomerSessionId = sessionId,
+                        BatchId = batchId,
+                        BatchName = "Customer upload batch",
+                        JobNumber = $"SP-BATCH-A-{Guid.NewGuid():N}"[..22],
+                        IdempotencyKey = $"API-BATCH-A-{Guid.NewGuid():N}",
+                        Status = "AWAITING_SHOP_APPROVAL",
+                        PageCount = 2,
+                        Copies = 1,
+                        ColourMode = "Mono",
+                        PaperSize = "A4",
+                        IsDuplex = false,
+                        Orientation = "AUTO",
+                        PrintKind = "DOCUMENT",
+                        QuoteExpiresUtc = now.AddMinutes(10),
+                        Currency = "INR",
+                        QuotedAmountMinor = 200,
+                        CreatedUtc = now,
+                        UpdatedUtc = now
+                    },
+                    new PrintJob
+                    {
+                        Id = rejectedJobId,
+                        TenantId = shop.TenantId,
+                        QrStationId = stationJson.RootElement.GetProperty("id").GetGuid(),
+                        CustomerSessionId = sessionId,
+                        BatchId = batchId,
+                        BatchName = "Customer upload batch",
+                        JobNumber = $"SP-BATCH-R-{Guid.NewGuid():N}"[..22],
+                        IdempotencyKey = $"API-BATCH-R-{Guid.NewGuid():N}",
+                        Status = "AWAITING_SHOP_APPROVAL",
+                        PageCount = 2,
+                        Copies = 1,
+                        ColourMode = "Mono",
+                        PaperSize = "A4",
+                        IsDuplex = false,
+                        Orientation = "AUTO",
+                        PrintKind = "DOCUMENT",
+                        QuoteExpiresUtc = now.AddMinutes(10),
+                        Currency = "INR",
+                        QuotedAmountMinor = 200,
+                        CreatedUtc = now.AddMilliseconds(1),
+                        UpdatedUtc = now
+                    });
+                await db.SaveChangesAsync();
+            }
+
+            client.DefaultRequestHeaders.Authorization =
+                new AuthenticationHeaderValue("Bearer", shop.AccessToken);
+            using (var review = await client.PostAsJsonAsync(
+                $"/api/v1/shop/print-batches/{batchId}/review",
+                new
+                {
+                    reviewedJobIds = new[] { acceptedJobId, rejectedJobId },
+                    acceptedJobIds = new[] { acceptedJobId },
+                    pdfBrandingEnabled = false
+                }))
+            {
+                using var json = await ReadExpectedJsonAsync(review, HttpStatusCode.OK);
+                Assert.Equal(2, json.RootElement.GetProperty("reviewedCount").GetInt32());
+                Assert.Equal(1, json.RootElement.GetProperty("acceptedCount").GetInt32());
+                Assert.Equal(1, json.RootElement.GetProperty("rejectedCount").GetInt32());
+            }
+
+            // Checkout is public and scoped by the customer session, not by the shop bearer token.
+            client.DefaultRequestHeaders.Authorization = null;
+            using var checkout = await SendWithSessionJsonAsync(
+                client,
+                HttpMethod.Post,
+                $"/api/v1/public/batches/{batchId}/payments",
+                sessionToken!,
+                new { method = "UPI" });
+            using var checkoutJson = await ReadExpectedJsonAsync(checkout, HttpStatusCode.OK);
+            var batchPaymentId = checkoutJson.RootElement.GetProperty("id").GetGuid();
+            Assert.Equal(200L, checkoutJson.RootElement.GetProperty("amountMinor").GetInt64());
+            Assert.Equal(1, checkoutJson.RootElement.GetProperty("fileCount").GetInt32());
+
+            using (var duplicateCheckout = await SendWithSessionJsonAsync(
+                client,
+                HttpMethod.Post,
+                $"/api/v1/public/batches/{batchId}/payments",
+                sessionToken!,
+                new { method = "UPI" }))
+            {
+                using var json = await ReadExpectedJsonAsync(duplicateCheckout, HttpStatusCode.OK);
+                Assert.Equal(batchPaymentId, json.RootElement.GetProperty("id").GetGuid());
+                Assert.Equal(1, json.RootElement.GetProperty("fileCount").GetInt32());
+            }
+
+            using (var report = await SendWithSessionJsonAsync(
+                client,
+                HttpMethod.Post,
+                $"/api/v1/public/batch-payments/{batchPaymentId}/report",
+                sessionToken!,
+                new { referenceNumber = "IT-BATCH-REFERENCE-1234" }))
+                Assert.Equal(HttpStatusCode.OK, report.StatusCode);
+
+            client.DefaultRequestHeaders.Authorization =
+                new AuthenticationHeaderValue("Bearer", shop.AccessToken);
+            using (var verification = await client.PostAsync(
+                $"/api/v1/shop/payments/{batchPaymentId}/verify",
+                content: null))
+                Assert.Equal(HttpStatusCode.OK, verification.StatusCode);
+
+            // The accepted file is authorised by the single batch payment. The rejected
+            // file remains excluded and can never be authorised by that payment.
+            await using (var verificationScope = factory.Services.CreateAsyncScope())
+            {
+                var db = verificationScope.ServiceProvider.GetRequiredService<SmartPrintDbContext>();
+                var batchPayment = await db.PrintBatchPayments.SingleAsync(item => item.Id == batchPaymentId);
+                var acceptedJob = await db.PrintJobs.SingleAsync(item => item.Id == acceptedJobId);
+                var rejectedJob = await db.PrintJobs.SingleAsync(item => item.Id == rejectedJobId);
+                var filePayments = await db.PrintPayments
+                    .Where(item => item.BatchPaymentId == batchPaymentId)
+                    .ToListAsync();
+
+                Assert.Equal("VERIFIED", batchPayment.Status);
+                Assert.Equal("PAID_AUTHORISED", acceptedJob.Status);
+                Assert.Equal("REJECTED", rejectedJob.Status);
+                Assert.Single(filePayments);
+                Assert.Equal(acceptedJobId, filePayments[0].PrintJobId);
+                Assert.Equal(200L, filePayments[0].AmountMinor);
+            }
+
+            using (var postCheckoutReview = await client.PostAsJsonAsync(
+                $"/api/v1/shop/print-batches/{batchId}/review",
+                new
+                {
+                    reviewedJobIds = new[] { acceptedJobId, rejectedJobId },
+                    acceptedJobIds = new[] { acceptedJobId },
+                    pdfBrandingEnabled = false
+                }))
+            {
+                using var json = await ReadExpectedJsonAsync(postCheckoutReview, HttpStatusCode.Conflict);
+                Assert.Equal("batch_payment_already_started", json.RootElement.GetProperty("code").GetString());
+            }
         }
     }
 
