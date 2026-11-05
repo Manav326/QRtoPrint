@@ -1,4 +1,18 @@
-import type { CustomerPrintRequestSettings, PrintQuoteResult, UploadedPrintJob } from "../../api";
+import type { CustomerPhotoPricing, CustomerPrintRequestSettings, PrintQuoteResult, UploadedPrintJob } from "../../api";
+
+export type CustomerPrintFlowProps = {
+  dark:boolean;
+  publicCode:string;
+  sessionToken:string;
+  paymentOptions:{upiEnabled:boolean;upiId?:string|null;payeeName?:string|null;cashEnabled:boolean;instantPaymentEnabled:boolean};
+  localAgent:CustomerLocalAgent|null;
+  localReady:boolean;
+  localFallbackSuggested:boolean;
+  cloudAssistedPrintingEnabled:boolean;
+  photoPricing:CustomerPhotoPricing|null;
+  hasAssignedPrinter:boolean;
+  printerCapabilitiesJson?:string|null;
+};
 
 export type CustomerLocalAgent = NonNullable<Awaited<ReturnType<typeof import("../../api").createCustomerSession>>["localAgent"]>;
 
