@@ -266,7 +266,7 @@ test("customer job status remains scoped to the active customer session in its s
 
 
 test("batch review defaults every uploaded file to accepted until the shopkeeper rejects it", () => {
-  const shop = read("../src/features/shop/ShopConsole.tsx");
+  const shop = read("../src/features/shop/ShopOverlays.tsx");
   assert.match(shop, /const acceptedIds=jobs\.filter\(job=>decisions\[job\.id\]\?\?true\)\.map\(job=>job\.id\)/);
   assert.match(shop, /onDecision:\(jobId:string,accepted:boolean\)=>void/);
   assert.match(shop, /decisions\[job\.id\]\?\?true/);

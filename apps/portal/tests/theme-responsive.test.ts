@@ -299,11 +299,12 @@ test("shop workspace content expands into the space left after the sidebar", () 
 
 test("shop owner personal details are editable from the account menu without mixing shop branding", () => {
   const shop = read("../src/features/shop/ShopConsole.tsx");
+  const overlays = read("../src/features/shop/ShopOverlays.tsx");
   const settings = read("../src/features/shop/settings/SettingsPage.tsx");
   const api = read("../src/api.ts");
-  const modalStart = shop.indexOf("function ShopOwnerAccountModal");
-  const modalEnd = shop.indexOf("function HelpSupportModal", modalStart);
-  const modal = shop.slice(modalStart, modalEnd);
+  const modalStart = overlays.indexOf("function ShopOwnerAccountModal");
+  const modalEnd = overlays.indexOf("function HelpSupportModal", modalStart);
+  const modal = overlays.slice(modalStart, modalEnd);
 
   assert.match(shop, /Personal details/);
   assert.match(shop, /ownerAccountOpen/);
@@ -412,7 +413,8 @@ test("all print settings controls capture React event values before state update
 
 
 test("PDF footer branding is opt-in per batch and cannot cover source content or paper output", () => {
-  const shop = read("../src/features/shop/ShopConsole.tsx");
+  const overlays = read("../src/features/shop/ShopOverlays.tsx");
+  const customer = read("../src/features/customer/CustomerPrintFlow.tsx");
   const customer = read("../src/features/customer/CustomerPrintFlow.tsx");
   const api = read("../src/api.ts");
   const reviewEndpoint = read("../../../src/SmartPrint.Api/Endpoints/ShopPrintBatchReviewEndpoints.cs");
@@ -428,8 +430,8 @@ test("PDF footer branding is opt-in per batch and cannot cover source content or
   const queueModels = read("../../../src/SmartPrint.Agent/AgentQueueModels.cs");
   const safetyRules = read("../../../src/SmartPrint.Agent/PdfBrandingRules.cs");
 
-  assert.ok(shop.includes('useState(()=>jobs.some(job=>job.pdfBrandingEnabled===true))'));
-  assert.ok(shop.includes('checked={pdfBrandingEnabled} disabled={busy}'));
+  assert.ok(overlays.includes('useState(()=>jobs.some(job=>job.pdfBrandingEnabled===true))'));
+  assert.ok(overlays.includes('checked={pdfBrandingEnabled} disabled={busy}'));
   assert.ok(api.includes('body: JSON.stringify({ reviewedJobIds, acceptedJobIds, pdfBrandingEnabled })'));
   assert.ok(contracts.includes('bool PdfBrandingEnabled = false'));
   assert.ok(reviewEndpoint.includes('request.PdfBrandingEnabled'));
@@ -454,19 +456,19 @@ test("PDF footer branding is opt-in per batch and cannot cover source content or
 });
 test("contextual information stays concise and is accessible by hover, focus and tap", () => {
   const customer = read("../src/features/customer/CustomerPrintFlow.tsx");
-  const shop = read("../src/features/shop/ShopConsole.tsx");
+  const overlays = read("../src/features/shop/ShopOverlays.tsx");
   const tooltip = read("../src/shared/ui/InfoTooltip.tsx");
   const css = read("../src/styles.css");
   assert.match(tooltip, /function InfoTooltip/);
   assert.match(tooltip, /aria-describedby=\{tooltipId\}/);
   assert.match(tooltip, /onMouseEnter=\{\(\)=>setOpen\(true\)\}/);
   assert.match(tooltip, /onClick=\{\(\)=>setOpen\(true\)\}/);
-  assert.match(shop, /<InfoTooltip label="PDF footer details">/);
-  assert.match(shop, /Footer only appears on PDFs with a verified blank bottom margin\./);
+  assert.match(overlays, /<InfoTooltip label="PDF footer details">/);
+  assert.match(overlays, /Footer only appears on PDFs with a verified blank bottom margin\./);
   assert.match(customer, /<InfoTooltip label="Why cash is unavailable">/);
   assert.match(customer, /The shop must enable Cash at counter in Payments settings\./);
   assert.match(customer, /jobStatus\.pdfBrandingEnabled&&<div className="customer-branding-note">/);
-  assert.doesNotMatch(shop+customer, /If this request is saved as a PDF, a small SmartPrint by QuantaEdge footer/);
+  assert.doesNotMatch(overlays+customer, /If this request is saved as a PDF, a small SmartPrint by QuantaEdge footer/);
   assert.match(css, /\.context-info:focus-within \.context-info-tooltip/);
   assert.match(css, /\.context-info\.context-info-open \.context-info-tooltip/);
 });
