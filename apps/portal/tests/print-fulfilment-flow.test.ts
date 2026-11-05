@@ -19,7 +19,7 @@ test("owner quote edits are sent through the existing print-job API", () => {
   const shop = read("../src/features/shop/useShopPrintActions.ts");
   const customer = read("../src/features/customer/CustomerPrintFlow.tsx");
   const api = read("../src/api.ts");
-  assert.match(shop, /updateShopPrintJobSettings\(tokens\.accessToken,job\.id,settings\)/);
+  assert.match(shop, /updateShopPrintJobSettings\(accessToken,job\.id,settings\)/);
   assert.match(api, /\/api\/v1\/shop\/print-jobs\/\$\{jobId\}\/settings/);
   assert.match(shop, /Revised quote .* sent to the customer for approval/);
   assert.match(customer, /setPrintSettingsByJobId\(current=>/);
@@ -461,11 +461,12 @@ test("customer photo previews do not expose the raw image or prepared PDF viewer
 
 test("the exact same Photo Studio is opened from the shop image review",()=>{
  const shop=read("../src/features/shop/ShopConsole.tsx");
+ const overlays=read("../src/features/shop/ShopOverlays.tsx");
  const actions=read("../src/features/shop/useShopPrintActions.ts");
  assert.match(actions,/setShopPhotoStudio\(\{source,job:preview\.job,returnPreview\}\)/);
  assert.match(actions,/replaceShopPhotoDocument\(accessToken,editor\.job\.id,sheet\.file,sheet\.sizeCode,sheet\.photoCount,sheet\.photosPerPage\)/);
  assert.match(shop,/shopPhotoStudio && <PhotoStudio source=\{shopPhotoStudio\.source\}/);
- assert.match(shop,/Enhance photo for printing/);
+ assert.match(overlays,/Enhance photo for printing/);
 });
 
 test("native Windows content capture protection covers the photo editor and image preview",()=>{
@@ -527,7 +528,7 @@ test("shop-owner Photo Studio supports cloud and local storage without changing 
  const shop=read("../src/features/shop/ShopConsole.tsx");
  const actions=read("../src/features/shop/useShopPrintActions.ts");
  const api=read("../src/api.ts");
- const shop=read("../../../src/SmartPrint.Api/Services/ShopPhotoRevisionService.cs");
+ const shopPhotoService=read("../../../src/SmartPrint.Api/Services/ShopPhotoRevisionService.cs");
  const agent=read("../../../src/SmartPrint.Api/Services/AgentLocalPhotoRevisionService.cs");
  assert.match(shop,/preview\.job\.storageMode==="CLOUD"\|\|preview\.job\.storageMode==="LOCAL_AGENT"/);
  assert.match(actions,/editor\.job\.storageMode==="LOCAL_AGENT"[\s\S]*?replaceShopPhotoDocumentLocally/);
