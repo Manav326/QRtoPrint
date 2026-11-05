@@ -676,8 +676,8 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun setToolbarPage(title: String) {
-        toolbar.title = "smartprint"
-        toolbar.subtitle = "BY QUANTAEDGE  ·  " + title.trim().uppercase(Locale.ROOT)
+        toolbar.title = "SmartPrint"
+        toolbar.subtitle = "by QuantaEdge  ·  " + title.trim()
     }
 
     private fun setToolbarBackAction(description: String, action: () -> Unit) {
