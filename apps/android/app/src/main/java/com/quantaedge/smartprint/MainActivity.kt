@@ -1135,25 +1135,8 @@ class MainActivity : AppCompatActivity() {
         content.addView(scroll, frameParams())
     }
 
-    private fun activityStatusLabel(status: String): String = when (status.uppercase(Locale.ROOT)) {
-        "AWAITING_SHOP_APPROVAL" -> "Shop review"
-        "AWAITING_PAYMENT", "AWAITING_CUSTOMER_PAYMENT" -> "Payment due"
-        "AWAITING_COUNTER_PAYMENT" -> "Pay at counter"
-        "PAYMENT_REPORTED" -> "Verify pending"
-        "PAYMENT_REJECTED" -> "Payment declined"
-        "PAID_AUTHORISED" -> "Paid"
-        "LOCAL_QUEUE_CLAIMED" -> "Transferring"
-        "LOCAL_QUEUE_READY" -> "Queued"
-        "PRINT_AUTHORISED" -> "Print approved"
-        "PRINT_SUBMITTING" -> "Sending"
-        "SPOOLER_ACCEPTED" -> "Queue accepted"
-        "PRINTING" -> "Printing"
-        "OUTPUT_UNCONFIRMED" -> "Output check"
-        "COMPLETED" -> "Completed"
-        "REJECTED" -> "Rejected"
-        "QUOTE_EXPIRED" -> "Quote expired"
-        else -> "In progress"
-    }
+    private fun activityStatusLabel(status: String): String =
+        CustomerOrderStatusPresentation.activityStatusLabel(status)
 
     private fun loadCustomerHistory(container: LinearLayout) {
         Thread {
@@ -1234,13 +1217,11 @@ class MainActivity : AppCompatActivity() {
                                 orientation = LinearLayout.VERTICAL
                                 setPadding(dp(13), dp(12), dp(13), dp(12))
                             }
-                            val latestStatus = batch.firstOrNull { it.status !in setOf("COMPLETED", "REJECTED") }?.status
-                                ?: batch.maxByOrNull { it.createdUtc }?.status.orEmpty()
-                            val status = if (batch.all { it.status == "COMPLETED" }) "COMPLETED" else latestStatus
+                            val status = CustomerOrderStatusPresentation.batchSummaryStatus(batch.map { it.status })
                             val tagPalette = when (status.uppercase(Locale.ROOT)) {
-                                "COMPLETED" -> if ((resources.configuration.uiMode and android.content.res.Configuration.UI_MODE_NIGHT_MASK) == android.content.res.Configuration.UI_MODE_NIGHT_YES)
+                                "COMPLETED", "PDF_EXPORTED" -> if ((resources.configuration.uiMode and android.content.res.Configuration.UI_MODE_NIGHT_MASK) == android.content.res.Configuration.UI_MODE_NIGHT_YES)
                                     0xFF173D2E.toInt() to 0xFF9BE5B8.toInt() else 0xFFE5F7EC.toInt() to 0xFF20774D.toInt()
-                                "REJECTED", "PAYMENT_REJECTED" -> if ((resources.configuration.uiMode and android.content.res.Configuration.UI_MODE_NIGHT_MASK) == android.content.res.Configuration.UI_MODE_NIGHT_YES)
+                                "REJECTED", "PAYMENT_REJECTED", "REFUNDED", "CANCELLED", "FAILED" -> if ((resources.configuration.uiMode and android.content.res.Configuration.UI_MODE_NIGHT_MASK) == android.content.res.Configuration.UI_MODE_NIGHT_YES)
                                     0xFF49232C.toInt() to 0xFFFFA8B2.toInt() else 0xFFFCE8EB.toInt() to 0xFFAB3347.toInt()
                                 "PRINTING", "PRINT_SUBMITTING", "SPOOLER_ACCEPTED", "LOCAL_QUEUE_READY" -> if ((resources.configuration.uiMode and android.content.res.Configuration.UI_MODE_NIGHT_MASK) == android.content.res.Configuration.UI_MODE_NIGHT_YES)
                                     0xFF1B3550.toInt() to 0xFF9DD0FF.toInt() else 0xFFE6F2FF.toInt() to 0xFF275F93.toInt()
@@ -1353,6 +1334,20 @@ class MainActivity : AppCompatActivity() {
                         orientation = LinearLayout.VERTICAL
                         setPadding(dp(16), dp(12), dp(16), dp(18))
                     }
+                    val batchPayment = detailResponses.asSequence()
+                        .mapNotNull { it.optJSONObject("batchPayment") }
+                        .firstOrNull()
+                    if (batchPayment != null) {
+                        detailColumn.addView(text(
+                            CustomerOrderStatusPresentation.batchPaymentSummary(
+                                batchPayment.optString("status"),
+                                batchPayment.optLong("amountMinor"),
+                                batchPayment.optString("currency", batch.first().currency),
+                                batch.size
+                            ),
+                            10, R.color.qp_muted, false
+                        ).apply { setPadding(0, 0, 0, dp(8)) })
+                    }
                     detailResponses.forEachIndexed { index, response ->
                         val summary = response.optJSONObject("job") ?: JSONObject()
                         val timeline = response.optJSONArray("timeline") ?: org.json.JSONArray()
@@ -1366,13 +1361,16 @@ class MainActivity : AppCompatActivity() {
                             summary.optString("paperSize", "A4"), 10, R.color.qp_muted, false)
                             .apply { setPadding(0, dp(4), 0, dp(5)) })
                         val payment = response.optJSONObject("payment")
-                        val batchPayment = response.optJSONObject("batchPayment")
-                        val amount = batchPayment?.optLong("amountMinor") ?: payment?.optLong("amountMinor")
-                        val paymentStatus = batchPayment?.optString("status") ?: payment?.optString("status")
-                        if (amount != null) detailColumn.addView(text(
-                            "Payment: " + (paymentStatus ?: "Unknown") + " · " +
-                                "%.2f".format(Locale.ROOT, amount / 100.0) + " " + historyItem.currency,
-                            10, R.color.qp_muted, false))
+                        val paymentStatus = payment?.optString("status")?.takeIf { it.isNotBlank() }
+                            ?: historyItem.paymentStatus
+                        val allocatedAmountMinor = payment?.optLong("amountMinor") ?: historyItem.paidAmountMinor
+                        val refundedAmountMinor = payment?.optLong("refundedAmountMinor") ?: historyItem.refundedAmountMinor
+                        val paymentSummary = CustomerOrderStatusPresentation.filePaymentSummary(
+                            paymentStatus, allocatedAmountMinor, refundedAmountMinor, historyItem.currency
+                        )
+                        if (paymentSummary != null) detailColumn.addView(text(
+                            paymentSummary, 10, R.color.qp_muted, false
+                        ))
                         detailColumn.addView(text("Progress", 11, R.color.qp_text, true)
                             .apply { setPadding(0, dp(8), 0, dp(4)) })
                         for (eventIndex in 0 until timeline.length()) {
