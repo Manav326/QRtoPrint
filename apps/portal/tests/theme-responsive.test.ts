@@ -403,7 +403,7 @@ test("all print settings controls capture React event values before state update
   assert.match(app, /const advancedEnabled=event\.currentTarget\.checked/);
   assert.match(app, /const paperSize=event\.currentTarget\.value/);
   assert.match(app, /const orientation=event\.currentTarget\.value/);
-  assert.match(app, /const copies=Math\.max\(1,Math\.min\(100,Number\(event\.currentTarget\.value\)\|\|1\)\)/);
+  assert.match(queue, /const copies=Math\.max\(1,Math\.min\(100,Number\(event\.currentTarget\.value\)\|\|1\)\)/);
 });
 
 
@@ -455,8 +455,10 @@ test("contextual information stays concise and is accessible by hover, focus and
   assert.match(tooltip, /aria-describedby=\{tooltipId\}/);
   assert.match(tooltip, /onMouseEnter=\{\(\)=>setOpen\(true\)\}/);
   assert.match(tooltip, /onClick=\{\(\)=>setOpen\(true\)\}/);
-  assert.match(app, /Files stay on this computer\. Reconnect it to use its printers\./);
-  assert.match(app, /To switch computers, upload a new Cloud-assisted batch\./);
+  assert.match(app, /<InfoTooltip label="PDF footer details">/);
+  assert.match(app, /Footer only appears on PDFs with a verified blank bottom margin\./);
+  assert.match(app, /<InfoTooltip label="Why cash is unavailable">/);
+  assert.match(app, /The shop must enable Cash at counter in Payments settings\./);
   assert.match(app, /jobStatus\.pdfBrandingEnabled&&<div className="customer-branding-note">/);
   assert.doesNotMatch(app, /If this request is saved as a PDF, a small SmartPrint by QuantaEdge footer/);
   assert.match(css, /\.context-info:focus-within \.context-info-tooltip/);
