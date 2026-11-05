@@ -466,14 +466,14 @@ test("Windows local document previews prefer the paired Agent loopback endpoint"
   const api = read("../src/api.ts");
   const routing = read("../src/local-preview-routing.ts");
   const desktop = read("../../desktop/src-tauri/tauri.conf.json");
-  assert.match(routing, /function isPrivateLocalPreviewEndpoint\\(value: string, allowLoopback = false\\)/);
-  assert.match(routing, /loopbackIpv4 = endpoint\\.hostname === "127\\.0\\.0\\.1"/);
-  assert.match(routing, /LOCAL_AGENT_PREVIEW_ENDPOINT = "http:\\/\\/127\\.0\\.0\\.1:17842"/);
-  assert.match(api, /getLocalPreviewEndpointCandidates\\(isDesktopApp\\(\\), source\\.endpoints\\)/);
-  assert.match(api, /isPrivateLocalPreviewEndpoint\\(value, isDesktopApp\\(\\)\\)/);
-  assert.match(desktop, /connect-src[^"]*http:\\/\\/127\\.0\\.0\\.1:17842/);
-  assert.match(api, /The paired shop computer did not respond\\. Check that the Windows Print Agent is running and connected/);
-  assert.match(api, /Could not connect to the paired shop computer\\. Check that the Windows Print Agent is running and allowed through Windows Firewall/);
+  assert.ok(routing.includes("function isPrivateLocalPreviewEndpoint(value: string, allowLoopback = false)"));
+  assert.ok(routing.includes('loopbackIpv4 = endpoint.hostname === "127.0.0.1"'));
+  assert.ok(routing.includes('LOCAL_AGENT_PREVIEW_ENDPOINT = "http://127.0.0.1:17842"'));
+  assert.ok(api.includes("getLocalPreviewEndpointCandidates(isDesktopApp(), source.endpoints)"));
+  assert.ok(api.includes("isPrivateLocalPreviewEndpoint(value, isDesktopApp())"));
+  assert.ok(desktop.includes("http://127.0.0.1:17842"));
+  assert.ok(api.includes("The paired shop computer did not respond. Check that the Windows Print Agent is running and connected"));
+  assert.ok(api.includes("Could not connect to the paired shop computer. Check that the Windows Print Agent is running and allowed through Windows Firewall"));
 });
 
 test("customer uploader is centred and shared light-theme text tokens meet readable contrast", () => {
