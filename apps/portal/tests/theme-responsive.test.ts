@@ -245,7 +245,7 @@ test("Android customer printing uses the same single Copies control and event ha
 });
 
 test("shop phone-readiness QR guides SmartPrint users through the in-app Wi-Fi check", () => {
-  const app = read("../src/App.tsx");
+  const app = read("../src/features/shop/agent/PrintAgentPage.tsx");
   const start = app.indexOf('<strong>Scan with SmartPrint on your phone</strong>');
   assert.ok(start >= 0, "The shop QR should lead with the SmartPrint in-app flow.");
   const section = app.slice(start, start + 650);
@@ -461,12 +461,13 @@ test("contextual information stays concise and is accessible by hover, focus and
 
 test("customer payment settings refresh without reopening the QR session and explain disabled cash", () => {
   const app = read("../src/App.tsx");
+  const paymentPage = read("../src/features/shop/payments/PaymentsPage.tsx");
   const api = read("../src/api.ts");
   const sessionService = read("../../../src/SmartPrint.Api/Services/PublicCustomerSessionService.cs");
   const registrationService = read("../../../src/SmartPrint.Api/Services/AccountRegistrationService.cs");
   assert.match(app, /paymentOptions:session\.paymentOptions/);
   assert.match(app, /Cash at counter unavailable/);
-  assert.match(app, /Disabled · customers will not see cash at the counter\./);
+  assert.match(paymentPage, /Disabled · customers will not see cash at the counter\./);
   assert.match(api, /paymentOptions: \{ upiEnabled: boolean; upiId\?: string \| null; payeeName\?: string \| null; cashEnabled: boolean; instantPaymentEnabled: boolean \}/);
   assert.match(sessionService, /GetPaymentOptionsAsync\(session\.TenantId, cancellationToken\)/);
   assert.match(sessionService, /new PublicCustomerSessionRenewalSnapshot\(session\.ExpiresUtc, localAgent, paymentOptions\)/);

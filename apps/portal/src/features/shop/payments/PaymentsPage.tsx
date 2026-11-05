@@ -25,7 +25,7 @@ interface PaymentsPageProps {
   busyJobId: string | null;
 }
 
-export default function PaymentsPage({settings,payments,refunds,onSave,onVerify,onReject,busy,busyJobId}: PaymentsPageProps {
+export default function PaymentsPage({settings,payments,refunds,onSave,onVerify,onReject,busy,busyJobId}: PaymentsPageProps) {
   settings:ShopPaymentSettings;
   payments:ShopPayment[];
   refunds:ShopRefund[];
