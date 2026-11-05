@@ -8,6 +8,7 @@ using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.AspNetCore.Identity;
+using Microsoft.EntityFrameworkCore;
 using Npgsql;
 using SmartPrint.Api.Data;
 using SmartPrint.Api.Domain;
@@ -622,7 +623,6 @@ internal sealed class ApiIntegrationWebApplicationFactory(
 
 internal sealed class ApiIntegrationTestDatabase(
     string connectionString,
-    string adminConnectionString,
     string databaseName) : IAsyncDisposable
 {
     public string ConnectionString { get; } = connectionString;
@@ -654,25 +654,16 @@ internal sealed class ApiIntegrationTestDatabase(
         target.Pooling = false;
         return new ApiIntegrationTestDatabase(
             target.ConnectionString,
-            admin.ConnectionString,
             databaseName);
     }
 
     public async ValueTask DisposeAsync()
     {
         NpgsqlConnection.ClearAllPools();
-        await using var connection = new NpgsqlConnection(adminConnectionString);
-        await connection.OpenAsync();
-        await using (var terminate = connection.CreateCommand())
-        {
-            terminate.CommandText =
-                "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = @database AND pid <> pg_backend_pid()";
-            terminate.Parameters.AddWithValue("database", databaseName);
-            await terminate.ExecuteNonQueryAsync();
-        }
-
-        await using var drop = connection.CreateCommand();
-        drop.CommandText = $"DROP DATABASE IF EXISTS \"{databaseName}\"";
-        await drop.ExecuteNonQueryAsync();
+        var options = new DbContextOptionsBuilder<SmartPrintDbContext>()
+            .UseNpgsql(ConnectionString)
+            .Options;
+        await using var db = new SmartPrintDbContext(options);
+        await db.Database.EnsureDeletedAsync();
     }
 }
