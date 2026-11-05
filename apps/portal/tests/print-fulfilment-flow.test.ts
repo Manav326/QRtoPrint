@@ -332,7 +332,7 @@ test("local Agent photo revision is scoped to its grant and idempotent after com
   const endpoint = readApi("AgentLocalPhotoRevisionEndpoints.cs");
   const service = read("../../../src/SmartPrint.Api/Services/AgentLocalPhotoRevisionService.cs");
   const grant = read("../../../src/SmartPrint.Api/Security/LocalDocumentPhotoRevisionGrant.cs");
-  assert.match(endpoint, /AgentAuthentication\.AuthenticateAsync/);
+  assert.match(endpoint, /authenticationService\.AuthenticateAsync\(context, ct\)/);
   assert.match(endpoint, /revisions\.AuthorizeAsync/);
   assert.match(endpoint, /revisions\.CompleteAsync/);
   assert.match(service, /LocalDocumentPhotoRevisionGrant\.IsFor/);
