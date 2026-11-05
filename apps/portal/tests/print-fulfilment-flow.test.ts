@@ -347,10 +347,8 @@ test("local Agent photo revision is scoped to its grant and idempotent after com
 });
 
 test("customer local transfer remains visible with a clear unavailable state when no Agent endpoint exists",()=>{
- const customerEntry=read("../src/features/customer/CustomerEntry.tsx");
+ const connection=read("../src/features/customer/CustomerLocalConnection.tsx");
  const customer=read("../src/features/customer/CustomerPrintFlow.tsx");
- const start=customerEntry.indexOf("function CustomerLocalConnection(");
- const connection=customerEntry.slice(start);
  assert.match(connection,/if\(!localAgent\?\.endpoints\.length\)[\s\S]*?setCheckStatus\("unavailable"\)/);
  assert.doesNotMatch(connection,/if\(!localAgent\?\.endpoints\.length\)return null/);
  assert.match(connection,/Direct transfer is temporarily unavailable/);
@@ -366,13 +364,12 @@ test("owner preview selects the persisted supported MIME type before the blob re
 });
 
 test("customer web upload accepts drag and drop and contains no JavaScript browser alert dialogs",()=>{
- const app=read("../src/App.tsx");
+ const customerEntry=read("../src/features/customer/CustomerEntry.tsx");
  const customer=read("../src/features/customer/CustomerPrintFlow.tsx");
  const shop=read("../src/features/shop/ShopConsole.tsx");
- const customer=read("../src/features/customer/CustomerPrintFlow.tsx");
  assert.match(customer,/onDragOver=\{event=>\{if\(!batchLockedForPayment\)event\.preventDefault\(\);\}\}/);
  assert.match(customer,/onDrop=\{event=>\{event\.preventDefault\(\);if\(batchLockedForPayment\)return;chooseFiles\(Array\.from\(event\.dataTransfer\.files\|\|\[\]\)\);\}\}/);
- assert.doesNotMatch(app+customer+shop,/window\.(alert|confirm|prompt)\s*\(/);
+ assert.doesNotMatch(customerEntry+customer+shop,/window\.(alert|confirm|prompt)\s*\(/);
 });
 
 test("photo studio's selected photo quantity creates one multi-page file with one photo-count record",()=>{

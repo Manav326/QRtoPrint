@@ -38,14 +38,15 @@ test("Android customer station keeps the shared print page and offers native loc
     new URL("../../android/app/src/main/java/com/quantaedge/smartprint/MainActivity.kt", import.meta.url),
     "utf8"
   );
+  const connectionSource = readFileSync(new URL("../src/features/customer/CustomerLocalConnection.tsx", import.meta.url), "utf8");
   const customerFlow = readFileSync(new URL("../src/features/customer/CustomerPrintFlow.tsx", import.meta.url), "utf8");
   assert.match(customerFlow, /function CustomerPrintFlow\(/);
-  assert.match(customerEntrySource, /requestSmartPrintNativeLocalNetworkAccess/);
+  assert.match(connectionSource, /requestSmartPrintNativeLocalNetworkAccess/);
   assert.match(customerEntrySource, /bridge\.addEventListener\("message",handleReply\)/);
   assert.match(customerEntrySource, /value\.startsWith\("localNetworkAccess:"\)/);
   assert.match(customerEntrySource, /nativeLocalNetworkPermissionDenied=access==="denied"/);
-  assert.match(customerEntrySource, /allow SmartPrint under Android Settings/);
-  assert.match(customerEntrySource, /Tap Check Wi-Fi to connect to this shop/);
+  assert.match(connectionSource, /allow SmartPrint under Android Settings/);
+  assert.match(connectionSource, /Tap Check Wi-Fi to connect to this shop/);
   assert.match(androidSource, /override fun onShowFileChooser\([\s\S]*?showPicker\(\)/);
   assert.match(androidSource, /text\("SmartPrint My Files"/);
   assert.match(androidSource, /button\("Browse phone"/);
