@@ -402,7 +402,8 @@ test("a completed customer order offers a fresh session instead of another payme
  const app=read("../src/App.tsx");
  assert.match(app,/const startNewSession=useCallback\(async\(\)=>/);
  assert.match(app,/key=\{result\.sessionToken\}/);
- assert.match(app,/jobStatus\.status===\"COMPLETED\"[\s\S]*?customer-session-complete/);
+ assert.match(app,/isCustomerBatchFinished/);
+ assert.match(app,/canStartNewSession&&<div className="customer-session-complete">/);
  assert.match(app,/onClick=\{onStartNewSession\}/);
 });
 

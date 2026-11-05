@@ -1336,14 +1336,18 @@ class MainActivity : AppCompatActivity() {
                     }
                     val batchPayment = detailResponses.asSequence()
                         .mapNotNull { it.optJSONObject("batchPayment") }
-                        .firstOrNull()
+                        .maxByOrNull { it.optString("updatedUtc") }
                     if (batchPayment != null) {
+                        val batchPaymentId = batchPayment.optString("id")
+                        val allocatedFileCount = detailResponses.count { response ->
+                            response.optJSONObject("payment")?.optString("batchPaymentId") == batchPaymentId
+                        }.coerceAtLeast(1)
                         detailColumn.addView(text(
                             CustomerOrderStatusPresentation.batchPaymentSummary(
                                 batchPayment.optString("status"),
                                 batchPayment.optLong("amountMinor"),
                                 batchPayment.optString("currency", batch.first().currency),
-                                batch.size
+                                allocatedFileCount
                             ),
                             10, R.color.qp_muted, false
                         ).apply { setPadding(0, 0, 0, dp(8)) })
