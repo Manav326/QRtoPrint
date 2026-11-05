@@ -258,6 +258,7 @@ test("shop phone-readiness QR guides SmartPrint users through the in-app Wi-Fi c
 
 test("shop owner navigation groups daily work and moves account destinations into the header menu", () => {
   const app = read("../src/App.tsx");
+  const settingsPage = read("../src/features/shop/settings/SettingsPage.tsx");
   const css = read("../src/styles.css");
   const sidebarStart = app.indexOf('<aside className={sidebarOpen');
   const sidebarEnd = app.indexOf("</aside>", sidebarStart);
@@ -269,7 +270,7 @@ test("shop owner navigation groups daily work and moves account destinations int
   assert.doesNotMatch(sidebar, /plan-card|support-link|profile-row/,
     "Trial, help and owner controls must not be permanently pinned in the sidebar.");
   assert.match(app, /Personal details/);
-  assert.match(app, /Shop profile &amp; branding/);
+  assert.match(settingsPage, /Shop profile &amp; branding/);
   assert.match(app, /Trial &amp; subscription/);
   assert.match(app, /Help &amp; support/);
   assert.match(app, /accountMenuOpen/);
@@ -294,10 +295,8 @@ test("shop workspace content expands into the space left after the sidebar", () 
 
 test("shop owner personal details are editable from the account menu without mixing shop branding", () => {
   const app = read("../src/App.tsx");
+  const settings = read("../src/features/shop/settings/SettingsPage.tsx");
   const api = read("../src/api.ts");
-  const settingsStart = app.indexOf("function SettingsPage");
-  const settingsEnd = app.indexOf("function ShopOwnerAccountModal", settingsStart);
-  const settings = app.slice(settingsStart, settingsEnd);
   const modalStart = app.indexOf("function ShopOwnerAccountModal");
   const modalEnd = app.indexOf("function HelpSupportModal", modalStart);
   const modal = app.slice(modalStart, modalEnd);
