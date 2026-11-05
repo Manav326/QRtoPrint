@@ -196,7 +196,17 @@ foreach ($driverId in $DriverIds) {
             }
         })
 
-        $signedCatalogs = @($catalogs | Where-Object { $_.status -eq "Valid" -and $_.signerMatchesVendor })
+        $validSignedCatalogs = @($catalogs | Where-Object { $_.status -eq "Valid" })
+        $validVendorCatalogs = @($validSignedCatalogs | Where-Object { $_.signerMatchesVendor })
+        $packageSignerMatchesVendor = $true
+        if (-not [string]::IsNullOrWhiteSpace([string]$driver.packageSignerContains)) {
+            $packageSignerMatchesVendor = (
+                $packageSignature.Status -eq "Valid" -and
+                $null -ne $packageSignature.SignerCertificate -and
+                $packageSignature.SignerCertificate.Subject -match [regex]::Escape([string]$driver.packageSignerContains)
+            )
+        }
+
         $result = [pscustomobject]@{
             schemaVersion = 1
             driverId = $driverId
@@ -210,12 +220,15 @@ foreach ($driverId in $DriverIds) {
             packageContentType = $download.contentType
             embeddedAuthenticode = [string]$packageSignature.Status
             embeddedSigner = $packageSigner
+            packageSignerContains = $driver.packageSignerContains
+            packageSignerMatchesVendor = $packageSignerMatchesVendor
             extractionStatus = $extractStatus
             extractionTool = $extractTool
             extractedFileCount = $files.Count
             infFiles = $infs
             catalogCount = $catalogs.Count
-            validVendorCatalogCount = $signedCatalogs.Count
+            validSignedCatalogCount = $validSignedCatalogs.Count
+            validVendorCatalogCount = $validVendorCatalogs.Count
             catalogs = $catalogs
             physicalPrinterVerified = $false
             packageExecuted = $false
@@ -223,10 +236,19 @@ foreach ($driverId in $DriverIds) {
         }
         $result | ConvertTo-Json -Depth 20 | Set-Content -LiteralPath $reportPath -Encoding utf8
         Write-Host "$driverId package SHA-256: $hash"
-        Write-Host "$driverId extraction: $extractStatus; INF files: $($infs.Count); valid vendor catalogs: $($signedCatalogs.Count)"
+        Write-Host "$driverId extraction: $extractStatus; INF files: $($infs.Count); valid signed catalogs: $($validSignedCatalogs.Count); vendor catalogs: $($validVendorCatalogs.Count)"
 
-        if ($extractStatus -notin @("EXTRACTED", "EXTRACTED_WITH_7ZIP") -or $infs.Count -eq 0 -or $signedCatalogs.Count -eq 0) {
-            $failures += "$driverId did not produce an extracted INF and a valid vendor-signed catalog."
+        if ($extractStatus -notin @("EXTRACTED", "EXTRACTED_WITH_7ZIP") -or
+            $infs.Count -eq 0 -or
+            $validSignedCatalogs.Count -eq 0) {
+            $failures += "$driverId did not produce an extracted INF and at least one valid signed catalog."
+        }
+        if (-not [string]::IsNullOrWhiteSpace([string]$driver.catalogSignerContains) -and
+            $validVendorCatalogs.Count -eq 0) {
+            $failures += "$driverId did not produce a valid catalog signed by the expected catalog publisher."
+        }
+        if (-not $packageSignerMatchesVendor) {
+            $failures += "$driverId package Authenticode signer did not match the expected package publisher."
         }
         if ($packageSignature.Status -eq "HashMismatch") {
             $failures += "$driverId package Authenticode signature reported a hash mismatch."
