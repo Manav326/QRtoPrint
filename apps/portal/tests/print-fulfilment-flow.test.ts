@@ -483,7 +483,7 @@ test("native Windows content capture protection covers the photo editor and imag
 test("shop owner can open the same editor for cloud and local Agent images",()=>{
  const shop=read("../src/features/shop/ShopConsole.tsx");
  const actions=read("../src/features/shop/useShopPrintActions.ts");
- const api=read("../src/api.ts");
+ const api=read("../src/api/print-jobs.ts");
  assert.match(shop,/preview\.job\.storageMode==="CLOUD"\|\|preview\.job\.storageMode==="LOCAL_AGENT"/);
  assert.match(actions,/editor\.job\.storageMode==="LOCAL_AGENT"[\s\S]*?replaceShopPhotoDocumentLocally/);
  assert.match(actions,/replaceShopPhotoDocument\(accessToken,editor\.job\.id,sheet\.file,sheet\.sizeCode,sheet\.photoCount,sheet\.photosPerPage\)/);
@@ -527,7 +527,7 @@ test("local photo revision rejects paid, handed-off and changed originals",()=>{
 test("shop-owner Photo Studio supports cloud and local storage without changing a local job into cloud storage",()=>{
  const shop=read("../src/features/shop/ShopConsole.tsx");
  const actions=read("../src/features/shop/useShopPrintActions.ts");
- const api=read("../src/api.ts");
+ const api=read("../src/api/print-jobs.ts");
  const shopPhotoService=read("../../../src/SmartPrint.Api/Services/ShopPhotoRevisionService.cs");
  const agent=read("../../../src/SmartPrint.Api/Services/AgentLocalPhotoRevisionService.cs");
  assert.match(shop,/preview\.job\.storageMode==="CLOUD"\|\|preview\.job\.storageMode==="LOCAL_AGENT"/);

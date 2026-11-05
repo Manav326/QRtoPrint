@@ -33,21 +33,19 @@ test("station route remains separate from admin and shop scopes", () => {
 });
 
 test("Android customer station keeps the shared print page and offers native local-network permission and phone files", () => {
-  const appSource = readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8");
+  const customerEntrySource = readFileSync(new URL("../src/features/customer/CustomerEntry.tsx", import.meta.url), "utf8");
   const androidSource = readFileSync(
     new URL("../../android/app/src/main/java/com/quantaedge/smartprint/MainActivity.kt", import.meta.url),
     "utf8"
   );
-  const apiSource = readFileSync(new URL("../src/api/customer.ts", import.meta.url), "utf8");
-
   const customerFlow = readFileSync(new URL("../src/features/customer/CustomerPrintFlow.tsx", import.meta.url), "utf8");
   assert.match(customerFlow, /function CustomerPrintFlow\(/);
-  assert.match(appSource, /requestSmartPrintNativeLocalNetworkAccess/);
-  assert.match(appSource, /bridge\.addEventListener\("message",handleReply\)/);
-  assert.match(apiSource, /value\.startsWith\("localNetworkAccess:"\)/);
-  assert.match(appSource, /nativeLocalNetworkPermissionDenied=access==="denied"/);
-  assert.match(appSource, /allow SmartPrint under Android Settings/);
-  assert.match(appSource, /Tap Check Wi-Fi to connect to this shop/);
+  assert.match(customerEntrySource, /requestSmartPrintNativeLocalNetworkAccess/);
+  assert.match(customerEntrySource, /bridge\.addEventListener\("message",handleReply\)/);
+  assert.match(customerEntrySource, /value\.startsWith\("localNetworkAccess:"\)/);
+  assert.match(customerEntrySource, /nativeLocalNetworkPermissionDenied=access==="denied"/);
+  assert.match(customerEntrySource, /allow SmartPrint under Android Settings/);
+  assert.match(customerEntrySource, /Tap Check Wi-Fi to connect to this shop/);
   assert.match(androidSource, /override fun onShowFileChooser\([\s\S]*?showPicker\(\)/);
   assert.match(androidSource, /text\("SmartPrint My Files"/);
   assert.match(androidSource, /button\("Browse phone"/);
