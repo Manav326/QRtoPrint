@@ -5,7 +5,7 @@ import { buildShopOrderJourneys, filterShopOrderJourneys } from "../src/order-jo
 function job(v: Partial<ShopPrintJob> & Pick<ShopPrintJob,"id"|"jobNumber"|"status">): ShopPrintJob {
   return {
     id:v.id, jobNumber:v.jobNumber, status:v.status, batchId:v.batchId??null,
-    batchName:v.batchName??null, batchGroupName:v.batchGroupName??null, rejectedPageNumbersJson:"[]",
+    batchName:v.batchName??null, batchGroupName:v.batchGroupName??null, rejectedPageNumbersJson:v.rejectedPageNumbersJson??"[]",
     pageCount:v.pageCount??2,copies:v.copies??1,colourMode:"Mono",paperSize:"A4",isDuplex:false,
     currency:v.currency??"INR",quotedAmountMinor:v.quotedAmountMinor??1000,
     createdUtc:v.createdUtc??"2026-11-04T10:00:00Z",
@@ -83,4 +83,31 @@ test("stage filters and search cover batch, order, original file and folder name
   assert.equal(filterShopOrderJourneys(orders,"review","school forms").length,1);
   assert.equal(filterShopOrderJourneys(orders,"review","portrait.jpg").length,0);
   assert.equal(filterShopOrderJourneys(orders,"all","portrait.jpg").length,1);
+});
+
+test("excluded totals include rejected, fully refunded and cancelled files", () => {
+  const order = buildShopOrderJourneys([
+    job({id:"completed",jobNumber:"SP-1",batchId:"mixed",status:"COMPLETED",pageCount:2}),
+    job({id:"rejected",jobNumber:"SP-2",batchId:"mixed",status:"REJECTED",pageCount:3}),
+    job({id:"refunded",jobNumber:"SP-3",batchId:"mixed",status:"REFUNDED",pageCount:4}),
+    job({id:"cancelled",jobNumber:"SP-4",batchId:"mixed",status:"CANCELLED",pageCount:1})
+  ], [])[0];
+  assert.equal(order.acceptedCount, 1);
+  assert.equal(order.rejectedCount, 3);
+  assert.equal(order.refundedCount, 1);
+});
+
+test("pages to produce subtract unique rejected pages before multiplying by copies", () => {
+  const order = buildShopOrderJourneys([
+    job({id:"partial",jobNumber:"SP-1",batchId:"refund",status:"PAID_AUTHORISED",pageCount:5,copies:2,rejectedPageNumbersJson:"[2,4,4,99,0]"}),
+    job({id:"ready",jobNumber:"SP-2",batchId:"refund",status:"COMPLETED",pageCount:2,copies:1})
+  ], [])[0];
+  assert.equal(order.pageCount, 8);
+});
+
+test("invalid rejected-page metadata does not break shop journey totals", () => {
+  const order = buildShopOrderJourneys([
+    job({id:"legacy",jobNumber:"SP-1",status:"PRINTING",pageCount:3,copies:2,rejectedPageNumbersJson:"not-json"})
+  ], [])[0];
+  assert.equal(order.pageCount, 6);
 });

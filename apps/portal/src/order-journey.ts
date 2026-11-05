@@ -14,6 +14,24 @@ const PAYMENT = new Set(["AWAITING_PAYMENT","AWAITING_CUSTOMER_PAYMENT","AWAITIN
 const REVIEW = new Set(["AWAITING_SHOP_APPROVAL","AWAITING_PAYMENT","PAYMENT_REJECTED","REJECTED"]);
 const VERIFYABLE = new Set(["AWAITING_CUSTOMER_PAYMENT","CUSTOMER_REPORTED","CASH_AWAITING_PAYMENT"]);
 const NON_ACTIVE = new Set(["REJECTED","REFUNDED","CANCELLED"]);
+
+function produciblePages(job: ShopPrintJob): number {
+  const pageCount = Number.isFinite(job.pageCount) ? Math.max(0, Math.trunc(job.pageCount)) : 0;
+  const copies = Number.isFinite(job.copies) ? Math.max(1, Math.trunc(job.copies)) : 1;
+  let rejectedCount = 0;
+  try {
+    const parsed: unknown = JSON.parse(job.rejectedPageNumbersJson || "[]");
+    if (Array.isArray(parsed)) {
+      const rejected = new Set(parsed.filter((page): page is number =>
+        Number.isInteger(page) && page >= 1 && page <= pageCount
+      ));
+      rejectedCount = rejected.size;
+    }
+  } catch {
+    // Invalid legacy metadata must not break the order journey.
+  }
+  return Math.max(0, pageCount - rejectedCount) * copies;
+}
 const VERIFIED = new Set(["VERIFIED","PARTIALLY_REFUNDED"]);
 
 function latestPayment(entries: ShopPayment[]): ShopPayment | null {
@@ -65,7 +83,7 @@ export function buildShopOrderJourneys(jobs: ShopPrintJob[], payments: ShopPayme
     const batchId = sortedJobs.find(job => job.batchId)?.batchId ?? null;
     const payment = paymentFor(batchId, sortedJobs, payments);
     const active = sortedJobs.filter(job => !NON_ACTIVE.has(job.status));
-    const rejectedCount = sortedJobs.filter(job => job.status === "REJECTED").length;
+    const rejectedCount = sortedJobs.filter(job => NON_ACTIVE.has(job.status)).length;
     const refundedCount = sortedJobs.filter(job => job.status === "REFUNDED").length;
     const attentionJobs = sortedJobs.filter(job => job.status === "FAILED" || job.status === "OUTPUT_UNCONFIRMED" || !!job.failureCode);
     const stage = resolveStage(sortedJobs, payment);
@@ -76,7 +94,7 @@ export function buildShopOrderJourneys(jobs: ShopPrintJob[], payments: ShopPayme
       key, batchId, name: first.batchName?.trim() || first.batchGroupName?.trim() || fallback,
       reference: first.jobNumber, createdUtc: latest, jobs: sortedJobs, payment, ...stage,
       acceptedCount: active.length, rejectedCount, refundedCount,
-      pageCount: active.reduce((n,job)=>n+Math.max(0,job.pageCount)*Math.max(1,job.copies),0),
+      pageCount: active.reduce((n,job)=>n+produciblePages(job),0),
       quotedAmountMinor: active.reduce((n,job)=>n+Math.max(0,job.quotedAmountMinor),0),
       currency: first.currency || payment?.currency || "INR", attentionJobs,
       canReview: !!batchId && (!payment || payment.status === "REJECTED") && sortedJobs.some(job=>REVIEW.has(job.status)),
