@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useShopData } from "./useShopData";
-import type, { ShopModal, ShopSection } from "./shop-types";
+import type { ShopModal, ShopSection } from "./shop-types";
 import OverviewPage from "./OverviewPage";
 import { BatchReviewModal, JobHistoryModal, DocumentPreviewModal, RefundModal, ShopOwnerAccountModal, HelpSupportModal, PrinterModal, StationModal } from "./ShopOverlays";
 import { Activity, Check, Clock3, CreditCard, FileText, LayoutDashboard, ChevronDown, LifeBuoy, LogOut, Menu, Monitor, Plus, Printer, QrCode, Settings, UserRound, ShieldCheck, Users, Wallet, X, PanelLeftClose, PanelLeftOpen } from "lucide-react";
