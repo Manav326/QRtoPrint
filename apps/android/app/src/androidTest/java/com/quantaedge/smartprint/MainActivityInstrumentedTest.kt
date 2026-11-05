@@ -119,7 +119,7 @@ class MainActivityInstrumentedTest {
                     .get(activity) as com.google.android.material.appbar.MaterialToolbar
                 assertEquals("SmartPrint", toolbar.title.toString())
                 assertTrue(toolbar.subtitle.toString().contains("by QuantaEdge"))
-                assertTrue(toolbar.subtitle.toString().contains("ACCOUNT"))
+                assertTrue(toolbar.subtitle.toString().contains("Account"))
                 assertEquals("Back", toolbar.navigationContentDescription)
                 assertNotNull(toolbar.navigationIcon)
             }
