@@ -57,11 +57,11 @@ export default function ShopConsole({ tokens, onSignOut, dark, onToggleTheme }: 
 
   const {
     cloudStatus, profile, setProfile, printers, setPrinters, stations, setStations, pricing, setPricing,
-    printJobs, , journeyJobs, journeyPayments, journeyRefreshing,
-    hasMoreQueueJobs, loadingOlderQueueJobs, , queueSearch, agentDevices, setAgentDevices,
+    printJobs, journeyJobs, journeyPayments, journeyRefreshing,
+    hasMoreQueueJobs, loadingOlderQueueJobs, queueSearch, agentDevices, setAgentDevices,
     agentDevicesRef, paymentSettings, setPaymentSettings, payments, refunds, subscription,
-    apiConnectionState, , loading, , error, setError,
-    reload, , refreshPrintQueue, loadOlderQueueJobs, searchPrintQueue, refreshOrderJourney
+    apiConnectionState, loading, error, setError,
+    reload, refreshPrintQueue, loadOlderQueueJobs, searchPrintQueue, refreshOrderJourney
   } = useShopData({
     accessToken: tokens.accessToken,
     onSignOut,
