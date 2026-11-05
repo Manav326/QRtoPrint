@@ -75,7 +75,7 @@ class DocumentViewerInstrumentedTest {
                 onView(withText(source.name)).perform(scrollTo(), click())
                 onView(withText("Page 1 of 8")).check(matches(isDisplayed()))
                 onView(withContentDescription("Document page thumbnails")).perform(swipeLeft())
-                onView(withContentDescription("Go to page 8")).perform(click())
+                onView(withContentDescription("Go to page 8")).perform(scrollTo(), click())
                 onView(withText("Page 8 of 8")).check(matches(isDisplayed()))
             }
         } finally { source.delete() }

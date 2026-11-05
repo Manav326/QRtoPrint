@@ -280,16 +280,22 @@ class SmartPrintDocumentViewer(
             val scale = min(1f, maxEdge.toFloat() / max(page.width, page.height).toFloat())
             val width = max(1, (page.width * scale).toInt())
             val height = max(1, (page.height * scale).toInt())
-            val bitmap = Bitmap.createBitmap(width, height, config)
+            // PdfRenderer.Page.render requires ARGB_8888 on supported Android
+            // versions. Convert the completed thumbnail only after rendering.
+            val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
             bitmap.eraseColor(Color.WHITE)
             val transform = Matrix().apply {
                 setScale(width.toFloat() / page.width, height.toFloat() / page.height)
             }
             try {
                 page.render(bitmap, null, transform, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
-                return bitmap
-            } catch (error: Exception) {
+                if (config == Bitmap.Config.ARGB_8888) return bitmap
+                val converted = bitmap.copy(config, false)
+                    ?: throw IllegalStateException("The page thumbnail could not be converted.")
                 bitmap.recycle()
+                return converted
+            } catch (error: Exception) {
+                if (!bitmap.isRecycled) bitmap.recycle()
                 throw error
             }
         }
