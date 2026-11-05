@@ -16,7 +16,7 @@ test("customer upload sends the selected file settings to both storage paths", (
 });
 
 test("owner quote edits are sent through the existing print-job API", () => {
-  const shop = read("../src/features/shop/ShopConsole.tsx");
+  const shop = read("../src/features/shop/useShopPrintActions.ts");
   const customer = read("../src/features/customer/CustomerPrintFlow.tsx");
   const api = read("../src/api.ts");
   assert.match(shop, /updateShopPrintJobSettings\(tokens\.accessToken,job\.id,settings\)/);
@@ -358,10 +358,11 @@ test("customer local transfer remains visible with a clear unavailable state whe
 });
 
 test("owner preview selects the persisted supported MIME type before the blob response type",()=>{
- const shop=read("../src/features/shop/ShopConsole.tsx");
- assert.match(shop,/const storedType=\(job\.document\.mediaType\|\|""\)/);
- assert.match(shop,/supportedTypes\.has\(storedType\)[\s\S]*?supportedTypes\.has\(responseType\)/);
- assert.match(shop,/Preview format is not supported/);
+ const actions=read("../src/features/shop/useShopPrintActions.ts");
+ const overlays=read("../src/features/shop/ShopOverlays.tsx");
+ assert.match(actions,/const storedType=\(job\.document\.mediaType\|\|""\)/);
+ assert.match(actions,/supportedTypes\.has\(storedType\)[\s\S]*?supportedTypes\.has\(responseType\)/);
+ assert.match(overlays,/Preview format is not supported/);
 });
 
 test("customer web upload accepts drag and drop and contains no JavaScript browser alert dialogs",()=>{
@@ -460,8 +461,9 @@ test("customer photo previews do not expose the raw image or prepared PDF viewer
 
 test("the exact same Photo Studio is opened from the shop image review",()=>{
  const shop=read("../src/features/shop/ShopConsole.tsx");
- assert.match(shop,/setShopPhotoStudio\(\{source,job:preview\.job,returnPreview\}\)/);
- assert.match(shop,/replaceShopPhotoDocument\(tokens\.accessToken,editor\.job\.id,sheet\.file,sheet\.sizeCode,sheet\.photoCount,sheet\.photosPerPage\)/);
+ const actions=read("../src/features/shop/useShopPrintActions.ts");
+ assert.match(actions,/setShopPhotoStudio\(\{source,job:preview\.job,returnPreview\}\)/);
+ assert.match(actions,/replaceShopPhotoDocument\(accessToken,editor\.job\.id,sheet\.file,sheet\.sizeCode,sheet\.photoCount,sheet\.photosPerPage\)/);
  assert.match(shop,/shopPhotoStudio && <PhotoStudio source=\{shopPhotoStudio\.source\}/);
  assert.match(shop,/Enhance photo for printing/);
 });
@@ -479,10 +481,11 @@ test("native Windows content capture protection covers the photo editor and imag
 
 test("shop owner can open the same editor for cloud and local Agent images",()=>{
  const shop=read("../src/features/shop/ShopConsole.tsx");
+ const actions=read("../src/features/shop/useShopPrintActions.ts");
  const api=read("../src/api.ts");
  assert.match(shop,/preview\.job\.storageMode==="CLOUD"\|\|preview\.job\.storageMode==="LOCAL_AGENT"/);
- assert.match(shop,/editor\.job\.storageMode==="LOCAL_AGENT"[\s\S]*?replaceShopPhotoDocumentLocally/);
- assert.match(shop,/replaceShopPhotoDocument\(tokens\.accessToken,editor\.job\.id,sheet\.file,sheet\.sizeCode,sheet\.photoCount,sheet\.photosPerPage\)/);
+ assert.match(actions,/editor\.job\.storageMode==="LOCAL_AGENT"[\s\S]*?replaceShopPhotoDocumentLocally/);
+ assert.match(actions,/replaceShopPhotoDocument\(accessToken,editor\.job\.id,sheet\.file,sheet\.sizeCode,sheet\.photoCount,sheet\.photosPerPage\)/);
  assert.match(api,/\/api\/v1\/shop\/print-jobs\/\$\{jobId\}\/photo-revision-grant/);
  assert.match(api,/\/api\/v1\/local\/documents\/\$\{encodeURIComponent\(jobId\)\}\/photo-revision/);
 });
@@ -522,14 +525,15 @@ test("local photo revision rejects paid, handed-off and changed originals",()=>{
 
 test("shop-owner Photo Studio supports cloud and local storage without changing a local job into cloud storage",()=>{
  const shop=read("../src/features/shop/ShopConsole.tsx");
+ const actions=read("../src/features/shop/useShopPrintActions.ts");
  const api=read("../src/api.ts");
  const shop=read("../../../src/SmartPrint.Api/Services/ShopPhotoRevisionService.cs");
  const agent=read("../../../src/SmartPrint.Api/Services/AgentLocalPhotoRevisionService.cs");
  assert.match(shop,/preview\.job\.storageMode==="CLOUD"\|\|preview\.job\.storageMode==="LOCAL_AGENT"/);
- assert.match(shop,/editor\.job\.storageMode==="LOCAL_AGENT"[\s\S]*?replaceShopPhotoDocumentLocally/);
+ assert.match(actions,/editor\.job\.storageMode==="LOCAL_AGENT"[\s\S]*?replaceShopPhotoDocumentLocally/);
  assert.match(api,/\/api\/v1\/shop\/print-jobs\/\$\{jobId\}\/photo-revision-grant/);
  assert.match(api,/\/api\/v1\/local\/documents\/\$\{encodeURIComponent\(jobId\)\}\/photo-revision/);
- assert.match(shop,/document\.StorageMode = "CLOUD"/);
+ assert.match(shopPhotoService,/document\.StorageMode = "CLOUD"/);
  assert.match(agent,/document\.StorageMode = "LOCAL_AGENT"/);
 });
 
