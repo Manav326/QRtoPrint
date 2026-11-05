@@ -4,7 +4,7 @@ import type { PlatformOverview } from "../../api";
 import { formatIstDateTime } from "../../date-time";
 import { prettyStatus, toneForStatus } from "./platform-admin-formatting";
 
-export default function PlatformOverviewSection({overview,overviewLoading}:{overview:PlatformOverview|null;overviewLoading:boolean}) {
+export default function PlatformOverviewSection({overview,overviewLoading,overviewError}:{overview:PlatformOverview|null;overviewLoading:boolean;overviewError:string}) {
   return (
     <section className="platform-overview">
                   {overviewLoading && !overview ? (
@@ -75,7 +75,7 @@ function Metric({icon,label,value,note,tone}:{icon:ReactNode;label:string;value:
   );
 }
 
-function HealthRow({icon,title,value,detail}:{icon:React.ReactNode;title:string;value:string;detail:string}) {
+function HealthRow({icon,title,value,detail}:{icon:ReactNode;title:string;value:string;detail:string}) {
   return <div className="platform-health-row"><div className="platform-health-icon">{icon}</div><div><strong>{title}</strong><small>{detail}</small></div><span>{value}</span></div>;
 }
 

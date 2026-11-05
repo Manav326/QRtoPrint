@@ -51,7 +51,7 @@ export default function PlatformTenantsSection({
                   {tenantActionError && <div className="inline-error" role="alert">{tenantActionError}</div>}
                   {tenantLoading && !tenants ? <div className="platform-loading-inline"><span className="button-spinner"/> Loading shops…</div> : null}
                   {statusHistoryTenant && <section className="panel platform-status-history">
-                    <div className="panel-heading"><div><h2>Status history · {statusHistoryTenant.businessName}</h2><p>Audited platform tenant lifecycle changes</p></div><button className="text-action" onClick={() => { setStatusHistoryTenant(null); setStatusHistory(null); }}>Close</button></div>
+                    <div className="panel-heading"><div><h2>Status history · {statusHistoryTenant.businessName}</h2><p>Audited platform tenant lifecycle changes</p></div><button className="text-action" onClick={closeTenantStatusHistory}>Close</button></div>
                     {statusHistory === null ? <div className="platform-loading-inline">Loading status history…</div> :
                       statusHistory.length === 0 ? <div className="platform-loading-inline">No status changes have been recorded.</div> :
                       <div className="platform-status-history-list">{statusHistory.map(item => <div className="platform-status-history-row" key={item.id}>

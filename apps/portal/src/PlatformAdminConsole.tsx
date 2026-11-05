@@ -128,7 +128,7 @@ export default function PlatformAdminConsole({
           </div>
 
           {overviewError && <div className="inline-error" role="alert">{overviewError}</div>}
-          {section === "Overview" && <PlatformOverviewSection overview={overview} overviewLoading={overviewLoading}/>}
+          {section === "Overview" && <PlatformOverviewSection overview={overview} overviewLoading={overviewLoading} overviewError={overviewError}/>}
           {section === "Tenants" && <PlatformTenantsSection
             tenants={tenants} tenantLoading={tenantLoading} tenantError={tenantError}
             tenantActionError={tenantActionError} tenantActionId={tenantActionId}
