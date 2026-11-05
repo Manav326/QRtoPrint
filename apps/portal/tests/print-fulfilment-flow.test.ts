@@ -400,8 +400,17 @@ test("native Android protects Photo Studio from screenshots through the origin-p
 
 test("a completed customer order offers a fresh session instead of another payment or quote",()=>{
  const app=read("../src/App.tsx");
- assert.match(app,/async function startNewSession\(\)/);
+ assert.match(app,/const startNewSession=useCallback\(async\(\)=>/);
  assert.match(app,/key=\{result\.sessionToken\}/);
  assert.match(app,/jobStatus\.status===\"COMPLETED\"[\s\S]*?customer-session-complete/);
  assert.match(app,/onClick=\{onStartNewSession\}/);
+});
+
+test("native customer account identity accompanies QR session renewal",()=>{
+ const api=read("../src/api.ts");
+ const start=api.indexOf("export async function renewCustomerPrintSession(");
+ const end=api.indexOf("\n}",start);
+ assert.ok(start>=0&&end>start);
+ const renewal=api.slice(start,end);
+ assert.match(renewal,/headers: \{ "X-Print-Session": sessionToken, \.\.\.await nativeCustomerAuthorizationHeaders\(\) \}/);
 });
