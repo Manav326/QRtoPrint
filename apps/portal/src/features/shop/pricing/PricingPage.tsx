@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { ShieldCheck, Wallet } from "lucide-react";
-import { formatIstDateTime } from "../../date-time";
-import type { ShopPricingProfile } from "../../api";
+import { formatIstDateTime } from "../../../date-time";
+import type { ShopPricingProfile } from "../../../api";
 
 export interface PricingUpdate {
   monoPerSideMinor: number;
