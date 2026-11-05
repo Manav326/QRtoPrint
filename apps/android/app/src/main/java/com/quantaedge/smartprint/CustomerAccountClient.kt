@@ -30,6 +30,9 @@ data class CustomerAuth(
 
 data class CustomerPrintHistoryItem(
     val id: String,
+    val batchId: String?,
+    val batchName: String?,
+    val batchGroupName: String?,
     val jobNumber: String,
     val status: String,
     val pageCount: Int,
@@ -182,6 +185,9 @@ object CustomerAccountClient {
             val job = jobs.optJSONObject(index) ?: return@mapNotNull null
             CustomerPrintHistoryItem(
                 id = job.optString("id"),
+                batchId = job.optString("batchId").takeUnless { it.isBlank() || it == "null" },
+                batchName = job.optString("batchName").takeUnless { it.isBlank() || it == "null" },
+                batchGroupName = job.optString("batchGroupName").takeUnless { it.isBlank() || it == "null" },
                 jobNumber = job.optString("jobNumber"),
                 status = job.optString("status"),
                 pageCount = job.optInt("pageCount"),
@@ -199,6 +205,13 @@ object CustomerAccountClient {
                 outputCompletedUtc = job.optString("outputCompletedUtc").takeUnless { it.isBlank() || it == "null" }
             )
         }
+    }
+
+    /** Reads the current state and audit timeline of a job owned by this signed-in customer. */
+    fun jobStatus(baseUrl: String, accessToken: String, jobId: String): JSONObject {
+        val safeId = jobId.trim()
+        require(safeId.matches(Regex("^[0-9a-fA-F-]{36}$"))) { "The print job identifier is invalid." }
+        return request(baseUrl, "/api/v1/customer/jobs/$safeId/status", null, accessToken)
     }
 
     private fun JSONObject.toAuth(email: String, displayName: String) = CustomerAuth(
