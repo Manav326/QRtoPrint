@@ -365,18 +365,20 @@ test("folder defaults inherit to files and advanced paper options are opt-in", (
 test("offline requests use the existing secure queue and owner changes require customer approval", () => {
   const app = read("../src/App.tsx");
   const api = read("../src/api.ts");
-  const server = read("../../../src/SmartPrint.Api/Program.cs");
+  const recoveryEndpoint = read("../../../src/SmartPrint.Api/Endpoints/PublicCloudRecoveryEndpoints.cs");
+  const recoveryService = read("../../../src/SmartPrint.Api/Services/PublicCloudRecoveryService.cs");
+  const settingsEndpoint = read("../../../src/SmartPrint.Api/Endpoints/ShopPrintJobSettingsEndpoints.cs");
+  const settingsService = read("../../../src/SmartPrint.Api/Services/ShopPrintJobSettingsService.cs");
 
   assert.ok(app.includes("secureQueueFallbackEnabled"));
-  assert.ok(server.includes('publicApi.MapPost("/sessions/current/local-upload-tickets/{ticketId:guid}/cloud-recovery"'));
-  assert.ok(server.includes("if (!subscription.CloudAssistedPrintingEnabled && recoveryAgentAvailable)"));
+  assert.ok(recoveryEndpoint.includes('publicApi.MapPost("/sessions/current/local-upload-tickets/{ticketId:guid}/cloud-recovery"'));
+  assert.ok(recoveryService.includes("if (!subscription.CloudAssistedPrintingEnabled && recoveryAgentAvailable)"));
   assert.doesNotMatch(api, /X-Print-Queue-Fallback|allowQueueFallback/);
-  assert.doesNotMatch(server, /X-Print-Queue-Fallback|queueFallbackRequested/);
-  assert.ok(server.includes('shop.MapPatch("/print-jobs/{jobId:guid}/settings"'));
-  assert.ok(server.includes('job.Status = "AWAITING_CUSTOMER_APPROVAL";'));
+  assert.doesNotMatch(recoveryEndpoint + recoveryService, /X-Print-Queue-Fallback|queueFallbackRequested/);
+  assert.ok(settingsEndpoint.includes('shop.MapPatch("/print-jobs/{jobId:guid}/settings"'));
+  assert.ok(settingsService.includes('job.Status = "AWAITING_CUSTOMER_APPROVAL";'));
   assert.ok(app.includes("onUpdateSettings={updatePrintJobSettings}"));
 });
-
 test("customer paper summaries reflect advanced folder and per-file choices", () => {
   const app = read("../src/App.tsx");
   assert.match(app, /customer-paper-default">\{defaults\.advancedEnabled\?defaults\.paperSize:"A4"\}/);
@@ -529,13 +531,12 @@ test("local preview endpoint candidates are deduplicated and bounded", () => {
 test("session renewal refreshes customer payment choices and explains unavailable payment methods", () => {
   const app = read("../src/App.tsx");
   const api = read("../src/api.ts");
-  const backend = read("../../../src/SmartPrint.Api/Program.cs");
+  const sessionService = read("../../../src/SmartPrint.Api/Services/PublicCustomerSessionService.cs");
   assert.match(api, /paymentOptions: \{ upiEnabled: boolean; upiId\?: string \| null; payeeName\?: string \| null; cashEnabled: boolean; instantPaymentEnabled: boolean \}/);
   assert.match(app, /paymentOptions:session\.paymentOptions/);
-  assert.match(backend, /PaymentOptions = paymentOptions/);
+  assert.match(sessionService, /new PublicCustomerSessionRenewalSnapshot\(session\.ExpiresUtc, localAgent, paymentOptions\)/);
   assert.equal((app.match(/The shop has not enabled UPI or cash payment/g) ?? []).length, 2);
 });
-
 test("contextual help supports outside-click and Escape dismissal", () => {
   const app = read("../src/App.tsx");
   assert.match(app, /document\.addEventListener\("pointerdown",dismissOutside\)/);

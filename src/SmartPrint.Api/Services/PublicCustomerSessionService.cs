@@ -20,7 +20,8 @@ public sealed record PublicCustomerSessionResult(
 
 public sealed record PublicCustomerSessionRenewalSnapshot(
     DateTimeOffset ExpiresUtc,
-    object? LocalAgent);
+    object? LocalAgent,
+    object PaymentOptions);
 
 public sealed record PublicCustomerSessionSnapshot(
     Guid Id,
@@ -83,10 +84,11 @@ public sealed class PublicCustomerSessionService(
             .SingleOrDefaultAsync(cancellationToken);
         var localAgent = await agentEndpointInfo.GetLocalAgentInfoAsync(
             session.TenantId, stationPrinterId, now, cancellationToken);
+        var paymentOptions = await GetPaymentOptionsAsync(session.TenantId, cancellationToken);
 
         return new PublicCustomerSessionResult(
             PublicCustomerSessionFailure.None,
-            new PublicCustomerSessionRenewalSnapshot(session.ExpiresUtc, localAgent));
+            new PublicCustomerSessionRenewalSnapshot(session.ExpiresUtc, localAgent, paymentOptions));
     }
 
     public async Task<PublicCustomerSessionResult> ResumeAsync(
@@ -249,17 +251,7 @@ public sealed class PublicCustomerSessionService(
                 profile.Currency
             })
             .SingleAsync(cancellationToken);
-        var paymentOptions = await db.ShopPaymentProfiles.AsNoTracking()
-            .Where(profile => profile.TenantId == tenantId)
-            .Select(profile => new
-            {
-                profile.UpiEnabled,
-                profile.UpiId,
-                profile.PayeeName,
-                profile.CashEnabled,
-                profile.InstantPaymentEnabled
-            })
-            .SingleAsync(cancellationToken);
+        var paymentOptions = await GetPaymentOptionsAsync(tenantId, cancellationToken);
         var printer = printerDeviceId is Guid selectedPrinterId
             ? await db.PrinterDevices.AsNoTracking()
                 .Where(item =>
@@ -302,4 +294,21 @@ public sealed class PublicCustomerSessionService(
             customerEntitlements.CloudAssistedPrintingEnabled,
             photoPricing);
     }
+    private async Task<object> GetPaymentOptionsAsync(Guid tenantId, CancellationToken cancellationToken)
+    {
+        var paymentOptions = await db.ShopPaymentProfiles.AsNoTracking()
+            .Where(profile => profile.TenantId == tenantId)
+            .Select(profile => new
+            {
+                profile.UpiEnabled,
+                profile.UpiId,
+                profile.PayeeName,
+                profile.CashEnabled,
+                profile.InstantPaymentEnabled
+            })
+            .SingleAsync(cancellationToken);
+
+        return paymentOptions;
+    }
+
 }
