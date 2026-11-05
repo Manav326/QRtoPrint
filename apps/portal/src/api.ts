@@ -1206,10 +1206,9 @@ function isPrivateLocalAgentEndpoint(value: string): URL | null {
       (octets[0] === 10 ||
         (octets[0] === 172 && octets[1] >= 16 && octets[1] <= 31) ||
         (octets[0] === 192 && octets[1] === 168));
-    const loopbackIpv4 = endpoint.hostname === "127.0.0.1";
     if (endpoint.protocol !== "http:" || endpoint.port !== "17842" ||
         endpoint.username || endpoint.password || endpoint.pathname !== "/" ||
-        endpoint.search || endpoint.hash || !(privateIpv4 || (allowLoopback && loopbackIpv4))) return null;
+        endpoint.search || endpoint.hash || !privateIpv4) return null;
     return endpoint;
   } catch {
     return null;
