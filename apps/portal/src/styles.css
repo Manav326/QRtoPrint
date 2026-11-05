@@ -3213,3 +3213,36 @@ html[data-theme="dark"] .customer-entry:not(.smartprint-native) .customer-upload
 .customer-entry:not(.smartprint-native) .customer-upload-zone {
   transition: border-color .18s;
 }
+
+/* SmartPrint customer previews: originals are visible, edited sheets are preview-only. */
+.customer-original-image-preview{display:block;max-width:100%;max-height:min(60vh,620px);margin:0 auto;object-fit:contain;border-radius:8px}
+.customer-edited-photo-preview{display:grid;gap:10px;min-width:0}
+.customer-edited-photo-frame{position:relative;display:grid;place-items:center;max-height:min(68vh,620px);overflow:hidden;padding:12px;background:var(--surface-2);border-radius:10px}
+.customer-edited-photo-frame img{display:block;max-width:100%;max-height:58vh;object-fit:contain}
+.customer-edited-photo-frame>span{position:absolute;right:18px;bottom:18px;padding:5px 8px;border-radius:5px;background:#101522b8;color:#fff;font-size:10px;font-weight:700;letter-spacing:.2px;pointer-events:none}
+.customer-edited-photo-pages{display:flex;gap:8px;overflow-x:auto;padding:2px 1px 8px;max-width:100%;overscroll-behavior-x:contain}
+.customer-edited-photo-pages button{flex:0 0 88px;display:grid;gap:4px;justify-items:center;padding:5px;border:1px solid var(--border);border-radius:8px;background:var(--surface);color:var(--text);font-size:9px;cursor:pointer}
+.customer-edited-photo-pages button[aria-pressed="true"]{border-color:var(--accent);box-shadow:0 0 0 2px color-mix(in srgb,var(--accent) 16%,transparent)}
+.customer-edited-photo-pages img{width:76px;height:72px;object-fit:contain;background:#fff;border-radius:4px}
+.customer-edited-photo-preview>small{color:var(--muted);font-size:10px}
+@media(max-width:520px){
+ .customer-edited-photo-frame{padding:7px;max-height:56vh}
+ .customer-edited-photo-frame img{max-height:48vh}
+ .customer-edited-photo-pages button{flex-basis:76px}
+ .customer-edited-photo-pages img{width:64px;height:64px}
+}
+/* Small-screen baseline for customer workflows and embedded web surfaces. */
+#root,.app-shell,.main-panel,.content-wrap,.customer-entry,.customer-entry-card,.customer-print-flow{min-width:0;max-width:100%}
+input,select,textarea,button{max-width:100%}
+.customer-entry button,.customer-entry select,.customer-entry input{min-width:0}
+.customer-entry .customer-choice,.customer-entry .customer-upload-mode,.customer-entry .customer-file-studio-button{white-space:normal;overflow-wrap:anywhere}
+@media(max-width:420px){
+ .customer-entry-card{padding-inline:12px}
+ .customer-flow-heading h2{font-size:clamp(18px,6vw,23px)}
+ .customer-upload-zone strong,.customer-upload-mode strong{overflow-wrap:anywhere}
+ .customer-file-label{flex-wrap:wrap;gap:7px}
+ .customer-file-studio-button{white-space:normal}
+ .customer-uploaded-batch-item,.customer-folder-title,.customer-folder-defaults{min-width:0}
+ .customer-folder-defaults{flex-wrap:wrap}
+ .customer-flow-button{max-width:100%;white-space:normal;line-height:1.25}
+}
