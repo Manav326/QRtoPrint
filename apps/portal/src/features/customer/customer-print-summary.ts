@@ -1,5 +1,5 @@
-import { shouldBlockBatchCheckoutForExpiredQuote } from "../../batch-checkout-state";
-import { customerFileFingerprint } from "./customer-print-utils";
+import { shouldBlockBatchCheckoutForExpiredQuote } from "../../batch-checkout-state.ts";
+import { customerFileFingerprint } from "./customer-print-utils.ts";
 import type {
   CustomerBatchPayment, CustomerJobStatus, CustomerPayment, CustomerPhotoPricing,
   PrintQuoteResult, UploadedPrintJob
