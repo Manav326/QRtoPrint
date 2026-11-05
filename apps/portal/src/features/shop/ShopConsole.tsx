@@ -98,6 +98,7 @@ export default function ShopConsole({ tokens, onSignOut, dark, onToggleTheme }: 
   const [modal, setModal] = useState<ShopModal>(null);
   const [busy, setBusy] = useState(false);
   const [toast, setToast] = useState("");
+  const [busyResourceId, setBusyResourceId] = useState<string | null>(null);
   const {
     localAgentStatus, localAgentConflict, localAgentRevoked, localAgentNeedsRepair,
     localAgentEnrollmentIssue, localAgentOwnershipChecking, enrollmentCode, agentBusy,
@@ -136,7 +137,6 @@ export default function ShopConsole({ tokens, onSignOut, dark, onToggleTheme }: 
     accessToken: tokens.accessToken, setBusy, setBusyJobId, setError, setToast, reload,
     setPaymentSettings, setProfile, setPricing, setOwnerAccountOpen, confirmInApp, promptInApp
   });
-  const [busyResourceId, setBusyResourceId] = useState<string | null>(null);
   const [eventHistory, setEventHistory] = useState<{ job: ShopPrintJob; events: ShopJobEvent[] } | null>(null);
 
   function requestActionDialog(options: { title: string; message: string; inputLabel?: string; confirmLabel?: string }): Promise<string | null> {
