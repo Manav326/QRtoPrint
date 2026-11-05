@@ -5,15 +5,14 @@ import { createShopDeviceActions } from "./shop-device-actions";
 import { createShopBillingActions } from "./shop-billing-actions";
 import { useShopPrintActions } from "./useShopPrintActions";
 import { useShopDialogs } from "./useShopDialogs";
+import { useShopNavigation } from "./useShopNavigation";
 import type { ShopModal, ShopSection } from "./shop-types";
 import OverviewPage from "./OverviewPage";
 import { BatchReviewModal, JobHistoryModal, DocumentPreviewModal, RefundModal, ShopOwnerAccountModal, HelpSupportModal, PrinterModal, StationModal } from "./ShopOverlays";
 import { Activity, Check, Clock3, CreditCard, FileText, LayoutDashboard, ChevronDown, LifeBuoy, LogOut, Menu, Monitor, Plus, Printer, QrCode, Settings, UserRound, ShieldCheck, Users, Wallet, X, PanelLeftClose, PanelLeftOpen } from "lucide-react";
 import PhotoStudio from "../../PhotoStudio";
-import { shopPathForSection, shopSectionFromPath } from "../../portal-routing";
 import { logout, type AuthTokens } from "../../api";
 import { isDesktopApp } from "../../desktop-bridge";
-import { readSidebarCollapsedPreference, saveSidebarCollapsedPreference } from "../../ui-preferences";
 import OrderJourneyPage from "../../OrderJourneyPage";
 import SubscriptionPage from "../subscription/SubscriptionPage";
 import PrintersPage from "./printers/PrintersPage";
@@ -68,35 +67,14 @@ export default function ShopConsole({ tokens, onSignOut, dark, onToggleTheme }: 
     active,
     onDesktopAgentSync: () => desktopAgentScheduleRef.current(0)
   });
+  const {
+    sidebarOpen,setSidebarOpen,sidebarCollapsed,setSidebarCollapsed,accountMenuOpen,setAccountMenuOpen,
+    helpOpen,setHelpOpen,ownerAccountOpen,setOwnerAccountOpen,accountMenuRef,modal,setModal,
+    navAction,toggleSidebarCollapsed
+  } = useShopNavigation({active,setActive,setError});
 
-  useEffect(() => {
-    const syncSectionFromPath = () => setActive(shopSectionFromPath(window.location.pathname));
-    window.addEventListener("popstate", syncSectionFromPath);
-    return () => window.removeEventListener("popstate", syncSectionFromPath);
-  }, []);
 
-  const [sidebarOpen, setSidebarOpen] = useState(false);
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(readSidebarCollapsedPreference);
-  const [accountMenuOpen, setAccountMenuOpen] = useState(false);
-  const [helpOpen, setHelpOpen] = useState(false);
-  const [ownerAccountOpen, setOwnerAccountOpen] = useState(false);
-  const accountMenuRef = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    if (!accountMenuOpen) return;
-    const closeOnOutsidePointer = (event: PointerEvent) => {
-      if (!accountMenuRef.current?.contains(event.target as Node)) setAccountMenuOpen(false);
-    };
-    const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setAccountMenuOpen(false);
-    };
-    document.addEventListener("pointerdown", closeOnOutsidePointer);
-    window.addEventListener("keydown", closeOnEscape);
-    return () => {
-      document.removeEventListener("pointerdown", closeOnOutsidePointer);
-      window.removeEventListener("keydown", closeOnEscape);
-    };
-  }, [accountMenuOpen]);
-  const [modal, setModal] = useState<ShopModal>(null);
+
   const [busy, setBusy] = useState(false);
   const [toast, setToast] = useState("");
   const {
@@ -135,13 +113,7 @@ export default function ShopConsole({ tokens, onSignOut, dark, onToggleTheme }: 
     setPaymentSettings, setProfile, setPricing, setOwnerAccountOpen, confirmInApp, promptInApp
   });
 
-  function toggleSidebarCollapsed() {
-    setSidebarCollapsed(current => {
-      const next = !current;
-      saveSidebarCollapsedPreference(next);
-      return next;
-    });
-  }
+
 
 
 
@@ -175,16 +147,7 @@ export default function ShopConsole({ tokens, onSignOut, dark, onToggleTheme }: 
     catch (exception) { setError(exception instanceof Error ? exception.message : "Could not clear the secure desktop session."); }
   }
 
-  const navAction = (section: ShopSection) => {
-    const nextPath = shopPathForSection(section);
-    if (window.location.pathname !== nextPath) {
-      window.history.pushState({}, "", nextPath);
-    }
-    setActive(section);
-    setSidebarOpen(false);
-    setAccountMenuOpen(false);
-    setError("");
-  };
+
 
   const activePageTitle = active === "Settings" ? "Shop profile" : active;
 
