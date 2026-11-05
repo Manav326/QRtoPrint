@@ -1095,10 +1095,49 @@ public sealed class ApiWorkflowIntegrationTests
     private sealed record CustomerCredentials(string AccessToken);
 }
 
-internal sealed class ApiIntegrationWebApplicationFactory(
-    string connectionString,
-    string storageRoot) : WebApplicationFactory<Program>
+internal sealed class ApiIntegrationWebApplicationFactory : WebApplicationFactory<Program>
 {
+    private const string SigningKey = "integration-test-signing-key-with-more-than-32-bytes";
+    private readonly string connectionString;
+    private readonly string storageRoot;
+    private readonly Dictionary<string, string?> previousEnvironment = new(StringComparer.Ordinal);
+
+    public ApiIntegrationWebApplicationFactory(string connectionString, string storageRoot)
+    {
+        this.connectionString = connectionString;
+        this.storageRoot = storageRoot;
+
+        // Minimal hosting evaluates required configuration in Program.cs before
+        // WebApplicationFactory's later ConfigureAppConfiguration callback runs.
+        // Supply only the test host's process environment before CreateClient starts it.
+        SetEnvironment("ConnectionStrings__SmartPrint", connectionString);
+        SetEnvironment("Authentication__SigningKey", SigningKey);
+        SetEnvironment("Authentication__Issuer", "QRtoPrint.IntegrationTests");
+        SetEnvironment("Authentication__Audience", "QRtoPrint.IntegrationTests");
+        SetEnvironment("Database__ApplyMigrationsOnStartup", "true");
+        SetEnvironment("Documents__EncryptionKey", Convert.ToBase64String(
+            Enumerable.Range(1, 32).Select(value => (byte)value).ToArray()));
+        SetEnvironment("Documents__StorageRoot", storageRoot);
+        SetEnvironment("PublicPortal__BaseUrl", "https://print.integration.example");
+    }
+
+    private void SetEnvironment(string key, string? value)
+    {
+        previousEnvironment[key] = Environment.GetEnvironmentVariable(key);
+        Environment.SetEnvironmentVariable(key, value);
+    }
+
+    protected override void Dispose(bool disposing)
+    {
+        base.Dispose(disposing);
+        if (!disposing)
+            return;
+
+        foreach (var item in previousEnvironment)
+            Environment.SetEnvironmentVariable(item.Key, item.Value);
+        previousEnvironment.Clear();
+    }
+
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
         builder.UseEnvironment("Production");
@@ -1107,7 +1146,7 @@ internal sealed class ApiIntegrationWebApplicationFactory(
             configuration.AddInMemoryCollection(new Dictionary<string, string?>
             {
                 ["ConnectionStrings:SmartPrint"] = connectionString,
-                ["Authentication:SigningKey"] = "integration-test-signing-key-with-more-than-32-bytes",
+                ["Authentication:SigningKey"] = SigningKey,
                 ["Authentication:Issuer"] = "QRtoPrint.IntegrationTests",
                 ["Authentication:Audience"] = "QRtoPrint.IntegrationTests",
                 ["Database:ApplyMigrationsOnStartup"] = "true",
