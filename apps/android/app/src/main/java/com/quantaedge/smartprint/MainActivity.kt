@@ -1189,7 +1189,7 @@ class MainActivity : AppCompatActivity() {
                     }
                     val query = EditText(this).apply {
                         hint = "Search batch, order, file or shop name"
-                        singleLine = true
+                        setSingleLine(true)
                         inputType = InputType.TYPE_CLASS_TEXT
                         textSize = 12f
                         setTextColor(getColor(R.color.qp_text))
@@ -1352,8 +1352,8 @@ class MainActivity : AppCompatActivity() {
                         setPadding(dp(16), dp(12), dp(16), dp(18))
                     }
                     detailResponses.forEachIndexed { index, response ->
-                        val summary = response.optJSONObject("Job") ?: JSONObject()
-                        val timeline = response.optJSONArray("Timeline") ?: org.json.JSONArray()
+                        val summary = response.optJSONObject("job") ?: JSONObject()
+                        val timeline = response.optJSONArray("timeline") ?: org.json.JSONArray()
                         val historyItem = batch[index]
                         detailColumn.addView(text(historyItem.originalFileName, 14, R.color.qp_text, true)
                             .apply { setPadding(0, 0, 0, dp(5)) })
@@ -1363,8 +1363,8 @@ class MainActivity : AppCompatActivity() {
                             " pages · " + summary.optInt("copies", historyItem.copies) + " copies · " +
                             summary.optString("paperSize", "A4"), 10, R.color.qp_muted, false)
                             .apply { setPadding(0, dp(4), 0, dp(5)) })
-                        val payment = response.optJSONObject("Payment")
-                        val batchPayment = response.optJSONObject("BatchPayment")
+                        val payment = response.optJSONObject("payment")
+                        val batchPayment = response.optJSONObject("batchPayment")
                         val amount = batchPayment?.optLong("amountMinor") ?: payment?.optLong("amountMinor")
                         val paymentStatus = batchPayment?.optString("status") ?: payment?.optString("status")
                         if (amount != null) detailColumn.addView(text(

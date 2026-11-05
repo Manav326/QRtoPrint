@@ -216,7 +216,7 @@ test("photo studio's selected photo quantity creates one multi-page file with on
  const app=read("../src/App.tsx");
  const studio=read("../src/PhotoStudio.tsx");
  assert.match(studio,/const pages=Math\.ceil\(parsedCopies\/photosPerPage\)/);
- assert.match(studio,/onApply\(\[\{file:output,sizeCode:size\.id,photoCount:parsedCopies,photosPerPage\}\]\)/);
+ assert.match(studio,/onApply\(\[\{file:output,sizeCode:size\.id,photoCount:parsedCopies,photosPerPage,previewPages:jpegPages\.map/);
  assert.match(studio,/buildPhotoPdf\(jpegPages\)/);
  assert.match(app,/const generated=sheets\.map\(sheet=>sheet\.file\)/);
  assert.match(app,/photos\[fp\]=\{sizeCode:sheet\.sizeCode,photoCount:sheet\.photoCount,photosPerPage:sheet\.photosPerPage\}/);
@@ -290,16 +290,17 @@ test("cloud shop photo revisions require an unpaid review-stage image and valida
  assert.match(route,/SHOP_PHOTO_ENHANCED/);
 });
 
-test("customer photo previews do not expose the raw image or prepared PDF viewer",()=>{
+test("customer photo previews show the source image and branded prepared pages without a download link",()=>{
  const app=read("../src/App.tsx");
  const previewStart=app.indexOf("{previewUrl&&file&&");
  const previewEnd=app.indexOf("{files.length>0&&<button className=\"customer-flow-button\"",previewStart);
  assert.ok(previewStart>=0&&previewEnd>previewStart);
  const preview=app.slice(previewStart,previewEnd);
- assert.match(preview,/Photo held in the shop workflow/);
- assert.match(preview,/Photo sheet prepared for this shop/);
- assert.doesNotMatch(preview,/<img src=\{previewUrl\}/);
- assert.doesNotMatch(preview,/photoSettingsByFileFingerprint\[[^\]]+\]\?<iframe/);
+ assert.match(preview,/customer-original-image-preview/);
+ assert.match(preview,/customer-edited-photo-frame/);
+ assert.match(preview,/SmartPrint by QuantaEdge/);
+ assert.doesNotMatch(preview,/<a[^>]+download=/i);
+ assert.doesNotMatch(preview,/photoSettingsByFileFingerprint\\[[^\\]]+\\]\\?<iframe/);
 });
 
 test("the exact same Photo Studio is opened from the shop image review",()=>{

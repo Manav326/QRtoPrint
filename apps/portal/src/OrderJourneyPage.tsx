@@ -100,7 +100,8 @@ function OrderCard({journey,printers,agents,onReviewBatch,onVerifyPayment,...act
 }){
   const printer=printerSummary(journey.jobs,printers,agents);
   const canReview=journey.canReview&&!!journey.batchId;
-  const headline=journey.isClosed?"No files moving forward":journey.attentionJobs.length?"Needs a quick check":journey.stage==="received"?"New order received":journey.stage==="review"?"Your review is next":journey.stage==="payment"?"Waiting for payment":journey.stage==="printing"?"Order is being prepared":"Ready for collection";
+  const allOutputsReady=journey.jobs.length>0&&journey.jobs.every(job=>readyStatuses.has(job.status));
+  const headline=journey.isClosed?"No files moving forward":journey.attentionJobs.length?"Needs a quick check":journey.stage==="received"?"New order received":journey.stage==="review"?"Your review is next":journey.stage==="payment"?"Waiting for payment":journey.stage==="printing"?"Order is being prepared":allOutputsReady?"Ready for collection":"Print output saved";
   const stageIndex=journey.isClosed?1:journey.stageIndex;
   return <article className={styles.orderCard}>
     <div className={styles.orderCardTop}><div className={styles.orderIdentity}>

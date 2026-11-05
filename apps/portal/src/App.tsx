@@ -2,7 +2,7 @@ import { Fragment, useCallback, useEffect, useId, useRef, useState, type ReactNo
 import {
   Activity, ArrowRight, Check, Clock3, Copy, CreditCard, FileText, FileUp, FolderOpen, LayoutDashboard,
   ChevronDown, LifeBuoy, LogOut, Menu, Monitor, Plus, Printer, QrCode, Search, Settings, Wifi, Image as ImageIcon, UserRound,
-  ShieldCheck, Users, Wallet, X, PanelLeftClose, PanelLeftOpen, RotateCcw, Zap, Info
+  ShieldCheck, Users, Wallet, X, PanelLeftClose, PanelLeftOpen, RotateCcw, RefreshCw, Zap, Info
 } from "lucide-react";
 import QRCode from "react-qr-code";
 import PhotoStudio, { type PreparedPhotoSheet } from "./PhotoStudio";
@@ -1255,7 +1255,7 @@ function ShopConsole({ tokens, onSignOut, dark, onToggleTheme }: { tokens: AuthT
       const savedJob:ShopPrintJob={...editor.job,printKind:"PHOTO",photoSizeCode:sheet.sizeCode,photoCount:sheet.photoCount,pageCount:Math.max(1,Math.ceil(sheet.photoCount/sheet.photosPerPage)),document:{...editor.job.document,originalFileName:sheet.file.name,mediaType:"application/pdf",sizeBytes:sheet.file.size}};
       setPreview({name:sheet.file.name,url:URL.createObjectURL(previewBlob),blob:previewBlob,mediaType:"application/pdf",job:savedJob,readOnly:true});
     }catch{
-      setError("The A4 photo PDF was saved to the existing print job, but its preview could not be refreshed. Refresh the queue before approving or printing.");
+      setError("The A4 photo PDF was saved to the existing print job, but the queue could not refresh its preview. Refresh the queue before approving or printing.");
     }finally{
       setBusyJobId(null);
     }
@@ -3322,7 +3322,7 @@ function CustomerEntry({publicCode,dark,onToggleTheme}:{publicCode:string;dark:b
         <div className="entry-printer-card"><div className="entry-printer-icon"><Printer size={20}/></div><div><strong>{result.printer?.displayName||"Shop print counter"}</strong><span>{nativeAppMode?(result.printer?.status||"Printer not selected"):result.printer?result.printer.manufacturer+" · "+result.printer.model:"The shop will select a printer for your job."}</span></div><Status label={result.printer?.status||"Session ready"} tone="blue"/></div>
         <div className="entry-session-note"><ShieldCheck size={16}/><span>{nativeAppMode?"Secure session · Expires "+formatIstTime(result.expiresUtc):"This session expires at "+formatIstTime(result.expiresUtc)+". Your document access stays limited to this shop session."}</span></div>
         <CustomerLocalConnection localAgent={result.localAgent} onReady={handleLocalReady} onUnavailable={handleLocalUnavailable} cloudAssistedPrintingEnabled={result.cloudAssistedPrintingEnabled}/>
-        <CustomerPrintFlow key={result.sessionToken} dark={dark} publicCode={publicCode} sessionToken={result.sessionToken} paymentOptions={result.paymentOptions} localAgent={result.localAgent} localReady={localReady} localFallbackSuggested={localFallbackSuggested} cloudAssistedPrintingEnabled={result.cloudAssistedPrintingEnabled} photoPricing={result.photoPricing} hasAssignedPrinter={Boolean(result.printer)} printerCapabilitiesJson={result.printer?.capabilitiesJson} onStartNewSession={()=>void startNewSession()}/>
+        <CustomerPrintFlow dark={dark} publicCode={publicCode} sessionToken={result.sessionToken} paymentOptions={result.paymentOptions} localAgent={result.localAgent} localReady={localReady} localFallbackSuggested={localFallbackSuggested} cloudAssistedPrintingEnabled={result.cloudAssistedPrintingEnabled} photoPricing={result.photoPricing} hasAssignedPrinter={Boolean(result.printer)} printerCapabilitiesJson={result.printer?.capabilitiesJson} key={result.sessionToken} onStartNewSession={()=>void startNewSession()}/>
       </>:null}
     </main>
     <footer className="customer-entry-footer">© 2026 SmartPrint by QuantaEdge · Secure customer printing</footer>

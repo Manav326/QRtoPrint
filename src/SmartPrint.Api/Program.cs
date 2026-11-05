@@ -1000,12 +1000,12 @@ customerApi.MapGet("/jobs/{jobId:guid}/status", async (
     // to the originating session. Do not require that the short-lived QR session
     // remains active: history tracking must survive app restarts and session expiry.
     var ownedJob = await (
-        from job in db.PrintJobs.AsNoTracking()
+        from trackedPrintJob in db.PrintJobs.AsNoTracking()
         join session in db.CustomerPrintSessions.AsNoTracking()
-            on new { job.TenantId, SessionId = job.CustomerSessionId }
+            on new { trackedPrintJob.TenantId, SessionId = trackedPrintJob.CustomerSessionId }
             equals new { session.TenantId, SessionId = session.Id }
-        where job.Id == jobId && session.CustomerUserId == customerId
-        select new { job.TenantId, SessionId = session.Id }
+        where trackedPrintJob.Id == jobId && session.CustomerUserId == customerId
+        select new { trackedPrintJob.TenantId, SessionId = session.Id }
     ).SingleOrDefaultAsync(ct);
 
     if (ownedJob is null)
@@ -1013,7 +1013,7 @@ customerApi.MapGet("/jobs/{jobId:guid}/status", async (
         return Results.NotFound();
     }
 
-    var job = await db.PrintJobs.AsNoTracking()
+    var jobStatus = await db.PrintJobs.AsNoTracking()
         .Where(item => item.Id == jobId && item.TenantId == ownedJob.TenantId &&
                        item.CustomerSessionId == ownedJob.SessionId)
         .Select(item => new
@@ -1090,7 +1090,7 @@ customerApi.MapGet("/jobs/{jobId:guid}/status", async (
             .SingleOrDefaultAsync(ct)
         : null;
 
-    return Results.Ok(new { Job = job, Timeline = timeline, Payment = payment, BatchPayment = batchPayment });
+    return Results.Ok(new { Job = jobStatus, Timeline = timeline, Payment = payment, BatchPayment = batchPayment });
 });
 
 var shop = app.MapGroup("/api/v1/shop").RequireAuthorization()
