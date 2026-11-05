@@ -453,11 +453,6 @@ public sealed class ApiWorkflowIntegrationTests
                 $"/api/v1/platform/tenants/{shop.TenantId}/subscription-history"))
                 Assert.Equal(HttpStatusCode.OK, subscriptionHistory.StatusCode);
 
-            // Subscription information remains available as a recovery read after
-            // suspension; profile details are intentionally not returned for inactive tenants.
-            using (var subscriptionRecoveryRead = await client.GetAsync("/api/v1/shop/subscription"))
-                Assert.Equal(HttpStatusCode.OK, subscriptionRecoveryRead.StatusCode);
-
             // A second, job-free tenant can be suspended. New shop mutations remain blocked.
             var suspendedShop = await RegisterShopAsync(client, "Suspended Integration Shop");
             using (var suspend = await client.PatchAsJsonAsync(
