@@ -1,7 +1,6 @@
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
-using SmartPrint.Api.Data;
 using SmartPrint.Api.Security;
 using SmartPrint.Api.Services;
 using static SmartPrint.Api.Security.OpaqueTokenHasher;
@@ -19,11 +18,11 @@ public static partial class AgentEndpoints
         agentApi.MapGet("/local-document-previews/{jobId:guid}/authorize", async (
             Guid jobId,
             HttpContext context,
-            SmartPrintDbContext db,
+            AgentAuthenticationService authenticationService,
             AgentDocumentPreviewService previewService,
             CancellationToken ct) =>
         {
-            var device = await AgentAuthentication.AuthenticateAsync(context, db, ct);
+            var device = await authenticationService.AuthenticateAsync(context, ct);
             if (device is null)
             {
                 return Results.Json(new

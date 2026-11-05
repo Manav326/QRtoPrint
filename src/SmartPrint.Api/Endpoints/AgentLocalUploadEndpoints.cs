@@ -2,7 +2,6 @@ using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
 using SmartPrint.Api.Contracts;
-using SmartPrint.Api.Data;
 using SmartPrint.Api.Security;
 using SmartPrint.Api.Services;
 
@@ -15,11 +14,11 @@ public static partial class AgentEndpoints
         agentApi.MapPost("/local-uploads/{ticketId:guid}/claim", async (
             Guid ticketId,
             HttpContext context,
-            SmartPrintDbContext db,
+            AgentAuthenticationService authenticationService,
             AgentLocalUploadClaimService claimService,
             CancellationToken ct) =>
         {
-            var device = await AgentAuthentication.AuthenticateAsync(context, db, ct);
+            var device = await authenticationService.AuthenticateAsync(context, ct);
             if (device is null) return Results.Unauthorized();
 
             var rawGrant = context.Request.Headers["X-Print-Upload-Grant"].FirstOrDefault();
@@ -134,11 +133,11 @@ public static partial class AgentEndpoints
             Guid ticketId,
             LocalPrintUploadCompletionRequest request,
             HttpContext context,
-            SmartPrintDbContext db,
+            AgentAuthenticationService authenticationService,
             AgentLocalUploadCompletionService completionService,
             CancellationToken ct) =>
         {
-            var device = await AgentAuthentication.AuthenticateAsync(context, db, ct);
+            var device = await authenticationService.AuthenticateAsync(context, ct);
             if (device is null) return Results.Unauthorized();
 
             var rawGrant = context.Request.Headers["X-Print-Upload-Grant"].FirstOrDefault();
@@ -280,11 +279,11 @@ public static partial class AgentEndpoints
         agentApi.MapGet("/local-uploads/{jobId:guid}/status", async (
             Guid jobId,
             HttpContext context,
-            SmartPrintDbContext db,
+            AgentAuthenticationService authenticationService,
             AgentLocalUploadStatusService statusService,
             CancellationToken ct) =>
         {
-            var device = await AgentAuthentication.AuthenticateAsync(context, db, ct);
+            var device = await authenticationService.AuthenticateAsync(context, ct);
             if (device is null) return Results.Unauthorized();
 
             var status = await statusService.GetAsync(jobId, device.TenantId, device.Id, ct);

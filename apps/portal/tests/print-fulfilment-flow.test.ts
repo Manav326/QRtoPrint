@@ -931,3 +931,29 @@ test("endpoint modules do not compose EF queries outside the database health end
       moduleName + " must delegate feature queries to an application service.");
   }
 });
+
+
+test("Agent endpoint handlers delegate paired-device authentication to the authentication service", () => {
+  const endpointModules = [
+    "AgentConnectivityEndpoints.cs",
+    "AgentDocumentPreviewEndpoints.cs",
+    "AgentJobEndpoints.cs",
+    "AgentLocalUploadEndpoints.cs",
+    "AgentPrintClaimEndpoints.cs",
+    "AgentSpoolerLifecycleEndpoints.cs",
+    "AgentLocalPhotoRevisionEndpoints.cs"
+  ];
+
+  for (const moduleName of endpointModules) {
+    const source = readApi(moduleName);
+    assert.match(source, /authenticationService\.AuthenticateAsync\(context, ct\)/,
+      moduleName + " must authenticate through the shared application service.");
+    assert.doesNotMatch(source, /SmartPrintDbContext|AgentAuthentication\.AuthenticateAsync/,
+      moduleName + " must not compose Agent authentication data access.");
+  }
+
+  const service = read("../../../src/SmartPrint.Api/Services/AgentAuthenticationService.cs");
+  const security = read("../../../src/SmartPrint.Api/Security/AgentAuthentication.cs");
+  assert.match(service, /AgentAuthentication\.IsSecretValid/);
+  assert.match(security, /CryptographicOperations\.FixedTimeEquals/);
+});

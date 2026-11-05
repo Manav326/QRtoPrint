@@ -1,40 +1,28 @@
 using System.Security.Cryptography;
-using Microsoft.AspNetCore.Http;
-using Microsoft.EntityFrameworkCore;
-using SmartPrint.Api.Data;
-using SmartPrint.Api.Domain;
 using static SmartPrint.Api.Security.OpaqueTokenHasher;
 
 namespace SmartPrint.Api.Security;
 
 public static class AgentAuthentication
 {
-    public static async Task<AgentDevice?> AuthenticateAsync(
-        HttpContext context,
-        SmartPrintDbContext db,
-        CancellationToken cancellationToken)
+    public static bool IsSecretValid(string suppliedSecret, string storedHash)
     {
-        if (!Guid.TryParse(context.Request.Headers["X-Print-Agent-Id"].FirstOrDefault(), out var agentId))
+        if (string.IsNullOrWhiteSpace(suppliedSecret) || suppliedSecret.Length > 256 ||
+            string.IsNullOrWhiteSpace(storedHash))
         {
-            return null;
+            return false;
         }
 
-        var secret = context.Request.Headers["X-Print-Agent-Secret"].FirstOrDefault();
-        if (string.IsNullOrWhiteSpace(secret) || secret.Length > 256)
+        try
         {
-            return null;
+            var suppliedHash = Convert.FromHexString(HashOpaqueToken(suppliedSecret));
+            var expectedHash = Convert.FromHexString(storedHash);
+            return suppliedHash.Length == expectedHash.Length &&
+                   CryptographicOperations.FixedTimeEquals(suppliedHash, expectedHash);
         }
-
-        var device = await db.AgentDevices.SingleOrDefaultAsync(
-            item => item.Id == agentId && item.RevokedUtc == null && item.Status != "Revoked",
-            cancellationToken);
-        if (device is null)
+        catch (FormatException)
         {
-            return null;
+            return false;
         }
-
-        var suppliedHash = Convert.FromHexString(HashOpaqueToken(secret));
-        var storedHash = Convert.FromHexString(device.SecretHash);
-        return CryptographicOperations.FixedTimeEquals(suppliedHash, storedHash) ? device : null;
     }
 }

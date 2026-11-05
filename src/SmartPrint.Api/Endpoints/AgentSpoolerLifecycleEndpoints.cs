@@ -3,7 +3,6 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.EntityFrameworkCore;
 using SmartPrint.Api.Contracts;
-using SmartPrint.Api.Data;
 using SmartPrint.Api.Domain;
 using SmartPrint.Api.Security;
 using SmartPrint.Api.Services;
@@ -18,11 +17,11 @@ public static partial class AgentEndpoints
             Guid jobId,
             AgentPdfExportedRequest request,
             HttpContext context,
-            SmartPrintDbContext db,
+            AgentAuthenticationService authenticationService,
             AgentSpoolerLifecycleService spooler,
             CancellationToken ct) =>
         {
-            var device = await AgentAuthentication.AuthenticateAsync(context, db, ct);
+            var device = await authenticationService.AuthenticateAsync(context, ct);
             if (device is null)
             {
                 return Results.Unauthorized();
@@ -77,11 +76,11 @@ public static partial class AgentEndpoints
             Guid jobId,
             AgentSpoolerAcceptedRequest request,
             HttpContext context,
-            SmartPrintDbContext db,
+            AgentAuthenticationService authenticationService,
             AgentSpoolerLifecycleService spooler,
             CancellationToken ct) =>
         {
-            var device = await AgentAuthentication.AuthenticateAsync(context, db, ct);
+            var device = await authenticationService.AuthenticateAsync(context, ct);
             if (device is null)
             {
                 return Results.Unauthorized();
@@ -133,11 +132,11 @@ public static partial class AgentEndpoints
             Guid jobId,
             AgentPrintBlockedRequest request,
             HttpContext context,
-            SmartPrintDbContext db,
+            AgentAuthenticationService authenticationService,
             AgentSpoolerLifecycleService spooler,
             CancellationToken ct) =>
         {
-            var device = await AgentAuthentication.AuthenticateAsync(context, db, ct);
+            var device = await authenticationService.AuthenticateAsync(context, ct);
             if (device is null)
             {
                 return Results.Unauthorized();
@@ -177,11 +176,11 @@ public static partial class AgentEndpoints
             Guid jobId,
             AgentPrintBlockedRequest request,
             HttpContext context,
-            SmartPrintDbContext db,
+            AgentAuthenticationService authenticationService,
             AgentSpoolerLifecycleService spooler,
             CancellationToken ct) =>
         {
-            var device = await AgentAuthentication.AuthenticateAsync(context, db, ct);
+            var device = await authenticationService.AuthenticateAsync(context, ct);
             if (device is null)
             {
                 return Results.Unauthorized();
@@ -224,11 +223,11 @@ public static partial class AgentEndpoints
             Guid jobId,
             AgentSpoolerStatusRequest request,
             HttpContext context,
-            SmartPrintDbContext db,
+            AgentAuthenticationService authenticationService,
             AgentSpoolerLifecycleService spooler,
             CancellationToken ct) =>
         {
-            var device = await AgentAuthentication.AuthenticateAsync(context, db, ct);
+            var device = await authenticationService.AuthenticateAsync(context, ct);
             if (device is null)
             {
                 return Results.Unauthorized();

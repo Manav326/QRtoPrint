@@ -2,7 +2,6 @@ using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
 using SmartPrint.Api.Contracts;
-using SmartPrint.Api.Data;
 using SmartPrint.Api.Security;
 using SmartPrint.Api.Services;
 
@@ -14,11 +13,11 @@ public static partial class AgentEndpoints
     {
         agentApi.MapPost("/jobs/claim", async (
             HttpContext context,
-            SmartPrintDbContext db,
+            AgentAuthenticationService authenticationService,
             AgentJobQueueService queue,
             CancellationToken ct) =>
         {
-            var device = await AgentAuthentication.AuthenticateAsync(context, db, ct);
+            var device = await authenticationService.AuthenticateAsync(context, ct);
             if (device is null)
                 return Results.Unauthorized();
 
@@ -36,11 +35,11 @@ public static partial class AgentEndpoints
         agentApi.MapGet("/jobs/{jobId:guid}/document", async (
             Guid jobId,
             HttpContext context,
-            SmartPrintDbContext db,
+            AgentAuthenticationService authenticationService,
             AgentJobQueueService queue,
             CancellationToken ct) =>
         {
-            var device = await AgentAuthentication.AuthenticateAsync(context, db, ct);
+            var device = await authenticationService.AuthenticateAsync(context, ct);
             if (device is null)
                 return Results.Unauthorized();
 
@@ -76,11 +75,11 @@ public static partial class AgentEndpoints
             Guid jobId,
             AgentJobReceivedRequest request,
             HttpContext context,
-            SmartPrintDbContext db,
+            AgentAuthenticationService authenticationService,
             AgentJobQueueService queue,
             CancellationToken ct) =>
         {
-            var device = await AgentAuthentication.AuthenticateAsync(context, db, ct);
+            var device = await authenticationService.AuthenticateAsync(context, ct);
             if (device is null)
                 return Results.Unauthorized();
 

@@ -2,7 +2,6 @@ using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
 using SmartPrint.Api.Contracts;
-using SmartPrint.Api.Data;
 using SmartPrint.Api.Security;
 using SmartPrint.Api.Services;
 
@@ -14,13 +13,13 @@ public static partial class AgentEndpoints
     {
         agentApi.MapPost("/heartbeat", async (
             HttpContext context,
-            SmartPrintDbContext db,
+            AgentAuthenticationService authenticationService,
             IConfiguration configuration,
             AgentHeartbeatRequest request,
             AgentConnectivityService connectivity,
             CancellationToken ct) =>
         {
-            var device = await AgentAuthentication.AuthenticateAsync(context, db, ct);
+            var device = await authenticationService.AuthenticateAsync(context, ct);
             if (device is null)
                 return Results.Unauthorized();
 
@@ -42,12 +41,12 @@ public static partial class AgentEndpoints
 
         agentApi.MapPost("/printers/sync", async (
             HttpContext context,
-            SmartPrintDbContext db,
+            AgentAuthenticationService authenticationService,
             AgentPrinterSyncRequest request,
             AgentConnectivityService connectivity,
             CancellationToken ct) =>
         {
-            var device = await AgentAuthentication.AuthenticateAsync(context, db, ct);
+            var device = await authenticationService.AuthenticateAsync(context, ct);
             if (device is null)
                 return Results.Unauthorized();
 

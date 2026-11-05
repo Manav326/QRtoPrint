@@ -1,7 +1,6 @@
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
-using SmartPrint.Api.Data;
 using SmartPrint.Api.Security;
 using SmartPrint.Api.Services;
 
@@ -19,11 +18,11 @@ public static class AgentLocalPhotoRevisionEndpoints
             Guid jobId,
             HttpContext context,
             AgentLocalPhotoRevisionRequest request,
-            SmartPrintDbContext db,
+            AgentAuthenticationService authenticationService,
             AgentLocalPhotoRevisionService revisions,
             CancellationToken ct) =>
         {
-            var device = await AgentAuthentication.AuthenticateAsync(context, db, ct);
+            var device = await authenticationService.AuthenticateAsync(context, ct);
             if (device is null) return Results.Unauthorized();
 
             var result = await revisions.AuthorizeAsync(
@@ -42,11 +41,11 @@ public static class AgentLocalPhotoRevisionEndpoints
             Guid jobId,
             HttpContext context,
             AgentLocalPhotoRevisionRequest request,
-            SmartPrintDbContext db,
+            AgentAuthenticationService authenticationService,
             AgentLocalPhotoRevisionService revisions,
             CancellationToken ct) =>
         {
-            var device = await AgentAuthentication.AuthenticateAsync(context, db, ct);
+            var device = await authenticationService.AuthenticateAsync(context, ct);
             if (device is null) return Results.Unauthorized();
 
             var result = await revisions.CompleteAsync(
