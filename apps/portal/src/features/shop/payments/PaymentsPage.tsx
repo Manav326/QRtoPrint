@@ -26,15 +26,6 @@ interface PaymentsPageProps {
 }
 
 export default function PaymentsPage({settings,payments,refunds,onSave,onVerify,onReject,busy,busyJobId}: PaymentsPageProps) {
-  settings:ShopPaymentSettings;
-  payments:ShopPayment[];
-  refunds:ShopRefund[];
-  onSave:(values:{upiEnabled:boolean;upiId:string|null;payeeName:string|null;cashEnabled:boolean;instantPaymentEnabled:boolean})=>void;
-  onVerify:(payment:ShopPayment)=>void;
-  onReject:(payment:ShopPayment)=>void;
-  busy:boolean;
-  busyJobId:string|null;
-}) {
   const [upiEnabled,setUpiEnabled]=useState(settings.upiEnabled);
   const [upiId,setUpiId]=useState(settings.upiId||"");
   const [payeeName,setPayeeName]=useState(settings.payeeName||"");
