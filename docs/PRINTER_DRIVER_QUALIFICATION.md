@@ -24,6 +24,8 @@ Initial entries:
 - Brother Universal Printer Driver 1.0.0.0 for the India DCP-J100 support page (20.37 MB; Server 2025 support pending; two-sided printing explicitly unsupported).
 - Pantum P2503 Windows Driver 1.0.5 (currently listed for Windows 11 x64 only; Server 2025 support pending).
 - Pantum Universal Printing Driver 1.0.6 (exact Windows OS target pending; not eligible for hosted installation yet).
+- Ricoh PCL6 Driver for Universal Print 4.46.0.0 (official EXE archive inspected without execution; Ricoh package signature valid, INF catalog WHCP signature pinned; installation remains blocked because the installer accepts only ZIP/CAB INF packages and license/install review is pending).
+- Kyocera KX Universal Printer Driver 8.7.0422.0 (official ZIP audited; x64 INF and Kyocera-signed catalog identified, package SHA-256 and catalog thumbprint pinned; exact supported OS/model/license/install review remains pending).
 
 Official support pages are references, not permission to download or redistribute. No driver package is committed to this repository, cached in a public artifact, or published with SmartPrint releases.
 
@@ -32,7 +34,7 @@ Official support pages are references, not permission to download or redistribut
 A driver is eligible for a runner only when all of these are present and reviewed:
 
 1. Official vendor HTTPS package URL.
-2. Exact package version and SHA-256 pinned in the manifest.
+2. Exact package version and SHA-256 pinned in the manifest; the non-executing package audit verifies both the downloaded hash and the version declared by a printer INF.
 3. License/use approval for automated CI execution.
 4. Extracted INF and catalog paths inside a ZIP/CAB package.
 5. At least one valid signature on an INF-declared catalog. The catalog publisher may be the printer manufacturer or Microsoft Windows Hardware Compatibility Publisher (WHCP); capture its exact certificate thumbprint. If the outer package is Authenticode-signed, record and verify its publisher separately.
@@ -48,7 +50,7 @@ Canon's India Generic Plus UFR II V3.50 support page currently carries restricti
 
 1. Validate the complete manifest without downloading packages.
 2. On an explicitly selected, approved driver, download only from an allowlisted vendor host. Redirects are checked at every hop.
-3. Verify the pinned SHA-256 before extraction.
+3. Verify the pinned SHA-256 before extraction and confirm the printer INF DriverVer matches the manifest version.
 4. Extract to a disposable temporary folder and enforce path containment for the INF.
 5. Read the catalog references from the selected INF and verify a valid signature against the exact certificate thumbprint pinned in the manifest.
 6. Stage the INF with PnPUtil and register the print driver.
