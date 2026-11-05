@@ -35,12 +35,12 @@ A driver is eligible for a runner only when all of these are present and reviewe
 2. Exact package version and SHA-256 pinned in the manifest.
 3. License/use approval for automated CI execution.
 4. Extracted INF and catalog paths inside a ZIP/CAB package.
-5. Valid catalog signature with the expected publisher.
+5. At least one valid signature on an INF-declared catalog. The catalog publisher may be the printer manufacturer or Microsoft Windows Hardware Compatibility Publisher (WHCP); capture its exact certificate thumbprint. If the outer package is Authenticode-signed, record and verify its publisher separately.
 6. Exact Windows driver name and supported model family.
 7. The exact INF-declared catalog publisher certificate thumbprint pinned in the manifest.
 8. An explicit `ciApproval: approved` and `licenseReview: approved`.
 
-The installation harness accepts only ZIP and CAB packages. It never executes vendor setup EXEs, scripts or custom installer binaries. If a package is available only as an EXE, it remains pending until a vendor-approved INF-package extraction route is established. Before installation, the selected INF must declare the catalog being checked; that catalog must have a valid signature whose exact certificate thumbprint matches the pinned manifest value. A vendor-name substring alone is not sufficient for installation approval.
+The installation harness accepts only ZIP and CAB packages. It never executes vendor setup EXEs, scripts or custom installer binaries. If a package is available only as an EXE, it remains pending until a vendor-approved INF-package extraction route is established. Before installation, the selected INF must declare the catalog being checked; that catalog must have a valid signature whose exact certificate thumbprint matches the pinned manifest value. A vendor-name substring alone is not sufficient for installation approval. The non-executing package audit distinguishes an outer package signer (for example, Ricoh) from the INF catalog signer (which can be Microsoft WHCP for a WHQL-signed driver).
 
 Canon's India Generic Plus UFR II V3.50 support page currently carries restrictive personal/non-commercial-use language and prohibits transfer, redistribution and modification. This entry is blocked from commercial CI pending written permission or an alternate license. Brother's India support listing states that its Universal Printer Driver 1.0.0.0 does not support two-sided printing; this limitation must be carried into any model-specific compatibility result.
 
