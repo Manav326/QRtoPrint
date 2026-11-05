@@ -834,3 +834,23 @@ test("HTTPS cloud recovery keeps encrypted storage and original-file reconciliat
   assert.match(service, /storage\.DeleteAsync\(stored\.StorageKey\)/);
   assert.match(service, /CompleteAsync\(\s*ticketId,\s*rawSessionToken,\s*rawGrant/);
 });
+
+
+test("complex query endpoints delegate aggregate reads to application query services", () => {
+  const expectations = [
+    ["PlatformOverviewEndpoints.cs", "overviewService.GetOverviewAsync", "overviewService.ListTenantsAsync", "overviewService.GetStatusHistoryAsync"],
+    ["ShopReportEndpoints.cs", "reportService.GetSummaryAsync"],
+    ["ShopCustomerEndpoints.cs", "customers.ListAsync", "customers.GetCustomerJobsAsync"],
+    ["ShopPaymentQueryEndpoints.cs", "paymentQueries.GetPaymentsAsync", "paymentQueries.GetRefundsAsync"],
+    ["ShopPrintJobQueryEndpoints.cs", "jobQueries.GetJobsAsync"]
+  ];
+
+  for (const [moduleName, ...delegations] of expectations) {
+    const source = readApi(moduleName);
+    for (const delegation of delegations) {
+      assert.ok(source.includes(delegation), moduleName + " must delegate " + delegation);
+    }
+    assert.doesNotMatch(source, /SmartPrintDbContext|\\bdb\\./,
+      moduleName + " must not own aggregate query composition.");
+  }
+});

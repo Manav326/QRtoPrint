@@ -94,7 +94,12 @@ public static class ApiServiceRegistration
         services.AddScoped<ShopPricingService>();
         services.AddScoped<PlatformTenantStatusService>();
         services.AddScoped<PlatformSubscriptionService>();
+        services.AddScoped<PlatformOverviewService>();
         services.AddScoped<PlatformOperationalSettingsService>();
+        services.AddScoped<ShopReportService>();
+        services.AddScoped<ShopCustomerQueryService>();
+        services.AddScoped<ShopPaymentQueryService>();
+        services.AddScoped<ShopPrintJobQueryService>();
         services.AddScoped<ShopPrintJobDecisionService>();
         services.AddScoped<ShopPaymentSettingsService>();
         services.AddScoped<AuthenticationSessionService>();
