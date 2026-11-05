@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState } from "react";
+import { useShopData } from "./useShopData";
 import { Activity, ArrowRight, Check, Clock3, CreditCard, FileText, FolderOpen, LayoutDashboard, ChevronDown, LifeBuoy, LogOut, Menu, Monitor, Plus, Printer, QrCode, Settings, Image as ImageIcon, UserRound, ShieldCheck, Users, Wallet, X, PanelLeftClose, PanelLeftOpen, RotateCcw } from "lucide-react";
 import PhotoStudio, { type PreparedPhotoSheet } from "../../PhotoStudio";
 import { shopPathForSection, shopSectionFromPath } from "../../portal-routing";
-import { ApiError, applyShopPrintBatchReview, approveShopPrintJob, assignShopPrintJobPrinter, confirmShopPrintOutput, dispatchShopPrintJob, createAgentEnrollmentCode, createPrinter, createStation, downloadShopDocument, replaceShopPhotoDocument, replaceShopPhotoDocumentLocally, getShopAgentDevices, getShopJobEvents, getShopPrinters, getShopPrintJobsPage, getShopPrintBatchJobs, getShopPayments, loadShopData, logout, rejectShopPrintJob, rejectShopPayment, revokeAgentDevice, rotateStationCode, storeTokens, updatePrinterActive, updateShopPaymentSettings, updateShopPricing, updateShopPrintJobSettings, updateShopOwnerAccount, updateShopProfile, updateStationEnabled, verifyShopPayment, retryShopPdfExport, recordShopPrintRefund, previewShopPrintRefund, type ShopPayment, type ShopPaymentSettings, type ShopRefund, type AgentDevice, type AuthTokens, type PrinterDevice, type ShopJobEvent, type QrStation, type ShopPricingProfile, type ShopPrintJob, type ShopProfile, type ShopSubscriptionSummary, type CustomerPrintRequestSettings } from "../../api";
+import { ApiError, applyShopPrintBatchReview, approveShopPrintJob, assignShopPrintJobPrinter, confirmShopPrintOutput, dispatchShopPrintJob, createAgentEnrollmentCode, createPrinter, createStation, downloadShopDocument, replaceShopPhotoDocument, replaceShopPhotoDocumentLocally, getShopJobEvents, getShopPrintBatchJobs, loadShopData, logout, rejectShopPrintJob, rejectShopPayment, revokeAgentDevice, rotateStationCode, storeTokens, updatePrinterActive, updateShopPaymentSettings, updateShopPricing, updateShopPrintJobSettings, updateShopOwnerAccount, updateShopProfile, updateStationEnabled, verifyShopPayment, retryShopPdfExport, recordShopPrintRefund, previewShopPrintRefund, type ShopPayment, type ShopPaymentSettings, type ShopRefund, type AgentDevice, type AuthTokens, type PrinterDevice, type ShopJobEvent, type QrStation, type ShopPricingProfile, type ShopPrintJob, type ShopProfile, type ShopSubscriptionSummary, type CustomerPrintRequestSettings } from "../../api";
 import { enrollLocalAgent, getLocalAgentStatus, isDesktopApp, setDesktopContentProtection, type DesktopAgentStatus } from "../../desktop-bridge";
 import { readSidebarCollapsedPreference, saveSidebarCollapsedPreference } from "../../ui-preferences";
 import OrderJourneyPage from "../../OrderJourneyPage";
@@ -52,6 +53,19 @@ const sectionGroups: { label: string; items: Section[] }[] = [
 
 export default function ShopConsole({ tokens, onSignOut, dark, onToggleTheme }: { tokens: AuthTokens; onSignOut: () => Promise<void>; dark: boolean; onToggleTheme: () => void }) {
   const [active, setActive] = useState<Section>(() => shopSectionFromPath(window.location.pathname));
+  const {
+    cloudStatus, profile, setProfile, printers, setPrinters, stations, setStations, pricing, setPricing,
+    printJobs, setPrintJobs, journeyJobs, journeyPayments, journeyRefreshing,
+    hasMoreQueueJobs, loadingOlderQueueJobs, queueApiOffset, queueSearch, agentDevices, setAgentDevices,
+    agentDevicesRef, paymentSettings, setPaymentSettings, payments, refunds, subscription,
+    apiConnectionState, setApiConnectionState, loading, setLoading, error, setError,
+    reload, handleShopApiError, refreshPrintQueue, loadOlderQueueJobs, searchPrintQueue, refreshOrderJourney
+  } = useShopData({
+    accessToken: tokens.accessToken,
+    onSignOut,
+    active,
+    onDesktopAgentSync: () => scheduleDesktopAgentSync(0)
+  });
 
   useEffect(() => {
     const syncSectionFromPath = () => setActive(shopSectionFromPath(window.location.pathname));
@@ -80,7 +94,6 @@ export default function ShopConsole({ tokens, onSignOut, dark, onToggleTheme }: 
       window.removeEventListener("keydown", closeOnEscape);
     };
   }, [accountMenuOpen]);
-  const reloadInFlight = useRef(false);
   const desktopAgentSyncTimer = useRef<number | null>(null);
   const desktopAgentSyncInFlight = useRef(false);
   const desktopAgentSyncAttempts = useRef(0);
@@ -93,36 +106,8 @@ export default function ShopConsole({ tokens, onSignOut, dark, onToggleTheme }: 
   const [localAgentEnrollmentIssue, setLocalAgentEnrollmentIssue] = useState<{ code: string | null; message: string } | null>(null);
   const localAgentEnrollmentIssueRef = useRef<{ code: string | null; message: string } | null>(null);
   const [localAgentOwnershipChecking, setLocalAgentOwnershipChecking] = useState(false);
-  const [cloudStatus, setCloudStatus] = useState<"checking" | "connected" | "unavailable">("checking");
-  const [profile, setProfile] = useState<ShopProfile | null>(null);
-  const [printers, setPrinters] = useState<PrinterDevice[]>([]);
-  const [stations, setStations] = useState<QrStation[]>([]);
-  const [pricing, setPricing] = useState<ShopPricingProfile | null>(null);
-  const [printJobs, setPrintJobs] = useState<ShopPrintJob[]>([]);
-  const [journeyJobs, setJourneyJobs] = useState<ShopPrintJob[]>([]);
-  const [journeyPayments, setJourneyPayments] = useState<ShopPayment[]>([]);
-  const [journeyRefreshing, setJourneyRefreshing] = useState(false);
-  const journeyRefreshInFlight = useRef(false);
-  const [hasMoreQueueJobs, setHasMoreQueueJobs] = useState(false);
-  const [loadingOlderQueueJobs, setLoadingOlderQueueJobs] = useState(false);
-  const loadingOlderQueueJobsRef = useRef(false);
-  const [queueApiOffset, setQueueApiOffset] = useState(0);
-  const [queueSearch, setQueueSearch] = useState("");
-  const queueSearchGeneration = useRef(0);
-  const queuePageGeneration = useRef(0);
-  const queueFirstPageIds = useRef<Set<string>>(new Set());
-  const [agentDevices, setAgentDevices] = useState<AgentDevice[]>([]);
-  const agentDevicesRef = useRef<AgentDevice[]>([]);
-  agentDevicesRef.current = agentDevices;
-  const [paymentSettings, setPaymentSettings] = useState<ShopPaymentSettings | null>(null);
-  const [payments, setPayments] = useState<ShopPayment[]>([]);
-  const [refunds, setRefunds] = useState<ShopRefund[]>([]);
-  const [subscription, setSubscription] = useState<ShopSubscriptionSummary | null>(null);
-  const [apiConnectionState, setApiConnectionState] = useState<"checking" | "connected" | "degraded" | "offline">("checking");
   const [enrollmentCode, setEnrollmentCode] = useState<{ code: string; expiresUtc: string } | null>(null);
   const [agentBusy, setAgentBusy] = useState(false);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState("");
   const [modal, setModal] = useState<Modal>(null);
   const [busy, setBusy] = useState(false);
   const [toast, setToast] = useState("");
@@ -145,174 +130,6 @@ export default function ShopConsole({ tokens, onSignOut, dark, onToggleTheme }: 
   const [busyJobId, setBusyJobId] = useState<string | null>(null);
   const [busyResourceId, setBusyResourceId] = useState<string | null>(null);
   const [eventHistory, setEventHistory] = useState<{ job: ShopPrintJob; events: ShopJobEvent[] } | null>(null);
-
-  async function reload() {
-    if (reloadInFlight.current) return;
-    queueSearchGeneration.current++;
-    queuePageGeneration.current++;
-    reloadInFlight.current = true;
-    setApiConnectionState("checking");
-    setLoading(true);
-    setError("");
-    try {
-      const [snapshot, unfilteredJourneyJobs] = await Promise.all([
-        loadShopData(tokens.accessToken, queueSearch),
-        queueSearch.trim()
-          ? getShopPrintJobsPage(tokens.accessToken, 0, 100)
-          : Promise.resolve(null)
-      ]);
-      setProfile(snapshot.profile);
-      setPrinters(snapshot.printers);
-      setStations(snapshot.stations);
-      setPricing(snapshot.pricing);
-      setPrintJobs(snapshot.printJobs);
-      setJourneyJobs(unfilteredJourneyJobs ?? snapshot.printJobs);
-      setJourneyPayments(snapshot.payments);
-      queueFirstPageIds.current = new Set(snapshot.printJobs.map(job => job.id));
-      setHasMoreQueueJobs(snapshot.printJobs.length === 100);
-      setQueueApiOffset(snapshot.printJobs.length);
-      agentDevicesRef.current = snapshot.agentDevices;
-      setAgentDevices(snapshot.agentDevices);
-      setPaymentSettings(snapshot.paymentSettings);
-      setPayments(snapshot.payments);
-      setRefunds(snapshot.refunds);
-      setSubscription(snapshot.subscription);
-      setApiConnectionState("connected");
-      setCloudStatus("connected");
-      if (isDesktopApp()) {
-        // The Windows service may still be starting after installation or reboot.
-        // Keep discovery off the initial shop-data load and retry quietly.
-        scheduleDesktopAgentSync(0);
-      }
-    } catch (exception) {
-      setCloudStatus("unavailable");
-      if (exception instanceof ApiError && exception.status === 401) {
-        storeTokens(null);
-        try { await onSignOut(); }
-        catch (signOutError) { setError(signOutError instanceof Error ? signOutError.message : "Could not clear the secure desktop session."); }
-      } else {
-        handleShopApiError(exception, "Could not load your shop.");
-      }
-    } finally {
-      setLoading(false);
-      reloadInFlight.current = false;
-    }
-  }
-
-  function handleShopApiError(exception: unknown, fallback: string) {
-    if (exception instanceof ApiError && exception.status === 401) {
-      storeTokens(null);
-      onSignOut();
-      return;
-    }
-    const status = exception instanceof ApiError ? exception.status : 0;
-    setApiConnectionState(status === 0 ? "offline" : status >= 500 ? "degraded" : "connected");
-    setError(exception instanceof Error ? exception.message : fallback);
-  }
-
-  async function refreshPrintQueue() {
-    const generation = queuePageGeneration.current;
-    try {
-      const [latest, latestPrinters, latestAgents] = await Promise.all([
-        getShopPrintJobsPage(tokens.accessToken, 0, 100, queueSearch),
-        getShopPrinters(tokens.accessToken),
-        getShopAgentDevices(tokens.accessToken)
-      ]);
-      if (generation !== queuePageGeneration.current) return;
-      setApiConnectionState("connected");
-      setPrinters(latestPrinters);
-      setAgentDevices(latestAgents);
-      const latestIds = new Set(latest.map(job => job.id));
-      const firstPageMembershipChanged = latest.length !== queueFirstPageIds.current.size ||
-        latest.some(job => !queueFirstPageIds.current.has(job.id));
-      if (firstPageMembershipChanged) {
-        // Any insert/removal shifts every offset page. Reset pagination to the
-        // current first page so no older records are skipped or duplicated.
-        queuePageGeneration.current++;
-        queueFirstPageIds.current = latestIds;
-        setPrintJobs(latest);
-        setQueueApiOffset(latest.length);
-        setHasMoreQueueJobs(latest.length === 100);
-        return;
-      }
-      setPrintJobs(current => {
-        const byId = new Map(current.map(job => [job.id, job]));
-        for (const job of latest) byId.set(job.id, job);
-        return Array.from(byId.values()).sort((left, right) =>
-          Date.parse(right.createdUtc) - Date.parse(left.createdUtc) || right.id.localeCompare(left.id)
-        );
-      });
-      setHasMoreQueueJobs(latest.length === 100 || printJobs.length > latest.length);
-    } catch (exception) {
-      if (generation !== queuePageGeneration.current) return;
-      handleShopApiError(exception, "Could not refresh the print queue.");
-    }
-  }
-
-  async function loadOlderQueueJobs() {
-    if (loadingOlderQueueJobsRef.current || !hasMoreQueueJobs) return;
-    loadingOlderQueueJobsRef.current = true;
-    const generation = queuePageGeneration.current;
-    const offset = queueApiOffset;
-    setLoadingOlderQueueJobs(true);
-    try {
-      const older = await getShopPrintJobsPage(tokens.accessToken, offset, 100, queueSearch);
-      if (generation !== queuePageGeneration.current) return;
-      setPrintJobs(current => {
-        const knownIds = new Set(current.map(job => job.id));
-        const merged = [...current, ...older.filter(job => !knownIds.has(job.id))];
-        return merged.sort((left, right) =>
-          Date.parse(right.createdUtc) - Date.parse(left.createdUtc) || right.id.localeCompare(left.id)
-        );
-      });
-      setQueueApiOffset(offset => offset + older.length);
-      setHasMoreQueueJobs(older.length === 100);
-    } catch (exception) {
-      if (generation !== queuePageGeneration.current) return;
-      handleShopApiError(exception, "Could not load older print jobs.");
-    } finally {
-      loadingOlderQueueJobsRef.current = false;
-      setLoadingOlderQueueJobs(false);
-    }
-  }
-
-  async function searchPrintQueue(value: string) {
-    const normalized = value.trim().slice(0, 120);
-    const generation = ++queueSearchGeneration.current;
-    queuePageGeneration.current++;
-    setQueueSearch(normalized);
-    try {
-      const matches = await getShopPrintJobsPage(tokens.accessToken, 0, 100, normalized);
-      if (generation !== queueSearchGeneration.current) return;
-      queueFirstPageIds.current = new Set(matches.map(job => job.id));
-      setPrintJobs(matches);
-      setQueueApiOffset(matches.length);
-      setHasMoreQueueJobs(matches.length === 100);
-    } catch (exception) {
-      if (generation !== queueSearchGeneration.current) return;
-      handleShopApiError(exception, "Could not search the print queue.");
-    }
-  }
-
-  async function refreshOrderJourney() {
-    if (journeyRefreshInFlight.current) return;
-    journeyRefreshInFlight.current = true;
-    setJourneyRefreshing(true);
-    try {
-      const [latestJobs, latestPayments] = await Promise.all([
-        getShopPrintJobsPage(tokens.accessToken, 0, 100),
-        getShopPayments(tokens.accessToken)
-      ]);
-      setJourneyJobs(latestJobs);
-      setJourneyPayments(latestPayments);
-      setApiConnectionState("connected");
-    } catch (exception) {
-      handleShopApiError(exception, "Could not refresh the order journey.");
-    } finally {
-      journeyRefreshInFlight.current = false;
-      setJourneyRefreshing(false);
-    }
-  }
 
   function requestActionDialog(options: { title: string; message: string; inputLabel?: string; confirmLabel?: string }): Promise<string | null> {
     return new Promise(resolve => {
@@ -349,11 +166,7 @@ export default function ShopConsole({ tokens, onSignOut, dark, onToggleTheme }: 
     });
   }
 
-  useEffect(() => {
-    void reload();
-    // A token change is the only trigger; mutations call reload explicitly.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tokens.accessToken]);
+
 
   useEffect(() => () => {
     if (desktopAgentSyncTimer.current !== null) {
@@ -362,44 +175,7 @@ export default function ShopConsole({ tokens, onSignOut, dark, onToggleTheme }: 
     }
   }, []);
 
-  useEffect(() => {
-    if (active === "Print Queue") return;
-    let mounted = true;
-    let inFlight = false;
-    const refreshDevices = async () => {
-      if (inFlight) return;
-      inFlight = true;
-      try {
-        const [latestPrinters, latestAgents] = await Promise.all([
-          getShopPrinters(tokens.accessToken),
-          getShopAgentDevices(tokens.accessToken)
-        ]);
-        if (mounted) {
-          setPrinters(latestPrinters);
-          setAgentDevices(latestAgents);
-          setApiConnectionState("connected");
-        }
-      } catch (exception) {
-        if (mounted) {
-          if (exception instanceof ApiError && exception.status === 401) {
-            storeTokens(null);
-            onSignOut();
-          } else {
-            const status = exception instanceof ApiError ? exception.status : 0;
-            setApiConnectionState(status === 0 ? "offline" : status >= 500 ? "degraded" : "connected");
-          }
-        }
-      } finally {
-        inFlight = false;
-      }
-    };
-    void refreshDevices();
-    const timer = window.setInterval(() => void refreshDevices(), 15_000);
-    return () => {
-      mounted = false;
-      window.clearInterval(timer);
-    };
-  }, [active, tokens.accessToken]);
+
 
   useEffect(() => {
     if (active !== "Order Journey") return;
