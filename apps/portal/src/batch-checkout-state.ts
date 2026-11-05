@@ -9,3 +9,34 @@ export function shouldBlockBatchCheckoutForExpiredQuote(
 
   return acceptedQuoteHasExpired && !paymentAlreadyStarted;
 }
+
+
+const quoteRefreshBlockedStatuses = new Set([
+  "AWAITING_SHOP_APPROVAL",
+  "AWAITING_PAYMENT",
+  "AWAITING_CUSTOMER_PAYMENT",
+  "CUSTOMER_REPORTED",
+  "CASH_AWAITING_PAYMENT",
+  "PAYMENT_REPORTED",
+  "VERIFIED",
+  "PARTIALLY_REFUNDED",
+  "PAID_AUTHORISED",
+  "LOCAL_QUEUE_CLAIMED",
+  "LOCAL_QUEUE_READY",
+  "PRINT_AUTHORISED",
+  "PRINT_SUBMITTING",
+  "SPOOLER_ACCEPTED",
+  "PRINTING",
+  "OUTPUT_UNCONFIRMED",
+  "COMPLETED",
+  "PDF_EXPORTED",
+  "FAILED",
+  "REJECTED",
+  "REFUNDED",
+  "CANCELLED"
+]);
+
+/** Prevents a new quote from replacing an order once acceptance, payment or fulfilment has started. */
+export function shouldBlockQuoteRefreshForStatus(status: string | null | undefined): boolean {
+  return typeof status === "string" && quoteRefreshBlockedStatuses.has(status.toUpperCase());
+}

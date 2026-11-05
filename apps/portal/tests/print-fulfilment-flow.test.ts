@@ -397,3 +397,11 @@ test("native Android protects Photo Studio from screenshots through the origin-p
  assert.match(activity,/window\.addFlags\(WindowManager\.LayoutParams\.FLAG_SECURE\)/);
  assert.match(activity,/window\.clearFlags\(WindowManager\.LayoutParams\.FLAG_SECURE\)/);
 });
+
+test("a completed customer order offers a fresh session instead of another payment or quote",()=>{
+ const app=read("../src/App.tsx");
+ assert.match(app,/async function startNewSession\(\)/);
+ assert.match(app,/key=\{result\.sessionToken\}/);
+ assert.match(app,/jobStatus\.status===\"COMPLETED\"[\s\S]*?customer-session-complete/);
+ assert.match(app,/onClick=\{onStartNewSession\}/);
+});

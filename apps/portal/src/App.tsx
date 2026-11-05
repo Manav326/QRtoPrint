@@ -8,7 +8,7 @@ import QRCode from "react-qr-code";
 import PhotoStudio, { type PreparedPhotoSheet } from "./PhotoStudio";
 import CustomerUpiQr from "./CustomerUpiQr";
 import { buildCustomerUpiIntent } from "./upi-payment-intent";
-import { shouldBlockBatchCheckoutForExpiredQuote } from "./batch-checkout-state";
+import { shouldBlockBatchCheckoutForExpiredQuote, shouldBlockQuoteRefreshForStatus } from "./batch-checkout-state";
 import { canFallbackToCloudFromLocalFailure, resolveCustomerUploadMode } from "./local-upload-routing";
 import AuthScreen from "./AuthScreen";
 import PublicLandingPage from "./PublicLandingPage";
@@ -4648,10 +4648,9 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
   const canSendBatch=quoteEligibleItems.length>0&&
     acceptedQuoteEntries.length===quoteEligibleItems.length&&
     acceptedQuoteEntries.some(entry=>entry.quote?.status==="AWAITING_CUSTOMER_APPROVAL");
-  const quoteLockedStatuses=new Set(["AWAITING_CUSTOMER_PAYMENT","CUSTOMER_REPORTED","CASH_AWAITING_PAYMENT","PAYMENT_REPORTED","PAID_AUTHORISED","LOCAL_QUEUE_CLAIMED","LOCAL_QUEUE_READY","PRINT_AUTHORISED","PRINT_SUBMITTING","SPOOLER_ACCEPTED","PRINTING","OUTPUT_UNCONFIRMED","COMPLETED","PARTIALLY_REFUNDED"]);
   const canCalculateBatch=!batchLockedForPayment&&!batchPaymentStarted&&quoteItems.some(item=>{
     const status=statusForBatchItem(item);
-    if(quoteLockedStatuses.has(status))return false;
+    if(shouldBlockQuoteRefreshForStatus(status))return false;
     if(quoteExpiredForBatchItem(item))return true;
     if(quotesByJobId[item.job.id]&&quotesByJobId[item.job.id].status!=="QUOTE_EXPIRED")return false;
     return !quotesByJobId[item.job.id]||quotesByJobId[item.job.id].status==="QUOTE_EXPIRED"||
