@@ -6,7 +6,6 @@ import {
 } from "../../api";
 import { enrollLocalAgent, getLocalAgentStatus, isDesktopApp, type DesktopAgentStatus } from "../../desktop-bridge";
 
-type AgentEnrollmentIssue = { code: string | null; message: string };
 type UseDesktopAgentOptions = {
   accessToken: string;
   onSignOut: () => Promise<void>;
