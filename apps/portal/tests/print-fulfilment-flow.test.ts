@@ -850,7 +850,7 @@ test("complex query endpoints delegate aggregate reads to application query serv
     for (const delegation of delegations) {
       assert.ok(source.includes(delegation), moduleName + " must delegate " + delegation);
     }
-    assert.doesNotMatch(source, /SmartPrintDbContext|\\bdb\\./,
+    assert.doesNotMatch(source, /SmartPrintDbContext|\bdb\./,
       moduleName + " must not own aggregate query composition.");
   }
 });
@@ -868,7 +868,7 @@ test("remaining workflow-heavy reads stay outside HTTP endpoint handlers", () =>
     for (const delegation of delegations) {
       assert.ok(source.includes(delegation), moduleName + " must delegate " + delegation);
     }
-    assert.doesNotMatch(source, /db\\.(?:PrintJobs|PrintDocuments|PrintJobEvents|AgentDevices|PrintPayments)/,
+    assert.doesNotMatch(source, /db\.(?:PrintJobs|PrintDocuments|PrintJobEvents|AgentDevices|PrintPayments)/,
       moduleName + " must not compose workflow-specific queries.");
   }
 
@@ -892,7 +892,7 @@ test("shop resource reads delegate their persistence queries to feature services
   for (const [moduleName, delegation] of expectations) {
     const source = readApi(moduleName);
     assert.ok(source.includes(delegation), moduleName + " must delegate its data read to the feature service");
-    assert.doesNotMatch(source, /SmartPrintDbContext|\\bdb\\./,
+    assert.doesNotMatch(source, /SmartPrintDbContext|\bdb\./,
       moduleName + " must not compose database queries in the endpoint.");
   }
 });
