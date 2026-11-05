@@ -7,7 +7,7 @@ import styles from "./PhotoStudio.module.css";
 import { isDesktopApp, setDesktopContentProtection } from "./desktop-bridge";
 import { A4_HEIGHT_MM, A4_WIDTH_MM, A4_HEIGHT_PX, A4_WIDTH_PX, buildPhotoPdf, getPhotoSheetLayout } from "./photo-studio-layout";
 
-export type PreparedPhotoSheet = { file: File; sizeCode: string; photoCount: number; photosPerPage: number };
+export type PreparedPhotoSheet = { file: File; sizeCode: string; photoCount: number; photosPerPage: number; previewPages?: Blob[] };
 
 type PhotoSize = {
   id: string;
@@ -398,7 +398,7 @@ export default function PhotoStudio({
       const pdf=new Blob([buffer],{type:"application/pdf"});
       if(pdf.size>MAX_FILE_BYTES)throw new Error("The prepared photo PDF exceeds SmartPrint's 20 MB file limit. Use a smaller original photo or reduce the number of copies.");
       const output=new File([pdf],safeBaseName(source.name)+"-"+size.id+"-photos.pdf",{type:"application/pdf",lastModified:Date.now()});
-      await onApply([{file:output,sizeCode:size.id,photoCount:parsedCopies,photosPerPage}]);
+      await onApply([{file:output,sizeCode:size.id,photoCount:parsedCopies,photosPerPage,previewPages:jpegPages.map(jpeg=>new Blob([jpeg],{type:"image/jpeg"}))}]);
     }catch(cause){setError(cause instanceof Error?cause.message:"Photo sheet creation failed. Try again with this photo.");}
     finally{setBusy(false);}
   }
