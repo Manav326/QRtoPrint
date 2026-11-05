@@ -206,7 +206,7 @@ public sealed class ApiWorkflowIntegrationTests
             {
                 using var json = await ReadExpectedJsonAsync(customerJobsAfterUpload, HttpStatusCode.OK);
                 Assert.Contains(
-                    json.RootElement.EnumerateArray(),
+                    json.RootElement.GetProperty("jobs").EnumerateArray(),
                     item => item.GetProperty("id").GetGuid() == jobId);
             }
 
