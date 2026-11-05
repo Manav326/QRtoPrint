@@ -55,10 +55,11 @@ test("paid jobs are staged while a physical printer is offline and checked at di
 });
 test("plan-limited HTTPS fallback is only offered when the Agent is unavailable", () => {
   const app = read("../src/App.tsx");
+  const customer = read("../src/features/customer/CustomerPrintFlow.tsx");
   const api = read("../src/api.ts");
   const publicUploadSource = readApi("PublicJobCreationEndpoints.cs");
   const publicUploadService = read("../../../src/SmartPrint.Api/Services/PublicJobCreationService.cs");
-  assert.match(app, /secureQueueFallbackEnabled = cloudAssistedPrintingEnabled \|\| !localAgent\?\.endpoints\.length \|\| localFallbackSuggested/);
+  assert.match(customer, /secureQueueFallbackEnabled = cloudAssistedPrintingEnabled \|\| !localAgent\?\.endpoints\.length \|\| localFallbackSuggested/);
   const directUploadStart = api.indexOf("export async function uploadCustomerDocument(");
   const directUploadEnd = api.indexOf("type CustomerLocalAgentApi", directUploadStart);
   const directUpload = api.slice(directUploadStart, directUploadEnd);
@@ -346,12 +347,13 @@ test("local Agent photo revision is scoped to its grant and idempotent after com
 
 test("customer local transfer remains visible with a clear unavailable state when no Agent endpoint exists",()=>{
  const app=read("../src/App.tsx");
+ const customer=read("../src/features/customer/CustomerPrintFlow.tsx");
  const start=app.indexOf("function CustomerLocalConnection("),end=app.indexOf("type CustomerGroupSettings",start);
  const connection=app.slice(start,end);
  assert.match(connection,/if\(!localAgent\?\.endpoints\.length\)[\s\S]*?setCheckStatus\("unavailable"\)/);
  assert.doesNotMatch(connection,/if\(!localAgent\?\.endpoints\.length\)return null/);
  assert.match(connection,/Direct transfer is temporarily unavailable/);
- assert.match(app,/customer-upload-mode-unavailable/);
+ assert.match(customer,/customer-upload-mode-unavailable/);
 });
 
 test("owner preview selects the persisted supported MIME type before the blob response type",()=>{
@@ -363,27 +365,29 @@ test("owner preview selects the persisted supported MIME type before the blob re
 
 test("customer web upload accepts drag and drop and contains no JavaScript browser alert dialogs",()=>{
  const app=read("../src/App.tsx");
- assert.match(app,/onDragOver=\{event=>\{if\(!batchLockedForPayment\)event\.preventDefault\(\);\}\}/);
- assert.match(app,/onDrop=\{event=>\{event\.preventDefault\(\);if\(batchLockedForPayment\)return;chooseFiles\(Array\.from\(event\.dataTransfer\.files\|\|\[\]\)\);\}\}/);
+ const customer=read("../src/features/customer/CustomerPrintFlow.tsx");
+ assert.match(customer,/onDragOver=\{event=>\{if\(!batchLockedForPayment\)event\.preventDefault\(\);\}\}/);
+ assert.match(customer,/onDrop=\{event=>\{event\.preventDefault\(\);if\(batchLockedForPayment\)return;chooseFiles\(Array\.from\(event\.dataTransfer\.files\|\|\[\]\)\);\}\}/);
  assert.doesNotMatch(app,/window\.(alert|confirm|prompt)\s*\(/);
 });
 
 test("photo studio's selected photo quantity creates one multi-page file with one photo-count record",()=>{
  const app=read("../src/App.tsx");
+ const customer=read("../src/features/customer/CustomerPrintFlow.tsx");
  const studio=read("../src/PhotoStudio.tsx");
  assert.match(studio,/const pages=Math\.ceil\(parsedCopies\/photosPerPage\)/);
  assert.match(studio,/onApply\(\[\{file:output,sizeCode:size\.id,photoCount:parsedCopies,photosPerPage\}\]\)/);
  assert.match(studio,/buildPhotoPdf\(jpegPages\)/);
- assert.match(app,/const generated=sheets\.map\(sheet=>sheet\.file\)/);
- assert.match(app,/photos\[fp\]=\{sizeCode:sheet\.sizeCode,photoCount:sheet\.photoCount,photosPerPage:sheet\.photosPerPage\}/);
+ assert.match(customer,/const generated=sheets\.map\(sheet=>sheet\.file\)/);
+ assert.match(customer,/photos\[fp\]=\{sizeCode:sheet\.sizeCode,photoCount:sheet\.photoCount,photosPerPage:sheet\.photosPerPage\}/);
 });
 
 test("Shop Wi-Fi option remains visible when HTTPS fallback is disabled",()=>{
- const app=read("../src/App.tsx");
- const start=app.indexOf('<div className="customer-upload-modes">');
- const picker=app.indexOf('<div className="customer-upload-picker-grid"',start);
+ const customer=read("../src/features/customer/CustomerPrintFlow.tsx");
+ const start=customer.indexOf('<div className="customer-upload-modes">');
+ const picker=customer.indexOf('<div className="customer-upload-picker-grid"',start);
  assert.ok(start>=0&&picker>start);
- const modes=app.slice(start,picker);
+ const modes=customer.slice(start,picker);
  assert.match(modes,/customer-upload-mode-unavailable/);
  assert.match(modes,/secureQueueFallbackEnabled&&/);
  assert.doesNotMatch(modes,/\? <div className="customer-upload-modes"/);
@@ -440,11 +444,11 @@ test("cloud shop photo revisions require an unpaid review-stage image and valida
 });
 
 test("customer photo previews do not expose the raw image or prepared PDF viewer",()=>{
- const app=read("../src/App.tsx");
- const previewStart=app.indexOf("{previewUrl&&file&&");
- const previewEnd=app.indexOf("{files.length>0&&<button className=\"customer-flow-button\"",previewStart);
+ const customer=read("../src/features/customer/CustomerPrintFlow.tsx");
+ const previewStart=customer.indexOf("{previewUrl&&file&&");
+ const previewEnd=customer.indexOf("{files.length>0&&<button className=\"customer-flow-button\"",previewStart);
  assert.ok(previewStart>=0&&previewEnd>previewStart);
- const preview=app.slice(previewStart,previewEnd);
+ const preview=customer.slice(previewStart,previewEnd);
  assert.match(preview,/Photo held in the shop workflow/);
  assert.match(preview,/Photo sheet prepared for this shop/);
  assert.doesNotMatch(preview,/<img src=\{previewUrl\}/);

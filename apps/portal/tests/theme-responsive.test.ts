@@ -212,26 +212,27 @@ test("batch routing enforces local-computer ownership and preserves print-time a
 });
 
 test("customer upload form clearly supports backend-approved image formats", () => {
-  const app = read("../src/App.tsx");
-  const customerFlowStart = app.indexOf("function CustomerPrintFlow(");
-  const customerFlowEnd = app.indexOf("function UploadIcon()", customerFlowStart);
+  const customer = read("../src/features/customer/CustomerPrintFlow.tsx");
+  const customerFlowStart = customer.indexOf("function CustomerPrintFlow(");
+  const customerFlowEnd = customer.indexOf("function UploadIcon()", customerFlowStart);
   assert.ok(customerFlowStart >= 0 && customerFlowEnd > customerFlowStart,
     "The shared customer upload form must remain present.");
-  const customerFlow = app.slice(customerFlowStart, customerFlowEnd);
+  const customerFlow = customer.slice(customerFlowStart, customerFlowEnd);
   assert.ok(customerFlow.includes("Add documents or images"));
   assert.ok(customerFlow.includes("Select documents or images"));
   assert.ok(customerFlow.includes('accept=".pdf,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png"'));
-  assert.ok(app.includes('const supported=rootFiles.filter(candidate=>/\\.(pdf|jpe?g|png)$/i.test(candidate.name));'),
+  assert.ok(customer.includes('const supported=rootFiles.filter(candidate=>/\\.(pdf|jpe?g|png)$/i.test(candidate.name));'),
     "The shared selection handler must retain PDF, JPG, JPEG and PNG support.");
 });
 
 test("Android customer printing uses the same single Copies control and event handlers as the browser", () => {
   const app = read("../src/App.tsx");
-  const customerFlowStart = app.indexOf("function CustomerPrintFlow(");
-  const customerFlowEnd = app.indexOf("function UploadIcon()", customerFlowStart);
+  const customer = read("../src/features/customer/CustomerPrintFlow.tsx");
+  const customerFlowStart = customer.indexOf("function CustomerPrintFlow(");
+  const customerFlowEnd = customer.indexOf("function UploadIcon()", customerFlowStart);
   assert.ok(customerFlowStart >= 0 && customerFlowEnd > customerFlowStart,
     "The shared CustomerPrintFlow component must remain present.");
-  const customerFlow = app.slice(customerFlowStart, customerFlowEnd);
+  const customerFlow = customer.slice(customerFlowStart, customerFlowEnd);
   assert.ok(app.includes("<CustomerPrintFlow dark={dark} publicCode={publicCode}"), "Customer print flow follows the saved appearance.");
   assert.ok(customerFlow.includes('navigator.userAgent.includes("SmartPrintAndroid/1")'));
   assert.equal((customerFlow.match(/customer-folder-copies/g) ?? []).length, 2,
@@ -320,24 +321,24 @@ test("shop owner personal details are editable from the account menu without mix
 
 test("native customer UI follows explicit SmartPrint theme and marks selected upload mode", () => {
   const css = read("../src/styles.css");
-  const app = read("../src/App.tsx");
+  const customer = read("../src/features/customer/CustomerPrintFlow.tsx");
   assert.doesNotMatch(css, /@media\s*\(prefers-color-scheme:\s*dark\)/,
     "The OS dark preference must not override a saved SmartPrint light theme.");
   assert.match(css, /html\[data-theme="dark"\] \.customer-entry\.smartprint-native/);
   assert.match(css, /\.customer-entry\.smartprint-native \.customer-upload-mode\.selected/);
   assert.match(css, /customer-upload-mode\.selected::after[\s\S]*?Selected/);
-  assert.match(app, /aria-pressed=\{uploadMode==="LOCAL"\}/);
-  assert.match(app, /aria-pressed=\{uploadMode==="CLOUD"\}/);
+  assert.match(customer, /aria-pressed=\{uploadMode==="LOCAL"\}/);
+  assert.match(customer, /aria-pressed=\{uploadMode==="CLOUD"\}/);
 });
 
 
 test("customer print settings are preserved independently of printer capability reports", () => {
-  const app = read("../src/App.tsx");
-  const flowStart = app.indexOf("function CustomerPrintFlow(");
-  const flowEnd = app.indexOf("function UploadIcon()", flowStart);
+  const customer = read("../src/features/customer/CustomerPrintFlow.tsx");
+  const flowStart = customer.indexOf("function CustomerPrintFlow(");
+  const flowEnd = customer.indexOf("function UploadIcon()", flowStart);
   assert.ok(flowStart >= 0 && flowEnd > flowStart,
     "The shared customer print flow must remain present.");
-  const flow = app.slice(flowStart, flowEnd);
+  const flow = customer.slice(flowStart, flowEnd);
 
   assert.ok(flow.includes("Customer requests are captured independently of current hardware reports."));
   assert.ok(flow.includes("void printerCapabilitiesJson;"));
@@ -349,10 +350,10 @@ test("customer print settings are preserved independently of printer capability 
 });
 
 test("folder defaults inherit to files and advanced paper options are opt-in", () => {
-  const app = read("../src/App.tsx");
-  const flowStart = app.indexOf("function CustomerPrintFlow(");
-  const flowEnd = app.indexOf("function UploadIcon()", flowStart);
-  const flow = app.slice(flowStart, flowEnd);
+  const customer = read("../src/features/customer/CustomerPrintFlow.tsx");
+  const flowStart = customer.indexOf("function CustomerPrintFlow(");
+  const flowEnd = customer.indexOf("function UploadIcon()", flowStart);
+  const flow = customer.slice(flowStart, flowEnd);
 
   assert.ok(flow.includes("advancedEnabled:false"));
   assert.ok(flow.includes("const selected=own?.custom?{...defaults,...own}:defaults;"));
@@ -366,13 +367,14 @@ test("folder defaults inherit to files and advanced paper options are opt-in", (
 
 test("offline requests use the existing secure queue and owner changes require customer approval", () => {
   const app = read("../src/App.tsx");
+  const customer = read("../src/features/customer/CustomerPrintFlow.tsx");
   const api = read("../src/api.ts");
   const recoveryEndpoint = read("../../../src/SmartPrint.Api/Endpoints/PublicCloudRecoveryEndpoints.cs");
   const recoveryService = read("../../../src/SmartPrint.Api/Services/PublicCloudRecoveryService.cs");
   const settingsEndpoint = read("../../../src/SmartPrint.Api/Endpoints/ShopPrintJobSettingsEndpoints.cs");
   const settingsService = read("../../../src/SmartPrint.Api/Services/ShopPrintJobSettingsService.cs");
 
-  assert.ok(app.includes("secureQueueFallbackEnabled"));
+  assert.ok(customer.includes("secureQueueFallbackEnabled"));
   assert.ok(recoveryEndpoint.includes('publicApi.MapPost("/sessions/current/local-upload-tickets/{ticketId:guid}/cloud-recovery"'));
   assert.ok(recoveryService.includes("if (!subscription.CloudAssistedPrintingEnabled && recoveryAgentAvailable)"));
   assert.doesNotMatch(api, /X-Print-Queue-Fallback|allowQueueFallback/);
@@ -382,27 +384,27 @@ test("offline requests use the existing secure queue and owner changes require c
   assert.ok(app.includes("onUpdateSettings={updatePrintJobSettings}"));
 });
 test("customer paper summaries reflect advanced folder and per-file choices", () => {
-  const app = read("../src/App.tsx");
-  assert.match(app, /customer-paper-default">\{defaults\.advancedEnabled\?defaults\.paperSize:"A4"\}/);
-  assert.match(app, /customer-paper-default">\{own\.advancedEnabled\?own\.paperSize:"A4"\}/);
-  assert.match(app, /entry\.quote!\.paperSize/);
-  assert.match(app, /item\.job\.paperSize\?\?"A4"/);
+  const customer = read("../src/features/customer/CustomerPrintFlow.tsx");
+  assert.match(customer, /customer-paper-default">\{defaults\.advancedEnabled\?defaults\.paperSize:"A4"\}/);
+  assert.match(customer, /customer-paper-default">\{own\.advancedEnabled\?own\.paperSize:"A4"\}/);
+  assert.match(customer, /entry\.quote!\.paperSize/);
+  assert.match(customer, /item\.job\.paperSize\?\?"A4"/);
 });
 
 test("all print settings controls capture React event values before state updaters", () => {
-  const app = read("../src/App.tsx");
+  const customer = read("../src/features/customer/CustomerPrintFlow.tsx");
   const queue = read("../src/features/shop/queue/PrintQueuePage.tsx");
   const setters = ["setGroupSettings(current=>","setFileSettings(current=>","setEditingPrintSettings(current=>"];
   for (const setter of setters) {
-    const source = setter === "setEditingPrintSettings(current=>" ? queue : app;
+    const source = setter === "setEditingPrintSettings(current=>" ? queue : customer;
     const lines = source.split("\n").filter(line => line.includes(setter));
     assert.ok(lines.length > 0, `${setter} must remain part of the shared print settings flow.`);
     assert.ok(lines.every(line => !line.includes("event.currentTarget") && !line.includes("event.target")),
       `${setter} must use values captured before entering the state updater.`);
   }
-  assert.match(app, /const advancedEnabled=event\.currentTarget\.checked/);
-  assert.match(app, /const paperSize=event\.currentTarget\.value/);
-  assert.match(app, /const orientation=event\.currentTarget\.value/);
+  assert.match(customer, /const advancedEnabled=event\.currentTarget\.checked/);
+  assert.match(customer, /const paperSize=event\.currentTarget\.value/);
+  assert.match(customer, /const orientation=event\.currentTarget\.value/);
   assert.match(queue, /const copies=Math\.max\(1,Math\.min\(100,Number\(event\.currentTarget\.value\)\|\|1\)\)/);
 });
 
