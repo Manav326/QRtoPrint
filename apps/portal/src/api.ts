@@ -855,14 +855,14 @@ export async function createCustomerSession(publicCode: string) {
 }
 
 
-export function renewCustomerPrintSession(sessionToken: string) {
+export async function renewCustomerPrintSession(sessionToken: string) {
   return apiRequest<{
     expiresUtc: string;
     localAgent: { agentDeviceId: string; endpoints: string[] } | null;
     paymentOptions: { upiEnabled: boolean; upiId?: string | null; payeeName?: string | null; cashEnabled: boolean; instantPaymentEnabled: boolean };
   }>("/api/v1/public/sessions/current/renew", {
     method: "POST",
-    headers: { "X-Print-Session": sessionToken }
+    headers: { "X-Print-Session": sessionToken, ...await nativeCustomerAuthorizationHeaders() }
   });
 }
 
