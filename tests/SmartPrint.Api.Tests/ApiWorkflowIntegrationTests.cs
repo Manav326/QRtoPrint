@@ -453,8 +453,12 @@ public sealed class ApiWorkflowIntegrationTests
                 $"/api/v1/platform/tenants/{shop.TenantId}/subscription-history"))
                 Assert.Equal(HttpStatusCode.OK, subscriptionHistory.StatusCode);
 
-            // A second, job-free tenant can be suspended. Read-only recovery remains
-            // accessible while new shop mutations are rejected by the tenant filter.
+            // Subscription information remains available as a recovery read after
+            // suspension; profile details are intentionally not returned for inactive tenants.
+            using (var subscriptionRecoveryRead = await client.GetAsync("/api/v1/shop/subscription"))
+                Assert.Equal(HttpStatusCode.OK, subscriptionRecoveryRead.StatusCode);
+
+            // A second, job-free tenant can be suspended. New shop mutations remain blocked.
             var suspendedShop = await RegisterShopAsync(client, "Suspended Integration Shop");
             using (var suspend = await client.PatchAsJsonAsync(
                 $"/api/v1/platform/tenants/{suspendedShop.TenantId}/status",
@@ -467,8 +471,8 @@ public sealed class ApiWorkflowIntegrationTests
 
             client.DefaultRequestHeaders.Authorization =
                 new AuthenticationHeaderValue("Bearer", suspendedShop.AccessToken);
-            using (var recoveryRead = await client.GetAsync("/api/v1/shop/profile"))
-                Assert.Equal(HttpStatusCode.OK, recoveryRead.StatusCode);
+            using (var subscriptionRecoveryRead = await client.GetAsync("/api/v1/shop/subscription"))
+                Assert.Equal(HttpStatusCode.OK, subscriptionRecoveryRead.StatusCode);
             using (var blockedMutation = await client.PutAsJsonAsync("/api/v1/shop/pricing", new
             {
                 monoPerSideMinor = 100,
