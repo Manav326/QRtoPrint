@@ -96,6 +96,7 @@ public static class ApiServiceRegistration
         services.AddScoped<PlatformSubscriptionService>();
         services.AddScoped<PlatformOverviewService>();
         services.AddScoped<AgentDocumentPreviewService>();
+        services.AddScoped<AgentEndpointInfoService>();
         services.AddScoped<ShopPrintJobReadService>();
         services.AddScoped<ShopSubscriptionQueryService>();
         services.AddScoped<PublicCustomerJobQueryService>();

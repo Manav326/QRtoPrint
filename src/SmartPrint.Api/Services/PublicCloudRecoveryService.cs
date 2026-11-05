@@ -3,7 +3,6 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;
 using SmartPrint.Api.Data;
 using SmartPrint.Api.Domain;
-using SmartPrint.Api.Endpoints;
 using SmartPrint.Api.Storage;
 using SmartPrint.Documents;
 using static SmartPrint.Api.Security.OpaqueTokenHasher;
@@ -41,7 +40,8 @@ public sealed record PublicCloudRecoveryResult(
 public sealed class PublicCloudRecoveryService(
     SmartPrintDbContext db,
     DocumentStorage storage,
-    TenantEntitlementService entitlements)
+    TenantEntitlementService entitlements,
+    AgentEndpointInfoService agentEndpointInfo)
 {
     public async Task<PublicCloudRecoveryResult> PreflightAsync(
         Guid ticketId,
@@ -270,8 +270,8 @@ public sealed class PublicCloudRecoveryService(
                 return await RejectAndCleanAsync(new PublicCloudRecoveryResult(PublicCloudRecoveryFailure.SubscriptionInactive));
             }
 
-            var recoveryAgentAvailable = await AgentEndpointInfo.GetLocalAgentInfoAsync(
-                db, ticket.TenantId, ticket.PrinterDeviceId, commitNow, cancellationToken) is not null;
+            var recoveryAgentAvailable = await agentEndpointInfo.GetLocalAgentInfoAsync(
+                ticket.TenantId, ticket.PrinterDeviceId, commitNow, cancellationToken) is not null;
             if (!subscription.CloudAssistedPrintingEnabled && recoveryAgentAvailable)
             {
                 return await RejectAndCleanAsync(new PublicCloudRecoveryResult(PublicCloudRecoveryFailure.CloudRecoveryUnavailable));

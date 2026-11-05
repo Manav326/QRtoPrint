@@ -3,7 +3,6 @@ using Microsoft.EntityFrameworkCore;
 using SmartPrint.Api.Contracts;
 using SmartPrint.Api.Data;
 using SmartPrint.Api.Domain;
-using SmartPrint.Api.Endpoints;
 using static SmartPrint.Api.Security.OpaqueTokenHasher;
 
 namespace SmartPrint.Api.Services;
@@ -43,7 +42,8 @@ public sealed record PublicCustomerCurrentSessionSnapshot(
 
 public sealed class PublicCustomerSessionService(
     SmartPrintDbContext db,
-    TenantEntitlementService entitlements)
+    TenantEntitlementService entitlements,
+    AgentEndpointInfoService agentEndpointInfo)
 {
     public async Task<PublicCustomerSessionResult> RenewAsync(
         string? rawToken,
@@ -81,8 +81,8 @@ public sealed class PublicCustomerSessionService(
                               station.IsEnabled)
             .Select(station => station.PrinterDeviceId)
             .SingleOrDefaultAsync(cancellationToken);
-        var localAgent = await AgentEndpointInfo.GetLocalAgentInfoAsync(
-            db, session.TenantId, stationPrinterId, now, cancellationToken);
+        var localAgent = await agentEndpointInfo.GetLocalAgentInfoAsync(
+            session.TenantId, stationPrinterId, now, cancellationToken);
 
         return new PublicCustomerSessionResult(
             PublicCustomerSessionFailure.None,
@@ -221,8 +221,8 @@ public sealed class PublicCustomerSessionService(
                 station.IsEnabled)
             .Select(station => station.PrinterDeviceId)
             .SingleOrDefaultAsync(cancellationToken);
-        var localAgent = await AgentEndpointInfo.GetLocalAgentInfoAsync(
-            db, session.TenantId, stationPrinterId, now, cancellationToken);
+        var localAgent = await agentEndpointInfo.GetLocalAgentInfoAsync(
+            session.TenantId, stationPrinterId, now, cancellationToken);
 
         return new PublicCustomerSessionResult(
             PublicCustomerSessionFailure.None,
@@ -277,8 +277,8 @@ public sealed class PublicCustomerSessionService(
                 .SingleOrDefaultAsync(cancellationToken)
             : null;
         var customerEntitlements = await entitlements.GetForTenantAsync(tenantId, cancellationToken);
-        var localAgent = await AgentEndpointInfo.GetLocalAgentInfoAsync(
-            db, tenantId, printerDeviceId, now, cancellationToken);
+        var localAgent = await agentEndpointInfo.GetLocalAgentInfoAsync(
+            tenantId, printerDeviceId, now, cancellationToken);
         var photoPricing = await db.ShopPricingProfiles.AsNoTracking()
             .Where(item => item.TenantId == tenantId)
             .Select(item => new

@@ -4,7 +4,6 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using SmartPrint.Api.Data;
 using SmartPrint.Api.Domain;
-using SmartPrint.Api.Endpoints;
 using SmartPrint.Api.Security;
 using SmartPrint.Api.Storage;
 using SmartPrint.Documents;
@@ -37,7 +36,8 @@ public sealed class PublicJobCreationService(
     SmartPrintDbContext db,
     DocumentStorage storage,
     TenantEntitlementService entitlements,
-    ILogger<PublicJobCreationService> logger)
+    ILogger<PublicJobCreationService> logger,
+    AgentEndpointInfoService agentEndpointInfo)
 {
     public async Task<bool> IsSessionActiveAsync(string rawToken, CancellationToken cancellationToken)
     {
@@ -162,8 +162,8 @@ public sealed class PublicJobCreationService(
                               station.TenantId == session.TenantId)
             .Select(station => station.PrinterDeviceId)
             .SingleOrDefaultAsync(cancellationToken);
-        var localAgentAvailable = await AgentEndpointInfo.GetLocalAgentInfoAsync(
-            db, session.TenantId, stationDefaultPrinterId, now, cancellationToken) is not null;
+        var localAgentAvailable = await agentEndpointInfo.GetLocalAgentInfoAsync(
+            session.TenantId, stationDefaultPrinterId, now, cancellationToken) is not null;
         if (!subscription.CloudAssistedPrintingEnabled && localAgentAvailable)
         {
             return Problem(StatusCodes.Status403Forbidden,

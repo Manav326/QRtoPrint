@@ -896,3 +896,18 @@ test("shop resource reads delegate their persistence queries to feature services
       moduleName + " must not compose database queries in the endpoint.");
   }
 });
+
+
+test("local Agent endpoint discovery is implemented in the application service layer", () => {
+  const queryService = read("../../../src/SmartPrint.Api/Services/AgentEndpointInfoService.cs");
+  assert.match(queryService, /GetLocalAgentInfoAsync/);
+  for (const moduleName of [
+    "PublicCloudRecoveryService.cs",
+    "PublicCustomerSessionService.cs",
+    "PublicJobCreationService.cs"
+  ]) {
+    const source = read("../../../src/SmartPrint.Api/Services/" + moduleName);
+    assert.match(source, /agentEndpointInfo\.GetLocalAgentInfoAsync/);
+    assert.doesNotMatch(source, /AgentEndpointInfo\.GetLocalAgentInfoAsync/);
+  }
+});
