@@ -6,7 +6,7 @@ const read = (path: string) => readFileSync(new URL(path, import.meta.url), "utf
 const readApi = (name: string) => read(`../../../src/SmartPrint.Api/Endpoints/${name}`);
 
 test("customer upload sends the selected file settings to both storage paths", () => {
-  const api = read("../src/api.ts");
+  const api = read("../src/api/customer.ts");
   assert.match(api, /form\.append\("colourMode", settings\.colourMode\)/);
   assert.match(api, /form\.append\("paperSize", settings\.paperSize\)/);
   assert.match(api, /form\.append\("isDuplex", String\(settings\.isDuplex\)\)/);
@@ -18,7 +18,7 @@ test("customer upload sends the selected file settings to both storage paths", (
 test("owner quote edits are sent through the existing print-job API", () => {
   const shop = read("../src/features/shop/useShopPrintActions.ts");
   const customer = read("../src/features/customer/CustomerPrintFlow.tsx");
-  const api = read("../src/api.ts");
+  const api = read("../src/api/print-jobs.ts");
   assert.match(shop, /updateShopPrintJobSettings\(accessToken,job\.id,settings\)/);
   assert.match(api, /\/api\/v1\/shop\/print-jobs\/\$\{jobId\}\/settings/);
   assert.match(shop, /Revised quote .* sent to the customer for approval/);
@@ -57,7 +57,7 @@ test("paid jobs are staged while a physical printer is offline and checked at di
 test("plan-limited HTTPS fallback is only offered when the Agent is unavailable", () => {
   const customerEntry = read("../src/features/customer/CustomerEntry.tsx");
   const customer = read("../src/features/customer/CustomerPrintFlow.tsx");
-  const api = read("../src/api.ts");
+  const api = read("../src/api/customer.ts");
   const publicUploadSource = readApi("PublicJobCreationEndpoints.cs");
   const publicUploadService = read("../../../src/SmartPrint.Api/Services/PublicJobCreationService.cs");
   assert.match(customer, /secureQueueFallbackEnabled = cloudAssistedPrintingEnabled \|\| !localAgent\?\.endpoints\.length \|\| localFallbackSuggested/);
@@ -190,7 +190,7 @@ test("local Agent completion validates and finalizes the claimed ticket through 
 test("local upload ticket retries preserve batch identity and renew the same expired reservation", () => {
   const source = readApi("PublicUploadTicketEndpoints.cs");
   const service = read("../../../src/SmartPrint.Api/Services/PublicLocalUploadTicketService.cs");
-  const api = read("../src/api.ts");
+  const api = read("../src/api/customer.ts");
   const customer = read("../src/features/customer/CustomerPrintFlow.tsx");
   const entitlements = read("../../../src/SmartPrint.Api/Services/TenantEntitlementService.cs");
   const ticketStart = source.indexOf('publicApi.MapPost("/sessions/current/local-upload-tickets"');
@@ -398,9 +398,9 @@ test("Shop Wi-Fi option remains visible when HTTPS fallback is disabled",()=>{
 });
 
 test("cloud shop document preview retries the binary fetch with a refreshed access token",()=>{
- const api=read("../src/api.ts");
+ const api=read("../src/api/print-jobs.ts");
  const start=api.indexOf("export async function downloadShopDocument(");
- const end=api.indexOf("export function createAgentEnrollmentCode(",start);
+ const end=api.indexOf("export function replaceShopPhotoDocumentLocally(",start);
  assert.ok(start>=0&&end>start);
  const preview=api.slice(start,end);
  assert.match(preview,/if \(response\.status === 401\)\s*\{\s*const refreshed = await refreshStoredSession\(token\)/);

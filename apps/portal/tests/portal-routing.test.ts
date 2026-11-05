@@ -38,9 +38,10 @@ test("Android customer station keeps the shared print page and offers native loc
     new URL("../../android/app/src/main/java/com/quantaedge/smartprint/MainActivity.kt", import.meta.url),
     "utf8"
   );
-  const apiSource = readFileSync(new URL("../src/api.ts", import.meta.url), "utf8");
+  const apiSource = readFileSync(new URL("../src/api/customer.ts", import.meta.url), "utf8");
 
-  assert.match(appSource, /function CustomerPrintFlow\(/);
+  const customerFlow = readFileSync(new URL("../src/features/customer/CustomerPrintFlow.tsx", import.meta.url), "utf8");
+  assert.match(customerFlow, /function CustomerPrintFlow\(/);
   assert.match(appSource, /requestSmartPrintNativeLocalNetworkAccess/);
   assert.match(appSource, /bridge\.addEventListener\("message",handleReply\)/);
   assert.match(apiSource, /value\.startsWith\("localNetworkAccess:"\)/);
@@ -148,7 +149,7 @@ test("theme defaults to light, survives logout, and applies to the document root
     saveSidebarCollapsedPreference(true);
     assert.equal(readSidebarCollapsedPreference(), true);
 
-    const apiSource = readFileSync(new URL("../src/api.ts", import.meta.url), "utf8");
+    const apiSource = readFileSync(new URL("../src/api/core.ts", import.meta.url), "utf8");
     assert.match(apiSource, /export function storeTokens\([\s\S]*?sessionStorage\.setItem\(scopedKey/);
     assert.match(apiSource, /else sessionStorage\.removeItem\(scopedKey\)/);
     assert.doesNotMatch(apiSource.slice(apiSource.indexOf("export function storeTokens"), apiSource.indexOf("export const signIn")), /localStorage/);

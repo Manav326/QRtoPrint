@@ -186,7 +186,7 @@ test("QR station poster has a clear three-step hierarchy and scan-first customer
 test("batch routing enforces local-computer ownership and preserves print-time audit identity", () => {
   const customer = read("../src/features/customer/CustomerPrintFlow.tsx");
   const queue = read("../src/features/shop/queue/PrintQueuePage.tsx");
-  const api = read("../src/api.ts");
+  const api = read("../src/api/customer.ts");
   const css = read("../src/styles.css");
 
   assert.match(queue, /Assign one printer for all files in batch/);
@@ -301,7 +301,7 @@ test("shop owner personal details are editable from the account menu without mix
   const shop = read("../src/features/shop/ShopConsole.tsx");
   const overlays = read("../src/features/shop/ShopOverlays.tsx");
   const settings = read("../src/features/shop/settings/SettingsPage.tsx");
-  const api = read("../src/api.ts");
+  const api = read("../src/api/shop.ts");
   const modalStart = overlays.indexOf("function ShopOwnerAccountModal");
   const modalEnd = overlays.indexOf("function HelpSupportModal", modalStart);
   const modal = overlays.slice(modalStart, modalEnd);
@@ -370,8 +370,7 @@ test("folder defaults inherit to files and advanced paper options are opt-in", (
 
 test("offline requests use the existing secure queue and owner changes require customer approval", () => {
   const customer = read("../src/features/customer/CustomerPrintFlow.tsx");
-  const customer = read("../src/features/customer/CustomerPrintFlow.tsx");
-  const api = read("../src/api.ts");
+  const api = read("../src/api/customer.ts");
   const recoveryEndpoint = read("../../../src/SmartPrint.Api/Endpoints/PublicCloudRecoveryEndpoints.cs");
   const recoveryService = read("../../../src/SmartPrint.Api/Services/PublicCloudRecoveryService.cs");
   const settingsEndpoint = read("../../../src/SmartPrint.Api/Endpoints/ShopPrintJobSettingsEndpoints.cs");
@@ -415,8 +414,7 @@ test("all print settings controls capture React event values before state update
 test("PDF footer branding is opt-in per batch and cannot cover source content or paper output", () => {
   const overlays = read("../src/features/shop/ShopOverlays.tsx");
   const customer = read("../src/features/customer/CustomerPrintFlow.tsx");
-  const customer = read("../src/features/customer/CustomerPrintFlow.tsx");
-  const api = read("../src/api.ts");
+  const api = read("../src/api/shop.ts");
   const reviewEndpoint = read("../../../src/SmartPrint.Api/Endpoints/ShopPrintBatchReviewEndpoints.cs");
   const reviewService = read("../../../src/SmartPrint.Api/Services/ShopPrintBatchReviewService.cs");
   const contracts = read("../../../src/SmartPrint.Api/Contracts/ApiContracts.cs");
@@ -477,7 +475,7 @@ test("customer payment settings refresh without reopening the QR session and exp
   const customerEntry = read("../src/features/customer/CustomerEntry.tsx");
   const customer = read("../src/features/customer/CustomerPrintFlow.tsx");
   const paymentPage = read("../src/features/shop/payments/PaymentsPage.tsx");
-  const api = read("../src/api.ts");
+  const api = read("../src/api/customer.ts");
   const sessionService = read("../../../src/SmartPrint.Api/Services/PublicCustomerSessionService.cs");
   const registrationService = read("../../../src/SmartPrint.Api/Services/AccountRegistrationService.cs");
   assert.match(customerEntry, /paymentOptions:session\.paymentOptions/);
@@ -491,7 +489,7 @@ test("customer payment settings refresh without reopening the QR session and exp
   assert.match(registrationService, /CashEnabled = false/);
 });
 test("Windows local document previews prefer the paired Agent loopback endpoint", () => {
-  const api = read("../src/api.ts");
+  const api = read("../src/api/print-jobs.ts");
   const routing = read("../src/local-preview-routing.ts");
   const desktop = read("../../desktop/src-tauri/tauri.conf.json");
   assert.ok(routing.includes("function isPrivateLocalPreviewEndpoint(value: string, allowLoopback = false)"));
@@ -548,7 +546,7 @@ test("local preview endpoint candidates are deduplicated and bounded", () => {
 test("session renewal refreshes customer payment choices and explains unavailable payment methods", () => {
   const customerEntry = read("../src/features/customer/CustomerEntry.tsx");
   const customer = read("../src/features/customer/CustomerPrintFlow.tsx");
-  const api = read("../src/api.ts");
+  const api = read("../src/api/customer.ts");
   const sessionService = read("../../../src/SmartPrint.Api/Services/PublicCustomerSessionService.cs");
   assert.match(api, /paymentOptions: \{ upiEnabled: boolean; upiId\?: string \| null; payeeName\?: string \| null; cashEnabled: boolean; instantPaymentEnabled: boolean \}/);
   assert.match(customerEntry, /paymentOptions:session\.paymentOptions/);
