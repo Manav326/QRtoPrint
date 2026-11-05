@@ -117,8 +117,8 @@ class MainActivityInstrumentedTest {
             scenario.onActivity { activity ->
                 val toolbar = MainActivity::class.java.getDeclaredField("toolbar").apply { isAccessible = true }
                     .get(activity) as com.google.android.material.appbar.MaterialToolbar
-                assertEquals("smartprint", toolbar.title.toString())
-                assertTrue(toolbar.subtitle.toString().contains("BY QUANTAEDGE"))
+                assertEquals("SmartPrint", toolbar.title.toString())
+                assertTrue(toolbar.subtitle.toString().contains("by QuantaEdge"))
                 assertTrue(toolbar.subtitle.toString().contains("ACCOUNT"))
                 assertEquals("Back", toolbar.navigationContentDescription)
                 assertNotNull(toolbar.navigationIcon)
