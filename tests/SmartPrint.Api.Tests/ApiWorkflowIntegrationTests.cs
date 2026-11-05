@@ -717,8 +717,8 @@ public sealed class ApiWorkflowIntegrationTests
                 $"/api/v1/shop/print-batches/{batchId}/review",
                 new
                 {
-                    reviewedJobIds = new[] { acceptedJobId, rejectedJobId },
-                    acceptedJobIds = new[] { acceptedJobId },
+                    reviewedJobIds = new[] { rejectedJobId },
+                    acceptedJobIds = new[] { rejectedJobId },
                     pdfBrandingEnabled = false
                 }))
             {
