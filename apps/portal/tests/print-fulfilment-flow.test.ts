@@ -548,7 +548,7 @@ test("PDF export preview grants require a verified local Agent-owned export", ()
   const grant = read("../../../src/SmartPrint.Api/Security/LocalDocumentPreviewGrant.cs");
 
   assert.match(shopEndpoint, /reads\.GetPreviewSourceAsync/);
-  assert.match(shop, /job\.Status != "COMPLETED"/);
+  assert.match(shop, /output\.Status != "COMPLETED"/);
   assert.match(shop, /job\.OutputType != "PDF_EXPORT"/);
   assert.match(shop, /output\.OutputSha256 is not \{ Length: 64 \}/);
   assert.match(shop, /output\.ClaimedByAgentDeviceId is not Guid outputAgentId/);
