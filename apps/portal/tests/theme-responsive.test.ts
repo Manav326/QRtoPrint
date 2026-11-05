@@ -227,14 +227,14 @@ test("customer upload form clearly supports backend-approved image formats", () 
 });
 
 test("Android customer printing uses the same single Copies control and event handlers as the browser", () => {
-  const app = read("../src/App.tsx");
+  const customerEntry = read("../src/features/customer/CustomerEntry.tsx");
   const customer = read("../src/features/customer/CustomerPrintFlow.tsx");
   const customerFlowStart = customer.indexOf("function CustomerPrintFlow(");
   const customerFlowEnd = customer.indexOf("function UploadIcon()", customerFlowStart);
   assert.ok(customerFlowStart >= 0 && customerFlowEnd > customerFlowStart,
     "The shared CustomerPrintFlow component must remain present.");
   const customerFlow = customer.slice(customerFlowStart, customerFlowEnd);
-  assert.ok(app.includes("<CustomerPrintFlow dark={dark} publicCode={publicCode}"), "Customer print flow follows the saved appearance.");
+  assert.ok(customerEntry.includes("<CustomerPrintFlow dark={dark} publicCode={publicCode}"), "Customer print flow follows the saved appearance.");
   assert.ok(customerFlow.includes('navigator.userAgent.includes("SmartPrintAndroid/1")'));
   assert.equal((customerFlow.match(/customer-folder-copies/g) ?? []).length, 2,
     "There must be one folder-default Copies input and one per-file Custom override in the shared flow.");
