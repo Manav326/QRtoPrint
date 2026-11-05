@@ -1,29 +1,26 @@
-using System.Security.Claims;
-using System.Security.Cryptography;
-using System.Text;
-using System.Text.Json;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
-using Microsoft.EntityFrameworkCore;
-using SmartPrint.Api.Contracts;
 using SmartPrint.Api.Data;
-using SmartPrint.Api.Domain;
 using SmartPrint.Api.Security;
 using SmartPrint.Api.Services;
-using SmartPrint.Api.Storage;
 using static SmartPrint.Api.Security.OpaqueTokenHasher;
 
 namespace SmartPrint.Api.Endpoints;
 
 public static partial class AgentEndpoints
 {
-    private static void MapAgentDocumentPreviewEndpoint(RouteGroupBuilder agentApi, string signingKeyText, string issuer, string audience)
+    private static void MapAgentDocumentPreviewEndpoint(
+        RouteGroupBuilder agentApi,
+        string signingKeyText,
+        string issuer,
+        string audience)
     {
         agentApi.MapGet("/local-document-previews/{jobId:guid}/authorize", async (
             Guid jobId,
             HttpContext context,
             SmartPrintDbContext db,
+            AgentDocumentPreviewService previewService,
             CancellationToken ct) =>
         {
             var device = await AgentAuthentication.AuthenticateAsync(context, db, ct);
@@ -52,62 +49,28 @@ public static partial class AgentEndpoints
             var outputPreview = string.Equals(variant, "output", StringComparison.OrdinalIgnoreCase);
             if (!string.IsNullOrWhiteSpace(variant) && !outputPreview &&
                 !string.Equals(variant, "original", StringComparison.OrdinalIgnoreCase))
-                return Results.BadRequest(new { code = "local_preview_variant_invalid" });
-
-            if (outputPreview)
             {
-                var output = await db.PrintJobs.AsNoTracking()
-                    .Where(job => job.Id == jobId && job.TenantId == device.TenantId &&
-                                  job.ClaimedByAgentDeviceId == device.Id)
-                    .Select(job => new
-                    {
-                        job.Status,
-                        job.OutputType,
-                        job.OutputFileName,
-                        job.OutputSizeBytes,
-                        job.OutputSha256,
-                        job.OutputCompletedUtc
-                    })
-                    .SingleOrDefaultAsync(ct);
-
-                if (output is null)
-                    return Results.NotFound();
-                if (output.Status != "COMPLETED" || output.OutputType != "PDF_EXPORT" ||
-                    output.OutputCompletedUtc is null ||
-                    string.IsNullOrWhiteSpace(output.OutputFileName) ||
-                    output.OutputFileName.Length > 255 ||
-                    output.OutputFileName.Contains('/') || output.OutputFileName.Contains('\\') ||
-                    !string.Equals(Path.GetExtension(output.OutputFileName), ".pdf", StringComparison.OrdinalIgnoreCase) ||
-                    output.OutputSizeBytes is not long outputSize || outputSize <= 0 || outputSize > 100L * 1024 * 1024 ||
-                    output.OutputSha256 is not { Length: 64 } || !output.OutputSha256.All(Uri.IsHexDigit))
-                    return Results.Conflict(new { code = "pdf_export_preview_unavailable" });
-
-                return Results.Ok(new
-                {
-                    MediaType = "application/pdf",
-                    OriginalFileName = output.OutputFileName,
-                    SizeBytes = outputSize,
-                    Sha256 = output.OutputSha256
-                });
+                return Results.BadRequest(new { code = "local_preview_variant_invalid" });
             }
 
-            var document = await (
-                from job in db.PrintJobs.AsNoTracking()
-                join item in db.PrintDocuments.AsNoTracking()
-                    on new { job.TenantId, PrintJobId = job.Id } equals new { item.TenantId, item.PrintJobId }
-                where job.Id == jobId && job.TenantId == device.TenantId &&
-                      item.StorageMode == "LOCAL_AGENT" && item.AgentDeviceId == device.Id
-                select new { item.MediaType, item.OriginalFileName, item.SizeBytes, item.Sha256 }
-            ).SingleOrDefaultAsync(ct);
+            var result = await previewService.GetAsync(
+                jobId, device.TenantId, device.Id, outputPreview, ct);
+            if (result.Failure == AgentDocumentPreviewFailure.NotFound)
+            {
+                return Results.NotFound();
+            }
+            if (result.Failure == AgentDocumentPreviewFailure.PdfExportUnavailable)
+            {
+                return Results.Conflict(new { code = "pdf_export_preview_unavailable" });
+            }
 
-            if (document is null) return Results.NotFound();
             return Results.Ok(new
             {
-                document.MediaType,
-                document.OriginalFileName,
-                document.SizeBytes,
-                document.Sha256
+                result.MediaType,
+                result.OriginalFileName,
+                result.SizeBytes,
+                result.Sha256
             });
-        });;
+        });
     }
 }

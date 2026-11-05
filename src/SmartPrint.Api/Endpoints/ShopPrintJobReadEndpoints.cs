@@ -2,11 +2,7 @@ using System.Security.Claims;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
-using Microsoft.EntityFrameworkCore;
-using SmartPrint.Api.Data;
-using SmartPrint.Api.Domain;
-using SmartPrint.Api.Security;
-using SmartPrint.Api.Storage;
+using SmartPrint.Api.Services;
 using static SmartPrint.Api.Security.EndpointIdentity;
 
 namespace SmartPrint.Api.Endpoints;
@@ -22,169 +18,106 @@ public static class ShopPrintJobReadEndpoints
         shop.MapGet("/print-jobs/{jobId:guid}/events", async (
             Guid jobId,
             ClaimsPrincipal principal,
-            SmartPrintDbContext db,
+            ShopPrintJobReadService reads,
             CancellationToken ct) =>
         {
             if (!TryGetTenantId(principal, out var tenantId))
             {
                 return Results.Forbid();
             }
-        
-            if (!await db.PrintJobs.AsNoTracking().AnyAsync(job => job.Id == jobId && job.TenantId == tenantId, ct))
-            {
-                return Results.NotFound();
-            }
-        
-            var events = await db.PrintJobEvents.AsNoTracking()
-                .Where(item => item.TenantId == tenantId && item.PrintJobId == jobId)
-                .OrderBy(item => item.CreatedUtc)
-                .Select(item => new
-                {
-                    item.Id,
-                    item.PreviousStatus,
-                    item.NewStatus,
-                    item.ActorType,
-                    item.ReasonCode,
-                    item.CreatedUtc
-                })
-                .ToListAsync(ct);
-            return Results.Ok(events);
+
+            var events = await reads.GetEventsAsync(tenantId, jobId, ct);
+            return events is null ? Results.NotFound() : Results.Ok(events);
         });
 
         shop.MapGet("/print-jobs/{jobId:guid}/document", async (
             Guid jobId,
             ClaimsPrincipal principal,
             HttpContext context,
-            SmartPrintDbContext db,
-            DocumentStorage storage,
+            ShopPrintJobReadService reads,
             CancellationToken ct) =>
         {
             if (!TryGetTenantId(principal, out var tenantId))
             {
                 return Results.Forbid();
             }
-        
-            var document = await db.PrintDocuments.AsNoTracking()
-                .Where(item => item.TenantId == tenantId && item.PrintJobId == jobId)
-                .Select(item => new { item.StorageKey, item.StorageMode, item.MediaType, item.PurgedUtc })
-                .SingleOrDefaultAsync(ct);
-            if (document is null)
+
+            var document = await reads.GetDocumentAsync(tenantId, jobId, ct);
+            if (document.Failure == ShopPrintJobDocumentFailure.NotFound)
             {
                 return Results.NotFound();
             }
-        
-            if (document.StorageMode == "LOCAL_AGENT")
+            if (document.Failure == ShopPrintJobDocumentFailure.StoredOnLocalAgent)
             {
-                return Results.Conflict(new { code = "document_stored_on_local_agent", message = "This document is stored only on the shop's Windows Print Agent; cloud preview is not available." });
+                return Results.Conflict(new
+                {
+                    code = "document_stored_on_local_agent",
+                    message = "This document is stored only on the shop's Windows Print Agent; cloud preview is not available."
+                });
             }
-            if (document.PurgedUtc is not null)
+            if (document.Failure == ShopPrintJobDocumentFailure.Purged)
             {
                 return Results.StatusCode(StatusCodes.Status410Gone);
             }
-        
-            MemoryStream content;
-            try
+            if (document.Failure == ShopPrintJobDocumentFailure.StorageUnavailable)
             {
-                content = storage.OpenRead(document.StorageKey);
+                return Results.Problem(
+                    statusCode: StatusCodes.Status500InternalServerError,
+                    title: "The stored document could not be opened.");
             }
-            catch (IOException)
-            {
-                return Results.Problem(statusCode: StatusCodes.Status500InternalServerError, title: "The stored document could not be opened.");
-            }
-        
+
             context.Response.Headers["Cache-Control"] = "private, no-store";
             context.Response.Headers["X-Content-Type-Options"] = "nosniff";
             context.Response.Headers["Content-Security-Policy"] = "sandbox";
-            return Results.File(content, document.MediaType, enableRangeProcessing: false);
+            return Results.File(document.Content!, document.MediaType!, enableRangeProcessing: false);
         });
 
         shop.MapGet("/print-jobs/{jobId:guid}/preview-source", async (
             Guid jobId,
             ClaimsPrincipal principal,
-            SmartPrintDbContext db,
             HttpContext context,
+            ShopPrintJobReadService reads,
             CancellationToken ct) =>
         {
-            // Preview grants are bearer credentials; never let browsers or proxies cache them.
             context.Response.Headers.CacheControl = "private, no-store";
             context.Response.Headers.Pragma = "no-cache";
 
             if (!TryGetTenantId(principal, out var tenantId))
+            {
                 return Results.Forbid();
+            }
 
             var variant = context.Request.Query["variant"].FirstOrDefault();
             var outputPreview = string.Equals(variant, "output", StringComparison.OrdinalIgnoreCase);
             if (!string.IsNullOrWhiteSpace(variant) && !outputPreview &&
                 !string.Equals(variant, "original", StringComparison.OrdinalIgnoreCase))
+            {
                 return Results.BadRequest(new { code = "local_preview_variant_invalid" });
-
-            Guid agentId;
-            if (outputPreview)
-            {
-                var output = await db.PrintJobs.AsNoTracking()
-                    .Where(job => job.Id == jobId && job.TenantId == tenantId)
-                    .Select(job => new
-                    {
-                        job.Status,
-                        job.OutputType,
-                        job.OutputFileName,
-                        job.OutputSha256,
-                        job.OutputSizeBytes,
-                        job.OutputCompletedUtc,
-                        job.ClaimedByAgentDeviceId
-                    })
-                    .SingleOrDefaultAsync(ct);
-
-                if (output is null)
-                    return Results.NotFound();
-                if (output.Status != "COMPLETED" || output.OutputType != "PDF_EXPORT" ||
-                    output.OutputCompletedUtc is null ||
-                    string.IsNullOrWhiteSpace(output.OutputFileName) ||
-                    output.OutputFileName.Length > 255 ||
-                    output.OutputFileName.Contains('/') || output.OutputFileName.Contains('\\') ||
-                    !string.Equals(Path.GetExtension(output.OutputFileName), ".pdf", StringComparison.OrdinalIgnoreCase) ||
-                    output.OutputSizeBytes is not long outputSize || outputSize <= 0 || outputSize > 100L * 1024 * 1024 ||
-                    output.OutputSha256 is not { Length: 64 } || !output.OutputSha256.All(Uri.IsHexDigit) ||
-                    output.ClaimedByAgentDeviceId is not Guid outputAgentId)
-                {
-                    return Results.Conflict(new
-                    {
-                        code = "pdf_export_preview_unavailable",
-                        message = "A verified, completed PDF export is not available for this job yet."
-                    });
-                }
-
-                agentId = outputAgentId;
-            }
-            else
-            {
-                var document = await db.PrintDocuments.AsNoTracking()
-                    .Where(item => item.TenantId == tenantId && item.PrintJobId == jobId)
-                    .Select(item => new { item.StorageMode, item.AgentDeviceId })
-                    .SingleOrDefaultAsync(ct);
-                if (document is null)
-                    return Results.NotFound();
-                if (!string.Equals(document.StorageMode, "LOCAL_AGENT", StringComparison.Ordinal))
-                    return Results.Ok(new { Mode = "CLOUD" });
-                if (document.AgentDeviceId is not Guid documentAgentId)
-                {
-                    return Results.Conflict(new
-                    {
-                        code = "local_preview_agent_missing",
-                        message = "This local-only document is not associated with a paired print computer."
-                    });
-                }
-                agentId = documentAgentId;
             }
 
-            var now = DateTimeOffset.UtcNow;
-            var agent = await db.AgentDevices.AsNoTracking()
-                .Where(item => item.Id == agentId && item.TenantId == tenantId &&
-                               item.RevokedUtc == null && item.Status != "Revoked" &&
-                               item.LastSeenUtc != null && item.LastSeenUtc >= now.AddMinutes(-2))
-                .Select(item => new { item.Id, item.LocalEndpointsJson })
-                .SingleOrDefaultAsync(ct);
-            if (agent is null)
+            var result = await reads.GetPreviewSourceAsync(
+                tenantId, jobId, outputPreview, signingKeyText, issuer, audience, ct);
+            if (result.Failure == ShopPrintJobPreviewFailure.NotFound)
+            {
+                return Results.NotFound();
+            }
+            if (result.Failure == ShopPrintJobPreviewFailure.PdfExportUnavailable)
+            {
+                return Results.Conflict(new
+                {
+                    code = "pdf_export_preview_unavailable",
+                    message = "A verified, completed PDF export is not available for this job yet."
+                });
+            }
+            if (result.Failure == ShopPrintJobPreviewFailure.LocalAgentMissing)
+            {
+                return Results.Conflict(new
+                {
+                    code = "local_preview_agent_missing",
+                    message = "This local-only document is not associated with a paired print computer."
+                });
+            }
+            if (result.Failure == ShopPrintJobPreviewFailure.AgentOffline)
             {
                 return Results.Conflict(new
                 {
@@ -192,9 +125,7 @@ public static class ShopPrintJobReadEndpoints
                     message = "The paired Windows Print Agent is offline. Reconnect it before previewing this shop-local document."
                 });
             }
-
-            var endpoints = AgentLocalEndpointRules.ReadJson(agent.LocalEndpointsJson);
-            if (endpoints.Length == 0)
+            if (result.Failure == ShopPrintJobPreviewFailure.EndpointMissing)
             {
                 return Results.Conflict(new
                 {
@@ -203,15 +134,17 @@ public static class ShopPrintJobReadEndpoints
                 });
             }
 
-            var expiresUtc = now.AddMinutes(2);
-            var grantToken = LocalDocumentPreviewGrant.Issue(
-                signingKeyText, issuer, audience, tenantId, jobId, agent.Id, now, expiresUtc);
+            if (result.Mode == "CLOUD")
+            {
+                return Results.Ok(new { Mode = "CLOUD" });
+            }
+
             return Results.Ok(new
             {
-                Mode = "LOCAL_AGENT",
-                GrantToken = grantToken,
-                Endpoints = endpoints,
-                ExpiresUtc = expiresUtc
+                Mode = result.Mode,
+                GrantToken = result.GrantToken,
+                Endpoints = result.Endpoints,
+                ExpiresUtc = result.ExpiresUtc
             });
         });
 

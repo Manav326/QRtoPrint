@@ -854,3 +854,26 @@ test("complex query endpoints delegate aggregate reads to application query serv
       moduleName + " must not own aggregate query composition.");
   }
 });
+
+
+test("remaining workflow-heavy reads stay outside HTTP endpoint handlers", () => {
+  const expectations = [
+    ["AgentDocumentPreviewEndpoints.cs", "previewService.GetAsync"],
+    ["ShopPrintJobReadEndpoints.cs", "reads.GetEventsAsync", "reads.GetDocumentAsync", "reads.GetPreviewSourceAsync"],
+    ["CustomerEndpoints.cs", "customerJobs.GetJobsAsync"]
+  ];
+
+  for (const [moduleName, ...delegations] of expectations) {
+    const source = readApi(moduleName);
+    for (const delegation of delegations) {
+      assert.ok(source.includes(delegation), moduleName + " must delegate " + delegation);
+    }
+    assert.doesNotMatch(source, /db\\.(?:PrintJobs|PrintDocuments|PrintJobEvents|AgentDevices|PrintPayments)/,
+      moduleName + " must not compose workflow-specific queries.");
+  }
+
+  const shopAccount = readApi("ShopAccountEndpoints.cs");
+  assert.match(shopAccount, /subscriptions\.GetAsync\(tenantId, ct\)/);
+  const shopReport = readApi("ShopReportEndpoints.cs");
+  assert.match(shopReport, /reportService\.GetSummaryAsync/);
+});
