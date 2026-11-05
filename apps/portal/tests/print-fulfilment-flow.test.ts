@@ -346,10 +346,10 @@ test("local Agent photo revision is scoped to its grant and idempotent after com
 });
 
 test("customer local transfer remains visible with a clear unavailable state when no Agent endpoint exists",()=>{
- const app=read("../src/App.tsx");
+ const customerEntry=read("../src/features/customer/CustomerEntry.tsx");
  const customer=read("../src/features/customer/CustomerPrintFlow.tsx");
- const start=app.indexOf("function CustomerLocalConnection("),end=app.indexOf("type CustomerGroupSettings",start);
- const connection=app.slice(start,end);
+ const start=customerEntry.indexOf("function CustomerLocalConnection(");
+ const connection=customerEntry.slice(start);
  assert.match(connection,/if\(!localAgent\?\.endpoints\.length\)[\s\S]*?setCheckStatus\("unavailable"\)/);
  assert.doesNotMatch(connection,/if\(!localAgent\?\.endpoints\.length\)return null/);
  assert.match(connection,/Direct transfer is temporarily unavailable/);
