@@ -4,6 +4,7 @@ using Microsoft.AspNetCore.Routing;
 using Microsoft.EntityFrameworkCore;
 using SmartPrint.Api.Contracts;
 using SmartPrint.Api.Data;
+using SmartPrint.Api.Domain;
 using SmartPrint.Api.Security;
 using SmartPrint.Api.Services;
 
@@ -27,15 +28,8 @@ public static partial class AgentEndpoints
                 return Results.Unauthorized();
             }
 
-            if (string.IsNullOrWhiteSpace(request.FileName) ||
-                request.FileName.Length > 255 ||
-                request.FileName != Path.GetFileName(request.FileName) ||
-                string.IsNullOrWhiteSpace(request.OutputPath) ||
-                request.OutputPath.Length > 1024 ||
-                request.OutputPath.Any(char.IsControl) ||
-                request.SizeBytes is <= 0 or > 1_000_000_000 ||
-                request.Sha256 is not { Length: 64 } ||
-                !request.Sha256.All(Uri.IsHexDigit))
+            if (!AgentSpoolerLifecycleRequestRules.IsValidPdfExportReceipt(
+                request.FileName, request.OutputPath, request.SizeBytes, request.Sha256))
             {
                 return Results.BadRequest(new { code = "invalid_pdf_export_receipt" });
             }
@@ -93,11 +87,8 @@ public static partial class AgentEndpoints
                 return Results.Unauthorized();
             }
 
-            if (request.SpoolerJobId <= 0 ||
-                string.IsNullOrWhiteSpace(request.SpoolerJobName) ||
-                request.SpoolerJobName.Length > 180 ||
-                string.IsNullOrWhiteSpace(request.SpoolerStatus) ||
-                request.SpoolerStatus.Length > 80)
+            if (!AgentSpoolerLifecycleRequestRules.IsValidSpoolerAccepted(
+                request.SpoolerJobId, request.SpoolerJobName, request.SpoolerStatus))
             {
                 return Results.BadRequest(new { code = "invalid_spooler_receipt" });
             }
@@ -153,7 +144,7 @@ public static partial class AgentEndpoints
             }
 
             var reason = request.ReasonCode?.Trim();
-            if (string.IsNullOrWhiteSpace(reason) || reason.Length > 80)
+            if (!AgentSpoolerLifecycleRequestRules.IsValidReasonCode(reason))
             {
                 return Results.BadRequest();
             }
@@ -243,12 +234,8 @@ public static partial class AgentEndpoints
                 return Results.Unauthorized();
             }
 
-            if (request.SpoolerJobId <= 0 ||
-                string.IsNullOrWhiteSpace(request.SpoolerStatus) ||
-                request.SpoolerStatus.Length > 80 ||
-                request.PagesPrinted < 0 ||
-                request.TotalPages < 0 ||
-                (request.TotalPages > 0 && request.PagesPrinted > request.TotalPages))
+            if (!AgentSpoolerLifecycleRequestRules.IsValidSpoolerStatus(
+                request.SpoolerJobId, request.SpoolerStatus, request.PagesPrinted, request.TotalPages))
             {
                 return Results.BadRequest(new { code = "invalid_spooler_status" });
             }

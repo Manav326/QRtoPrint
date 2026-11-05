@@ -1,15 +1,10 @@
-using System.Security.Claims;
-using System.Text;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
-using Microsoft.EntityFrameworkCore;
 using SmartPrint.Api.Contracts;
 using SmartPrint.Api.Data;
-using SmartPrint.Api.Domain;
 using SmartPrint.Api.Security;
 using SmartPrint.Api.Services;
-using SmartPrint.Api.Storage;
 
 namespace SmartPrint.Api.Endpoints;
 
@@ -286,66 +281,14 @@ public static partial class AgentEndpoints
             Guid jobId,
             HttpContext context,
             SmartPrintDbContext db,
+            AgentLocalUploadStatusService statusService,
             CancellationToken ct) =>
         {
             var device = await AgentAuthentication.AuthenticateAsync(context, db, ct);
             if (device is null) return Results.Unauthorized();
-        
-            var ticket = await db.LocalPrintUploadTickets.AsNoTracking()
-                .Where(item => item.PrintJobId == jobId &&
-                               item.TenantId == device.TenantId &&
-                               item.AgentDeviceId == device.Id)
-                .Select(item => new { item.CompletedUtc, item.ExpiresUtc, item.Sha256, item.SizeBytes })
-                .SingleOrDefaultAsync(ct);
-            if (ticket is null) return Results.NotFound();
-        
-            var documentExists = await db.PrintDocuments.AsNoTracking().AnyAsync(item =>
-                item.TenantId == device.TenantId &&
-                item.PrintJobId == jobId &&
-                item.SizeBytes == ticket.SizeBytes &&
-                item.Sha256 == ticket.Sha256 &&
-                (item.StorageMode == "CLOUD" ||
-                 (item.StorageMode == "LOCAL_AGENT" && item.AgentDeviceId == device.Id)), ct);
-        
-            var safeToDelete = false;
-            DateTimeOffset? deleteAfterUtc = null;
-            if (ticket.CompletedUtc != null && documentExists)
-            {
-                var job = await db.PrintJobs.AsNoTracking()
-                    .Where(item => item.TenantId == device.TenantId && item.Id == jobId)
-                    .Select(item => new { item.Status, item.UpdatedUtc, item.OutputConfirmedUtc, item.OutputCompletedUtc })
-                    .SingleOrDefaultAsync(ct);
-                if (job is not null &&
-                    (job.Status is "REJECTED" or "PAYMENT_REJECTED" or "QUOTE_EXPIRED" or "REFUNDED") &&
-                    job.OutputConfirmedUtc == null &&
-                    job.OutputCompletedUtc == null)
-                {
-                    var hasFinancialHold = await db.PrintPayments.AsNoTracking().AnyAsync(payment =>
-                        payment.TenantId == device.TenantId && payment.PrintJobId == jobId &&
-                        (payment.Status == "AWAITING_CUSTOMER_PAYMENT" ||
-                         payment.Status == "CUSTOMER_REPORTED" ||
-                         payment.Status == "CASH_AWAITING_PAYMENT" ||
-                         ((payment.Status == "VERIFIED" || payment.Status == "PARTIALLY_REFUNDED") &&
-                          payment.RefundedAmountMinor < payment.AmountMinor)), ct);
-                    if (!hasFinancialHold)
-                    {
-                        var retentionDays = await db.PlatformOperationalSettings.AsNoTracking()
-                            .Where(item => item.Id == PlatformOperationalSettings.SingletonIdValue)
-                            .Select(item => (int?)item.PendingLocalUploadRetentionDays)
-                            .SingleOrDefaultAsync(ct) ?? 30;
-                        safeToDelete = true;
-                        deleteAfterUtc = job.UpdatedUtc.AddDays(retentionDays);
-                    }
-                }
-            }
-        
-            return Results.Ok(new
-            {
-                Completed = ticket.CompletedUtc != null && documentExists,
-                ticket.ExpiresUtc,
-                SafeToDelete = safeToDelete,
-                DeleteAfterUtc = deleteAfterUtc
-            });
+
+            var status = await statusService.GetAsync(jobId, device.TenantId, device.Id, ct);
+            return status is null ? Results.NotFound() : Results.Ok(status);
         });
         
     }

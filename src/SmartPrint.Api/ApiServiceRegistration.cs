@@ -93,12 +93,15 @@ public static class ApiServiceRegistration
         services.AddScoped<ShopStationService>();
         services.AddScoped<ShopPricingService>();
         services.AddScoped<PlatformTenantStatusService>();
+        services.AddScoped<PlatformSubscriptionService>();
+        services.AddScoped<PlatformOperationalSettingsService>();
         services.AddScoped<ShopPrintJobDecisionService>();
         services.AddScoped<ShopPaymentSettingsService>();
         services.AddScoped<AuthenticationSessionService>();
         services.AddScoped<AgentPrintClaimService>();
         services.AddScoped<AgentLocalUploadClaimService>();
         services.AddScoped<AgentLocalUploadCompletionService>();
+        services.AddScoped<AgentLocalUploadStatusService>();
         services.AddScoped<PlatformPlanService>();
         services.AddScoped<ShopPrintJobSettingsService>();
         services.AddScoped<ShopPaymentReviewService>();
