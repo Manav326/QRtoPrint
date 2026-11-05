@@ -1,6 +1,4 @@
-import {
-  useEffect,
-  useState } from "react";
+import { useEffect, useState } from "react";
 import { useCustomerPrintStatus } from "./useCustomerPrintStatus";
 import {
   ApiError,
@@ -59,14 +57,6 @@ export function useCustomerPrintFlow(props:CustomerPrintFlowProps) {
   const [photoStudioSourceFingerprint,setPhotoStudioSourceFingerprint]=useState<string|null>(null);
   const [uploadProgress,setUploadProgress]=useState<{completed:number;total:number;currentFile:string|null}|null>(null);
   const [quote,setQuote]=useState<PrintQuoteResult|null>(()=>initialDraft?.quote??null);
-  const {
-    jobStatus, setJobStatus, batchStatuses, payment, setPayment, batchPayment, setBatchPayment,
-    rememberBatchPayment, rememberCustomerPayment, rememberBatchStatuses, rememberCustomerStatus,
-    refreshJobStatus, refreshBatchStatuses
-  } = useCustomerPrintStatus({
-    sessionToken, uploaded, uploadedBatch, setPrintSettingsByJobId, setQuotesByJobId, setQuote, setBusy, setError
-  });
-
   const [paymentReference,setPaymentReference]=useState("");
   const [paymentMethod,setPaymentMethod]=useState<"UPI"|"CASH">(paymentOptions.upiEnabled?"UPI":"CASH");
   const [busy,setBusy]=useState(false);
@@ -75,6 +65,15 @@ export function useCustomerPrintFlow(props:CustomerPrintFlowProps) {
     localAgent?.endpoints.length ? "LOCAL" : "CLOUD"
   );
   const [uploadModeManuallySelected,setUploadModeManuallySelected]=useState(false);
+
+  const {
+    jobStatus, setJobStatus, batchStatuses, payment, setPayment, batchPayment, setBatchPayment,
+    rememberBatchPayment, rememberCustomerPayment, rememberBatchStatuses, rememberCustomerStatus,
+    refreshJobStatus, refreshBatchStatuses
+  } = useCustomerPrintStatus({
+    sessionToken, uploaded, uploadedBatch, setPrintSettingsByJobId, setQuotesByJobId, setQuote, setBusy, setError
+  });
+
 
   const secureQueueFallbackEnabled = cloudAssistedPrintingEnabled || !localAgent?.endpoints.length || localFallbackSuggested;
 
