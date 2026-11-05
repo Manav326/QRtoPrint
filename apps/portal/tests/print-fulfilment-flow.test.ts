@@ -16,15 +16,16 @@ test("customer upload sends the selected file settings to both storage paths", (
 });
 
 test("owner quote edits are sent through the existing print-job API", () => {
-  const app = read("../src/App.tsx");
+  const shop = read("../src/features/shop/ShopConsole.tsx");
+  const customer = read("../src/features/customer/CustomerPrintFlow.tsx");
   const api = read("../src/api.ts");
-  assert.match(app, /updateShopPrintJobSettings\(tokens\.accessToken,job\.id,settings\)/);
+  assert.match(shop, /updateShopPrintJobSettings\(tokens\.accessToken,job\.id,settings\)/);
   assert.match(api, /\/api\/v1\/shop\/print-jobs\/\$\{jobId\}\/settings/);
-  assert.match(app, /Revised quote .* sent to the customer for approval/);
+  assert.match(shop, /Revised quote .* sent to the customer for approval/);
   assert.match(app, /setPrintSettingsByJobId\(current=>/);
-  assert.match(app, /copies:candidate\.copies/);
-  assert.match(app, /paperSize,/);
-  assert.match(app, /orientation,/);
+  assert.match(customer, /copies:candidate\.copies/);
+  assert.match(customer, /paperSize,/);
+  assert.match(customer, /orientation,/);
 });
 
 test("paid jobs are staged while a physical printer is offline and checked at dispatch", () => {
@@ -54,7 +55,7 @@ test("paid jobs are staged while a physical printer is offline and checked at di
   assert.match(dispatchService, /printer\.LastSeenUtc/);
 });
 test("plan-limited HTTPS fallback is only offered when the Agent is unavailable", () => {
-  const app = read("../src/App.tsx");
+  const customerEntry = read("../src/features/customer/CustomerEntry.tsx");
   const customer = read("../src/features/customer/CustomerPrintFlow.tsx");
   const api = read("../src/api.ts");
   const publicUploadSource = readApi("PublicJobCreationEndpoints.cs");
@@ -69,8 +70,8 @@ test("plan-limited HTTPS fallback is only offered when the Agent is unavailable"
   assert.doesNotMatch(publicUploadService, /queueFallbackRequested/);
   assert.doesNotMatch(publicUploadSource, /X-Print-Queue-Fallback|queueFallbackRequested/);
   assert.doesNotMatch(api, /X-Print-Queue-Fallback|allowQueueFallback/);
-  assert.match(app, /setCheckStatus\("unavailable"\);\s*onReady\(false\);[\s\S]*?onUnavailable\(\);/);
-  assert.match(app, /const agentHeartbeatOffline=readiness\?\.heartbeatFresh!==true;[\s\S]*?if\(cloudAssistedPrintingEnabled\|\|agentHeartbeatOffline\)onUnavailable\(\)/);
+  assert.match(customerEntry, /setCheckStatus\("unavailable"\);\s*onReady\(false\);[\s\S]*?onUnavailable\(\);/);
+  assert.match(customerEntry, /const agentHeartbeatOffline=readiness\?\.heartbeatFresh!==true;[\s\S]*?if\(cloudAssistedPrintingEnabled\|\|agentHeartbeatOffline\)onUnavailable\(\)/);
 });
 
 test("pre-submission printer capability blocks are explained in the shop queue", () => {
@@ -265,10 +266,10 @@ test("customer job status remains scoped to the active customer session in its s
 
 
 test("batch review defaults every uploaded file to accepted until the shopkeeper rejects it", () => {
-  const app = read("../src/App.tsx");
-  assert.match(app, /const acceptedIds=jobs\.filter\(job=>decisions\[job\.id\]\?\?true\)\.map\(job=>job\.id\)/);
-  assert.match(app, /onDecision:\(jobId:string,accepted:boolean\)=>void/);
-  assert.match(app, /decisions\[job\.id\]\?\?true/);
+  const shop = read("../src/features/shop/ShopConsole.tsx");
+  assert.match(shop, /const acceptedIds=jobs\.filter\(job=>decisions\[job\.id\]\?\?true\)\.map\(job=>job\.id\)/);
+  assert.match(shop, /onDecision:\(jobId:string,accepted:boolean\)=>void/);
+  assert.match(shop, /decisions\[job\.id\]\?\?true/);
 });
 
 test("customer session lifecycle remains behind thin route adapters", () => {
@@ -357,18 +358,20 @@ test("customer local transfer remains visible with a clear unavailable state whe
 });
 
 test("owner preview selects the persisted supported MIME type before the blob response type",()=>{
- const app=read("../src/App.tsx");
- assert.match(app,/const storedType=\(job\.document\.mediaType\|\|""\)/);
- assert.match(app,/supportedTypes\.has\(storedType\)[\s\S]*?supportedTypes\.has\(responseType\)/);
- assert.match(app,/Preview format is not supported/);
+ const shop=read("../src/features/shop/ShopConsole.tsx");
+ assert.match(shop,/const storedType=\(job\.document\.mediaType\|\|""\)/);
+ assert.match(shop,/supportedTypes\.has\(storedType\)[\s\S]*?supportedTypes\.has\(responseType\)/);
+ assert.match(shop,/Preview format is not supported/);
 });
 
 test("customer web upload accepts drag and drop and contains no JavaScript browser alert dialogs",()=>{
  const app=read("../src/App.tsx");
  const customer=read("../src/features/customer/CustomerPrintFlow.tsx");
+ const shop=read("../src/features/shop/ShopConsole.tsx");
+ const customer=read("../src/features/customer/CustomerPrintFlow.tsx");
  assert.match(customer,/onDragOver=\{event=>\{if\(!batchLockedForPayment\)event\.preventDefault\(\);\}\}/);
  assert.match(customer,/onDrop=\{event=>\{event\.preventDefault\(\);if\(batchLockedForPayment\)return;chooseFiles\(Array\.from\(event\.dataTransfer\.files\|\|\[\]\)\);\}\}/);
- assert.doesNotMatch(app,/window\.(alert|confirm|prompt)\s*\(/);
+ assert.doesNotMatch(app+customer+shop,/window\.(alert|confirm|prompt)\s*\(/);
 });
 
 test("photo studio's selected photo quantity creates one multi-page file with one photo-count record",()=>{
@@ -456,30 +459,30 @@ test("customer photo previews do not expose the raw image or prepared PDF viewer
 });
 
 test("the exact same Photo Studio is opened from the shop image review",()=>{
- const app=read("../src/App.tsx");
- assert.match(app,/setShopPhotoStudio\(\{source,job:preview\.job,returnPreview\}\)/);
- assert.match(app,/replaceShopPhotoDocument\(tokens\.accessToken,editor\.job\.id,sheet\.file,sheet\.sizeCode,sheet\.photoCount,sheet\.photosPerPage\)/);
- assert.match(app,/shopPhotoStudio && <PhotoStudio source=\{shopPhotoStudio\.source\}/);
- assert.match(app,/Enhance photo for printing/);
+ const shop=read("../src/features/shop/ShopConsole.tsx");
+ assert.match(shop,/setShopPhotoStudio\(\{source,job:preview\.job,returnPreview\}\)/);
+ assert.match(shop,/replaceShopPhotoDocument\(tokens\.accessToken,editor\.job\.id,sheet\.file,sheet\.sizeCode,sheet\.photoCount,sheet\.photosPerPage\)/);
+ assert.match(shop,/shopPhotoStudio && <PhotoStudio source=\{shopPhotoStudio\.source\}/);
+ assert.match(shop,/Enhance photo for printing/);
 });
 
 test("native Windows content capture protection covers the photo editor and image preview",()=>{
  const studio=read("../src/PhotoStudio.tsx");
- const app=read("../src/App.tsx");
+ const shop=read("../src/features/shop/ShopConsole.tsx");
  const bridge=read("../src/desktop-bridge.ts");
  const permissions=JSON.parse(read("../../desktop/src-tauri/capabilities/default.json"));
  assert.match(studio,/setDesktopContentProtection\(true\)/);
- assert.match(app,/setDesktopContentProtection\(true\)/);
+ assert.match(shop,/setDesktopContentProtection\(true\)/);
  assert.match(bridge,/getCurrentWindow\(\)\.setContentProtected\(enabled\)/);
  assert.ok(permissions.permissions.includes("core:window:allow-set-content-protected"));
 });
 
 test("shop owner can open the same editor for cloud and local Agent images",()=>{
- const app=read("../src/App.tsx");
+ const shop=read("../src/features/shop/ShopConsole.tsx");
  const api=read("../src/api.ts");
- assert.match(app,/preview\.job\.storageMode==="CLOUD"\|\|preview\.job\.storageMode==="LOCAL_AGENT"/);
- assert.match(app,/editor\.job\.storageMode==="LOCAL_AGENT"[\s\S]*?replaceShopPhotoDocumentLocally/);
- assert.match(app,/replaceShopPhotoDocument\(tokens\.accessToken,editor\.job\.id,sheet\.file,sheet\.sizeCode,sheet\.photoCount,sheet\.photosPerPage\)/);
+ assert.match(shop,/preview\.job\.storageMode==="CLOUD"\|\|preview\.job\.storageMode==="LOCAL_AGENT"/);
+ assert.match(shop,/editor\.job\.storageMode==="LOCAL_AGENT"[\s\S]*?replaceShopPhotoDocumentLocally/);
+ assert.match(shop,/replaceShopPhotoDocument\(tokens\.accessToken,editor\.job\.id,sheet\.file,sheet\.sizeCode,sheet\.photoCount,sheet\.photosPerPage\)/);
  assert.match(api,/\/api\/v1\/shop\/print-jobs\/\$\{jobId\}\/photo-revision-grant/);
  assert.match(api,/\/api\/v1\/local\/documents\/\$\{encodeURIComponent\(jobId\)\}\/photo-revision/);
 });
@@ -518,12 +521,12 @@ test("local photo revision rejects paid, handed-off and changed originals",()=>{
 });
 
 test("shop-owner Photo Studio supports cloud and local storage without changing a local job into cloud storage",()=>{
- const app=read("../src/App.tsx");
+ const shop=read("../src/features/shop/ShopConsole.tsx");
  const api=read("../src/api.ts");
  const shop=read("../../../src/SmartPrint.Api/Services/ShopPhotoRevisionService.cs");
  const agent=read("../../../src/SmartPrint.Api/Services/AgentLocalPhotoRevisionService.cs");
- assert.match(app,/preview\.job\.storageMode==="CLOUD"\|\|preview\.job\.storageMode==="LOCAL_AGENT"/);
- assert.match(app,/editor\.job\.storageMode==="LOCAL_AGENT"[\s\S]*?replaceShopPhotoDocumentLocally/);
+ assert.match(shop,/preview\.job\.storageMode==="CLOUD"\|\|preview\.job\.storageMode==="LOCAL_AGENT"/);
+ assert.match(shop,/editor\.job\.storageMode==="LOCAL_AGENT"[\s\S]*?replaceShopPhotoDocumentLocally/);
  assert.match(api,/\/api\/v1\/shop\/print-jobs\/\$\{jobId\}\/photo-revision-grant/);
  assert.match(api,/\/api\/v1\/local\/documents\/\$\{encodeURIComponent\(jobId\)\}\/photo-revision/);
  assert.match(shop,/document\.StorageMode = "CLOUD"/);
