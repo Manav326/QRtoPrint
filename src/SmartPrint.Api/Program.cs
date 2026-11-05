@@ -942,6 +942,7 @@ customerApi.MapGet("/jobs", async (
         select new
         {
             job.Id,
+            job.BatchId,
             job.BatchGroupName,
             job.BatchName,
             job.JobNumber,
@@ -980,6 +981,116 @@ customerApi.MapGet("/jobs", async (
         .ToListAsync(ct);
 
     return Results.Ok(new { Jobs = jobs });
+});
+
+
+customerApi.MapGet("/jobs/{jobId:guid}/status", async (
+    Guid jobId,
+    ClaimsPrincipal principal,
+    SmartPrintDbContext db,
+    CancellationToken ct) =>
+{
+    var customerId = CustomerIdentity.GetCustomerId(principal);
+    if (customerId is null)
+    {
+        return Results.Forbid();
+    }
+
+    // A signed-in customer owns the order through the customer identity attached
+    // to the originating session. Do not require that the short-lived QR session
+    // remains active: history tracking must survive app restarts and session expiry.
+    var ownedJob = await (
+        from trackedPrintJob in db.PrintJobs.AsNoTracking()
+        join session in db.CustomerPrintSessions.AsNoTracking()
+            on new { trackedPrintJob.TenantId, SessionId = trackedPrintJob.CustomerSessionId }
+            equals new { session.TenantId, SessionId = session.Id }
+        where trackedPrintJob.Id == jobId && session.CustomerUserId == customerId
+        select new { trackedPrintJob.TenantId, SessionId = session.Id }
+    ).SingleOrDefaultAsync(ct);
+
+    if (ownedJob is null)
+    {
+        return Results.NotFound();
+    }
+
+    var jobStatus = await db.PrintJobs.AsNoTracking()
+        .Where(item => item.Id == jobId && item.TenantId == ownedJob.TenantId &&
+                       item.CustomerSessionId == ownedJob.SessionId)
+        .Select(item => new
+        {
+            item.Id,
+            item.BatchGroupName,
+            item.BatchName,
+            item.JobNumber,
+            item.Status,
+            item.PageCount,
+            item.Copies,
+            item.ColourMode,
+            item.PaperSize,
+            item.IsDuplex,
+            item.Orientation,
+            item.PrintKind,
+            item.PhotoSizeCode,
+            item.PhotoCount,
+            item.Currency,
+            item.QuotedAmountMinor,
+            item.RejectedPageNumbersJson,
+            item.OutputCompletedUtc,
+            item.UpdatedUtc,
+            OriginalFileName = db.PrintDocuments.AsNoTracking()
+                .Where(document => document.TenantId == item.TenantId && document.PrintJobId == item.Id)
+                .Select(document => document.OriginalFileName)
+                .FirstOrDefault()
+        })
+        .SingleAsync(ct);
+
+    var timeline = await db.PrintJobEvents.AsNoTracking()
+        .Where(item => item.TenantId == ownedJob.TenantId && item.PrintJobId == jobId)
+        .OrderBy(item => item.CreatedUtc)
+        .Select(item => new { item.NewStatus, item.ActorType, item.CreatedUtc })
+        .ToListAsync(ct);
+
+    var payment = await db.PrintPayments.AsNoTracking()
+        .Where(item => item.TenantId == ownedJob.TenantId && item.PrintJobId == jobId)
+        .OrderByDescending(item => item.CreatedUtc)
+        .Select(item => new
+        {
+            item.Id,
+            item.BatchPaymentId,
+            item.Method,
+            item.Status,
+            item.AmountMinor,
+            item.RefundedAmountMinor,
+            item.Currency,
+            item.PaymentReference,
+            item.RejectionReason,
+            item.CreatedUtc,
+            item.UpdatedUtc,
+            item.VerifiedUtc
+        })
+        .FirstOrDefaultAsync(ct);
+
+    var batchPayment = payment?.BatchPaymentId is Guid batchPaymentId
+        ? await db.PrintBatchPayments.AsNoTracking()
+            .Where(item => item.Id == batchPaymentId && item.TenantId == ownedJob.TenantId)
+            .Select(item => new
+            {
+                item.Id,
+                item.Method,
+                item.Status,
+                item.AmountMinor,
+                item.Currency,
+                item.BatchId,
+                item.PaymentReference,
+                item.RejectionReason,
+                item.CreatedUtc,
+                item.UpdatedUtc,
+                item.VerifiedUtc
+            })
+            .SingleOrDefaultAsync(ct)
+        : null;
+
+    return Results.Ok(new { Job = jobStatus, Timeline = timeline, Payment = payment, BatchPayment = batchPayment });
 });
 
 var shop = app.MapGroup("/api/v1/shop").RequireAuthorization()
@@ -8802,11 +8913,35 @@ publicApi.MapPost("/sessions/current/renew", async (
         return Results.Unauthorized();
     }
 
+    // A customer who signs in after opening the QR flow can still attach this
+    // active session to their account. Never move a session between accounts.
+    var customerId = CustomerIdentity.GetCustomerId(context.User);
+    if (customerId is Guid signedInCustomerId)
+    {
+        if (session.CustomerUserId is Guid existingCustomerId &&
+            existingCustomerId != signedInCustomerId)
+        {
+            return Results.Forbid();
+        }
+
+        if (session.CustomerUserId is null)
+        {
+            session.CustomerUserId = signedInCustomerId;
+        }
+    }
+
     // Renew only when the existing expiry is approaching; repeated foreground
     // refreshes do not cause a database write on every customer status poll.
-    if (session.ExpiresUtc <= now.AddMinutes(10))
+    var shouldExtend = session.ExpiresUtc <= now.AddMinutes(10);
+    if (shouldExtend)
     {
         session.ExpiresUtc = now.AddMinutes(15);
+    }
+
+    // Persist account association even when the session did not need its expiry
+    // extended. Anonymous guest sessions still produce no database write here.
+    if (customerId is not null || shouldExtend)
+    {
         await db.SaveChangesAsync(ct);
     }
 

@@ -3,11 +3,11 @@ import test from "node:test";
 import { readFileSync } from "node:fs";
 import { buildPhotoPdf,getPhotoSheetLayout } from "../src/photo-studio-layout.ts";
 
-test("exact physical photo layout is centred on A4",()=>{
+test("exact physical photo layout starts at the top safe margin on A4",()=>{
  const layout=getPhotoSheetLayout({widthMm:35,heightMm:45});
  assert.equal(layout.perSheet,25);
  assert.ok(Math.abs((210-layout.contentWidthMm)/2-layout.offsetXmm)<.001);
- assert.ok(Math.abs((297-layout.contentHeightMm)/2-layout.offsetYmm)<.001);
+ assert.equal(layout.offsetYmm,8);
 });
 test("caption labels reserve their own area and never shrink photo dimensions",()=>{
  const plain=getPhotoSheetLayout({widthMm:35,heightMm:45});
@@ -192,4 +192,13 @@ test("50 photos at nine per page build one six-page A4 PDF",()=>{
 test("changing photos per A4 page redraws the live preview",()=>{
  const studio=readFileSync(new URL("../src/PhotoStudio.tsx",import.meta.url),"utf8");
  assert.match(studio,/\},\[image,size,copies,photosPerPage,previewPageIndex,/);
+});
+
+test("Photo Studio returns preview-only JPEG pages and the customer UI brands prepared pages",()=>{
+ const studio=readFileSync(new URL("../src/PhotoStudio.tsx",import.meta.url),"utf8");
+ const app=readFileSync(new URL("../src/App.tsx",import.meta.url),"utf8");
+ assert.match(studio,/previewPages:jpegPages\.map\(jpeg=>new Blob\(\[jpeg\],\{type:"image\/jpeg"\}\)\)/);
+ assert.match(app,/customer-original-image-preview/);
+ assert.match(app,/customer-edited-photo-frame/);
+ assert.match(app,/SmartPrint by QuantaEdge/);
 });

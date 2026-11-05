@@ -160,3 +160,41 @@
   .attentionLine{grid-column:1/-1}.orderCardBottom{align-items:flex-start;flex-direction:column}.nextStep>strong{max-width:none}.actionButton{width:100%}
 }
 @media(prefers-reduced-motion:reduce){.journeyPage *,.journeyPage *::before,.journeyPage *::after{animation-duration:.01ms!important;animation-iteration-count:1!important;transition-duration:.01ms!important;scroll-behavior:auto!important}}
+
+.flowStepButton{width:100%;height:68px;display:grid;grid-template-columns:35px minmax(0,1fr);grid-template-rows:1fr 1fr;align-items:center;column-gap:9px;padding:8px 9px;border:1px solid var(--border);border-radius:10px;background:var(--surface);color:var(--text);text-align:left;min-width:0;cursor:pointer;transition:border-color .18s,transform .18s,background .18s}
+.flowStepButton:hover{border-color:var(--accent);transform:translateY(-1px)}
+.flowStepButton:focus-visible,.miniAction:focus-visible,.actionButton:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.flowStepButton.flowStepSelected{border-color:var(--accent);background:var(--accent-soft);box-shadow:0 0 0 2px color-mix(in srgb,var(--accent) 13%,transparent)}
+.flowStepSelected .flowStepCopy strong{color:var(--accent)}
+.flowStepSelected .flowIcon{background:var(--surface);color:var(--accent)}
+.orderFilters{display:flex;align-items:flex-end;gap:10px;min-width:0}
+.orderSearch{display:flex;flex-direction:column;gap:5px;flex:1;min-width:0;color:var(--muted);font-size:9px;font-weight:700}
+.orderSearch input{height:38px;width:100%;min-width:0;border:1px solid var(--border);border-radius:8px;padding:0 11px;background:var(--surface);color:var(--text);font:500 11px "DM Sans",sans-serif;outline:none}
+.orderSearch input:focus{border-color:var(--accent);box-shadow:0 0 0 3px color-mix(in srgb,var(--accent) 12%,transparent)}
+.clearFilters{height:38px;padding:0 12px;border:1px solid var(--border);border-radius:8px;background:var(--surface);color:var(--muted);font:650 9px "DM Sans",sans-serif;cursor:pointer;white-space:nowrap}
+.clearFilters:disabled{opacity:.4;cursor:default}
+.cardWorkflowActions{display:flex;flex-wrap:wrap;gap:7px;padding:0 0 10px;border-bottom:1px solid var(--border)}
+.closedHint{align-self:center;color:var(--muted);font-size:9px}
+.orderFileList{display:grid;gap:8px;padding-top:10px}
+.orderFileItem{display:grid;grid-template-columns:minmax(0,1fr);gap:7px;padding:9px 10px;border:1px solid var(--border-soft);border-radius:9px;background:var(--surface-2);min-width:0}
+.orderFileMeta{display:flex;align-items:baseline;justify-content:space-between;gap:10px;min-width:0}
+.orderFileMeta strong{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:9px;color:var(--text)}
+.orderFileMeta span{flex:0 0 auto;font-size:8px;color:var(--muted)}
+.fileActionPanel{display:flex;align-items:center;flex-wrap:wrap;gap:6px;min-width:0}
+.miniAction{min-height:29px;display:inline-flex;align-items:center;justify-content:center;gap:5px;padding:4px 8px;border:1px solid var(--border);border-radius:7px;background:var(--surface);color:var(--muted);font:650 8px "DM Sans",sans-serif;white-space:nowrap;cursor:pointer}
+.miniAction:hover{border-color:var(--accent);color:var(--accent)}
+.miniApprove{color:var(--green);border-color:color-mix(in srgb,var(--green) 35%,var(--border))}
+.miniReject{color:var(--red);border-color:color-mix(in srgb,var(--red) 35%,var(--border))}
+.printerAssignment{display:flex;align-items:center;gap:6px;color:var(--muted);font-size:8px;white-space:nowrap}
+.printerAssignment select{height:29px;max-width:min(210px,55vw);min-width:100px;border:1px solid var(--border);border-radius:7px;background:var(--surface);color:var(--text);font:500 8px "DM Sans",sans-serif;padding:0 5px}
+@media(max-width:650px){
+ .flowStepButton{height:59px;grid-template-columns:30px minmax(0,1fr);padding:6px;column-gap:7px}
+ .orderFilters{align-items:stretch;flex-direction:column}
+ .clearFilters{width:100%}
+ .orderFileMeta{align-items:flex-start;flex-direction:column;gap:3px}
+ .fileActionPanel{display:grid;grid-template-columns:repeat(2,minmax(0,1fr))}
+ .miniAction{min-width:0;width:100%;font-size:8px}
+ .printerAssignment{grid-column:1/-1;justify-content:space-between}
+ .printerAssignment select{max-width:72%;flex:1}
+ .cardWorkflowActions .actionButton{width:auto;flex:1 1 100%}
+}

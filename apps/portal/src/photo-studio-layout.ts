@@ -32,7 +32,7 @@ export function getPhotoSheetLayout(size: PhotoSheetSize, captionHeightMm = 0, r
   return {
     columns, rows, perSheet,
     offsetXmm: Math.max(margin, (A4_WIDTH_MM - contentWidthMm) / 2),
-    offsetYmm: Math.max(margin, (A4_HEIGHT_MM - contentHeightMm) / 2),
+    offsetYmm: margin,
     contentWidthMm, contentHeightMm
   };
 }
