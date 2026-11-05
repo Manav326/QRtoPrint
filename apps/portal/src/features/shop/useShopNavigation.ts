@@ -5,12 +5,11 @@ import { readSidebarCollapsedPreference, saveSidebarCollapsedPreference } from "
 import type { ShopModal, ShopSection } from "./shop-types";
 
 type ShopNavigationOptions = {
-  active:ShopSection;
   setActive:Dispatch<SetStateAction<ShopSection>>;
   setError:(message:string)=>void;
 };
 
-export function useShopNavigation({active,setActive,setError}:ShopNavigationOptions) {
+export function useShopNavigation({setActive,setError}:ShopNavigationOptions) {
   useEffect(() => {
     const syncSectionFromPath = () => setActive(shopSectionFromPath(window.location.pathname));
     window.addEventListener("popstate", syncSectionFromPath);
