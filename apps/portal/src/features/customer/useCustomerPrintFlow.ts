@@ -3,18 +3,8 @@ import {
   useState } from "react";
 import { useCustomerPrintStatus } from "./useCustomerPrintStatus";
 import { useCustomerPrintUpload } from "./useCustomerPrintUpload";
-import {
-  ApiError,
-  acceptCustomerQuote,
-  calculateCustomerQuote,
-  getCustomerJobStatus,
-  reportCustomerBatchPayment,
-  reportCustomerUpiPayment,
-  startCustomerBatchPayment,
-  startCustomerPayment,
-  type PrintQuoteResult,
-  type UploadedPrintJob
-} from "../../api";
+import { useCustomerPrintCheckout } from "./useCustomerPrintCheckout";
+import type { PrintQuoteResult, UploadedPrintJob } from "../../api";
 import { deriveCustomerPrintSummary } from "./customer-print-summary";
 import { resolveCustomerUploadMode } from "../../local-upload-routing";
 import {
@@ -53,8 +43,6 @@ export function useCustomerPrintFlow(props:CustomerPrintFlowProps) {
   const [photoStudioSource,setPhotoStudioSource]=useState<File|null>(null);
   const [photoStudioSourceFingerprint,setPhotoStudioSourceFingerprint]=useState<string|null>(null);
   const [quote,setQuote]=useState<PrintQuoteResult|null>(()=>initialDraft?.quote??null);
-  const [paymentReference,setPaymentReference]=useState("");
-  const [paymentMethod,setPaymentMethod]=useState<"UPI"|"CASH">(paymentOptions.upiEnabled?"UPI":"CASH");
   const [busy,setBusy]=useState(false);
   const [error,setError]=useState("");
   const [uploadMode,setUploadMode]=useState<"LOCAL"|"CLOUD">(
@@ -165,6 +153,20 @@ export function useCustomerPrintFlow(props:CustomerPrintFlowProps) {
     canSendBatch, canCalculateBatch, photoPriceMap, photoAlreadyUploaded
   } = summary;
 
+  const checkout = useCustomerPrintCheckout({
+    sessionToken, uploaded, uploadedBatch, batchId, jobStatus, batchStatuses,
+    quotesByJobId, setQuotesByJobId, printSettingsByJobId, photoSettingsByJobId,
+    quoteExpiredForBatchItem, statusForBatchItem, hasLegacyIndividualPayment,
+    payment, batchPayment, setBatchPayment, setQuote, setJobStatus,
+    rememberBatchStatuses, rememberCustomerStatus, rememberCustomerPayment, rememberBatchPayment,
+    refreshBatchStatuses, upiEnabled: paymentOptions.upiEnabled, busy, setBusy, setError
+  });
+  const {
+    paymentReference, setPaymentReference, paymentMethod, setPaymentMethod,
+    getQuote, acceptQuote, beginPayment, submitPaymentReference
+  } = checkout;
+
+
 
   useEffect(()=>{
     if(!nativeAppMode)return;
@@ -195,69 +197,6 @@ export function useCustomerPrintFlow(props:CustomerPrintFlowProps) {
     setUploaded(item);setQuote(quotesByJobId[item.job.id]??null);setJobStatus(null);setPayment(null);setPaymentReference("");setError("");
   }
 
-  async function getQuote(itemsOverride?:UploadedPrintJob[],settingsOverride?:Record<string,CustomerSavedPrintSettings>,photoSettingsOverride?:Record<string,CustomerPhotoSettings>) {
-    const items=itemsOverride??(uploadedBatch.length?uploadedBatch:(uploaded?[uploaded]:[]));
-    if(items.length===0)return;
-    setBusy(true);setError("");setJobStatus(null);
-    const nextQuotes={...quotesByJobId};
-    const failures:string[]=[];
-    try {
-      for(const item of items) {
-        const existingQuote=nextQuotes[item.job.id];
-        const status=uploaded?.job.id===item.job.id&&jobStatus?.status
-          ?jobStatus.status
-          :batchStatuses[item.job.id]?.status??item.job.status;
-        const quoteExpired=quoteExpiredForBatchItem(item);
-        if(!quoteExpired&&existingQuote&&existingQuote.status!=="QUOTE_EXPIRED")continue;
-        if(quoteExpired
-          ? !["QUOTE_EXPIRED","AWAITING_CUSTOMER_APPROVAL","AWAITING_SHOP_APPROVAL","AWAITING_PAYMENT","PAYMENT_REJECTED"].includes(status)
-          : !["AWAITING_CONFIGURATION","UPLOADED","Uploaded"].includes(status))continue;
-        const requestedSettings=settingsOverride?.[item.job.id]??printSettingsByJobId[item.job.id];
-        const settings:CustomerSavedPrintSettings={
-          copies:requestedSettings?.copies??1,
-          colourMode:requestedSettings?.colourMode??"Mono",
-          isDuplex:requestedSettings?.isDuplex??false,
-          paperSize:requestedSettings?.paperSize??"A4",
-          orientation:requestedSettings?.orientation??"AUTO",
-          advancedEnabled:requestedSettings?.advancedEnabled??false
-        };
-        const photoSettings=photoSettingsOverride?.[item.job.id]??photoSettingsByJobId[item.job.id];
-        try {
-          nextQuotes[item.job.id]=await calculateCustomerQuote(sessionToken,item.job.id,{
-            colourMode:photoSettings?"Colour":settings.colourMode,
-            paperSize:photoSettings?"A4":settings.paperSize,
-            isDuplex:photoSettings?false:settings.isDuplex,
-            copies:photoSettings?1:settings.copies,
-            orientation:photoSettings?"AUTO":settings.orientation,
-            ...(photoSettings?{printKind:"PHOTO" as const,photoSizeCode:photoSettings.sizeCode,photoCount:photoSettings.photoCount,photosPerPage:photoSettings.photosPerPage??photoSettings.photoCount}:{printKind:"DOCUMENT" as const})
-          });
-        } catch(exception) {
-          failures.push(item.document.originalFileName);
-        }
-      }
-      setQuotesByJobId(nextQuotes);
-      const statusResults=await Promise.all(items.map(async item=>{
-        try{return [item.job.id,await getCustomerJobStatus(sessionToken,item.job.id)] as const;}
-        catch{return null;}
-      }));
-      const freshStatuses=statusResults.reduce<Record<string,CustomerJobStatus>>((map,item)=>{
-        if(item)map[item[0]]=item[1];
-        return map;
-      },{});
-      rememberBatchStatuses(freshStatuses);
-      if(uploaded&&freshStatuses[uploaded.job.id]){
-        const selected=freshStatuses[uploaded.job.id];
-        rememberCustomerStatus(selected);
-      }
-      const selectedQuote=uploaded?nextQuotes[uploaded.job.id]??null:null;
-      setQuote(selectedQuote??Object.values(nextQuotes)[0]??null);
-      if(failures.length) setError(`Could not quote: ${failures.join(", ")}. Retry the batch quote.`);
-      else if(!Object.keys(nextQuotes).length) setError("No files are waiting for a quote.");
-    } catch(exception) {
-      setError(exception instanceof ApiError?exception.message:"The shop could not calculate the batch quote.");
-    } finally {setBusy(false);}
-  }
-
   const {
     upload, uploadProgress, applyPhotoSheets, openPhotoStudio, openCustomerPdfPreview,
     chooseFiles, removeSelectedFile
@@ -274,86 +213,6 @@ export function useCustomerPrintFlow(props:CustomerPrintFlowProps) {
     setPayment, setPaymentReference, groupNameForFile, defaultsForGroup, settingsForFile, getQuote
   });
 
-  async function acceptQuote() {
-    const items=uploadedBatch.length?uploadedBatch:(uploaded?[uploaded]:[]);
-    const pending=items.filter(item=>
-      !["REJECTED","REFUNDED"].includes(statusForBatchItem(item))&&
-      quotesByJobId[item.job.id]?.status==="AWAITING_CUSTOMER_APPROVAL");
-    if(pending.length===0)return;
-    setBusy(true);setError("");
-    const nextQuotes={...quotesByJobId};
-    const failures:string[]=[];
-    try {
-      for(const item of pending) {
-        try {
-          const accepted=await acceptCustomerQuote(sessionToken,item.job.id);
-          const current=nextQuotes[item.job.id];
-          if(current)nextQuotes[item.job.id]={...current,status:accepted.status};
-        } catch {
-          const fresh=await getCustomerJobStatus(sessionToken,item.job.id).catch(()=>null);
-          if(fresh&&fresh.status!=="AWAITING_CUSTOMER_APPROVAL") {
-            rememberBatchStatuses({[item.job.id]:fresh});
-          } else failures.push(item.document.originalFileName);
-        }
-      }
-      setQuotesByJobId(nextQuotes);
-      if(uploaded) {
-        const refreshed=await getCustomerJobStatus(sessionToken,uploaded.job.id);
-        rememberCustomerStatus(refreshed);
-      }
-      const refreshedBatch=await Promise.all(items.map(async item=>{
-        try{return [item.job.id,await getCustomerJobStatus(sessionToken,item.job.id)] as const;}
-        catch{return null;}
-      }));
-      rememberBatchStatuses(Object.fromEntries(refreshedBatch.filter((entry):entry is NonNullable<typeof entry>=>entry!==null)));
-      setQuote(uploaded?nextQuotes[uploaded.job.id]??null:null);
-      if(failures.length)setError(`Could not send: ${failures.join(", ")}. Refresh and retry.`);
-    } catch(exception) {
-      setError(exception instanceof ApiError?exception.message:"The batch could not be sent to the shop.");
-    } finally {setBusy(false);}
-  }
-
-  async function beginPayment(method:"UPI"|"CASH",forceBatchCheckout=false) {
-    if(!uploaded)return;
-    setBusy(true);setError("");
-    try {
-      if(batchId&&(forceBatchCheckout||!hasLegacyIndividualPayment)){
-        const attempt=await startCustomerBatchPayment(sessionToken,batchId,method);
-        setBatchPayment(attempt);
-        setPaymentMethod(method);
-        await refreshBatchStatuses();
-      } else {
-        const attempt=await startCustomerPayment(sessionToken,uploaded.job.id,method);
-        rememberCustomerPayment(attempt);
-        setPaymentMethod(method);
-        const refreshed=await getCustomerJobStatus(sessionToken,uploaded.job.id);
-        rememberCustomerStatus(refreshed);
-      }
-    } catch(exception) {
-      if(batchId)await refreshBatchStatuses();
-      setError(exception instanceof ApiError?exception.message:"Could not start this payment method.");
-    } finally {setBusy(false);}
-  }
-
-  async function submitPaymentReference() {
-    setBusy(true);setError("");
-    try {
-      if(batchPayment&&batchPayment.status==="AWAITING_CUSTOMER_PAYMENT"){
-        await reportCustomerBatchPayment(sessionToken,batchPayment.id,paymentReference.trim());
-        setPaymentReference("");
-        await refreshBatchStatuses();
-      } else {
-        if(!payment||!uploaded)return;
-        await reportCustomerUpiPayment(sessionToken,payment.id,paymentReference.trim());
-        setPaymentReference("");
-        const refreshed=await getCustomerJobStatus(sessionToken,uploaded.job.id);
-        rememberCustomerStatus(refreshed);
-        rememberBatchPayment(refreshed.payment?.batchPayment);
-      }
-    } catch(exception) {
-      setError(exception instanceof ApiError?exception.message:"The payment reference could not be submitted.");
-    } finally {setBusy(false);}
-  }
 
 
 
