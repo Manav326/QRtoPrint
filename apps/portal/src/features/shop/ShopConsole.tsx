@@ -11,7 +11,7 @@ import { BatchReviewModal, JobHistoryModal, DocumentPreviewModal, RefundModal, S
 import { Activity, Check, Clock3, CreditCard, FileText, LayoutDashboard, ChevronDown, LifeBuoy, LogOut, Menu, Monitor, Plus, Printer, QrCode, Settings, UserRound, ShieldCheck, Users, Wallet, X, PanelLeftClose, PanelLeftOpen } from "lucide-react";
 import PhotoStudio from "../../PhotoStudio";
 import { shopPathForSection, shopSectionFromPath } from "../../portal-routing";
-import { logout, type AuthTokens, type ShopPrintJob } from "../../api";
+import { logout, type AuthTokens } from "../../api";
 import { isDesktopApp } from "../../desktop-bridge";
 import { readSidebarCollapsedPreference, saveSidebarCollapsedPreference } from "../../ui-preferences";
 import OrderJourneyPage from "../../OrderJourneyPage";
@@ -57,11 +57,11 @@ export default function ShopConsole({ tokens, onSignOut, dark, onToggleTheme }: 
 
   const {
     cloudStatus, profile, setProfile, printers, setPrinters, stations, setStations, pricing, setPricing,
-    printJobs, setPrintJobs, journeyJobs, journeyPayments, journeyRefreshing,
-    hasMoreQueueJobs, loadingOlderQueueJobs, queueApiOffset, queueSearch, agentDevices, setAgentDevices,
+    printJobs, , journeyJobs, journeyPayments, journeyRefreshing,
+    hasMoreQueueJobs, loadingOlderQueueJobs, , queueSearch, agentDevices, setAgentDevices,
     agentDevicesRef, paymentSettings, setPaymentSettings, payments, refunds, subscription,
-    apiConnectionState, setApiConnectionState, loading, setLoading, error, setError,
-    reload, handleShopApiError, refreshPrintQueue, loadOlderQueueJobs, searchPrintQueue, refreshOrderJourney
+    apiConnectionState, , loading, , error, setError,
+    reload, , refreshPrintQueue, loadOlderQueueJobs, searchPrintQueue, refreshOrderJourney
   } = useShopData({
     accessToken: tokens.accessToken,
     onSignOut,
