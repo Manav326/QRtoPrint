@@ -45,8 +45,8 @@ class SmartPrintDocumentViewer(
     companion object {
         private const val MAX_PAGE_EDGE = 2200
         private const val MAX_IMAGE_EDGE = 2600
-        private const val THUMBNAIL_EDGE = 150
-        private const val THUMBNAIL_WINDOW = 4
+        private const val THUMBNAIL_EDGE = 96
+        private const val IMAGE_THUMBNAIL_WINDOW = 4
     }
 
     private data class Thumbnail(val index: Int, val bitmap: Bitmap)
@@ -80,10 +80,11 @@ class SmartPrintDocumentViewer(
         setPadding(dp(10), dp(7), dp(10), dp(7))
         includeFontPadding = false
     }
-    private val previousPage = readerControl("‹", "Previous page")
-    private val nextPage = readerControl("›", "Next page")
-    private val rotatePage = readerControl("↻", "Rotate view")
+    private val previousPage = readerControl("←", "Previous page")
+    private val nextPage = readerControl("→", "Next page")
+    private val rotatePage = readerControl("⟳", "Rotate view")
     private val filmstrip = HorizontalScrollView(context).apply {
+        contentDescription = "Document page thumbnails"
         isHorizontalScrollBarEnabled = false
         clipToPadding = false
         overScrollMode = View.OVER_SCROLL_NEVER
@@ -123,11 +124,12 @@ class SmartPrintDocumentViewer(
                 rotationDegrees = (rotationDegrees + 90) % 360
                 renderCurrentPdfPage()
             }
-            pageControls.addView(previousPage, LinearLayout.LayoutParams(dp(42), dp(40)))
-            pageControls.addView(pageCounter, LinearLayout.LayoutParams(0, dp(40), 1f))
-            pageControls.addView(rotatePage, LinearLayout.LayoutParams(dp(42), dp(40)))
-            pageControls.addView(nextPage, LinearLayout.LayoutParams(dp(42), dp(40)))
-            addView(pageControls, LinearLayout.LayoutParams(-1, dp(44)))
+            pageControls.contentDescription = "Document navigation"
+            pageControls.addView(previousPage, LinearLayout.LayoutParams(dp(44), dp(42)))
+            pageControls.addView(pageCounter, LinearLayout.LayoutParams(0, dp(42), 1f).apply { marginStart = dp(8); marginEnd = dp(8) })
+            pageControls.addView(rotatePage, LinearLayout.LayoutParams(dp(44), dp(42)))
+            pageControls.addView(nextPage, LinearLayout.LayoutParams(dp(44), dp(42)).apply { marginStart = dp(8) })
+            addView(pageControls, LinearLayout.LayoutParams(-1, dp(52)))
         } else if (imageSiblings.size > 1) {
             pageCounter.text = "Photo ${currentImageIndex + 1} of ${imageSiblings.size}"
             pageCounter.gravity = Gravity.CENTER_VERTICAL
@@ -251,10 +253,8 @@ class SmartPrintDocumentViewer(
 
                 val thumbnails = mutableListOf<Thumbnail>()
                 try {
-                    val first = max(0, index - THUMBNAIL_WINDOW)
-                    val last = min(renderer.pageCount - 1, index + THUMBNAIL_WINDOW)
-                    for (pageIndex in first..last) {
-                        val raw = renderer.openPageBitmap(pageIndex, THUMBNAIL_EDGE)
+                    for (pageIndex in 0 until renderer.pageCount) {
+                        val raw = renderer.openPageBitmap(pageIndex, THUMBNAIL_EDGE, Bitmap.Config.RGB_565)
                         val thumb = try {
                             rotateBitmap(raw, if (pageIndex == index) rotation else 0).also {
                                 if (it !== raw) raw.recycle()
@@ -275,12 +275,12 @@ class SmartPrintDocumentViewer(
         }
     }
 
-    private fun PdfRenderer.openPageBitmap(index: Int, maxEdge: Int): Bitmap {
+    private fun PdfRenderer.openPageBitmap(index: Int, maxEdge: Int, config: Bitmap.Config = Bitmap.Config.ARGB_8888): Bitmap {
         openPage(index).use { page ->
             val scale = min(1f, maxEdge.toFloat() / max(page.width, page.height).toFloat())
             val width = max(1, (page.width * scale).toInt())
             val height = max(1, (page.height * scale).toInt())
-            val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+            val bitmap = Bitmap.createBitmap(width, height, config)
             bitmap.eraseColor(Color.WHITE)
             val transform = Matrix().apply {
                 setScale(width.toFloat() / page.width, height.toFloat() / page.height)
@@ -330,8 +330,8 @@ class SmartPrintDocumentViewer(
         val mainBitmap = decodeImage(file, MAX_IMAGE_EDGE)
         val thumbnails = mutableListOf<Thumbnail>()
         return try {
-            val first = max(0, index - THUMBNAIL_WINDOW)
-            val last = min(imageSiblings.lastIndex, index + THUMBNAIL_WINDOW)
+            val first = max(0, index - IMAGE_THUMBNAIL_WINDOW)
+            val last = min(imageSiblings.lastIndex, index + IMAGE_THUMBNAIL_WINDOW)
             for (imageIndex in first..last) {
                 try {
                     val thumbnail = decodeImage(imageSiblings[imageIndex], THUMBNAIL_EDGE)
@@ -549,14 +549,15 @@ class SmartPrintDocumentViewer(
         ) selectable.resourceId else 0
         return TextView(context).apply {
             text = label
-            textSize = 24f
+            textSize = 19f
             gravity = Gravity.CENTER
-            minWidth = dp(40)
-            minHeight = dp(40)
+            minWidth = dp(44)
+            minHeight = dp(42)
+            includeFontPadding = false
             contentDescription = description
             setTextColor(getColor(R.color.qp_text))
-            background = SmartPrintGlass.surface(context, 14, R.color.qp_glass_card)
-            elevation = dp(3).toFloat()
+            background = SmartPrintGlass.surface(context, 12, R.color.qp_glass_card)
+            elevation = dp(1).toFloat()
             isClickable = true
             isFocusable = true
         }
