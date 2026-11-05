@@ -982,6 +982,116 @@ customerApi.MapGet("/jobs", async (
     return Results.Ok(new { Jobs = jobs });
 });
 
+
+customerApi.MapGet("/jobs/{jobId:guid}/status", async (
+    Guid jobId,
+    ClaimsPrincipal principal,
+    SmartPrintDbContext db,
+    CancellationToken ct) =>
+{
+    var customerId = CustomerIdentity.GetCustomerId(principal);
+    if (customerId is null)
+    {
+        return Results.Forbid();
+    }
+
+    // A signed-in customer owns the order through the customer identity attached
+    // to the originating session. Do not require that the short-lived QR session
+    // remains active: history tracking must survive app restarts and session expiry.
+    var ownedJob = await (
+        from job in db.PrintJobs.AsNoTracking()
+        join session in db.CustomerPrintSessions.AsNoTracking()
+            on new { job.TenantId, SessionId = job.CustomerSessionId }
+            equals new { session.TenantId, SessionId = session.Id }
+        where job.Id == jobId && session.CustomerUserId == customerId
+        select new { job.TenantId, SessionId = session.Id }
+    ).SingleOrDefaultAsync(ct);
+
+    if (ownedJob is null)
+    {
+        return Results.NotFound();
+    }
+
+    var job = await db.PrintJobs.AsNoTracking()
+        .Where(item => item.Id == jobId && item.TenantId == ownedJob.TenantId &&
+                       item.CustomerSessionId == ownedJob.SessionId)
+        .Select(item => new
+        {
+            item.Id,
+            item.BatchGroupName,
+            item.BatchName,
+            item.JobNumber,
+            item.Status,
+            item.PageCount,
+            item.Copies,
+            item.ColourMode,
+            item.PaperSize,
+            item.IsDuplex,
+            item.Orientation,
+            item.PrintKind,
+            item.PhotoSizeCode,
+            item.PhotoCount,
+            item.Currency,
+            item.QuotedAmountMinor,
+            item.RejectedPageNumbersJson,
+            item.OutputCompletedUtc,
+            item.UpdatedUtc,
+            OriginalFileName = db.PrintDocuments.AsNoTracking()
+                .Where(document => document.TenantId == item.TenantId && document.PrintJobId == item.Id)
+                .Select(document => document.OriginalFileName)
+                .FirstOrDefault()
+        })
+        .SingleAsync(ct);
+
+    var timeline = await db.PrintJobEvents.AsNoTracking()
+        .Where(item => item.TenantId == ownedJob.TenantId && item.PrintJobId == jobId)
+        .OrderBy(item => item.CreatedUtc)
+        .Select(item => new { item.NewStatus, item.ActorType, item.CreatedUtc })
+        .ToListAsync(ct);
+
+    var payment = await db.PrintPayments.AsNoTracking()
+        .Where(item => item.TenantId == ownedJob.TenantId && item.PrintJobId == jobId)
+        .OrderByDescending(item => item.CreatedUtc)
+        .Select(item => new
+        {
+            item.Id,
+            item.BatchPaymentId,
+            item.Method,
+            item.Status,
+            item.AmountMinor,
+            item.RefundedAmountMinor,
+            item.Currency,
+            item.PaymentReference,
+            item.RejectionReason,
+            item.CreatedUtc,
+            item.UpdatedUtc,
+            item.VerifiedUtc
+        })
+        .FirstOrDefaultAsync(ct);
+
+    var batchPayment = payment?.BatchPaymentId is Guid batchPaymentId
+        ? await db.PrintBatchPayments.AsNoTracking()
+            .Where(item => item.Id == batchPaymentId && item.TenantId == ownedJob.TenantId)
+            .Select(item => new
+            {
+                item.Id,
+                item.Method,
+                item.Status,
+                item.AmountMinor,
+                item.Currency,
+                item.BatchId,
+                item.PaymentReference,
+                item.RejectionReason,
+                item.CreatedUtc,
+                item.UpdatedUtc,
+                item.VerifiedUtc
+            })
+            .SingleOrDefaultAsync(ct)
+        : null;
+
+    return Results.Ok(new { Job = job, Timeline = timeline, Payment = payment, BatchPayment = batchPayment });
+});
+
 var shop = app.MapGroup("/api/v1/shop").RequireAuthorization()
     .AddEndpointFilter((context, next) => EnforceTenantActiveAsync(context, next, allowSubscriptionRead: true));
 
