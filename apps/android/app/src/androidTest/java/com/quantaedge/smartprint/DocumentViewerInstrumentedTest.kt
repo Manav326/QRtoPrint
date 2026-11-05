@@ -61,6 +61,27 @@ class DocumentViewerInstrumentedTest {
     }
 
     @Test
+    fun theFilmstripProvidesEveryPageOfALongerPdf() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val source = File(context.filesDir, "documents/CI-reader-all-pages-${System.currentTimeMillis()}.pdf")
+        source.parentFile?.mkdirs()
+        createPdf(source, pageCount = 8)
+        try {
+            ActivityScenario.launch(MainActivity::class.java).use {
+                onView(org.hamcrest.Matchers.allOf(
+                    withContentDescription("My Files"),
+                    androidx.test.espresso.matcher.ViewMatchers.isAssignableFrom(android.widget.LinearLayout::class.java)
+                )).perform(click())
+                onView(withText(source.name)).perform(scrollTo(), click())
+                onView(withText("Page 1 of 8")).check(matches(isDisplayed()))
+                onView(withContentDescription("Document page thumbnails")).perform(swipeLeft())
+                onView(withContentDescription("Go to page 8")).perform(click())
+                onView(withText("Page 8 of 8")).check(matches(isDisplayed()))
+            }
+        } finally { source.delete() }
+    }
+
+    @Test
     fun opensCustomerUploadPdfInTheNativeReaderAndReturnsToTheUploadPage() {
         val context = ApplicationProvider.getApplicationContext<Context>()
         val previewDirectory = File(context.cacheDir, "customer-upload-pdf-preview")
@@ -185,10 +206,10 @@ class DocumentViewerInstrumentedTest {
         }
     }
 
-    private fun createPdf(file: File) {
+    private fun createPdf(file: File, pageCount: Int = 2) {
         val document = PdfDocument()
         try {
-            repeat(2) { index ->
+            repeat(pageCount) { index ->
                 val page = document.startPage(
                     PdfDocument.PageInfo.Builder(420, 594, index + 1).create()
                 )
