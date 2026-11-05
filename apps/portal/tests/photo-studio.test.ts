@@ -92,7 +92,7 @@ test("the shared Photo Studio explains different save actions for customers and 
 });
 
 test("shop owners can inspect the actual prepared photo PDF before approving the job",()=>{
- const overlays=readFileSync(new URL("../src/features/shop/ShopOverlays.tsx",import.meta.url),"utf8");
+ const overlays=readFileSync(new URL("../src/features/shop/modals/DocumentPreviewModal.tsx",import.meta.url),"utf8");
  assert.match(overlays,/isPdf&&job\.printKind==="PHOTO"[\s\S]*?<iframe src=\{url\} title=\{name\}\//);
  assert.match(overlays,/SMARTPRINT · SHOP PRINT ONLY · PRIVATE PREVIEW/);
 });
