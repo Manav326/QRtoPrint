@@ -942,6 +942,7 @@ customerApi.MapGet("/jobs", async (
         select new
         {
             job.Id,
+            job.BatchId,
             job.BatchGroupName,
             job.BatchName,
             job.JobNumber,
