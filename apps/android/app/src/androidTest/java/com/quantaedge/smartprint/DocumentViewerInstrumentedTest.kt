@@ -120,7 +120,7 @@ class DocumentViewerInstrumentedTest {
                     val viewer = MainActivity::class.java.getDeclaredField("documentViewer")
                         .apply { isAccessible = true }
                         .get(activity)
-                    assertTrue("The upload form is restored after closing PDF preview", toolbar.subtitle.toString().endsWith("PRINT"))
+                    assertTrue("The upload form is restored after closing PDF preview", toolbar.subtitle.toString().endsWith("Print"))
                     assertNull("The native preview reader is closed", viewer)
                 }
             }
