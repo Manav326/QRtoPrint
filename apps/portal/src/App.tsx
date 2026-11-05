@@ -1540,6 +1540,16 @@ function ShopConsole({ tokens, onSignOut, dark, onToggleTheme }: { tokens: AuthT
             onNavigate={navAction}
             onReviewBatch={openBatchReview}
             onVerifyPayment={verifyPayment}
+            onPreview={job=>{navAction("Print Queue");void previewJob(job,true);}}
+            onApprove={approveJob}
+            onReject={rejectJob}
+            onRefund={job=>setRefundJob(job)}
+            onAssignPrinter={assignPrinter}
+            onDispatch={dispatchPrintJob}
+            onConfirmOutput={confirmPrintedOutput}
+            onRetryPdfExport={retryPdfExport}
+            onHistory={viewJobHistory}
+            onOpenPhotoStudio={job=>void openShopPhotoStudioForJob(job)}
           />}
           {active === "Overview" && <Overview profile={profile} printers={printers} stations={stations} printJobs={printJobs} pricing={pricing} agentDevices={agentDevices} paymentSettings={paymentSettings} onNavigate={navAction}/>}
           {active === "Printers" && <PrintersPage printers={printers} busyResourceId={busyResourceId} onAdd={() => setModal("printer")} onToggle={togglePrinter}/>}
