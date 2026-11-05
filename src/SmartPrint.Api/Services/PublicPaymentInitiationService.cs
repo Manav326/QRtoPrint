@@ -300,6 +300,38 @@ public sealed class PublicPaymentInitiationService(
             return new PublicPaymentInitiationResult(PublicPaymentInitiationFailure.JobNotFound);
         }
 
+        // Check for an existing active payment before requiring a payable job status.
+        // Starting payment moves the job out of AWAITING_PAYMENT, but an exact retry
+        // must return the same payment rather than fail with JobNotReadyForPayment.
+        var activePayment = await db.PrintPayments.SingleOrDefaultAsync(
+            item => item.TenantId == session.TenantId &&
+                    item.PrintJobId == job.Id &&
+                    item.BatchPaymentId == null &&
+                    (item.Status == "AWAITING_CUSTOMER_PAYMENT" ||
+                     item.Status == "CUSTOMER_REPORTED" ||
+                     item.Status == "CASH_AWAITING_PAYMENT"),
+            cancellationToken);
+        if (activePayment is not null)
+        {
+            await transaction.RollbackAsync(cancellationToken);
+            return activePayment.Method != method
+                ? new PublicPaymentInitiationResult(
+                    PublicPaymentInitiationFailure.PaymentAttemptAlreadyActive,
+                    Payment: activePayment,
+                    Job: job)
+                : new PublicPaymentInitiationResult(
+                    PublicPaymentInitiationFailure.None,
+                    Payment: activePayment,
+                    Job: job);
+        }
+
+        if (job.BatchId is not null)
+        {
+            await transaction.RollbackAsync(cancellationToken);
+            return new PublicPaymentInitiationResult(
+                PublicPaymentInitiationFailure.BatchCheckoutRequired, Job: job);
+        }
+
         if (job.Status is not ("AWAITING_PAYMENT" or "PAYMENT_REJECTED"))
         {
             await transaction.RollbackAsync(cancellationToken);
@@ -315,35 +347,6 @@ public sealed class PublicPaymentInitiationService(
         {
             await transaction.RollbackAsync(cancellationToken);
             return new PublicPaymentInitiationResult(PublicPaymentInitiationFailure.PaymentMethodUnavailable);
-        }
-
-        var activePayment = await db.PrintPayments.SingleOrDefaultAsync(
-            item => item.TenantId == session.TenantId &&
-                    item.PrintJobId == job.Id &&
-                    item.BatchPaymentId == null &&
-                    (item.Status == "AWAITING_CUSTOMER_PAYMENT" ||
-                     item.Status == "CUSTOMER_REPORTED" ||
-                     item.Status == "CASH_AWAITING_PAYMENT"),
-            cancellationToken);
-        if (job.BatchId is not null && activePayment is null)
-        {
-            await transaction.RollbackAsync(cancellationToken);
-            return new PublicPaymentInitiationResult(
-                PublicPaymentInitiationFailure.BatchCheckoutRequired, Job: job);
-        }
-
-        if (activePayment is not null)
-        {
-            await transaction.RollbackAsync(cancellationToken);
-            return activePayment.Method != method
-                ? new PublicPaymentInitiationResult(
-                    PublicPaymentInitiationFailure.PaymentAttemptAlreadyActive,
-                    Payment: activePayment,
-                    Job: job)
-                : new PublicPaymentInitiationResult(
-                    PublicPaymentInitiationFailure.None,
-                    Payment: activePayment,
-                    Job: job);
         }
 
         var payment = new PrintPayment
