@@ -40,6 +40,9 @@ import { applyThemePreference, readDarkModePreference, readSidebarCollapsedPrefe
 import ThemeToggleButton from "./ThemeToggleButton";
 import OrderJourneyPage from "./OrderJourneyPage";
 import SubscriptionPage from "./features/subscription/SubscriptionPage";
+import EmptyModule from "./shared/ui/EmptyModule";
+import Status from "./shared/ui/Status";
+import PrintersPage from "./features/shop/printers/PrintersPage";
 import PricingPage from "./features/shop/pricing/PricingPage";
 import SettingsPage from "./features/shop/settings/SettingsPage";
 import { IST_TIME_ZONE, formatIstDate, formatIstDateTime, formatIstTime, istDateKey } from "./date-time";
@@ -1880,35 +1883,6 @@ function Overview({ profile, printers, stations, printJobs, pricing, agentDevice
   );
 }
 
-function PrintersPage({ printers, busyResourceId, onAdd, onToggle }: { printers: PrinterDevice[]; busyResourceId:string|null; onAdd:()=>void; onToggle:(printer:PrinterDevice)=>void }) {
-  return (
-    <section className="panel collection-panel">
-      <div className="collection-header"><div><h2>Your printers</h2><p>Each Windows queue stays separate. SmartPrint will never merge printers automatically, even when two queues share a port.</p></div><button className="primary-button" onClick={onAdd}><Plus size={16}/> Add printer</button></div>
-      {printers.length===0 ? <EmptyModule icon={<Printer size={24}/>} title="No printers registered yet" text="Add your first printer. It will appear here as awaiting local-agent discovery until the Windows Print Agent reports its capabilities and live status." actionLabel="Add your first printer" onAction={onAdd}/> :
-      <div className="printer-grid">{printers.map(printer=>{
-        const possibleDuplicates=printer.outputMode!=="PDF_EXPORT"&&printer.agentDeviceId&&printer.connectionAddress
-          ?printers.filter(other=>other.id!==printer.id&&other.outputMode!=="PDF_EXPORT"&&other.agentDeviceId===printer.agentDeviceId&&
-            !!other.connectionAddress&&other.connectionAddress.trim().toLowerCase()===printer.connectionAddress!.trim().toLowerCase())
-          :[];
-        return <article className="printer-card" key={printer.id}>
-          <div className="printer-card-top"><div className="printer-card-icon"><Printer size={20}/></div><Status label={printer.status} tone={printer.status.toLowerCase()==="ready"?"green":"slate"}/></div>
-          <h3>{printer.outputMode==="PDF_EXPORT"?"PDF export · "+printer.displayName:printer.displayName}</h3>
-          <p>{printer.outputMode==="PDF_EXPORT"?"Direct local PDF generation · no Windows Save As dialog":printer.manufacturer+" · "+printer.model}</p>
-          <div className="printer-meta">
-            <span>{printer.outputMode==="PDF_EXPORT"?"PDF export destination":printer.connectionType}{printer.isDefault?(printer.outputMode==="PDF_EXPORT"?" · Default output destination":" · Default Windows queue"):""}</span>
-            <span>{printer.queueName || printer.connectionAddress || "Connection not verified"}</span>
-          </div>
-          {possibleDuplicates.length>0&&<div className="printer-duplicate-warning" role="note">
-            <strong>Possible duplicate printer</strong>
-            <span>{possibleDuplicates.map(item=>item.displayName).join(", ")} uses the same Windows port. SmartPrint keeps both queues separate; confirm whether they are alternate queues for one physical printer.</span>
-          </div>}
-          <div className="printer-card-footer"><span className={printer.isActive?"enabled-label":"disabled-label"}>{printer.isActive?"Enabled":"Disabled"}</span><button className="subtle-button" disabled={!!busyResourceId} onClick={()=>onToggle(printer)}>{busyResourceId===printer.id?<span className="button-spinner"/>:printer.isActive?"Disable":"Enable"}</button></div>
-        </article>;
-      })}</div>}
-    </section>
-  );
-}
-
 function StationsPage({ stations, profile, busyResourceId, onAdd, onToggle, onGenerate }: {
   stations:QrStation[]; profile:ShopProfile|null; busyResourceId:string|null; onAdd:()=>void; onToggle:(station:QrStation)=>void; onGenerate:(station:QrStation)=>void;
 }) {
@@ -2915,10 +2889,6 @@ function Modal({title,subtitle,children,onClose}:{title:string;subtitle:string;c
   return <div className="modal-scrim" onMouseDown={e=>{if(e.target===e.currentTarget)onClose();}}><section className="modal-card" role="dialog" aria-modal="true" aria-label={title}><div className="modal-heading"><div><h2>{title}</h2><p>{subtitle}</p></div><button className="icon-button" onClick={onClose} aria-label="Close"><X size={18}/></button></div>{children}</section></div>;
 }
 
-function EmptyModule({icon,title,text,actionLabel,onAction}:{icon:ReactNode;title:string;text:string;actionLabel?:string;onAction?:()=>void}) {
-  return <section className="panel empty-module"><div className="empty-module-icon">{icon}</div><h2>{title}</h2><p>{text}</p>{actionLabel&&onAction&&<button className="primary-button" onClick={onAction}>{actionLabel}<ArrowRight size={15}/></button>}</section>;
-}
-
 function SetupCheck({complete,title,detail,onClick}:{complete:boolean;title:string;detail:string;onClick:()=>void}) {
   return <button className="setup-check" onClick={onClick}><span className={complete?"check-circle complete":"check-circle"}>{complete?<Check size={14}/>:null}</span><span className="setup-check-copy"><strong>{title}</strong><small>{detail}</small></span><ArrowRight size={16}/></button>;
 }
@@ -2928,7 +2898,6 @@ function Metric({icon,label,value,note,accent}:{icon:ReactNode;label:string;valu
 function Device({name,detail,state,tone}:{name:string;detail:string;state:string;tone:string}) {
   return <div className="device-row"><div className="device-glyph"><Printer size={16}/></div><div className="device-copy"><strong>{name}</strong><span>{detail}</span></div><Status label={state} tone={tone}/></div>;
 }
-function Status({label,tone}:{label:string;tone:string}) { return <span className={"status-badge "+tone}><i/>{label}</span>; }
 function PrintKindTag({printKind,count}:{printKind?:string|null;count?:number}) {
   const isPhoto=printKind==="PHOTO";
   const label=isPhoto?"Photo":"Document";
