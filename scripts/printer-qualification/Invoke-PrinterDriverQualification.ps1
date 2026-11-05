@@ -239,7 +239,7 @@ try {
     $declaredCatalogs = @()
     foreach ($catalogReference in $catalogReferences) {
         if ([System.IO.Path]::IsPathRooted([string]$catalogReference) -or
-            ([string]$catalogReference) -match '(^|[\\/])\.\.([\\/]|$')) {
+            ([string]$catalogReference) -match '(^|[\\/])\.\.([\\/]|$)') {
             throw "INF catalog path '$catalogReference' is rooted or traverses outside the package."
         }
         $catalogPath = [System.IO.Path]::GetFullPath((Join-Path (Split-Path -Parent $infPath) ([string]$catalogReference)))
