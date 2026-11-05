@@ -5,69 +5,55 @@ namespace SmartPrint.Api.Tests;
 
 public sealed class AgentPrinterSyncRulesTests
 {
-    private static AgentPrinterDiscoveryRequest Printer(
-        string queue = "Microsoft Print to PDF",
-        string driver = "Microsoft Print To PDF",
-        string port = "PORTPROMPT:",
-        string status = "Ready",
-        string outputMode = "PHYSICAL",
-        string capabilities = "{}") =>
-        new(queue, driver, port, status, false, outputMode, capabilities);
-
     [Fact]
-    public void AcceptsAValidPrinterAndPreservesItsMetadata()
+    public void AcceptsValidPrinterMetadataAndReturnsTheValidatedQueues()
     {
-        var result = AgentPrinterSyncRules.Validate([Printer()]);
+        var printer = Printer("HP LaserJet", "HP Universal", "USB001");
 
-        Assert.True(result.IsValid);
-        Assert.Single(result.Printers);
-        Assert.Equal("Microsoft Print to PDF", result.Printers[0].QueueName);
+        var result = AgentPrinterSyncRules.Validate([printer]);
+
+        Assert.Equal(AgentPrinterSyncValidationFailure.None, result.Failure);
+        Assert.Equal([printer], result.Printers);
     }
 
     [Fact]
-    public void RejectsMissingListAndMoreThanOneHundredPrinters()
+    public void RejectsMissingOrExcessivePrinterLists()
     {
         Assert.Equal(
             AgentPrinterSyncValidationFailure.PrinterLimitExceeded,
             AgentPrinterSyncRules.Validate(null).Failure);
 
-        var tooMany = Enumerable.Range(0, 101)
-            .Select(index => Printer($"Queue {index}"))
+        var excessive = Enumerable.Range(0, AgentPrinterSyncRules.MaximumPrinters + 1)
+            .Select(index => Printer($"Queue {index}", "Driver", "Port"))
             .ToArray();
 
         Assert.Equal(
             AgentPrinterSyncValidationFailure.PrinterLimitExceeded,
-            AgentPrinterSyncRules.Validate(tooMany).Failure);
+            AgentPrinterSyncRules.Validate(excessive).Failure);
     }
 
     [Theory]
-    [InlineData("not-json")]
+    [InlineData("{")]
     [InlineData("[]")]
     [InlineData("null")]
-    public void RejectsMalformedOrNonObjectCapabilityReports(string capabilities)
-    {
-        var result = AgentPrinterSyncRules.Validate([Printer(capabilities: capabilities)]);
-
-        Assert.Equal(AgentPrinterSyncValidationFailure.InvalidCapabilitiesJson, result.Failure);
-    }
-
-    [Fact]
-    public void RejectsCapabilityReportsLargerThanSixteenKilobytes()
-    {
-        var result = AgentPrinterSyncRules.Validate([Printer(capabilities: "{\"data\":\"" + new string('x', 16000) + "\"}")]);
-
-        Assert.Equal(AgentPrinterSyncValidationFailure.InvalidCapabilitiesJson, result.Failure);
-    }
-
-    [Fact]
-    public void RejectsDuplicateQueueNamesCaseInsensitively()
+    public void RejectsInvalidOrNonObjectCapabilitiesJson(string capabilitiesJson)
     {
         var result = AgentPrinterSyncRules.Validate([
-            Printer(queue: "Office Printer"),
-            Printer(queue: "office printer")
+            Printer("HP LaserJet", "HP Universal", "USB001", capabilitiesJson: capabilitiesJson)
         ]);
 
-        Assert.Equal(AgentPrinterSyncValidationFailure.InvalidPrinterMetadata, result.Failure);
+        Assert.Equal(AgentPrinterSyncValidationFailure.InvalidCapabilitiesJson, result.Failure);
+        Assert.Empty(result.Printers);
+    }
+
+    [Fact]
+    public void RejectsNullPrinterEntries()
+    {
+        var printers = new AgentPrinterDiscoveryRequest[] { null! };
+
+        var result = AgentPrinterSyncRules.Validate(printers);
+
+        Assert.Equal(AgentPrinterSyncValidationFailure.InvalidCapabilitiesJson, result.Failure);
     }
 
     [Theory]
@@ -75,29 +61,66 @@ public sealed class AgentPrinterSyncRulesTests
     [InlineData("Queue", "", "Port", "Ready", "PHYSICAL")]
     [InlineData("Queue", "Driver", "Port", "UnknownStatus", "PHYSICAL")]
     [InlineData("Queue", "Driver", "Port", "Ready", "UNSUPPORTED")]
-    public void RejectsInvalidQueueDriverStatusAndOutputMode(
-        string queue,
-        string driver,
-        string port,
+    public void RejectsInvalidPrinterMetadata(
+        string queueName,
+        string driverName,
+        string portName,
         string status,
         string outputMode)
     {
         var result = AgentPrinterSyncRules.Validate([
-            Printer(queue, driver, port, status, outputMode)
+            Printer(queueName, driverName, portName, status, outputMode)
         ]);
 
         Assert.Equal(AgentPrinterSyncValidationFailure.InvalidPrinterMetadata, result.Failure);
     }
 
     [Fact]
+    public void RejectsDuplicateQueueNamesIgnoringCaseAndWhitespace()
+    {
+        var result = AgentPrinterSyncRules.Validate([
+            Printer("HP LaserJet", "Driver A", "Port A"),
+            Printer(" hp laserjet ", "Driver B", "Port B")
+        ]);
+
+        Assert.Equal(AgentPrinterSyncValidationFailure.InvalidPrinterMetadata, result.Failure);
+    }
+
+    [Fact]
+    public void EnforcesPrinterMetadataAndCapabilitiesLengthLimits()
+    {
+        Assert.Equal(
+            AgentPrinterSyncValidationFailure.InvalidPrinterMetadata,
+            AgentPrinterSyncRules.Validate([
+                Printer(new string('Q', AgentPrinterSyncRules.MaximumQueueNameLength + 1), "Driver", "Port")
+            ]).Failure);
+
+        Assert.Equal(
+            AgentPrinterSyncValidationFailure.InvalidCapabilitiesJson,
+            AgentPrinterSyncRules.Validate([
+                Printer("Queue", "Driver", "Port",
+                    capabilitiesJson: "{ \"payload\": \"" + new string('x', AgentPrinterSyncRules.MaximumCapabilitiesJsonLength) + "\" }")
+            ]).Failure);
+    }
+
+    private static AgentPrinterDiscoveryRequest Printer(
+        string queueName,
+        string driverName,
+        string portName,
+        string status = "Ready",
+        string outputMode = "PHYSICAL",
+        string capabilitiesJson = "{}") =>
+        new(queueName, driverName, portName, status, false, outputMode, capabilitiesJson);
+    [Fact]
     public void AcceptsBothPhysicalAndPdfExportOutputModes()
     {
         var result = AgentPrinterSyncRules.Validate([
-            Printer(queue: "Office Printer", outputMode: "PHYSICAL"),
-            Printer(queue: "PDF Export", outputMode: "PDF_EXPORT")
+            Printer("Office Printer", "HP Driver", "USB001", outputMode: "PHYSICAL"),
+            Printer("PDF Export", "Microsoft Print To PDF", "PORTPROMPT:", outputMode: "PDF_EXPORT")
         ]);
 
-        Assert.True(result.IsValid);
+        Assert.Equal(AgentPrinterSyncValidationFailure.None, result.Failure);
         Assert.Equal(2, result.Printers.Count);
     }
+
 }
