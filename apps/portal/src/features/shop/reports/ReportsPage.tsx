@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Activity, Check, FileText, Printer, Wallet } from "lucide-react";
+import { Activity, Check, FileText, Printer, ShieldCheck, Wallet } from "lucide-react";
 import { getShopReportSummary, type ShopReportSummary } from "../../../api";
 import { formatIstDateTime } from "../../../date-time";
 import { formatMoney, prettyStatus } from "../../../shared/lib/formatting";
