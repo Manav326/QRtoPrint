@@ -1,4 +1,5 @@
 import { apiRequest, readStoredTokens } from "./core";
+import type { ShopPricingProfile } from "./customer";
 
 export interface ShopProfile {
   id: string;

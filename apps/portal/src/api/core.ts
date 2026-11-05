@@ -1,5 +1,5 @@
-import { getLocalAgentStatus, isDesktopApp, writeDesktopSession } from "./desktop-bridge";
-import { authStorageKey } from "./portal-routing";
+import { getLocalAgentStatus, isDesktopApp, writeDesktopSession } from "../desktop-bridge";
+import { authStorageKey } from "../portal-routing";
 export interface AuthTokens {
   tokenType: string;
   accessToken: string;
