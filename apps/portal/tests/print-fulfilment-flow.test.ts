@@ -541,20 +541,23 @@ test("native Android protects Photo Studio from screenshots through the origin-p
 
 
 test("PDF export preview grants require a verified local Agent-owned export", () => {
-  const shop = readApi("ShopPrintJobReadEndpoints.cs");
-  const agent = readApi("AgentDocumentPreviewEndpoints.cs");
+  const shop = read("../../../src/SmartPrint.Api/Services/ShopPrintJobReadService.cs");
+  const shopEndpoint = readApi("ShopPrintJobReadEndpoints.cs");
+  const agent = read("../../../src/SmartPrint.Api/Services/AgentDocumentPreviewService.cs");
+  const agentEndpoint = readApi("AgentDocumentPreviewEndpoints.cs");
   const grant = read("../../../src/SmartPrint.Api/Security/LocalDocumentPreviewGrant.cs");
 
-  assert.match(shop, /context\.Request\.Query\["variant"\]/);
-  assert.match(shop, /output\.Status != "COMPLETED"/);
-  assert.match(shop, /output\.OutputType != "PDF_EXPORT"/);
+  assert.match(shopEndpoint, /reads\.GetPreviewSourceAsync/);
+  assert.match(shop, /job\.Status != "COMPLETED"/);
+  assert.match(shop, /job\.OutputType != "PDF_EXPORT"/);
   assert.match(shop, /output\.OutputSha256 is not \{ Length: 64 \}/);
   assert.match(shop, /output\.ClaimedByAgentDeviceId is not Guid outputAgentId/);
   assert.match(shop, /LocalDocumentPreviewGrant\.Issue/);
-  assert.match(agent, /LocalDocumentPreviewGrant\.TryValidate/);
-  assert.match(agent, /job\.ClaimedByAgentDeviceId == device\.Id/);
+  assert.match(agentEndpoint, /LocalDocumentPreviewGrant\.TryValidate/);
+  assert.match(agentEndpoint, /previewService\.GetAsync/);
+  assert.match(agent, /job\.ClaimedByAgentDeviceId == agentId/);
   assert.match(agent, /output\.OutputType != "PDF_EXPORT"/);
-  assert.match(agent, /MediaType = "application\/pdf"/);
+  assert.match(agent, /"application\/pdf"/);
   assert.match(grant, /local_document_preview/);
 });
 

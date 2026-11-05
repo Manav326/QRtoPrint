@@ -410,8 +410,8 @@ test("PDF footer branding is opt-in per batch and cannot cover source content or
   const reviewEndpoint = read("../../../src/SmartPrint.Api/Endpoints/ShopPrintBatchReviewEndpoints.cs");
   const reviewService = read("../../../src/SmartPrint.Api/Services/ShopPrintBatchReviewService.cs");
   const contracts = read("../../../src/SmartPrint.Api/Contracts/ApiContracts.cs");
-  const shopQueue = read("../../../src/SmartPrint.Api/Endpoints/ShopPrintJobQueryEndpoints.cs");
-  const shopCustomers = read("../../../src/SmartPrint.Api/Endpoints/ShopCustomerEndpoints.cs");
+  const shopQueue = read("../../../src/SmartPrint.Api/Services/ShopPrintJobQueryService.cs");
+  const shopCustomers = read("../../../src/SmartPrint.Api/Services/ShopCustomerQueryService.cs");
   const customerStatus = read("../../../src/SmartPrint.Api/Services/PublicJobStatusService.cs");
   const agentJobs = read("../../../src/SmartPrint.Api/Endpoints/AgentJobEndpoints.cs");
   const agentJobQueue = read("../../../src/SmartPrint.Api/Services/AgentJobQueueService.cs");

@@ -143,7 +143,7 @@ public static partial class AgentEndpoints
                 return Results.Unauthorized();
             }
 
-            var reason = request.ReasonCode?.Trim();
+            var reason = request.ReasonCode?.Trim() ?? string.Empty;
             if (!AgentSpoolerLifecycleRequestRules.IsValidReasonCode(reason))
             {
                 return Results.BadRequest();
