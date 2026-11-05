@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type { Dispatch, SetStateAction } from "react";
 import {
   ApiError, acceptCustomerQuote, calculateCustomerQuote, getCustomerJobStatus,
@@ -34,7 +34,7 @@ type CustomerPrintCheckoutOptions = {
   rememberBatchPayment: (payment?: CustomerBatchPayment | null) => void;
   refreshBatchStatuses: () => Promise<void>;
   upiEnabled: boolean;
-  busy: boolean;
+  cashEnabled: boolean;
   setBusy: Setter<boolean>;
   setError: Setter<string>;
 };
@@ -46,10 +46,15 @@ export function useCustomerPrintCheckout(options: CustomerPrintCheckoutOptions) 
     quoteExpiredForBatchItem, statusForBatchItem, hasLegacyIndividualPayment,
     payment, batchPayment, setBatchPayment, setQuote, setJobStatus,
     rememberBatchStatuses, rememberCustomerStatus, rememberCustomerPayment, rememberBatchPayment,
-    refreshBatchStatuses, upiEnabled, busy, setBusy, setError
+    refreshBatchStatuses, upiEnabled, cashEnabled, setBusy, setError
   } = options;
   const [paymentReference, setPaymentReference] = useState("");
   const [paymentMethod, setPaymentMethod] = useState<"UPI" | "CASH">(upiEnabled ? "UPI" : "CASH");
+
+  useEffect(() => {
+    if (!upiEnabled && cashEnabled) setPaymentMethod("CASH");
+    else if (upiEnabled) setPaymentMethod("UPI");
+  }, [upiEnabled, cashEnabled]);
 
   async function getQuote(itemsOverride?:UploadedPrintJob[],settingsOverride?:Record<string,CustomerSavedPrintSettings>,photoSettingsOverride?:Record<string,CustomerPhotoSettings>) {
     const items=itemsOverride??(uploadedBatch.length?uploadedBatch:(uploaded?[uploaded]:[]));

@@ -82,11 +82,6 @@ export function useCustomerPrintFlow(props:CustomerPrintFlowProps) {
   const customerUploadUnavailable = !secureQueueFallbackEnabled && !localAgent?.endpoints.length;
 
   useEffect(()=>{
-    if(!paymentOptions.upiEnabled&&paymentOptions.cashEnabled)setPaymentMethod("CASH");
-    else if(paymentOptions.upiEnabled)setPaymentMethod("UPI");
-  },[paymentOptions.upiEnabled,paymentOptions.cashEnabled]);
-
-  useEffect(()=>{
     const storageKey=`qrtoprint.customer-active-job:${publicCode}`;
     if(!uploaded&&uploadedBatch.length===0&&!batchName.trim()){
       localStorage.removeItem(storageKey);
@@ -159,7 +154,7 @@ export function useCustomerPrintFlow(props:CustomerPrintFlowProps) {
     quoteExpiredForBatchItem, statusForBatchItem, hasLegacyIndividualPayment,
     payment, batchPayment, setBatchPayment, setQuote, setJobStatus,
     rememberBatchStatuses, rememberCustomerStatus, rememberCustomerPayment, rememberBatchPayment,
-    refreshBatchStatuses, upiEnabled: paymentOptions.upiEnabled, busy, setBusy, setError
+    refreshBatchStatuses, upiEnabled: paymentOptions.upiEnabled, cashEnabled: paymentOptions.cashEnabled, setBusy, setError
   });
   const {
     paymentReference, setPaymentReference, paymentMethod, setPaymentMethod,
