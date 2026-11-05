@@ -4,6 +4,7 @@ import { useDesktopAgent } from "./useDesktopAgent";
 import { createShopDeviceActions } from "./shop-device-actions";
 import { createShopBillingActions } from "./shop-billing-actions";
 import { useShopPrintActions } from "./useShopPrintActions";
+import { useShopDialogs } from "./useShopDialogs";
 import type { ShopModal, ShopSection } from "./shop-types";
 import OverviewPage from "./OverviewPage";
 import { BatchReviewModal, JobHistoryModal, DocumentPreviewModal, RefundModal, ShopOwnerAccountModal, HelpSupportModal, PrinterModal, StationModal } from "./ShopOverlays";
@@ -98,6 +99,9 @@ export default function ShopConsole({ tokens, onSignOut, dark, onToggleTheme }: 
   const [modal, setModal] = useState<ShopModal>(null);
   const [busy, setBusy] = useState(false);
   const [toast, setToast] = useState("");
+  const {
+    actionDialog,actionDialogValue,setActionDialogValue,confirmInApp,promptInApp,closeActionDialog,submitActionDialog
+  } = useShopDialogs();
   const [busyResourceId, setBusyResourceId] = useState<string | null>(null);
   const {
     busyJobId,setBusyJobId,preview,setPreview,focusShopPhotoEdit,setFocusShopPhotoEdit,shopPhotoStudio,
@@ -124,45 +128,12 @@ export default function ShopConsole({ tokens, onSignOut, dark, onToggleTheme }: 
     accessToken: tokens.accessToken, busy, setBusy, busyResourceId, setBusyResourceId,
     setModal, setStations, setError, setToast, reload, confirmInApp
   });
-    job:ShopPrintJob;
-    returnPreview:{name:string;blob:Blob;mediaType:string;job:ShopPrintJob;readOnly:boolean};
-  }|null>(null);
-  type ActionDialogState = { title: string; message: string; inputLabel?: string; confirmLabel: string; resolve: (value: string | null) => void };
-  const [actionDialog, setActionDialog] = useState<ActionDialogState | null>(null);
-  const [actionDialogValue, setActionDialogValue] = useState("");
   const {
     savePaymentSettings, verifyPayment, rejectPayment, saveProfile, saveOwnerAccount, savePricing
   } = createShopBillingActions({
     accessToken: tokens.accessToken, setBusy, setBusyJobId, setError, setToast, reload,
     setPaymentSettings, setProfile, setPricing, setOwnerAccountOpen, confirmInApp, promptInApp
   });
-
-  function requestActionDialog(options: { title: string; message: string; inputLabel?: string; confirmLabel?: string }): Promise<string | null> {
-    return new Promise(resolve => {
-      setActionDialogValue("");
-      setActionDialog({ ...options, confirmLabel: options.confirmLabel || "Confirm", resolve });
-    });
-  }
-
-  async function confirmInApp(message: string, title = "Please confirm", confirmLabel = "Confirm"): Promise<boolean> {
-    return (await requestActionDialog({ title, message, confirmLabel })) !== null;
-  }
-
-  async function promptInApp(message: string, title = "Enter details", inputLabel = "Reason"): Promise<string | null> {
-    return requestActionDialog({ title, message, inputLabel, confirmLabel: "Continue" });
-  }
-
-  function closeActionDialog() {
-    const current = actionDialog;
-    setActionDialog(null);
-    current?.resolve(null);
-  }
-
-  function submitActionDialog() {
-    const current = actionDialog;
-    setActionDialog(null);
-    current?.resolve(actionDialogValue);
-  }
 
   function toggleSidebarCollapsed() {
     setSidebarCollapsed(current => {
