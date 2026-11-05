@@ -40,7 +40,8 @@
       "notes": "Official HP India support page is specific to the 64-bit PCL 6 Universal Print Driver family and offers Windows 11 selection. The current official evidence reviewed does not establish Windows Server 2025 support. Do not qualify on the Server 2025 runner until HP publishes matching OS support or confirms it.",
       "githubHostedRunner": "Windows Server 2025 x64",
       "windows11Certification": "not_established_by_github_hosted_runner",
-      "runnerEligibility": "blocked_until_vendor_confirms_windows_server_2025"
+      "runnerEligibility": "blocked_until_vendor_confirms_windows_server_2025",
+      "catalogSignerThumbprint": null
     },
     {
       "id": "canon-generic-plus-ufr-ii-x64",
@@ -73,7 +74,8 @@
       "notes": "Canon India issue 0101310501 lists Windows Server 2025 support and names the V3.50 package. Its India support disclaimer limits use to personal/non-commercial purposes and restricts transfer. Do not download or use in commercial CI without written permission or a separately approved package/license.",
       "githubHostedRunner": "Windows Server 2025 x64",
       "windows11Certification": "not_established_by_github_hosted_runner",
-      "runnerEligibility": "windows_server_2025_supported_but_license_blocked"
+      "runnerEligibility": "windows_server_2025_supported_but_license_blocked",
+      "catalogSignerThumbprint": null
     },
     {
       "id": "epson-universal-print-driver-x64",
@@ -104,7 +106,8 @@
       "notes": "Epson's official Download Center lists Universal Print Driver v2.123.00 dated 2026-10-23 (87.53 MB) for the L3150 Series on Windows 11 x64. It does not establish Server 2025 support. The download is an EXE self-extractor; CI will not execute it. Approve an extracted INF/CAB/ZIP payload, Server 2025 support and use rights before installation.",
       "githubHostedRunner": "Windows Server 2025 x64",
       "windows11Certification": "not_established_by_github_hosted_runner",
-      "runnerEligibility": "blocked_until_vendor_confirms_windows_server_2025"
+      "runnerEligibility": "blocked_until_vendor_confirms_windows_server_2025",
+      "catalogSignerThumbprint": null
     },
     {
       "id": "brother-universal-printer-driver-x64",
@@ -138,7 +141,8 @@
       ],
       "githubHostedRunner": "Windows Server 2025 x64",
       "windows11Certification": "not_established_by_github_hosted_runner",
-      "runnerEligibility": "blocked_until_vendor_confirms_windows_server_2025"
+      "runnerEligibility": "blocked_until_vendor_confirms_windows_server_2025",
+      "catalogSignerThumbprint": null
     },
     {
       "id": "pantum-p2503-x64",
@@ -168,7 +172,8 @@
       "notes": "Pantum India lists P2503 Windows Driver v1.0.5, English, 14.19 MB, with installation instructions limited to Windows 11 64-bit. Server 2025 is not listed. A Windows 11 lab or explicit Pantum Server 2025 support confirmation is required.",
       "githubHostedRunner": "Windows Server 2025 x64",
       "windows11Certification": "not_established_by_github_hosted_runner",
-      "runnerEligibility": "blocked_until_vendor_confirms_windows_server_2025"
+      "runnerEligibility": "blocked_until_vendor_confirms_windows_server_2025",
+      "catalogSignerThumbprint": null
     },
     {
       "id": "pantum-universal-printing-driver-x64",
@@ -208,7 +213,8 @@
       "notes": "Pantum global support lists Universal Printing Driver v1.0.6 (75.52 MB) for BP5100/BM5100/BP5200/BM5200/BM5300 families. The reviewed listing does not identify a specific Windows OS target for this package. Confirm OS support, package type, INF payload and terms before qualification.",
       "githubHostedRunner": "Windows Server 2025 x64",
       "windows11Certification": "not_established_by_github_hosted_runner",
-      "runnerEligibility": "blocked_until_exact_windows_support_is_confirmed"
+      "runnerEligibility": "blocked_until_exact_windows_support_is_confirmed",
+      "catalogSignerThumbprint": null
     },
     {
       "id": "ricoh-universal-pcl6-x64",
@@ -243,7 +249,8 @@
       "notes": "Ricoh's official AP410/AP410n download page lists PCL6 Universal Print Driver 4.46.0.0 (released 2026-10-06) for Windows Server 2025 x64. Official EXE package URL recorded for non-executing package audit only; no setup EXE will be run. Pin hash, verify embedded publisher/catalogs, extract INF and review package terms before installation.",
       "githubHostedRunner": "Windows Server 2025 x64",
       "windows11Certification": "not_established_by_github_hosted_runner",
-      "runnerEligibility": "pending_nonexecuting_package_audit"
+      "runnerEligibility": "pending_nonexecuting_package_audit",
+      "catalogSignerThumbprint": null
     },
     {
       "id": "kyocera-kx-universal-x64",
@@ -270,7 +277,8 @@
       "notes": "Official Kyocera release notes identify KX Driver 8.6.1022 and a broad model set; Kyocera's security advisory says the older 8.3.3520 package is affected by CVE-2023-38634 and version 8.4.1716 fixes it. This latest package is recorded for non-executing audit only. Confirm the exact OS matrix for 8.6.1022 and verify hashes/catalog signatures before any installation.",
       "githubHostedRunner": "Windows Server 2025 x64",
       "windows11Certification": "not_established_by_github_hosted_runner",
-      "runnerEligibility": "pending_nonexecuting_package_audit"
+      "runnerEligibility": "pending_nonexecuting_package_audit",
+      "catalogSignerThumbprint": null
     }
   ]
 }

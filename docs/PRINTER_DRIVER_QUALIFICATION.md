@@ -37,9 +37,10 @@ A driver is eligible for a runner only when all of these are present and reviewe
 4. Extracted INF and catalog paths inside a ZIP/CAB package.
 5. Valid catalog signature with the expected publisher.
 6. Exact Windows driver name and supported model family.
-7. An explicit `ciApproval: approved` and `licenseReview: approved`.
+7. The exact INF-declared catalog publisher certificate thumbprint pinned in the manifest.
+8. An explicit `ciApproval: approved` and `licenseReview: approved`.
 
-The harness accepts only ZIP and CAB packages. It never executes vendor setup EXEs, scripts or custom installer binaries. If a package is available only as an EXE, it remains pending until a vendor-approved extraction route is established.
+The installation harness accepts only ZIP and CAB packages. It never executes vendor setup EXEs, scripts or custom installer binaries. If a package is available only as an EXE, it remains pending until a vendor-approved INF-package extraction route is established. Before installation, the selected INF must declare the catalog being checked; that catalog must have a valid signature whose exact certificate thumbprint matches the pinned manifest value. A vendor-name substring alone is not sufficient for installation approval.
 
 Canon's India Generic Plus UFR II V3.50 support page currently carries restrictive personal/non-commercial-use language and prohibits transfer, redistribution and modification. This entry is blocked from commercial CI pending written permission or an alternate license. Brother's India support listing states that its Universal Printer Driver 1.0.0.0 does not support two-sided printing; this limitation must be carried into any model-specific compatibility result.
 
@@ -49,7 +50,7 @@ Canon's India Generic Plus UFR II V3.50 support page currently carries restricti
 2. On an explicitly selected, approved driver, download only from an allowlisted vendor host. Redirects are checked at every hop.
 3. Verify the pinned SHA-256 before extraction.
 4. Extract to a disposable temporary folder and enforce path containment for the INF.
-5. Verify a valid signed catalog from the approved publisher.
+5. Read the catalog references from the selected INF and verify a valid signature against the exact certificate thumbprint pinned in the manifest.
 6. Stage the INF with PnPUtil and register the print driver.
 7. Create a uniquely named queue with a local file-backed port.
 8. Run the existing `WindowsPrintExecutor.Print` path in monochrome on A4 against a generated, non-customer PNG. This provides a conservative baseline; feature-specific colour/duplex checks are separate.
@@ -65,11 +66,11 @@ The dedicated GitHub Actions workflow supports:
 - `manifest-only`: safe default; validates metadata without downloading any vendor package.
 - One explicitly selected driver ID: runs only after both approval gates have been completed in the manifest.
 
-The workflow is pinned to GitHub-hosted `windows-2025` x64 (Windows Server 2025). The qualification script reads the actual OS caption and architecture and refuses to download a driver unless the exact runner target appears in that package's vendor-listed `windowsTargets`. A successful Server 2025 result is not evidence of Windows 11 x64 support. The standard hosted Windows 11 runner is ARM64, so Windows 11 x64-only packages remain unqualified on this runner until a suitable isolated test environment is available. The workflow does not use self-hosted runners or repository secrets.
+The workflow is pinned to GitHub-hosted `windows-2025` x64 (Windows Server 2025). The qualification script reads the actual OS caption and architecture and refuses to download a driver unless the exact runner target appears in that package's vendor-listed `windowsTargets`. A successful Server 2025 result is not evidence of Windows 11 x64 support. The standard hosted Windows 11 runner is ARM64, so Windows 11 x64-only packages remain unqualified on this runner until a suitable isolated test environment is available. The vendor-install job targets the GitHub Environment `printer-driver-qualification`. Before approving any manifest entry, create that environment in repository Settings → Environments and require designated reviewers; the workflow declaration alone does not configure reviewer protection. The workflow does not use self-hosted runners or repository secrets.
 
 ## Evidence and status language
 
-The output report uses `DRIVER_RENDERED` only when an approved package was installed, a queue was created, Windows accepted the spooler job and the driver produced a non-empty output file. The PR workflow also runs a built-in Microsoft Print to PDF fixture through the same file-backed local port and production Agent path; this validates the harness mechanics but is not a vendor-driver pass.
+The output report uses `DRIVER_RENDERED` only when an approved package was installed, a queue was created, Windows accepted the spooler job and the driver produced a non-empty output file. The PR workflow also runs a built-in Microsoft Print to PDF fixture through the same file-backed local port and production Agent path; this validates the harness mechanics but is not a vendor-driver pass. The render test waits for the spooler job to finish and requires three identical output hashes across consecutive observations, plus an A4 capability report, before recording a pass.
 
 It always sets `physicalPrinterVerified: false`.
 

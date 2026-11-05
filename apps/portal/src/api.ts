@@ -1,4 +1,5 @@
 import { isUncompletedLocalUploadTicketExpired } from "./local-upload-routing";
+import { getLocalPreviewEndpointCandidates, isPrivateLocalPreviewEndpoint } from "./local-preview-routing";
 import { getLocalAgentStatus, isDesktopApp, writeDesktopSession } from "./desktop-bridge";
 import { authStorageKey } from "./portal-routing";
 export interface AuthTokens {
@@ -594,6 +595,10 @@ export function getShopSubscription(token: string) {
   return apiRequest<ShopSubscriptionSummary>("/api/v1/shop/subscription", {}, token);
 }
 
+export function getShopPayments(token: string) {
+  return apiRequest<ShopPayment[]>("/api/v1/shop/payments", {}, token);
+}
+
 export async function loadShopData(token: string, queueSearch = "") {
   const [profile, printers, stations, pricing, printJobs, agentDevices, paymentSettings, payments, refunds, subscription] = await Promise.all([
     apiRequest<ShopProfile>("/api/v1/shop/profile", {}, token),
@@ -603,7 +608,7 @@ export async function loadShopData(token: string, queueSearch = "") {
     getShopPrintJobsPage(token, 0, 100, queueSearch),
     getShopAgentDevices(token),
     apiRequest<ShopPaymentSettings>("/api/v1/shop/payment-settings", {}, token),
-    apiRequest<ShopPayment[]>("/api/v1/shop/payments", {}, token),
+    getShopPayments(token),
     apiRequest<ShopRefund[]>("/api/v1/shop/refunds", {}, token),
     getShopSubscription(token)
   ]);
@@ -854,6 +859,7 @@ export function renewCustomerPrintSession(sessionToken: string) {
   return apiRequest<{
     expiresUtc: string;
     localAgent: { agentDeviceId: string; endpoints: string[] } | null;
+    paymentOptions: { upiEnabled: boolean; upiId?: string | null; payeeName?: string | null; cashEnabled: boolean; instantPaymentEnabled: boolean };
   }>("/api/v1/public/sessions/current/renew", {
     method: "POST",
     headers: { "X-Print-Session": sessionToken }
@@ -1594,23 +1600,6 @@ export function applyShopPrintBatchReview(
   }, token);
 }
 
-function isPrivateLocalPreviewEndpoint(value: string): URL | null {
-  try {
-    const endpoint = new URL(value);
-    const octets = endpoint.hostname.split(".").map(Number);
-    const privateIpv4 = octets.length === 4 &&
-      octets.every(part => Number.isInteger(part) && part >= 0 && part <= 255) &&
-      (octets[0] === 10 ||
-        (octets[0] === 172 && octets[1] >= 16 && octets[1] <= 31) ||
-        (octets[0] === 192 && octets[1] === 168));
-    if (endpoint.protocol !== "http:" || endpoint.port !== "17842" ||
-        endpoint.username || endpoint.password || endpoint.pathname !== "/" ||
-        endpoint.search || endpoint.hash || !privateIpv4) return null;
-    return endpoint;
-  } catch {
-    return null;
-  }
-}
 
 export async function downloadShopDocument(
   token: string,
@@ -1661,8 +1650,12 @@ export async function downloadShopDocument(
   }
 
   let lastError: Error | null = null;
-  for (const value of source.endpoints.slice(0, 8)) {
-    const endpoint = isPrivateLocalPreviewEndpoint(value);
+  // The Windows app is running on the paired shop computer itself. Prefer
+  // loopback so preview does not depend on Wi-Fi routing or firewall hairpinning.
+  // Browser clients continue to use only server-advertised private LAN endpoints.
+  const endpointValues = getLocalPreviewEndpointCandidates(isDesktopApp(), source.endpoints);
+  for (const value of endpointValues.slice(0, 8)) {
+    const endpoint = isPrivateLocalPreviewEndpoint(value, isDesktopApp());
     if (!endpoint) continue;
     const controller = new AbortController();
     const timeout = window.setTimeout(() => controller.abort(), 15_000);
@@ -1694,7 +1687,19 @@ export async function downloadShopDocument(
       lastError = new ApiError(detail || `Local document preview failed (${response.status}).`, response.status);
       if ([401, 403, 404, 409, 415].includes(response.status)) break;
     } catch (exception) {
-      lastError = exception instanceof Error ? exception : new Error("Could not reach the paired shop computer.");
+      if (exception instanceof Error && exception.name === "AbortError") {
+        lastError = new ApiError(
+          "The paired shop computer did not respond. Check that the Windows Print Agent is running and connected, then try again.",
+          0
+        );
+      } else if (exception instanceof TypeError) {
+        lastError = new ApiError(
+          "Could not connect to the paired shop computer. Check that the Windows Print Agent is running and allowed through Windows Firewall.",
+          0
+        );
+      } else {
+        lastError = exception instanceof Error ? exception : new Error("Could not reach the paired shop computer.");
+      }
     } finally {
       window.clearTimeout(timeout);
     }

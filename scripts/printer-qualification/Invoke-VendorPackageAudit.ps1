@@ -56,7 +56,7 @@ function Receive-OfficialPackage {
                 continue
             }
 
-            $response.EnsureSuccessStatusCode()
+            $response.EnsureSuccessStatusCode() | Out-Null
             if ($null -ne $response.Content.Headers.ContentLength -and $response.Content.Headers.ContentLength -gt 1GB) {
                 throw "Official package exceeds the 1 GiB audit limit."
             }

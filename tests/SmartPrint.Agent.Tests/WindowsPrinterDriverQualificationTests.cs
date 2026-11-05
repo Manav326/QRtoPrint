@@ -75,13 +75,33 @@ public sealed class WindowsPrinterDriverQualificationTests
 
         try
         {
-            var receipt = new WindowsPrintExecutor().Print(entry, bytes, CancellationToken.None);
+            var executor = new WindowsPrintExecutor();
+            var receipt = executor.Print(entry, bytes, CancellationToken.None);
             Assert.True(receipt.JobId > 0, "Windows did not return a spooler job identifier.");
 
             var deadline = DateTime.UtcNow.AddSeconds(60);
             byte[]? rendered = null;
+            string? previousOutputHash = null;
+            var stableOutputObservations = 0;
+            var spoolerFinished = false;
+            var finalSpoolerStatus = "UNKNOWN";
+            int? finalPagesPrinted = null;
+            int? finalTotalPages = null;
             while (DateTime.UtcNow < deadline)
             {
+                var currentJob = executor.GetJob(queueName!, receipt.JobId);
+                finalSpoolerStatus = currentJob?.Status ?? "REMOVED";
+                finalPagesPrinted = currentJob?.PagesPrinted;
+                finalTotalPages = currentJob?.TotalPages;
+
+                if (currentJob?.Status is "OFFLINE" or "PAPEROUT" or "PAUSED" or "ERROR" or "USERINTERVENTION")
+                    throw new InvalidOperationException($"Windows spooler reported driver job state '{currentJob.Status}'.");
+
+                spoolerFinished = currentJob is null ||
+                    (currentJob.Status == "PRINTED" &&
+                     currentJob.TotalPages > 0 &&
+                     currentJob.PagesPrinted >= currentJob.TotalPages);
+
                 try
                 {
                     if (File.Exists(outputPath))
@@ -89,26 +109,51 @@ public sealed class WindowsPrinterDriverQualificationTests
                         var candidate = await File.ReadAllBytesAsync(outputPath!);
                         if (candidate.Length > 128)
                         {
-                            rendered = candidate;
-                            break;
+                            var candidateHash = Convert.ToHexString(SHA256.HashData(candidate));
+                            stableOutputObservations = string.Equals(candidateHash, previousOutputHash, StringComparison.Ordinal)
+                                ? stableOutputObservations + 1
+                                : 1;
+                            previousOutputHash = candidateHash;
+
+                            // A completed spooler job plus three identical half-second reads
+                            // avoids treating a still-growing file as successful output.
+                            if (spoolerFinished && stableOutputObservations >= 3)
+                            {
+                                rendered = candidate;
+                                break;
+                            }
+                        }
+                        else
+                        {
+                            previousOutputHash = null;
+                            stableOutputObservations = 0;
                         }
                     }
                 }
                 catch (IOException)
                 {
                     // The print processor may still be writing the output file.
+                    previousOutputHash = null;
+                    stableOutputObservations = 0;
                 }
 
                 await Task.Delay(500);
             }
 
             Assert.NotNull(rendered);
-            Assert.True(rendered!.Length > 128, "The manufacturer driver produced no usable rendered spool output.");
+            Assert.True(rendered!.Length > 128, "The driver produced no usable rendered spool output.");
+            Assert.Contains(rendered!, value => value != 0);
 
             var capabilitiesJson = WindowsPrinterCapabilityDiscovery.DiscoverJson(queueName!);
             using var capabilities = JsonDocument.Parse(capabilitiesJson);
             Assert.Equal(1, capabilities.RootElement.GetProperty("schemaVersion").GetInt32());
             Assert.Equal("WINDOWS_DRIVER", capabilities.RootElement.GetProperty("source").GetString());
+            var paperSizes = capabilities.RootElement.GetProperty("paperSizes");
+            Assert.Equal(JsonValueKind.Array, paperSizes.ValueKind);
+            Assert.True(
+                paperSizes.EnumerateArray().Any(paper =>
+                    string.Equals(paper.GetProperty("name").GetString(), "A4", StringComparison.OrdinalIgnoreCase)),
+                "The India-market qualification baseline requires the driver to report A4 paper support.");
 
             var report = new
             {
@@ -120,6 +165,10 @@ public sealed class WindowsPrinterDriverQualificationTests
                 driverManufacturer,
                 queueName,
                 spoolerJobId = receipt.JobId,
+                spoolerStatusAtCompletion = finalSpoolerStatus,
+                spoolerPagesPrinted = finalPagesPrinted,
+                spoolerTotalPages = finalTotalPages,
+                stableOutputObservations,
                 outputFileName = Path.GetFileName(outputPath!),
                 outputSizeBytes = rendered.Length,
                 outputSha256 = Convert.ToHexString(SHA256.HashData(rendered)).ToLowerInvariant(),

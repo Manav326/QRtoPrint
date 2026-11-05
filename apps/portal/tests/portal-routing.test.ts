@@ -64,6 +64,7 @@ test("admin and shop browser credentials use independent session keys", () => {
 
 test("shop workspace sections have stable deep links and restore correctly", () => {
   const sections = [
+    "Order Journey",
     "Overview",
     "Print Queue",
     "Printers",
@@ -83,6 +84,8 @@ test("shop workspace sections have stable deep links and restore correctly", () 
     assert.equal(shopSectionFromPath(path), section);
   }
 
+  assert.equal(shopSectionFromPath("/shop"), "Order Journey");
+  assert.equal(shopSectionFromPath("/shop/overview"), "Overview");
   assert.equal(shopSectionFromPath("/shop/settings/"), "Settings");
   assert.equal(shopSectionFromPath("/shop/queue/jobs/42"), "Print Queue");
   assert.equal(shopSectionFromPath("/shop/unknown"), "Overview");
