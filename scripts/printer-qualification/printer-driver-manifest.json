@@ -245,7 +245,7 @@
       "packageFormat": "exe-archive",
       "infRelativePath": null,
       "driverName": null,
-      "catalogSignerContains": "RICOH",
+      "catalogSignerContains": null,
       "allowedDownloadHosts": [
         "support.ricoh.com",
         "op-drv-ds1.support.ricoh.com"
@@ -256,7 +256,7 @@
       "githubHostedRunner": "Windows Server 2025 x64",
       "windows11Certification": "not_established_by_github_hosted_runner",
       "runnerEligibility": "pending_nonexecuting_package_audit",
-      "catalogSignerThumbprint": null,
+      "catalogSignerThumbprint": "32B4E7CE92A59C722B8BDF7AE3E66520CFB9DE21",
       "packageSignerContains": "RICOH"
     },
     {
