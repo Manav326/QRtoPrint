@@ -8913,11 +8913,35 @@ publicApi.MapPost("/sessions/current/renew", async (
         return Results.Unauthorized();
     }
 
+    // A customer who signs in after opening the QR flow can still attach this
+    // active session to their account. Never move a session between accounts.
+    var customerId = CustomerIdentity.GetCustomerId(context.User);
+    if (customerId is Guid signedInCustomerId)
+    {
+        if (session.CustomerUserId is Guid existingCustomerId &&
+            existingCustomerId != signedInCustomerId)
+        {
+            return Results.Forbid();
+        }
+
+        if (session.CustomerUserId is null)
+        {
+            session.CustomerUserId = signedInCustomerId;
+        }
+    }
+
     // Renew only when the existing expiry is approaching; repeated foreground
     // refreshes do not cause a database write on every customer status poll.
-    if (session.ExpiresUtc <= now.AddMinutes(10))
+    var shouldExtend = session.ExpiresUtc <= now.AddMinutes(10);
+    if (shouldExtend)
     {
         session.ExpiresUtc = now.AddMinutes(15);
+    }
+
+    // Persist account association even when the session did not need its expiry
+    // extended. Anonymous guest sessions still produce no database write here.
+    if (customerId is not null || shouldExtend)
+    {
         await db.SaveChangesAsync(ct);
     }
 
