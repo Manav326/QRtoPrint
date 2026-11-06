@@ -5,8 +5,6 @@ $ErrorActionPreference = "Stop"
 $repoRoot = Split-Path -Parent $PSScriptRoot
 $envPath = Join-Path $repoRoot ".env"
 $composeFile = Join-Path $repoRoot "compose.yml"
-$secretDirectory = Join-Path $repoRoot ".secrets\cloudflare"
-$tokenPath = Join-Path $secretDirectory "tunnel-token"
 $exampleEnvPath = Join-Path $repoRoot ".env.example"
 
 function New-RandomHex([int]$Length) {
@@ -73,12 +71,6 @@ function Get-RepositoryImageNamespace {
     $repository = Get-RepositoryFullName
     $owner = $repository.Split("/")[0]
     return ("ghcr.io/" + $owner.ToLowerInvariant())
-}
-function Get-CloudflareToken {
-    $secure = Read-Host "Paste the Cloudflare Tunnel token (hidden input)" -AsSecureString
-    $pointer = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($secure)
-    try { return [Runtime.InteropServices.Marshal]::PtrToStringBSTR($pointer) }
-    finally { [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($pointer) }
 }
 function Save-Utf8NoBom([string]$Path, [string[]]$Lines) {
     [IO.File]::WriteAllLines($Path, $Lines, [Text.UTF8Encoding]::new($false))
@@ -164,25 +156,20 @@ $lines = @($lines | Where-Object {
     -not $_.StartsWith("ACME_EMAIL=", [StringComparison]::Ordinal)
 })
 
-New-Item -ItemType Directory -Force -Path $secretDirectory | Out-Null
-if (-not (Test-Path -LiteralPath $tokenPath -PathType Leaf) -or
-    [string]::IsNullOrWhiteSpace((Get-Content -LiteralPath $tokenPath -Raw))) {
-    Write-Host ""
-    Write-Host "Create a named Cloudflare Tunnel and add a Published application route:" -ForegroundColor Cyan
-    Write-Host "Hostname: $currentBaseUrl"
-    Write-Host "Service:  http://portal:80"
-    Write-Host "Then paste the Docker connector token below."
-    $token = Get-CloudflareToken
-    if ([string]::IsNullOrWhiteSpace($token)) { throw "A Cloudflare Tunnel token is required." }
-    [IO.File]::WriteAllText($tokenPath, $token.Trim(), [Text.UTF8Encoding]::new($false))
-    $token = $null
+& docker network inspect cloudflare-edge *> $null
+if ($LASTEXITCODE -ne 0) {
+    throw "The shared Docker network 'cloudflare-edge' is missing. Start it from QuantaEdge-Production with .\scripts\local-ingress.ps1 up."
+}
+$connectorState = & docker inspect quantaedge-ingress-cloudflared --format '{{.State.Status}}' 2>$null
+if ($LASTEXITCODE -ne 0 -or $connectorState -ne "running") {
+    throw "The central Cloudflare connector is not running. Start it from QuantaEdge-Production with .\scripts\local-ingress.ps1 up."
 }
 Save-Utf8NoBom $envPath $lines
 
 docker compose --env-file $envPath -f $composeFile config --quiet
 if ($LASTEXITCODE -ne 0) { throw "Production Cloudflare Compose configuration is invalid." }
 
-Write-Host "Pulling published images and starting production services with Cloudflare Tunnel..." -ForegroundColor Cyan
+Write-Host "Pulling published images and starting SmartPrint production services on the shared Cloudflare edge network..." -ForegroundColor Cyan
 docker compose --env-file $envPath -f $composeFile pull
 $imagesPulled = ($LASTEXITCODE -eq 0)
 if (-not $imagesPulled -and (Get-Command gh -ErrorAction SilentlyContinue)) {
@@ -238,13 +225,13 @@ for ($attempt = 0; $attempt -lt 60; $attempt++) {
     Start-Sleep -Seconds 3
 }
 if (-not $publicHealthy) {
-    docker compose --env-file $envPath -f $composeFile logs --tail 100 cloudflared portal api
-    throw "Containers are healthy, but $currentBaseUrl is not reachable. Confirm the Cloudflare route targets http://portal:80."
+    docker compose --env-file $envPath -f $composeFile logs --tail 100 portal api
+    throw "Containers are healthy, but $currentBaseUrl is not reachable. Confirm the central Tunnel is running and its Published Application route targets http://qrtoprint-portal:80 (or compatibility alias http://portal:80)."
 }
 
 docker compose --env-file $envPath -f $composeFile ps
 Write-Host ""
-Write-Host "QRtoPrint production deployment is reachable through Cloudflare Tunnel." -ForegroundColor Green
+Write-Host "SmartPrint production deployment is reachable through the centrally managed Cloudflare Tunnel." -ForegroundColor Green
 Write-Host "Single public application URL: $currentBaseUrl"
 Write-Host "Portal, QR links and API:      $currentBaseUrl"
 Write-Host "Agent local listener:         TCP 17842 (Private firewall profile)"
