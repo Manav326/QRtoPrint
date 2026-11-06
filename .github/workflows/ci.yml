@@ -49,9 +49,9 @@ jobs:
       - run: pnpm typecheck
       - run: pnpm build
       - name: Typecheck native desktop frontend
-        run: pnpm --filter @smartprint/desktop typecheck
+        run: pnpm --filter @smart-print/desktop typecheck
       - name: Build native desktop frontend
-        run: pnpm --filter @smartprint/desktop build
+        run: pnpm --filter @smart-print/desktop build
       - name: Validate portal Nginx proxy configuration
         run: docker run --rm --add-host api:127.0.0.1 -v "$GITHUB_WORKSPACE/apps/portal/nginx.conf:/etc/nginx/conf.d/default.conf:ro" nginx:alpine nginx -t
       - name: Validate production Compose configuration
@@ -193,7 +193,7 @@ jobs:
       - name: Compile the native Windows desktop host
         shell: pwsh
         run: |
-          pnpm --filter @smartprint/desktop build
+          pnpm --filter @smart-print/desktop build
           if ($LASTEXITCODE -ne 0) { throw "SmartPrint desktop frontend build failed." }
           cargo check --locked --manifest-path apps/desktop/src-tauri/Cargo.toml --target x86_64-pc-windows-msvc
           if ($LASTEXITCODE -ne 0) { throw "SmartPrint native desktop host compilation failed." }
@@ -206,7 +206,7 @@ jobs:
             throw "Configure the SMARTPRINT_PUBLIC_BASE_URL Actions variable before building the desktop application."
           }
           $env:VITE_API_BASE_URL = $env:SMARTPRINT_PUBLIC_BASE_URL
-          pnpm --filter @smartprint/desktop exec tauri build --no-bundle --ci
+          pnpm --filter @smart-print/desktop exec tauri build --no-bundle --ci
           if ($LASTEXITCODE -ne 0) { throw "SmartPrint native desktop build failed." }
           $nativeExe = "apps/desktop/src-tauri/target/release/smartprint-desktop.exe"
           if (-not (Test-Path -LiteralPath $nativeExe)) { throw "The SmartPrint native desktop executable was not produced." }
