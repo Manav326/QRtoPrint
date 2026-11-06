@@ -20,7 +20,7 @@ if (-not $ConfirmRestore) {
     throw 'Restore is destructive. Re-run with -ConfirmRestore after checking the selected backup set.'
 }
 if (-not (Test-Path -LiteralPath $envPath)) {
-    throw 'A running QRtoPrint installation with its original .env is required. Start it with scripts\docker-up.ps1 first.'
+    throw 'A running SmartPrint installation with its original .env is required. Start it with scripts\docker-up.ps1 first.'
 }
 if (-not (Get-Command docker -ErrorAction SilentlyContinue)) { throw 'Docker was not found.' }
 docker compose version | Out-Null
@@ -136,7 +136,7 @@ try {
     docker rm -f $backupHelper | Out-Null
     $backupHelper = $null
 
-    Write-Host 'Starting QRtoPrint services from the restored backup...' -ForegroundColor Cyan
+    Write-Host 'Starting SmartPrint services from the restored backup...' -ForegroundColor Cyan
     docker compose @composeBaseArgs up -d
     if ($LASTEXITCODE -ne 0) { throw 'The restored data is in place, but Docker Compose could not restart the stack.' }
 
@@ -149,7 +149,7 @@ try {
     if (-not $healthy) { throw 'The API did not become ready after restore. Inspect docker compose logs; the API and portal may need manual recovery.' }
 
     $restoreSucceeded = $true
-    Write-Host 'QRtoPrint database and encrypted cloud documents have been restored successfully.' -ForegroundColor Green
+    Write-Host 'SmartPrint database and encrypted cloud documents have been restored successfully.' -ForegroundColor Green
     Write-Host "The previous .env was preserved at: $temporaryEnvPath"
     Write-Host 'The Windows Agent local DPAPI queue is not part of this Docker backup; it remains on each shop computer.'
 } finally {
