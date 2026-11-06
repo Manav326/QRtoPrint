@@ -98,6 +98,7 @@ let paymentRejectedBatchPaymentId;
 let qaPlanVersionId;
 let qaAgentEnrollment;
 let qaAgentIdentity;
+let qaAgentLastId;
 
 const CASE_IDS_BY_RECORD_NAME = new Map([
   ["Local portal and API health", ["ENV-001", "ENV-002", "ENV-003", "ENV-004"]],
@@ -164,7 +165,8 @@ const PLANNED_CASE_IDS = [
     "PLATFORM-001", "PLATFORM-002", "PLATFORM-003", "PLATFORM-004",
     "TENANT-001", "TENANT-002", "TENANT-003",
     "PHOTO-001", "PHOTO-002", "PHOTO-003", "PHOTO-004", "PHOTO-005", "PHOTO-006",
-    "REPORT-001", "REPORT-002", "REPORT-003", "REPORT-004"
+    "REPORT-001", "REPORT-002", "REPORT-003", "REPORT-004",
+    "RBAC-007", "RBAC-008", "RBAC-009", "RBAC-010", "TENANT-005", "TENANT-006", "TENANT-007", "TENANT-008", "TENANT-009", "TENANT-010", "QR-011", "QR-012", "QR-013", "UPLOAD-003", "UPLOAD-004", "DOC-006", "JOB-010", "JOB-011", "PLATFORM-010", "PLATFORM-011", "PLATFORM-012", "PLATFORM-013", "PLATFORM-014", "SHOP-019", "SHOP-020", "SHOP-021", "SHOP-022", "SHOP-023", "SHOP-024", "PAY-011", "PAY-012", "PAY-013", "AGENT-030", "AGENT-031", "AGENT-032", "AGENT-033"
   ])
 ];
 
@@ -2062,6 +2064,39 @@ try {
       }), 201, "Enroll disposable QA Agent through the real API");
       assert.ok(enrolled.agentDeviceId && enrolled.agentSecret);
       qaAgentIdentity = { id: enrolled.agentDeviceId, secret: enrolled.agentSecret };
+      qaAgentLastId = qaAgentIdentity.id;
+
+      const invalidAgentSecret = await request(page, "POST", "/api/v1/agent/heartbeat", {
+        headers: {
+          "X-Print-Agent-Id": qaAgentIdentity.id,
+          "X-Print-Agent-Secret": "deliberately-invalid-qa-secret"
+        },
+        body: { version: "smartprint-local-qa", operatingSystem: "Windows", localEndpoints: [] }
+      });
+      assert.equal(invalidAgentSecret.status, 401, "A known Agent ID with an incorrect secret must be rejected.");
+
+      const malformedAgentId = await request(page, "POST", "/api/v1/agent/heartbeat", {
+        headers: {
+          "X-Print-Agent-Id": "not-a-guid",
+          "X-Print-Agent-Secret": qaAgentIdentity.secret
+        },
+        body: { version: "smartprint-local-qa", operatingSystem: "Windows", localEndpoints: [] }
+      });
+      assert.equal(malformedAgentId.status, 401, "A malformed Agent identity must be rejected.");
+
+      const invalidEnrollmentCode = await request(page, "POST", "/api/v1/agent/enroll", {
+        body: {
+          code: "SMARTPRINT-QA-INVALID-ENROLLMENT-CODE",
+          fingerprint: fingerprint + "-INVALID-CODE",
+          deviceName: "SmartPrint QA Invalid Enrollment"
+        }
+      });
+      assert.equal(invalidEnrollmentCode.status, 401, "An unknown Agent enrollment code must be rejected.");
+
+      const invalidEnrollmentMetadata = await request(page, "POST", "/api/v1/agent/enroll", {
+        body: { code: qaAgentEnrollment.code, fingerprint: "", deviceName: "" }
+      });
+      assert.equal(invalidEnrollmentMetadata.status, 400, "Enrollment must reject missing device identity metadata.");
 
       enrollmentReplay = await request(page, "POST", "/api/v1/agent/enroll", {
         body: {
@@ -2134,6 +2169,10 @@ try {
       return {
         enrollmentCreatedPersistedAgent: true,
         oneTimeCodeReplay: enrollmentReplay.status,
+        invalidAgentSecret: invalidAgentSecret.status,
+        malformedAgentId: malformedAgentId.status,
+        unknownEnrollmentCode: invalidEnrollmentCode.status,
+        invalidEnrollmentMetadata: invalidEnrollmentMetadata.status,
         heartbeat: heartbeat.status,
         invalidPrinterSync: invalidSync.status,
         emptyPrinterDiscovery: emptySync.discovered,
@@ -2156,7 +2195,10 @@ try {
       }
       qaAgentIdentity = null;
     }
-  }, ["AGENT-023", "AGENT-024", "AGENT-025", "AGENT-026", "AGENT-027", "AGENT-028", "AGENT-029"]);
+  }, [
+    "AGENT-023", "AGENT-024", "AGENT-025", "AGENT-026", "AGENT-027", "AGENT-028", "AGENT-029",
+    "AGENT-030", "AGENT-031", "AGENT-032", "AGENT-033"
+  ]);
 
   await record("DEVICE/QR: printer and station controls restore safely; QR rotation invalidates the old public code", async () => {
     let printerNeedsRestore = false;
@@ -2447,6 +2489,256 @@ try {
       refreshAfterLogout: refreshAfterLogout.status
     };
   }, ["AUTH-001", "AUTH-002", "AUTH-003", "AUTH-004", "AUTH-005", "AUTH-006", "AUTH-007", "AUTH-008"]);
+
+
+  await record("RBAC: a global customer token cannot enter shop-owner APIs", async () => {
+    const response = await request(page, "GET", "/api/v1/shop/profile", { token: customerTokens.accessToken });
+    assert.equal(response.status, 403, "Customer identity must not be accepted as a shop owner.");
+    return { customerToShopProfile: response.status, shopDataReturned: false };
+  }, ["RBAC-007"]);
+
+  await record("RBAC: a shop-owner token cannot enter customer identity APIs", async () => {
+    const response = await request(page, "GET", "/api/v1/customer/me", { token: shop1Tokens.accessToken });
+    assert.equal(response.status, 403, "Shop-owner identity must not be accepted as a global customer.");
+    return { shopToCustomerProfile: response.status, customerDataReturned: false };
+  }, ["RBAC-008"]);
+
+  await record("RBAC: a shop-owner token cannot access the platform control plane", async () => {
+    const response = await request(page, "GET", "/api/v1/platform/overview", { token: shop1Tokens.accessToken });
+    assert.equal(response.status, 403, "Tenant shop owners must not access platform administration.");
+    return { shopToPlatformOverview: response.status, platformDataReturned: false };
+  }, ["RBAC-009"]);
+
+  await record("RBAC: a customer token cannot access the platform control plane", async () => {
+    const response = await request(page, "GET", "/api/v1/platform/overview", { token: customerTokens.accessToken });
+    assert.equal(response.status, 403, "Global customers must not access platform administration.");
+    return { customerToPlatformOverview: response.status, platformDataReturned: false };
+  }, ["RBAC-010"]);
+
+  await record("TENANT: Shop One cannot disable Shop Two's printer", async () => {
+    const attempt = await request(shop1Page, "PATCH", "/api/v1/shop/printers/" + shop2Printer.id + "/active?isActive=false", { token: shop1Tokens.accessToken });
+    assert.equal(attempt.status, 404, "Foreign tenant printer IDs must be indistinguishable from missing printer IDs.");
+    const printers = assertHttp(await request(shop2Page, "GET", "/api/v1/shop/printers", { token: shop2Tokens.accessToken }), 200, "Shop Two printer read-back");
+    assert.ok(printers.find(item => item.id === shop2Printer.id)?.isActive, "Cross-tenant access must not disable Shop Two's printer.");
+    return { foreignPrinterMutation: attempt.status, foreignPrinterStillActive: true };
+  }, ["TENANT-005"]);
+
+  await record("TENANT: Shop One cannot disable Shop Two's QR station", async () => {
+    const attempt = await request(shop1Page, "PATCH", "/api/v1/shop/qr-stations/" + shop2Station.id + "/enabled?isEnabled=false", { token: shop1Tokens.accessToken });
+    assert.equal(attempt.status, 404, "Foreign tenant QR station IDs must be rejected.");
+    const stations = assertHttp(await request(shop2Page, "GET", "/api/v1/shop/qr-stations", { token: shop2Tokens.accessToken }), 200, "Shop Two station read-back");
+    assert.ok(stations.find(item => item.id === shop2Station.id)?.isEnabled, "Cross-tenant access must not disable Shop Two's station.");
+    return { foreignStationMutation: attempt.status, foreignStationStillEnabled: true };
+  }, ["TENANT-006"]);
+
+  await record("TENANT: Shop One cannot rotate Shop Two's QR station code", async () => {
+    const attempt = await request(shop1Page, "POST", "/api/v1/shop/qr-stations/" + shop2Station.id + "/rotate-code", { token: shop1Tokens.accessToken });
+    assert.equal(attempt.status, 404, "Foreign station QR-code rotation must be rejected.");
+    const stations = assertHttp(await request(shop2Page, "GET", "/api/v1/shop/qr-stations", { token: shop2Tokens.accessToken }), 200, "Shop Two station code read-back");
+    assert.equal(stations.find(item => item.id === shop2Station.id)?.publicUrl, shop2Station.publicUrl,
+      "A foreign tenant must not rotate or replace the station's public code.");
+    return { foreignCodeRotation: attempt.status, publicUrlUnchanged: true };
+  }, ["TENANT-007"]);
+
+  await record("TENANT: printer listings expose only the authenticated shop's printers", async () => {
+    const one = assertHttp(await request(shop1Page, "GET", "/api/v1/shop/printers", { token: shop1Tokens.accessToken }), 200, "Shop One printer listing");
+    const two = assertHttp(await request(shop2Page, "GET", "/api/v1/shop/printers", { token: shop2Tokens.accessToken }), 200, "Shop Two printer listing");
+    assert.ok(one.some(item => item.id === shop1Printer.id));
+    assert.ok(!one.some(item => item.id === shop2Printer.id), "Shop One must not receive Shop Two's printer row.");
+    assert.ok(two.some(item => item.id === shop2Printer.id));
+    assert.ok(!two.some(item => item.id === shop1Printer.id), "Shop Two must not receive Shop One's printer row.");
+    return { shopOneRows: one.length, shopTwoRows: two.length, crossTenantRows: 0 };
+  }, ["TENANT-008"]);
+
+  await record("TENANT: QR station listings expose only the authenticated shop's stations", async () => {
+    const one = assertHttp(await request(shop1Page, "GET", "/api/v1/shop/qr-stations", { token: shop1Tokens.accessToken }), 200, "Shop One station listing");
+    const two = assertHttp(await request(shop2Page, "GET", "/api/v1/shop/qr-stations", { token: shop2Tokens.accessToken }), 200, "Shop Two station listing");
+    assert.ok(one.some(item => item.id === shop1Station.id));
+    assert.ok(!one.some(item => item.id === shop2Station.id), "Shop One must not receive Shop Two's station row.");
+    assert.ok(two.some(item => item.id === shop2Station.id));
+    assert.ok(!two.some(item => item.id === shop1Station.id), "Shop Two must not receive Shop One's station row.");
+    return { shopOneRows: one.length, shopTwoRows: two.length, crossTenantRows: 0 };
+  }, ["TENANT-009"]);
+
+  await record("TENANT: revoked Agent identity remains visible only to its source shop", async () => {
+    assert.ok(qaAgentLastId, "The disposable Shop One Agent ID must have been captured.");
+    const one = assertHttp(await request(shop1Page, "GET", "/api/v1/shop/agent-devices", { token: shop1Tokens.accessToken }), 200, "Shop One Agent listing");
+    const two = assertHttp(await request(shop2Page, "GET", "/api/v1/shop/agent-devices", { token: shop2Tokens.accessToken }), 200, "Shop Two Agent listing");
+    assert.equal(one.find(item => item.id === qaAgentLastId)?.status, "Revoked", "Shop One must retain its revoked Agent audit row.");
+    assert.ok(!two.some(item => item.id === qaAgentLastId), "A tenant must never see another shop's Agent identity.");
+    return { sourceShopSeesRevokedIdentity: true, otherShopSeesIdentity: false };
+  }, ["TENANT-010"]);
+
+  await record("QR: unknown public station codes cannot create a customer session", async () => {
+    const response = await request(page, "POST", "/api/v1/public/stations/SMARTPRINT-QA-NO-SUCH-STATION/sessions");
+    assert.equal(response.status, 404, "An unknown or disabled public station code must not create a session.");
+    assert.equal(response.json?.code, "station_not_available");
+    return { unknownStationStatus: response.status, sessionCreated: false };
+  }, ["QR-011"]);
+
+  await record("QR: an invalid opaque session token cannot read current session data", async () => {
+    const response = await request(customerPage, "GET", "/api/v1/public/sessions/current", { sessionToken: "SMARTPRINT-QA-INVALID-SESSION-TOKEN" });
+    assert.equal(response.status, 401, "An invalid opaque session token must be rejected.");
+    return { invalidSessionRead: response.status, sessionDataReturned: false };
+  }, ["QR-012"]);
+
+  await record("QR: an invalid opaque session token cannot renew a session", async () => {
+    const response = await request(customerPage, "POST", "/api/v1/public/sessions/current/renew", { sessionToken: "SMARTPRINT-QA-INVALID-SESSION-TOKEN" });
+    assert.equal(response.status, 401, "An invalid opaque session token must not be renewed.");
+    return { invalidSessionRenewal: response.status, sessionChanged: false };
+  }, ["QR-013"]);
+
+  await record("UPLOAD: a print upload requires an Idempotency-Key", async () => {
+    const response = await request(customerPage, "POST", "/api/v1/public/sessions/current/jobs", { sessionToken: customerSession.sessionToken });
+    assert.equal(response.status, 400, "A cloud document upload must require an idempotency key.");
+    assert.equal(response.json?.code, "session_and_idempotency_required");
+    return { missingIdempotencyKey: response.status, printJobCreated: false };
+  }, ["UPLOAD-003"]);
+
+  await record("UPLOAD: malformed batch identifiers are rejected before document ingestion", async () => {
+    const response = await request(customerPage, "POST", "/api/v1/public/sessions/current/jobs", {
+      sessionToken: customerSession.sessionToken,
+      headers: { "Idempotency-Key": "smartprint-qa-invalid-batch-" + crypto.randomUUID(), "X-Print-Batch-Id": "not-a-guid" }
+    });
+    assert.equal(response.status, 400, "Malformed batch IDs must be rejected.");
+    assert.equal(response.json?.code, "invalid_batch_id");
+    return { invalidBatchId: response.status, printJobCreated: false };
+  }, ["UPLOAD-004"]);
+
+  await record("DOC: cloud document upload rejects non-multipart requests", async () => {
+    const response = await request(customerPage, "POST", "/api/v1/public/sessions/current/jobs", {
+      sessionToken: customerSession.sessionToken,
+      headers: { "Idempotency-Key": "smartprint-qa-non-multipart-" + crypto.randomUUID() },
+      body: { unexpected: "json is not a document upload" }
+    });
+    assert.equal(response.status, 400, "Document ingestion must require multipart form data.");
+    assert.equal(response.json?.code, "multipart_form_required");
+    return { nonMultipartUpload: response.status, printJobCreated: false };
+  }, ["DOC-006"]);
+
+  await record("JOB: a customer session cannot read a job outside its session", async () => {
+    const response = await request(customerPage, "GET", "/api/v1/public/jobs/" + crypto.randomUUID() + "/status", { sessionToken: customerSession.sessionToken });
+    assert.equal(response.status, 404, "A customer session must not reveal jobs outside its own session.");
+    return { foreignOrUnknownJobStatus: response.status, jobDataReturned: false };
+  }, ["JOB-010"]);
+
+  await record("JOB: a signed-in customer cannot read another customer's job history entry", async () => {
+    const response = await request(customerPage, "GET", "/api/v1/customer/jobs/" + crypto.randomUUID() + "/status", { token: customerTokens.accessToken });
+    assert.equal(response.status, 404, "Customer account job status must hide jobs not owned by that customer.");
+    return { foreignOrUnknownCustomerJob: response.status, jobDataReturned: false };
+  }, ["JOB-011"]);
+
+  await record("PLATFORM: tenant directory rejects overlong search input", async () => {
+    const response = await request(adminPage, "GET", "/api/v1/platform/tenants?search=" + encodeURIComponent("x".repeat(101)), { token: adminTokens.accessToken });
+    assert.equal(response.status, 400, "Tenant search must reject more than 100 characters.");
+    return { overlongSearch: response.status };
+  }, ["PLATFORM-010"]);
+
+  await record("PLATFORM: tenant directory rejects overlong status filters", async () => {
+    const response = await request(adminPage, "GET", "/api/v1/platform/tenants?status=" + encodeURIComponent("S".repeat(25)), { token: adminTokens.accessToken });
+    assert.equal(response.status, 400, "Tenant status filters must reject more than 24 characters.");
+    return { overlongStatus: response.status };
+  }, ["PLATFORM-011"]);
+
+  await record("PLATFORM: tenant directory clamps oversized pagination safely", async () => {
+    const response = assertHttp(await request(adminPage, "GET", "/api/v1/platform/tenants?page=999999&pageSize=999", { token: adminTokens.accessToken }), 200, "Tenant directory upper pagination bounds");
+    assert.equal(response.page, 10000);
+    assert.equal(response.pageSize, 50);
+    assert.ok(Array.isArray(response.items));
+    return { page: response.page, pageSize: response.pageSize };
+  }, ["PLATFORM-012"]);
+
+  await record("PLATFORM: tenant directory clamps negative and zero pagination safely", async () => {
+    const response = assertHttp(await request(adminPage, "GET", "/api/v1/platform/tenants?page=-5&pageSize=0", { token: adminTokens.accessToken }), 200, "Tenant directory lower pagination bounds");
+    assert.equal(response.page, 1);
+    assert.equal(response.pageSize, 1);
+    assert.ok(Array.isArray(response.items));
+    return { page: response.page, pageSize: response.pageSize };
+  }, ["PLATFORM-013"]);
+
+  await record("PLATFORM: unknown tenant status history does not disclose audit data", async () => {
+    const response = await request(adminPage, "GET", "/api/v1/platform/tenants/" + crypto.randomUUID() + "/status-history", { token: adminTokens.accessToken });
+    assert.equal(response.status, 404, "Unknown tenant IDs must not return a status history.");
+    return { unknownTenantHistory: response.status, auditRowsReturned: false };
+  }, ["PLATFORM-014"]);
+
+  await record("SHOP: overlong shop display names are rejected without changing saved branding", async () => {
+    const before = assertHttp(await request(shop1Page, "GET", "/api/v1/shop/profile", { token: shop1Tokens.accessToken }), 200, "Shop profile before display-name boundary test");
+    const rejected = await request(shop1Page, "PUT", "/api/v1/shop/profile", {
+      token: shop1Tokens.accessToken,
+      body: { displayName: "Q".repeat(181), accentColor: before.accentColor, logoUrl: before.logoUrl }
+    });
+    assert.equal(rejected.status, 400, "Shop display names must be limited to 180 characters.");
+    const after = assertHttp(await request(shop1Page, "GET", "/api/v1/shop/profile", { token: shop1Tokens.accessToken }), 200, "Shop profile after display-name boundary test");
+    assert.equal(after.displayName, before.displayName, "Rejected profile changes must not persist.");
+    return { rejectedStatus: rejected.status, savedDisplayNameUnchanged: true };
+  }, ["SHOP-019"]);
+
+  await record("SHOP: malformed accent colors are rejected without changing saved branding", async () => {
+    const before = assertHttp(await request(shop1Page, "GET", "/api/v1/shop/profile", { token: shop1Tokens.accessToken }), 200, "Shop profile before accent-color boundary test");
+    const rejected = await request(shop1Page, "PUT", "/api/v1/shop/profile", {
+      token: shop1Tokens.accessToken,
+      body: { displayName: before.displayName, accentColor: "#12X45G", logoUrl: before.logoUrl }
+    });
+    assert.equal(rejected.status, 400, "Accent colors must be six-digit hexadecimal colors.");
+    const after = assertHttp(await request(shop1Page, "GET", "/api/v1/shop/profile", { token: shop1Tokens.accessToken }), 200, "Shop profile after accent-color boundary test");
+    assert.equal(after.accentColor, before.accentColor, "Rejected accent colors must not persist.");
+    return { rejectedStatus: rejected.status, savedAccentColorUnchanged: true };
+  }, ["SHOP-020"]);
+
+  await record("SHOP: printer creation rejects missing manufacturer and model fields", async () => {
+    const before = assertHttp(await request(shop1Page, "GET", "/api/v1/shop/printers", { token: shop1Tokens.accessToken }), 200, "Printer list before required-field test");
+    const rejected = await request(shop1Page, "POST", "/api/v1/shop/printers", {
+      token: shop1Tokens.accessToken,
+      body: { displayName: "SmartPrint QA Incomplete Printer", manufacturer: "", model: "", connectionType: "USB", capabilitiesJson: "{}" }
+    });
+    assert.equal(rejected.status, 400, "Printer creation must require manufacturer and model.");
+    const after = assertHttp(await request(shop1Page, "GET", "/api/v1/shop/printers", { token: shop1Tokens.accessToken }), 200, "Printer list after required-field test");
+    assert.equal(after.length, before.length, "Rejected printer creation must not create a record.");
+    return { rejectedStatus: rejected.status, printerCountUnchanged: true };
+  }, ["SHOP-021"]);
+
+  await record("SHOP: QR station creation rejects an empty station name without creating a row", async () => {
+    const before = assertHttp(await request(shop1Page, "GET", "/api/v1/shop/qr-stations", { token: shop1Tokens.accessToken }), 200, "Station list before required-field test");
+    const rejected = await request(shop1Page, "POST", "/api/v1/shop/qr-stations", {
+      token: shop1Tokens.accessToken,
+      body: { displayName: " ", printerDeviceId: shop1Printer.id }
+    });
+    assert.equal(rejected.status, 400, "QR station creation must require a non-empty name.");
+    const after = assertHttp(await request(shop1Page, "GET", "/api/v1/shop/qr-stations", { token: shop1Tokens.accessToken }), 200, "Station list after required-field test");
+    assert.equal(after.length, before.length, "Rejected station creation must not create a row.");
+    return { rejectedStatus: rejected.status, stationCountUnchanged: true };
+  }, ["SHOP-022"]);
+
+  await record("SHOP: an unknown printer ID cannot be changed", async () => {
+    const response = await request(shop1Page, "PATCH", "/api/v1/shop/printers/" + crypto.randomUUID() + "/active?isActive=false", { token: shop1Tokens.accessToken });
+    assert.equal(response.status, 404, "Unknown printer IDs must return not found.");
+    return { unknownPrinterMutation: response.status, recordsChanged: false };
+  }, ["SHOP-023"]);
+
+  await record("SHOP: an unknown QR station ID cannot be changed", async () => {
+    const response = await request(shop1Page, "PATCH", "/api/v1/shop/qr-stations/" + crypto.randomUUID() + "/enabled?isEnabled=false", { token: shop1Tokens.accessToken });
+    assert.equal(response.status, 404, "Unknown station IDs must return not found.");
+    return { unknownStationMutation: response.status, recordsChanged: false };
+  }, ["SHOP-024"]);
+
+  await record("PAYMENT: UPI references shorter than four characters are rejected", async () => {
+    const response = await request(customerPage, "POST", "/api/v1/public/batch-payments/" + crypto.randomUUID() + "/report", { body: { referenceNumber: "A1" } });
+    assert.equal(response.status, 400, "UPI references shorter than four characters must be rejected.");
+    return { shortReference: response.status, paymentUpdated: false };
+  }, ["PAY-011"]);
+
+  await record("PAYMENT: UPI references containing whitespace or punctuation are rejected", async () => {
+    const response = await request(customerPage, "POST", "/api/v1/public/batch-payments/" + crypto.randomUUID() + "/report", { body: { referenceNumber: "QA 1234!" } });
+    assert.equal(response.status, 400, "UPI reference characters must be letters, digits, hyphens or underscores.");
+    return { invalidReferenceCharacters: response.status, paymentUpdated: false };
+  }, ["PAY-012"]);
+
+  await record("PAYMENT: UPI references longer than one hundred characters are rejected", async () => {
+    const response = await request(customerPage, "POST", "/api/v1/public/batch-payments/" + crypto.randomUUID() + "/report", { body: { referenceNumber: "Q".repeat(101) } });
+    assert.equal(response.status, 400, "UPI references must not exceed 100 characters.");
+    return { overlongReference: response.status, paymentUpdated: false };
+  }, ["PAY-013"]);
 
 
   await record("Live local browser has no same-origin server errors or critical resource failures", async () => {
