@@ -435,6 +435,10 @@ try {
         if (-not $gradle) { $gradle = Get-Command gradle -ErrorAction SilentlyContinue }
         $sdkRoot = $env:ANDROID_SDK_ROOT
         if ([string]::IsNullOrWhiteSpace($sdkRoot)) { $sdkRoot = $env:ANDROID_HOME }
+        if ([string]::IsNullOrWhiteSpace($sdkRoot) -and $env:LOCALAPPDATA) {
+            $defaultSdk = Join-Path $env:LOCALAPPDATA "Android\Sdk"
+            if (Test-Path -LiteralPath $defaultSdk -PathType Container) { $sdkRoot = $defaultSdk }
+        }
         if (-not $gradle -or [string]::IsNullOrWhiteSpace($sdkRoot) -or -not (Test-Path -LiteralPath $sdkRoot -PathType Container)) {
             Add-QAResult -Name "Android local JVM and emulator suites" -Status "SKIPPED" -Detail "A system Gradle installation and Android SDK are required; no device will be installed or altered."
         } else {
