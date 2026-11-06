@@ -20,6 +20,8 @@ const enabled = name => ['true', '1', 'yes'].includes((process.env[name] || '').
 const runShop = enabled('LIVE_QA_CHECK_SHOP_WORKSPACE');
 const runAdmin = enabled('LIVE_QA_CHECK_PLATFORM_ADMIN');
 const runStation = enabled('LIVE_QA_CHECK_CUSTOMER_STATION');
+const runCustomerUploadWorkflow = enabled('LIVE_QA_CHECK_CUSTOMER_UPLOAD_WORKFLOW');
+const expectedQaShopName = (process.env.SMARTPRINT_LIVE_QA_EXPECTED_QA_SHOP_NAME || '').trim();
 const shopEmail = process.env.SMARTPRINT_LIVE_QA_SHOP_EMAIL || '';
 const shopPassword = process.env.SMARTPRINT_LIVE_QA_SHOP_PASSWORD || '';
 const adminEmail = process.env.SMARTPRINT_LIVE_QA_ADMIN_EMAIL || '';
@@ -28,6 +30,8 @@ const stationPath = (process.env.SMARTPRINT_LIVE_QA_STATION_PATH || '').trim();
 if (runShop && (!shopEmail || !shopPassword)) throw new Error('Dedicated QA shop credentials are required.');
 if (runAdmin && (!adminEmail || !adminPassword)) throw new Error('Dedicated QA admin credentials are required.');
 if (runStation && !/^\/s\/[A-Za-z0-9_-]+\/?$/.test(stationPath)) throw new Error('A dedicated station path such as /s/QA_STATION is required.');
+if (runCustomerUploadWorkflow && (!runShop || !runStation)) throw new Error('The real customer-upload workflow requires the dedicated shop account and dedicated QA station options.');
+if (runCustomerUploadWorkflow && !expectedQaShopName) throw new Error('Set SMARTPRINT_LIVE_QA_EXPECTED_QA_SHOP_NAME to the exact dedicated QA shop display name.');
 
 const { chromium } = await import(pathToFileURL(join(moduleDirectory, 'index.mjs')).href);
 const rl = createInterface({ input, output });
@@ -43,7 +47,13 @@ const report = {
     refundsRecorded: false,
     printDispatches: false,
     shopSettingsChanged: false,
-    temporaryCustomerSession: runStation
+    temporaryCustomerSession: runStation,
+    syntheticDocumentUploaded: false,
+    realJobCreated: false,
+    testJobRejectedBeforePayment: false,
+    paymentAttempts: false,
+    refundsRecorded: false,
+    printDispatches: false
   },
   checks: [],
   warnings: [],
@@ -56,6 +66,8 @@ let browser;
 let context;
 let page;
 let releaseMetadata = null;
+let customerSession = null;
+let signedInShopToken = null;
 
 async function record(name, action) {
   const started = Date.now();
@@ -178,6 +190,188 @@ async function browserRangeProbe(path) {
   return { status: result.status, contentRange: result.headers['content-range'], byteLength: result.byteLength, contentType: result.headers['content-type'] || null };
 }
 
+
+function createSyntheticPdfBase64() {
+  const stream = 'BT /F1 18 Tf 72 720 Td (SmartPrint QA synthetic test document) Tj ET';
+  const objects = [
+    '<< /Type /Catalog /Pages 2 0 R >>',
+    '<< /Type /Pages /Kids [3 0 R] /Count 1 >>',
+    '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>',
+    '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>',
+    '<< /Length ' + Buffer.byteLength(stream, 'ascii') + ' >>\nstream\n' + stream + '\nendstream'
+  ];
+  let pdf = '%PDF-1.4\n';
+  const offsets = [];
+  for (let index = 0; index < objects.length; index += 1) {
+    offsets.push(Buffer.byteLength(pdf, 'ascii'));
+    pdf += (index + 1) + ' 0 obj\n' + objects[index] + '\nendobj\n';
+  }
+  const xrefOffset = Buffer.byteLength(pdf, 'ascii');
+  pdf += 'xref\n0 ' + (objects.length + 1) + '\n';
+  pdf += '0000000000 65535 f \n';
+  for (const offset of offsets) pdf += String(offset).padStart(10, '0') + ' 00000 n \n';
+  pdf += 'trailer\n<< /Size ' + (objects.length + 1) + ' /Root 1 0 R >>\n';
+  pdf += 'startxref\n' + xrefOffset + '\n%%EOF\n';
+  return Buffer.from(pdf, 'ascii').toString('base64');
+}
+
+async function uploadSyntheticPdf(sessionToken, batchId, idempotencyKey, fileName, base64) {
+  const result = await page.evaluate(async ({ sessionToken, batchId, idempotencyKey, fileName, base64 }) => {
+    const bytes = Uint8Array.from(atob(base64), character => character.charCodeAt(0));
+    const form = new FormData();
+    form.append('file', new Blob([bytes], { type: 'application/pdf' }), fileName);
+    form.append('colourMode', 'Mono');
+    form.append('paperSize', 'A4');
+    form.append('isDuplex', 'false');
+    form.append('copies', '1');
+    form.append('orientation', 'AUTO');
+    form.append('batchName', 'SmartPrint automated QA');
+    const response = await fetch('/api/v1/public/sessions/current/jobs', {
+      method: 'POST',
+      credentials: 'same-origin',
+      cache: 'no-store',
+      headers: {
+        'X-Print-Session': sessionToken,
+        'Idempotency-Key': idempotencyKey,
+        'X-Print-Batch-Id': batchId
+      },
+      body: form
+    });
+    return { status: response.status, body: await response.text() };
+  }, { sessionToken, batchId, idempotencyKey, fileName, base64 });
+  let parsed = null;
+  try { parsed = JSON.parse(result.body); } catch {}
+  return { ...result, parsed };
+}
+
+async function runRealCustomerUploadWorkflow() {
+  assert.ok(customerSession?.sessionToken, 'No live customer session token was captured from the dedicated station.');
+  assert.ok(signedInShopToken?.accessToken, 'No authenticated QA shop token is available.');
+  assert.equal(customerSession.shopName, expectedQaShopName,
+    'The selected station belongs to a different shop. No document was uploaded.');
+
+  const sessionHeaders = { 'X-Print-Session': customerSession.sessionToken };
+  const invalid = await uploadSyntheticPdf(
+    customerSession.sessionToken,
+    crypto.randomUUID(),
+    crypto.randomUUID(),
+    'smartprint-invalid-document.pdf',
+    Buffer.from('This is not a PDF document.', 'ascii').toString('base64')
+  );
+  assert.equal(invalid.status, 422,
+    'A malformed PDF should be rejected by the real document validator; received HTTP ' + invalid.status + '.');
+
+  const batchId = crypto.randomUUID();
+  const idempotencyKey = crypto.randomUUID();
+  const fileName = 'smartprint-live-qa-' + new Date().toISOString().replace(/[:.]/g, '-') + '.pdf';
+  const pdfBase64 = createSyntheticPdfBase64();
+  let job = null;
+
+  try {
+    const upload = await uploadSyntheticPdf(
+      customerSession.sessionToken, batchId, idempotencyKey, fileName, pdfBase64
+    );
+    assert.ok([200, 201].includes(upload.status),
+      'Real customer upload failed with HTTP ' + upload.status + ': ' + upload.body.slice(0, 600));
+    assert.ok(upload.parsed?.job?.id, 'Upload response did not contain a real PrintJob ID.');
+    job = upload.parsed.job;
+    report.safety.syntheticDocumentUploaded = true;
+    report.safety.realJobCreated = true;
+
+    assert.equal(job.pageCount, 1, 'Synthetic test PDF should be analysed as exactly one page.');
+    assert.equal(job.status, 'AWAITING_CONFIGURATION', 'New uploaded document should enter configuration.');
+
+    const replay = await uploadSyntheticPdf(
+      customerSession.sessionToken, batchId, idempotencyKey, fileName, pdfBase64
+    );
+    assert.equal(replay.status, 200, 'Idempotent replay should return the existing upload.');
+    assert.equal(replay.parsed?.job?.id, job.id, 'Idempotent replay created or returned a different PrintJob.');
+    assert.equal(replay.parsed?.duplicateRequest, true, 'Idempotent replay was not marked duplicate.');
+
+    const quote = await browserFetch('/api/v1/public/jobs/' + job.id + '/quote', {
+      method: 'POST',
+      headers: sessionHeaders,
+      body: JSON.stringify({
+        colourMode: 'Mono', paperSize: 'A4', isDuplex: false, copies: 1, orientation: 'AUTO'
+      })
+    });
+    assert.equal(quote.status, 200, 'Real quote calculation returned HTTP ' + quote.status + ': ' + quote.body.slice(0, 500));
+    const quoteBody = JSON.parse(quote.body);
+    assert.equal(quoteBody.id, job.id);
+    assert.equal(quoteBody.currency, 'INR');
+    assert.ok(Number.isInteger(quoteBody.quotedAmountMinor) && quoteBody.quotedAmountMinor >= 0);
+    assert.ok(Date.parse(quoteBody.quoteExpiresUtc) > Date.now(), 'Quote expiry must be in the future.');
+
+    const accept = await browserFetch('/api/v1/public/jobs/' + job.id + '/accept-quote', {
+      method: 'POST', headers: sessionHeaders
+    });
+    assert.equal(accept.status, 200, 'Customer quote acceptance returned HTTP ' + accept.status + ': ' + accept.body.slice(0, 500));
+    const accepted = JSON.parse(accept.body);
+    assert.equal(accepted.id, job.id);
+    assert.equal(accepted.status, 'AWAITING_SHOP_APPROVAL');
+
+    const shopHeaders = {
+      Authorization: (signedInShopToken.tokenType || 'Bearer') + ' ' + signedInShopToken.accessToken
+    };
+    const queue = await browserFetch(
+      '/api/v1/shop/print-jobs?offset=0&take=100&search=' + encodeURIComponent(job.jobNumber),
+      { headers: shopHeaders }
+    );
+    assert.equal(queue.status, 200, 'Shop queue could not read the just-created real job.');
+    const jobs = JSON.parse(queue.body);
+    assert.ok(Array.isArray(jobs) && jobs.some(item => item.id === job.id),
+      'The real job was not visible in the correct shop queue.');
+
+    const rejection = await browserFetch('/api/v1/shop/print-jobs/' + job.id + '/reject', {
+      method: 'POST', headers: shopHeaders
+    });
+    assert.equal(rejection.status, 200, 'QA cleanup rejection returned HTTP ' + rejection.status + ': ' + rejection.body.slice(0, 500));
+    assert.equal(JSON.parse(rejection.body).status, 'REJECTED');
+    report.safety.testJobRejectedBeforePayment = true;
+
+    const status = await browserFetch('/api/v1/public/jobs/' + job.id + '/status', {
+      headers: sessionHeaders
+    });
+    assert.equal(status.status, 200, 'Customer could not retrieve the final job state.');
+    const statusBody = JSON.parse(status.body);
+    assert.equal(statusBody.job?.status, 'REJECTED', 'Customer status did not reflect the shop-side QA rejection.');
+    return {
+      stationShop: customerSession.shopName,
+      jobNumber: job.jobNumber,
+      pageCount: job.pageCount,
+      quotedAmountMinor: quoteBody.quotedAmountMinor,
+      currency: quoteBody.currency,
+      idempotentReplay: 'same PrintJob returned; no duplicate created',
+      finalStatus: statusBody.job.status,
+      rejectedBeforePayment: true,
+      paymentAttempted: false,
+      printDispatched: false
+    };
+  } catch (error) {
+    // Best-effort cleanup only for states the API explicitly permits rejecting.
+    if (job?.id && signedInShopToken?.accessToken && !report.safety.testJobRejectedBeforePayment) {
+      try {
+        const shopHeaders = {
+          Authorization: (signedInShopToken.tokenType || 'Bearer') + ' ' + signedInShopToken.accessToken
+        };
+        const status = await browserFetch('/api/v1/public/jobs/' + job.id + '/status', { headers: sessionHeaders });
+        const current = status.status === 200 ? (JSON.parse(status.body).job?.status || '') : '';
+        if (['AWAITING_SHOP_APPROVAL', 'AWAITING_PAYMENT'].includes(current)) {
+          await browserFetch('/api/v1/shop/print-jobs/' + job.id + '/reject', {
+            method: 'POST', headers: shopHeaders
+          });
+          report.safety.testJobRejectedBeforePayment = true;
+        } else {
+          report.warnings.push({ name: 'QA upload cleanup', message: 'Test job ' + job.jobNumber + ' remains in state ' + (current || 'unknown') + '; manual QA-shop review is required.' });
+        }
+      } catch (cleanupError) {
+        report.warnings.push({ name: 'QA upload cleanup', message: 'Could not reject test job ' + job.jobNumber + ': ' + String(cleanupError).slice(0, 500) });
+      }
+    }
+    throw error;
+  }
+}
+
 async function screenshot(name) {
   await page.screenshot({ path: join(screenshots, `${name}.png`), fullPage: true, animations: 'disabled' }).catch(() => {});
 }
@@ -204,6 +398,11 @@ async function signInAndVisit(label, email, password, sections, formSelector, bu
     throw new Error(`${label} account did not reach the workspace. ${authError || 'Check the dedicated QA account or API response.'}`);
   }
   await page.locator('.sidebar .nav-item').first().waitFor({ state: 'visible', timeout: 15000 });
+
+  if (label === 'shop') {
+    const raw = await page.evaluate(() => sessionStorage.getItem('qrtoprint.auth.shop'));
+    try { signedInShopToken = raw ? JSON.parse(raw) : null; } catch { signedInShopToken = null; }
+  }
 
   // Verify the actual scoped bearer token can read its own scope and cannot cross roles.
   const scope = label === 'shop' ? 'shop' : 'admin';
@@ -368,16 +567,47 @@ try {
   }
 
   if (runStation) {
-    await record('Dedicated customer QR station creates a temporary session', async () => {
+    await record('Dedicated customer QR station creates a real temporary session', async () => {
       const result = await visitRoute(stationPath, '.customer-entry', 'customer QR station');
       const state = page.locator('.customer-entry-card .entry-eyebrow');
       await state.waitFor({ state: 'visible', timeout: 25000 });
-      const label = (await state.innerText()).trim();
-      assert.equal(label, 'SECURE SESSION CREATED');
-      return { ...result, stationPath: '[configured dedicated QA station]', sessionCreated: true, state: label };
+      const stateLabel = (await state.innerText()).trim();
+      assert.equal(stateLabel, 'SECURE SESSION CREATED');
+      const publicCode = stationPath.match(/^\\/s\\/([A-Za-z0-9_-]+)\\/?$/)[1];
+      const sessionToken = await page.evaluate(code => sessionStorage.getItem('qrtoprint.customer-session:' + code), publicCode);
+      assert.ok(sessionToken, 'Customer session token was not saved for the dedicated station.');
+      const current = await browserFetch('/api/v1/public/sessions/current', {
+        headers: { 'X-Print-Session': sessionToken }
+      });
+      assert.equal(current.status, 200, 'The real customer session token was not accepted by the API.');
+      const currentBody = JSON.parse(current.body);
+      customerSession = {
+        sessionToken,
+        shopName: currentBody.shop?.displayName || '',
+        expiresUtc: currentBody.expiresUtc,
+        stationPath,
+        localAgentAvailable: Boolean(currentBody.localAgent)
+      };
+      if (expectedQaShopName) assert.equal(customerSession.shopName, expectedQaShopName,
+        'The dedicated station does not belong to the expected QA shop.');
+      return {
+        ...result,
+        stationPath: '[configured dedicated QA station]',
+        sessionCreated: true,
+        sessionApiVerified: true,
+        shopName: customerSession.shopName,
+        expiresUtc: customerSession.expiresUtc,
+        localAgentAvailable: customerSession.localAgentAvailable
+      };
     });
   } else {
     report.checks.push({ id: `SP-WEB-${String(report.checks.length + 1).padStart(3, '0')}`, name: 'Dedicated customer QR station', status: 'SKIPPED', reason: 'Run with -RunCustomerStation and a disposable enabled test station.' });
+  }
+
+  if (runCustomerUploadWorkflow) {
+    await record('Real PDF upload, analysis, idempotency, quote, customer acceptance, shop visibility and safe rejection', async () => runRealCustomerUploadWorkflow());
+  } else {
+    report.checks.push({ id: `SP-WEB-${String(report.checks.length + 1).padStart(3, '0')}`, name: 'Real customer document and quote workflow', status: 'SKIPPED', reason: 'Enable the opt-in customer-upload workflow with a dedicated QA shop and station; the default run creates no jobs.' });
   }
 
   await record('HTTPS origin continuity for application and health routes', async () => {
