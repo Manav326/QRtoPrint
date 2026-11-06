@@ -606,7 +606,8 @@ try {
 
     $liveSuite = Join-Path $PSScriptRoot "smartprint-local-e2e.mjs"
     if (-not (Test-Path -LiteralPath $liveSuite -PathType Leaf)) { throw "Local E2E suite is missing: $liveSuite" }
-    $syntaxOk = Invoke-QAStep -Name "Validate local Playwright suite JavaScript syntax" -LogName "playwright-syntax-check.log" -Action {        & $node.Source "--check" $liveSuite
+    $syntaxOk = Invoke-QAStep -Name "Validate local Playwright suite JavaScript syntax" -LogName "playwright-syntax-check.log" -Action {
+        & $node.Source "--check" $liveSuite
     }
     if (-not $syntaxOk) { throw "The local Playwright suite has a syntax error. Review logs/playwright-syntax-check.log." }
 
