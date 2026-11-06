@@ -1,350 +1,202 @@
-# SmartPrint — existing Playwright coverage and exhaustive live acceptance plan
+# SmartPrint — local real-data exhaustive QA
 
-Target under test: `https://smartprint.quantaedge.in` only.
+This is the execution guide for the Windows QA runner in this repository.
 
-## 1. Existing tests found in `Manav326/QRtoPrint`
+## Testing boundary
 
-### A. Existing live-production Playwright suite
+The exhaustive acceptance run targets only the local SmartPrint stack:
 
-File: `scripts/qa/live-environment.mjs`  
-Workflow: `.github/workflows/live-environment-qa.yml`  
-Workflow name: **SmartPrint Live Environment QA**
+- Portal: http://127.0.0.1:3000
+- API through the portal reverse proxy: http://127.0.0.1:3000/api/...
+- Local PostgreSQL and document storage: the persistent volumes attached to compose.local.yml
 
-This is the current Playwright suite that targets the configured HTTPS deployment. It runs these checks:
+The test runner refuses any target other than the local loopback portal. Its browser and API requests are same-origin. It does not point the test browser at https://smartprint.quantaedge.in, does not use the production database, and does not use mock API routes, synthetic JWTs or fixture customer sessions.
 
-1. API liveness (`/health/live`) and SmartPrint API identity/version.
-2. API readiness and PostgreSQL connection (`/health/ready`).
-3. Platform API rejects unauthenticated access.
-4. An unknown API route returns 404.
-5. Release metadata (`/downloads/status`) is healthy or reports the documented retryable 503.
-6. Public landing page renders in Chromium and uses HTTPS resources.
-7. Shop sign-in screen renders.
-8. Legacy `/login` route remains compatible.
-9. Shop registration screen renders.
-10. Platform-admin sign-in screen renders.
-11. Optional: dedicated QA shop account signs in and visits its 11 workspace sections (read-only).
-12. Optional: dedicated platform-admin account signs in and visits its 5 sections (read-only).
-13. Optional: dedicated station route creates one short-lived customer session.
-14. Application and health routes remain on the configured HTTPS origin.
+The Cloudflare Free/Bot Fight Mode 403 issue is therefore irrelevant to this local run. No Cloudflare security changes are required.
 
-Important limits: the current live suite does not submit registration, upload documents, create print orders, verify payments, refund, dispatch to a printer or confirm physical output. Its optional station test creates a temporary session only. It launches headless Chromium and uses Node's built-in `fetch` for API probes. The Security Events you shared show `HeadlessChrome` and `node` being challenged by Bot Fight Mode, so this existing CI-oriented script is not the preferred runner for the Free-plan production zone. A local Windows headed-browser runner is provided below; it uses Edge/Chromium page-context requests and pauses for a normal interactive Cloudflare challenge if one is shown.
+## One-command run
 
-### B. Existing real-browser UI/visual suite (not live production)
+From a Windows PowerShell window opened in the local QRtoPrint repository:
 
-File: `apps/portal/tests/theme-responsive.browser.mjs`
-
-This launches the portal and desktop frontends locally. It deliberately intercepts API requests and uses fixture data / synthetic browser sessions. It is not a production-data test. It covers:
-
-- Public landing, shop login, admin login, customer QR entry, shop workspace and admin workspace routes.
-- Five viewports: 1440×1000, 1024×900, 768×1024, 520×900 and 390×844.
-- Light/dark theme, theme toggle, refresh persistence, route continuity and preservation across sign-out/sign-in.
-- Layout overflow, clipped controls, top-bar overlap and route title layout.
-- Theme contrast checks for landing, authentication, customer QR and workspace design tokens.
-- Shop navigation and admin navigation, including order-journey fixture checks.
-- Photo Studio browser component at phone/tablet/desktop sizes.
-- Windows desktop frontend at its declared 1000×680 minimum window size.
-
-Because the API is mocked, use it for visual/regression coverage, not for authentication or data correctness against production.
-
-### C. Existing portal logic tests (Node test runner, not Playwright)
-
-The CI workflow runs these 10 files with Node's test runner:
-
-- `apps/portal/tests/portal-routing.test.ts`
-- `apps/portal/tests/order-journey.test.ts`
-- `apps/portal/tests/customer-session-state.test.ts`
-- `apps/portal/tests/table-layout.test.ts`
-- `apps/portal/tests/theme-responsive.test.ts`
-- `apps/portal/tests/batch-checkout-state.test.ts`
-- `apps/portal/tests/local-upload-routing.test.ts`
-- `apps/portal/tests/print-fulfilment-flow.test.ts`
-- `apps/portal/tests/photo-studio.test.ts`
-- `apps/portal/tests/upi-payment-intent.test.ts`
-
-### D. Existing companion suites (not Playwright)
-
-- API: `tests/SmartPrint.Api.Tests/` — .NET tests for tenant boundaries, auth, quotas, batch capacity, quote/pricing, refunds, dispatch, downloads, documents, retention and PostgreSQL migration upgrades.
-- Agent: `tests/SmartPrint.Agent.Tests/` — .NET tests for pairing, credential store, local queue, local endpoint discovery, printer capabilities and Windows print execution. CI separately enables its real Microsoft Print to PDF queue integration.
-- Android: Gradle unit tests plus API 36 emulator UI tests via `scripts/qa/android-emulator-ci.sh`.
-- Windows installer: `scripts/qa/windows-installer-lifecycle.ps1` exercises install/reinstall/upgrade/rollback/uninstall in CI.
-- Physical acceptance: `docs/ANDROID_PHYSICAL_ACCEPTANCE.md` has PHY-01 through PHY-12 and a required owner-to-customer test sequence. These are not proven by emulator or Playwright.
-
-## 2. Run the existing and new test suites from Windows
-
-The repository now provides one Windows orchestrator. Pull `Manav326/QRtoPrint` main, open PowerShell in the QRtoPrint repository root, and run:
-
-```powershell
+~~~powershell
 git pull --ff-only origin main
 .\scripts\qa\run-smartprint-qa.ps1
-```
+~~~
 
-The default run executes these suites in sequence:
+The runner:
 
-1. **Existing portal logic tests** — the same 10 Node test files listed above, using Node 22's built-in test runner.
-2. **Existing responsive/theme Playwright suite** — starts the local portal and desktop frontends with isolated API fixtures. It covers five viewport sizes, light/dark mode, layout overflow, contrast, navigation and Photo Studio. It does not contact production APIs or mutate production data.
-3. **New live headed-browser suite** — opens the production SmartPrint site in Microsoft Edge. If Edge is unavailable, it uses headed Playwright Chromium. It checks the public site, API liveness/readiness, PostgreSQL readiness, unauthenticated platform authorization, unknown route behavior, release metadata, cache policy, one-byte range support for available downloads, login/registration/admin entry screens and HTTPS origin consistency.
+1. Checks Node.js 22+, Docker Desktop and Docker Compose.
+2. Reuses the existing local .env.local and persistent volumes. If this is the first local setup, it invokes scripts/docker-up-local.ps1 to create local secrets and start the local stack. It never runs docker compose down -v.
+3. Rebuilds the current portal/API containers from the source you just pulled and checks /health/ready before tests.
+4. Creates or reuses four clearly labelled QA identities: two shop owners, one global customer and one platform administrator. Shop/customer registration uses the real app registration path; the platform administrator uses the existing protected one-time bootstrap command in the local API container. The bootstrap refuses to elevate a shop user.
+5. Stores generated passwords in .secrets/smartprint-qa/qa-accounts.dpapi.json, protected with Windows DPAPI for the current Windows user. Passwords are not printed, placed in test reports or committed to Git.
+6. Installs/locates the pinned Playwright package and Chromium in the npm cache.
+7. Validates the E2E JavaScript syntax and runs the headed Microsoft Edge/Chromium Playwright suite against the real local portal and API.
+8. Runs the existing portal logic tests, API/.NET tests and Windows Agent tests when the corresponding SDKs are installed. The destructive PostgreSQL migration test is excluded from the local application database by leaving SMARTPRINT_TEST_POSTGRES unset.
+9. If the Microsoft Print to PDF virtual queue is installed, opts in to the Agent's real GDI spooler integration test. That test verifies the Windows virtual printer produced a PDF; it does not send paper to a physical printer.
+10. If system Gradle and the Android SDK are installed, runs Android JVM tests and builds a local-portal debug APK. If an Android emulator is already running, it also runs connected instrumentation tests. It never installs the APK on an attached physical phone.
 
-The orchestrator installs the pinned Playwright 1.56.1 Chromium runtime in npm's temporary cache and runs `pnpm install --frozen-lockfile` for the local visual suite. It does not modify `package.json` or `pnpm-lock.yaml`. On Windows it starts and terminates the local Vite process trees. Results, logs, screenshots, and JSON summaries are placed in a timestamped directory under `artifacts\smartprint-qa\`.
+No extra branch, remote QA secret, Cloudflare rule or manual account setup is required.
 
-The live headed suite sends API probes from the browser page context. If Cloudflare shows a normal interactive challenge, it waits for you to complete it in the visible browser and press Enter in PowerShell. It does not spoof browser fingerprints, hide automation, or bypass Cloudflare protection.
+## Existing test coverage retained
 
-### Optional authenticated read-only suites
+### Portal logic regression tests
 
-Use dedicated QA identities—not personal or customer accounts. The script prompts for email and securely prompts for the password; credentials are not written to the report.
+The runner executes these repository tests with the Node test runner:
 
-```powershell
-.\scripts\qa\run-smartprint-qa.ps1 -RunShopWorkspace -RunPlatformAdmin
-```
+- apps/portal/tests/portal-routing.test.ts
+- apps/portal/tests/order-journey.test.ts
+- apps/portal/tests/customer-session-state.test.ts
+- apps/portal/tests/table-layout.test.ts
+- apps/portal/tests/theme-responsive.test.ts
+- apps/portal/tests/batch-checkout-state.test.ts
+- apps/portal/tests/local-upload-routing.test.ts
+- apps/portal/tests/print-fulfilment-flow.test.ts
+- apps/portal/tests/photo-studio.test.ts
+- apps/portal/tests/upi-payment-intent.test.ts
 
-This signs in and opens all 12 shop sections (`Order Journey`, `Overview`, `Print Queue`, `Printers`, `QR Stations`, `Print Agent`, `Pricing`, `Subscription`, `Payments`, `Customers`, `Reports`, `Settings`) and all 5 platform sections. It also verifies that a shop token cannot access the platform overview and a platform-admin token cannot access a shop profile. These checks are read-only.
+These are isolated logic tests. They are reported separately from the real-data E2E suite and are not presented as live API tests.
 
-### Optional disposable customer-station check
+### Existing Playwright UI fixture suite
 
-Only use an enabled **dedicated QA station**. The check creates one temporary customer session; it does not upload a document or create an order.
+apps/portal/tests/theme-responsive.browser.mjs remains available for UI component development and mock-fixture regression. It deliberately intercepts API calls; it is not executed by the exhaustive real-data runner and does not count as a real-data acceptance pass.
 
-```powershell
-.\scripts\qa\run-smartprint-qa.ps1 -RunCustomerStation -StationPath "/s/QA_STATION_PUBLIC_CODE"
-```
+### Existing live-production smoke suite
 
-You can combine all three options. Do not use an ordinary customer station for this test.
+scripts/qa/live-environment.mjs remains available for a separate production-origin smoke check. It is not the database-mutating local acceptance suite. GitHub-hosted headless requests may still receive Cloudflare Bot Fight Mode challenges on the Free zone.
 
-### Run suites separately when investigating a failure
+## Real-data Playwright journey
 
-```powershell
-# Only the existing portal logic tests and live browser test:
-.\scripts\qa\run-smartprint-qa.ps1 -SkipResponsiveBrowserTests
+The suite is scripts/qa/smartprint-local-e2e.mjs. It launches headed Edge, falling back to headed Playwright Chromium. It saves screenshots and a redacted JSON report.
 
-# Only the local responsive/visual suite and live browser test:
-.\scripts\qa\run-smartprint-qa.ps1 -SkipPortalLogicTests
+### Account creation and authentication
 
-# Only the live headed-browser suite:
-.\scripts\qa\run-smartprint-qa.ps1 -SkipPortalLogicTests -SkipResponsiveBrowserTests
-```
+- Register two new shops through the real shop registration UI, with unique generated business names and example.invalid email identities.
+- Sign out and sign back in through the real shop sign-in UI.
+- Verify incorrect shop passwords are rejected.
+- Create the global customer in local PostgreSQL through the real customer registration API, then verify invalid and successful customer login.
+- Bootstrap a separate platform-admin account in the local API container; verify incorrect password rejection and sign in through the platform-admin UI.
+- Capture real access/refresh tokens from the browser's authenticated session storage; never create test JWTs.
 
-The existing GitHub-hosted `scripts/qa/live-environment.mjs` remains available for CI. It uses headless Chromium and Node `fetch`, so Cloudflare Bot Fight Mode may still challenge that hosted runner. Use the new Windows runner for local public-origin testing without weakening zone security.
+The customer QR-entry screen does not have a separate customer sign-in page. The suite creates a real customer identity through the supported registration API, authenticates that identity, then attaches it to the real station-session request made by the customer QR page.
 
-## 3. Additional live Playwright cases required
+### Platform-admin control centre
 
-The following cases are the missing production-facing E2E coverage to add after the existing suites have produced a baseline report. They must use a dedicated QA shop, test station and synthetic documents. The browser suite must save screenshots, traces, network failures and a redacted JSON report. All mutating cases should be opt-in and carry a `@destructive` / `@controlled-print` tag so a public smoke run cannot execute them accidentally.
+- Navigate Overview, Shop tenants, Plans & entitlements, Shop subscriptions and Operations & retention.
+- Create or reuse SMARTPRINT_QA_AUTOMATION, a zero-priced, cloud-assisted QA-only plan, through the real platform plan screens.
+- Publish a free plan version and assign it to each generated QA shop through the real Grant plan access dialog.
+- Read the saved subscriptions and append-only assignment audit history back from the local API.
+- Verify that a shop cannot access platform endpoints and a platform admin cannot use a shop-scoped endpoint.
 
-### A. Public site, downloads and browser health
+### Shop workspace
 
-| ID | Test | Expected result |
-|---|---|---|
-| SP-LIVE-001 | Landing page loads in headed Edge/Chromium on the canonical hostname | HTTP 200, correct page identity, no uncaught page errors or same-origin 5xx |
-| SP-LIVE-002 | Canonical HTTPS, redirects and host consistency | All app navigation remains on `https://smartprint.quantaedge.in`; no HTTP downgrade |
-| SP-LIVE-003 | Static JS/CSS/fonts/images load | No failed critical resources, mixed content or console errors |
-| SP-LIVE-004 | `/health/live` response schema | API identity and `live` status are correct |
-| SP-LIVE-005 | `/health/ready` response schema | Ready status and database connected |
-| SP-LIVE-006 | `/downloads/status` schema and cache policy | Current version and asset availability are internally consistent |
-| SP-LIVE-007 | Windows download route | Stable-release installer streams with correct content type/length |
-| SP-LIVE-008 | Android download route | Signed Android APK streams only when availability says true |
-| SP-LIVE-009 | Range request / resume download | Valid single byte-range returns correct 206 and Content-Range; invalid range is rejected safely |
-| SP-LIVE-010 | Download proxy redirect handling | Browser remains on SmartPrint origin; upstream signed GitHub Location is not exposed |
-| SP-LIVE-011 | Stable release/version and checksum agreement | Downloaded asset hash matches published SHA256SUMS.txt |
-| SP-LIVE-012 | Download upstream unavailable / retryable error | Friendly retryable state; page remains usable; no broken redirect |
+Each generated shop opens the real sidebar sections:
 
-### B. Authentication, roles and sessions
+- Order Journey
+- Overview
+- Print Queue
+- Customers
+- Printers
+- QR Stations
+- Print Agent
+- Pricing
+- Payments
+- Reports
 
-| ID | Test | Expected result |
-|---|---|---|
-| SP-AUTH-001 | Valid dedicated shop-owner login | Authenticated shop workspace opens for the expected tenant |
-| SP-AUTH-002 | Incorrect password | Clear error; no authenticated session |
-| SP-AUTH-003 | Empty/malformed email and empty password | Inline validation; no request until valid input |
-| SP-AUTH-004 | Repeated failed login / rate limit | Server-side limit applies; no account enumeration or lockout bypass |
-| SP-AUTH-005 | Refresh while authenticated | Session is restored or safely refreshed without losing route/context |
-| SP-AUTH-006 | Expired access token / refresh token | Re-authentication is safe; no protected content leaks |
-| SP-AUTH-007 | Logout | Both in-memory and session credentials are cleared; protected route requires login |
-| SP-AUTH-008 | Shop/admin session separation | Shop token cannot authorize admin; admin token cannot authorize shop |
-| SP-AUTH-009 | Normal shop user attempts platform endpoint | 401/403; no platform data is returned |
-| SP-AUTH-010 | Platform admin attempts tenant data without proper scope | Only permitted platform operations are returned; tenant boundaries enforced |
-| SP-AUTH-011 | Direct navigation to protected deep links while logged out | User is redirected to correct login route and destination restored safely |
-| SP-AUTH-012 | Account email/password update validation | Correct current-password verification, safe email-change handling and no stale session |
-| SP-AUTH-013 | Account recovery / email verification availability | Verify documented state; currently tracked as not implemented, not a test failure if explicitly unavailable |
+The suite also opens the account-menu-only Personal details, Shop profile & branding, Trial & subscription and Help & support screens.
 
-### C. QR station and customer session lifecycle
+For each shop it creates a no-dispatch QA printer record and a dedicated QR station through the actual shop UI. The QA printer has no Agent device attached and its queue name is SMARTPRINT_QA_NO_DISPATCH. It configures a QA-only rate card and the UPI/cash display methods using the real shop forms, then confirms all persisted values through the local API.
 
-| ID | Test | Expected result |
-|---|---|---|
-| SP-QR-001 | Open enabled dedicated station QR | Correct shop branding and customer print form appear |
-| SP-QR-002 | Disabled/revoked/nonexistent station code | Safe unavailable message; no session issued |
-| SP-QR-003 | Create customer session | Session is station- and tenant-bound, short-lived and returned once |
-| SP-QR-004 | Refresh with active session | Same session resumes; no duplicate session/job |
-| SP-QR-005 | Expired session | API rejects it; page guides customer to restart |
-| SP-QR-006 | Revoked session | Existing token cannot continue upload/quote/dispatch |
-| SP-QR-007 | Replay / reuse one-use upload grant | Second use is rejected |
-| SP-QR-008 | Cross-station token or grant replay | Rejected without revealing another shop's metadata |
-| SP-QR-009 | Session keepalive and renewal | Session extends only within policy and correct station scope |
-| SP-QR-010 | Session tab close/reopen | Resume behaviour matches product policy; no session leaks to another browser profile |
-| SP-QR-011 | QR code route parsing / unsafe URL payload | Only approved HTTPS station route accepted; invalid schemes/hosts rejected |
-| SP-QR-012 | High-rate session creation | Server-side rate limit applies without creating duplicate sessions |
+### Responsive and theme coverage
 
-### D. Customer documents, batches, quote and job creation
+- Public landing, shop sign-in, shop registration and platform-admin sign-in pages.
+- Both QA shop workspaces and the platform-admin workspace.
+- Viewports: 1440×1000, 1024×900, 768×1024, 520×900 and 390×844.
+- Light and dark theme in each authenticated workspace.
+- Root/body horizontal overflow and visible interactive controls clipped beyond the viewport.
+- JavaScript exceptions, same-origin console errors, HTTP 5xx responses and failed same-origin JavaScript/CSS/font resources.
 
-| ID | Test | Expected result |
-|---|---|---|
-| SP-DOC-001 | Upload a synthetic valid PDF | Correct analysis, page count, size and SHA-256 recorded |
-| SP-DOC-002 | Upload valid JPG/JPEG/PNG | Image job is accepted with correct media type and page handling |
-| SP-DOC-003 | Extension/MIME/signature mismatch | Rejected server-side, even when browser accept attribute is bypassed |
-| SP-DOC-004 | Zero-byte / corrupt file | Friendly validation; no orphan job/document |
-| SP-DOC-005 | Unsupported executable/script/archive/Office file | Rejected under current supported formats; no parser execution |
-| SP-DOC-006 | 20 MB boundary | At-limit document accepted if otherwise valid; over-limit rejected |
-| SP-DOC-007 | PDF page-count boundary (500) | 500-page maximum enforced; 501-page file rejected |
-| SP-DOC-008 | Multi-file batch boundary (20 files / 50 MB) | In-limit batch accepted; file-count and aggregate-size overflow rejected |
-| SP-DOC-009 | Same file submitted twice | Product's duplicate policy is respected; no accidental duplicate print job |
-| SP-DOC-010 | Batch display | Multiple files appear as one logical batch but independent print jobs as designed |
-| SP-DOC-011 | Copies, colour, paper, duplex and orientation inputs | Values persist across steps and match server quote request |
-| SP-DOC-012 | Quote calculation | Server-side price, tax/fees if applicable, copies and duplex allocations are authoritative |
-| SP-DOC-013 | Customer tampers with price/amount in browser | Server ignores client-supplied amount and returns canonical quote |
-| SP-DOC-014 | Quote expiry | Expired quote cannot be accepted/paid/dispatched |
-| SP-DOC-015 | Quote refresh after settings change | New quote uses current versioned shop settings; prior quote remains immutable |
-| SP-DOC-016 | Browser refresh mid-upload | Recoverable state; no duplicate reservation or lost batch |
-| SP-DOC-017 | Interrupted cloud upload | Retry/resume is bounded and idempotent; no partial document exposed |
-| SP-DOC-018 | Interrupted local upload | Pending ticket reconciles; retry does not create duplicate work |
-| SP-DOC-019 | SHA-256 mismatch / truncated body | Agent/API reject corrupt payload; no print is authorized |
-| SP-DOC-020 | Concurrent uploads at quota boundary | Tenant monthly quota is serialized; no over-allocation |
+The responsive checks navigate real pages using real local data; they do not install mocked API routes.
 
-### E. Cloud-assisted and direct shop-Wi-Fi paths
+### Customer QR, documents and batch review
 
-| ID | Test | Expected result |
-|---|---|---|
-| SP-NET-001 | Cloud-assisted upload | Upload reaches protected cloud storage and is available only to authorized shop/Agent |
-| SP-NET-002 | Local upload with phone on shop LAN | Private Agent route is discovered and upload goes directly to Agent |
-| SP-NET-003 | Phone on wrong Wi-Fi | Local path is not falsely marked ready; safe cloud fallback remains available |
-| SP-NET-004 | Local Network Access permission denied | Helpful recovery message; no leaked private IP/token |
-| SP-NET-005 | Agent offline/unreachable | No silent local success; cloud fallback offered if configured |
-| SP-NET-006 | Router client isolation / firewall blocks TCP 17842 | Clear not-connected state; no repeated uncontrolled dispatch |
-| SP-NET-007 | Local endpoint from non-RFC1918 or wrong port | Browser/native app refuses the endpoint |
-| SP-NET-008 | Wrong Origin / CORS | Agent only accepts exact configured portal origin and approved local requests |
-| SP-NET-009 | One-use grant bound to wrong Agent/printer/station | Upload denied |
-| SP-NET-010 | Local upload grant expiry/revocation | Expired/revoked grant rejected |
-| SP-NET-011 | Local queue disk full / file-system failure | No false success; retry/recovery guidance and integrity maintained |
-| SP-NET-012 | Broadband loss during local upload | Existing local transfer recovery policy applies; cloud control-plane dependency is reported honestly |
+- Open the generated QA station route on the local portal and create a real server-issued, customer-bound session.
+- Verify the real session API and shop binding.
+- Confirm that an invalid PDF is rejected with HTTP 422 before creating a print job.
+- Upload a synthetic two-page PDF through the actual customer file picker and upload UI.
+- Calculate a quote, send it to the shop, verify the customer status/history and shop queue, and confirm the shop can reject an unpaid job.
+- Open a second fresh QR session and upload two different synthetic PDFs in one batch through the actual customer UI.
+- Verify distinct PrintJob IDs, one Batch ID, both files in the correct shop queue and customer-visible status.
+- Open the actual shop batch review modal and preview the first uploaded PDF through the real document-download API.
+- Uncheck the second file, re-check it to prove rejection can be undone before applying, then uncheck it again and apply the review.
+- Verify that exactly one file is AWAITING_PAYMENT and one file is REJECTED.
+- Verify that the rejected file is excluded from the single batch payment total.
 
-### F. Shop workspace and fulfilment
+### Payment-intent safety and accounting guards
 
-| ID | Test | Expected result |
-|---|---|---|
-| SP-SHOP-001 | Open all shop sections | Order Journey, Overview, Print Queue, Printers, QR Stations, Print Agent, Pricing, Subscription, Payments, Customers, Reports and Settings render |
-| SP-SHOP-002 | Deep-link each section and refresh | Correct section restores without broken route |
-| SP-SHOP-003 | Job queue search/filter/pagination | Results and counts agree with server; no tenant leakage |
-| SP-SHOP-004 | Batch cards and counts | One logical card per batch; status counts correctly reflect underlying jobs |
-| SP-SHOP-005 | Open uploaded job/document preview | Only authorized tenant content is available; local-only document stays local |
-| SP-SHOP-006 | Approve a QA job | Correct state transition and audit record |
-| SP-SHOP-007 | Reject a QA job | Correct terminal/review state; customer sees safe reason |
-| SP-SHOP-008 | Select/reassign printer | Only active, compatible printers are offered; choice persists |
-| SP-SHOP-009 | Printer offline or stale capability | Dispatch is blocked or guided safely; no optimistic print-complete state |
-| SP-SHOP-010 | Review/reject individual batch files | Every file starts accepted; individual rejection excludes only that file |
-| SP-SHOP-011 | Undo a file rejection before apply | File returns to accepted and amount/selection recomputes |
-| SP-SHOP-012 | Partial page rejection/refund calculation | Allocation respects copies/duplex/minimum charge; cumulative refund never exceeds original payment |
-| SP-SHOP-013 | Full rejection/refund calculation | Full eligible amount is derived from immutable quote allocation |
-| SP-SHOP-014 | Repeated refund command / idempotency replay | No duplicate refund record or over-refund |
-| SP-SHOP-015 | Customer payment attempt appears in shop | Unverified UPI reference is clearly marked reported/pending, not paid |
-| SP-SHOP-016 | Shop manually verifies QA cash/UPI test payment | Requires authorized operator and audit; use test-only transaction, never fake production receipts |
-| SP-SHOP-017 | Cash/UPI settings and price validation | Invalid configuration rejected; existing jobs retain quote snapshots |
-| SP-SHOP-018 | Dispatch only after server-authorized prerequisites | No job dispatch before approval, valid quote and verified payment where policy requires |
-| SP-SHOP-019 | Duplicate dispatch click / network retry | One dispatch attempt; uncertain physical output is not auto-resubmitted |
-| SP-SHOP-020 | Spooler accepted vs physically completed | UI distinguishes queue acceptance, printing, completed and output-unconfirmed |
-| SP-SHOP-021 | Explicit output confirmation | Only authorized shop operator can confirm; report/job state updates once |
-| SP-SHOP-022 | Restart after uncertain spooler submission | No automatic duplicate print; recovery asks operator to reconcile output |
-| SP-SHOP-023 | Customer directory/history | Tenant-scoped signed-in customer data only; guest jobs remain anonymous as designed |
-| SP-SHOP-024 | Reports and payment totals | Collections and refunds appear in their correct accounting periods |
+The suite creates one real UPI batch payment intent for the one accepted file. It submits a clearly synthetic reference prefixed QA-NOT-REAL, verifies duplicate-reference idempotency, then rejects the pending reference from the shop and verifies duplicate rejection idempotency.
 
-### G. Platform administration
+It deliberately does not:
 
-| ID | Test | Expected result |
-|---|---|---|
-| SP-ADMIN-001 | Admin login and session persistence | Platform identity only; no shop identity confusion |
-| SP-ADMIN-002 | Shop owner visits `/admin` | Admin-only login/denial; no platform access |
-| SP-ADMIN-003 | Open all five platform sections | Overview, Shop tenants, Plans & entitlements, Shop subscriptions and Operations & retention render |
-| SP-ADMIN-004 | Tenant list search/pagination | Correct results; no accidental mutation |
-| SP-ADMIN-005 | Tenant detail cross-check | Tenant status/plan/usage agrees with API, without exposing documents or secrets |
-| SP-ADMIN-006 | Plan version view | Immutable published versions display correctly |
-| SP-ADMIN-007 | Assign trial/free plan to QA tenant | Authorized assignment and audit actor/reason recorded |
-| SP-ADMIN-008 | Reject invalid/expired plan assignment | No unintended entitlement change |
-| SP-ADMIN-009 | Suspend QA tenant | New sessions/quotes/dispatch are blocked; recovery/history remain available |
-| SP-ADMIN-010 | Reactivate suspended QA tenant | Only supported transition allowed and audited |
-| SP-ADMIN-011 | Attempt terminal inactive reactivation | Rejected, no state mutation |
-| SP-ADMIN-012 | Retention settings change | Requires reason and stores before/after audit; only QA tenant/approved test config |
-| SP-ADMIN-013 | Admin logout and token expiry | Platform access removed immediately |
-| SP-ADMIN-014 | Cross-role API attempts | Server rejects, regardless of hidden UI navigation |
+- transfer money;
+- claim the synthetic reference is a real UTR;
+- verify or authorise the payment;
+- record a refund or say money was returned;
+- enable a live payment gateway;
+- dispatch the job to an Agent or printer.
 
-### H. Desktop, Agent and physical printer
+The suite also reads payments/refunds, verifies refund preview is blocked without a verified payment, and checks that dispatch is blocked for a rejected/unpaid job.
 
-| ID | Test | Expected result |
-|---|---|---|
-| SP-WIN-001 | Installer install/reinstall/upgrade/rollback/uninstall | Existing lifecycle script passes without losing pairing or queue state |
-| SP-WIN-002 | Agent initial pairing | Short-lived authorization, correct tenant and device identity |
-| SP-WIN-003 | Re-pair after owner revocation | Requires explicit reconnect after server confirms revocation |
-| SP-WIN-004 | Attempt to move Agent from another active shop | Blocked until original shop revokes it |
-| SP-WIN-005 | Windows service starts under configured identity | Service, DPAPI and ACL permissions work as intended |
-| SP-WIN-006 | Firewall rule scope | Private profile only; TCP 17842 not exposed publicly |
-| SP-WIN-007 | Local endpoint discovery | Only valid private IPv4 endpoints discovered |
-| SP-WIN-008 | Printer inventory sync | Real queue/driver capabilities sync to shop portal |
-| SP-WIN-009 | Disconnect/restart Agent | Queue journal and documents survive restart; heartbeat recovers |
-| SP-WIN-010 | Print synthetic PDF on Microsoft Print to PDF | Actual PDF output file exists and is valid |
-| SP-WIN-011 | Print on designated physical printer | Correct page count, copies, colour, paper and duplex; operator observes output |
-| SP-WIN-012 | Printer offline/out of paper/paper jam | No false completed state; recoverable state and clear operator action |
-| SP-WIN-013 | Output uncertain after service/process restart | No auto reprint; explicit reconciliation required |
-| SP-WIN-014 | Agent disk loss / local source recovery | Documented recovery path; currently a production-readiness gap to validate |
+### Agent and tenant boundaries
 
-### I. Android physical acceptance (not browser-only)
+- Generate a short-lived Agent enrollment code for the QA shop, but do not pair or revoke a machine identity.
+- Verify that Shop One cannot access or mutate Shop Two's resources and job history.
+- Verify that customer/shop/admin tokens cannot cross their respective scopes.
 
-Run and record PHY-01 through PHY-12 in `docs/ANDROID_PHYSICAL_ACCEPTANCE.md`. Playwright can test the embedded web page but cannot prove camera hardware, Android document picker behavior, native permission prompts, Local Network Access or phone-to-Agent transfer. These require a real Android device, and the full owner-to-customer sequence requires an actual shop PC and network.
+## Android and Windows execution
 
-### J. Security, privacy, performance and resilience
+### Android
 
-| ID | Test | Expected result |
-|---|---|---|
-| SP-SEC-001 | Shop A requests Shop B job/document/customer by ID | 404/403 and no data leakage |
-| SP-SEC-002 | Customer session requests different station/tenant | Denied |
-| SP-SEC-003 | Forged JWT / changed tenant claim | Signature/scope validation rejects request |
-| SP-SEC-004 | Missing/invalid/expired Agent credential | Agent endpoint denies access |
-| SP-SEC-005 | Path traversal / encoded traversal in file name | Rejected; storage remains outside web root |
-| SP-SEC-006 | Malicious/corrupt PDF and oversized images | Safely rejected/limited; no unbounded parser execution |
-| SP-SEC-007 | Stored/reflected HTML payload in names/notes | Rendered as text; no script execution |
-| SP-SEC-008 | CSRF/CORS and origin checks | Only approved origins and auth flows work |
-| SP-SEC-009 | Login/QR/upload/Agent rate limits | Limits are server-side and not bypassable by untrusted headers |
-| SP-SEC-010 | Secret/document leakage in console, logs and artifacts | Tokens, passwords, document bytes and signed asset URLs are absent |
-| SP-SEC-011 | Keyboard-only navigation and accessible labels | Primary flows operable; focus and dialogs behave correctly |
-| SP-SEC-012 | Slow 3G / high latency / dropped connection | Clear loading, retry, duplicate-safe state transitions |
-| SP-SEC-013 | Concurrent upload/claim/refund races on PostgreSQL | Exactly-once reservations/claims/refunds; no over-quota or over-refund |
-| SP-SEC-014 | Backup restore rehearsal | Database, document archive and keys restored together and verified |
-| SP-SEC-015 | Agent/local queue restart recovery | Durable queue and event reconciliation; no missing/duplicate job |
-| SP-SEC-016 | Sustained/burst traffic on a disposable QA tenant | Latency/error/rate-limit behavior within agreed operational thresholds |
+When system Gradle and Android SDK are installed, the orchestrator:
 
-## 4. Important features that are not currently implemented
+- runs :app:testDebugUnitTest;
+- builds :app:assembleDebug;
+- uses http://10.0.2.2:3000 so the Android app targets the local portal from the Android emulator;
+- runs :app:connectedDebugAndroidTest only if an Android emulator is already online.
 
-The repository README/roadmap explicitly says some work is not part of the current release. Record these as **NOT IMPLEMENTED / OUT OF SCOPE**, not failed tests:
+Physical Android devices are not targeted automatically. Camera permission flows, real camera scanning, the phone's document picker, Android Wi-Fi permissions and actual phone-to-shop LAN upload still require device acceptance.
 
-- Automated customer payment gateway verification and automated refund execution/reconciliation.
-- Automated SaaS subscription checkout/invoices/webhooks/reconciliation.
-- Office document uploads and multi-file Office conversion.
-- Full iOS native app, Play Store production channel and all-printer universal compatibility.
-- Automated email verification and account recovery.
-- Malware scanning and isolated document parser/converter.
-- End-to-end encryption of direct-LAN document bytes (the current LAN path uses private-network HTTP; do not use on guest/public Wi-Fi).
-- Dedicated least-privilege Windows Agent service identity validation.
-- Encrypted off-host backup and rehearsed full restore.
-- Local Agent disk-loss re-upload recovery and full PostgreSQL concurrency scenarios.
+### Windows virtual printer
 
-## 5. Live test safety and release gates
+If Microsoft Print to PDF is installed, the Agent test run enables only SMARTPRINT_RUN_WINDOWS_SPOOLER_INTEGRATION=1. This exercises the real Windows GDI → virtual spooler → generated PDF output path. The secondary queue integration flag remains off. This is not a physical printer acceptance test.
 
-1. Use one dedicated QA shop tenant, one dedicated enabled QA station, dedicated QA shop/admin users and synthetic documents.
-2. Public smoke and login/navigation tests are read-only. Do not run registration or settings/plan changes on a real customer tenant.
-3. Any case that creates an order, payment record, refund, quota reservation, customer session, dispatch or print output must be tagged and explicitly enabled for the QA tenant only.
-4. Real payment gateway tests are not applicable to this release because automated gateway integration is not implemented. Never use a real customer payment for QA.
-5. Physical output tests must use an explicitly selected test printer or Microsoft Print to PDF. Confirm printer, number of copies and synthetic document before dispatch.
-6. Never automatically retry an output-uncertain print. Reconcile with the operator first.
-7. Capture redacted screenshots, Playwright traces, API status, test ID, build/version and timestamp. Never save password, token, QR session secret, personal document or full payment reference in evidence.
-8. Final sign-off requires no open Sev-1/Sev-2 issues, successful real-device Android acceptance PHY-01–PHY-12, successful owner-to-customer physical print sequence, backup/restore evidence and security review.
+A physical Windows Agent paired to the QA shop, actual printer dispatch, printed paper output and the owner's Android-to-shop-Wi-Fi flow still require a dedicated test machine and printer. The script does not reconfigure a real Agent service, change its identity, install/uninstall the desktop app, or print to an ordinary shop printer.
 
-## 6. Test result states
+## Safety and repeatability
 
-- **PASS** — expected behavior observed with evidence.
-- **FAIL** — reproducible product defect.
-- **BLOCKED** — test could not run due environment, access, dependency or unavailable hardware.
-- **NOT IMPLEMENTED** — explicitly not in current product scope.
-- **SKIPPED** — deliberately not run, with reason recorded.
+- All account names, documents, plans, stations, payment references and jobs are explicitly labelled SmartPrint QA.
+- All portal, API and database operations from the E2E suite are local-only.
+- No existing shop, customer, printer, Agent identity or existing station is intentionally modified.
+- A QA plan is zero-priced. No paid plan assignment is made.
+- QA payment settings use a non-live placeholder UPI identity and cash method. No payment is verified.
+- The two-file batch creates real local records in the local QA tenant. The pending synthetic UPI reference is rejected before payment verification. No refund is recorded.
+- The generated QA account password file is DPAPI-protected for the current Windows user and lives in .secrets/, which is gitignored.
+- Do not upload the .secrets directory, .env.local, raw tokens, screenshots containing private content or local database files to GitHub.
+- Do not aim this runner at the public production URL. Its local E2E script hard-fails unless the origin is loopback on port 3000.
 
-A successful DNS/HTTP request or page render is never sufficient to mark a customer printing flow passed.
+## Evidence and result interpretation
+
+Each run creates:
+
+~~~text
+artifacts/smartprint-qa/<run-id>/
+  summary.json
+  summary.txt
+  logs/
+  local-e2e/
+    report.json
+    report.txt
+    screenshots/
+~~~
+
+A test is PASS only when the real local UI/API operation and its persisted result meet the assertion. Missing local SDKs/devices are SKIPPED; hardware-only acceptance is reported as not performed. A fully green local web/API run does not certify physical Android or printer output. Production release sign-off still requires all applicable items in docs/ANDROID_PHYSICAL_ACCEPTANCE.md and the security/operations checklist.
