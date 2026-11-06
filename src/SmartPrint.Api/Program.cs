@@ -129,7 +129,8 @@ var corsOrigins = (configuredCorsOrigins is { Length: > 0 }
     : new[]
     {
         "http://localhost:3000",
-        "http://localhost:3001"
+        "http://localhost:3001",
+        "http://127.0.0.1:3000"
     })
     .Append("http://tauri.localhost")
     .Distinct(StringComparer.OrdinalIgnoreCase)
@@ -239,7 +240,7 @@ app.MapGet("/health/live", () => Results.Ok(new
     service = "qrtoprint-api",
     status = "live",
     version = typeof(Program).Assembly.GetName().Version?.ToString() ?? "0.1.0"
-}));
+})).AllowAnonymous();
 
 app.MapGet("/health/ready", async (SmartPrintDbContext db, CancellationToken ct) =>
 {
@@ -253,7 +254,7 @@ app.MapGet("/health/ready", async (SmartPrintDbContext db, CancellationToken ct)
     {
         return Results.Problem(statusCode: StatusCodes.Status503ServiceUnavailable, title: "Database unavailable");
     }
-});
+}).AllowAnonymous();
 
 app.MapGet("/", () => Results.Ok(new
 {
@@ -261,7 +262,7 @@ app.MapGet("/", () => Results.Ok(new
     name = "Smart Print API",
     apiVersion = "v1",
     health = "/health/live"
-}));
+})).AllowAnonymous();
 
 var platform = app.MapGroup("/api/v1/platform")
     .RequireAuthorization(PlatformAdminAuthorization.PolicyName);
