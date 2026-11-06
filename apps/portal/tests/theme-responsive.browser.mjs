@@ -48,11 +48,11 @@ function stopWorkspaceProcess(child) {
 }
 
 const server = startWorkspaceProcess([
-  "--filter", "@qrtoprint/portal", "dev",
+  "--filter", "@smart-print/portal", "dev",
   "--host", "127.0.0.1", "--port", "4173", "--strictPort"
 ]);
 const desktopServer = startWorkspaceProcess([
-  "--filter", "@qrtoprint/desktop", "dev",
+  "--filter", "@smart-print/desktop", "dev",
   "--host", "127.0.0.1", "--port", "1420", "--strictPort"
 ]);
 
