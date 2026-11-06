@@ -6,7 +6,7 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
-$repository = 'Manav326/QRtoPrint'
+$repository = 'Manav326/smart-print'
 $repoRoot = Split-Path -Parent $PSScriptRoot
 $configPath = @((Join-Path $repoRoot '.env.local'), (Join-Path $repoRoot '.env')) | Where-Object { Test-Path -LiteralPath $_ -PathType Leaf } | Select-Object -First 1
 if ([string]::IsNullOrWhiteSpace($ApiBaseUrl) -or [string]::IsNullOrWhiteSpace($CustomerPortalOrigin)) {
@@ -66,8 +66,18 @@ $oldMoved = $false
 $newInstalled = $false
 
 try {
-    gh run download $run.databaseId --repo $repository --name qrtoprint-agent-win-x64 --dir $stageDirectory
-    if ($LASTEXITCODE -ne 0) { throw "Could not download the Windows Agent artifact from CI run $($run.databaseId)." }
+    $downloadedArtifact = 'smartprint-agent-win-x64'
+    gh run download $run.databaseId --repo $repository --name $downloadedArtifact --dir $stageDirectory
+    if ($LASTEXITCODE -ne 0) {
+        # The latest successful CI run may predate the artifact rename. Preserve
+        # downloads from that run while preferring the canonical SmartPrint name.
+        Get-ChildItem -LiteralPath $stageDirectory -Force | Remove-Item -Recurse -Force
+        $downloadedArtifact = 'qrtoprint-agent-win-x64'
+        Write-Warning "The selected CI run has no SmartPrint-named Agent artifact; checking its legacy artifact name."
+        gh run download $run.databaseId --repo $repository --name $downloadedArtifact --dir $stageDirectory
+    }
+    if ($LASTEXITCODE -ne 0) { throw "Could not download either the SmartPrint or legacy Windows Agent artifact from CI run $($run.databaseId)." }
+    Write-Host "Downloaded CI artifact: $downloadedArtifact"
 
     $requiredFiles = @(
         'SmartPrint.Agent.exe', 'pair-agent.ps1', 'install-agent-service.ps1',
