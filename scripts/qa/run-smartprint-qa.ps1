@@ -332,17 +332,18 @@ try {
     # particular, never stop or replace a QuantaEdge site container to make
     # room for SmartPrint.
     $portPreflightOk = Invoke-QAStep -Name "Check localhost ports 3000 and 8080 are not owned by another Docker project" -LogName "docker-port-preflight.log" -Action {
-        $runningContainers = @(& $docker.Source "ps" "--format" "{{.Names}}|{{.Ports}}")
+        $runningContainers = @(& $docker.Source "ps" "--format" '{{.Names}}|{{.Ports}}|{{.Label "com.docker.compose.project"}}')
         if ($LASTEXITCODE -ne 0) { throw "Could not inspect running Docker containers." }
         $conflicts = @()
         foreach ($containerLine in $runningContainers) {
-            $parts = $containerLine -split '\|', 2
-            if ($parts.Count -ne 2) { continue }
+            $parts = $containerLine -split '\|', 3
+            if ($parts.Count -lt 2) { continue }
             $containerName = $parts[0].Trim()
             $publishedPorts = $parts[1]
-            if ($containerName.StartsWith("$composeProjectName-", [StringComparison]::Ordinal)) { continue }
-            if ($publishedPorts -match '(^|,)\s*(?:\[[^\]]+\]:|(?:\d{1,3}\.){3}\d{1,3}:)?(?:3000|8080)->') {
-                $conflicts += "$containerName : $publishedPorts"
+            $containerProject = if ($parts.Count -ge 3) { $parts[2].Trim() } else { "" }
+            if ($containerProject -eq $composeProjectName) { continue }
+            if ($publishedPorts -match '(^|,)\s*(?:\[[^\]]+\]:|(?:\d{1,3}\.){3}\d{1,3}:|:::)?(?:3000|8080)->') {
+                $conflicts += "$containerName (project: $containerProject) : $publishedPorts"
             }
         }
         if ($conflicts.Count -gt 0) {
