@@ -351,7 +351,7 @@ try {
             $conflicts | ForEach-Object { Write-Host ("  " + $_) -ForegroundColor Yellow }
             throw "SmartPrint needs localhost port 3000 for the portal. The API remains private behind Nginx on the Compose network. Resolve the listed port ownership safely before running QA again."
         }
-        Write-Host "Ports 3000 and 8080 have no conflicting Docker container owners."
+        Write-Host "Host port 3000 has no conflicting Docker container owner; API port 8080 is private to the Compose network."
     }
     if (-not $portPreflightOk) { throw "Docker port preflight failed; no existing containers were stopped." }
 
