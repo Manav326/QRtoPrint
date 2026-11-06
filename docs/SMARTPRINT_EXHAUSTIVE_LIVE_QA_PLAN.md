@@ -26,7 +26,7 @@ git pull --ff-only origin main
 The runner:
 
 1. Checks Node.js 22.6+, Docker Desktop and Docker Compose.
-2. Reuses the existing local .env.local and persistent volumes. If this is the first local setup, it invokes scripts/docker-up-local.ps1 to create local secrets and start the local stack. It never runs docker compose down -v.
+2. Reuses the existing local .env.local and persistent volumes. Both scripts explicitly pin Docker Compose to project `qrtoprint-local` with `--project-name`, overriding any inherited `COMPOSE_PROJECT_NAME`; SmartPrint cannot reuse the `quantaedge-site` project namespace. The bootstrap never uses `--remove-orphans` and the runner never runs `docker compose down -v`.
 3. Rebuilds the current portal/API containers from the source you just pulled and checks /health/ready before tests.
 4. Creates or reuses four clearly labelled QA identities: two shop owners, one global customer and one platform administrator. Shop/customer registration uses the real app registration path; the platform administrator uses the existing protected one-time bootstrap command in the local API container. The bootstrap refuses to elevate a shop user.
 5. Stores generated passwords in .secrets/smartprint-qa/qa-accounts.dpapi.json, protected with Windows DPAPI for the current Windows user. Passwords are not printed, placed in test reports or committed to Git.
