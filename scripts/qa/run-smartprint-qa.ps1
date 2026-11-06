@@ -548,7 +548,18 @@ try {
         if ($proxyLiveExit -ne 0 -or -not $proxyLiveText) {
             throw "The portal /health/live reverse proxy request failed. curl exit: $proxyLiveExit. Response: $proxyLiveText"
         }
-        if ($proxyLiveText -notmatch '(?s)\n__SMARTPRINT_HTTP_STATUS__:(\d{3})\s*
+        if ($proxyLiveText.Length -lt 3 -or $proxyLiveText -notmatch '\d{3}$') {
+            throw "The portal /health/live response did not include an HTTP status. Response: $proxyLiveText"
+        }
+        $proxyLiveStatus = [int]$proxyLiveText.Substring($proxyLiveText.Length - 3)
+        $proxyLiveBody = $proxyLiveText.Substring(0, $proxyLiveText.Length - 3).Trim()
+        if ($proxyLiveStatus -ne 200) {
+            throw "The portal /health/live reverse proxy returned HTTP $proxyLiveStatus. Response body: $proxyLiveBody"
+        }
+        $proxyLive = $proxyLiveBody | ConvertFrom-Json -ErrorAction Stop
+        if ($proxyLive.status -ne "live") { throw "Portal-proxied API liveness returned an unexpected payload: $proxyLiveBody" }
+
+
 
         $corsArgs = $composeBaseArgs + @(
             "exec", "-T", "api", "curl", "--noproxy", "*", "--silent", "--show-error",
