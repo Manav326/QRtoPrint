@@ -38,8 +38,8 @@ services:
       PublicDownloads__GitHubRepository: ${GITHUB_REPOSITORY:-Manav326/smart-print}
       Cors__AllowedOrigins__0: ${PUBLIC_BASE_URL:?Set PUBLIC_BASE_URL in .env.local}
       Cors__AllowedOrigins__1: "http://localhost:3000"
-    ports:
-      - "127.0.0.1:8080:8080"
+    # Keep the API private to the Compose network. The portal proxies /api and /health
+    # to api:8080; publishing host port 8080 would collide with other local products.
     volumes:
       - qrtoprint_local_documents:/var/lib/qrtoprint/documents
     depends_on:
