@@ -7,6 +7,9 @@ $ErrorActionPreference = "Stop"
 $repoRoot = Split-Path -Parent $PSScriptRoot
 $envPath = Join-Path $repoRoot ".env"
 $composeFile = Join-Path $repoRoot "compose.yml"
+# Always operate on the existing production project and its persistent volumes.
+$composeProjectName = "qrtoprint"
+$composeBaseArgs = @("--project-name", $composeProjectName, "--env-file", $envPath, "-f", $composeFile)
 
 if (-not (Test-Path -LiteralPath $envPath)) {
     throw "No .env file exists. Start QRtoPrint with scripts\docker-up.ps1 first."
@@ -49,7 +52,7 @@ $backupContainer = $null
 
 try {
     Write-Host "Pausing API and portal writes for a consistent backup..." -ForegroundColor Cyan
-    docker compose --env-file $envPath -f $composeFile stop api portal
+    docker compose @composeBaseArgs stop api portal
     if ($LASTEXITCODE -ne 0) {
         throw "Could not pause API and portal services."
     }
@@ -58,18 +61,18 @@ try {
     Write-Host "Exporting PostgreSQL..." -ForegroundColor Cyan
     $dbUser = $values["POSTGRES_USER"]
     $dbName = $values["POSTGRES_DB"]
-    docker compose --env-file $envPath -f $composeFile exec -T db pg_dump -U $dbUser -d $dbName -Fc -f $tempDbFile
+    docker compose @composeBaseArgs exec -T db pg_dump -U $dbUser -d $dbName -Fc -f $tempDbFile
     if ($LASTEXITCODE -ne 0) {
         throw "PostgreSQL export failed."
     }
-    docker compose --env-file $envPath -f $composeFile cp "db:$tempDbFile" $dbFile
+    docker compose @composeBaseArgs cp "db:$tempDbFile" $dbFile
     if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $dbFile)) {
         throw "Could not copy the PostgreSQL backup to $dbFile."
     }
-    docker compose --env-file $envPath -f $composeFile exec -T db rm -f $tempDbFile | Out-Null
+    docker compose @composeBaseArgs exec -T db rm -f $tempDbFile | Out-Null
 
     Write-Host "Archiving encrypted cloud documents..." -ForegroundColor Cyan
-    $apiContainer = docker compose --env-file $envPath -f $composeFile ps -a -q api
+    $apiContainer = docker compose @composeBaseArgs ps -a -q api
     if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($apiContainer)) {
         throw "Could not locate the API container's persistent document volume."
     }
@@ -113,7 +116,7 @@ finally {
     }
     if ($servicesStopped) {
         Write-Host "Restarting API and portal..." -ForegroundColor Cyan
-        docker compose --env-file $envPath -f $composeFile start api portal
+        docker compose @composeBaseArgs start api portal
         if ($LASTEXITCODE -ne 0) {
             Write-Warning "Backup finished but the API/portal restart failed. Run docker compose up -d api portal."
         }
