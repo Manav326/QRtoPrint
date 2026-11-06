@@ -572,17 +572,100 @@ async function setupShopResources(page, tokens, shopLabel) {
 
 async function assertResponsive(page, label, viewport) {
   await page.setViewportSize(viewport);
-  await page.waitForTimeout(100);
-  const metrics = await page.evaluate(() => ({
-    width: window.innerWidth,
-    documentWidth: document.documentElement.scrollWidth,
-    bodyWidth: document.body.scrollWidth
-  }));
+  await page.waitForTimeout(120);
+  const metrics = await page.evaluate(() => {
+    const width = window.innerWidth;
+    const controls = Array.from(document.querySelectorAll("button,a,input,select,textarea,[role='button']"));
+    const clipped = [];
+    for (const element of controls) {
+      const style = getComputedStyle(element);
+      const rect = element.getBoundingClientRect();
+      if (style.display === "none" || style.visibility === "hidden" || rect.width <= 0 || rect.height <= 0) continue;
+      const sidebar = element.closest(".sidebar");
+      if (sidebar && !sidebar.classList.contains("sidebar-open") && width <= 850) continue;
+      let parent = element.parentElement;
+      let insideHorizontalScroller = false;
+      while (parent && parent !== document.body) {
+        const parentStyle = getComputedStyle(parent);
+        const parentRect = parent.getBoundingClientRect();
+        if ((parentStyle.overflowX === "auto" || parentStyle.overflowX === "scroll") &&
+            parent.scrollWidth > parent.clientWidth + 1 &&
+            parentRect.left >= -1 && parentRect.right <= width + 1) {
+          insideHorizontalScroller = true;
+          break;
+        }
+        parent = parent.parentElement;
+      }
+      if (!insideHorizontalScroller && (rect.left < -1 || rect.right > width + 1)) {
+        clipped.push({
+          tag: element.tagName.toLowerCase(),
+          label: element.getAttribute("aria-label") || element.textContent?.trim().slice(0, 60) || "",
+          left: Math.round(rect.left),
+          right: Math.round(rect.right)
+        });
+      }
+    }
+    return {
+      width,
+      documentWidth: document.documentElement.scrollWidth,
+      bodyWidth: document.body.scrollWidth,
+      clippedControls: clipped.slice(0, 12)
+    };
+  });
   assert.ok(metrics.documentWidth <= viewport.width + 1,
     label + " document overflow at " + viewport.width + "px: " + JSON.stringify(metrics));
   assert.ok(metrics.bodyWidth <= viewport.width + 1,
     label + " body overflow at " + viewport.width + "px: " + JSON.stringify(metrics));
+  assert.equal(metrics.clippedControls.length, 0,
+    label + " has interactive controls clipped at " + viewport.width + "px: " + JSON.stringify(metrics.clippedControls));
   return metrics;
+}
+
+async function setWorkspaceTheme(page, dark) {
+  const toggle = page.locator(".theme-toggle-button").first();
+  await toggle.waitFor({ state: "visible", timeout: 10000 });
+  const desired = String(dark);
+  if (await toggle.getAttribute("aria-pressed") !== desired) await toggle.click();
+  assert.equal(await toggle.getAttribute("aria-pressed"), desired,
+    "The real workspace theme toggle did not switch to " + (dark ? "dark" : "light") + ".");
+}
+
+async function runAuthenticatedResponsiveMatrix(page, sections, label) {
+  const viewports = [
+    { width: 1440, height: 1000 },
+    { width: 1024, height: 900 },
+    { width: 768, height: 1024 },
+    { width: 520, height: 900 },
+    { width: 390, height: 844 }
+  ];
+  let checks = 0;
+  for (const dark of [false, true]) {
+    await setWorkspaceTheme(page, dark);
+    for (const viewport of viewports) {
+      await page.setViewportSize(viewport);
+      for (const section of sections) {
+        if (viewport.width <= 850) {
+          const openNavigation = page.getByRole("button", { name: "Open navigation" });
+          if (await openNavigation.isVisible().catch(() => false)) await openNavigation.click();
+        }
+        const item = page.locator(".sidebar .nav-item").filter({ hasText: section }).first();
+        await item.waitFor({ state: "visible", timeout: 12000 });
+        await item.click();
+        await page.waitForFunction(
+          expected => [...document.querySelectorAll(".sidebar .nav-item")]
+            .some(element => element.textContent.trim() === expected && element.classList.contains("active")),
+          section,
+          { timeout: 12000 }
+        );
+        await assertResponsive(page, label + " / " + section + " / " + (dark ? "dark" : "light"), viewport);
+        checks += 1;
+      }
+    }
+  }
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  await setWorkspaceTheme(page, false);
+  await screenshot(page, label + "-responsive-final");
+  return { workspace: label, sections: sections.length, themes: 2, viewportWidths: viewports.map(item => item.width), layoutChecks: checks, mockedApiRoutes: 0 };
 }
 
 try {
