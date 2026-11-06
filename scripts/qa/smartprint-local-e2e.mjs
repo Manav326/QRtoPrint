@@ -34,6 +34,8 @@ const report = {
   runId,
   startedUtc: new Date().toISOString(),
   browser: null,
+  browserVersion: null,
+  browserExecutablePath: null,
   safety: {
     usedMockApiRoutes: false,
     usedSyntheticJwtTokens: false,
@@ -876,17 +878,10 @@ async function runAuthenticatedResponsiveMatrix(page, sections, label) {
 }
 
 try {
-  browser = await (async () => {
-    try {
-      const instance = await chromium.launch({ channel: "msedge", headless: false });
-      report.browser = "Microsoft Edge headed";
-      return instance;
-    } catch {
-      const instance = await chromium.launch({ headless: false });
-      report.browser = "Playwright Chromium headed";
-      return instance;
-    }
-  })();
+  browser = await chromium.launch({ headless: false });
+  report.browser = "Playwright Chromium headed";
+  report.browserVersion = browser.version();
+  report.browserExecutablePath = chromium.executablePath();
   context = await browser.newContext({ viewport: { width: 1440, height: 1000 }, acceptDownloads: false });
   context.on("page", watchPage);
   page = await context.newPage();
@@ -2488,10 +2483,15 @@ try {
   const failedCases = [...caseResults.values()].filter(status => status === "FAIL").length;
   const skippedCases = [...caseResults.values()].filter(status => status === "SKIPPED").length;
   const missingCases = PLANNED_CASE_IDS.filter(caseId => !caseResults.has(caseId));
+  const caseExecutionCoveragePercent = Number(((caseResults.size / PLANNED_CASE_IDS.length) * 100).toFixed(1));
+  const casePassPercent = Number(((passedCases / PLANNED_CASE_IDS.length) * 100).toFixed(1));
   report.caseCoverage = {
     plannedCases: PLANNED_CASE_IDS.length,
     uniqueCasesExercised: caseResults.size,
-    coveragePercent: Number(((caseResults.size / PLANNED_CASE_IDS.length) * 100).toFixed(1)),
+    coveragePercent: caseExecutionCoveragePercent,
+    caseExecutionCoveragePercent,
+    casePassPercent,
+    allPlannedCasesPassed: caseResults.size === PLANNED_CASE_IDS.length && passedCases === PLANNED_CASE_IDS.length,
     coverageGatePassed: (caseResults.size / PLANNED_CASE_IDS.length) >= 0.9,
     passedCases,
     failedCases,
@@ -2507,6 +2507,9 @@ try {
     plannedCases: report.caseCoverage.plannedCases,
     uniqueCasesExercised: report.caseCoverage.uniqueCasesExercised,
     coveragePercent: report.caseCoverage.coveragePercent,
+    caseExecutionCoveragePercent: report.caseCoverage.caseExecutionCoveragePercent,
+    casePassPercent: report.caseCoverage.casePassPercent,
+    allPlannedCasesPassed: report.caseCoverage.allPlannedCasesPassed,
     coverageGatePassed: report.caseCoverage.coverageGatePassed,
     passedCases: report.caseCoverage.passedCases,
     failedCases: report.caseCoverage.failedCases,
@@ -2521,7 +2524,8 @@ try {
     "Skipped: " + report.summary.skipped + "\n" +
     "Warnings: " + report.summary.warnings + "\n" +
     "Test cases executed: " + report.caseCoverage.uniqueCasesExercised + "/" + report.caseCoverage.plannedCases + "\n" +
-    "Test case coverage: " + report.caseCoverage.coveragePercent + "% (minimum 90%)\n" +
+    "Functional case execution coverage: " + report.caseCoverage.caseExecutionCoveragePercent + "% (minimum 90%)\n" +
+    "Functional case pass rate: " + report.caseCoverage.casePassPercent + "%\n" +
     "Test cases passed/failed: " + report.caseCoverage.passedCases + "/" + report.caseCoverage.failedCases + "\n" +
     "Coverage gate: " + (report.caseCoverage.coverageGatePassed ? "PASS" : "FAIL") + "\n" +
     "Missing test cases: " + report.caseCoverage.missingCases.join(", ") + "\n" +
