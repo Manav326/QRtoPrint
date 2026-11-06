@@ -14,7 +14,7 @@ SmartPrint by QuantaEdge (repository: smart-print) is a multi-tenant SaaS platfo
 
 ## Deployment origin
 
-The application has one public origin, configured per deployment in PUBLIC_BASE_URL. The customer portal, shop portal, platform administration, API and station QR links all use that origin; do not add separate API or admin hostnames for this application. Set IMAGE_NAMESPACE in .env to `ghcr.io/manav326`; production images are published as `smart-print-api` and `smart-print-portal`. Set GITHUB_REPOSITORY to `Manav326/smart-print` for release downloads.
+The GitHub repository and container images use the `smart-print` identity. Local and production Docker image names are isolated as `localhost/smart-print/smart-print-api:local`, `localhost/smart-print/smart-print-portal:local`, `ghcr.io/manav326/smart-print-api`, and `ghcr.io/manav326/smart-print-portal`. Existing Compose project identifiers remain temporarily unchanged to preserve persistent database/document volumes during the rename; do not rename or delete those volumes as part of this transition. The application has one public origin, configured per deployment in PUBLIC_BASE_URL. The customer portal, shop portal, platform administration, API and station QR links all use that origin; do not add separate API or admin hostnames for this application. Set IMAGE_NAMESPACE in .env to `ghcr.io/manav326`; production images are published as `smart-print-api` and `smart-print-portal`. Set GITHUB_REPOSITORY to `Manav326/smart-print` for release downloads.
 
 ## Repository status
 
