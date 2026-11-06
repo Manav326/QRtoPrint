@@ -230,8 +230,14 @@ function Install-OrLocatePlaywright {
     if (-not $npm) { $npm = Get-Command npm -ErrorAction Stop }
 
     if (-not $SkipPlaywrightInstall) {
-        & $npm.Source "exec" "--yes" "--package=playwright@1.56.1" "--" "playwright" "install" "chromium"
-        if ($LASTEXITCODE -ne 0) { throw "Playwright 1.56.1 Chromium installation failed." }
+        # Capture npm's browser-download output so PowerShell does not return
+        # those progress lines as part of this function's module-path result.
+        $installOutput = @(& $npm.Source "exec" "--yes" "--package=playwright@1.56.1" "--" "playwright" "install" "chromium" 2>&1)
+        $installExitCode = $LASTEXITCODE
+        if ($installExitCode -ne 0) {
+            $installOutput | ForEach-Object { Write-Host $_ }
+            throw "Playwright 1.56.1 Chromium installation failed with exit code $installExitCode."
+        }
     }
 
     $npmCache = (& $npm.Source "config" "get" "cache").Trim()
