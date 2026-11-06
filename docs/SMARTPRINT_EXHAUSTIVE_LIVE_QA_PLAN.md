@@ -151,15 +151,19 @@ The suite also reads payments/refunds, verifies refund preview is blocked withou
 
 ### Agent and tenant boundaries
 
-- Generate a short-lived Agent enrollment code for the QA shop, but do not pair or revoke a machine identity.
+- Generate a real one-time Agent enrollment code and redeem it through the actual `/agent/enroll` endpoint to create a disposable local QA Agent identity with a unique QA fingerprint.
+- Authenticate the QA protocol client using the real secret returned by enrollment, send a heartbeat, reject malformed printer discovery metadata, and accept an empty printer-discovery sync. No physical printer is advertised or asserted.
+- Verify that an enrollment code cannot be replayed, revoke the disposable QA Agent through the shop endpoint, and prove its credential can no longer heartbeat.
+- Probe all 17 protected Agent API routes without credentials and verify they return 401. These are live API auth tests, not mocked routes.
+- The runner does not install, pair or reconfigure a Windows Agent service, and it does not touch a physical printer.
 - Verify that Shop One cannot access or mutate Shop Two's resources and job history.
 - Verify that customer/shop/admin tokens cannot cross their respective scopes.
 
 ## Expanded functional acceptance catalogue and 90% gate
 
-The local real-data Playwright runner now carries **195 uniquely identified functional acceptance cases**. Each case ID is attached to the actual E2E record that performs its assertions. At the end of a run, report.json and report.txt show planned cases, reached cases, the coverage percentage, pass/fail counts, and any case IDs that were not reached.
+The local real-data Playwright runner now carries **219 uniquely identified functional acceptance cases**. Each case ID is attached to the actual E2E record that performs its assertions. At the end of a run, report.json and report.txt show planned cases, reached cases, the coverage percentage, pass/fail counts, and any case IDs that were not reached.
 
-**Coverage definition:** functional test-case execution coverage = unique planned case IDs reached by the runner ÷ 195. The runner exits with a failure when this is below **90%**. A failed assertion still counts as an executed case, so coverage and pass rate are reported separately. A release-quality run should have 100% of the cases reached and 100% of executed assertions passing.
+**Coverage definition:** functional test-case execution coverage = unique planned case IDs reached by the runner ÷ 219. The runner exits with a failure when this is below **90%**. A failed assertion still counts as an executed case, so coverage and pass rate are reported separately. A release-quality run should have 100% of the cases reached and 100% of executed assertions passing.
 
 This is **not source-code line or branch coverage**. No 90% code-coverage claim is made. Measuring line/branch coverage requires a separate instrumented Coverlet/Node coverage run and generated coverage reports; it must not be inferred from the count of functional cases.
 
@@ -188,7 +192,7 @@ This is **not source-code line or branch coverage**. No 90% code-coverage claim 
 | Batch workflow | BATCH-001–012 | 12 | Two real documents, shared Batch ID, distinct PrintJob IDs, queue/customer states, preview, accept-by-default, undo rejection and individual final decisions |
 | Payment workflow | PAY-001–010 | 10 | Payment verification/intent guards, one accepted-file total, synthetic reference idempotency, shop rejection and customer-visible rejected state; no actual money receipt |
 | Refund safety | REFUND-001–004 | 4 | Refund preview without verified funds, sent-confirmation requirement and refund-screen/list guard checks; no false refund record |
-| Agent lifecycle guardrails | AGENT-001–005 | 5 | Agent presence, no-Agent dispatch rejection and disposable enrollment-code generation without pairing a machine |
+| Agent lifecycle and protocol security | AGENT-001–029 | 29 | Agent presence/dispatch guard, one-time enrollment, ephemeral QA identity, authenticated heartbeat, printer-sync validation, one-time-code replay, revocation and no-credential denial on every protected Agent endpoint |
 | Printer/station controls | DEVICE-001–002 | 2 | QA printer and station disable/restore lifecycle |
 | Tenant lifecycle | TENANT-001–004 | 4 | Invalid status rejected, QA tenant suspension blocks normal work, restore is audited and idempotent duplicate state is safe |
 | Security guard | SEC-001 | 1 | Unpaid/rejected work cannot cross into a financial refund action |
@@ -203,6 +207,7 @@ The extra cases are intentionally run against QA-only identities and records:
 - **Shop configuration:** each invalid update is followed by a read-back. Rejected rate/printer/station writes must not change the rate-card version or create unintended rows. A station cannot be attached to another tenant's printer.
 - **QR/session:** tests prove the opaque session token cannot be read anonymously or resumed against another tenant's QR station. A disabled or rotated station code cannot create a new session; the new rotated code must work.
 - **Reports:** Shop One is checked against each supported 7-, 30- and 90-day summary window, an unsupported 14-day window is rejected, and Shop Two reads its own report under its own token.
+- **Agent protocol:** a QA identity is enrolled with a one-time code and later revoked. The heartbeat and printer-discovery routes are called against the real local API, and all protected Agent routes reject missing credentials. No local Windows Agent executable or physical printer is represented as paired.
 - **Photo Studio:** a synthetic PNG is processed in a separate browser page. The test opens the actual editor, exercises crop/look/background and optional form controls, generates the prepared A4 photo PDF, verifies the preview, and confirms no server-side customer print job was created. The prepared file is not uploaded or sent to the shop.
 - **Payment/refund:** test-only payment references are explicitly marked synthetic. A rejected payment cannot be manually verified, an unpaid/rejected job cannot be approved/dispatched, refund preview without verified money is rejected, and the API refuses a refund request whose `confirmedSent` value is false. No real transfer, payment verification, refund, gateway or printer dispatch occurs.
 - **Platform/tenant:** only the generated QA shop is suspended; it is restored to Active in the same run. Operational settings are saved with their existing values only to prove the audit trail, so platform policy values are not changed. A duplicate Active transition must be idempotent.
@@ -212,7 +217,7 @@ The extra cases are intentionally run against QA-only identities and records:
 The 191-case gate measures the documented local functional catalogue. It does not replace these additional suites or acceptance requirements:
 
 - The portal Node regression suite and the API/Agent .NET unit suites remain separate test results. They provide domain/logic regression coverage beyond the mapped browser/API acceptance cases.
-- The Windows Agent's full live machine lifecycle—real enrollment, heartbeat, printer discovery, local queue claim/receipt, spooler accepted/failed/unconfirmed states, PDF export and output confirmation—is not exercised by the current non-paired QA E2E. Only safe Agent presence/dispatch guards and enrollment-code creation are tested here; the Agent unit suite and optional Microsoft Print to PDF integration remain separate.
+- The Windows Agent executable's full live machine lifecycle—actual service enrollment, local queue claim/receipt, spooler accepted/failed/unconfirmed states, PDF export and output confirmation—is not exercised by the protocol test client. The E2E does exercise the server's real one-time enrollment, heartbeat, printer-sync validation, revocation and auth protections with a disposable QA identity. The Agent unit suite and optional Microsoft Print to PDF integration remain separate.
 - The Android emulator test suite is conditional on an installed SDK and an already running emulator. Physical Android camera, permission, local-network and Wi-Fi readiness tests remain in docs/ANDROID_PHYSICAL_ACCEPTANCE.md.
 - Real LAN direct upload, Windows service identity, a physical printer, printed paper, power/network interruption recovery, concurrency/load, backup/restore rehearsal and payment-provider settlement require separate dedicated acceptance. They are not counted as passed by this 191-case browser suite.
 - No destructive tenant deactivation, data deletion, storage cleanup, real payment, actual refund, permanent printer pairing or physical print is performed by this runner.
