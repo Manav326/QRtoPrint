@@ -1,14 +1,14 @@
 FROM node:22-alpine AS build
 ARG SOURCE_REPOSITORY=
 LABEL org.opencontainers.image.source="${SOURCE_REPOSITORY}"
-LABEL org.opencontainers.image.description="QRtoPrint customer and shop web portal"
+LABEL org.opencontainers.image.description="SmartPrint customer and shop web portal"
 WORKDIR /workspace
 RUN corepack enable && corepack prepare pnpm@10.18.0 --activate
 COPY . .
 RUN pnpm install --frozen-lockfile
 ARG VITE_API_BASE_URL=
 ENV VITE_API_BASE_URL=${VITE_API_BASE_URL}
-RUN pnpm --filter @qrtoprint/portal build
+RUN pnpm --filter @smartprint/portal build
 
 FROM nginx:alpine AS runtime
 COPY apps/portal/nginx.conf /etc/nginx/conf.d/default.conf
