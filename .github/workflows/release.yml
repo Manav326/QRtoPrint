@@ -83,13 +83,13 @@ jobs:
         shell: pwsh
         run: |
           $env:VITE_API_BASE_URL = $env:SMARTPRINT_PUBLIC_BASE_URL
-          pnpm --filter @qrtoprint/desktop build
+          pnpm --filter @smartprint/desktop build
           if ($LASTEXITCODE -ne 0) { throw "SmartPrint desktop frontend build failed." }
       - name: Build native Windows desktop executable
         shell: pwsh
         run: |
           $env:VITE_API_BASE_URL = $env:SMARTPRINT_PUBLIC_BASE_URL
-          pnpm --filter @qrtoprint/desktop exec tauri build --no-bundle --ci
+          pnpm --filter @smartprint/desktop exec tauri build --no-bundle --ci
           if ($LASTEXITCODE -ne 0) { throw "SmartPrint native desktop build failed." }
           $nativeExe = "apps/desktop/src-tauri/target/release/smartprint-desktop.exe"
           if (-not (Test-Path -LiteralPath $nativeExe)) { throw "The SmartPrint native desktop executable was not produced." }
