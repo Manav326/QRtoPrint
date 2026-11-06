@@ -538,28 +538,30 @@ try {
         if ($apiLive.status -ne "live") { throw "Direct API liveness returned an unexpected payload." }
 
         $proxyLiveArgs = $composeBaseArgs + @(
-            "exec", "-T", "api", "curl", "--noproxy", "*", "--silent", "--show-error",
-            "--write-out", "\n__SMARTPRINT_HTTP_STATUS__:%{http_code}",
+            "exec", "-T", "api", "curl", "--noproxy", "*", "--silent", "--show-error", "--include",
             "http://portal/health/live"
         )
-        $proxyLiveOutput = & $docker.Source @proxyLiveArgs
+        $proxyLiveOutput = @(& $docker.Source @proxyLiveArgs)
         $proxyLiveExit = $LASTEXITCODE
         $proxyLiveText = $proxyLiveOutput -join [Environment]::NewLine
         if ($proxyLiveExit -ne 0 -or -not $proxyLiveText) {
             throw "The portal /health/live reverse proxy request failed. curl exit: $proxyLiveExit. Response: $proxyLiveText"
         }
-        if ($proxyLiveText.Length -lt 3 -or $proxyLiveText -notmatch '\d{3}$') {
-            throw "The portal /health/live response did not include an HTTP status. Response: $proxyLiveText"
+        $proxyLiveStatusMatch = [regex]::Match($proxyLiveText, '(?m)^HTTP/\S+\s+(?<status>\d{3})')
+        if (-not $proxyLiveStatusMatch.Success) {
+            throw "The portal /health/live response did not contain an HTTP status line. Response: $proxyLiveText"
         }
-        $proxyLiveStatus = [int]$proxyLiveText.Substring($proxyLiveText.Length - 3)
-        $proxyLiveBody = $proxyLiveText.Substring(0, $proxyLiveText.Length - 3).Trim()
+        $proxyLiveStatus = [int]$proxyLiveStatusMatch.Groups["status"].Value
+        $proxyLiveSeparator = [regex]::Match($proxyLiveText, '\r?\n\r?\n')
+        if (-not $proxyLiveSeparator.Success) {
+            throw "The portal /health/live response did not contain an HTTP header/body separator. Response: $proxyLiveText"
+        }
+        $proxyLiveBody = $proxyLiveText.Substring($proxyLiveSeparator.Index + $proxyLiveSeparator.Length).Trim()
         if ($proxyLiveStatus -ne 200) {
             throw "The portal /health/live reverse proxy returned HTTP $proxyLiveStatus. Response body: $proxyLiveBody"
         }
         $proxyLive = $proxyLiveBody | ConvertFrom-Json -ErrorAction Stop
         if ($proxyLive.status -ne "live") { throw "Portal-proxied API liveness returned an unexpected payload: $proxyLiveBody" }
-
-
 
         $corsArgs = $composeBaseArgs + @(
             "exec", "-T", "api", "curl", "--noproxy", "*", "--silent", "--show-error",
