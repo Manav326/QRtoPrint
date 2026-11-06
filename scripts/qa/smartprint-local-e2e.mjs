@@ -235,6 +235,13 @@ async function signInPlatformAdmin(page, email, password) {
 async function navigateSections(page, labels, prefix) {
   const visited = [];
   for (const label of labels) {
+    const viewportWidth = await page.evaluate(() => window.innerWidth);
+    if (viewportWidth <= 850) {
+      const openNavigation = page.getByRole("button", { name: "Open navigation" });
+      if (await openNavigation.isVisible().catch(() => false)) {
+        await openNavigation.click();
+      }
+    }
     const item = page.locator(".sidebar .nav-item").filter({ hasText: label }).first();
     await item.waitFor({ state: "visible", timeout: 12000 });
     await item.click();
@@ -244,7 +251,7 @@ async function navigateSections(page, labels, prefix) {
       label,
       { timeout: 12000 }
     );
-    await page.waitForTimeout(100);
+    await page.waitForTimeout(120);
     await screenshot(page, prefix + "-" + label);
     visited.push(label);
   }
@@ -689,12 +696,31 @@ try {
     };
   });
 
-  await record("Shop one navigates every real workspace section and loads its APIs", async () => {
+  await record("Shop one navigates every real sidebar section and the account-menu-only tools", async () => {
     const sections = [
-      "Order Journey", "Overview", "Print Queue", "Printers", "QR Stations",
-      "Print Agent", "Pricing", "Subscription", "Payments", "Customers", "Reports", "Settings"
+      "Order Journey", "Overview", "Print Queue", "Customers",
+      "Printers", "QR Stations", "Print Agent", "Pricing", "Payments", "Reports"
     ];
     const visited = await navigateSections(shop1Page, sections, "shop-one");
+    const accountMenu = shop1Page.getByRole("button", { name: /Account options for/ });
+    await accountMenu.click();
+    await shop1Page.getByRole("button", { name: "Personal details" }).click();
+    await shop1Page.getByRole("dialog", { name: "Personal details" }).waitFor({ state: "visible", timeout: 10000 });
+    await screenshot(shop1Page, "shop-one-personal-details");
+    await shop1Page.getByRole("button", { name: "Close" }).last().click();
+    await accountMenu.click();
+    await shop1Page.getByRole("button", { name: "Shop profile & branding" }).click();
+    await shop1Page.locator(".settings-panel").waitFor({ state: "visible", timeout: 10000 });
+    await screenshot(shop1Page, "shop-one-profile-branding");
+    await accountMenu.click();
+    await shop1Page.getByRole("button", { name: "Trial & subscription" }).click();
+    await shop1Page.locator(".subscription-workspace").waitFor({ state: "visible", timeout: 10000 });
+    await screenshot(shop1Page, "shop-one-subscription");
+    await accountMenu.click();
+    await shop1Page.getByRole("button", { name: "Help & support" }).click();
+    await shop1Page.getByRole("dialog", { name: "Help & support" }).waitFor({ state: "visible", timeout: 10000 });
+    await screenshot(shop1Page, "shop-one-help-support");
+    await shop1Page.getByRole("button", { name: "Close" }).last().click();
     const checks = [
       ["/api/v1/shop/profile", "profile"],
       ["/api/v1/shop/subscription", "subscription"],
@@ -719,12 +745,19 @@ try {
     return { sectionsVisited: visited, realApiReads: checks.length, printerRows: payload.printers.length, stationRows: payload.stations.length };
   });
 
-  await record("Shop two navigates every real workspace section and loads its APIs", async () => {
+  await record("Shop two navigates every real sidebar section and account-menu-only tools", async () => {
     const sections = [
-      "Order Journey", "Overview", "Print Queue", "Printers", "QR Stations",
-      "Print Agent", "Pricing", "Subscription", "Payments", "Customers", "Reports", "Settings"
+      "Order Journey", "Overview", "Print Queue", "Customers",
+      "Printers", "QR Stations", "Print Agent", "Pricing", "Payments", "Reports"
     ];
     const visited = await navigateSections(shop2Page, sections, "shop-two");
+    const accountMenu = shop2Page.getByRole("button", { name: /Account options for/ });
+    await accountMenu.click();
+    await shop2Page.getByRole("button", { name: "Shop profile & branding" }).click();
+    await shop2Page.locator(".settings-panel").waitFor({ state: "visible", timeout: 10000 });
+    await accountMenu.click();
+    await shop2Page.getByRole("button", { name: "Trial & subscription" }).click();
+    await shop2Page.locator(".subscription-workspace").waitFor({ state: "visible", timeout: 10000 });
     const paths = [
       "/api/v1/shop/profile", "/api/v1/shop/subscription", "/api/v1/shop/printers",
       "/api/v1/shop/qr-stations", "/api/v1/shop/pricing", "/api/v1/shop/customers",
