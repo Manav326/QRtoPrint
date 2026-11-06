@@ -25,7 +25,7 @@ git pull --ff-only origin main
 
 The runner:
 
-1. Checks Node.js 22+, Docker Desktop and Docker Compose.
+1. Checks Node.js 22.6+, Docker Desktop and Docker Compose.
 2. Reuses the existing local .env.local and persistent volumes. If this is the first local setup, it invokes scripts/docker-up-local.ps1 to create local secrets and start the local stack. It never runs docker compose down -v.
 3. Rebuilds the current portal/API containers from the source you just pulled and checks /health/ready before tests.
 4. Creates or reuses four clearly labelled QA identities: two shop owners, one global customer and one platform administrator. Shop/customer registration uses the real app registration path; the platform administrator uses the existing protected one-time bootstrap command in the local API container. The bootstrap refuses to elevate a shop user.
@@ -35,6 +35,8 @@ The runner:
 8. Runs the existing portal logic tests, API/.NET tests and Windows Agent tests when the corresponding SDKs are installed. The destructive PostgreSQL migration test is excluded from the local application database by leaving SMARTPRINT_TEST_POSTGRES unset.
 9. If the Microsoft Print to PDF virtual queue is installed, opts in to the Agent's real GDI spooler integration test. That test verifies the Windows virtual printer produced a PDF; it does not send paper to a physical printer.
 10. If system Gradle and the Android SDK are installed, runs Android JVM tests and builds a local-portal debug APK. If an Android emulator is already running, it also runs connected instrumentation tests. It never installs the APK on an attached physical phone.
+
+Generated logs, screenshots and JSON/TXT reports are written under `artifacts/smartprint-qa/`; this directory is Git-ignored. QA account passwords remain DPAPI-protected under `.secrets/`.
 
 No extra branch, remote QA secret, Cloudflare rule or manual account setup is required.
 
