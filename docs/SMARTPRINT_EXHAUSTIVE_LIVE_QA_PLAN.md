@@ -174,7 +174,7 @@ This is **not source-code line or branch coverage**. No 90% code-coverage claim 
 | Customer identity/auth | CUSTAUTH-001–004 | 4 | Global customer registration, duplicate registration and successful/failed customer authentication |
 | Platform-admin authentication | ADMINAUTH-001–002 | 2 | Bootstrap-created administrator sign-in and invalid-password rejection |
 | Authentication negative/security lifecycle | AUTH-001–008 | 8 | Invalid/duplicate registrations, cross-role login denial, anonymous route denial, refresh rotation, replay prevention and logout revocation |
-| Plans and subscriptions | PLAN-001–006 | 6 | QA free plan creation, publish/version immutability path, tenant assignment and persisted subscription state |
+| Plans and subscriptions | PLAN-001–006 | 6 | QA free-plan creation, draft save/publish, tenant assignment and persisted subscription state |
 | Platform UI and operations | PLATFORM-001–009 | 9 | All control-centre areas, directory/plan/subscription/settings reads, settings validation, audit history and safe no-op save |
 | Shop setup and validation | SHOP-001–018 | 18 | Printer/station/rate/payment setup in two tenants; invalid pricing, invalid capabilities, unsupported printer type, foreign-printer binding, insecure logo and account validation; verify rejected writes did not mutate saved state |
 | Shop navigation/account tools | SHOPUI-001–027 | 27 | Both shop workspaces, all primary sections, account-menu tools and authenticated responsive navigation |
