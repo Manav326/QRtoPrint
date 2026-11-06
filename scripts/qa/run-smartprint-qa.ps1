@@ -1,6 +1,5 @@
 [CmdletBinding()]
 param(
-    [switch]$RebuildLocalStack,
     [switch]$SkipUnitTests,
     [switch]$SkipPlaywrightInstall
 )
@@ -232,7 +231,8 @@ $environmentNames = @(
     "SMARTPRINT_QA_ADMIN_EMAIL", "SMARTPRINT_QA_ADMIN_PASSWORD", "SMARTPRINT_QA_ADMIN_NAME",
     "SMARTPRINT_QA_CUSTOMER_EMAIL", "SMARTPRINT_QA_CUSTOMER_PASSWORD", "SMARTPRINT_QA_CUSTOMER_NAME",
     "QRTP_PLATFORM_ADMIN_EMAIL", "QRTP_PLATFORM_ADMIN_NAME", "QRTP_PLATFORM_ADMIN_PASSWORD",
-    "SMARTPRINT_TEST_POSTGRES"
+    "SMARTPRINT_TEST_POSTGRES", "SMARTPRINT_RUN_WINDOWS_SPOOLER_INTEGRATION",
+    "SMARTPRINT_RUN_MULTI_QUEUE_INTEGRATION"
 )
 $originalEnvironment = @{}
 foreach ($name in $environmentNames) {
@@ -356,6 +356,11 @@ try {
 
     $liveSuite = Join-Path $PSScriptRoot "smartprint-local-e2e.mjs"
     if (-not (Test-Path -LiteralPath $liveSuite -PathType Leaf)) { throw "Local E2E suite is missing: $liveSuite" }
+    $syntaxOk = Invoke-QAStep -Name "Validate local Playwright suite JavaScript syntax" -LogName "playwright-syntax-check.log" -Action {
+        & $node.Source "--check" $liveSuite
+    }
+    if (-not $syntaxOk) { throw "The local Playwright suite has a syntax error. Review logs/playwright-syntax-check.log." }
+
     $e2eOk = Invoke-QAStep -Name "Real local Playwright E2E: shop owners, customer, platform admin, database, uploads, quotes, payment rejection and tenant isolation" -LogName "local-real-data-e2e.log" -Action {
         & $node.Source $liveSuite
     }
@@ -398,12 +403,119 @@ try {
             }
             if (-not $apiTestOk) { $exitCode = 1 }
 
-            $agentTestOk = Invoke-QAStep -Name "Existing SmartPrint Windows Agent unit/regression tests" -LogName "agent-dotnet-tests.log" -Action {
+            $pdfPrinterAvailable = $false
+            if (Get-Command Get-Printer -ErrorAction SilentlyContinue) {
+                $pdfPrinter = Get-Printer -Name "Microsoft Print to PDF" -ErrorAction SilentlyContinue
+                $pdfPrinterAvailable = $null -ne $pdfPrinter
+            }
+
+            if ($pdfPrinterAvailable) {
+                $env:SMARTPRINT_RUN_WINDOWS_SPOOLER_INTEGRATION = "1"
+                Write-Host "Microsoft Print to PDF is installed. Enabling the real Windows virtual-spooler integration test; no paper printer or secondary queue will be used." -ForegroundColor Cyan
+            } else {
+                $env:SMARTPRINT_RUN_WINDOWS_SPOOLER_INTEGRATION = $null
+                Add-QAResult -Name "Microsoft Print to PDF Windows spooler integration" -Status "SKIPPED" -Detail "The Microsoft Print to PDF queue is not installed or the PrintManagement cmdlet is unavailable."
+            }
+            $env:SMARTPRINT_RUN_MULTI_QUEUE_INTEGRATION = $null
+            $agentTestOk = Invoke-QAStep -Name "Existing SmartPrint Windows Agent unit/regression tests and optional Microsoft Print to PDF integration" -LogName "agent-dotnet-tests.log" -Action {
                 & $dotnet.Source "test" "tests/SmartPrint.Agent.Tests/SmartPrint.Agent.Tests.csproj" "--configuration" "Release" "--logger" "console;verbosity=minimal"
             }
             if (-not $agentTestOk) { $exitCode = 1 }
+            if ($pdfPrinterAvailable -and $agentTestOk) {
+                Add-QAResult -Name "Microsoft Print to PDF Windows spooler integration" -Status "PASS" -Detail "The real GDI job reached the Windows virtual printer and a valid driver-generated PDF was verified in a temporary directory."
+            }
+            $env:SMARTPRINT_RUN_WINDOWS_SPOOLER_INTEGRATION = $null
         } else {
             Add-QAResult -Name "Existing API and Windows Agent .NET unit suites" -Status "SKIPPED" -Detail ".NET 10 SDK was not found on this Windows machine."
+        }
+
+        # Android tests are run only on a local SDK/emulator. The Gradle property points
+        # the app's WebView at the local Docker portal through the Android emulator host bridge.
+        $gradle = Get-Command gradle.bat -ErrorAction SilentlyContinue
+        if (-not $gradle) { $gradle = Get-Command gradle -ErrorAction SilentlyContinue }
+        $sdkRoot = $env:ANDROID_SDK_ROOT
+        if ([string]::IsNullOrWhiteSpace($sdkRoot)) { $sdkRoot = $env:ANDROID_HOME }
+        if (-not $gradle -or [string]::IsNullOrWhiteSpace($sdkRoot) -or -not (Test-Path -LiteralPath $sdkRoot -PathType Container)) {
+            Add-QAResult -Name "Android local JVM and emulator suites" -Status "SKIPPED" -Detail "A system Gradle installation and Android SDK are required; no device will be installed or altered."
+        } else {
+            $androidGradleArgs = @(
+                "--no-daemon", "-p", "apps/android",
+                "-PsmartPrintServiceUrl=http://10.0.2.2:3000",
+                ":app:testDebugUnitTest", ":app:assembleDebug"
+            )
+            $androidBuildOk = Invoke-QAStep -Name "Android native JVM tests and local-portal debug APK build" -LogName "android-unit-build.log" -Action {
+                & $gradle.Source @androidGradleArgs
+            }
+            if (-not $androidBuildOk) { $exitCode = 1 }
+
+            $adb = Get-Command adb.exe -ErrorAction SilentlyContinue
+            if (-not $adb) { $adb = Get-Command adb -ErrorAction SilentlyContinue }
+            if (-not $adb) {
+                $platformToolsAdb = Join-Path $sdkRoot "platform-tools\adb.exe"
+                if (Test-Path -LiteralPath $platformToolsAdb -PathType Leaf) {
+                    $adb = [PSCustomObject]@{ Source = $platformToolsAdb }
+                }
+            }
+            if ($adb) {
+                $adbOutput = @(& $adb.Source "devices")
+                $emulatorDevices = @($adbOutput | Where-Object { $_ -match '^emulator-\d+\s+device
+catch {
+    $fatalError = $_.Exception.Message
+    $exitCode = 1
+    Add-QAResult -Name "QA orchestrator" -Status "FAIL" -Detail $fatalError
+    ($_ | Out-String) | Set-Content -LiteralPath (Join-Path $logDirectory "fatal-error.log")
+}
+finally {
+    foreach ($name in $environmentNames) {
+        [Environment]::SetEnvironmentVariable($name, $originalEnvironment[$name], "Process")
+    }
+
+    $summary = [PSCustomObject]@{
+        product = "SmartPrint"
+        environment = "LOCAL_DOCKER_POSTGRES_REAL_API"
+        target = $target
+        runId = $runId
+        startedLocal = $runStamp
+        completedUtc = [DateTime]::UtcNow.ToString("o")
+        result = if ($exitCode -eq 0) { "PASS" } else { "FAIL" }
+        passed = @($results | Where-Object status -eq "PASS").Count
+        failed = @($results | Where-Object status -eq "FAIL").Count
+        skipped = @($results | Where-Object status -eq "SKIPPED").Count
+        warnings = @($results | Where-Object status -eq "WARN").Count
+        steps = @($results)
+        fatalError = $fatalError
+        evidenceDirectory = $artifactRelative
+        qaCredentialsFile = ".secrets\smartprint-qa\qa-accounts.dpapi.json"
+        mockedApiRoutesUsed = $false
+        productionDatabaseTouched = $false
+    }
+    $summary | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath (Join-Path $artifactRoot "summary.json") -Encoding UTF8
+    $summary | Format-List | Out-String | Set-Content -LiteralPath (Join-Path $artifactRoot "summary.txt") -Encoding UTF8
+    Write-Host ([Environment]::NewLine + "=== SMARTPRINT LOCAL QA SUMMARY ===") -ForegroundColor Cyan
+    $summary | Format-Table result, passed, failed, skipped, warnings, target, evidenceDirectory -AutoSize
+    Write-Host "QA identities are stored encrypted for the current Windows user. No password was written to the report or Git."
+    Write-Host "Evidence: $artifactRoot" -ForegroundColor Cyan
+}
+
+if ($exitCode -ne 0) { exit 1 }
+ })
+            } else {
+                $emulatorDevices = @()
+            }
+
+            if ($androidBuildOk -and $emulatorDevices.Count -gt 0) {
+                $instrumentationArgs = @(
+                    "--no-daemon", "-p", "apps/android",
+                    "-PsmartPrintServiceUrl=http://10.0.2.2:3000",
+                    ":app:connectedDebugAndroidTest"
+                )
+                $androidUiOk = Invoke-QAStep -Name "Android real emulator instrumentation tests against local SmartPrint portal" -LogName "android-emulator-tests.log" -Action {
+                    & $gradle.Source @instrumentationArgs
+                }
+                if (-not $androidUiOk) { $exitCode = 1 }
+            } elseif ($androidBuildOk) {
+                Add-QAResult -Name "Android emulator instrumentation suite" -Status "SKIPPED" -Detail "No Android emulator is running. Physical phones are deliberately not targeted by this script."
+            }
         }
     }
 }
