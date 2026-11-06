@@ -85,14 +85,14 @@ The same CI run publishes `smartprint-android-test-reports` with JVM and emulato
 
 This is the recommended local end-to-end test path. The phone opens the same publicly trusted HTTPS URL as production; no private CA certificate is installed on customer devices.
 
-1. In Cloudflare, create a named tunnel under **Networking → Tunnels**.
-2. Add a **Published application** route for the hostname you want to use. Set its service URL to **http://portal:80** (the portal service inside the Docker network).
-3. From the repository root, run:
+1. Use the existing QuantaEdge Cloudflare Tunnel managed by the `QuantaEdge-Production` control plane. Do not create a product-specific connector or a second tunnel.
+2. In that tunnel, the SmartPrint Published Application route must target **http://qrtoprint-portal:80** on the shared Docker network `cloudflare-edge`. The compatibility alias `http://portal:80` is also retained.
+3. Start the central connector once from the QuantaEdge-Production checkout with `.\scripts\local-ingress.ps1 up`. Then, from this repository root, run:
 
     .\scripts\docker-up-local.ps1
 
-   The helper reuses .env.local and the existing database/document volumes. It asks once for the tunnel connector token and stores it in the Git-ignored .secrets/cloudflare/tunnel-token file. The token is not printed or placed in the environment file.
-4. The only application URL is PUBLIC_BASE_URL in .env.local. The helper asks for it when no value is configured; it has no domain fallback. The portal and API share this hostname; Nginx routes /api and /health internally to the API.
+   The helper reuses .env.local and the existing database/document volumes. It no longer collects or manages the Tunnel token; Tunnel credentials belong only to the central control plane.
+4. The only SmartPrint application URL is PUBLIC_BASE_URL in .env.local. The helper asks for it when no value is configured; it has no domain fallback. The portal and API share this hostname; Nginx routes /api and /health internally to the API.
 
 The phone opens that Cloudflare HTTPS URL. When the customer taps Check shop Wi-Fi, Chrome may request Local Network Access permission for the shop computer. No certificate installation is required. Cloud-assisted upload remains available when local access is unavailable.
 
@@ -110,7 +110,7 @@ Use the current PUBLIC_BASE_URL in those commands. After its first authenticated
 
 ### Changing the public URL later
 
-Change PUBLIC_BASE_URL in .env.local (or .env for production), update the matching exact-hostname Published application route in Cloudflare to http://portal:80, and restart the Compose stack. Cloudflare's route is infrastructure configuration and must match the chosen hostname. Keep the previous hostname routed to the same portal during migration: previously printed QR codes keep working, and already-paired Agents can heartbeat through the old hostname and learn the new URL. Remove the old route only after Agents have updated and old QR codes are no longer in circulation.
+Change PUBLIC_BASE_URL in .env.local (or .env for production), update the matching exact-hostname Published application route in the central Cloudflare Tunnel to http://qrtoprint-portal:80, and restart the Compose stack. Cloudflare's route is infrastructure configuration and must match the chosen hostname. Keep the previous hostname routed to the same portal during migration: previously printed QR codes keep working, and already-paired Agents can heartbeat through the old hostname and learn the new URL. Remove the old route only after Agents have updated and old QR codes are no longer in circulation.
 
 ### Stop / restart
 
@@ -122,16 +122,16 @@ Restart with .\scripts\docker-up-local.ps1. Never use down -v; that deletes pers
 
 ## Docker deployment
 
-The production stack runs PostgreSQL, the ASP.NET Core API, the React portal and a Cloudflare Tunnel connector. The connector makes outbound connections to Cloudflare; the host does not need inbound ports 80/443, a public IP, a Caddy certificate, or a separate API hostname.
+The production stack runs PostgreSQL, the ASP.NET Core API and the React portal. Cloudflare Tunnel is a shared QuantaEdge infrastructure service managed by `QuantaEdge-Production`; this product stack does not run its own connector. The host does not need inbound ports 80/443, a public IP, a Caddy certificate, or a separate API hostname.
 
 ### First start
 
-1. In Cloudflare, create a named tunnel and add a Published application route for the chosen hostname. Set the service URL to **http://portal:80**.
+1. Ensure the central connector is running from QuantaEdge-Production and the shared `cloudflare-edge` network exists. The Cloudflare Published Application route for this hostname must target **http://qrtoprint-portal:80**.
 2. From the repository directory, run:
 
     .\scripts\docker-up.ps1
 
-   The helper creates .env with fresh database, signing and document-encryption secrets, prompts once for the tunnel token, and stores it under the Git-ignored .secrets/cloudflare/ directory. It pulls the published GHCR images and preserves named data volumes.
+   The helper creates .env with fresh database, signing and document-encryption secrets. It does not collect or store Tunnel credentials. It pulls the published GHCR images and preserves named data volumes.
 3. Open the URL printed by the script. The same PUBLIC_BASE_URL serves the portal, API and newly generated station QR links.
 
 ### One place to change the URL
