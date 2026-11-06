@@ -541,8 +541,30 @@ try {
         $corsOutput = & $docker.Source @corsArgs
         if ($LASTEXITCODE -ne 0) { throw "Could not execute local CORS preflight through the portal proxy." }
         $corsHeaders = $corsOutput -join [Environment]::NewLine
-        if ($corsHeaders -notmatch '(?im)^HTTP/\S+\s+204\b' -or
-            $corsHeaders -notmatch '(?im)^Access-Control-Allow-Origin:\s*http://127\.0\.0\.1:3000\s*
+        $preflightStatusIs204 = $corsHeaders -match 'HTTP/.+ 204'
+        $allowedOriginHeaderFound = $corsHeaders.IndexOf(
+            "Access-Control-Allow-Origin: http://127.0.0.1:3000",
+            [StringComparison]::OrdinalIgnoreCase
+        ) -ge 0
+        if (-not $preflightStatusIs204 -or -not $allowedOriginHeaderFound) {
+            throw "Local origin CORS preflight failed. Response headers: $corsHeaders"
+        }
+
+        $fontArgs = $composeBaseArgs + @(
+            "exec", "-T", "portal", "sh", "-lc",
+            "if grep -R -n -E 'fonts.googleapis.com|fonts.gstatic.com' /usr/share/nginx/html; then exit 1; else exit 0; fi"
+        )
+        $fontOutput = & $docker.Source @fontArgs
+        if ($LASTEXITCODE -ne 0) {
+            throw "Compiled portal image still references external Google Fonts. No browser E2E was started."
+        }
+        Write-Host "Verified direct and proxied API liveness, local CORS preflight, running image IDs and offline fonts."
+    }
+    if (-not $runtimePreflightOk) {
+        throw "Local runtime preflight failed. The long Playwright E2E suite was intentionally not started. Review logs/runtime-preflight.log."
+    }
+
+    $accounts = Get-OrCreateQAAccounts
     Set-QAProcessEnvironment $accounts
     $env:QRTP_PLATFORM_ADMIN_EMAIL = $accounts.admin.email
     $env:QRTP_PLATFORM_ADMIN_NAME = $accounts.admin.displayName
