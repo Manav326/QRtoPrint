@@ -161,9 +161,9 @@ The suite also reads payments/refunds, verifies refund preview is blocked withou
 
 ## Expanded functional acceptance catalogue and 90% gate
 
-The local real-data Playwright runner now carries **219 uniquely identified functional acceptance cases**. Case IDs are grouped under E2E records. At the end of a run, report.json and report.txt show IDs mapped to attempted checks, IDs whose entire owning check completed successfully, IDs associated with failed/incomplete checks, the completion percentage, the pass rate, and IDs not mapped to a reached check.
+The local real-data Playwright runner now carries **255 uniquely identified functional acceptance cases**. Case IDs are grouped under E2E records. At the end of a run, report.json and report.txt show IDs mapped to attempted checks, IDs whose entire owning check completed successfully, IDs associated with failed/incomplete checks, the completion percentage, the pass rate, and IDs not mapped to a reached check.
 
-**Coverage definition:** functional case completion coverage = case IDs belonging to records that completed all their assertions successfully ÷ 219. This is deliberately conservative: when a grouped record aborts on a failed assertion, the runner does not count every case ID attached to that record as fully completed because it cannot prove that the remaining assertions ran. The runner exits with a failure when this coverage is below **90%**; any failed record also fails the run. A release-quality run should complete all 219 cases with 100% of their assertions passing.
+**Coverage definition:** functional case completion coverage = case IDs belonging to records that completed all their assertions successfully ÷ 255. This is deliberately conservative: when a grouped record aborts on a failed assertion, the runner does not count every case ID attached to that record as fully completed because it cannot prove that the remaining assertions ran. The runner exits with a failure when this coverage is below **90%**; any failed record also fails the run. A release-quality run should complete all 255 cases with 100% of their assertions passing.
 
 This is **not source-code line or branch coverage**. No 90% code-coverage claim is made. Measuring line/branch coverage requires a separate instrumented Coverlet/Node coverage run and generated coverage reports; it must not be inferred from the count of functional cases.
 
@@ -179,22 +179,22 @@ This is **not source-code line or branch coverage**. No 90% code-coverage claim 
 | Platform-admin authentication | ADMINAUTH-001–002 | 2 | Bootstrap-created administrator sign-in and invalid-password rejection |
 | Authentication negative/security lifecycle | AUTH-001–008 | 8 | Invalid/duplicate registrations, cross-role login denial, anonymous route denial, refresh rotation, replay prevention and logout revocation |
 | Plans and subscriptions | PLAN-001–006 | 6 | QA free-plan creation, draft save/publish, tenant assignment and persisted subscription state |
-| Platform UI and operations | PLATFORM-001–009 | 9 | All control-centre areas, directory/plan/subscription/settings reads, settings validation, audit history and safe no-op save |
-| Shop setup and validation | SHOP-001–018 | 18 | Printer/station/rate/payment setup in two tenants; invalid pricing, invalid capabilities, unsupported printer type, foreign-printer binding, insecure logo and account validation; verify rejected writes did not mutate saved state |
+| Platform UI and operations | PLATFORM-001–014 | 14 | All control-centre areas, directory/plan/subscription/settings reads, settings validation, audit history and safe no-op save |
+| Shop setup and validation | SHOP-001–024 | 24 | Printer/station/rate/payment setup in two tenants; invalid pricing, invalid capabilities, unsupported printer type, foreign-printer binding, insecure logo, required-field, branding and unknown-resource validation; verify rejected writes did not mutate saved state |
 | Shop navigation/account tools | SHOPUI-001–027 | 27 | Both shop workspaces, all primary sections, account-menu tools and authenticated responsive navigation |
 | Shop reports | REPORT-001–004 | 4 | 7/30/90-day summaries, unsupported range rejection and both tenant report scopes |
-| Authorization and isolation | RBAC-001–006 | 6 | Shop/admin/customer role separation, foreign tenant resource access and cross-tenant job-history denial |
-| QR station/session lifecycle | QR-001–010 | 10 | Session renewal/resume, session-to-station binding, station enable/disable, rotation invalidates old code and new code can create a session |
+| Authorization and isolation | RBAC-001–010 | 10 | Shop/admin/customer role separation, customer/shop/platform cross-role denial, foreign tenant resource access and cross-tenant job-history denial |
+| QR station/session lifecycle | QR-001–013 | 13 | Session renewal/resume, session-to-station binding, station enable/disable, rotation invalidates old code and new code can create a session |
 | Customer account linkage | CUST-001–002 | 2 | QR print session tied to global customer identity and customer job-history endpoint |
-| Local upload validation | UPLOAD-001–002 | 2 | Invalid digest and unsupported extension fail closed before a local upload ticket can be issued |
-| Document upload | DOC-001–005 | 5 | Malformed PDF rejected without job creation, real synthetic PDF upload, two-page parsing, quote preparation and saved job metadata |
-| Job lifecycle | JOB-001–009 | 9 | Customer quote/submit, shop queue, customer history/status, unpaid rejection and rejection guards against approval/dispatch |
+| Local upload validation | UPLOAD-001–004 | 4 | Invalid digest and unsupported extension fail closed before a local upload ticket can be issued |
+| Document upload | DOC-001–006 | 6 | Malformed PDF rejected without job creation, real synthetic PDF upload, two-page parsing, quote preparation and saved job metadata |
+| Job lifecycle | JOB-001–011 | 11 | Customer quote/submit, shop queue, customer history/status, unpaid rejection and rejection guards against approval/dispatch |
 | Batch workflow | BATCH-001–012 | 12 | Two real documents, shared Batch ID, distinct PrintJob IDs, queue/customer states, preview, accept-by-default, undo rejection and individual final decisions |
-| Payment workflow | PAY-001–010 | 10 | Payment verification/intent guards, one accepted-file total, synthetic reference idempotency, shop rejection and customer-visible rejected state; no actual money receipt |
+| Payment workflow | PAY-001–013 | 13 | Payment verification/intent guards, one accepted-file total, synthetic reference idempotency, shop rejection and customer-visible rejected state; no actual money receipt |
 | Refund safety | REFUND-001–004 | 4 | Refund preview without verified funds, sent-confirmation requirement and refund-screen/list guard checks; no false refund record |
-| Agent lifecycle and protocol security | AGENT-001–029 | 29 | Agent presence/dispatch guard, one-time enrollment, ephemeral QA identity, authenticated heartbeat, printer-sync validation, one-time-code replay, revocation and no-credential denial on every protected Agent endpoint |
+| Agent lifecycle and protocol security | AGENT-001–033 | 33 | Agent presence/dispatch guard, one-time enrollment, ephemeral QA identity, authenticated heartbeat, printer-sync validation, one-time-code replay, revocation and no-credential denial on every protected Agent endpoint |
 | Printer/station controls | DEVICE-001–002 | 2 | QA printer and station disable/restore lifecycle |
-| Tenant lifecycle | TENANT-001–004 | 4 | Invalid status rejected, QA tenant suspension blocks normal work, restore is audited and idempotent duplicate state is safe |
+| Tenant lifecycle | TENANT-001–010 | 10 | Invalid status rejected, QA tenant suspension blocks normal work, restore is audited and idempotent duplicate state is safe |
 | Security guard | SEC-001 | 1 | Unpaid/rejected work cannot cross into a financial refund action |
 | Browser and resource diagnostics | OBS-001–004 | 4 | Same-origin runtime errors, console errors, failed resources and HTTP 5xx monitoring |
 | Photo Studio | PHOTO-001–006 | 6 | Real browser image selection, crop/look/background tools, optional form details, photo size/count and local multi-photo A4 PDF generation without a server print job |
@@ -212,14 +212,18 @@ The extra cases are intentionally run against QA-only identities and records:
 - **Payment/refund:** test-only payment references are explicitly marked synthetic. A rejected payment cannot be manually verified, an unpaid/rejected job cannot be approved/dispatched, refund preview without verified money is rejected, and the API refuses a refund request whose `confirmedSent` value is false. No real transfer, payment verification, refund, gateway or printer dispatch occurs.
 - **Platform/tenant:** only the generated QA shop is suspended; it is restored to Active in the same run. Operational settings are saved with their existing values only to prove the audit trail, so platform policy values are not changed. A duplicate Active transition must be idempotent.
 
+- **Extended authorization and tenant isolation:** positive and negative access checks cover customer-to-shop, shop-to-customer, shop/customer-to-platform denial, plus printer/station/Agent list isolation and foreign-tenant printer/station mutations. Every rejected mutation is followed by a read-back to prove the other tenant's record remains unchanged.
+- **Additional request validation:** the suite rejects invalid public station codes, invalid opaque session tokens, missing idempotency keys, malformed upload batch IDs, non-multipart document posts, unknown customer job IDs, unsupported platform directory bounds, invalid shop branding/device fields and malformed/overlong UPI references.
+- **Agent authentication:** a real disposable Agent is probed with an incorrect secret, malformed Agent ID, unknown enrollment code and incomplete enrollment metadata before normal heartbeat/sync and revocation tests. These probes do not create another Agent or printer.
+
 ### Coverage boundaries that remain separate
 
-The 191-case gate measures the documented local functional catalogue. It does not replace these additional suites or acceptance requirements:
+The 255-case gate measures the documented local functional catalogue. It does not replace these additional suites or acceptance requirements:
 
 - The portal Node regression suite and the API/Agent .NET unit suites remain separate test results. They provide domain/logic regression coverage beyond the mapped browser/API acceptance cases.
 - The Windows Agent executable's full live machine lifecycle—actual service enrollment, local queue claim/receipt, spooler accepted/failed/unconfirmed states, PDF export and output confirmation—is not exercised by the protocol test client. The E2E does exercise the server's real one-time enrollment, heartbeat, printer-sync validation, revocation and auth protections with a disposable QA identity. The Agent unit suite and optional Microsoft Print to PDF integration remain separate.
 - The Android emulator test suite is conditional on an installed SDK and an already running emulator. Physical Android camera, permission, local-network and Wi-Fi readiness tests remain in docs/ANDROID_PHYSICAL_ACCEPTANCE.md.
-- Real LAN direct upload, Windows service identity, a physical printer, printed paper, power/network interruption recovery, concurrency/load, backup/restore rehearsal and payment-provider settlement require separate dedicated acceptance. They are not counted as passed by this 191-case browser suite.
+- Real LAN direct upload, Windows service identity, a physical printer, printed paper, power/network interruption recovery, concurrency/load, backup/restore rehearsal and payment-provider settlement require separate dedicated acceptance. They are not counted as passed by this 255-case browser suite.
 - No destructive tenant deactivation, data deletion, storage cleanup, real payment, actual refund, permanent printer pairing or physical print is performed by this runner.
 
 ## Android and Windows execution
