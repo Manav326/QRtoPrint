@@ -171,7 +171,7 @@ jobs:
       - name: Upload Windows Agent package
         uses: actions/upload-artifact@v7
         with:
-          name: smartprint-agent-win-x64
+          name: smart-print-agent-win-x64
           path: artifacts/agent/
           if-no-files-found: error
           retention-days: 30
@@ -226,7 +226,7 @@ jobs:
       - name: Upload Windows desktop package
         uses: actions/upload-artifact@v7
         with:
-          name: smartprint-desktop-win-x64
+          name: smart-print-desktop-win-x64
           path: artifacts/desktop/
           if-no-files-found: error
           retention-days: 30
@@ -243,12 +243,12 @@ jobs:
       - name: Download Windows Agent package
         uses: actions/download-artifact@v8
         with:
-          name: smartprint-agent-win-x64
+          name: smart-print-agent-win-x64
           path: artifacts/agent
       - name: Download Windows desktop package
         uses: actions/download-artifact@v8
         with:
-          name: smartprint-desktop-win-x64
+          name: smart-print-desktop-win-x64
           path: artifacts/desktop
       - name: Build two versioned SmartPrint installers
         shell: pwsh
@@ -285,7 +285,7 @@ jobs:
       - name: Upload Windows installer validation artifact
         uses: actions/upload-artifact@v7
         with:
-          name: smartprint-windows-setup-validation
+          name: smart-print-windows-setup-validation
           path: |
             artifacts/agent-installer/SmartPrint-Windows-v1.exe
             artifacts/agent-installer/SmartPrint-Windows-v2.exe
