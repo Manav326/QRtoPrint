@@ -37,7 +37,7 @@ if (-not $playwrightModule) { throw "Playwright module not found in $npxRoot" }
 
 $env:PLAYWRIGHT_MODULE_DIR = $playwrightModule
 $env:SMARTPRINT_LIVE_QA_BASE_URL = 'https://smartprint.quantaedge.in'
-$env:LIVE_QA_ARTIFACT_DIR = 'artifacts/live-environment-qa-windows-headed'
+if ([string]::IsNullOrWhiteSpace($env:LIVE_QA_ARTIFACT_DIR)) { $env:LIVE_QA_ARTIFACT_DIR = 'artifacts/live-environment-qa-windows-headed' }
 $env:LIVE_QA_CHECK_SHOP_WORKSPACE = if ($RunShopWorkspace) { 'true' } else { 'false' }
 $env:LIVE_QA_CHECK_PLATFORM_ADMIN = if ($RunPlatformAdmin) { 'true' } else { 'false' }
 $env:LIVE_QA_CHECK_CUSTOMER_STATION = if ($RunCustomerStation) { 'true' } else { 'false' }
