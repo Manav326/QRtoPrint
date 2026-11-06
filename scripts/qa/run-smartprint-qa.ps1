@@ -336,12 +336,12 @@ try {
         if ($LASTEXITCODE -ne 0) { throw "Could not inspect running Docker containers." }
         $conflicts = @()
         foreach ($containerLine in $runningContainers) {
-            $parts = $containerLine -split "\\|", 2
+            $parts = $containerLine -split '\|', 2
             if ($parts.Count -ne 2) { continue }
             $containerName = $parts[0].Trim()
             $publishedPorts = $parts[1]
             if ($containerName.StartsWith("$composeProjectName-", [StringComparison]::Ordinal)) { continue }
-            if ($publishedPorts -match '(^|,)\\s*(?:\\[[^\\]]+\\]:|(?:\\d{1,3}\\.){3}\\d{1,3}:)?(?:3000|8080)->') {
+            if ($publishedPorts -match '(^|,)\s*(?:\[[^\]]+\]:|(?:\d{1,3}\.){3}\d{1,3}:)?(?:3000|8080)->') {
                 $conflicts += "$containerName : $publishedPorts"
             }
         }
