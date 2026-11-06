@@ -41,7 +41,7 @@ function Add-QAResult {
         "WARN" { "Yellow" }
         default { "DarkYellow" }
     }
-    Write-Host ("{0} — {1}" -f $Status, $Name) -ForegroundColor $colour
+    Write-Host ("{0} - {1}" -f $Status, $Name) -ForegroundColor $colour
     if ($Detail) { Write-Host ("  " + $Detail) }
 }
 
