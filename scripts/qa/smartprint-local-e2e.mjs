@@ -947,14 +947,28 @@ try {
     return { account: "local platform admin", tenantCount: overview.tenantCount };
   });
 
-  await record("Create and publish a free QA-only plan; assign it to both test tenants", async () => {
-    const one = await assignQaPlan(adminPage, adminTokens.accessToken, process.env.SMARTPRINT_QA_SHOP1_NAME);
-    const two = await assignQaPlan(adminPage, adminTokens.accessToken, process.env.SMARTPRINT_QA_SHOP2_NAME);
+  await record("Create and publish a free QA-only plan, then assign it through the platform UI", async () => {
+    const plan = await ensureQaPlanThroughPlatformUi(adminPage, adminTokens.accessToken);
+    const one = await assignQaPlanThroughPlatformUi(
+      adminPage, adminTokens.accessToken, process.env.SMARTPRINT_QA_SHOP1_NAME, plan
+    );
+    const two = await assignQaPlanThroughPlatformUi(
+      adminPage, adminTokens.accessToken, process.env.SMARTPRINT_QA_SHOP2_NAME, plan
+    );
     shop1TenantId = one.tenantId;
     shop2TenantId = two.tenantId;
-    qaPlanVersionId = one.planVersionId;
+    qaPlanVersionId = plan.planVersionId;
     report.safety.assignedQaOnlyFreePlan = true;
-    return { planCode: "SMARTPRINT_QA_AUTOMATION", freeMonthlyPrice: true, cloudAssistedPrinting: true, assignedTenants: 2 };
+    return {
+      planCode: plan.planCode,
+      planVersionId: plan.planVersionId,
+      freeMonthlyPrice: true,
+      cloudAssistedPrinting: true,
+      shopOne: one,
+      shopTwo: two,
+      assignmentsPerformedThisRun: Number(!one.alreadyAssigned) + Number(!two.alreadyAssigned),
+      noPaymentRequiredOrRecorded: true
+    };
   });
 
   await record("Platform admin navigates every real control-centre section", async () => {
