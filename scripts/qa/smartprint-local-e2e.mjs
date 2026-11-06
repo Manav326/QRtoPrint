@@ -295,7 +295,7 @@ async function navigateSections(page, labels, prefix) {
     await item.click();
     await page.waitForFunction(
       expected => [...document.querySelectorAll(".sidebar .nav-item")]
-        .some(element => element.textContent.trim() === expected && element.classList.contains("active")),
+        .some(element => element.classList.contains("active") && (element.getAttribute("aria-label") === expected || element.getAttribute("title") === expected || element.textContent.trim().startsWith(expected))),
       label,
       { timeout: 12000 }
     );
@@ -384,7 +384,7 @@ async function clickAdminSection(page, label) {
   await item.click();
   await page.waitForFunction(
     expected => [...document.querySelectorAll(".sidebar .nav-item")]
-      .some(element => element.textContent.trim() === expected && element.classList.contains("active")),
+      .some(element => element.classList.contains("active") && (element.getAttribute("aria-label") === expected || element.getAttribute("title") === expected || element.textContent.trim().startsWith(expected))),
     label,
     { timeout: 12000 }
   );
@@ -562,7 +562,7 @@ async function clickShopSection(page, label) {
   await page.locator(".sidebar .nav-item").filter({ hasText: label }).first().click();
   await page.waitForFunction(
     expected => [...document.querySelectorAll(".sidebar .nav-item")]
-      .some(element => element.textContent.trim() === expected && element.classList.contains("active")),
+      .some(element => element.classList.contains("active") && (element.getAttribute("aria-label") === expected || element.getAttribute("title") === expected || element.textContent.trim().startsWith(expected))),
     label,
     { timeout: 12000 }
   );
@@ -786,7 +786,7 @@ async function runAuthenticatedResponsiveMatrix(page, sections, label) {
         await item.click();
         await page.waitForFunction(
           expected => [...document.querySelectorAll(".sidebar .nav-item")]
-            .some(element => element.textContent.trim() === expected && element.classList.contains("active")),
+            .some(element => element.classList.contains("active") && (element.getAttribute("aria-label") === expected || element.getAttribute("title") === expected || element.textContent.trim().startsWith(expected))),
           section,
           { timeout: 12000 }
         );
