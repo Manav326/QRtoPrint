@@ -174,8 +174,10 @@ async function openRoute(page, path, selector, label) {
     return performance.getEntriesByType("resource")
       .map(entry => entry.name)
       .filter(value => {
-        try { return new URL(value, expected).origin !== expected; }
-        catch { return true; }
+        try {
+          const parsed = new URL(value, expected);
+          return (parsed.protocol === "http:" || parsed.protocol === "https:") && parsed.origin !== expected;
+        } catch { return true; }
       });
   });
   assert.equal(offOrigin.length, 0, label + " loaded resources outside the local SmartPrint origin: " + offOrigin.join(", "));
@@ -411,7 +413,7 @@ async function assignQaPlan(adminPage, adminToken, shopName) {
         planVersionId: selectedVersion.id,
         billingInterval: "Monthly",
         reason: "Local SmartPrint automated QA entitlement. No customer billing or payment.",
-        idempotencyKey: "smartprint-local-qa-" + runId + "-" + tenant.id,
+        idempotencyKey: "smartprint-local-qa-" + tenant.id + "-" + selectedVersion.id,
         paymentConfirmed: false
       }
     });
