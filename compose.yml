@@ -54,6 +54,12 @@ services:
       context: .
       dockerfile: apps/portal/Dockerfile
     restart: unless-stopped
+    networks:
+      default: {}
+      cloudflare-edge:
+        aliases:
+          - qrtoprint-portal
+          - portal
     depends_on:
       api:
         condition: service_healthy
@@ -64,20 +70,12 @@ services:
       retries: 5
       start_period: 10s
 
-  cloudflared:
-    image: cloudflare/cloudflared:latest
-    restart: unless-stopped
-    command: ["tunnel", "--no-autoupdate", "run", "--token-file", "/run/secrets/cloudflare_tunnel_token"]
-    secrets:
-      - cloudflare_tunnel_token
-    depends_on:
-      portal:
-        condition: service_healthy
 
 volumes:
   qrtoprint_database:
   qrtoprint_documents:
 
-secrets:
-  cloudflare_tunnel_token:
-    file: ./.secrets/cloudflare/tunnel-token
+networks:
+  cloudflare-edge:
+    external: true
+    name: cloudflare-edge
