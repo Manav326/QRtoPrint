@@ -20,8 +20,9 @@ function startWorkspaceProcess(args) {
   const options = { stdio: "inherit", env: process.env, windowsHide: true };
   if (process.platform === "win32") {
     // .cmd shims must be invoked through cmd.exe on Windows.
-    const quote = value => `"${String(value).replace(/"/g, '""')}"`;
-    const command = [quote(packageManager), ...prefix, ...args.map(quote)].join(" ");
+    // All arguments are fixed test-runner tokens without spaces, so this keeps
+    // cmd.exe invocation simple while still honoring an absolute pnpm/corepack path.
+    const command = [packageManager, ...prefix, ...args].join(" ");
     const child = spawn(process.env.ComSpec || "cmd.exe", ["/d", "/c", command], options);
     child.spawnError = null;
     child.on("error", error => { child.spawnError = error; });
