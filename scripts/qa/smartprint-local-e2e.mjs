@@ -93,6 +93,8 @@ let paymentRejectedJob;
 let paymentRejectedBatchId;
 let paymentRejectedBatchPaymentId;
 let qaPlanVersionId;
+let qaAgentEnrollment;
+let qaAgentIdentity;
 
 const CASE_IDS_BY_RECORD_NAME = new Map([
   ["Local portal and API health", ["ENV-001", "ENV-002", "ENV-003", "ENV-004"]],
@@ -136,6 +138,14 @@ const CASE_IDS_BY_RECORD_NAME = new Map([
   ["Shop payment and refund screens load without recording false financial events", ["PAY-010", "REFUND-003", "REFUND-004"]],
   ["Agent and printer prerequisites are visible; dispatch without a paired QA Agent is safely blocked", ["AGENT-001", "AGENT-002", "AGENT-003"]],
   ["Dedicated QA Agent enrollment code can be generated without pairing or replacing a machine identity", ["AGENT-004", "AGENT-005"]],
+  ["Agent API requires an authenticated paired identity for all protected endpoints", [
+    "AGENT-006", "AGENT-007", "AGENT-008", "AGENT-009", "AGENT-010", "AGENT-011",
+    "AGENT-012", "AGENT-013", "AGENT-014", "AGENT-015", "AGENT-016", "AGENT-017",
+    "AGENT-018", "AGENT-019", "AGENT-020", "AGENT-021", "AGENT-022"
+  ]],
+  ["Disposable QA Agent enrolls, heartbeats, validates printer sync, rejects code replay and revokes safely", [
+    "AGENT-023", "AGENT-024", "AGENT-025", "AGENT-026", "AGENT-027", "AGENT-028", "AGENT-029"
+  ]],
   ["Platform and shop routes remain isolated after creating real QA data", ["RBAC-006", "TENANT-004"]],
   ["Live local browser has no same-origin server errors or critical resource failures", ["OBS-001", "OBS-002", "OBS-003", "OBS-004"]]
 ]);
@@ -1985,12 +1995,172 @@ try {
   });
 
   await record("Dedicated QA Agent enrollment code can be generated without pairing or replacing a machine identity", async () => {
-    const enrollment = assertHttp(await request(shop1Page, "POST", "/api/v1/shop/agent-enrollment-codes", {
+    qaAgentEnrollment = assertHttp(await request(shop1Page, "POST", "/api/v1/shop/agent-enrollment-codes", {
       token: shop1Tokens.accessToken
     }), 201, "Create Agent enrollment code");
-    assert.ok(enrollment.code && Date.parse(enrollment.expiresUtc) > Date.now());
-    return { codeCreated: true, expiresUtc: enrollment.expiresUtc, paired: false, existingAgentIdentityChanged: false };
+    assert.ok(qaAgentEnrollment.code && Date.parse(qaAgentEnrollment.expiresUtc) > Date.now());
+    return { codeCreated: true, expiresUtc: qaAgentEnrollment.expiresUtc, paired: false, existingAgentIdentityChanged: false };
   });
+
+  await record("Agent API requires an authenticated paired identity for all protected endpoints", async () => {
+    const jobId = crypto.randomUUID();
+    const ticketId = crypto.randomUUID();
+    const protectedRequests = [
+      ["POST", "/api/v1/agent/jobs/claim"],
+      ["GET", "/api/v1/agent/jobs/" + jobId + "/document"],
+      ["POST", "/api/v1/agent/jobs/" + jobId + "/received", { sha256: "a".repeat(64), sizeBytes: 1024 }],
+      ["POST", "/api/v1/agent/local-uploads/" + ticketId + "/claim"],
+      ["POST", "/api/v1/agent/local-uploads/" + ticketId + "/complete", {
+        pageCount: 1, pageSizesJson: "[]", fileExtension: ".pdf", mediaType: "application/pdf",
+        sizeBytes: 1024, sha256: "a".repeat(64)
+      }],
+      ["GET", "/api/v1/agent/local-uploads/" + jobId + "/status"],
+      ["POST", "/api/v1/agent/jobs/print-claim", { localJobs: [{ jobId, sha256: "a".repeat(64), sizeBytes: 1024 }] }],
+      ["POST", "/api/v1/agent/jobs/" + jobId + "/pdf-exported", {
+        fileName: "qa.pdf", outputPath: "C:\\SmartPrintQA\\qa.pdf", sizeBytes: 1024, sha256: "a".repeat(64)
+      }],
+      ["POST", "/api/v1/agent/jobs/" + jobId + "/spooler-accepted", {
+        spoolerJobId: 1, spoolerJobName: "SmartPrint QA", spoolerStatus: "Printed"
+      }],
+      ["POST", "/api/v1/agent/jobs/" + jobId + "/print-blocked", { reasonCode: "QA_ONLY", message: "Unauthenticated QA probe" }],
+      ["POST", "/api/v1/agent/jobs/" + jobId + "/output-unconfirmed", { reasonCode: "QA_ONLY", message: "Unauthenticated QA probe" }],
+      ["POST", "/api/v1/agent/jobs/" + jobId + "/spooler-status", {
+        spoolerJobId: 1, spoolerStatus: "Printed", pagesPrinted: 1, totalPages: 1
+      }],
+      ["POST", "/api/v1/agent/local-document-photo-revisions/" + jobId + "/authorize", {
+        photoSizeCode: "35x45", photoCount: 1, photosPerPage: 1
+      }],
+      ["POST", "/api/v1/agent/local-document-photo-revisions/" + jobId + "/complete", {
+        pageCount: 1, photoCount: 1, photosPerPage: 1, photoSizeCode: "35x45", sha256: "a".repeat(64)
+      }],
+      ["GET", "/api/v1/agent/local-document-previews/" + jobId + "/authorize"],
+      ["POST", "/api/v1/agent/heartbeat", { version: "unauthenticated-qa-probe", operatingSystem: "Windows" }],
+      ["POST", "/api/v1/agent/printers/sync", { printers: [] }]
+    ];
+
+    const outcomes = [];
+    for (const [method, path, body] of protectedRequests) {
+      const response = await request(page, method, path, { body });
+      assert.equal(response.status, 401, "Protected Agent endpoint must reject missing agent credentials: " + method + " " + path);
+      outcomes.push({ method, path: path.replace(jobId, "[job]").replace(ticketId, "[ticket]"), status: response.status });
+    }
+    return { protectedAgentEndpoints: outcomes.length, allRejectedWithoutCredentials: true, outcomes };
+  }, ["AGENT-006", "AGENT-007", "AGENT-008", "AGENT-009", "AGENT-010", "AGENT-011", "AGENT-012", "AGENT-013", "AGENT-014", "AGENT-015", "AGENT-016", "AGENT-017", "AGENT-018", "AGENT-019", "AGENT-020", "AGENT-021", "AGENT-022"]);
+
+  await record("Disposable QA Agent enrolls, heartbeats, validates printer sync, rejects code replay and revokes safely", async () => {
+    assert.ok(qaAgentEnrollment?.code, "The disposable QA enrollment code must exist.");
+    const fingerprint = "SMARTPRINT-QA-EPHEMERAL-" + runId;
+    let enrollmentReplay = null;
+    let heartbeat = null;
+    let invalidSync = null;
+    let emptySync = null;
+    let revoked = false;
+
+    try {
+      const enrolled = assertHttp(await request(page, "POST", "/api/v1/agent/enroll", {
+        body: {
+          code: qaAgentEnrollment.code,
+          fingerprint,
+          deviceName: "SmartPrint QA Disposable Agent"
+        }
+      }), 201, "Enroll disposable QA Agent through the real API");
+      assert.ok(enrolled.agentDeviceId && enrolled.agentSecret);
+      qaAgentIdentity = { id: enrolled.agentDeviceId, secret: enrolled.agentSecret };
+
+      enrollmentReplay = await request(page, "POST", "/api/v1/agent/enroll", {
+        body: {
+          code: qaAgentEnrollment.code,
+          fingerprint: fingerprint + "-REPLAY",
+          deviceName: "SmartPrint QA Enrollment Replay"
+        }
+      });
+      assert.equal(enrollmentReplay.status, 401, "A one-time enrollment code must not be reusable.");
+
+      const agentHeaders = {
+        "X-Print-Agent-Id": qaAgentIdentity.id,
+        "X-Print-Agent-Secret": qaAgentIdentity.secret
+      };
+      heartbeat = assertHttp(await request(page, "POST", "/api/v1/agent/heartbeat", {
+        headers: agentHeaders,
+        body: { version: "smartprint-local-qa", operatingSystem: "Windows", localEndpoints: [] }
+      }), 200, "Authenticated QA Agent heartbeat");
+      assert.equal(heartbeat.id, qaAgentIdentity.id);
+      assert.equal(heartbeat.status, "Online");
+      assert.ok(Array.isArray(heartbeat.localEndpoints));
+
+      invalidSync = await request(page, "POST", "/api/v1/agent/printers/sync", {
+        headers: agentHeaders,
+        body: {
+          printers: [{
+            queueName: "SMARTPRINT_QA_INVALID_QUEUE",
+            driverName: "QA Validation Only",
+            portName: "QA-PORT",
+            status: "Ready",
+            isDefault: false,
+            outputMode: "PHYSICAL",
+            capabilitiesJson: "[]"
+          }]
+        }
+      });
+      assert.equal(invalidSync.status, 400, "Invalid printer capability payload must be rejected.");
+
+      emptySync = assertHttp(await request(page, "POST", "/api/v1/agent/printers/sync", {
+        headers: agentHeaders,
+        body: { printers: [] }
+      }), 200, "Valid empty printer discovery sync");
+      assert.equal(emptySync.discovered, 0, "No physical printer is asserted or discovered in this protocol-only run.");
+
+      const shopDevices = assertHttp(await request(shop1Page, "GET", "/api/v1/shop/agent-devices", {
+        token: shop1Tokens.accessToken
+      }), 200, "Shop sees the newly enrolled QA Agent");
+      const device = shopDevices.find(item => item.id === qaAgentIdentity.id);
+      assert.ok(device, "The enrolled Agent must be persisted under Shop One.");
+      assert.equal(device.status, "Online");
+
+      const revoke = assertHttp(await request(shop1Page, "PATCH",
+        "/api/v1/shop/agent-devices/" + qaAgentIdentity.id + "/revoke",
+        { token: shop1Tokens.accessToken }), 200, "Revoke disposable QA Agent");
+      assert.equal(revoke.status, "Revoked");
+      revoked = true;
+
+      const heartbeatAfterRevoke = await request(page, "POST", "/api/v1/agent/heartbeat", {
+        headers: agentHeaders,
+        body: { version: "smartprint-local-qa", operatingSystem: "Windows", localEndpoints: [] }
+      });
+      assert.equal(heartbeatAfterRevoke.status, 401, "A revoked Agent credential must no longer authenticate.");
+
+      const finalDevices = assertHttp(await request(shop1Page, "GET", "/api/v1/shop/agent-devices", {
+        token: shop1Tokens.accessToken
+      }), 200, "Shop sees the revoked QA Agent state");
+      const finalDevice = finalDevices.find(item => item.id === qaAgentIdentity.id);
+      assert.equal(finalDevice?.status, "Revoked");
+
+      return {
+        enrollmentCreatedPersistedAgent: true,
+        oneTimeCodeReplay: enrollmentReplay.status,
+        heartbeat: heartbeat.status,
+        invalidPrinterSync: invalidSync.status,
+        emptyPrinterDiscovery: emptySync.discovered,
+        shopCanSeeAgent: true,
+        revokeStatus: revoke.status,
+        revokedAgentHeartbeat: heartbeatAfterRevoke.status,
+        physicalPrintersCreatedOrTouched: false,
+        realWindowsServicePaired: false,
+        secretRecordedInEvidence: false
+      };
+    } finally {
+      if (qaAgentIdentity && !revoked) {
+        const cleanup = await request(shop1Page, "PATCH",
+          "/api/v1/shop/agent-devices/" + qaAgentIdentity.id + "/revoke",
+          { token: shop1Tokens.accessToken });
+        if (cleanup.status !== 200) {
+          throw new Error("QA cleanup could not revoke disposable Agent identity; HTTP " + cleanup.status);
+        }
+        revoked = true;
+      }
+      qaAgentIdentity = null;
+    }
+  }, ["AGENT-023", "AGENT-024", "AGENT-025", "AGENT-026", "AGENT-027", "AGENT-028", "AGENT-029"]);
 
   await record("DEVICE/QR: printer and station controls restore safely; QR rotation invalidates the old public code", async () => {
     let printerNeedsRestore = false;
