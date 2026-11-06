@@ -12,6 +12,9 @@ $ErrorActionPreference = 'Stop'
 $repoRoot = Split-Path -Parent $PSScriptRoot
 $envPath = Join-Path $repoRoot '.env'
 $composeFile = Join-Path $repoRoot 'compose.yml'
+# Restore only into the existing production project and its persistent volumes.
+$composeProjectName = 'qrtoprint'
+$composeBaseArgs = @('--project-name', $composeProjectName, '--env-file', $envPath, '-f', $composeFile)
 
 if (-not $ConfirmRestore) {
     throw 'Restore is destructive. Re-run with -ConfirmRestore after checking the selected backup set.'
@@ -76,18 +79,18 @@ try {
     Write-Host "Saved previous deployment secrets to $temporaryEnvPath" -ForegroundColor Yellow
 
     Write-Host 'Pausing API and portal writes...' -ForegroundColor Cyan
-    docker compose --env-file $envPath -f $composeFile stop api portal
+    docker compose @composeBaseArgs stop api portal
     if ($LASTEXITCODE -ne 0) { throw 'Could not stop API and portal services.' }
     $servicesStopped = $true
 
-    docker compose --env-file $envPath -f $composeFile up -d db
+    docker compose @composeBaseArgs up -d db
     if ($LASTEXITCODE -ne 0) { throw 'Could not start PostgreSQL with the backup environment.' }
 
-    $apiContainer = docker compose --env-file $envPath -f $composeFile ps -a -q api
+    $apiContainer = docker compose @composeBaseArgs ps -a -q api
     if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($apiContainer)) {
-        docker compose --env-file $envPath -f $composeFile create api
+        docker compose @composeBaseArgs create api
         if ($LASTEXITCODE -ne 0) { throw 'Could not create an API container to access the persistent document volume.' }
-        $apiContainer = docker compose --env-file $envPath -f $composeFile ps -a -q api
+        $apiContainer = docker compose @composeBaseArgs ps -a -q api
     }
     if ([string]::IsNullOrWhiteSpace($apiContainer)) { throw 'The API container could not be located.' }
 
@@ -113,15 +116,15 @@ try {
 
     Write-Host 'Replacing PostgreSQL database...' -ForegroundColor Cyan
     $restoreStarted = $true
-    docker compose --env-file $envPath -f $composeFile exec -T db dropdb --if-exists --force -U $dbUser $dbName
+    docker compose @composeBaseArgs exec -T db dropdb --if-exists --force -U $dbUser $dbName
     if ($LASTEXITCODE -ne 0) { throw 'Could not drop the existing database. The API and portal remain stopped.' }
-    docker compose --env-file $envPath -f $composeFile exec -T db createdb -U $dbUser $dbName
+    docker compose @composeBaseArgs exec -T db createdb -U $dbUser $dbName
     if ($LASTEXITCODE -ne 0) { throw 'Could not recreate the database. The API and portal remain stopped.' }
-    docker compose --env-file $envPath -f $composeFile cp $databaseFile ('db:' + $temporaryDbPath)
+    docker compose @composeBaseArgs cp $databaseFile ('db:' + $temporaryDbPath)
     if ($LASTEXITCODE -ne 0) { throw 'Could not copy the database backup into PostgreSQL.' }
-    docker compose --env-file $envPath -f $composeFile exec -T db pg_restore --exit-on-error --no-owner --no-privileges -U $dbUser -d $dbName $temporaryDbPath
+    docker compose @composeBaseArgs exec -T db pg_restore --exit-on-error --no-owner --no-privileges -U $dbUser -d $dbName $temporaryDbPath
     if ($LASTEXITCODE -ne 0) { throw 'PostgreSQL restore failed. The API and portal remain stopped; inspect PostgreSQL logs before retrying.' }
-    docker compose --env-file $envPath -f $composeFile exec -T db rm -f $temporaryDbPath | Out-Null
+    docker compose @composeBaseArgs exec -T db rm -f $temporaryDbPath | Out-Null
 
     Write-Host 'Restoring encrypted cloud documents...' -ForegroundColor Cyan
     $backupHelper = docker create --volumes-from ($apiContainer.Trim() + ':rw') alpine:3.20 sh -c ('mkdir -p /var/lib/qrtoprint/documents && find /var/lib/qrtoprint/documents -mindepth 1 -maxdepth 1 -exec rm -rf {} + && tar -xzf ' + $temporaryDocumentsPath + ' -C /var/lib/qrtoprint/documents && chown -R 1654:1654 /var/lib/qrtoprint/documents')
@@ -134,12 +137,12 @@ try {
     $backupHelper = $null
 
     Write-Host 'Starting QRtoPrint services from the restored backup...' -ForegroundColor Cyan
-    docker compose --env-file $envPath -f $composeFile up -d
+    docker compose @composeBaseArgs up -d
     if ($LASTEXITCODE -ne 0) { throw 'The restored data is in place, but Docker Compose could not restart the stack.' }
 
     $healthy = $false
     for ($attempt = 0; $attempt -lt 90; $attempt++) {
-        docker compose --env-file $envPath -f $composeFile exec -T api curl --fail --silent http://127.0.0.1:8080/health/ready | Out-Null
+        docker compose @composeBaseArgs exec -T api curl --fail --silent http://127.0.0.1:8080/health/ready | Out-Null
         if ($LASTEXITCODE -eq 0) { $healthy = $true; break }
         Start-Sleep -Seconds 2
     }
@@ -154,7 +157,7 @@ try {
     if (-not $restoreSucceeded -and $servicesStopped -and -not $restoreStarted) {
         Write-Warning 'Restore stopped before replacing the database; restarting the original API and portal.'
         if ($envReplaced -and (Test-Path -LiteralPath $temporaryEnvPath)) { Copy-Item -LiteralPath $temporaryEnvPath -Destination $envPath -Force }
-        docker compose --env-file $envPath -f $composeFile start api portal | Out-Null
+        docker compose @composeBaseArgs start api portal | Out-Null
     } elseif (-not $restoreSucceeded -and $restoreStarted) {
         Write-Warning 'The restore started but did not complete. API and portal are intentionally left stopped to prevent serving a partial data restore.'
     }
