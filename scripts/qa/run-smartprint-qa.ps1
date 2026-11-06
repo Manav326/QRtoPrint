@@ -360,6 +360,26 @@ try {
         portal = "localhost/smart-print/smart-print-portal:local"
     }
     $imageBuildOk = Invoke-QAStep -Name "Build and verify the exact SmartPrint local Docker images" -LogName "docker-image-build.log" -Action {
+        $rootManifestPath = Join-Path $repoRoot "package.json"
+        $portalManifestPath = Join-Path $repoRoot "apps/portal/package.json"
+        $desktopManifestPath = Join-Path $repoRoot "apps/desktop/package.json"
+        $portalDockerfilePath = Join-Path $repoRoot "apps/portal/Dockerfile"
+        foreach ($requiredPath in @($rootManifestPath, $portalManifestPath, $desktopManifestPath, $portalDockerfilePath)) {
+            if (-not (Test-Path -LiteralPath $requiredPath -PathType Leaf)) {
+                throw "Required SmartPrint workspace identity file is missing: $requiredPath"
+            }
+        }
+        $rootManifest = Get-Content -LiteralPath $rootManifestPath -Raw | ConvertFrom-Json -ErrorAction Stop
+        $portalManifest = Get-Content -LiteralPath $portalManifestPath -Raw | ConvertFrom-Json -ErrorAction Stop
+        $desktopManifest = Get-Content -LiteralPath $desktopManifestPath -Raw | ConvertFrom-Json -ErrorAction Stop
+        $portalDockerfile = Get-Content -LiteralPath $portalDockerfilePath -Raw
+        if ($rootManifest.name -ne "smart-print" -or
+            $portalManifest.name -ne "@smart-print/portal" -or
+            $desktopManifest.name -ne "@smart-print/desktop" -or
+            $portalDockerfile -notmatch 'pnpm --filter @smart-print/portal build') {
+            throw "The checkout still contains an old workspace/package identity. Expected smart-print, @smart-print/portal, @smart-print/desktop, and the matching portal Docker build filter. Pull the current main branch before building."
+        }
+        Write-Host "Verified workspace identity: smart-print / @smart-print/portal / @smart-print/desktop."
         $resolvedConfigArgs = $composeBaseArgs + @("config", "--format", "json")
         $resolvedConfigOutput = & $docker.Source @resolvedConfigArgs
         if ($LASTEXITCODE -ne 0) { throw "Could not resolve the SmartPrint Compose image configuration." }
