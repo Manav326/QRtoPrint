@@ -79,9 +79,34 @@ function Invoke-QAStep {
 
 function Test-LocalSmartPrint {
     try {
+        # Verify that the public portal origin serves the application.
         $portal = Invoke-WebRequest -Uri "$target/" -Method GET -UseBasicParsing -TimeoutSec 8 -ErrorAction Stop
-        $ready = Invoke-RestMethod -Uri "$target/health/ready" -Method GET -TimeoutSec 8 -ErrorAction Stop
-        return ($portal.StatusCode -eq 200 -and $ready.status -eq "ready" -and $ready.database -eq "connected")
+        if ($portal.StatusCode -ne 200) {
+            return $false
+        }
+
+        # The API readiness endpoint includes database connectivity details.
+        # Probe it from inside the API container instead of exposing it through
+        # the unauthenticated portal origin or weakening API authorization.
+        $apiHealthArgs = $composeBaseArgs + @(
+            "exec",
+            "-T",
+            "api",
+            "curl",
+            "--fail",
+            "--silent",
+            "--show-error",
+            "http://127.0.0.1:8080/health/ready"
+        )
+        $apiHealthOutput = & $docker.Source @apiHealthArgs 2>$null
+        if ($LASTEXITCODE -ne 0 -or -not $apiHealthOutput) {
+            return $false
+        }
+
+        $ready = ($apiHealthOutput -join [Environment]::NewLine) |
+            ConvertFrom-Json -ErrorAction Stop
+
+        return ($ready.status -eq "ready" -and $ready.database -eq "connected")
     } catch {
         return $false
     }
@@ -448,7 +473,7 @@ try {
         & $docker.Source @logsArgs 2>&1 | Tee-Object -FilePath (Join-Path $logDirectory "docker-readiness-failure.log") | ForEach-Object { Write-Host $_ }
         throw "Local portal or API/PostgreSQL readiness did not become healthy at $target after rebuild. Review logs/docker-readiness-failure.log."
     }
-    Add-QAResult -Name "Local SmartPrint stack readiness" -Status "PASS" -Detail "Current source rebuilt; portal returns 200 and /health/ready reports ready with database connected."
+    Add-QAResult -Name "Local SmartPrint stack readiness" -Status "PASS" -Detail "Current source rebuilt; portal returns 200 and the private API readiness check confirms database connected."
 
     $accounts = Get-OrCreateQAAccounts
     Set-QAProcessEnvironment $accounts
