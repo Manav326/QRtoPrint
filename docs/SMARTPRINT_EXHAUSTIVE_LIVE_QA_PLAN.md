@@ -157,9 +157,9 @@ The suite also reads payments/refunds, verifies refund preview is blocked withou
 
 ## Expanded functional acceptance catalogue and 90% gate
 
-The local real-data Playwright runner now carries **191 uniquely identified functional acceptance cases**. Each case ID is attached to the actual E2E record that performs its assertions. At the end of a run, report.json and report.txt show planned cases, reached cases, the coverage percentage, pass/fail counts, and any case IDs that were not reached.
+The local real-data Playwright runner now carries **195 uniquely identified functional acceptance cases**. Each case ID is attached to the actual E2E record that performs its assertions. At the end of a run, report.json and report.txt show planned cases, reached cases, the coverage percentage, pass/fail counts, and any case IDs that were not reached.
 
-**Coverage definition:** functional test-case execution coverage = unique planned case IDs reached by the runner ÷ 191. The runner exits with a failure when this is below **90%**. A failed assertion still counts as an executed case, so coverage and pass rate are reported separately. A release-quality run should have 100% of the cases reached and 100% of executed assertions passing.
+**Coverage definition:** functional test-case execution coverage = unique planned case IDs reached by the runner ÷ 195. The runner exits with a failure when this is below **90%**. A failed assertion still counts as an executed case, so coverage and pass rate are reported separately. A release-quality run should have 100% of the cases reached and 100% of executed assertions passing.
 
 This is **not source-code line or branch coverage**. No 90% code-coverage claim is made. Measuring line/branch coverage requires a separate instrumented Coverlet/Node coverage run and generated coverage reports; it must not be inferred from the count of functional cases.
 
@@ -178,6 +178,7 @@ This is **not source-code line or branch coverage**. No 90% code-coverage claim 
 | Platform UI and operations | PLATFORM-001–009 | 9 | All control-centre areas, directory/plan/subscription/settings reads, settings validation, audit history and safe no-op save |
 | Shop setup and validation | SHOP-001–018 | 18 | Printer/station/rate/payment setup in two tenants; invalid pricing, invalid capabilities, unsupported printer type, foreign-printer binding, insecure logo and account validation; verify rejected writes did not mutate saved state |
 | Shop navigation/account tools | SHOPUI-001–027 | 27 | Both shop workspaces, all primary sections, account-menu tools and authenticated responsive navigation |
+| Shop reports | REPORT-001–004 | 4 | 7/30/90-day summaries, unsupported range rejection and both tenant report scopes |
 | Authorization and isolation | RBAC-001–006 | 6 | Shop/admin/customer role separation, foreign tenant resource access and cross-tenant job-history denial |
 | QR station/session lifecycle | QR-001–010 | 10 | Session renewal/resume, session-to-station binding, station enable/disable, rotation invalidates old code and new code can create a session |
 | Customer account linkage | CUST-001–002 | 2 | QR print session tied to global customer identity and customer job-history endpoint |
@@ -201,6 +202,7 @@ The extra cases are intentionally run against QA-only identities and records:
 - **Authentication:** the refresh-token test uses a newly authenticated QA shop session, proves the old refresh token cannot be replayed, and verifies logout revokes the replacement token. This block runs after the longer UI/data journeys to reduce the risk of colliding with the API's authentication rate limit during startup.
 - **Shop configuration:** each invalid update is followed by a read-back. Rejected rate/printer/station writes must not change the rate-card version or create unintended rows. A station cannot be attached to another tenant's printer.
 - **QR/session:** tests prove the opaque session token cannot be read anonymously or resumed against another tenant's QR station. A disabled or rotated station code cannot create a new session; the new rotated code must work.
+- **Reports:** Shop One is checked against each supported 7-, 30- and 90-day summary window, an unsupported 14-day window is rejected, and Shop Two reads its own report under its own token.
 - **Photo Studio:** a synthetic PNG is processed in a separate browser page. The test opens the actual editor, exercises crop/look/background and optional form controls, generates the prepared A4 photo PDF, verifies the preview, and confirms no server-side customer print job was created. The prepared file is not uploaded or sent to the shop.
 - **Payment/refund:** test-only payment references are explicitly marked synthetic. A rejected payment cannot be manually verified, an unpaid/rejected job cannot be approved/dispatched, refund preview without verified money is rejected, and the API refuses a refund request whose `confirmedSent` value is false. No real transfer, payment verification, refund, gateway or printer dispatch occurs.
 - **Platform/tenant:** only the generated QA shop is suspended; it is restored to Active in the same run. Operational settings are saved with their existing values only to prove the audit trail, so platform policy values are not changed. A duplicate Active transition must be idempotent.
