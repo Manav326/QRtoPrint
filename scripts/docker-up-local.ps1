@@ -15,7 +15,8 @@ function Assert-SmartPrintWorkspaceBuildIdentity {
     $portalManifestPath = Join-Path $repoRoot "apps/portal/package.json"
     $desktopManifestPath = Join-Path $repoRoot "apps/desktop/package.json"
     $portalDockerfilePath = Join-Path $repoRoot "apps/portal/Dockerfile"
-    foreach ($requiredPath in @($rootManifestPath, $portalManifestPath, $desktopManifestPath, $portalDockerfilePath)) {
+    $responsiveBrowserTestPath = Join-Path $repoRoot "apps/portal/tests/theme-responsive.browser.mjs"
+    foreach ($requiredPath in @($rootManifestPath, $portalManifestPath, $desktopManifestPath, $portalDockerfilePath, $responsiveBrowserTestPath)) {
         if (-not (Test-Path -LiteralPath $requiredPath -PathType Leaf)) {
             throw "Required SmartPrint workspace identity file is missing: $requiredPath"
         }
@@ -25,11 +26,14 @@ function Assert-SmartPrintWorkspaceBuildIdentity {
     $portalManifest = Get-Content -LiteralPath $portalManifestPath -Raw | ConvertFrom-Json -ErrorAction Stop
     $desktopManifest = Get-Content -LiteralPath $desktopManifestPath -Raw | ConvertFrom-Json -ErrorAction Stop
     $portalDockerfile = Get-Content -LiteralPath $portalDockerfilePath -Raw
+    $responsiveBrowserTest = Get-Content -LiteralPath $responsiveBrowserTestPath -Raw
     if ($rootManifest.name -ne "smart-print" -or
         $portalManifest.name -ne "@smart-print/portal" -or
         $desktopManifest.name -ne "@smart-print/desktop" -or
-        $portalDockerfile -notmatch 'pnpm --filter @smart-print/portal build') {
-        throw "The checkout still contains an old workspace/package identity. Expected smart-print, @smart-print/portal, @smart-print/desktop, and the matching portal Docker build filter. Pull the current main branch before building."
+        $portalDockerfile -notmatch 'pnpm --filter @smart-print/portal build' -or
+        $responsiveBrowserTest -notmatch '--filter',\s*'@smart-print/portal' -or
+        $responsiveBrowserTest -notmatch '--filter',\s*'@smart-print/desktop') {
+        throw "The checkout still contains an old workspace/package identity. Expected smart-print, @smart-print/portal, @smart-print/desktop, and matching Docker/browser QA package filters. Pull the current main branch before building."
     }
     Write-Host "Verified workspace identity: smart-print / @smart-print/portal / @smart-print/desktop."
 }
