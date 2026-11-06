@@ -277,7 +277,7 @@ try {
             throw "Local stack bootstrap is missing: $stackScript"
         }
         $bootstrapStackOk = Invoke-QAStep -Name "First-time local SmartPrint setup and secret creation" -LogName "docker-up-local-bootstrap.log" -Action {
-            & $stackScript
+            & $stackScript -PublicBaseUrl "https://smartprint.quantaedge.in"
         }
         if (-not $bootstrapStackOk) {
             throw "First-time local setup failed. Review logs/docker-up-local-bootstrap.log. Existing secrets and volumes were not deleted."
@@ -286,6 +286,517 @@ try {
 
     if (-not (Test-Path -LiteralPath $envPath -PathType Leaf)) {
         throw "The local .env.local file was not created. Run scripts/docker-up-local.ps1 and inspect its output."
+    }
+
+    $localEnvironmentLines = @(Get-Content -LiteralPath $envPath)
+    $publicBaseLine = $localEnvironmentLines |
+        Where-Object { $_ -match '^\s*PUBLIC_BASE_URL\s*=' } |
+        Select-Object -First 1
+    if ($null -eq $publicBaseLine -or $publicBaseLine -notmatch '^\s*PUBLIC_BASE_URL\s*=\s*https://[^\s]+\s*
+    if ($LASTEXITCODE -ne 0) {
+        throw "The required shared Docker network 'cloudflare-edge' is missing. Start it from the QuantaEdge-Production checkout with .\scripts\local-ingress.ps1 up. The QA runner will not create or replace shared ingress infrastructure."
+    }
+
+    Write-Host "Rebuilding SmartPrint from the current pulled repository source. Persistent database and document volumes are preserved." -ForegroundColor Cyan
+    $composeArgs = @(
+        "compose", "--env-file", $envPath, "-f", $composeFile, "config", "--quiet"
+    )
+    $configOk = Invoke-QAStep -Name "Validate local SmartPrint Compose configuration" -LogName "compose-config.log" -Action {
+        & $docker.Source @composeArgs
+    }
+    if (-not $configOk) { throw "Local SmartPrint Compose configuration is invalid." }
+
+    $upArgs = @(
+        "compose", "--env-file", $envPath, "-f", $composeFile, "up", "-d", "--build"
+    )
+    $stackOk = Invoke-QAStep -Name "Rebuild and start current local portal, API and PostgreSQL services" -LogName "docker-compose-up.log" -Action {
+        & $docker.Source @upArgs
+    }
+    if (-not $stackOk) { throw "Local SmartPrint Docker stack failed to build or start. Review logs/docker-compose-up.log." }
+
+    $deadline = [DateTime]::UtcNow.AddSeconds(180)
+    $ready = $false
+    do {
+        if (Test-LocalSmartPrint) { $ready = $true; break }
+        Start-Sleep -Seconds 2
+    } while ([DateTime]::UtcNow -lt $deadline)
+    if (-not $ready) {
+        $logsArgs = @("compose", "--env-file", $envPath, "-f", $composeFile, "logs", "--tail", "100", "portal", "api", "db")
+        & $docker.Source @logsArgs 2>&1 | Tee-Object -FilePath (Join-Path $logDirectory "docker-readiness-failure.log") | ForEach-Object { Write-Host $_ }
+        throw "Local portal or API/PostgreSQL readiness did not become healthy at $target after rebuilding. Review docker-readiness-failure.log."
+    }
+    Add-QAResult -Name "Local SmartPrint stack readiness" -Status "PASS" -Detail "Current repository source has been rebuilt. Portal returns 200 and /health/ready reports ready with database connected."
+
+    $accounts = Get-OrCreateQAAccounts
+    Set-QAProcessEnvironment $accounts
+
+    $env:QRTP_PLATFORM_ADMIN_EMAIL = $accounts.admin.email
+    $env:QRTP_PLATFORM_ADMIN_NAME = $accounts.admin.displayName
+    $env:QRTP_PLATFORM_ADMIN_PASSWORD = Unprotect-QAPassword $accounts.admin.passwordProtected
+
+    $envPath = Join-Path $repoRoot ".env.local"
+    if (-not (Test-Path -LiteralPath $envPath -PathType Leaf)) { throw "Local .env.local is missing. Run scripts/docker-up-local.ps1 first." }
+    $dockerArgs = @(
+        "compose", "--env-file", $envPath, "-f", "compose.local.yml",
+        "exec", "-T",
+        "-e", "QRTP_PLATFORM_ADMIN_EMAIL",
+        "-e", "QRTP_PLATFORM_ADMIN_NAME",
+        "-e", "QRTP_PLATFORM_ADMIN_PASSWORD",
+        "api", "dotnet", "SmartPrint.Api.dll", "--bootstrap-platform-admin"
+    )
+    $bootstrapOk = Invoke-QAStep -Name "Bootstrap local platform QA administrator (no shop account elevation)" -LogName "bootstrap-local-admin.log" -Action {
+        & $docker.Source @dockerArgs
+    }
+    if (-not $bootstrapOk) { throw "Local platform administrator bootstrap failed." }
+
+    $script:playwrightModule = $null
+    $playwrightOk = Invoke-QAStep -Name "Install and locate pinned Playwright 1.56.1 with Chromium" -LogName "playwright-install.log" -Action {
+        $script:playwrightModule = Install-OrLocatePlaywright
+        if (-not $script:playwrightModule) { throw "Playwright module resolution failed." }
+        Write-Host ("Pinned Playwright module: " + $script:playwrightModule)
+    }
+    if (-not $playwrightOk -or -not $script:playwrightModule) { throw "Playwright is not ready." }
+    $env:PLAYWRIGHT_MODULE_DIR = $script:playwrightModule
+
+    $liveSuite = Join-Path $PSScriptRoot "smartprint-local-e2e.mjs"
+    if (-not (Test-Path -LiteralPath $liveSuite -PathType Leaf)) { throw "Local E2E suite is missing: $liveSuite" }
+    $syntaxOk = Invoke-QAStep -Name "Validate local Playwright suite JavaScript syntax" -LogName "playwright-syntax-check.log" -Action {
+        & $node.Source "--check" $liveSuite
+    }
+    if (-not $syntaxOk) { throw "The local Playwright suite has a syntax error. Review logs/playwright-syntax-check.log." }
+
+    $e2eOk = Invoke-QAStep -Name "Real local Playwright E2E: shop owners, customer, platform admin, database, uploads, quotes, payment rejection and tenant isolation" -LogName "local-real-data-e2e.log" -Action {
+        & $node.Source $liveSuite
+    }
+    if (-not $e2eOk) { $exitCode = 1 }
+
+    if ($SkipUnitTests) {
+        Add-QAResult -Name "Existing portal/API/Agent logic suites" -Status "SKIPPED" -Detail "Skipped by -SkipUnitTests."
+    } else {
+        $portalTests = @(
+            "apps/portal/tests/portal-routing.test.ts",
+            "apps/portal/tests/order-journey.test.ts",
+            "apps/portal/tests/customer-session-state.test.ts",
+            "apps/portal/tests/table-layout.test.ts",
+            "apps/portal/tests/theme-responsive.test.ts",
+            "apps/portal/tests/batch-checkout-state.test.ts",
+            "apps/portal/tests/local-upload-routing.test.ts",
+            "apps/portal/tests/print-fulfilment-flow.test.ts",
+            "apps/portal/tests/photo-studio.test.ts",
+            "apps/portal/tests/upi-payment-intent.test.ts"
+        )
+        $missingPortalTests = @($portalTests | Where-Object { -not (Test-Path -LiteralPath (Join-Path $repoRoot $_) -PathType Leaf) })
+        if ($missingPortalTests.Count -eq 0) {
+            $portalOk = Invoke-QAStep -Name "Existing portal logic regression tests (Node test runner; not counted as live API tests)" -LogName "portal-logic-tests.log" -Action {
+                & $node.Source "--experimental-strip-types" "--test" @portalTests
+            }
+            if (-not $portalOk) { $exitCode = 1 }
+        } else {
+            Add-QAResult -Name "Existing portal logic regression tests" -Status "FAIL" -Detail ("Missing files: " + ($missingPortalTests -join ", "))
+            $exitCode = 1
+        }
+
+        $dotnet = Get-Command dotnet.exe -ErrorAction SilentlyContinue
+        if (-not $dotnet) { $dotnet = Get-Command dotnet -ErrorAction SilentlyContinue }
+        if ($dotnet) {
+            # A historical migration test calls EnsureDeletedAsync against SMARTPRINT_TEST_POSTGRES.
+            # The local application database is the live E2E target and must never be passed to that destructive test.
+            $env:SMARTPRINT_TEST_POSTGRES = $null
+            $apiTestOk = Invoke-QAStep -Name "Existing SmartPrint API unit/regression tests (PostgreSQL destructive migration test disabled)" -LogName "api-dotnet-tests.log" -Action {
+                & $dotnet.Source "test" "tests/SmartPrint.Api.Tests/SmartPrint.Api.Tests.csproj" "--configuration" "Release" "--logger" "console;verbosity=minimal"
+            }
+            if (-not $apiTestOk) { $exitCode = 1 }
+
+            $pdfPrinterAvailable = $false
+            if (Get-Command Get-Printer -ErrorAction SilentlyContinue) {
+                $pdfPrinter = Get-Printer -Name "Microsoft Print to PDF" -ErrorAction SilentlyContinue
+                $pdfPrinterAvailable = $null -ne $pdfPrinter
+            }
+
+            if ($pdfPrinterAvailable) {
+                $env:SMARTPRINT_RUN_WINDOWS_SPOOLER_INTEGRATION = "1"
+                Write-Host "Microsoft Print to PDF is installed. Enabling the real Windows virtual-spooler integration test; no paper printer or secondary queue will be used." -ForegroundColor Cyan
+            } else {
+                $env:SMARTPRINT_RUN_WINDOWS_SPOOLER_INTEGRATION = $null
+                Add-QAResult -Name "Microsoft Print to PDF Windows spooler integration" -Status "SKIPPED" -Detail "The Microsoft Print to PDF queue is not installed or the PrintManagement cmdlet is unavailable."
+            }
+            $env:SMARTPRINT_RUN_MULTI_QUEUE_INTEGRATION = $null
+            $agentTestOk = Invoke-QAStep -Name "Existing SmartPrint Windows Agent unit/regression tests and optional Microsoft Print to PDF integration" -LogName "agent-dotnet-tests.log" -Action {
+                & $dotnet.Source "test" "tests/SmartPrint.Agent.Tests/SmartPrint.Agent.Tests.csproj" "--configuration" "Release" "--logger" "console;verbosity=minimal"
+            }
+            if (-not $agentTestOk) { $exitCode = 1 }
+            if ($pdfPrinterAvailable -and $agentTestOk) {
+                Add-QAResult -Name "Microsoft Print to PDF Windows spooler integration" -Status "PASS" -Detail "The real GDI job reached the Windows virtual printer and a valid driver-generated PDF was verified in a temporary directory."
+            }
+            $env:SMARTPRINT_RUN_WINDOWS_SPOOLER_INTEGRATION = $null
+        } else {
+            Add-QAResult -Name "Existing API and Windows Agent .NET unit suites" -Status "SKIPPED" -Detail ".NET 10 SDK was not found on this Windows machine."
+        }
+
+        # Android tests are run only on a local SDK/emulator. The Gradle property points
+        # the app's WebView at the local Docker portal through the Android emulator host bridge.
+        $gradle = Get-Command gradle.bat -ErrorAction SilentlyContinue
+        if (-not $gradle) { $gradle = Get-Command gradle -ErrorAction SilentlyContinue }
+        $sdkRoot = $env:ANDROID_SDK_ROOT
+        if ([string]::IsNullOrWhiteSpace($sdkRoot)) { $sdkRoot = $env:ANDROID_HOME }
+        if ([string]::IsNullOrWhiteSpace($sdkRoot) -and $env:LOCALAPPDATA) {
+            $defaultSdk = Join-Path $env:LOCALAPPDATA "Android\Sdk"
+            if (Test-Path -LiteralPath $defaultSdk -PathType Container) { $sdkRoot = $defaultSdk }
+        }
+        if (-not $gradle -or [string]::IsNullOrWhiteSpace($sdkRoot) -or -not (Test-Path -LiteralPath $sdkRoot -PathType Container)) {
+            Add-QAResult -Name "Android local JVM and emulator suites" -Status "SKIPPED" -Detail "A system Gradle installation and Android SDK are required; no device will be installed or altered."
+        } else {
+            $androidGradleArgs = @(
+                "--no-daemon", "-p", "apps/android",
+                "-PsmartPrintServiceUrl=http://10.0.2.2:3000",
+                ":app:testDebugUnitTest", ":app:assembleDebug"
+            )
+            $androidBuildOk = Invoke-QAStep -Name "Android native JVM tests and local-portal debug APK build" -LogName "android-unit-build.log" -Action {
+                & $gradle.Source @androidGradleArgs
+            }
+            if (-not $androidBuildOk) { $exitCode = 1 }
+
+            $adb = Get-Command adb.exe -ErrorAction SilentlyContinue
+            if (-not $adb) { $adb = Get-Command adb -ErrorAction SilentlyContinue }
+            if (-not $adb) {
+                $platformToolsAdb = Join-Path $sdkRoot "platform-tools\adb.exe"
+                if (Test-Path -LiteralPath $platformToolsAdb -PathType Leaf) {
+                    $adb = [PSCustomObject]@{ Source = $platformToolsAdb }
+                }
+            }
+
+            if ($adb) {
+                $adbOutput = @(& $adb.Source "devices")
+                $connectedDevices = @($adbOutput | Where-Object { $_ -match '^\S+\s+device(\s|$)' })
+                $emulatorDevices = @($connectedDevices | Where-Object { $_ -match '^emulator-\d+\s+device(\s|$)' })
+            } else {
+                $connectedDevices = @()
+                $emulatorDevices = @()
+            }
+
+            # connectedDebugAndroidTest targets every online adb device. Run it only
+            # when the sole connected device is an emulator; never sideload to a phone.
+            if ($androidBuildOk -and $emulatorDevices.Count -eq 1 -and $connectedDevices.Count -eq 1) {
+                $instrumentationArgs = @(
+                    "--no-daemon", "-p", "apps/android",
+                    "-PsmartPrintServiceUrl=http://10.0.2.2:3000",
+                    ":app:connectedDebugAndroidTest"
+                )
+                $androidUiOk = Invoke-QAStep -Name "Android real emulator instrumentation tests against local SmartPrint portal" -LogName "android-emulator-tests.log" -Action {
+                    & $gradle.Source @instrumentationArgs
+                }
+                if (-not $androidUiOk) { $exitCode = 1 }
+            } elseif ($androidBuildOk) {
+                $deviceReason = if ($connectedDevices.Count -eq 0) {
+                    "No Android emulator is online."
+                } elseif ($connectedDevices.Count -gt 1) {
+                    "More than one adb device is online. Disconnect phones/extra emulators so Gradle cannot install to an unintended device."
+                } else {
+                    "The only connected Android device is not an emulator. Physical phones are deliberately not targeted by this script."
+                }
+                Add-QAResult -Name "Android emulator instrumentation suite" -Status "SKIPPED" -Detail $deviceReason
+            }
+        }
+    }
+}
+catch {
+    $fatalError = $_.Exception.Message
+    $exitCode = 1
+    Add-QAResult -Name "QA orchestrator" -Status "FAIL" -Detail $fatalError
+    ($_ | Out-String) | Set-Content -LiteralPath (Join-Path $logDirectory "fatal-error.log")
+}
+finally {
+    foreach ($name in $environmentNames) {
+        [Environment]::SetEnvironmentVariable($name, $originalEnvironment[$name], "Process")
+    }
+
+    $summary = [PSCustomObject]@{
+        product = "SmartPrint"
+        environment = "LOCAL_DOCKER_POSTGRES_REAL_API"
+        target = $target
+        runId = $runId
+        startedLocal = $runStamp
+        completedUtc = [DateTime]::UtcNow.ToString("o")
+        result = if ($exitCode -eq 0) { "PASS" } else { "FAIL" }
+        passed = @($results | Where-Object status -eq "PASS").Count
+        failed = @($results | Where-Object status -eq "FAIL").Count
+        skipped = @($results | Where-Object status -eq "SKIPPED").Count
+        warnings = @($results | Where-Object status -eq "WARN").Count
+        steps = @($results)
+        fatalError = $fatalError
+        evidenceDirectory = $artifactRelative
+        qaCredentialsFile = ".secrets\smartprint-qa\qa-accounts.dpapi.json"
+        mockedApiRoutesUsed = $false
+        productionDatabaseTouched = $false
+    }
+    $summary | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath (Join-Path $artifactRoot "summary.json") -Encoding UTF8
+    $summary | Format-List | Out-String | Set-Content -LiteralPath (Join-Path $artifactRoot "summary.txt") -Encoding UTF8
+    Write-Host ([Environment]::NewLine + "=== SMARTPRINT LOCAL QA SUMMARY ===") -ForegroundColor Cyan
+    $summary | Format-Table result, passed, failed, skipped, warnings, target, evidenceDirectory -AutoSize
+    Write-Host "QA identities are stored encrypted for the current Windows user. No password was written to the report or Git."
+    Write-Host "Evidence: $artifactRoot" -ForegroundColor Cyan
+}
+
+if ($exitCode -ne 0) { exit 1 }
+) {
+        Write-Host "The existing local environment is missing its canonical SmartPrint QR URL. Updating only PUBLIC_BASE_URL; all existing secrets and volumes are preserved." -ForegroundColor Yellow
+        $baseUrlFixOk = Invoke-QAStep -Name "Set the known canonical SmartPrint QR origin in local .env.local" -LogName "local-public-base-url.log" -Action {
+            & $stackScript -PublicBaseUrl "https://smartprint.quantaedge.in"
+        }
+        if (-not $baseUrlFixOk) {
+            throw "Could not set PUBLIC_BASE_URL in local .env.local. Existing signing/database/document secrets were not regenerated."
+        }
+        $localEnvironmentLines = @(Get-Content -LiteralPath $envPath)
+        $publicBaseLine = $localEnvironmentLines |
+            Where-Object { $_ -match '^\s*PUBLIC_BASE_URL\s*=\s*https://[^\s]+\s*
+    if ($LASTEXITCODE -ne 0) {
+        throw "The required shared Docker network 'cloudflare-edge' is missing. Start it from the QuantaEdge-Production checkout with .\scripts\local-ingress.ps1 up. The QA runner will not create or replace shared ingress infrastructure."
+    }
+
+    Write-Host "Rebuilding SmartPrint from the current pulled repository source. Persistent database and document volumes are preserved." -ForegroundColor Cyan
+    $composeArgs = @(
+        "compose", "--env-file", $envPath, "-f", $composeFile, "config", "--quiet"
+    )
+    $configOk = Invoke-QAStep -Name "Validate local SmartPrint Compose configuration" -LogName "compose-config.log" -Action {
+        & $docker.Source @composeArgs
+    }
+    if (-not $configOk) { throw "Local SmartPrint Compose configuration is invalid." }
+
+    $upArgs = @(
+        "compose", "--env-file", $envPath, "-f", $composeFile, "up", "-d", "--build"
+    )
+    $stackOk = Invoke-QAStep -Name "Rebuild and start current local portal, API and PostgreSQL services" -LogName "docker-compose-up.log" -Action {
+        & $docker.Source @upArgs
+    }
+    if (-not $stackOk) { throw "Local SmartPrint Docker stack failed to build or start. Review logs/docker-compose-up.log." }
+
+    $deadline = [DateTime]::UtcNow.AddSeconds(180)
+    $ready = $false
+    do {
+        if (Test-LocalSmartPrint) { $ready = $true; break }
+        Start-Sleep -Seconds 2
+    } while ([DateTime]::UtcNow -lt $deadline)
+    if (-not $ready) {
+        $logsArgs = @("compose", "--env-file", $envPath, "-f", $composeFile, "logs", "--tail", "100", "portal", "api", "db")
+        & $docker.Source @logsArgs 2>&1 | Tee-Object -FilePath (Join-Path $logDirectory "docker-readiness-failure.log") | ForEach-Object { Write-Host $_ }
+        throw "Local portal or API/PostgreSQL readiness did not become healthy at $target after rebuilding. Review docker-readiness-failure.log."
+    }
+    Add-QAResult -Name "Local SmartPrint stack readiness" -Status "PASS" -Detail "Current repository source has been rebuilt. Portal returns 200 and /health/ready reports ready with database connected."
+
+    $accounts = Get-OrCreateQAAccounts
+    Set-QAProcessEnvironment $accounts
+
+    $env:QRTP_PLATFORM_ADMIN_EMAIL = $accounts.admin.email
+    $env:QRTP_PLATFORM_ADMIN_NAME = $accounts.admin.displayName
+    $env:QRTP_PLATFORM_ADMIN_PASSWORD = Unprotect-QAPassword $accounts.admin.passwordProtected
+
+    $envPath = Join-Path $repoRoot ".env.local"
+    if (-not (Test-Path -LiteralPath $envPath -PathType Leaf)) { throw "Local .env.local is missing. Run scripts/docker-up-local.ps1 first." }
+    $dockerArgs = @(
+        "compose", "--env-file", $envPath, "-f", "compose.local.yml",
+        "exec", "-T",
+        "-e", "QRTP_PLATFORM_ADMIN_EMAIL",
+        "-e", "QRTP_PLATFORM_ADMIN_NAME",
+        "-e", "QRTP_PLATFORM_ADMIN_PASSWORD",
+        "api", "dotnet", "SmartPrint.Api.dll", "--bootstrap-platform-admin"
+    )
+    $bootstrapOk = Invoke-QAStep -Name "Bootstrap local platform QA administrator (no shop account elevation)" -LogName "bootstrap-local-admin.log" -Action {
+        & $docker.Source @dockerArgs
+    }
+    if (-not $bootstrapOk) { throw "Local platform administrator bootstrap failed." }
+
+    $script:playwrightModule = $null
+    $playwrightOk = Invoke-QAStep -Name "Install and locate pinned Playwright 1.56.1 with Chromium" -LogName "playwright-install.log" -Action {
+        $script:playwrightModule = Install-OrLocatePlaywright
+        if (-not $script:playwrightModule) { throw "Playwright module resolution failed." }
+        Write-Host ("Pinned Playwright module: " + $script:playwrightModule)
+    }
+    if (-not $playwrightOk -or -not $script:playwrightModule) { throw "Playwright is not ready." }
+    $env:PLAYWRIGHT_MODULE_DIR = $script:playwrightModule
+
+    $liveSuite = Join-Path $PSScriptRoot "smartprint-local-e2e.mjs"
+    if (-not (Test-Path -LiteralPath $liveSuite -PathType Leaf)) { throw "Local E2E suite is missing: $liveSuite" }
+    $syntaxOk = Invoke-QAStep -Name "Validate local Playwright suite JavaScript syntax" -LogName "playwright-syntax-check.log" -Action {
+        & $node.Source "--check" $liveSuite
+    }
+    if (-not $syntaxOk) { throw "The local Playwright suite has a syntax error. Review logs/playwright-syntax-check.log." }
+
+    $e2eOk = Invoke-QAStep -Name "Real local Playwright E2E: shop owners, customer, platform admin, database, uploads, quotes, payment rejection and tenant isolation" -LogName "local-real-data-e2e.log" -Action {
+        & $node.Source $liveSuite
+    }
+    if (-not $e2eOk) { $exitCode = 1 }
+
+    if ($SkipUnitTests) {
+        Add-QAResult -Name "Existing portal/API/Agent logic suites" -Status "SKIPPED" -Detail "Skipped by -SkipUnitTests."
+    } else {
+        $portalTests = @(
+            "apps/portal/tests/portal-routing.test.ts",
+            "apps/portal/tests/order-journey.test.ts",
+            "apps/portal/tests/customer-session-state.test.ts",
+            "apps/portal/tests/table-layout.test.ts",
+            "apps/portal/tests/theme-responsive.test.ts",
+            "apps/portal/tests/batch-checkout-state.test.ts",
+            "apps/portal/tests/local-upload-routing.test.ts",
+            "apps/portal/tests/print-fulfilment-flow.test.ts",
+            "apps/portal/tests/photo-studio.test.ts",
+            "apps/portal/tests/upi-payment-intent.test.ts"
+        )
+        $missingPortalTests = @($portalTests | Where-Object { -not (Test-Path -LiteralPath (Join-Path $repoRoot $_) -PathType Leaf) })
+        if ($missingPortalTests.Count -eq 0) {
+            $portalOk = Invoke-QAStep -Name "Existing portal logic regression tests (Node test runner; not counted as live API tests)" -LogName "portal-logic-tests.log" -Action {
+                & $node.Source "--experimental-strip-types" "--test" @portalTests
+            }
+            if (-not $portalOk) { $exitCode = 1 }
+        } else {
+            Add-QAResult -Name "Existing portal logic regression tests" -Status "FAIL" -Detail ("Missing files: " + ($missingPortalTests -join ", "))
+            $exitCode = 1
+        }
+
+        $dotnet = Get-Command dotnet.exe -ErrorAction SilentlyContinue
+        if (-not $dotnet) { $dotnet = Get-Command dotnet -ErrorAction SilentlyContinue }
+        if ($dotnet) {
+            # A historical migration test calls EnsureDeletedAsync against SMARTPRINT_TEST_POSTGRES.
+            # The local application database is the live E2E target and must never be passed to that destructive test.
+            $env:SMARTPRINT_TEST_POSTGRES = $null
+            $apiTestOk = Invoke-QAStep -Name "Existing SmartPrint API unit/regression tests (PostgreSQL destructive migration test disabled)" -LogName "api-dotnet-tests.log" -Action {
+                & $dotnet.Source "test" "tests/SmartPrint.Api.Tests/SmartPrint.Api.Tests.csproj" "--configuration" "Release" "--logger" "console;verbosity=minimal"
+            }
+            if (-not $apiTestOk) { $exitCode = 1 }
+
+            $pdfPrinterAvailable = $false
+            if (Get-Command Get-Printer -ErrorAction SilentlyContinue) {
+                $pdfPrinter = Get-Printer -Name "Microsoft Print to PDF" -ErrorAction SilentlyContinue
+                $pdfPrinterAvailable = $null -ne $pdfPrinter
+            }
+
+            if ($pdfPrinterAvailable) {
+                $env:SMARTPRINT_RUN_WINDOWS_SPOOLER_INTEGRATION = "1"
+                Write-Host "Microsoft Print to PDF is installed. Enabling the real Windows virtual-spooler integration test; no paper printer or secondary queue will be used." -ForegroundColor Cyan
+            } else {
+                $env:SMARTPRINT_RUN_WINDOWS_SPOOLER_INTEGRATION = $null
+                Add-QAResult -Name "Microsoft Print to PDF Windows spooler integration" -Status "SKIPPED" -Detail "The Microsoft Print to PDF queue is not installed or the PrintManagement cmdlet is unavailable."
+            }
+            $env:SMARTPRINT_RUN_MULTI_QUEUE_INTEGRATION = $null
+            $agentTestOk = Invoke-QAStep -Name "Existing SmartPrint Windows Agent unit/regression tests and optional Microsoft Print to PDF integration" -LogName "agent-dotnet-tests.log" -Action {
+                & $dotnet.Source "test" "tests/SmartPrint.Agent.Tests/SmartPrint.Agent.Tests.csproj" "--configuration" "Release" "--logger" "console;verbosity=minimal"
+            }
+            if (-not $agentTestOk) { $exitCode = 1 }
+            if ($pdfPrinterAvailable -and $agentTestOk) {
+                Add-QAResult -Name "Microsoft Print to PDF Windows spooler integration" -Status "PASS" -Detail "The real GDI job reached the Windows virtual printer and a valid driver-generated PDF was verified in a temporary directory."
+            }
+            $env:SMARTPRINT_RUN_WINDOWS_SPOOLER_INTEGRATION = $null
+        } else {
+            Add-QAResult -Name "Existing API and Windows Agent .NET unit suites" -Status "SKIPPED" -Detail ".NET 10 SDK was not found on this Windows machine."
+        }
+
+        # Android tests are run only on a local SDK/emulator. The Gradle property points
+        # the app's WebView at the local Docker portal through the Android emulator host bridge.
+        $gradle = Get-Command gradle.bat -ErrorAction SilentlyContinue
+        if (-not $gradle) { $gradle = Get-Command gradle -ErrorAction SilentlyContinue }
+        $sdkRoot = $env:ANDROID_SDK_ROOT
+        if ([string]::IsNullOrWhiteSpace($sdkRoot)) { $sdkRoot = $env:ANDROID_HOME }
+        if ([string]::IsNullOrWhiteSpace($sdkRoot) -and $env:LOCALAPPDATA) {
+            $defaultSdk = Join-Path $env:LOCALAPPDATA "Android\Sdk"
+            if (Test-Path -LiteralPath $defaultSdk -PathType Container) { $sdkRoot = $defaultSdk }
+        }
+        if (-not $gradle -or [string]::IsNullOrWhiteSpace($sdkRoot) -or -not (Test-Path -LiteralPath $sdkRoot -PathType Container)) {
+            Add-QAResult -Name "Android local JVM and emulator suites" -Status "SKIPPED" -Detail "A system Gradle installation and Android SDK are required; no device will be installed or altered."
+        } else {
+            $androidGradleArgs = @(
+                "--no-daemon", "-p", "apps/android",
+                "-PsmartPrintServiceUrl=http://10.0.2.2:3000",
+                ":app:testDebugUnitTest", ":app:assembleDebug"
+            )
+            $androidBuildOk = Invoke-QAStep -Name "Android native JVM tests and local-portal debug APK build" -LogName "android-unit-build.log" -Action {
+                & $gradle.Source @androidGradleArgs
+            }
+            if (-not $androidBuildOk) { $exitCode = 1 }
+
+            $adb = Get-Command adb.exe -ErrorAction SilentlyContinue
+            if (-not $adb) { $adb = Get-Command adb -ErrorAction SilentlyContinue }
+            if (-not $adb) {
+                $platformToolsAdb = Join-Path $sdkRoot "platform-tools\adb.exe"
+                if (Test-Path -LiteralPath $platformToolsAdb -PathType Leaf) {
+                    $adb = [PSCustomObject]@{ Source = $platformToolsAdb }
+                }
+            }
+
+            if ($adb) {
+                $adbOutput = @(& $adb.Source "devices")
+                $connectedDevices = @($adbOutput | Where-Object { $_ -match '^\S+\s+device(\s|$)' })
+                $emulatorDevices = @($connectedDevices | Where-Object { $_ -match '^emulator-\d+\s+device(\s|$)' })
+            } else {
+                $connectedDevices = @()
+                $emulatorDevices = @()
+            }
+
+            # connectedDebugAndroidTest targets every online adb device. Run it only
+            # when the sole connected device is an emulator; never sideload to a phone.
+            if ($androidBuildOk -and $emulatorDevices.Count -eq 1 -and $connectedDevices.Count -eq 1) {
+                $instrumentationArgs = @(
+                    "--no-daemon", "-p", "apps/android",
+                    "-PsmartPrintServiceUrl=http://10.0.2.2:3000",
+                    ":app:connectedDebugAndroidTest"
+                )
+                $androidUiOk = Invoke-QAStep -Name "Android real emulator instrumentation tests against local SmartPrint portal" -LogName "android-emulator-tests.log" -Action {
+                    & $gradle.Source @instrumentationArgs
+                }
+                if (-not $androidUiOk) { $exitCode = 1 }
+            } elseif ($androidBuildOk) {
+                $deviceReason = if ($connectedDevices.Count -eq 0) {
+                    "No Android emulator is online."
+                } elseif ($connectedDevices.Count -gt 1) {
+                    "More than one adb device is online. Disconnect phones/extra emulators so Gradle cannot install to an unintended device."
+                } else {
+                    "The only connected Android device is not an emulator. Physical phones are deliberately not targeted by this script."
+                }
+                Add-QAResult -Name "Android emulator instrumentation suite" -Status "SKIPPED" -Detail $deviceReason
+            }
+        }
+    }
+}
+catch {
+    $fatalError = $_.Exception.Message
+    $exitCode = 1
+    Add-QAResult -Name "QA orchestrator" -Status "FAIL" -Detail $fatalError
+    ($_ | Out-String) | Set-Content -LiteralPath (Join-Path $logDirectory "fatal-error.log")
+}
+finally {
+    foreach ($name in $environmentNames) {
+        [Environment]::SetEnvironmentVariable($name, $originalEnvironment[$name], "Process")
+    }
+
+    $summary = [PSCustomObject]@{
+        product = "SmartPrint"
+        environment = "LOCAL_DOCKER_POSTGRES_REAL_API"
+        target = $target
+        runId = $runId
+        startedLocal = $runStamp
+        completedUtc = [DateTime]::UtcNow.ToString("o")
+        result = if ($exitCode -eq 0) { "PASS" } else { "FAIL" }
+        passed = @($results | Where-Object status -eq "PASS").Count
+        failed = @($results | Where-Object status -eq "FAIL").Count
+        skipped = @($results | Where-Object status -eq "SKIPPED").Count
+        warnings = @($results | Where-Object status -eq "WARN").Count
+        steps = @($results)
+        fatalError = $fatalError
+        evidenceDirectory = $artifactRelative
+        qaCredentialsFile = ".secrets\smartprint-qa\qa-accounts.dpapi.json"
+        mockedApiRoutesUsed = $false
+        productionDatabaseTouched = $false
+    }
+    $summary | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath (Join-Path $artifactRoot "summary.json") -Encoding UTF8
+    $summary | Format-List | Out-String | Set-Content -LiteralPath (Join-Path $artifactRoot "summary.txt") -Encoding UTF8
+    Write-Host ([Environment]::NewLine + "=== SMARTPRINT LOCAL QA SUMMARY ===") -ForegroundColor Cyan
+    $summary | Format-Table result, passed, failed, skipped, warnings, target, evidenceDirectory -AutoSize
+    Write-Host "QA identities are stored encrypted for the current Windows user. No password was written to the report or Git."
+    Write-Host "Evidence: $artifactRoot" -ForegroundColor Cyan
+}
+
+if ($exitCode -ne 0) { exit 1 }
+ } |
+            Select-Object -First 1
+        if ($null -eq $publicBaseLine) { throw "PUBLIC_BASE_URL is still missing after local environment repair." }
     }
 
     & $docker.Source "network" "inspect" "cloudflare-edge" *> $null
