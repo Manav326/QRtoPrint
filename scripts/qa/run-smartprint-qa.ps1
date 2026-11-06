@@ -265,25 +265,63 @@ try {
     Add-QAResult -Name "Docker Desktop and Compose" -Status "PASS"
 
     $stackScript = Join-Path $repoRoot "scripts\docker-up-local.ps1"
-    if (-not (Test-Path -LiteralPath $stackScript -PathType Leaf)) { throw "Local stack starter is missing: $stackScript" }
-    $stackHealthy = (-not $RebuildLocalStack) -and (Test-LocalSmartPrint)
-    if ($stackHealthy) {
-        Add-QAResult -Name "Local SmartPrint stack" -Status "PASS" -Detail "Existing local portal and API/PostgreSQL readiness are healthy; no container rebuild was needed."
-    } else {
-        $stackOk = Invoke-QAStep -Name "Start/build local SmartPrint Docker stack (persistent DB and document volumes preserved)" -LogName "docker-up-local.log" -Action {
+    $composeFile = Join-Path $repoRoot "compose.local.yml"
+    $envPath = Join-Path $repoRoot ".env.local"
+    if (-not (Test-Path -LiteralPath $composeFile -PathType Leaf)) {
+        throw "Local Docker Compose file is missing: $composeFile"
+    }
+
+    if (-not (Test-Path -LiteralPath $envPath -PathType Leaf)) {
+        Write-Host "No local .env.local was found. Running the repository's first-time local-stack bootstrap to create local secrets safely." -ForegroundColor Yellow
+        if (-not (Test-Path -LiteralPath $stackScript -PathType Leaf)) {
+            throw "Local stack bootstrap is missing: $stackScript"
+        }
+        $bootstrapStackOk = Invoke-QAStep -Name "First-time local SmartPrint setup and secret creation" -LogName "docker-up-local-bootstrap.log" -Action {
             & $stackScript
         }
-        if (-not $stackOk) { throw "Local Docker stack did not start. Review logs/docker-up-local.log." }
-
-        $deadline = [DateTime]::UtcNow.AddSeconds(120)
-        $ready = $false
-        do {
-            if (Test-LocalSmartPrint) { $ready = $true; break }
-            Start-Sleep -Seconds 2
-        } while ([DateTime]::UtcNow -lt $deadline)
-        if (-not $ready) { throw "Local portal or API/PostgreSQL readiness did not become healthy at $target." }
-        Add-QAResult -Name "Local SmartPrint stack readiness" -Status "PASS" -Detail "Portal returns 200; /health/ready reports ready + database connected."
+        if (-not $bootstrapStackOk) {
+            throw "First-time local setup failed. Review logs/docker-up-local-bootstrap.log. Existing secrets and volumes were not deleted."
+        }
     }
+
+    if (-not (Test-Path -LiteralPath $envPath -PathType Leaf)) {
+        throw "The local .env.local file was not created. Run scripts/docker-up-local.ps1 and inspect its output."
+    }
+
+    & $docker.Source "network" "inspect" "cloudflare-edge" *> $null
+    if ($LASTEXITCODE -ne 0) {
+        throw "The required shared Docker network 'cloudflare-edge' is missing. Start it from the QuantaEdge-Production checkout with .\scripts\local-ingress.ps1 up. The QA runner will not create or replace shared ingress infrastructure."
+    }
+
+    Write-Host "Rebuilding SmartPrint from the current pulled repository source. Persistent database and document volumes are preserved." -ForegroundColor Cyan
+    $composeArgs = @(
+        "compose", "--env-file", $envPath, "-f", $composeFile, "config", "--quiet"
+    )
+    $configOk = Invoke-QAStep -Name "Validate local SmartPrint Compose configuration" -LogName "compose-config.log" -Action {
+        & $docker.Source @composeArgs
+    }
+    if (-not $configOk) { throw "Local SmartPrint Compose configuration is invalid." }
+
+    $upArgs = @(
+        "compose", "--env-file", $envPath, "-f", $composeFile, "up", "-d", "--build"
+    )
+    $stackOk = Invoke-QAStep -Name "Rebuild and start current local portal, API and PostgreSQL services" -LogName "docker-compose-up.log" -Action {
+        & $docker.Source @upArgs
+    }
+    if (-not $stackOk) { throw "Local SmartPrint Docker stack failed to build or start. Review logs/docker-compose-up.log." }
+
+    $deadline = [DateTime]::UtcNow.AddSeconds(180)
+    $ready = $false
+    do {
+        if (Test-LocalSmartPrint) { $ready = $true; break }
+        Start-Sleep -Seconds 2
+    } while ([DateTime]::UtcNow -lt $deadline)
+    if (-not $ready) {
+        $logsArgs = @("compose", "--env-file", $envPath, "-f", $composeFile, "logs", "--tail", "100", "portal", "api", "db")
+        & $docker.Source @logsArgs 2>&1 | Tee-Object -FilePath (Join-Path $logDirectory "docker-readiness-failure.log") | ForEach-Object { Write-Host $_ }
+        throw "Local portal or API/PostgreSQL readiness did not become healthy at $target after rebuilding. Review docker-readiness-failure.log."
+    }
+    Add-QAResult -Name "Local SmartPrint stack readiness" -Status "PASS" -Detail "Current repository source has been rebuilt. Portal returns 200 and /health/ready reports ready with database connected."
 
     $accounts = Get-OrCreateQAAccounts
     Set-QAProcessEnvironment $accounts
