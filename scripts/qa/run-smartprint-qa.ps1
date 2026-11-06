@@ -355,11 +355,46 @@ try {
     }
     if (-not $portPreflightOk) { throw "Docker port preflight failed; no existing containers were stopped." }
 
-    $upArgs = $composeBaseArgs + @("up", "-d", "--build")
-    $stackOk = Invoke-QAStep -Name "Rebuild and start current local portal, API and PostgreSQL services (project: $composeProjectName)" -LogName "docker-compose-up.log" -Action {
+    $expectedImages = @{
+        api = "localhost/smart-print/smart-print-api:local"
+        portal = "localhost/smart-print/smart-print-portal:local"
+    }
+    $imageBuildOk = Invoke-QAStep -Name "Build and verify the exact SmartPrint local Docker images" -LogName "docker-image-build.log" -Action {
+        $resolvedConfigArgs = $composeBaseArgs + @("config", "--format", "json")
+        $resolvedConfigOutput = & $docker.Source @resolvedConfigArgs
+        if ($LASTEXITCODE -ne 0) { throw "Could not resolve the SmartPrint Compose image configuration." }
+        $resolvedConfig = ($resolvedConfigOutput -join [Environment]::NewLine) | ConvertFrom-Json -ErrorAction Stop
+
+        foreach ($serviceName in @("api", "portal")) {
+            $configuredImage = [string]$resolvedConfig.services.$serviceName.image
+            if ($configuredImage -ne $expectedImages[$serviceName]) {
+                throw "Compose image mismatch for '$serviceName'. Expected '$($expectedImages[$serviceName])', found '$configuredImage'."
+            }
+            Write-Host ("Confirmed {0} image target: {1}" -f $serviceName, $configuredImage)
+        }
+
+        $buildArgs = $composeBaseArgs + @("build", "--progress", "plain", "api", "portal")
+        & $docker.Source @buildArgs
+        if ($LASTEXITCODE -ne 0) { throw "Docker Compose failed to build the API and Portal images." }
+
+        foreach ($serviceName in @("api", "portal")) {
+            $expectedImage = $expectedImages[$serviceName]
+            $tagOutput = & $docker.Source "image" "inspect" "--format" '{{json .RepoTags}}' $expectedImage
+            if ($LASTEXITCODE -ne 0) { throw "The expected image was not created: $expectedImage" }
+            $repoTags = ($tagOutput -join "") | ConvertFrom-Json -ErrorAction Stop
+            if (@($repoTags) -notcontains $expectedImage) {
+                throw "Docker image inspection did not report the required tag '$expectedImage'."
+            }
+            Write-Host ("Verified built image: {0}" -f $expectedImage) -ForegroundColor Green
+        }
+    }
+    if (-not $imageBuildOk) { throw "SmartPrint local image build or image-tag verification failed. Review logs/docker-image-build.log." }
+
+    $upArgs = $composeBaseArgs + @("up", "-d", "--no-build")
+    $stackOk = Invoke-QAStep -Name "Start the verified SmartPrint images and local PostgreSQL services (project: $composeProjectName)" -LogName "docker-compose-up.log" -Action {
         & $docker.Source @upArgs
     }
-    if (-not $stackOk) { throw "Local SmartPrint Docker stack failed to build or start. Review logs/docker-compose-up.log." }
+    if (-not $stackOk) { throw "Local SmartPrint Docker stack failed to start. Review logs/docker-compose-up.log." }
 
     $deadline = [DateTime]::UtcNow.AddSeconds(180)
     $ready = $false
