@@ -2109,10 +2109,6 @@ try {
           token: adminTokens.accessToken,
           body: { status: "Suspended", reason: "QA temporary suspension lifecycle test" }
         });
-      if (suspendedResponse.status === 200) {
-        const payload = suspendedResponse.body;
-        tenantRestored = payload?.status !== "Suspended";
-      }
       suspended = assertHttp(suspendedResponse, 200, "Suspend QA shop two");
       assert.equal(suspended.status, "Suspended");
 
@@ -2127,9 +2123,9 @@ try {
           token: adminTokens.accessToken,
           body: { status: "Active", reason: "QA restored shop after reversible lifecycle test" }
         });
-      if (restoredResponse.status === 200) tenantRestored = true;
       restored = assertHttp(restoredResponse, 200, "Restore QA shop two");
       assert.equal(restored.status, "Active");
+      tenantRestored = true;
 
       duplicateActive = assertHttp(await request(adminPage, "PATCH",
         "/api/v1/platform/tenants/" + shop2TenantId + "/status",
