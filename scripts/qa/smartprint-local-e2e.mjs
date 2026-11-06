@@ -1248,6 +1248,167 @@ try {
   });
 
 
+
+  await record("Customer opens a fresh QR session and uploads two real documents as one batch", async () => {
+    batchCustomerPage = await context.newPage();
+    const stationPath = shop1Station.publicUrl ? new URL(shop1Station.publicUrl).pathname : null;
+    assert.ok(stationPath && /^\/s\/[A-Za-z0-9_-]+\/?$/.test(stationPath),
+      "The QA station did not return a canonical public station URL.");
+
+    await batchCustomerPage.route("**/api/v1/public/stations/**/sessions", async route => {
+      const headers = { ...route.request().headers(), authorization: "Bearer " + customerTokens.accessToken };
+      await route.continue({ headers });
+    });
+    const response = await batchCustomerPage.goto(new URL(stationPath, baseUrl).toString(), {
+      waitUntil: "domcontentloaded",
+      timeout: 30000
+    });
+    assert.equal(response?.status(), 200);
+    await batchCustomerPage.locator(".customer-entry-card .entry-eyebrow").waitFor({ state: "visible", timeout: 30000 });
+    assert.equal((await batchCustomerPage.locator(".customer-entry-card .entry-eyebrow").innerText()).trim(), "SECURE SESSION CREATED");
+
+    const publicCode = stationPath.split("/").filter(Boolean)[1];
+    const sessionToken = await batchCustomerPage.evaluate(code =>
+      sessionStorage.getItem("qrtoprint.customer-session:" + code), publicCode);
+    assert.ok(sessionToken, "The new QA customer session token was not stored.");
+    const current = assertHttp(await request(batchCustomerPage, "GET", "/api/v1/public/sessions/current", {
+      sessionToken
+    }), 200, "Fresh QA customer session");
+    assert.equal(current.shop.displayName, process.env.SMARTPRINT_QA_SHOP1_NAME);
+    batchCustomerSession = { sessionToken, publicCode, stationPath, id: current.id };
+
+    const input = batchCustomerPage.locator('input[type="file"][accept*="application/pdf"]').first();
+    await input.setInputFiles([
+      {
+        name: "smartprint-qa-batch-a-" + runId + ".pdf",
+        mimeType: "application/pdf",
+        buffer: syntheticPdf(2, "SmartPrint QA batch document A")
+      },
+      {
+        name: "smartprint-qa-batch-b-" + runId + ".pdf",
+        mimeType: "application/pdf",
+        buffer: syntheticPdf(1, "SmartPrint QA batch document B")
+      }
+    ]);
+
+    const uploadButton = batchCustomerPage.getByRole("button", { name: /Upload 2 file\(s\)/ });
+    await uploadButton.waitFor({ state: "visible", timeout: 10000 });
+    await uploadButton.click();
+    await batchCustomerPage.locator(".customer-uploaded-batch-item").nth(1).waitFor({ state: "visible", timeout: 60000 });
+    await batchCustomerPage.locator(".customer-batch-quote-action").waitFor({ state: "visible", timeout: 15000 });
+    await batchCustomerPage.getByRole("button", { name: "Calculate batch quote" }).click();
+    await batchCustomerPage.locator(".customer-batch-quote-card").waitFor({ state: "visible", timeout: 45000 });
+
+    const draft = await batchCustomerPage.evaluate(code => {
+      const raw = localStorage.getItem("qrtoprint.customer-active-job:" + code);
+      try { return raw ? JSON.parse(raw) : null; } catch { return null; }
+    }, publicCode);
+    assert.ok(Array.isArray(draft?.uploadedBatch), "Customer batch draft did not persist an uploadedBatch array.");
+    assert.equal(draft.uploadedBatch.length, 2, "Exactly two real documents should be in the batch.");
+    assert.ok(draft.batchId, "The real upload batch ID was not persisted.");
+    const names = draft.uploadedBatch.map(item => item.document.originalFileName);
+    assert.equal(new Set(names).size, 2, "Both source documents must remain distinct.");
+    assert.ok(draft.uploadedBatch.every(item => item.job?.id), "Both file uploads must have real persisted PrintJob IDs.");
+    reviewedBatchId = draft.batchId;
+    report.safety.syntheticDocumentsUploaded = true;
+    report.safety.realLocalDatabaseJobsCreated = true;
+    return {
+      sessionId: current.id,
+      fileCount: draft.uploadedBatch.length,
+      sourceFiles: names,
+      sourcePageCounts: draft.uploadedBatch.map(item => item.job.pageCount),
+      uniquePrintJobs: new Set(draft.uploadedBatch.map(item => item.job.id)).size,
+      sameBatchId: true,
+      quoteCalculatedThroughUi: true
+    };
+  });
+
+  await record("Two-file customer batch is sent to the shop and appears as one tenant-scoped batch", async () => {
+    await batchCustomerPage.getByRole("button", { name: "Send batch to shop" }).click();
+    await batchCustomerPage.locator(".customer-job-state").waitFor({ state: "visible", timeout: 30000 });
+    reviewedBatchShopJobs = assertHttp(await request(shop1Page, "GET",
+      "/api/v1/shop/print-jobs?offset=0&take=100&batchId=" + encodeURIComponent(reviewedBatchId),
+      { token: shop1Tokens.accessToken }), 200, "Two-file QA batch in shop queue");
+    assert.equal(reviewedBatchShopJobs.length, 2, "Shop queue must contain exactly the two uploaded files.");
+    assert.ok(reviewedBatchShopJobs.every(job => job.batchId === reviewedBatchId));
+    assert.ok(reviewedBatchShopJobs.every(job => job.status === "AWAITING_SHOP_APPROVAL"));
+    const customerStates = [];
+    for (const job of reviewedBatchShopJobs) {
+      const status = assertHttp(await request(batchCustomerPage, "GET",
+        "/api/v1/public/jobs/" + job.id + "/status", {
+          sessionToken: batchCustomerSession.sessionToken
+        }), 200, "Customer batch job status");
+      assert.equal(status.job.status, "AWAITING_SHOP_APPROVAL");
+      customerStates.push(status.job.status);
+    }
+    return {
+      batchId: reviewedBatchId,
+      filesVisibleInShop: reviewedBatchShopJobs.length,
+      allFilesAwaitShopReview: true,
+      customerStatusCount: customerStates.length
+    };
+  });
+
+  await record("Shopkeeper rejects one file, undoes that rejection, then applies the individual file decision", async () => {
+    await clickShopSection(shop1Page, "Print Queue");
+    const reviewButton = shop1Page.getByRole("button", { name: /Preview & review/ }).first();
+    await reviewButton.waitFor({ state: "visible", timeout: 15000 });
+    await reviewButton.click();
+    const modal = shop1Page.getByRole("dialog", { name: "Review batch" });
+    await modal.waitFor({ state: "visible", timeout: 15000 });
+    const rows = modal.locator(".batch-review-row");
+    await rows.nth(1).waitFor({ state: "visible", timeout: 10000 });
+    assert.equal(await rows.count(), 2);
+    const decisions = rows.locator('input[type="checkbox"]');
+    assert.equal(await decisions.count(), 2);
+    assert.equal(await decisions.nth(0).isChecked(), true);
+    assert.equal(await decisions.nth(1).isChecked(), true);
+
+    await decisions.nth(1).uncheck();
+    assert.equal(await decisions.nth(1).isChecked(), false, "The second file should be marked for rejection.");
+    await decisions.nth(1).check();
+    assert.equal(await decisions.nth(1).isChecked(), true, "The shopkeeper must be able to undo a rejection before applying it.");
+    await decisions.nth(1).uncheck();
+    assert.equal(await decisions.nth(0).isChecked(), true, "The first file remains accepted.");
+    assert.equal(await decisions.nth(1).isChecked(), false, "Only the second file is rejected.");
+
+    await modal.getByRole("button", { name: "Apply review" }).click();
+    const confirmation = shop1Page.getByRole("dialog", { name: "Confirm batch review" });
+    await confirmation.waitFor({ state: "visible", timeout: 10000 });
+    await confirmation.getByRole("button", { name: "Apply review" }).click();
+    await modal.waitFor({ state: "detached", timeout: 20000 });
+
+    reviewedBatchShopJobs = assertHttp(await request(shop1Page, "GET",
+      "/api/v1/shop/print-jobs?offset=0&take=100&batchId=" + encodeURIComponent(reviewedBatchId),
+      { token: shop1Tokens.accessToken }), 200, "Batch status after shop review");
+    assert.equal(reviewedBatchShopJobs.length, 2);
+    const accepted = reviewedBatchShopJobs.filter(job => job.status === "AWAITING_PAYMENT");
+    const rejected = reviewedBatchShopJobs.filter(job => job.status === "REJECTED");
+    assert.equal(accepted.length, 1, "Exactly one file must remain accepted for checkout.");
+    assert.equal(rejected.length, 1, "Exactly one file must be rejected and excluded.");
+    const customerRejected = assertHttp(await request(batchCustomerPage, "GET",
+      "/api/v1/public/jobs/" + rejected[0].id + "/status", {
+        sessionToken: batchCustomerSession.sessionToken
+      }), 200, "Customer sees individually rejected file");
+    const customerAccepted = assertHttp(await request(batchCustomerPage, "GET",
+      "/api/v1/public/jobs/" + accepted[0].id + "/status", {
+        sessionToken: batchCustomerSession.sessionToken
+      }), 200, "Customer sees accepted file");
+    assert.equal(customerRejected.job.status, "REJECTED");
+    assert.equal(customerAccepted.job.status, "AWAITING_PAYMENT");
+    paymentRejectedJob = accepted[0];
+    report.safety.testJobRejectedBeforePayment = true;
+    return {
+      batchId: reviewedBatchId,
+      acceptedFiles: accepted.length,
+      rejectedFiles: rejected.length,
+      undoBeforeApplyVerified: true,
+      rejectedFileStatus: customerRejected.job.status,
+      acceptedFileStatus: customerAccepted.job.status,
+      rejectedFileIncludedInCheckout: false
+    };
+  });
+
   await record("Real UPI payment intent, synthetic QA reference, and shop rejection without marking money received", async () => {
     const paymentBatchId = crypto.randomUUID();
     const idempotencyKey = crypto.randomUUID();
