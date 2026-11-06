@@ -676,8 +676,8 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun setToolbarPage(title: String) {
-        toolbar.title = "smartprint"
-        toolbar.subtitle = "BY QUANTAEDGE  ·  " + title.trim().uppercase(Locale.ROOT)
+        toolbar.title = "SmartPrint"
+        toolbar.subtitle = "by QuantaEdge  ·  " + title.trim()
     }
 
     private fun setToolbarBackAction(description: String, action: () -> Unit) {
@@ -1135,100 +1135,165 @@ class MainActivity : AppCompatActivity() {
         content.addView(scroll, frameParams())
     }
 
-    private fun activityStatusLabel(status: String): String = when (status.uppercase(Locale.ROOT)) {
-        "AWAITING_SHOP_APPROVAL" -> "Shop review"
-        "AWAITING_PAYMENT", "AWAITING_CUSTOMER_PAYMENT" -> "Payment due"
-        "AWAITING_COUNTER_PAYMENT" -> "Pay at counter"
-        "PAYMENT_REPORTED" -> "Verify pending"
-        "PAYMENT_REJECTED" -> "Payment declined"
-        "PAID_AUTHORISED" -> "Paid"
-        "LOCAL_QUEUE_CLAIMED" -> "Transferring"
-        "LOCAL_QUEUE_READY" -> "Queued"
-        "PRINT_AUTHORISED" -> "Print approved"
-        "PRINT_SUBMITTING" -> "Sending"
-        "SPOOLER_ACCEPTED" -> "Queue accepted"
-        "PRINTING" -> "Printing"
-        "OUTPUT_UNCONFIRMED" -> "Output check"
-        "COMPLETED" -> "Completed"
-        "REJECTED" -> "Rejected"
-        "QUOTE_EXPIRED" -> "Quote expired"
-        else -> "In progress"
-    }
+    private fun activityStatusLabel(status: String): String =
+        CustomerOrderStatusPresentation.activityStatusLabel(status)
 
     private fun loadCustomerHistory(container: LinearLayout) {
         Thread {
             try {
                 var auth = customerAccountStore.read() ?: error("Sign in to view history.")
-                val jobs = try {
+                fun fetchHistory(): List<CustomerPrintHistoryItem> {
                     if (CustomerAccountClient.accessTokenIsExpired(auth)) {
                         auth = CustomerAccountClient.refresh(accountServiceUrl(), auth)
                         customerAccountStore.save(auth)
                     }
-                    CustomerAccountClient.history(accountServiceUrl(), auth.accessToken)
-                } catch (error: CustomerApiException) {
-                    if (error.statusCode != 401) throw error
-                    auth = CustomerAccountClient.refresh(accountServiceUrl(), auth)
-                    customerAccountStore.save(auth)
-                    CustomerAccountClient.history(accountServiceUrl(), auth.accessToken)
+                    return try {
+                        CustomerAccountClient.history(accountServiceUrl(), auth.accessToken)
+                    } catch (error: CustomerApiException) {
+                        if (error.statusCode != 401) throw error
+                        auth = CustomerAccountClient.refresh(accountServiceUrl(), auth)
+                        customerAccountStore.save(auth)
+                        CustomerAccountClient.history(accountServiceUrl(), auth.accessToken)
+                    }
                 }
+                val jobs = fetchHistory()
                 runOnUiThread {
                     if (navigation.selectedItemId != ACTIVITY || isFinishing) return@runOnUiThread
                     container.removeAllViews()
                     if (jobs.isEmpty()) {
                         container.addView(text("No jobs yet", 13, R.color.qp_muted, false)
                             .apply { setPadding(0, dp(14), 0, dp(14)) })
-                    } else {
-                        jobs.forEach { job ->
+                        return@runOnUiThread
+                    }
+
+                    val filters = LinearLayout(this).apply {
+                        orientation = LinearLayout.VERTICAL
+                        setPadding(0, 0, 0, dp(12))
+                    }
+                    val query = EditText(this).apply {
+                        hint = "Search batch, order, file or shop name"
+                        setSingleLine(true)
+                        inputType = InputType.TYPE_CLASS_TEXT
+                        textSize = 12f
+                        setTextColor(getColor(R.color.qp_text))
+                        setHintTextColor(getColor(R.color.qp_muted))
+                        setPadding(dp(12), 0, dp(12), 0)
+                        background = roundedDrawable(getColor(R.color.qp_card), 10, getColor(R.color.qp_outline))
+                    }
+                    val filterActions = LinearLayout(this).apply {
+                        orientation = LinearLayout.HORIZONTAL
+                        gravity = Gravity.CENTER_VERTICAL
+                    }
+                    var selectedDate: String? = null
+                    val dateButton = button("Any date", false)
+                    val clearButton = button("Clear", false)
+                    val results = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+                    val grouped = jobs.groupBy { it.batchId?.takeIf(String::isNotBlank) ?: it.id }
+                        .values
+                        .sortedByDescending { batch -> batch.maxOfOrNull { runCatching { Instant.parse(it.createdUtc).toEpochMilli() }.getOrDefault(0L) } ?: 0L }
+
+                    fun renderCards() {
+                        results.removeAllViews()
+                        val needle = query.text.toString().trim().lowercase(Locale.ROOT)
+                        val matches = grouped.filter { batch ->
+                            val dateMatch = selectedDate == null || batch.any { job ->
+                                runCatching { Instant.parse(job.createdUtc).atZone(ZoneId.systemDefault()).toLocalDate().toString() == selectedDate }.getOrDefault(false)
+                            }
+                            val searchMatch = needle.isBlank() || batch.any { job ->
+                                listOf(job.batchId.orEmpty(), job.batchName.orEmpty(), job.batchGroupName.orEmpty(),
+                                    job.jobNumber, job.originalFileName, job.shopName)
+                                    .any { it.lowercase(Locale.ROOT).contains(needle) }
+                            }
+                            dateMatch && searchMatch
+                        }
+                        if (matches.isEmpty()) {
+                            results.addView(text("No matching batches", 12, R.color.qp_muted, false)
+                                .apply { gravity = Gravity.CENTER; setPadding(0, dp(20), 0, dp(20)) })
+                            return
+                        }
+                        matches.forEach { batch ->
                             val item = card()
                             val body = LinearLayout(this).apply {
                                 orientation = LinearLayout.VERTICAL
-                                setPadding(dp(12), dp(11), dp(12), dp(11))
+                                setPadding(dp(13), dp(12), dp(13), dp(12))
+                            }
+                            val status = CustomerOrderStatusPresentation.batchSummaryStatus(batch.map { it.status })
+                            val tagPalette = when (status.uppercase(Locale.ROOT)) {
+                                "COMPLETED", "PDF_EXPORTED" -> if ((resources.configuration.uiMode and android.content.res.Configuration.UI_MODE_NIGHT_MASK) == android.content.res.Configuration.UI_MODE_NIGHT_YES)
+                                    0xFF173D2E.toInt() to 0xFF9BE5B8.toInt() else 0xFFE5F7EC.toInt() to 0xFF20774D.toInt()
+                                "REJECTED", "PAYMENT_REJECTED", "REFUNDED", "CANCELLED", "FAILED" -> if ((resources.configuration.uiMode and android.content.res.Configuration.UI_MODE_NIGHT_MASK) == android.content.res.Configuration.UI_MODE_NIGHT_YES)
+                                    0xFF49232C.toInt() to 0xFFFFA8B2.toInt() else 0xFFFCE8EB.toInt() to 0xFFAB3347.toInt()
+                                "PRINTING", "PRINT_SUBMITTING", "SPOOLER_ACCEPTED", "LOCAL_QUEUE_READY" -> if ((resources.configuration.uiMode and android.content.res.Configuration.UI_MODE_NIGHT_MASK) == android.content.res.Configuration.UI_MODE_NIGHT_YES)
+                                    0xFF1B3550.toInt() to 0xFF9DD0FF.toInt() else 0xFFE6F2FF.toInt() to 0xFF275F93.toInt()
+                                else -> if ((resources.configuration.uiMode and android.content.res.Configuration.UI_MODE_NIGHT_MASK) == android.content.res.Configuration.UI_MODE_NIGHT_YES)
+                                    0xFF3B315B.toInt() to 0xFFD2C7FF.toInt() else 0xFFF0EDFF.toInt() to 0xFF5B43B7.toInt()
                             }
                             val top = LinearLayout(this).apply {
                                 orientation = LinearLayout.HORIZONTAL
                                 gravity = Gravity.CENTER_VERTICAL
                             }
-                            top.addView(text(job.jobNumber, 13, R.color.qp_text, true),
-                                LinearLayout.LayoutParams(0, -2, 1f))
-                            top.addView(text(activityStatusLabel(job.status), 10, R.color.qp_primary, true))
+                            val identity = batch.first()
+                            val batchTitle = identity.batchName?.takeIf(String::isNotBlank)
+                                ?: identity.batchGroupName?.takeIf(String::isNotBlank)
+                                ?: identity.batchId?.let { "Batch · " + it.take(8).uppercase(Locale.ROOT) }
+                                ?: "Order · " + identity.jobNumber
+                            top.addView(text(batchTitle, 13, R.color.qp_text, true), LinearLayout.LayoutParams(0, -2, 1f))
+                            top.addView(text(activityStatusLabel(status), 9, R.color.qp_primary, true).apply {
+                                setPadding(dp(8), dp(5), dp(8), dp(5))
+                                setTextColor(tagPalette.second)
+                                background = roundedDrawable(tagPalette.first, 10)
+                            })
                             body.addView(top)
-                            val createdLabel = runCatching {
-                                Instant.parse(job.createdUtc)
-                                    .atZone(ZoneId.systemDefault())
-                                    .format(DateTimeFormatter.ofPattern("dd MMM yyyy · hh:mm a", Locale.ROOT))
-                            }.getOrDefault("Date unavailable")
-                            body.addView(text(job.shopName + " · " + createdLabel, 10, R.color.qp_muted, false)
-                                .apply { setPadding(0, dp(3), 0, 0) })
-                            body.addView(text(job.originalFileName, 12, R.color.qp_text, true)
-                                .apply { setPadding(0, dp(7), 0, 0) })
-                            val quote = "%.2f".format(Locale.ROOT, job.quotedAmountMinor / 100.0)
-                            body.addView(text(
-                                job.pageCount.toString() + " pages · " + job.copies + " copies · Quote " + job.currency + " " + quote,
-                                10, R.color.qp_muted, false
-                            ).apply { setPadding(0, dp(3), 0, 0) })
-                            val paid = "%.2f".format(Locale.ROOT, job.paidAmountMinor / 100.0)
-                            val returned = "%.2f".format(Locale.ROOT, job.refundedAmountMinor / 100.0)
-                            val net = "%.2f".format(Locale.ROOT, maxOf(0L, job.paidAmountMinor - job.refundedAmountMinor) / 100.0)
-                            body.addView(text(
-                                "Paid " + paid + " · Returned " + returned + " · Net " + net + " " + job.currency,
-                                10, R.color.qp_muted, false
-                            ).apply { setPadding(0, dp(3), 0, 0) })
-                            if (job.rejectedPageNumbersJson != "[]" && job.rejectedPageNumbersJson.isNotBlank()) {
-                                body.addView(text("Rejected: " + job.rejectedPageNumbersJson, 10, R.color.qp_muted, false)
-                                    .apply { setPadding(0, dp(3), 0, 0) })
-                            }
-                            job.outputCompletedUtc?.let { outputUtc ->
-                                val outputLabel = runCatching {
-                                    Instant.parse(outputUtc).atZone(ZoneId.systemDefault())
-                                        .format(DateTimeFormatter.ofPattern("dd MMM · hh:mm a", Locale.ROOT))
-                                }.getOrDefault(outputUtc)
-                                body.addView(text("Output confirmed · " + outputLabel, 10, R.color.qp_muted, false)
-                                    .apply { setPadding(0, dp(3), 0, 0) })
-                            }
+                            val date = runCatching { Instant.parse(identity.createdUtc).atZone(ZoneId.systemDefault())
+                                .format(DateTimeFormatter.ofPattern("dd MMM yyyy · hh:mm a", Locale.ROOT)) }
+                                .getOrDefault("Date unavailable")
+                            body.addView(text(identity.shopName + " · " + date, 10, R.color.qp_muted, false)
+                                .apply { setPadding(0, dp(5), 0, dp(5)) })
+                            body.addView(text(batch.size.toString() + " file(s) · " +
+                                batch.sumOf { it.pageCount } + " pages", 10, R.color.qp_muted, false))
+                            val paid = batch.sumOf { it.paidAmountMinor }
+                            val refunded = batch.sumOf { it.refundedAmountMinor }
+                            val net = maxOf(0L, paid - refunded)
+                            body.addView(text("Paid " + "%.2f".format(Locale.ROOT, paid / 100.0) +
+                                " · Returned " + "%.2f".format(Locale.ROOT, refunded / 100.0) +
+                                " · Net " + "%.2f".format(Locale.ROOT, net / 100.0) + " " + identity.currency,
+                                10, R.color.qp_muted, false).apply { setPadding(0, dp(5), 0, dp(3)) })
+                            body.addView(button("View details", false).apply {
+                                setOnClickListener { showCustomerJobDetails(batch) }
+                            }, linearParams().apply { topMargin = dp(7) })
                             item.addView(body)
-                            container.addView(item, linearParams().apply { bottomMargin = dp(6) })
+                            results.addView(item, linearParams().apply { bottomMargin = dp(8) })
                         }
                     }
+
+                    dateButton.setOnClickListener {
+                        val calendar = java.util.Calendar.getInstance()
+                        android.app.DatePickerDialog(this, { _, year, month, day ->
+                            selectedDate = "%04d-%02d-%02d".format(Locale.ROOT, year, month + 1, day)
+                            dateButton.text = "%02d %s %04d".format(Locale.ROOT, day,
+                                java.text.DateFormatSymbols.getInstance(Locale.ROOT).shortMonths[month], year)
+                            renderCards()
+                        }, calendar.get(java.util.Calendar.YEAR), calendar.get(java.util.Calendar.MONTH),
+                            calendar.get(java.util.Calendar.DAY_OF_MONTH)).show()
+                    }
+                    clearButton.setOnClickListener {
+                        selectedDate = null
+                        query.setText("")
+                        dateButton.text = "Any date"
+                        renderCards()
+                    }
+                    filterActions.addView(dateButton, LinearLayout.LayoutParams(0, dp(40), 1f))
+                    filterActions.addView(clearButton, LinearLayout.LayoutParams(dp(90), dp(40)).apply { marginStart = dp(8) })
+                    filters.addView(query, linearParams().apply { bottomMargin = dp(8) })
+                    filters.addView(filterActions, linearParams())
+                    container.addView(filters, linearParams())
+                    container.addView(results, linearParams())
+                    query.addTextChangedListener(object : android.text.TextWatcher {
+                        override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) = Unit
+                        override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) = renderCards()
+                        override fun afterTextChanged(s: android.text.Editable?) = Unit
+                    })
+                    renderCards()
                 }
             } catch (e: Exception) {
                 runOnUiThread {
@@ -1238,6 +1303,110 @@ class MainActivity : AppCompatActivity() {
                     container.addView(button("Retry", false).apply {
                         setOnClickListener { showActivity() }
                     }, linearParams().apply { topMargin = dp(8) })
+                }
+            }
+        }.start()
+    }
+
+    private fun showCustomerJobDetails(batch: List<CustomerPrintHistoryItem>) {
+        if (batch.isEmpty()) return
+        Thread {
+            try {
+                var auth = customerAccountStore.read() ?: error("Sign in to view order details.")
+                if (CustomerAccountClient.accessTokenIsExpired(auth)) {
+                    auth = CustomerAccountClient.refresh(accountServiceUrl(), auth)
+                    customerAccountStore.save(auth)
+                }
+                val detailResponses = batch.map { job ->
+                    try {
+                        CustomerAccountClient.jobStatus(accountServiceUrl(), auth.accessToken, job.id)
+                    } catch (error: CustomerApiException) {
+                        if (error.statusCode != 401) throw error
+                        auth = CustomerAccountClient.refresh(accountServiceUrl(), auth)
+                        customerAccountStore.save(auth)
+                        CustomerAccountClient.jobStatus(accountServiceUrl(), auth.accessToken, job.id)
+                    }
+                }
+                runOnUiThread {
+                    if (isFinishing) return@runOnUiThread
+                    val detailScroll = ScrollView(this).apply { isFillViewport = true }
+                    val detailColumn = LinearLayout(this).apply {
+                        orientation = LinearLayout.VERTICAL
+                        setPadding(dp(16), dp(12), dp(16), dp(18))
+                    }
+                    val batchPayment = detailResponses.asSequence()
+                        .mapNotNull { it.optJSONObject("batchPayment") }
+                        .maxByOrNull { it.optString("updatedUtc") }
+                    if (batchPayment != null) {
+                        val batchPaymentId = batchPayment.optString("id")
+                        val allocatedFileCount = detailResponses.count { response ->
+                            response.optJSONObject("payment")?.optString("batchPaymentId") == batchPaymentId
+                        }.coerceAtLeast(1)
+                        detailColumn.addView(text(
+                            CustomerOrderStatusPresentation.batchPaymentSummary(
+                                batchPayment.optString("status"),
+                                batchPayment.optLong("amountMinor"),
+                                batchPayment.optString("currency", batch.first().currency),
+                                allocatedFileCount
+                            ),
+                            10, R.color.qp_muted, false
+                        ).apply { setPadding(0, 0, 0, dp(8)) })
+                    }
+                    detailResponses.forEachIndexed { index, response ->
+                        val summary = response.optJSONObject("job") ?: JSONObject()
+                        val timeline = response.optJSONArray("timeline") ?: org.json.JSONArray()
+                        val historyItem = batch[index]
+                        detailColumn.addView(text(historyItem.originalFileName, 14, R.color.qp_text, true)
+                            .apply { setPadding(0, 0, 0, dp(5)) })
+                        detailColumn.addView(text("Order " + historyItem.jobNumber + " · " +
+                            activityStatusLabel(summary.optString("status", historyItem.status)), 11, R.color.qp_primary, true))
+                        detailColumn.addView(text(summary.optString("pageCount", historyItem.pageCount.toString()) +
+                            " pages · " + summary.optInt("copies", historyItem.copies) + " copies · " +
+                            summary.optString("paperSize", "A4"), 10, R.color.qp_muted, false)
+                            .apply { setPadding(0, dp(4), 0, dp(5)) })
+                        val payment = response.optJSONObject("payment")
+                        val paymentStatus = payment?.optString("status")?.takeIf { it.isNotBlank() }
+                            ?: historyItem.paymentStatus
+                        val allocatedAmountMinor = payment?.optLong("amountMinor") ?: historyItem.paidAmountMinor
+                        val refundedAmountMinor = payment?.optLong("refundedAmountMinor") ?: historyItem.refundedAmountMinor
+                        val paymentSummary = CustomerOrderStatusPresentation.filePaymentSummary(
+                            paymentStatus, allocatedAmountMinor, refundedAmountMinor, historyItem.currency
+                        )
+                        if (paymentSummary != null) detailColumn.addView(text(
+                            paymentSummary, 10, R.color.qp_muted, false
+                        ))
+                        detailColumn.addView(text("Progress", 11, R.color.qp_text, true)
+                            .apply { setPadding(0, dp(8), 0, dp(4)) })
+                        for (eventIndex in 0 until timeline.length()) {
+                            val event = timeline.optJSONObject(eventIndex) ?: continue
+                            val timestamp = runCatching {
+                                Instant.parse(event.optString("createdUtc")).atZone(ZoneId.systemDefault())
+                                    .format(DateTimeFormatter.ofPattern("dd MMM · hh:mm a", Locale.ROOT))
+                            }.getOrDefault("")
+                            detailColumn.addView(text(
+                                activityStatusLabel(event.optString("newStatus")) + " · " + timestamp,
+                                10, R.color.qp_muted, false
+                            ).apply { setPadding(dp(8), dp(3), 0, dp(3)) })
+                        }
+                        if (index < detailResponses.lastIndex) {
+                            detailColumn.addView(text(" ", 4, R.color.qp_muted, false).apply { setPadding(0, dp(8), 0, dp(8)) })
+                        }
+                    }
+                    detailScroll.addView(detailColumn)
+                    AlertDialog.Builder(this)
+                        .setTitle(batch.first().batchName?.takeIf(String::isNotBlank) ?: "Print details")
+                        .setView(detailScroll)
+                        .setPositiveButton("Close", null)
+                        .show()
+                }
+            } catch (error: Exception) {
+                runOnUiThread {
+                    if (isFinishing) return@runOnUiThread
+                    AlertDialog.Builder(this)
+                        .setTitle("Order details unavailable")
+                        .setMessage(error.message ?: "Please reconnect and try again.")
+                        .setPositiveButton("Close", null)
+                        .show()
                 }
             }
         }.start()

@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useRef, useState, type MouseEvent } from "react";
 import {
-  Check, ChevronLeft, ChevronRight, Crop, Image as ImageIcon, RotateCcw, SlidersHorizontal,
-  Sparkles, X, ZoomIn, ZoomOut, Type, PaintBucket, Pipette
+  Check, Crop, Image as ImageIcon, RotateCcw, SlidersHorizontal,
+  Sparkles, X, Type, PaintBucket, Pipette
 } from "lucide-react";
 import styles from "./PhotoStudio.module.css";
+import PhotoStudioCanvasWorkspace from "./PhotoStudioCanvasWorkspace";
 import { isDesktopApp, setDesktopContentProtection } from "./desktop-bridge";
 import { A4_HEIGHT_MM, A4_WIDTH_MM, A4_HEIGHT_PX, A4_WIDTH_PX, buildPhotoPdf, getPhotoSheetLayout } from "./photo-studio-layout";
 import {
@@ -12,7 +13,7 @@ import {
   type PhotoSize, type LookPreset, type Tool, type Adjustments
 } from "./photo-studio-rendering";
 
-export type PreparedPhotoSheet = { file: File; sizeCode: string; photoCount: number; photosPerPage: number };
+export type PreparedPhotoSheet = { file: File; sizeCode: string; photoCount: number; photosPerPage: number; previewPages?: Blob[] };
 
 export default function PhotoStudio({
   source,
@@ -255,7 +256,7 @@ export default function PhotoStudio({
       const pdf=new Blob([buffer],{type:"application/pdf"});
       if(pdf.size>MAX_FILE_BYTES)throw new Error("The prepared photo PDF exceeds SmartPrint's 20 MB file limit. Use a smaller original photo or reduce the number of copies.");
       const output=new File([pdf],safeBaseName(source.name)+"-"+size.id+"-photos.pdf",{type:"application/pdf",lastModified:Date.now()});
-      await onApply([{file:output,sizeCode:size.id,photoCount:parsedCopies,photosPerPage}]);
+      await onApply([{file:output,sizeCode:size.id,photoCount:parsedCopies,photosPerPage,previewPages:jpegPages.map(jpeg=>new Blob([jpeg],{type:"image/jpeg"}))}]);
     }catch(cause){setError(cause instanceof Error?cause.message:"Photo sheet creation failed. Try again with this photo.");}
     finally{setBusy(false);}
   }
@@ -373,35 +374,25 @@ export default function PhotoStudio({
           <div className={styles.privacyNote}><SlidersHorizontal size={14}/><span>Your original photo is not changed. ID-safe tools adjust framing and print appearance only; they do not reshape or retouch facial features.</span></div>
         </aside>
 
-        <main className={styles.canvasWorkspace}>
-          <div className={styles.contextToolbar}>
-            <span>PRINT SHEET PREVIEW</span>
-            {sheetCount>1&&<div className={styles.pageNavigator}>
-              <button type="button" aria-label="Previous A4 page" onClick={()=>setPreviewPage(current=>Math.max(0,current-1))} disabled={previewPageIndex===0}><ChevronLeft size={14}/></button>
-              <span>Page {previewPageIndex+1} of {sheetCount}</span>
-              <button type="button" aria-label="Next A4 page" onClick={()=>setPreviewPage(current=>Math.min(sheetCount-1,current+1))} disabled={previewPageIndex>=sheetCount-1}><ChevronRight size={14}/></button>
-            </div>}
-            <span className={styles.toolbarDivider}/>
-            <button type="button" onClick={() => setZoom(value => Math.max(1, Number((value - 0.1).toFixed(2))))} disabled={zoom <= 1} aria-label="Zoom out"><ZoomOut size={15}/></button>
-            <span className={styles.zoomLabel}>{zoom.toFixed(1)}×</span>
-            <button type="button" onClick={() => setZoom(value => Math.min(3, Number((value + 0.1).toFixed(2))))} disabled={zoom >= 3} aria-label="Zoom in"><ZoomIn size={15}/></button>
-            <span className={styles.toolbarDivider}/>
-            <button type="button" onClick={() => { setZoom(1); setFocusX(50); setFocusY(50); selectLook("natural"); }}><RotateCcw size={14}/> Reset</button>
-          </div>
-          <div className={styles.canvasViewport}>
-            {pickingBackground&&<div className={styles.pickInstruction}>Click a flat background area in the photo to sample its colour.</div>}
-            <div className={styles.sheetFrame} onContextMenu={event=>event.preventDefault()} onDragStart={event=>event.preventDefault()}>
-              {image ? <canvas ref={canvasRef} width={420} height={594} onClick={handleBackgroundPick} style={{cursor:pickingBackground?"crosshair":"default"}} className={styles.previewCanvas} draggable={false} role="img" aria-label={"A4 page "+(previewPageIndex+1)+" of "+sheetCount+" with "+previewPhotoCount+" photos"}/> : <div className={styles.loadingState}>{imageError || "Preparing your photo…"}</div>}
-              <div className={styles.previewProtection} aria-hidden="true"/>
-            </div>
-          </div>
-          <div className={styles.canvasFooter}>
-            <span>{size.label} · {size.widthMm} × {size.heightMm} mm</span>
-            <span>{copies} photos · {sheetCount} A4 pages</span>
-            <small>Page {previewPageIndex+1}: {previewPhotoCount} photos</small>
-            {resolutionMessage && <small>{resolutionMessage}</small>}
-          </div>
-        </main>
+        <PhotoStudioCanvasWorkspace
+          canvasRef={canvasRef}
+          image={Boolean(image)}
+          imageError={imageError}
+          pickingBackground={pickingBackground}
+          sheetCount={sheetCount}
+          previewPageIndex={previewPageIndex}
+          previewPhotoCount={previewPhotoCount}
+          zoom={zoom}
+          size={size}
+          copies={copies}
+          resolutionMessage={resolutionMessage}
+          onPreviousPage={()=>setPreviewPage(current=>Math.max(0,current-1))}
+          onNextPage={()=>setPreviewPage(current=>Math.min(sheetCount-1,current+1))}
+          onZoomOut={()=>setZoom(value=>Math.max(1,Number((value-0.1).toFixed(2))))}
+          onZoomIn={()=>setZoom(value=>Math.min(3,Number((value+0.1).toFixed(2))))}
+          onReset={()=>{setZoom(1);setFocusX(50);setFocusY(50);selectLook("natural");}}
+          onBackgroundPick={handleBackgroundPick}
+        />
       </div>
 
       <footer className={styles.footer}>

@@ -19,6 +19,7 @@ public sealed class PublicCustomerJobQueryService(SmartPrintDbContext db)
             select new
             {
                 job.Id,
+                job.BatchId,
                 job.BatchGroupName,
                 job.BatchName,
                 job.JobNumber,

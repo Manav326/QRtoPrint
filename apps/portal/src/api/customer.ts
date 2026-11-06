@@ -2,6 +2,44 @@ import { isUncompletedLocalUploadTicketExpired } from "../local-upload-routing";
 import { ApiError, LocalUploadPreflightError, LocalUploadOutcomeUnknownError, apiRequest } from "./core";
 import type { CustomerPayment } from "./payments";
 
+async function nativeCustomerBridgeRequest(message: string): Promise<string> {
+  try {
+    const bridge = (window as Window & {
+      SmartPrintNative?: {
+        postMessage: (message: string) => void;
+        addEventListener: (type: string, listener: (event: MessageEvent) => void) => void;
+        removeEventListener: (type: string, listener: (event: MessageEvent) => void) => void;
+      };
+    }).SmartPrintNative;
+    if (!bridge?.postMessage || !bridge.addEventListener || !bridge.removeEventListener) return "";
+    return await new Promise<string>((resolve) => {
+      let settled = false;
+      const finish = (value: string) => {
+        if (settled) return;
+        settled = true;
+        window.clearTimeout(timeout);
+        bridge.removeEventListener("message", onMessage);
+        resolve(value);
+      };
+      const onMessage = (event: MessageEvent) => {
+        const value = typeof event.data === "string" ? event.data : "";
+        if (value.startsWith("localNetworkAccess:")) return;
+        finish(value);
+      };
+      const timeout = window.setTimeout(() => finish(""), 10000);
+      bridge.addEventListener("message", onMessage);
+      bridge.postMessage(message);
+    });
+  } catch {
+    return "";
+  }
+}
+
+async function nativeCustomerAuthorizationHeaders(): Promise<Record<string, string>> {
+  const token = await nativeCustomerBridgeRequest("getCustomerAccessToken");
+  return token ? { Authorization: `Bearer ${token}` } : {};
+}
+
 export function getNativeCustomerPrintSession(publicCode: string): Promise<string> {
   return nativeCustomerBridgeRequest(`getCustomerPrintSession|${publicCode}`);
 }
@@ -45,14 +83,14 @@ export async function createCustomerSession(publicCode: string) {
 }
 
 
-export function renewCustomerPrintSession(sessionToken: string) {
+export async function renewCustomerPrintSession(sessionToken: string) {
   return apiRequest<{
     expiresUtc: string;
     localAgent: { agentDeviceId: string; endpoints: string[] } | null;
     paymentOptions: { upiEnabled: boolean; upiId?: string | null; payeeName?: string | null; cashEnabled: boolean; instantPaymentEnabled: boolean };
   }>("/api/v1/public/sessions/current/renew", {
     method: "POST",
-    headers: { "X-Print-Session": sessionToken }
+    headers: { "X-Print-Session": sessionToken, ...await nativeCustomerAuthorizationHeaders() }
   });
 }
 

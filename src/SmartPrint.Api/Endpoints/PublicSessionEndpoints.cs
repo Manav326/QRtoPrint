@@ -16,10 +16,14 @@ public static class PublicSessionEndpoints
         {
             var result = await sessions.RenewAsync(
                 context.Request.Headers["X-Print-Session"].FirstOrDefault(),
-                ct);
-            return result.Failure == PublicCustomerSessionFailure.Unauthorized
-                ? Results.Unauthorized()
-                : Results.Ok(result.Payload);
+                ct,
+                CustomerIdentity.GetCustomerId(context.User));
+            return result.Failure switch
+            {
+                PublicCustomerSessionFailure.Unauthorized => Results.Unauthorized(),
+                PublicCustomerSessionFailure.Forbidden => Results.Forbid(),
+                _ => Results.Ok(result.Payload)
+            };
         }).RequireRateLimiting("qr-session");
 
         publicApi.MapPost("/sessions/current/resume", async (

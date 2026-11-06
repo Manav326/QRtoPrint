@@ -9,43 +9,7 @@ import PrintKindTag from "../../../shared/ui/PrintKindTag";
 import Status from "../../../shared/ui/Status";
 import { isPrinterAvailable } from "../../../shared/lib/printers";
 import { verifiedPdfExportPath } from "../../../print-output";
-
-function spoolerStatusWarning(status?: string | null, printerStatus?: string | null) {
-  const spooler = (status || "").toUpperCase();
-  const printer = (printerStatus || "").toUpperCase();
-  if (spooler === "OFFLINE" || printer === "OFFLINE")
-    return "Printer is offline. Reconnect it; Windows may resume this same queued job. Do not start a duplicate.";
-  if (spooler === "PAPEROUT")
-    return "The printer reports no paper. Refill it and check the same Windows queue before continuing.";
-  if (spooler === "PAUSED" || printer === "PAUSED")
-    return "The printer or Windows print queue is paused. Resume the existing job in Windows; do not submit another copy.";
-  if (spooler === "PRINTER_UNAVAILABLE")
-    return "The Agent cannot currently open this printer queue. Reconnect or restore the queue, then refresh this job.";
-  if (spooler === "ERROR")
-    return "Windows reports a printer error. Resolve it in the printer queue and inspect any pages already produced.";
-  if (spooler === "USERINTERVENTION")
-    return "The printer requires attention. Resolve the prompt at the device before checking the same queued job.";
-  return "";
-}
-
-function printBlockMessage(code:string):string {
-  switch(code) {
-    case "PAPER_SIZE_UNSUPPORTED":
-    case "PAPER_SIZE_REJECTED":
-      return "The selected printer did not confirm the requested paper size.";
-    case "LANDSCAPE_UNSUPPORTED":
-    case "ORIENTATION_UNCONFIRMED":
-      return "The selected printer did not confirm the requested page orientation.";
-    case "COLOUR_UNSUPPORTED":
-    case "COLOUR_REJECTED":
-      return "The selected printer did not confirm colour output.";
-    case "DUPLEX_UNSUPPORTED":
-    case "DUPLEX_REJECTED":
-      return "The selected printer did not confirm double-sided output.";
-    default:
-      return "The Windows Agent could not confirm the requested settings with this output device.";
-  }
-}
+import { printBlockMessage, spoolerStatusWarning } from "./print-queue-status";
 
 export interface PrintQueuePageProps {
   jobs: ShopPrintJob[];
@@ -61,6 +25,7 @@ export interface PrintQueuePageProps {
   onRefund: (job: ShopPrintJob) => void;
   onReviewBatch: (batchId: string) => void;
   onHistory: (job: ShopPrintJob) => void;
+  onOpenPhotoStudio: (job: ShopPrintJob) => void;
   onAssignPrinter: (job: ShopPrintJob, printerDeviceId: string) => void;
   onUpdateSettings: (job: ShopPrintJob, settings: CustomerPrintRequestSettings) => Promise<void> | void;
   onDispatch: (job: ShopPrintJob) => void;
@@ -73,7 +38,7 @@ export interface PrintQueuePageProps {
   busyJobId: string | null;
 }
 
-export default function PrintQueuePage({ jobs, printers, agentDevices, searchQuery, loadingBatchId, onSearch, onPreview, onPreviewOutput, onApprove, onReject, onRefund, onReviewBatch, onHistory, onAssignPrinter, onUpdateSettings, onDispatch, onConfirmOutput, onRetryPdfExport, onRefresh, onLoadOlder, hasMoreJobs, loadingOlderJobs, busyJobId }: PrintQueuePageProps) {
+export default function PrintQueuePage({ jobs, printers, agentDevices, searchQuery, loadingBatchId, onSearch, onPreview, onPreviewOutput, onApprove, onReject, onRefund, onReviewBatch, onHistory, onOpenPhotoStudio, onAssignPrinter, onUpdateSettings, onDispatch, onConfirmOutput, onRetryPdfExport, onRefresh, onLoadOlder, hasMoreJobs, loadingOlderJobs, busyJobId }: PrintQueuePageProps) {
   const [autoRefresh,setAutoRefresh]=useState(true);
   const [refreshSeconds,setRefreshSeconds]=useState(10);
   const [searchInput,setSearchInput]=useState(searchQuery);
@@ -254,7 +219,7 @@ export default function PrintQueuePage({ jobs, printers, agentDevices, searchQue
                     orientation:(["AUTO","PORTRAIT","LANDSCAPE"].includes(job.orientation??"AUTO")?job.orientation??"AUTO":"AUTO") as CustomerPrintRequestSettings["orientation"]
                   });
                 }}>Adjust options</button>}
-                <button className="subtle-button" disabled={busyJobId===job.id} onClick={()=>onPreview(job)}>Preview original</button>
+                <button className="subtle-button" disabled={busyJobId===job.id} onClick={()=>onPreview(job)}>Preview original</button>{((job.document.mediaType||"").split(";")[0].trim().toLowerCase()==="image/jpeg"||(job.document.mediaType||"").split(";")[0].trim().toLowerCase()==="image/png"||/\.(?:jpe?g|png)$/i.test(job.document.originalFileName))&&<button className="subtle-button" disabled={busyJobId===job.id} onClick={()=>onOpenPhotoStudio(job)}>Photo Studio</button>}
                 {job.status==="COMPLETED"&&job.outputType==="PDF_EXPORT"&&verifiedPdfExportPath(job)&&job.outputFileName&&job.outputSha256?.length===64&&(job.outputSizeBytes??0)>0&&(job.outputSizeBytes??0)<=100*1024*1024&&<button className="subtle-button approve-action" disabled={busyJobId===job.id} onClick={()=>onPreviewOutput(job)}>Preview saved PDF</button>}
                 <button className="subtle-button" disabled={busyJobId===job.id} onClick={()=>onHistory(job)}>History</button>
                 {job.status==="AWAITING_SHOP_APPROVAL"&&<button className="subtle-button approve-action" disabled={busyJobId===job.id} onClick={()=>onApprove(job)}>Accept</button>}

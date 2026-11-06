@@ -160,6 +160,24 @@ export function useShopPrintActions({accessToken,reload,confirmInApp,setError,se
     }
   }
 
+  async function openShopPhotoStudioForJob(job:ShopPrintJob){
+    setBusyJobId(job.id);setError("");
+    try{
+      const blob=await downloadShopDocument(accessToken,job.id,"original");
+      const stored=(job.document.mediaType||"").split(";")[0].trim().toLowerCase();
+      const response=(blob.type||"").split(";")[0].trim().toLowerCase();
+      const extension=job.document.originalFileName.toLowerCase().split(".").pop();
+      const mediaType=stored==="image/jpeg"||stored==="image/png"?stored:response==="image/jpeg"||response==="image/png"?response:extension==="png"?"image/png":extension==="jpg"||extension==="jpeg"?"image/jpeg":"";
+      if(!mediaType)throw new Error("Photo Studio can open JPG and PNG originals. Preview this file first to confirm its format.");
+      const sourceBlob=blob.type===mediaType?blob:new Blob([blob],{type:mediaType});
+      const source=new File([sourceBlob],job.document.originalFileName,{type:mediaType,lastModified:Date.now()});
+      const returnPreview={name:job.document.originalFileName,blob:sourceBlob,mediaType,job,readOnly:false};
+      setFocusShopPhotoEdit(false);
+      setShopPhotoStudio({source,job,returnPreview});
+    }catch(exception){setError(exception instanceof Error?exception.message:"Could not open Photo Studio for this file.");}
+    finally{setBusyJobId(null);}
+  }
+
   function openShopPhotoStudio(){
     if(!preview||preview.readOnly||preview.mediaType!=="image/jpeg"&&preview.mediaType!=="image/png")return;
     const source=new File([preview.blob],preview.name,{type:preview.mediaType,lastModified:Date.now()});
@@ -199,6 +217,10 @@ export function useShopPrintActions({accessToken,reload,confirmInApp,setError,se
     setToast("The enhanced multi-page A4 photo PDF is saved to the same print job and its photo price has been recalculated.");
     try{
       await reload();
+      const blob=await downloadShopDocument(accessToken,editor.job.id,"original");
+      const previewBlob=blob.type==="application/pdf"?blob:new Blob([blob],{type:"application/pdf"});
+      const savedJob:ShopPrintJob={...editor.job,printKind:"PHOTO",photoSizeCode:sheet.sizeCode,photoCount:sheet.photoCount,pageCount:Math.max(1,Math.ceil(sheet.photoCount/sheet.photosPerPage)),document:{...editor.job.document,originalFileName:sheet.file.name,mediaType:"application/pdf",sizeBytes:sheet.file.size}};
+      setPreview({name:sheet.file.name,url:URL.createObjectURL(previewBlob),blob:previewBlob,mediaType:"application/pdf",job:savedJob,readOnly:true});
     }catch{
       setError("The A4 photo PDF was saved to the existing print job, but the queue could not refresh. Refresh the queue before approving or printing.");
     }finally{
@@ -351,7 +373,7 @@ export function useShopPrintActions({accessToken,reload,confirmInApp,setError,se
     refundJob,setRefundJob,batchReviewJobs,setBatchReviewJobs,batchReviewDecisions,setBatchReviewDecisions,
     batchReviewRetry,batchReviewLoadingId,eventHistory,setEventHistory,
     assignPrinter,updatePrintJobSettings,dispatchPrintJob,retryPdfExport,confirmPrintedOutput,previewJob,
-    openShopPhotoStudio,cancelShopPhotoStudio,applyShopPhotoStudio,viewJobHistory,approveJob,rejectJob,
+    openShopPhotoStudio,openShopPhotoStudioForJob,cancelShopPhotoStudio,applyShopPhotoStudio,viewJobHistory,approveJob,rejectJob,
     applyBatchReview,recordFileRefund,openBatchReview
   };
 }

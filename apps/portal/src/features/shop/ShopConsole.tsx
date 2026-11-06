@@ -87,7 +87,7 @@ export default function ShopConsole({ tokens, onSignOut, dark, onToggleTheme }: 
     refundJob,setRefundJob,batchReviewJobs,setBatchReviewJobs,batchReviewDecisions,setBatchReviewDecisions,
     batchReviewRetry,batchReviewLoadingId,eventHistory,setEventHistory,
     assignPrinter,updatePrintJobSettings,dispatchPrintJob,retryPdfExport,confirmPrintedOutput,previewJob,
-    openShopPhotoStudio,cancelShopPhotoStudio,applyShopPhotoStudio,viewJobHistory,approveJob,rejectJob,
+    openShopPhotoStudio,openShopPhotoStudioForJob,cancelShopPhotoStudio,applyShopPhotoStudio,viewJobHistory,approveJob,rejectJob,
     applyBatchReview,recordFileRefund,openBatchReview
   } = useShopPrintActions({
     accessToken: tokens.accessToken, reload, confirmInApp, setError, setToast
@@ -286,7 +286,7 @@ export default function ShopConsole({ tokens, onSignOut, dark, onToggleTheme }: 
           {active === "Subscription" && subscription && <SubscriptionPage summary={subscription}/>}
           {active === "Payments" && paymentSettings && <PaymentsPage settings={paymentSettings} payments={payments} refunds={refunds} onSave={savePaymentSettings} onVerify={verifyPayment} onReject={rejectPayment} busy={busy} busyJobId={busyJobId}/>}
           {active === "Settings" && profile && <SettingsPage profile={profile} onSave={saveProfile} busy={busy}/>}
-          {active === "Print Queue" && <PrintQueuePage jobs={printJobs} printers={printers} agentDevices={agentDevices} searchQuery={queueSearch} loadingBatchId={batchReviewLoadingId} onSearch={searchPrintQueue} onPreview={previewJob} onPreviewOutput={job=>void previewJob(job,true,"output")} onApprove={approveJob} onReject={rejectJob} onRefund={job=>setRefundJob(job)} onReviewBatch={openBatchReview} onHistory={viewJobHistory} onAssignPrinter={assignPrinter} onUpdateSettings={updatePrintJobSettings} onDispatch={dispatchPrintJob} onConfirmOutput={confirmPrintedOutput} onRetryPdfExport={retryPdfExport} onRefresh={refreshPrintQueue} onLoadOlder={loadOlderQueueJobs} hasMoreJobs={hasMoreQueueJobs} loadingOlderJobs={loadingOlderQueueJobs} busyJobId={busyJobId}/>} 
+          {active === "Print Queue" && <PrintQueuePage jobs={printJobs} printers={printers} agentDevices={agentDevices} searchQuery={queueSearch} loadingBatchId={batchReviewLoadingId} onSearch={searchPrintQueue} onPreview={previewJob} onPreviewOutput={job=>void previewJob(job,true,"output")} onApprove={approveJob} onReject={rejectJob} onRefund={job=>setRefundJob(job)} onReviewBatch={openBatchReview} onHistory={viewJobHistory} onOpenPhotoStudio={job=>void openShopPhotoStudioForJob(job)} onAssignPrinter={assignPrinter} onUpdateSettings={updatePrintJobSettings} onDispatch={dispatchPrintJob} onConfirmOutput={confirmPrintedOutput} onRetryPdfExport={retryPdfExport} onRefresh={refreshPrintQueue} onLoadOlder={loadOlderQueueJobs} hasMoreJobs={hasMoreQueueJobs} loadingOlderJobs={loadingOlderQueueJobs} busyJobId={busyJobId}/>} 
           {active === "Customers" && <CustomersPage token={tokens.accessToken}/>}
           {active === "Reports" && <ReportsPage token={tokens.accessToken}/>} 
 

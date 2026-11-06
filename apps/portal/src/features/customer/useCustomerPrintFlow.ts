@@ -6,6 +6,7 @@ import { useCustomerPrintUpload } from "./useCustomerPrintUpload";
 import { useCustomerPrintCheckout } from "./useCustomerPrintCheckout";
 import type { PrintQuoteResult, UploadedPrintJob } from "../../api";
 import { deriveCustomerPrintSummary } from "./customer-print-summary";
+import { isCustomerBatchFinished } from "../../customer-session-state";
 import { resolveCustomerUploadMode } from "../../local-upload-routing";
 import {
   customerFileFingerprint, isCustomerPdf, smartPrintNativePdfPreviewTokens, postSmartPrintNativeMessage,
@@ -130,6 +131,9 @@ export function useCustomerPrintFlow(props:CustomerPrintFlowProps) {
     };
   };
 
+  const batchItemsForStatus=uploadedBatch.length?uploadedBatch:(uploaded?[uploaded]:[]);
+  const canStartNewSession=!!uploaded&&isCustomerBatchFinished(batchItemsForStatus,batchStatuses,uploaded.job.id,jobStatus?.status);
+
   const summary = deriveCustomerPrintSummary({
     files, file, uploaded, uploadedBatch, uploadedFileFingerprints, batchId, batchPayment,
     payment, jobStatus, batchStatuses, quotesByJobId, photoPricing, groupNameForFile
@@ -194,7 +198,7 @@ export function useCustomerPrintFlow(props:CustomerPrintFlowProps) {
 
   const {
     upload, uploadProgress, applyPhotoSheets, openPhotoStudio, openCustomerPdfPreview,
-    chooseFiles, removeSelectedFile
+    chooseFiles, removeSelectedFile, photoPreviewPagesByFingerprint
   } = useCustomerPrintUpload({
     sessionToken, nativeAppMode, files, setFiles, selectedFileIndex, setSelectedFileIndex,
     uploaded, setUploaded, uploadedBatch, setUploadedBatch, uploadedFileFingerprints, setUploadedFileFingerprints,
@@ -228,6 +232,8 @@ export function useCustomerPrintFlow(props:CustomerPrintFlowProps) {
     quotesByJobId,
     setQuotesByJobId,
     photoSettingsByFileFingerprint,
+    photoPreviewPagesByFingerprint,
+    canStartNewSession,
     photoSettingsByJobId,
     photoStudioSource,
     setPhotoStudioSource,

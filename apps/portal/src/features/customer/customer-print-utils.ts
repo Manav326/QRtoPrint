@@ -12,6 +12,7 @@ export type CustomerPrintFlowProps = {
   photoPricing:CustomerPhotoPricing|null;
   hasAssignedPrinter:boolean;
   printerCapabilitiesJson?:string|null;
+  onStartNewSession:()=>void;
 };
 
 export type CustomerLocalAgent = NonNullable<Awaited<ReturnType<typeof import("../../api").createCustomerSession>>["localAgent"]>;
@@ -146,6 +147,10 @@ export function smartPrintNativeHeadline(status:string):string {
     case "PRINTING": return "Printing";
     case "OUTPUT_UNCONFIRMED": return "Output check pending";
     case "COMPLETED": return "Ready to collect";
+    case "PDF_EXPORTED": return "PDF ready";
+    case "REFUNDED": return "Fully refunded";
+    case "CANCELLED": return "Cancelled";
+    case "FAILED": return "Failed";
     case "REJECTED": return "Request declined";
     case "QUOTE_EXPIRED": return "Quote expired";
     default: return "Request in progress";
@@ -169,6 +174,10 @@ export function smartPrintNativeStatus(status:string):string {
     case "PRINTING": return "Printing in progress.";
     case "OUTPUT_UNCONFIRMED": return "Shop confirming print output.";
     case "COMPLETED": return "Ready for collection.";
+    case "PDF_EXPORTED": return "Your PDF was saved and verified.";
+    case "REFUNDED": return "The file was excluded and its full payment was returned.";
+    case "CANCELLED": return "This request was cancelled. No further print work will be produced.";
+    case "FAILED": return "This request could not be completed. Contact the shop before submitting again.";
     case "REJECTED": return "Shop rejected request.";
     case "QUOTE_EXPIRED": return "Quote expired.";
     default: return "Status updated.";
@@ -191,6 +200,10 @@ export function smartPrintNativeBoundary(status:string|undefined,hasQuote:boolea
     case "PRINTING": return "Printing · Output unconfirmed.";
     case "OUTPUT_UNCONFIRMED": return "Output unconfirmed · Shop checks pages.";
     case "COMPLETED": return "Output confirmed · Collect print.";
+    case "PDF_EXPORTED": return "PDF saved · Ready to use.";
+    case "REFUNDED": return "Fully refunded · No printing will take place.";
+    case "CANCELLED": return "Cancelled · No further print work.";
+    case "FAILED": return "Failed · Contact the shop before retrying.";
     case "QUOTE_EXPIRED": return "Quote expired · Request another.";
     case "REJECTED": return "Request rejected · Ask shop.";
     default: return hasQuote ? "Quote only · No payment." : "No payment yet.";

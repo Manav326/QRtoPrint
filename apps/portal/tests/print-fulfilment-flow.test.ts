@@ -966,3 +966,36 @@ test("Agent endpoint handlers delegate paired-device authentication to the authe
   assert.match(service, /AgentAuthentication\.IsSecretValid/);
   assert.match(security, /CryptographicOperations\.FixedTimeEquals/);
 });
+
+
+test("customers can start a fresh QR session after the saved order batch reaches a terminal state", () => {
+  const state = read("../src/customer-session-state.ts");
+  const entry = read("../src/features/customer/CustomerEntry.tsx");
+  const flow = read("../src/features/customer/CustomerPrintFlow.tsx");
+  assert.match(state, /PDF_EXPORTED/);
+  assert.match(state, /isCustomerBatchFinished/);
+  assert.match(entry, /const startNewSession=useCallback/);
+  assert.match(entry, /key={result\.sessionToken}/);
+  assert.match(flow, /customer-session-complete/);
+  assert.match(flow, /onStartNewSession/);
+});
+
+test("native customer renewal attaches signed-in identity without transferring an existing account session", () => {
+  const api = read("../src/api/customer.ts");
+  const endpoint = readApi("PublicSessionEndpoints.cs");
+  const service = read("../../../src/SmartPrint.Api/Services/PublicCustomerSessionService.cs");
+  assert.match(api, /headers: \{ "X-Print-Session": sessionToken, \.\.\.await nativeCustomerAuthorizationHeaders\(\) \}/);
+  assert.match(endpoint, /CustomerIdentity\.GetCustomerId\(context\.User\)/);
+  assert.match(service, /existingCustomerId != signedInCustomerId/);
+  assert.match(service, /PublicCustomerSessionFailure\.Forbidden/);
+  assert.match(service, /session\.CustomerUserId = signedInCustomerId/);
+});
+
+test("signed-in customer order status remains scoped to a job's own customer session", () => {
+  const endpoint = readApi("CustomerEndpoints.cs");
+  const service = read("../../../src/SmartPrint.Api/Services/PublicJobStatusService.cs");
+  assert.match(endpoint, /jobStatus\.GetForCustomerAsync\(jobId, customerId\.Value, ct\)/);
+  assert.match(service, /customerSession\.CustomerUserId == customerId/);
+  assert.match(service, /item\.TenantId == tenantId/);
+  assert.match(service, /item\.CustomerSessionId == sessionId/);
+});

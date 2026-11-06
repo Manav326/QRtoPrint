@@ -3,6 +3,8 @@ import test from "node:test";
 import { readFileSync } from "node:fs";
 import { buildPhotoPdf,getPhotoSheetLayout } from "../src/photo-studio-layout.ts";
 
+const read = (path: string) => readFileSync(new URL(path, import.meta.url), "utf8");
+
 test("exact physical photo layout is centred on A4",()=>{
  const layout=getPhotoSheetLayout({widthMm:35,heightMm:45});
  assert.equal(layout.perSheet,25);
@@ -201,4 +203,28 @@ test("50 photos at nine per page build one six-page A4 PDF",()=>{
 test("changing photos per A4 page redraws the live preview",()=>{
  const studio=readFileSync(new URL("../src/PhotoStudio.tsx",import.meta.url),"utf8");
  assert.match(studio,/\},\[image,size,copies,photosPerPage,previewPageIndex,/);
+});
+
+
+test("Photo Studio supplies page previews to the customer workspace without exposing a separate download", () => {
+  const studio = read("../src/PhotoStudio.tsx");
+  const preview = read("../src/features/customer/CustomerFilePreview.tsx");
+  assert.match(studio, /previewPages\?: Blob\[\]/);
+  assert.match(studio, /previewPages:jpegPages\.map\(jpeg=>new Blob\(\[jpeg\],\{type:"image\/jpeg"\}\)\)/);
+  assert.match(preview, /customer-edited-photo-frame/);
+  assert.match(preview, /customer-edited-photo-pages/);
+  assert.match(preview, /Preview only/);
+  assert.doesNotMatch(preview, /download=/);
+});
+
+
+test("Photo Studio canvas workspace is an isolated presentational component", () => {
+  const studio = read("../src/PhotoStudio.tsx");
+  const workspace = read("../src/PhotoStudioCanvasWorkspace.tsx");
+  assert.match(studio, /import PhotoStudioCanvasWorkspace from "\.\/PhotoStudioCanvasWorkspace"/);
+  assert.match(studio, /<PhotoStudioCanvasWorkspace/);
+  assert.match(workspace, /role="img"/);
+  assert.match(workspace, /onPreviousPage/);
+  assert.match(workspace, /onBackgroundPick/);
+  assert.match(workspace, /canvasRef/);
 });

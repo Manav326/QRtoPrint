@@ -1,8 +1,10 @@
+import { useState } from "react";
 import { useCustomerPrintFlow } from "./useCustomerPrintFlow";
 import {
-  Check, FileText, FileUp, FolderOpen, Image as ImageIcon, ShieldCheck, Wallet, X
+  Check, FileText, FileUp, FolderOpen, RefreshCw, ShieldCheck, Wallet, X
 } from "lucide-react";
 import PhotoStudio from "../../PhotoStudio";
+import CustomerFilePreview from "./CustomerFilePreview";
 import CustomerUpiQr from "../../CustomerUpiQr";
 import { buildCustomerUpiIntent } from "../../upi-payment-intent";
 import Status from "../../shared/ui/Status";
@@ -12,7 +14,7 @@ import InfoTooltip from "../../shared/ui/InfoTooltip";
 import { formatIstDateTime } from "../../date-time";
 import {
   rejectedPageList, formatBytes, consumeSmartPrintNativePickerGroups, customerPhotoSizeLabel,
-  isCustomerImage, customerFileFingerprint, isCustomerPdf, smartPrintNativePdfPreviewTokens,
+  customerFileFingerprint,
   consumeSmartPrintNativePdfPreviews, normalizeCustomerCopies, smartPrintNativeHeadline,
   smartPrintNativeStatus, smartPrintNativeBoundary, type CustomerGroupSettings,
   type CustomerFileSettings, type CustomerPrintFlowProps
@@ -37,6 +39,8 @@ export default function CustomerPrintFlow(props:CustomerPrintFlowProps) {
     quotesByJobId,
     setQuotesByJobId,
     photoSettingsByFileFingerprint,
+    photoPreviewPagesByFingerprint,
+    canStartNewSession,
     photoSettingsByJobId,
     photoStudioSource,
     setPhotoStudioSource,
@@ -110,6 +114,7 @@ export default function CustomerPrintFlow(props:CustomerPrintFlowProps) {
     chooseFiles,
     removeSelectedFile
   } = useCustomerPrintFlow(props);
+  const [selectedPreparedPhotoPage,setSelectedPreparedPhotoPage]=useState(0);
   return <>{photoStudioSource&&<PhotoStudio source={photoStudioSource} mode="customer" dark={dark} photoPrices={photoPriceMap} onCancel={()=>{setPhotoStudioSource(null);setPhotoStudioSourceFingerprint(null);}} onApply={applyPhotoSheets}/>}<section className="customer-print-flow">
     <div className="customer-flow-heading"><div><span>STEP 1</span><h2>{nativeAppMode?"Add files":"Add documents or images"}</h2></div><span className="upload-limit">PDF documents · JPG/PNG images · Up to 20 files / 50 MB per batch</span></div>
     <div className="customer-upload-modes">
@@ -242,7 +247,7 @@ export default function CustomerPrintFlow(props:CustomerPrintFlowProps) {
   />
 </label>}
 {files.length>0&&<small className="customer-upload-local-note">Folder defaults apply to every file. Set an individual file to Custom for an exception.</small>}
-    {previewUrl&&file&&<div className="customer-file-preview"><div className="customer-file-label"><FileText size={15}/><span>{photoSettingsByFileFingerprint[customerFileFingerprint(file)]?"Prepared photo sheet":"Selected document"} · {file.name}</span>{isCustomerImage(file)&&photoRatesAvailable&&<button type="button" className="customer-file-studio-button" disabled={busy||batchLockedForPayment||photoAlreadyUploaded} title={photoAlreadyUploaded?"This photo has already been submitted to the shop.":"Open Photo Studio"} onClick={()=>openPhotoStudio(file)}><ImageIcon size={14}/> {photoAlreadyUploaded?"Already sent to shop":"Open Photo Studio"}</button>}</div>{isCustomerImage(file)&&!photoRatesAvailable&&<small className="customer-upload-local-note">Photo printing is not enabled at this shop yet. Ask the shop owner to configure photo sizes and rates.</small>}{isCustomerImage(file)&&photoAlreadyUploaded&&photoRatesAvailable&&<small className="customer-upload-local-note">This photo is already with the shop. The shop owner can prepare it from the review queue without creating another print job.</small>}{isCustomerPdf(file)?photoSettingsByFileFingerprint[customerFileFingerprint(file)]?<div className="customer-private-photo-preview"><ShieldCheck size={20}/><strong>Photo sheet prepared for this shop</strong><span>It will be uploaded with your print request. The finished sheet is not available as a separate download.</span></div>:nativeAppMode?smartPrintNativePdfPreviewTokens.has(file)?<button type="button" className="customer-flow-button" onClick={()=>openCustomerPdfPreview(file)}><FileText size={16}/> Preview PDF</button>:<small className="customer-upload-local-note">PDF selected. Preview is unavailable for this file, but you can still upload it.</small>:<iframe src={previewUrl} title={file.name+" preview"}/>:<div className="customer-private-photo-preview"><ShieldCheck size={20}/><strong>Photo held in the shop workflow</strong><span>Open Photo Studio to view and prepare this image. The original is not displayed as a downloadable preview.</span></div>}</div>}
+    <CustomerFilePreview previewUrl={previewUrl} file={file} photoSettingsByFileFingerprint={photoSettingsByFileFingerprint} photoPreviewPagesByFingerprint={photoPreviewPagesByFingerprint} photoRatesAvailable={photoRatesAvailable} photoAlreadyUploaded={photoAlreadyUploaded} busy={busy} batchLockedForPayment={batchLockedForPayment} nativeAppMode={nativeAppMode} selectedPreparedPhotoPage={selectedPreparedPhotoPage} onSelectPreparedPhotoPage={setSelectedPreparedPhotoPage} onOpenPhotoStudio={openPhotoStudio} onOpenCustomerPdfPreview={openCustomerPdfPreview}/>
     {files.length>0&&<button className="customer-flow-button" disabled={busy||customerUploadUnavailable||pendingFilesCount===0||(uploadMode==="LOCAL"&&!localReady)} onClick={()=>void upload()}>{busy?<span className="button-spinner"/>:<><UploadIcon/>{uploadMode==="LOCAL"&&localAgent?"Upload "+pendingFilesCount+" file(s) to shop":"Upload "+pendingFilesCount+" file(s)"}</>}</button>}
     {uploadProgress&&<div className="customer-upload-progress"><span>{uploadProgress.currentFile?`Uploading ${Math.min(uploadProgress.completed+1,uploadProgress.total)} of ${uploadProgress.total}: ${uploadProgress.currentFile}`:`${uploadProgress.completed} of ${uploadProgress.total} files uploaded`}</span><div><i style={{width:`${uploadProgress.total?uploadProgress.completed/uploadProgress.total*100:0}%`}}/>{uploadProgress.currentFile&&<b aria-hidden="true"/>}</div><small>The count advances when each document finishes uploading.</small></div>}
     {files.length>0&&uploadMode==="LOCAL"&&localAgent&&<small className="customer-upload-local-note">{nativeAppMode?(localReady?"Direct shop Wi-Fi transfer uses local HTTP and is not encrypted in transit. Choose Cloud-assisted for HTTPS.":"Check shop Wi-Fi."):localReady?"Direct shop Wi-Fi transfer uses local HTTP and is not encrypted in transit. Choose Cloud-assisted for HTTPS encryption.":"Tap Check shop Wi-Fi above first to grant the browser permission."}</small>}
@@ -295,6 +300,7 @@ export default function CustomerPrintFlow(props:CustomerPrintFlowProps) {
         <span><strong>PDF footer selected by the shop.</strong> <InfoTooltip label="PDF footer details"><span>Footer only appears on PDFs with a verified blank bottom margin.</span><span>Digitally signed or interactive PDFs remain unchanged.</span><span>Original uploads and physical prints are never altered.</span><span>Image-to-PDF exports currently remain unbranded.</span><span>Branding off preserves a single-copy full-document PDF byte-for-byte.</span><span>Reformatted or multi-copy exports may be flattened.</span><span>Ask for an unbranded single-copy export when PDF structure matters.</span></InfoTooltip></span>
       </div>}
       {!!jobStatus.timeline?.length&&<div className="customer-state-timeline">{jobStatus.timeline.map((event,index)=><div key={index}><i/><span><strong>{prettyStatus(event.newStatus)}</strong><small>{event.actorType==="ShopUser"?"Shop team":event.actorType==="Customer"?"You":"System"} · {formatIstDateTime(event.createdUtc)}</small></span></div>)}</div>}
+      {canStartNewSession&&<div className="customer-session-complete"><div><strong>Order finished</strong><span>Your order history is saved. You can start another print session when ready.</span></div><button className="customer-flow-button" onClick={props.onStartNewSession}><RefreshCw size={16}/> Start new session</button></div>}
 
       {legacyIndividualPayment&&(jobStatus.status==="AWAITING_PAYMENT"||jobStatus.status==="PAYMENT_REJECTED")&&<div className="customer-pay-panel">
         <div className="customer-pay-heading"><span>PAY THE SHOP</span><strong>{formatMoney(jobStatus.quotedAmountMinor,jobStatus.currency)}</strong></div>

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { Dispatch, SetStateAction } from "react";
 import {
   ApiError, LocalUploadOutcomeUnknownError, LocalUploadPreflightError,
@@ -84,6 +84,9 @@ export function useCustomerPrintUpload(options: CustomerPrintUploadOptions) {
     settingsForFile, getQuote
   } = options;
   const [uploadProgress, setUploadProgress] = useState<{completed:number;total:number;currentFile:string|null}|null>(null);
+  const [photoPreviewPagesByFingerprint,setPhotoPreviewPagesByFingerprint]=useState<Record<string,string[]>>({});
+  const photoPreviewUrlsRef=useRef<Set<string>>(new Set());
+  useEffect(()=>()=>{photoPreviewUrlsRef.current.forEach(url=>URL.revokeObjectURL(url));photoPreviewUrlsRef.current.clear();},[]);
 
   async function upload() {
     if(batchLockedForPayment){
@@ -196,10 +199,17 @@ export function useCustomerPrintUpload(options: CustomerPrintUploadOptions) {
     const pending=nextFiles.filter(candidate=>!uploadedFileFingerprints.includes(customerFileFingerprint(candidate)));
     const bytes=uploadedBatch.reduce((sum,item)=>sum+item.document.sizeBytes,0)+pending.reduce((sum,file)=>sum+file.size,0);
     if(uploadedBatch.length+pending.length>20||bytes>50*1024*1024){setError("Prepared photo sheets exceed the batch limit. Reduce the copies or start a new batch.");setPhotoStudioSource(null);setPhotoStudioSourceFingerprint(null);return;}
-    const group=groupNameForFile(files[index]),groups={...fileGroupNames},settings={...fileSettings},photos={...photoSettingsByFileFingerprint};
-    delete groups[photoStudioSourceFingerprint];delete settings[photoStudioSourceFingerprint];delete photos[photoStudioSourceFingerprint];
-    for(const sheet of sheets){const fp=customerFileFingerprint(sheet.file);groups[fp]=group;settings[fp]={copies:"1",custom:true,colourMode:"Colour",isDuplex:false,advancedEnabled:false,paperSize:"A4",orientation:"AUTO"};photos[fp]={sizeCode:sheet.sizeCode,photoCount:sheet.photoCount,photosPerPage:sheet.photosPerPage};}
-    setFiles(nextFiles);setSelectedFileIndex(index);setFileGroupNames(groups);setFileSettings(settings);setPhotoSettingsByFileFingerprint(photos);setPhotoStudioSource(null);setPhotoStudioSourceFingerprint(null);setError("");
+    const group=groupNameForFile(files[index]),groups={...fileGroupNames},settings={...fileSettings},photos={...photoSettingsByFileFingerprint},previews={...photoPreviewPagesByFingerprint};
+    (previews[photoStudioSourceFingerprint]??[]).forEach(url=>{URL.revokeObjectURL(url);photoPreviewUrlsRef.current.delete(url);});
+    delete groups[photoStudioSourceFingerprint];delete settings[photoStudioSourceFingerprint];delete photos[photoStudioSourceFingerprint];delete previews[photoStudioSourceFingerprint];
+    for(const sheet of sheets){
+      const fp=customerFileFingerprint(sheet.file);groups[fp]=group;
+      settings[fp]={copies:"1",custom:true,colourMode:"Colour",isDuplex:false,advancedEnabled:false,paperSize:"A4",orientation:"AUTO"};
+      photos[fp]={sizeCode:sheet.sizeCode,photoCount:sheet.photoCount,photosPerPage:sheet.photosPerPage};
+      const urls=(sheet.previewPages??[]).map(page=>{const url=URL.createObjectURL(page);photoPreviewUrlsRef.current.add(url);return url;});
+      if(urls.length)previews[fp]=urls;
+    }
+    setFiles(nextFiles);setSelectedFileIndex(index);setFileGroupNames(groups);setFileSettings(settings);setPhotoSettingsByFileFingerprint(photos);setPhotoPreviewPagesByFingerprint(previews);setPhotoStudioSource(null);setPhotoStudioSourceFingerprint(null);setError("");
   }
   function openPhotoStudio(candidate:File){
     const fingerprint=customerFileFingerprint(candidate);
@@ -306,11 +316,13 @@ export function useCustomerPrintUpload(options: CustomerPrintUploadOptions) {
       return next;
     });
     setPhotoSettingsByFileFingerprint(current=>{const next={...current};delete next[fingerprint];return next;});
+    (photoPreviewPagesByFingerprint[fingerprint]??[]).forEach(url=>{URL.revokeObjectURL(url);photoPreviewUrlsRef.current.delete(url);});
+    setPhotoPreviewPagesByFingerprint(current=>{const next={...current};delete next[fingerprint];return next;});
     setError("");
   }
 
   return {
     upload, uploadProgress, applyPhotoSheets, openPhotoStudio, openCustomerPdfPreview,
-    chooseFiles, removeSelectedFile
+    chooseFiles, removeSelectedFile, photoPreviewPagesByFingerprint
   };
 }

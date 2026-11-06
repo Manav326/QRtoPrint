@@ -1,5 +1,6 @@
 import { shouldBlockBatchCheckoutForExpiredQuote } from "../../batch-checkout-state.ts";
 import { customerFileFingerprint } from "./customer-print-utils.ts";
+import { shouldBlockQuoteRefreshForStatus } from "../../batch-checkout-state";
 import type {
   CustomerBatchPayment, CustomerJobStatus, CustomerPayment, CustomerPhotoPricing,
   PrintQuoteResult, UploadedPrintJob
@@ -125,8 +126,9 @@ export function deriveCustomerPrintSummary({
   const canSendBatch=quoteEligibleItems.length>0&&
     acceptedQuoteEntries.length===quoteEligibleItems.length&&
     acceptedQuoteEntries.some(entry=>entry.quote?.status==="AWAITING_CUSTOMER_APPROVAL");
-  const canCalculateBatch=quoteItems.some(item=>{
+  const canCalculateBatch=!batchLockedForPayment&&!batchPaymentStarted&&quoteItems.some(item=>{
     const status=statusForBatchItem(item);
+    if(shouldBlockQuoteRefreshForStatus(status))return false;
     if(quoteExpiredForBatchItem(item))return true;
     if(quotesByJobId[item.job.id]&&quotesByJobId[item.job.id].status!=="QUOTE_EXPIRED")return false;
     return !quotesByJobId[item.job.id]||quotesByJobId[item.job.id].status==="QUOTE_EXPIRED"||

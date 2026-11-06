@@ -43,10 +43,41 @@ public sealed class PublicJobStatusService(SmartPrintDbContext db)
             return new PublicJobStatusResult(PublicJobStatusFailure.Unauthorized);
         }
 
+        return await BuildForSessionAsync(jobId,session.TenantId,session.Id,cancellationToken);
+    }
+
+    public async Task<PublicJobStatusResult> GetForCustomerAsync(
+        Guid jobId,
+        Guid customerId,
+        CancellationToken cancellationToken)
+    {
+        var ownedSession = await (
+            from job in db.PrintJobs.AsNoTracking()
+            join customerSession in db.CustomerPrintSessions.AsNoTracking()
+                on new { job.TenantId, SessionId = job.CustomerSessionId }
+                equals new { customerSession.TenantId, SessionId = customerSession.Id }
+            where job.Id == jobId && customerSession.CustomerUserId == customerId
+            select new { job.TenantId, SessionId = customerSession.Id }
+        ).SingleOrDefaultAsync(cancellationToken);
+
+        if (ownedSession is null)
+        {
+            return new PublicJobStatusResult(PublicJobStatusFailure.NotFound);
+        }
+
+        return await BuildForSessionAsync(jobId,ownedSession.TenantId,ownedSession.SessionId,cancellationToken);
+    }
+
+    private async Task<PublicJobStatusResult> BuildForSessionAsync(
+        Guid jobId,
+        Guid tenantId,
+        Guid sessionId,
+        CancellationToken cancellationToken)
+    {
         var job = await db.PrintJobs.AsNoTracking()
             .Where(item => item.Id == jobId &&
-                           item.TenantId == session.TenantId &&
-                           item.CustomerSessionId == session.Id)
+                           item.TenantId == tenantId &&
+                           item.CustomerSessionId == sessionId)
             .Select(item => new
             {
                 item.Id,
@@ -77,12 +108,12 @@ public sealed class PublicJobStatusService(SmartPrintDbContext db)
         }
 
         var timeline = await db.PrintJobEvents.AsNoTracking()
-            .Where(item => item.TenantId == session.TenantId && item.PrintJobId == jobId)
+            .Where(item => item.TenantId == tenantId && item.PrintJobId == jobId)
             .OrderBy(item => item.CreatedUtc)
             .Select(item => new { item.NewStatus, item.ActorType, item.CreatedUtc })
             .ToListAsync(cancellationToken);
         var payment = await db.PrintPayments.AsNoTracking()
-            .Where(item => item.TenantId == session.TenantId && item.PrintJobId == jobId)
+            .Where(item => item.TenantId == tenantId && item.PrintJobId == jobId)
             .OrderByDescending(item => item.CreatedUtc)
             .Select(item => new
             {
@@ -108,7 +139,7 @@ public sealed class PublicJobStatusService(SmartPrintDbContext db)
         {
             batchPayment = await db.PrintBatchPayments.AsNoTracking()
                 .SingleOrDefaultAsync(
-                    item => item.Id == batchPaymentId && item.TenantId == session.TenantId,
+                    item => item.Id == batchPaymentId && item.TenantId == tenantId,
                     cancellationToken);
         }
 
@@ -116,7 +147,7 @@ public sealed class PublicJobStatusService(SmartPrintDbContext db)
             ? 0
             : await db.PrintPayments.AsNoTracking()
                 .CountAsync(item =>
-                    item.TenantId == session.TenantId &&
+                    item.TenantId == tenantId &&
                     item.BatchPaymentId == batchPayment.Id,
                     cancellationToken);
 

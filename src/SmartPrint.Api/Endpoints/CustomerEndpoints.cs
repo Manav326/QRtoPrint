@@ -57,6 +57,28 @@ public static class CustomerEndpoints
         });
 
 
+        customerApi.MapGet("/jobs/{jobId:guid}/status", async (
+            Guid jobId,
+            ClaimsPrincipal principal,
+            PublicJobStatusService jobStatus,
+            CancellationToken ct) =>
+        {
+            var customerId = CustomerIdentity.GetCustomerId(principal);
+            if (customerId is null)
+            {
+                return Results.Forbid();
+            }
+
+            var result = await jobStatus.GetForCustomerAsync(jobId, customerId.Value, ct);
+            return result.Failure switch
+            {
+                PublicJobStatusFailure.NotFound => Results.NotFound(),
+                PublicJobStatusFailure.None => Results.Ok(result.Payload),
+                _ => Results.Forbid()
+            };
+        });
+
+
 
         return customerApi;
     }

@@ -11,7 +11,8 @@ public enum PublicCustomerSessionFailure
 {
     None,
     Unauthorized,
-    StationUnavailable
+    StationUnavailable,
+    Forbidden
 }
 
 public sealed record PublicCustomerSessionResult(
@@ -48,7 +49,8 @@ public sealed class PublicCustomerSessionService(
 {
     public async Task<PublicCustomerSessionResult> RenewAsync(
         string? rawToken,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        Guid? customerUserId = null)
     {
         if (string.IsNullOrWhiteSpace(rawToken))
         {
@@ -68,11 +70,33 @@ public sealed class PublicCustomerSessionService(
             return new PublicCustomerSessionResult(PublicCustomerSessionFailure.Unauthorized);
         }
 
+        // Attach a signed-in customer to the active QR session without ever
+        // transferring a session that is already owned by a different account.
+        if (customerUserId is Guid signedInCustomerId)
+        {
+            if (session.CustomerUserId is Guid existingCustomerId &&
+                existingCustomerId != signedInCustomerId)
+            {
+                return new PublicCustomerSessionResult(PublicCustomerSessionFailure.Forbidden);
+            }
+
+            if (session.CustomerUserId is null)
+            {
+                session.CustomerUserId = signedInCustomerId;
+            }
+        }
+
         // Renew only when the existing expiry is approaching; repeated foreground
         // refreshes do not cause a database write on every customer status poll.
-        if (session.ExpiresUtc <= now.AddMinutes(10))
+        var shouldExtend = session.ExpiresUtc <= now.AddMinutes(10);
+        if (shouldExtend)
         {
             session.ExpiresUtc = now.AddMinutes(15);
+        }
+
+        // Persist account association even when expiry did not need extending.
+        if (customerUserId is not null || shouldExtend)
+        {
             await db.SaveChangesAsync(cancellationToken);
         }
 
