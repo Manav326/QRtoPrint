@@ -929,11 +929,12 @@ try {
     const profile = assertHttp(await request(page, "GET", "/api/v1/customer/me", {
       token: customerTokens.accessToken
     }), 200, "QA customer profile");
-    const jobs = assertHttp(await request(page, "GET", "/api/v1/customer/jobs", {
+    const jobsResponse = assertHttp(await request(page, "GET", "/api/v1/customer/jobs", {
       token: customerTokens.accessToken
     }), 200, "QA customer jobs");
+    const jobs = jobsResponse.jobs;
     assert.ok(profile.id && profile.email === process.env.SMARTPRINT_QA_CUSTOMER_EMAIL);
-    assert.ok(Array.isArray(jobs));
+    assert.ok(Array.isArray(jobs), "Customer job history response did not contain its jobs array.");
     return { account: "global customer", createdThisRun: created, signInVerified: true, tenantScoped: false, jobsInitially: jobs.length };
   });
 
@@ -1220,10 +1221,10 @@ try {
       "/api/v1/shop/print-jobs?offset=0&take=100&search=" + encodeURIComponent(uploadedJob.jobNumber),
       { token: shop1Tokens.accessToken }), 200, "Shop print queue");
     assert.ok(shopQueue.some(item => item.id === uploadedJob.id), "The customer job did not appear in the correct shop's queue.");
-    const customerJobs = assertHttp(await request(customerPage, "GET", "/api/v1/customer/jobs", {
+    const customerJobsResponse = assertHttp(await request(customerPage, "GET", "/api/v1/customer/jobs", {
       token: customerTokens.accessToken
     }), 200, "Customer job history after upload");
-    assert.ok(customerJobs.some(item => item.id === uploadedJob.id), "The signed-in customer did not see the job in their history.");
+    assert.ok(customerJobsResponse.jobs?.some(item => item.id === uploadedJob.id), "The signed-in customer did not see the job in their history.");
     return { jobNumber: uploadedJob.jobNumber, customerStatus: status.job.status, shopQueueVisible: true, customerHistoryVisible: true };
   });
 
