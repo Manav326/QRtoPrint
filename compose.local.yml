@@ -1,3 +1,4 @@
+ # The legacy project name is intentionally retained so existing QA volumes stay attached.
 name: qrtoprint-local
 
 services:
