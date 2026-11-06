@@ -3,7 +3,9 @@ param(
     [switch]$RunShopWorkspace,
     [switch]$RunPlatformAdmin,
     [switch]$RunCustomerStation,
-    [string]$StationPath
+    [switch]$RunCustomerUploadWorkflow,
+    [string]$StationPath,
+    [string]$ExpectedQaShopName
 )
 
 $ErrorActionPreference = 'Stop'
@@ -41,6 +43,8 @@ if ([string]::IsNullOrWhiteSpace($env:LIVE_QA_ARTIFACT_DIR)) { $env:LIVE_QA_ARTI
 $env:LIVE_QA_CHECK_SHOP_WORKSPACE = if ($RunShopWorkspace) { 'true' } else { 'false' }
 $env:LIVE_QA_CHECK_PLATFORM_ADMIN = if ($RunPlatformAdmin) { 'true' } else { 'false' }
 $env:LIVE_QA_CHECK_CUSTOMER_STATION = if ($RunCustomerStation) { 'true' } else { 'false' }
+$env:LIVE_QA_CHECK_CUSTOMER_UPLOAD_WORKFLOW = if ($RunCustomerUploadWorkflow) { 'true' } else { 'false' }
+$env:SMARTPRINT_LIVE_QA_EXPECTED_QA_SHOP_NAME = $ExpectedQaShopName
 $env:SMARTPRINT_LIVE_QA_SHOP_EMAIL = ''
 $env:SMARTPRINT_LIVE_QA_SHOP_PASSWORD = ''
 $env:SMARTPRINT_LIVE_QA_ADMIN_EMAIL = ''
@@ -71,8 +75,36 @@ try {
     }
     if ($RunCustomerStation) {
         if ([string]::IsNullOrWhiteSpace($StationPath)) { $StationPath = Read-Host 'Dedicated disposable test station path (for example /s/QA_STATION_01)' }
-        if ($StationPath -notmatch '^/s/[A-Za-z0-9_-]+/?$') { throw 'StationPath must be /s/PUBLIC_CODE for a dedicated test station.' }
+        if ($StationPath -notmatch '^/s/[A-Za-z0-9_-]+/?
+
+    Write-Host ''
+    Write-Host 'Target: https://smartprint.quantaedge.in' -ForegroundColor Cyan
+    Write-Host 'A visible Microsoft Edge window will open. Complete any Cloudflare challenge normally if one appears.' -ForegroundColor Yellow
+    Write-Host 'Default checks are read-only. The optional customer workflow uploads one synthetic PDF, creates one real QA print job, accepts its quote, then rejects it before payment or dispatch.' -ForegroundColor Yellow
+    if ($RunCustomerStation) { Write-Host 'The dedicated station test creates one temporary customer session.' -ForegroundColor Yellow }
+    if ($RunCustomerUploadWorkflow) { Write-Host ('Real QA upload is restricted to shop: ' + $ExpectedQaShopName) -ForegroundColor Yellow }
+    Write-Host ''
+
+    & $node.Source $testScript
+    $scriptExit = $LASTEXITCODE
+    Write-Host "`nEvidence: $(Join-Path $repoRoot $env:LIVE_QA_ARTIFACT_DIR)" -ForegroundColor Cyan
+    if ($scriptExit -ne 0) { throw "Playwright live QA reported failures (exit code $scriptExit). Review report.json and screenshots." }
+}
+finally {
+    foreach ($name in @(
+        'PLAYWRIGHT_MODULE_DIR','SMARTPRINT_LIVE_QA_BASE_URL','LIVE_QA_ARTIFACT_DIR',
+        'LIVE_QA_CHECK_SHOP_WORKSPACE','LIVE_QA_CHECK_PLATFORM_ADMIN','LIVE_QA_CHECK_CUSTOMER_STATION','LIVE_QA_CHECK_CUSTOMER_UPLOAD_WORKFLOW','SMARTPRINT_LIVE_QA_EXPECTED_QA_SHOP_NAME',
+        'SMARTPRINT_LIVE_QA_SHOP_EMAIL','SMARTPRINT_LIVE_QA_SHOP_PASSWORD',
+        'SMARTPRINT_LIVE_QA_ADMIN_EMAIL','SMARTPRINT_LIVE_QA_ADMIN_PASSWORD','SMARTPRINT_LIVE_QA_STATION_PATH'
+    )) { [Environment]::SetEnvironmentVariable($name, $null, 'Process') }
+}) { throw 'StationPath must be /s/PUBLIC_CODE for a dedicated test station.' }
         $env:SMARTPRINT_LIVE_QA_STATION_PATH = $StationPath
+    }
+    if ($RunCustomerUploadWorkflow) {
+        if (-not $RunShopWorkspace -or -not $RunCustomerStation) { throw 'Customer upload workflow requires -RunShopWorkspace and -RunCustomerStation.' }
+        if ([string]::IsNullOrWhiteSpace($ExpectedQaShopName)) { $ExpectedQaShopName = Read-Host 'Exact expected QA shop display name (must match the station shop)' }
+        if ([string]::IsNullOrWhiteSpace($ExpectedQaShopName)) { throw 'ExpectedQaShopName is required to prevent uploads to the wrong shop.' }
+        $env:SMARTPRINT_LIVE_QA_EXPECTED_QA_SHOP_NAME = $ExpectedQaShopName
     }
 
     Write-Host ''
