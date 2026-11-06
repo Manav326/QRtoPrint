@@ -453,9 +453,9 @@ jobs:
           build-args: |
             SOURCE_REPOSITORY=${{ github.server_url }}/${{ github.repository }}
           tags: |
-            ${{ steps.image_namespace.outputs.value }}/qrtoprint-api:latest
+            ${{ steps.image_namespace.outputs.value }}/smart-print-api:latest
             ${{ steps.image_namespace.outputs.value }}/qrtoprint-api:sha-${{ github.sha }}
-          cache-from: type=gha,scope=qrtoprint-api
+          cache-from: type=gha,scope=smart-print-api
           cache-to: type=gha,mode=max,scope=qrtoprint-api
       - name: Build and publish portal image
         uses: docker/build-push-action@v7
@@ -467,9 +467,9 @@ jobs:
           build-args: |
             SOURCE_REPOSITORY=${{ github.server_url }}/${{ github.repository }}
           tags: |
-            ${{ steps.image_namespace.outputs.value }}/qrtoprint-portal:latest
+            ${{ steps.image_namespace.outputs.value }}/smart-print-portal:latest
             ${{ steps.image_namespace.outputs.value }}/qrtoprint-portal:sha-${{ github.sha }}
-          cache-from: type=gha,scope=qrtoprint-portal
+          cache-from: type=gha,scope=smart-print-portal
           cache-to: type=gha,mode=max,scope=qrtoprint-portal
 
       - name: Smoke-test published containers and database migrations
