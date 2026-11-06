@@ -156,7 +156,7 @@ for ($attempt = 0; $attempt -lt 60; $attempt++) {
 }
 if (-not $publicHealthy) {
     & docker compose @composeBaseArgs logs --tail 100 portal api
-    throw "Containers are healthy, but $currentBaseUrl is not reachable. Confirm the central Tunnel is running and its Published Application route targets http://qrtoprint-portal:80 (or the compatibility alias http://portal:80)."
+    throw "Containers are healthy, but $currentBaseUrl is not reachable. Confirm the central Tunnel is running and its Published Application route targets http://smart-print-portal:80."
 }
 
 & docker compose @composeBaseArgs ps
