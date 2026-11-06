@@ -48,12 +48,9 @@ const report = {
     printDispatches: false,
     shopSettingsChanged: false,
     temporaryCustomerSession: runStation,
-    syntheticDocumentUploaded: false,
-    realJobCreated: false,
-    testJobRejectedBeforePayment: false,
-    paymentAttempts: false,
-    refundsRecorded: false,
-    printDispatches: false
+    documentsUploaded: false,
+    printJobsCreated: false,
+    testJobRejectedBeforePayment: false
   },
   checks: [],
   warnings: [],
@@ -215,7 +212,7 @@ function createSyntheticPdfBase64() {
   return Buffer.from(pdf, 'ascii').toString('base64');
 }
 
-async function uploadSyntheticPdf(sessionToken, batchId, idempotencyKey, fileName, base64) {
+async async function uploadSyntheticPdf(sessionToken, batchId, idempotencyKey, fileName, base64) {
   const result = await page.evaluate(async ({ sessionToken, batchId, idempotencyKey, fileName, base64 }) => {
     const bytes = Uint8Array.from(atob(base64), character => character.charCodeAt(0));
     const form = new FormData();
@@ -275,8 +272,8 @@ async function runRealCustomerUploadWorkflow() {
       'Real customer upload failed with HTTP ' + upload.status + ': ' + upload.body.slice(0, 600));
     assert.ok(upload.parsed?.job?.id, 'Upload response did not contain a real PrintJob ID.');
     job = upload.parsed.job;
-    report.safety.syntheticDocumentUploaded = true;
-    report.safety.realJobCreated = true;
+    report.safety.documentsUploaded = true;
+    report.safety.printJobsCreated = true;
 
     assert.equal(job.pageCount, 1, 'Synthetic test PDF should be analysed as exactly one page.');
     assert.equal(job.status, 'AWAITING_CONFIGURATION', 'New uploaded document should enter configuration.');
@@ -573,7 +570,10 @@ try {
       await state.waitFor({ state: 'visible', timeout: 25000 });
       const stateLabel = (await state.innerText()).trim();
       assert.equal(stateLabel, 'SECURE SESSION CREATED');
-      const publicCode = stationPath.match(/^\\/s\\/([A-Za-z0-9_-]+)\\/?$/)[1];
+      const stationParts = stationPath.split('/').filter(Boolean);
+      const publicCode = stationParts[1];
+      assert.equal(stationParts[0], 's');
+      assert.ok(publicCode, 'Dedicated station code could not be parsed.');
       const sessionToken = await page.evaluate(code => sessionStorage.getItem('qrtoprint.customer-session:' + code), publicCode);
       assert.ok(sessionToken, 'Customer session token was not saved for the dedicated station.');
       const current = await browserFetch('/api/v1/public/sessions/current', {
