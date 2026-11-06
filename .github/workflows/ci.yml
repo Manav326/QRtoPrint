@@ -49,9 +49,9 @@ jobs:
       - run: pnpm typecheck
       - run: pnpm build
       - name: Typecheck native desktop frontend
-        run: pnpm --filter @qrtoprint/desktop typecheck
+        run: pnpm --filter @smartprint/desktop typecheck
       - name: Build native desktop frontend
-        run: pnpm --filter @qrtoprint/desktop build
+        run: pnpm --filter @smartprint/desktop build
       - name: Validate portal Nginx proxy configuration
         run: docker run --rm --add-host api:127.0.0.1 -v "$GITHUB_WORKSPACE/apps/portal/nginx.conf:/etc/nginx/conf.d/default.conf:ro" nginx:alpine nginx -t
       - name: Validate production Compose configuration
@@ -171,7 +171,7 @@ jobs:
       - name: Upload Windows Agent package
         uses: actions/upload-artifact@v7
         with:
-          name: qrtoprint-agent-win-x64
+          name: smartprint-agent-win-x64
           path: artifacts/agent/
           if-no-files-found: error
           retention-days: 30
@@ -193,7 +193,7 @@ jobs:
       - name: Compile the native Windows desktop host
         shell: pwsh
         run: |
-          pnpm --filter @qrtoprint/desktop build
+          pnpm --filter @smartprint/desktop build
           if ($LASTEXITCODE -ne 0) { throw "SmartPrint desktop frontend build failed." }
           cargo check --locked --manifest-path apps/desktop/src-tauri/Cargo.toml --target x86_64-pc-windows-msvc
           if ($LASTEXITCODE -ne 0) { throw "SmartPrint native desktop host compilation failed." }
@@ -206,7 +206,7 @@ jobs:
             throw "Configure the SMARTPRINT_PUBLIC_BASE_URL Actions variable before building the desktop application."
           }
           $env:VITE_API_BASE_URL = $env:SMARTPRINT_PUBLIC_BASE_URL
-          pnpm --filter @qrtoprint/desktop exec tauri build --no-bundle --ci
+          pnpm --filter @smartprint/desktop exec tauri build --no-bundle --ci
           if ($LASTEXITCODE -ne 0) { throw "SmartPrint native desktop build failed." }
           $nativeExe = "apps/desktop/src-tauri/target/release/smartprint-desktop.exe"
           if (-not (Test-Path -LiteralPath $nativeExe)) { throw "The SmartPrint native desktop executable was not produced." }
@@ -226,7 +226,7 @@ jobs:
       - name: Upload Windows desktop package
         uses: actions/upload-artifact@v7
         with:
-          name: qrtoprint-desktop-win-x64
+          name: smartprint-desktop-win-x64
           path: artifacts/desktop/
           if-no-files-found: error
           retention-days: 30
@@ -243,12 +243,12 @@ jobs:
       - name: Download Windows Agent package
         uses: actions/download-artifact@v8
         with:
-          name: qrtoprint-agent-win-x64
+          name: smartprint-agent-win-x64
           path: artifacts/agent
       - name: Download Windows desktop package
         uses: actions/download-artifact@v8
         with:
-          name: qrtoprint-desktop-win-x64
+          name: smartprint-desktop-win-x64
           path: artifacts/desktop
       - name: Build two versioned SmartPrint installers
         shell: pwsh
@@ -285,7 +285,7 @@ jobs:
       - name: Upload Windows installer validation artifact
         uses: actions/upload-artifact@v7
         with:
-          name: qrtoprint-windows-setup-validation
+          name: smartprint-windows-setup-validation
           path: |
             artifacts/agent-installer/SmartPrint-Windows-v1.exe
             artifacts/agent-installer/SmartPrint-Windows-v2.exe
