@@ -328,6 +328,32 @@ try {
     }
     if (-not $configOk) { throw "Local SmartPrint Compose configuration is invalid." }
 
+    # Refuse to take a localhost port from another Compose project. In
+    # particular, never stop or replace a QuantaEdge site container to make
+    # room for SmartPrint.
+    $portPreflightOk = Invoke-QAStep -Name "Check localhost ports 3000 and 8080 are not owned by another Docker project" -LogName "docker-port-preflight.log" -Action {
+        $runningContainers = @(& $docker.Source "ps" "--format" "{{.Names}}|{{.Ports}}")
+        if ($LASTEXITCODE -ne 0) { throw "Could not inspect running Docker containers." }
+        $conflicts = @()
+        foreach ($containerLine in $runningContainers) {
+            $parts = $containerLine -split "\\|", 2
+            if ($parts.Count -ne 2) { continue }
+            $containerName = $parts[0].Trim()
+            $publishedPorts = $parts[1]
+            if ($containerName.StartsWith("$composeProjectName-", [StringComparison]::Ordinal)) { continue }
+            if ($publishedPorts -match '(^|,)\\s*(?:\\[[^\\]]+\\]:|(?:\\d{1,3}\\.){3}\\d{1,3}:)?(?:3000|8080)->') {
+                $conflicts += "$containerName : $publishedPorts"
+            }
+        }
+        if ($conflicts.Count -gt 0) {
+            Write-Host "Conflicting containers (left running; no automatic stop was attempted):" -ForegroundColor Yellow
+            $conflicts | ForEach-Object { Write-Host ("  " + $_) -ForegroundColor Yellow }
+            throw "SmartPrint needs localhost ports 3000 and 8080. Resolve the listed container/port ownership safely before running QA again."
+        }
+        Write-Host "Ports 3000 and 8080 have no conflicting Docker container owners."
+    }
+    if (-not $portPreflightOk) { throw "Docker port preflight failed; no existing containers were stopped." }
+
     $upArgs = $composeBaseArgs + @("up", "-d", "--build")
     $stackOk = Invoke-QAStep -Name "Rebuild and start current local portal, API and PostgreSQL services (project: $composeProjectName)" -LogName "docker-compose-up.log" -Action {
         & $docker.Source @upArgs
