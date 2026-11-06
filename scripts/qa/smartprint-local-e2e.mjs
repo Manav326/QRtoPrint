@@ -65,6 +65,7 @@ const report = {
 let browser;
 let context;
 let pageErrors = [];
+let consoleErrors = [];
 let serverErrors = [];
 let resourceErrors = [];
 let shop1Page;
@@ -150,6 +151,27 @@ async function request(page, method, path, { token, sessionToken, body, headers 
   }, { url, method, token, sessionToken, body, headers });
   assert.equal(new URL(result.url).origin, expectedOrigin, "Local API request redirected outside the local origin.");
   return result;
+}
+
+function watchPage(targetPage) {
+  targetPage.on("pageerror", error => pageErrors.push(String(error.message).slice(0, 500)));
+  targetPage.on("console", message => {
+    if (message.type() !== "error") return;
+    const sourceUrl = message.location()?.url || "";
+    if (!sourceUrl || sourceUrl.startsWith(baseUrl.origin)) {
+      consoleErrors.push(String(message.text()).slice(0, 500));
+    }
+  });
+  targetPage.on("response", response => {
+    try {
+      const url = new URL(response.url());
+      if (url.origin !== baseUrl.origin) return;
+      if (response.status() >= 500) serverErrors.push({ status: response.status(), path: url.pathname });
+      if (["script", "stylesheet", "font"].includes(response.request().resourceType()) && response.status() >= 400) {
+        resourceErrors.push({ status: response.status(), path: url.pathname, type: response.request().resourceType() });
+      }
+    } catch {}
+  });
 }
 
 async function screenshot(page, name) {
@@ -683,19 +705,9 @@ try {
     }
   })();
   context = await browser.newContext({ viewport: { width: 1440, height: 1000 }, acceptDownloads: false });
+  context.on("page", watchPage);
   page = await context.newPage();
   page.setDefaultTimeout(15000);
-  page.on("pageerror", error => pageErrors.push(String(error.message).slice(0, 500)));
-  page.on("response", response => {
-    try {
-      const url = new URL(response.url());
-      if (url.origin !== baseUrl.origin) return;
-      if (response.status() >= 500) serverErrors.push({ status: response.status(), path: url.pathname });
-      if (["script", "stylesheet", "font"].includes(response.request().resourceType()) && response.status() >= 400) {
-        resourceErrors.push({ status: response.status(), path: url.pathname, type: response.request().resourceType() });
-      }
-    } catch {}
-  });
 
   await record("Local portal and API health", async () => {
     const portal = await page.goto(baseUrl.toString(), { waitUntil: "domcontentloaded" });
@@ -1282,7 +1294,14 @@ try {
     assert.equal(serverErrors.length, 0, JSON.stringify(serverErrors));
     assert.equal(resourceErrors.length, 0, JSON.stringify(resourceErrors));
     assert.equal(pageErrors.length, 0, pageErrors.join("\n"));
-    return { serverErrors: serverErrors.length, resourceErrors: resourceErrors.length, pageErrors: pageErrors.length };
+    assert.equal(consoleErrors.length, 0, consoleErrors.join("\n"));
+    return {
+      serverErrors: serverErrors.length,
+      resourceErrors: resourceErrors.length,
+      pageErrors: pageErrors.length,
+      consoleErrors: consoleErrors.length,
+      pagesObserved: context.pages().length
+    };
   });
 
   report.warnings.push({
