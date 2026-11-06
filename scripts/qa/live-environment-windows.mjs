@@ -109,7 +109,7 @@ async function openPath(path, label = path) {
 async function browserFetch(path, options = {}, readBody = true) {
   const requestUrl = new URL(path, origin).toString();
   assert.equal(new URL(requestUrl).origin, origin, 'Cross-origin test request blocked by harness.');
-  const result = await page.evaluate(async ({ requestUrl, options, readBody }) => {
+  const executeFetch = async () => page.evaluate(async ({ requestUrl, options, readBody }) => {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 30000);
     try {
@@ -128,6 +128,18 @@ async function browserFetch(path, options = {}, readBody = true) {
       clearTimeout(timer);
     }
   }, { requestUrl, options, readBody });
+
+  let result = await executeFetch();
+  const contentType = (result.headers['content-type'] || '').toLowerCase();
+  const looksLikeChallenge = /text\/html/.test(contentType) &&
+    /cloudflare|just a moment|challenge-platform|verify you are human|attention required/i.test(result.body);
+  if (result.status === 403 && looksLikeChallenge) {
+    // A fetch response cannot run an interactive challenge. Navigate the same
+    // same-origin path as a document, let the visible browser complete it, then retry.
+    const challengeResponse = await page.goto(requestUrl, { waitUntil: 'domcontentloaded', timeout: 45000 });
+    await maybePauseForCloudflare(challengeResponse, path, `API request ${path}`);
+    result = await executeFetch();
+  }
   assert.equal(new URL(result.url).origin, origin, `Request to ${path} redirected away from the SmartPrint origin.`);
   return result;
 }
