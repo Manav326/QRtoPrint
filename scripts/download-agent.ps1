@@ -66,7 +66,7 @@ $oldMoved = $false
 $newInstalled = $false
 
 try {
-    $downloadedArtifact = 'smartprint-agent-win-x64'
+    $downloadedArtifact = 'smart-print-agent-win-x64'
     gh run download $run.databaseId --repo $repository --name $downloadedArtifact --dir $stageDirectory
     if ($LASTEXITCODE -ne 0) {
         # The latest successful CI run may predate the artifact rename. Preserve
