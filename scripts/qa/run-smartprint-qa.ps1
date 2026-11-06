@@ -298,7 +298,6 @@ Write-Host "Evidence directory: $artifactRoot"
 
 try {
     if ($env:OS -ne "Windows_NT") { throw "This runner is designed for Windows PowerShell on the local shop/deployment machine." }
-
     $node = Get-Command node.exe -ErrorAction SilentlyContinue
     if (-not $node) { $node = Get-Command node -ErrorAction Stop }
     $nodeVersion = (& $node.Source --version).Trim()
@@ -488,9 +487,19 @@ try {
     }
     if (-not $imageBuildOk) { throw "SmartPrint local image build or image-tag verification failed. Review logs/docker-image-build.log." }
 
-    $upArgs = $composeBaseArgs + @("up", "-d", "--no-build")
-    $stackOk = Invoke-QAStep -Name "Start the verified SmartPrint images and local PostgreSQL services (project: $composeProjectName)" -LogName "docker-compose-up.log" -Action {
-        & $docker.Source @upArgs
+    $stackOk = Invoke-QAStep -Name "Start verified SmartPrint images and PostgreSQL without disturbing its data volume (project: $composeProjectName)" -LogName "docker-compose-up.log" -Action {
+        # Bring PostgreSQL up normally first. Do not force-recreate this stateful
+        # service: its existing container and named data volume must be retained.
+        $dbUpArgs = $composeBaseArgs + @("up", "-d", "--no-build", "db")
+        & $docker.Source @dbUpArgs
+        if ($LASTEXITCODE -ne 0) { throw "Local PostgreSQL failed to start." }
+
+        # Compose does not notice that a locally tagged image was rebuilt when
+        # the service configuration hash is unchanged. Force replacement of only
+        # the stateless app containers, with --no-deps so PostgreSQL is untouched.
+        $appUpArgs = $composeBaseArgs + @("up", "-d", "--no-build", "--force-recreate", "--no-deps", "api", "portal")
+        & $docker.Source @appUpArgs
+        if ($LASTEXITCODE -ne 0) { throw "Local SmartPrint API/portal containers failed to start from the rebuilt images." }
     }
     if (-not $stackOk) { throw "Local SmartPrint Docker stack failed to start. Review logs/docker-compose-up.log." }
 
@@ -597,8 +606,7 @@ try {
 
     $liveSuite = Join-Path $PSScriptRoot "smartprint-local-e2e.mjs"
     if (-not (Test-Path -LiteralPath $liveSuite -PathType Leaf)) { throw "Local E2E suite is missing: $liveSuite" }
-    $syntaxOk = Invoke-QAStep -Name "Validate local Playwright suite JavaScript syntax" -LogName "playwright-syntax-check.log" -Action {
-        & $node.Source "--check" $liveSuite
+    $syntaxOk = Invoke-QAStep -Name "Validate local Playwright suite JavaScript syntax" -LogName "playwright-syntax-check.log" -Action {        & $node.Source "--check" $liveSuite
     }
     if (-not $syntaxOk) { throw "The local Playwright suite has a syntax error. Review logs/playwright-syntax-check.log." }
 
