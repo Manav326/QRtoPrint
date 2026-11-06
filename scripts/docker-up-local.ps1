@@ -5,6 +5,9 @@ $ErrorActionPreference = "Stop"
 $repoRoot = Split-Path -Parent $PSScriptRoot
 $envPath = Join-Path $repoRoot ".env.local"
 $composeFile = Join-Path $repoRoot "compose.local.yml"
+# Never inherit COMPOSE_PROJECT_NAME from the caller: this is an isolated app stack.
+$composeProjectName = "qrtoprint-local"
+$composeBaseArgs = @("--project-name", $composeProjectName, "--env-file", $envPath, "-f", $composeFile)
 $exampleEnvPath = Join-Path $repoRoot ".env.example"
 
 function New-RandomHex([int]$Length) {
@@ -111,35 +114,35 @@ if ($LASTEXITCODE -ne 0 -or $connectorState -ne "running") {
 }
 Save-Utf8NoBom $envPath $lines
 
-docker compose --env-file $envPath -f $composeFile config --quiet
+& docker compose @composeBaseArgs config --quiet
 if ($LASTEXITCODE -ne 0) { throw "Local Cloudflare Compose configuration is invalid." }
 
 Write-Host "Building and starting the SmartPrint database, API and portal on the shared Cloudflare edge network..." -ForegroundColor Cyan
-docker compose --env-file $envPath -f $composeFile up -d --build --remove-orphans
+& docker compose @composeBaseArgs up -d --build
 if ($LASTEXITCODE -ne 0) {
-    docker compose --env-file $envPath -f $composeFile logs --tail 100
+    & docker compose @composeBaseArgs logs --tail 100
     throw "Local stack failed to build or start."
 }
 
 $apiHealthy = $false
 for ($attempt = 0; $attempt -lt 120; $attempt++) {
-    docker compose --env-file $envPath -f $composeFile exec -T api curl --fail --silent http://127.0.0.1:8080/health/ready | Out-Null
+    & docker compose @composeBaseArgs exec -T api curl --fail --silent http://127.0.0.1:8080/health/ready | Out-Null
     if ($LASTEXITCODE -eq 0) { $apiHealthy = $true; break }
     Start-Sleep -Seconds 2
 }
 if (-not $apiHealthy) {
-    docker compose --env-file $envPath -f $composeFile logs --tail 100 api db
+    & docker compose @composeBaseArgs logs --tail 100 api db
     throw "API did not become ready. Resolve startup or migration errors."
 }
 
 $portalHealthy = $false
 for ($attempt = 0; $attempt -lt 30; $attempt++) {
-    docker compose --env-file $envPath -f $composeFile exec -T portal wget -q -O /dev/null http://127.0.0.1/
+    & docker compose @composeBaseArgs exec -T portal wget -q -O /dev/null http://127.0.0.1/
     if ($LASTEXITCODE -eq 0) { $portalHealthy = $true; break }
     Start-Sleep -Seconds 2
 }
 if (-not $portalHealthy) {
-    docker compose --env-file $envPath -f $composeFile logs --tail 80 portal
+    & docker compose @composeBaseArgs logs --tail 80 portal
     throw "Portal did not become ready."
 }
 
@@ -152,11 +155,11 @@ for ($attempt = 0; $attempt -lt 60; $attempt++) {
     Start-Sleep -Seconds 3
 }
 if (-not $publicHealthy) {
-    docker compose --env-file $envPath -f $composeFile logs --tail 100 portal api
+    & docker compose @composeBaseArgs logs --tail 100 portal api
     throw "Containers are healthy, but $currentBaseUrl is not reachable. Confirm the central Tunnel is running and its Published Application route targets http://qrtoprint-portal:80 (or the compatibility alias http://portal:80)."
 }
 
-docker compose --env-file $envPath -f $composeFile ps
+& docker compose @composeBaseArgs ps
 Write-Host ""
 Write-Host "SmartPrint is reachable through the centrally managed Cloudflare Tunnel." -ForegroundColor Green
 Write-Host "Single public application URL: $currentBaseUrl"
