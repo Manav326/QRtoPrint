@@ -18,7 +18,8 @@ services:
       start_period: 10s
 
   api:
-    image: qrtoprint-api:local
+    image: localhost/qrtoprint-local/qrtoprint-api:local
+    pull_policy: build
     build:
       context: .
       dockerfile: Dockerfile.api
@@ -52,7 +53,8 @@ services:
       start_period: 45s
 
   portal:
-    image: qrtoprint-portal:local
+    image: localhost/qrtoprint-local/qrtoprint-portal:local
+    pull_policy: build
     build:
       context: .
       dockerfile: apps/portal/Dockerfile
