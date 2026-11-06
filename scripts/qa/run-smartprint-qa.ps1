@@ -537,14 +537,14 @@ try {
         $apiLive = ($apiLiveOutput -join [Environment]::NewLine) | ConvertFrom-Json -ErrorAction Stop
         if ($apiLive.status -ne "live") { throw "Direct API liveness returned an unexpected payload." }
 
-        $proxyLiveArgs = $composeBaseArgs + @("exec", "-T", "api", "curl", "--fail", "--silent", "--show-error", "http://portal/health/live")
+        $proxyLiveArgs = $composeBaseArgs + @("exec", "-T", "api", "curl", "--noproxy", "*", "--fail", "--silent", "--show-error", "http://portal/health/live")
         $proxyLiveOutput = & $docker.Source @proxyLiveArgs
         if ($LASTEXITCODE -ne 0 -or -not $proxyLiveOutput) { throw "The portal /health/live reverse proxy does not return HTTP 200." }
         $proxyLive = ($proxyLiveOutput -join [Environment]::NewLine) | ConvertFrom-Json -ErrorAction Stop
         if ($proxyLive.status -ne "live") { throw "Portal-proxied API liveness returned an unexpected payload." }
 
         $corsArgs = $composeBaseArgs + @(
-            "exec", "-T", "api", "curl", "--silent", "--show-error",
+            "exec", "-T", "api", "curl", "--noproxy", "*", "--silent", "--show-error",
             "--dump-header", "-", "--output", "/dev/null", "--request", "OPTIONS",
             "--header", "Origin: http://127.0.0.1:3000",
             "--header", "Access-Control-Request-Method: POST",
