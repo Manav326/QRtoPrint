@@ -27,7 +27,7 @@ The runner:
 
 1. Checks Node.js 22.6+, Docker Desktop and Docker Compose.
 2. Reuses the existing local .env.local and persistent volumes. Both scripts explicitly pin Docker Compose to project `qrtoprint-local` with `--project-name`, overriding any inherited `COMPOSE_PROJECT_NAME`; SmartPrint cannot reuse the `quantaedge-site` project namespace. The bootstrap never uses `--remove-orphans` and the runner never runs `docker compose down -v`.
-3. Verifies localhost ports 3000 and 8080 are not held by another Docker Compose project (and never stops foreign containers), rebuilds the current portal/API containers under the isolated `qrtoprint-local` project name, and checks /health/ready before tests.
+3. Verifies localhost port 3000 is not held by another Docker Compose project (and never stops foreign containers), rebuilds the current portal/API containers under the isolated `qrtoprint-local` project name, checks the portal at `127.0.0.1:3000`, and probes the private API `/health/ready` endpoint from inside the API container. API host port 8080 is not published.
 4. Creates or reuses four clearly labelled QA identities: two shop owners, one global customer and one platform administrator. Shop/customer registration uses the real app registration path; the platform administrator uses the existing protected one-time bootstrap command in the local API container. The bootstrap refuses to elevate a shop user.
 5. Stores generated passwords in .secrets/smartprint-qa/qa-accounts.dpapi.json, protected with Windows DPAPI for the current Windows user. Passwords are not printed, placed in test reports or committed to Git.
 6. Installs/locates the pinned Playwright package and Chromium in the npm cache.
