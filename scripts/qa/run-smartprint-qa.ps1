@@ -332,19 +332,36 @@ try {
     # particular, never stop or replace a QuantaEdge site container to make
     # room for SmartPrint.
     $portPreflightOk = Invoke-QAStep -Name "Check localhost port 3000 is not owned by another Docker project" -LogName "docker-port-preflight.log" -Action {
-        $runningContainers = @(& $docker.Source "ps" "--format" '{{.Names}}|{{.Ports}}|{{.Label "com.docker.compose.project"}}')
+        # Avoid nested quotes inside Docker's Go template: Windows PowerShell can
+        # strip them before the Docker CLI parses the template. Read IDs, names,
+        # and ports first, then retrieve Compose labels as JSON only for port
+        # 3000 candidates.
+        $runningContainers = @(& $docker.Source "ps" "--format" '{{.ID}}|{{.Names}}|{{.Ports}}')
         if ($LASTEXITCODE -ne 0) { throw "Could not inspect running Docker containers." }
         $conflicts = @()
         foreach ($containerLine in $runningContainers) {
             $parts = $containerLine -split '\|', 3
-            if ($parts.Count -lt 2) { continue }
-            $containerName = $parts[0].Trim()
-            $publishedPorts = $parts[1]
-            $containerProject = if ($parts.Count -ge 3) { $parts[2].Trim() } else { "" }
-            if ($containerProject -eq $composeProjectName) { continue }
-            if ($publishedPorts -match '(^|,)\s*(?:\[[^\]]+\]:|(?:\d{1,3}\.){3}\d{1,3}:|:::)?3000->') {
-                $conflicts += "$containerName (project: $containerProject) : $publishedPorts"
+            if ($parts.Count -lt 3) { continue }
+            $containerId = $parts[0].Trim()
+            $containerName = $parts[1].Trim()
+            $publishedPorts = $parts[2]
+            if ($publishedPorts -notmatch '(^|,)\s*(?:\[[^\]]+\]:|(?:\d{1,3}\.){3}\d{1,3}:|:::)?3000->') { continue }
+
+            $labelsJson = & $docker.Source "inspect" "--format" '{{json .Config.Labels}}' $containerId
+            if ($LASTEXITCODE -ne 0) {
+                throw "Could not inspect Docker Compose ownership for container '$containerName'."
             }
+            try {
+                $containerLabels = $labelsJson | ConvertFrom-Json -ErrorAction Stop
+            }
+            catch {
+                throw "Could not parse Docker labels for container '$containerName': $($_.Exception.Message)"
+            }
+            $projectProperty = if ($null -ne $containerLabels) { $containerLabels.PSObject.Properties["com.docker.compose.project"] } else { $null }
+            $containerProject = if ($null -ne $projectProperty) { [string]$projectProperty.Value } else { "" }
+            if ($containerProject -eq $composeProjectName) { continue }
+
+            $conflicts += "$containerName (project: $containerProject) : $publishedPorts"
         }
         if ($conflicts.Count -gt 0) {
             Write-Host "Conflicting containers (left running; no automatic stop was attempted):" -ForegroundColor Yellow
