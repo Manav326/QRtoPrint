@@ -94,7 +94,66 @@ let paymentRejectedBatchId;
 let paymentRejectedBatchPaymentId;
 let qaPlanVersionId;
 
-async function record(name, action, caseIds = []) {
+const CASE_IDS_BY_RECORD_NAME = new Map([
+  ["Local portal and API health", ["ENV-001", "ENV-002", "ENV-003", "ENV-004"]],
+  ["Public pages and registration/login/admin route rendering", ["PUB-001", "PUB-002", "PUB-003", "PUB-004", "PUB-005"]],
+  ["Public routes real-browser responsive matrix", [
+    "RESP-001", "RESP-002", "RESP-003", "RESP-004", "RESP-005",
+    "RESP-006", "RESP-007", "RESP-008", "RESP-009", "RESP-010",
+    "RESP-011", "RESP-012", "RESP-013", "RESP-014", "RESP-015",
+    "RESP-016", "RESP-017", "RESP-018", "RESP-019", "RESP-020"
+  ]],
+  ["Create or sign in to the first real QA shop through the shop UI", ["SHOPAUTH-001", "SHOPAUTH-002", "SHOPAUTH-003"]],
+  ["Create or sign in to the second real QA shop through the shop UI", ["SHOPAUTH-004", "SHOPAUTH-005", "SHOPAUTH-006"]],
+  ["Create or sign in to the real global customer account", ["CUSTAUTH-001", "CUSTAUTH-002", "CUSTAUTH-003", "CUSTAUTH-004"]],
+  ["Bootstrap-created platform administrator signs in through the real admin UI", ["ADMINAUTH-001", "ADMINAUTH-002"]],
+  ["Create and publish a free QA-only plan, then assign it through the platform UI", ["PLAN-001", "PLAN-002", "PLAN-003", "PLAN-004", "PLAN-005", "PLAN-006"]],
+  ["Platform admin navigates every real control-centre section", ["PLATFORM-005", "PLATFORM-006", "PLATFORM-007", "PLATFORM-008", "PLATFORM-009"]],
+  ["Shop one configures real QA printer/station, pricing and payment methods", ["SHOP-009", "SHOP-010", "SHOP-011", "SHOP-012", "SHOP-013", "SHOP-014"]],
+  ["Shop two configures isolated real QA printer/station", ["SHOP-015", "SHOP-016", "SHOP-017", "SHOP-018"]],
+  ["Shop one navigates every real sidebar section and the account-menu-only tools", [
+    "SHOPUI-001", "SHOPUI-002", "SHOPUI-003", "SHOPUI-004", "SHOPUI-005",
+    "SHOPUI-006", "SHOPUI-007", "SHOPUI-008", "SHOPUI-009", "SHOPUI-010",
+    "SHOPUI-011", "SHOPUI-012", "SHOPUI-013", "SHOPUI-014", "SHOPUI-015"
+  ]],
+  ["Shop two navigates every real sidebar section and account-menu-only tools", [
+    "SHOPUI-016", "SHOPUI-017", "SHOPUI-018", "SHOPUI-019", "SHOPUI-020",
+    "SHOPUI-021", "SHOPUI-022", "SHOPUI-023", "SHOPUI-024", "SHOPUI-025",
+    "SHOPUI-026", "SHOPUI-027"
+  ]],
+  ["Shop, platform-admin and cross-tenant authorization boundaries", ["RBAC-001", "RBAC-002", "RBAC-003", "RBAC-004", "RBAC-005"]],
+  ["Customer opens shop-one QR station and receives a customer-bound real session", ["QR-008", "QR-009", "QR-010"]],
+  ["Customer QR session is linked to the global customer account", ["CUST-001", "CUST-002"]],
+  ["Real document validator rejects a malformed PDF without creating a print job", ["DOC-001", "DOC-002"]],
+  ["Customer uploads a synthetic two-page PDF through the real portal UI", ["DOC-003", "DOC-004", "DOC-005"]],
+  ["Customer accepts the calculated quote and sends the job to the real shop queue", ["JOB-004", "JOB-005", "JOB-006", "JOB-007"]],
+  ["Shop rejects the unpaid QA job and customer sees the same terminal result", ["JOB-008", "JOB-009"]],
+  ["Customer cannot start payment for a shop-rejected job", ["PAY-002"]],
+  ["Customer opens a fresh QR session and uploads two real documents as one batch", ["BATCH-001", "BATCH-002", "BATCH-003", "BATCH-004"]],
+  ["Two-file customer batch is sent to the shop and appears as one tenant-scoped batch", ["BATCH-005", "BATCH-006", "BATCH-007"]],
+  ["Shopkeeper rejects one file, undoes that rejection, then applies the individual file decision", ["BATCH-008", "BATCH-009", "BATCH-010", "BATCH-011", "BATCH-012"]],
+  ["Real UPI payment intent, synthetic QA reference, and shop rejection without marking money received", ["PAY-003", "PAY-004", "PAY-005", "PAY-006", "PAY-007", "PAY-008", "PAY-009"]],
+  ["Shop payment and refund screens load without recording false financial events", ["PAY-010", "REFUND-003", "REFUND-004"]],
+  ["Agent and printer prerequisites are visible; dispatch without a paired QA Agent is safely blocked", ["AGENT-001", "AGENT-002", "AGENT-003"]],
+  ["Dedicated QA Agent enrollment code can be generated without pairing or replacing a machine identity", ["AGENT-004", "AGENT-005"]],
+  ["Platform and shop routes remain isolated after creating real QA data", ["RBAC-006", "TENANT-004"]],
+  ["Live local browser has no same-origin server errors or critical resource failures", ["OBS-001", "OBS-002", "OBS-003", "OBS-004"]]
+]);
+
+const PLANNED_CASE_IDS = [
+  ...new Set([
+    ...[...CASE_IDS_BY_RECORD_NAME.values()].flat(),
+    "AUTH-001", "AUTH-002", "AUTH-003", "AUTH-004", "AUTH-005", "AUTH-006", "AUTH-007", "AUTH-008",
+    "SHOP-001", "SHOP-002", "SHOP-003", "SHOP-004", "SHOP-005", "SHOP-006", "SHOP-007", "SHOP-008",
+    "QR-001", "QR-002", "QR-003", "QR-004", "UPLOAD-001", "UPLOAD-002",
+    "JOB-001", "JOB-002", "JOB-003", "PAY-001", "REFUND-001", "REFUND-002", "SEC-001",
+    "DEVICE-001", "DEVICE-002", "QR-005", "QR-006", "QR-007",
+    "PLATFORM-001", "PLATFORM-002", "PLATFORM-003", "PLATFORM-004",
+    "TENANT-001", "TENANT-002", "TENANT-003"
+  ])
+];
+
+async function record(name, action, caseIds = CASE_IDS_BY_RECORD_NAME.get(name) ?? []) {
   const started = Date.now();
   try {
     const details = await action();
@@ -953,83 +1012,6 @@ try {
     assert.ok(Number.isFinite(overview.tenantCount));
     return { account: "local platform admin", tenantCount: overview.tenantCount };
   });
-
-  await record("AUTH: registration validation, role boundaries, refresh rotation and logout revocation", async () => {
-    const invalidShopRegistration = await request(shop1Page, "POST", "/api/v1/auth/register-shop", {
-      body: { businessName: "", ownerName: "", email: "not-an-email", password: "invalid" }
-    });
-    assert.equal(invalidShopRegistration.status, 400, "Invalid shop registration data must be rejected.");
-
-    const duplicateShopRegistration = await request(shop1Page, "POST", "/api/v1/auth/register-shop", {
-      body: {
-        businessName: process.env.SMARTPRINT_QA_SHOP1_NAME,
-        ownerName: "SmartPrint QA Owner One",
-        email: process.env.SMARTPRINT_QA_SHOP1_EMAIL,
-        password: process.env.SMARTPRINT_QA_SHOP1_PASSWORD
-      }
-    });
-    assert.equal(duplicateShopRegistration.status, 409, "A duplicate shop email must not create a second tenant.");
-
-    const duplicateCustomerRegistration = await request(page, "POST", "/api/v1/auth/register-customer", {
-      body: {
-        displayName: process.env.SMARTPRINT_QA_CUSTOMER_NAME,
-        email: process.env.SMARTPRINT_QA_CUSTOMER_EMAIL,
-        password: process.env.SMARTPRINT_QA_CUSTOMER_PASSWORD
-      }
-    });
-    assert.equal(duplicateCustomerRegistration.status, 409, "A duplicate global customer email must be rejected.");
-
-    const customerThroughShopLogin = await request(page, "POST", "/api/v1/auth/login", {
-      body: { email: process.env.SMARTPRINT_QA_CUSTOMER_EMAIL, password: process.env.SMARTPRINT_QA_CUSTOMER_PASSWORD }
-    });
-    assert.equal(customerThroughShopLogin.status, 401, "A global customer must not authenticate as a shop owner.");
-
-    const shopThroughCustomerLogin = await request(page, "POST", "/api/v1/auth/customer-login", {
-      body: { email: process.env.SMARTPRINT_QA_SHOP2_EMAIL, password: process.env.SMARTPRINT_QA_SHOP2_PASSWORD }
-    });
-    assert.equal(shopThroughCustomerLogin.status, 401, "A shop owner must not authenticate as a global customer.");
-
-    const anonymousShopProfile = await request(page, "GET", "/api/v1/shop/profile");
-    const anonymousPlatformOverview = await request(page, "GET", "/api/v1/platform/overview");
-    assert.equal(anonymousShopProfile.status, 401, "Shop profile must require an access token.");
-    assert.equal(anonymousPlatformOverview.status, 401, "Platform administration must require an access token.");
-
-    const login = assertHttp(await request(shop2Page, "POST", "/api/v1/auth/login", {
-      body: { email: process.env.SMARTPRINT_QA_SHOP2_EMAIL, password: process.env.SMARTPRINT_QA_SHOP2_PASSWORD }
-    }), 200, "Independent shop token lifecycle login");
-    const rotated = assertHttp(await request(shop2Page, "POST", "/api/v1/auth/refresh", {
-      body: { refreshToken: login.refreshToken }
-    }), 200, "Refresh token rotation");
-    assert.ok(rotated.accessToken && rotated.refreshToken);
-    assert.notEqual(rotated.refreshToken, login.refreshToken, "Refresh must rotate the refresh token.");
-
-    const replay = await request(shop2Page, "POST", "/api/v1/auth/refresh", {
-      body: { refreshToken: login.refreshToken }
-    });
-    assert.equal(replay.status, 401, "A previously rotated refresh token must not be reusable.");
-
-    const logout = await request(shop2Page, "POST", "/api/v1/auth/logout", {
-      body: { refreshToken: rotated.refreshToken }
-    });
-    assert.equal(logout.status, 204, "Logout should revoke the active refresh token.");
-
-    const refreshAfterLogout = await request(shop2Page, "POST", "/api/v1/auth/refresh", {
-      body: { refreshToken: rotated.refreshToken }
-    });
-    assert.equal(refreshAfterLogout.status, 401, "A logged-out refresh token must not be reusable.");
-
-    return {
-      invalidRegistration: invalidShopRegistration.status,
-      duplicateShop: duplicateShopRegistration.status,
-      duplicateCustomer: duplicateCustomerRegistration.status,
-      crossRoleLogin: [customerThroughShopLogin.status, shopThroughCustomerLogin.status],
-      anonymousProtectedRoutes: [anonymousShopProfile.status, anonymousPlatformOverview.status],
-      refreshRotated: true,
-      oldRefreshReplay: replay.status,
-      logoutStatus: logout.status,
-      refreshAfterLogout: refreshAfterLogout.status
-    };
-  }, ["AUTH-001", "AUTH-002", "AUTH-003", "AUTH-004", "AUTH-005", "AUTH-006", "AUTH-007", "AUTH-008"]);
 
   await record("Create and publish a free QA-only plan, then assign it through the platform UI", async () => {
     const plan = await ensureQaPlanThroughPlatformUi(adminPage, adminTokens.accessToken);
@@ -2038,6 +2020,84 @@ try {
     };
   }, ["PLATFORM-001", "PLATFORM-002", "PLATFORM-003", "PLATFORM-004", "TENANT-001", "TENANT-002", "TENANT-003"]);
 
+  await record("AUTH: registration validation, role boundaries, refresh rotation and logout revocation", async () => {
+    const invalidShopRegistration = await request(shop1Page, "POST", "/api/v1/auth/register-shop", {
+      body: { businessName: "", ownerName: "", email: "not-an-email", password: "invalid" }
+    });
+    assert.equal(invalidShopRegistration.status, 400, "Invalid shop registration data must be rejected.");
+
+    const duplicateShopRegistration = await request(shop1Page, "POST", "/api/v1/auth/register-shop", {
+      body: {
+        businessName: process.env.SMARTPRINT_QA_SHOP1_NAME,
+        ownerName: "SmartPrint QA Owner One",
+        email: process.env.SMARTPRINT_QA_SHOP1_EMAIL,
+        password: process.env.SMARTPRINT_QA_SHOP1_PASSWORD
+      }
+    });
+    assert.equal(duplicateShopRegistration.status, 409, "A duplicate shop email must not create a second tenant.");
+
+    const duplicateCustomerRegistration = await request(page, "POST", "/api/v1/auth/register-customer", {
+      body: {
+        displayName: process.env.SMARTPRINT_QA_CUSTOMER_NAME,
+        email: process.env.SMARTPRINT_QA_CUSTOMER_EMAIL,
+        password: process.env.SMARTPRINT_QA_CUSTOMER_PASSWORD
+      }
+    });
+    assert.equal(duplicateCustomerRegistration.status, 409, "A duplicate global customer email must be rejected.");
+
+    const customerThroughShopLogin = await request(page, "POST", "/api/v1/auth/login", {
+      body: { email: process.env.SMARTPRINT_QA_CUSTOMER_EMAIL, password: process.env.SMARTPRINT_QA_CUSTOMER_PASSWORD }
+    });
+    assert.equal(customerThroughShopLogin.status, 401, "A global customer must not authenticate as a shop owner.");
+
+    const shopThroughCustomerLogin = await request(page, "POST", "/api/v1/auth/customer-login", {
+      body: { email: process.env.SMARTPRINT_QA_SHOP2_EMAIL, password: process.env.SMARTPRINT_QA_SHOP2_PASSWORD }
+    });
+    assert.equal(shopThroughCustomerLogin.status, 401, "A shop owner must not authenticate as a global customer.");
+
+    const anonymousShopProfile = await request(page, "GET", "/api/v1/shop/profile");
+    const anonymousPlatformOverview = await request(page, "GET", "/api/v1/platform/overview");
+    assert.equal(anonymousShopProfile.status, 401, "Shop profile must require an access token.");
+    assert.equal(anonymousPlatformOverview.status, 401, "Platform administration must require an access token.");
+
+    const login = assertHttp(await request(shop2Page, "POST", "/api/v1/auth/login", {
+      body: { email: process.env.SMARTPRINT_QA_SHOP2_EMAIL, password: process.env.SMARTPRINT_QA_SHOP2_PASSWORD }
+    }), 200, "Independent shop token lifecycle login");
+    const rotated = assertHttp(await request(shop2Page, "POST", "/api/v1/auth/refresh", {
+      body: { refreshToken: login.refreshToken }
+    }), 200, "Refresh token rotation");
+    assert.ok(rotated.accessToken && rotated.refreshToken);
+    assert.notEqual(rotated.refreshToken, login.refreshToken, "Refresh must rotate the refresh token.");
+
+    const replay = await request(shop2Page, "POST", "/api/v1/auth/refresh", {
+      body: { refreshToken: login.refreshToken }
+    });
+    assert.equal(replay.status, 401, "A previously rotated refresh token must not be reusable.");
+
+    const logout = await request(shop2Page, "POST", "/api/v1/auth/logout", {
+      body: { refreshToken: rotated.refreshToken }
+    });
+    assert.equal(logout.status, 204, "Logout should revoke the active refresh token.");
+
+    const refreshAfterLogout = await request(shop2Page, "POST", "/api/v1/auth/refresh", {
+      body: { refreshToken: rotated.refreshToken }
+    });
+    assert.equal(refreshAfterLogout.status, 401, "A logged-out refresh token must not be reusable.");
+
+    return {
+      invalidRegistration: invalidShopRegistration.status,
+      duplicateShop: duplicateShopRegistration.status,
+      duplicateCustomer: duplicateCustomerRegistration.status,
+      crossRoleLogin: [customerThroughShopLogin.status, shopThroughCustomerLogin.status],
+      anonymousProtectedRoutes: [anonymousShopProfile.status, anonymousPlatformOverview.status],
+      refreshRotated: true,
+      oldRefreshReplay: replay.status,
+      logoutStatus: logout.status,
+      refreshAfterLogout: refreshAfterLogout.status
+    };
+  }, ["AUTH-001", "AUTH-002", "AUTH-003", "AUTH-004", "AUTH-005", "AUTH-006", "AUTH-007", "AUTH-008"]);
+
+
   await record("Live local browser has no same-origin server errors or critical resource failures", async () => {
     assert.equal(serverErrors.length, 0, JSON.stringify(serverErrors));
     assert.equal(resourceErrors.length, 0, JSON.stringify(resourceErrors));
@@ -2068,11 +2128,18 @@ try {
       caseResults.set(caseId, check.status);
     }
   }
+  const passedCases = [...caseResults.values()].filter(status => status === "PASS").length;
+  const failedCases = [...caseResults.values()].filter(status => status === "FAIL").length;
+  const skippedCases = [...caseResults.values()].filter(status => status === "SKIPPED").length;
+  const missingCases = PLANNED_CASE_IDS.filter(caseId => !caseResults.has(caseId));
   report.caseCoverage = {
+    plannedCases: PLANNED_CASE_IDS.length,
     uniqueCasesExercised: caseResults.size,
-    passedCases: [...caseResults.values()].filter(status => status === "PASS").length,
-    failedCases: [...caseResults.values()].filter(status => status === "FAIL").length,
-    skippedCases: [...caseResults.values()].filter(status => status === "SKIPPED").length,
+    coveragePercent: Number(((caseResults.size / PLANNED_CASE_IDS.length) * 100).toFixed(1)),
+    passedCases,
+    failedCases,
+    skippedCases,
+    missingCases,
     caseStatuses: Object.fromEntries([...caseResults.entries()].sort(([left], [right]) => left.localeCompare(right)))
   };
   report.summary = {
@@ -2080,9 +2147,12 @@ try {
     failed: report.checks.filter(check => check.status === "FAIL").length,
     skipped: report.checks.filter(check => check.status === "SKIPPED").length,
     warnings: report.warnings.length,
+    plannedCases: report.caseCoverage.plannedCases,
     uniqueCasesExercised: report.caseCoverage.uniqueCasesExercised,
+    coveragePercent: report.caseCoverage.coveragePercent,
     passedCases: report.caseCoverage.passedCases,
-    failedCases: report.caseCoverage.failedCases
+    failedCases: report.caseCoverage.failedCases,
+    missingCases: report.caseCoverage.missingCases
   };
   writeFileSync(join(outputDirectory, "report.json"), JSON.stringify(report, null, 2) + "\n");
   writeFileSync(join(outputDirectory, "report.txt"),
