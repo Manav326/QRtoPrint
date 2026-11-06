@@ -8,8 +8,8 @@ if (-not (Test-Path -LiteralPath $envPath)) {
     throw "No .env file exists in the repository root."
 }
 
-docker compose --env-file $envPath -f (Join-Path $repoRoot "compose.yml") down
+docker compose --project-name qrtoprint --env-file $envPath -f (Join-Path $repoRoot "compose.yml") down
 if ($LASTEXITCODE -ne 0) {
-    throw "Could not stop the QRtoPrint Docker stack."
+    throw "Could not stop the SmartPrint production stack."
 }
-Write-Host "QRtoPrint stopped. Database, documents and Caddy certificates remain in named volumes." -ForegroundColor Green
+Write-Host "SmartPrint stopped. PostgreSQL and document volumes were preserved; the shared Cloudflare Tunnel is managed separately." -ForegroundColor Green
