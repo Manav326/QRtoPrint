@@ -216,13 +216,33 @@ async function registerOrSignInShop(page, email, password, businessName, ownerNa
     await page.locator(".app-shell").waitFor({ state: "visible", timeout: 20000 });
   }
 
+  if (registered) {
+    const invalidLogin = await request(page, "POST", "/api/v1/auth/login", {
+      body: { email, password: password + "-wrong" }
+    });
+    assert.equal(invalidLogin.status, 401, "Shop login accepted an incorrect password.");
+
+    const accountMenu = page.getByRole("button", { name: /Account options for/ });
+    await accountMenu.click();
+    await page.getByRole("button", { name: "Sign out" }).click();
+    await openRoute(page, "/shop", ".auth-screen", "shop-sign-in-after-registration");
+    await page.getByLabel("Email address").fill(email);
+    await page.locator('input[type="password"]').first().fill(password);
+    await page.getByRole("button", { name: "Sign in to workspace" }).click();
+    await page.locator(".app-shell").waitFor({ state: "visible", timeout: 20000 });
+  }
+
   const tokens = await tokensFromSession(page, "shop");
   await page.locator(".sidebar .nav-item").first().waitFor({ state: "visible", timeout: 15000 });
-  return { tokens, registered };
+  return { tokens, registered, signInVerifiedInUi: true };
 }
 
 async function signInPlatformAdmin(page, email, password) {
   await openRoute(page, "/admin", ".platform-admin-auth-screen", "platform-admin-sign-in");
+  const invalidLogin = await request(page, "POST", "/api/v1/auth/login", {
+    body: { email, password: password + "-wrong" }
+  });
+  assert.equal(invalidLogin.status, 401, "Platform admin login accepted an incorrect password.");
   await page.getByLabel("Email address").fill(email);
   await page.locator('input[type="password"]').first().fill(password);
   await page.getByRole("button", { name: "Sign in to administration" }).click();
@@ -678,20 +698,28 @@ try {
         password: process.env.SMARTPRINT_QA_CUSTOMER_PASSWORD
       }
     });
+    let created = false;
     if (registration.status === 201) {
-      customerTokens = registration.json;
+      created = true;
       report.safety.registeredLocalQaCustomer = true;
-    } else if (registration.status === 409) {
-      const login = await request(page, "POST", "/api/v1/auth/customer-login", {
-        body: {
-          email: process.env.SMARTPRINT_QA_CUSTOMER_EMAIL,
-          password: process.env.SMARTPRINT_QA_CUSTOMER_PASSWORD
-        }
-      });
-      customerTokens = assertHttp(login, 200, "QA customer login");
     } else {
-      assertHttp(registration, 201, "QA customer registration");
+      assert.equal(registration.status, 409,
+        "Customer registration returned an unexpected status: " + registration.status + " " + registration.text.slice(0, 500));
     }
+    const invalidLogin = await request(page, "POST", "/api/v1/auth/customer-login", {
+      body: {
+        email: process.env.SMARTPRINT_QA_CUSTOMER_EMAIL,
+        password: process.env.SMARTPRINT_QA_CUSTOMER_PASSWORD + "-wrong"
+      }
+    });
+    assert.equal(invalidLogin.status, 401, "Customer login accepted an incorrect password.");
+    const login = await request(page, "POST", "/api/v1/auth/customer-login", {
+      body: {
+        email: process.env.SMARTPRINT_QA_CUSTOMER_EMAIL,
+        password: process.env.SMARTPRINT_QA_CUSTOMER_PASSWORD
+      }
+    });
+    customerTokens = assertHttp(login, 200, "QA customer login");
     const profile = assertHttp(await request(page, "GET", "/api/v1/customer/me", {
       token: customerTokens.accessToken
     }), 200, "QA customer profile");
@@ -700,7 +728,7 @@ try {
     }), 200, "QA customer jobs");
     assert.ok(profile.id && profile.email === process.env.SMARTPRINT_QA_CUSTOMER_EMAIL);
     assert.ok(Array.isArray(jobs));
-    return { account: "global customer", tenantScoped: false, jobsInitially: jobs.length };
+    return { account: "global customer", createdThisRun: created, signInVerified: true, tenantScoped: false, jobsInitially: jobs.length };
   });
 
   await record("Bootstrap-created platform administrator signs in through the real admin UI", async () => {
