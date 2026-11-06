@@ -31,7 +31,7 @@ The runner:
 4. Creates or reuses four clearly labelled QA identities: two shop owners, one global customer and one platform administrator. Shop/customer registration uses the real app registration path; the platform administrator uses the existing protected one-time bootstrap command in the local API container. The bootstrap refuses to elevate a shop user.
 5. Stores generated passwords in .secrets/smartprint-qa/qa-accounts.dpapi.json, protected with Windows DPAPI for the current Windows user. Passwords are not printed, placed in test reports or committed to Git.
 6. Installs/locates the pinned Playwright package and Chromium in the npm cache.
-7. Validates the E2E JavaScript syntax and runs the headed Microsoft Edge/Chromium Playwright suite against the real local portal and API.
+7. Validates the E2E JavaScript syntax and runs the headed Playwright-managed Chromium browser against the real local portal and API. It does not launch or fall back to the system-installed Microsoft Edge.
 8. Runs the existing portal logic tests, API/.NET tests and Windows Agent tests when the corresponding SDKs are installed. The destructive PostgreSQL migration test is excluded from the local application database by leaving SMARTPRINT_TEST_POSTGRES unset.
 9. If the Microsoft Print to PDF virtual queue is installed, opts in to the Agent's real GDI spooler integration test. That test verifies the Windows virtual printer produced a PDF; it does not send paper to a physical printer.
 10. If system Gradle and the Android SDK are installed, runs Android JVM tests and builds a local-portal debug APK. If an Android emulator is already running, it also runs connected instrumentation tests. It never installs the APK on an attached physical phone.
@@ -69,7 +69,7 @@ scripts/qa/live-environment.mjs remains available for a separate production-orig
 
 ## Real-data Playwright journey
 
-The suite is scripts/qa/smartprint-local-e2e.mjs. It launches headed Edge, falling back to headed Playwright Chromium. It saves screenshots and a redacted JSON report.
+The suite is scripts/qa/smartprint-local-e2e.mjs. It launches the pinned Playwright-managed Chromium executable in headed mode and records its version and executable path. It never selects the system Edge channel. It saves screenshots and a redacted JSON report.
 
 ### Account creation and authentication
 
@@ -161,7 +161,7 @@ The suite also reads payments/refunds, verifies refund preview is blocked withou
 
 ## Expanded functional acceptance catalogue and 90% gate
 
-The local real-data Playwright runner now carries **219 uniquely identified functional acceptance cases**. Each case ID is attached to the actual E2E record that performs its assertions. At the end of a run, report.json and report.txt show planned cases, reached cases, the coverage percentage, pass/fail counts, and any case IDs that were not reached.
+The local real-data Playwright runner now carries **219 uniquely identified functional acceptance cases**. Each case ID is attached to the actual E2E record that performs its assertions. At the end of a run, report.json and report.txt show planned cases, reached cases, functional case execution coverage, functional case pass rate, pass/fail counts, and any case IDs that were not reached. The pass rate is separate from execution coverage: an attempted test that fails is executed but does not pass.
 
 **Coverage definition:** functional test-case execution coverage = unique planned case IDs reached by the runner ÷ 219. The runner exits with a failure when this is below **90%**. A failed assertion still counts as an executed case, so coverage and pass rate are reported separately. A release-quality run should have 100% of the cases reached and 100% of executed assertions passing.
 
