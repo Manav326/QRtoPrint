@@ -51,4 +51,40 @@ public sealed class PlanEntitlementRulesTests
         Assert.False(PlanEntitlementRules.AllowsDocument(1_000_000, 0));
         Assert.False(PlanEntitlementRules.AllowsDocument(0, 1));
     }
+
+    
+    [Fact]
+    public void ZeroAdditionalQuotaRequestIsAllowedWithoutCrossingCapacity()
+    {
+        Assert.True(PlanEntitlementRules.CanAdd(3, 3, 0));
+        Assert.True(PlanEntitlementRules.CanAdd(null, 0, 0));
+    }
+
+    [Fact]
+    public void RejectsNegativeMaximumAndAlreadyExceededCapacity()
+    {
+        Assert.False(PlanEntitlementRules.CanAdd(-1, 0));
+        Assert.False(PlanEntitlementRules.CanAdd(3, 4, 0));
+    }
+
+    [Theory]
+    [InlineData("trial", true)]
+    [InlineData("ACTIVE", true)]
+    [InlineData("Suspended", false)]
+    [InlineData("Inactive", false)]
+    [InlineData("PastDue", false)]
+    [InlineData("", false)]
+    public void SubscriptionStatusComparisonIsCaseInsensitiveButNotPermissive(string status, bool expected)
+    {
+        var now = DateTimeOffset.UtcNow;
+        Assert.Equal(expected, PlanEntitlementRules.IsSubscriptionAccessActive(status, now.AddMinutes(1), now));
+    }
+
+    [Fact]
+    public void DocumentEntitlementRejectsNegativeAndZeroLimitsAndRequests()
+    {
+        Assert.False(PlanEntitlementRules.AllowsDocument(100, -1));
+        Assert.False(PlanEntitlementRules.AllowsDocument(-1, 1));
+        Assert.False(PlanEntitlementRules.AllowsDocument(0, 1));
+    }
 }

@@ -100,6 +100,159 @@ public sealed class PrintRefundRulesTests
         Assert.False(PrintRefundRules.CanRefundBeforePrintHandoff(new PrintJob { Status = "PAID_AUTHORISED", SpoolerSubmittedUtc = DateTimeOffset.UtcNow }));
     }
 
+    [Fact]
+    public void RejectsMissingOrMismatchedRefundPaymentIdentity()
+    {
+        var job = new PrintJob { Id = Guid.NewGuid(), TenantId = Guid.NewGuid() };
+        Assert.False(PrintRefundRules.HasRefundableVerifiedPayment(job, null));
+        Assert.False(PrintRefundRules.HasRefundableVerifiedPayment(job, new PrintPayment
+        {
+            TenantId = Guid.NewGuid(), PrintJobId = job.Id, Status = "VERIFIED", AmountMinor = 100
+        }));
+    }
+
+    [Theory]
+    [InlineData("REJECTED")]
+    [InlineData("AWAITING_CUSTOMER_PAYMENT")]
+    [InlineData("CUSTOMER_REPORTED")]
+    [InlineData("REFUNDED")]
+    public void RejectsPaymentStatusesThatAreNotRefundable(string status)
+    {
+        var job = new PrintJob { Id = Guid.NewGuid(), TenantId = Guid.NewGuid() };
+        var payment = new PrintPayment { TenantId = job.TenantId, PrintJobId = job.Id, Status = status, AmountMinor = 100 };
+        Assert.False(PrintRefundRules.HasRefundableVerifiedPayment(job, payment));
+    }
+
+    [Fact]
+    public void RejectsZeroValueAndInvalidRefundBalances()
+    {
+        var job = new PrintJob { Id = Guid.NewGuid(), TenantId = Guid.NewGuid() };
+        var payment = new PrintPayment { TenantId = job.TenantId, PrintJobId = job.Id, Status = "VERIFIED", AmountMinor = 0 };
+        Assert.False(PrintRefundRules.HasRefundableVerifiedPayment(job, payment));
+        payment.AmountMinor = 100;
+        payment.RefundedAmountMinor = -1;
+        Assert.False(PrintRefundRules.HasRefundableVerifiedPayment(job, payment));
+        payment.RefundedAmountMinor = 101;
+        Assert.False(PrintRefundRules.HasRefundableVerifiedPayment(job, payment));
+        payment.RefundedAmountMinor = 100;
+        Assert.True(PrintRefundRules.HasRefundableVerifiedPayment(job, payment));
+    }
+
+    [Theory]
+    [InlineData("AWAITING_PAYMENT")]
+    [InlineData("AWAITING_SHOP_APPROVAL")]
+    [InlineData("PAYMENT_REJECTED")]
+    [InlineData("COMPLETED")]
+    [InlineData("CANCELLED")]
+    public void RefundBeforeHandoffRequiresAnEligibleJobStatus(string status)
+        => Assert.False(PrintRefundRules.CanRefundBeforePrintHandoff(new PrintJob { Status = status }));
+
+    [Fact]
+    public void EveryAgentOrSpoolerHandoffMarkerBlocksPreHandoffRefund()
+    {
+        var now = DateTimeOffset.UtcNow;
+        var handoffMutations = new Action<PrintJob>[]
+        {
+            job => job.ClaimedByAgentDeviceId = Guid.NewGuid(),
+            job => job.AgentClaimedUtc = now,
+            job => job.LocalQueueReceivedUtc = now,
+            job => job.PrintDispatchLeaseExpiresUtc = now,
+            job => job.PrintDispatchAttempts = 1,
+            job => job.SpoolerJobId = 1,
+            job => job.SpoolerJobName = "SmartPrint QA",
+            job => job.SpoolerStatus = "Queued",
+            job => job.SpoolerSubmittedUtc = now,
+            job => job.SpoolerObservedUtc = now,
+            job => job.OutputConfirmedUtc = now,
+            job => job.OutputCompletedUtc = now
+        };
+        foreach (var mutate in handoffMutations)
+        {
+            var job = new PrintJob { Status = "PAID_AUTHORISED" };
+            mutate(job);
+            Assert.False(PrintRefundRules.CanRefundBeforePrintHandoff(job));
+        }
+    }
+
+    [Fact]
+    public void RejectedPageNormalizationSortsValidPagesAndPreservesPriorRefunds()
+        => Assert.Equal([1, 3, 500], PrintRefundRules.NormalizeRejectedPages(500, [500, 3, 1], [1]));
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(501)]
+    public void RejectedPageNormalizationRejectsPageCountsOutsideBounds(int pageCount)
+        => Assert.Throws<ArgumentOutOfRangeException>(() => PrintRefundRules.NormalizeRejectedPages(pageCount, [], []));
+
+    [Fact]
+    public void RejectedPageNormalizationRejectsNullPageCollections()
+    {
+        Assert.Throws<ArgumentNullException>(() => PrintRefundRules.NormalizeRejectedPages(1, null!, []));
+        Assert.Throws<ArgumentNullException>(() => PrintRefundRules.NormalizeRejectedPages(1, [], null!));
+    }
+
+    [Fact]
+    public void LegacyEqualPageAllocationHandlesAmountsSmallerThanPageCount()
+        => Assert.Equal([1L, 1L, 0L], PrintRefundRules.NormalizePageAllocations(2, 3, null));
+
+    [Theory]
+    [InlineData(0L)]
+    [InlineData(-1L)]
+    public void PageAllocationRejectsNonPositiveOriginalAmounts(long amountMinor)
+        => Assert.Throws<ArgumentOutOfRangeException>(() => PrintRefundRules.NormalizePageAllocations(amountMinor, 1, []));
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(501)]
+    public void PageAllocationRejectsPageCountsOutsideBounds(int pageCount)
+        => Assert.Throws<ArgumentOutOfRangeException>(() => PrintRefundRules.NormalizePageAllocations(100, pageCount, []));
+
+    [Fact]
+    public void PageAllocationRejectsNegativeEntriesAndWrongAllocationLength()
+    {
+        Assert.Throws<InvalidOperationException>(() => PrintRefundRules.NormalizePageAllocations(100, 2, [50L, -1L]));
+        Assert.Throws<InvalidOperationException>(() => PrintRefundRules.NormalizePageAllocations(100, 3, [50L, 50L]));
+    }
+
+    [Fact]
+    public void PageAllocationUsesCheckedArithmeticForOverflow()
+        => Assert.Throws<OverflowException>(() => PrintRefundRules.NormalizePageAllocations(long.MaxValue, 2, [long.MaxValue, 1]));
+
+    [Fact]
+    public void CumulativeRefundRejectsInvalidAllocationShapes()
+    {
+        Assert.Throws<ArgumentException>(() => PrintRefundRules.CalculateCumulativeRefundAmount([], []));
+        Assert.Throws<ArgumentException>(() => PrintRefundRules.CalculateCumulativeRefundAmount(Enumerable.Repeat(1L, 501).ToArray(), []));
+        Assert.Throws<ArgumentException>(() => PrintRefundRules.CalculateCumulativeRefundAmount([10L, -1L], []));
+    }
+
+    [Fact]
+    public void CumulativeRefundRejectsOutOfRangeAndDuplicatePages()
+    {
+        Assert.Throws<ArgumentException>(() => PrintRefundRules.CalculateCumulativeRefundAmount([10L, 20L], [0]));
+        Assert.Throws<ArgumentException>(() => PrintRefundRules.CalculateCumulativeRefundAmount([10L, 20L], [3]));
+        Assert.Throws<ArgumentException>(() => PrintRefundRules.CalculateCumulativeRefundAmount([10L, 20L], [1, 1]));
+    }
+
+    [Fact]
+    public void CumulativeRefundReturnsZeroForNoRejectedPagesAndDetectsOverflow()
+    {
+        Assert.Equal(0L, PrintRefundRules.CalculateCumulativeRefundAmount([10L, 20L], []));
+        Assert.Throws<OverflowException>(() => PrintRefundRules.CalculateCumulativeRefundAmount([long.MaxValue, 1L], [1, 2]));
+    }
+
+    [Fact]
+    public void AdditionalRefundRejectsInvalidPreviousRefundAndAllocationTotal()
+    {
+        Assert.Throws<ArgumentOutOfRangeException>(() => PrintRefundRules.CalculateAdditionalRefundAmount(100, -1, [1], [100]));
+        Assert.Throws<ArgumentOutOfRangeException>(() => PrintRefundRules.CalculateAdditionalRefundAmount(100, 101, [1], [100]));
+        Assert.Throws<ArgumentException>(() => PrintRefundRules.CalculateAdditionalRefundAmount(100, 0, [1], [99]));
+    }
+
+    [Fact]
+    public void AdditionalRefundRejectsASelectionBelowAlreadyRefundedAmount()
+        => Assert.Throws<InvalidOperationException>(() => PrintRefundRules.CalculateAdditionalRefundAmount(100, 75, [1], [50, 50]));
+
     private static ShopPricingProfile Profile(long monoPerSide = 0, long monoDuplexPerSheet = 0, long minimumCharge = 0)
         => new() { IsConfigured = true, MonoPerSideMinor = monoPerSide, MonoDuplexPerSheetMinor = monoDuplexPerSheet, MinimumChargeMinor = minimumCharge };
 }

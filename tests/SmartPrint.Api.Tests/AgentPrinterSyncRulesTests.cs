@@ -103,6 +103,79 @@ public sealed class AgentPrinterSyncRulesTests
             ]).Failure);
     }
 
+    [Fact]
+    public void AcceptsAnEmptyPrinterDiscoveryResult()
+    {
+        var result = AgentPrinterSyncRules.Validate([]);
+        Assert.Equal(AgentPrinterSyncValidationFailure.None, result.Failure);
+        Assert.Empty(result.Printers);
+    }
+
+    [Theory]
+    [InlineData("Ready")]
+    [InlineData("Busy")]
+    [InlineData("Offline")]
+    [InlineData("Paused")]
+    [InlineData("Error")]
+    [InlineData("Unknown")]
+    public void AcceptsEverySupportedPrinterStatus(string status)
+    {
+        var result = AgentPrinterSyncRules.Validate([Printer("Queue", "Driver", "Port", status)]);
+        Assert.Equal(AgentPrinterSyncValidationFailure.None, result.Failure);
+        Assert.Single(result.Printers);
+    }
+
+    [Fact]
+    public void AcceptsExactQueueDriverPortAndCapabilitiesLengthLimits()
+    {
+        var capabilities = "{\"x\":\"" + new string('x', AgentPrinterSyncRules.MaximumCapabilitiesJsonLength - 8) + "\"}";
+        Assert.Equal(AgentPrinterSyncRules.MaximumCapabilitiesJsonLength, capabilities.Length);
+        var result = AgentPrinterSyncRules.Validate([
+            Printer(
+                new string('Q', AgentPrinterSyncRules.MaximumQueueNameLength),
+                new string('D', AgentPrinterSyncRules.MaximumDriverNameLength),
+                new string('P', AgentPrinterSyncRules.MaximumPortNameLength),
+                capabilitiesJson: capabilities)
+        ]);
+        Assert.Equal(AgentPrinterSyncValidationFailure.None, result.Failure);
+    }
+
+    [Fact]
+    public void RejectsDriverAndPortNamesAboveTheirConfiguredLimits()
+    {
+        Assert.Equal(AgentPrinterSyncValidationFailure.InvalidPrinterMetadata,
+            AgentPrinterSyncRules.Validate([Printer("Queue", new string('D', AgentPrinterSyncRules.MaximumDriverNameLength + 1), "Port")]).Failure);
+        Assert.Equal(AgentPrinterSyncValidationFailure.InvalidPrinterMetadata,
+            AgentPrinterSyncRules.Validate([Printer("Queue", "Driver", new string('P', AgentPrinterSyncRules.MaximumPortNameLength + 1))]).Failure);
+    }
+
+    [Fact]
+    public void AcceptsExactlyOneHundredDistinctPrinterQueues()
+    {
+        var printers = Enumerable.Range(0, AgentPrinterSyncRules.MaximumPrinters)
+            .Select(index => Printer($"Queue {index}", "Driver", $"Port {index}"))
+            .ToArray();
+        var result = AgentPrinterSyncRules.Validate(printers);
+        Assert.Equal(AgentPrinterSyncValidationFailure.None, result.Failure);
+        Assert.Equal(AgentPrinterSyncRules.MaximumPrinters, result.Printers.Count);
+    }
+
+    [Fact]
+    public void RejectsCapabilitiesJsonWhenItExceedsTheConfiguredLimit()
+    {
+        var tooLong = "{\"x\":\"" + new string('x', AgentPrinterSyncRules.MaximumCapabilitiesJsonLength - 7) + "\"}";
+        Assert.True(tooLong.Length > AgentPrinterSyncRules.MaximumCapabilitiesJsonLength);
+        Assert.Equal(AgentPrinterSyncValidationFailure.InvalidCapabilitiesJson,
+            AgentPrinterSyncRules.Validate([Printer("Queue", "Driver", "Port", capabilitiesJson: tooLong)]).Failure);
+    }
+
+    [Fact]
+    public void TreatsMissingCapabilitiesAsAnEmptyObject()
+    {
+        var result = AgentPrinterSyncRules.Validate([Printer("Queue", "Driver", "Port", capabilitiesJson: null!)]);
+        Assert.Equal(AgentPrinterSyncValidationFailure.None, result.Failure);
+    }
+
     private static AgentPrinterDiscoveryRequest Printer(
         string queueName,
         string driverName,

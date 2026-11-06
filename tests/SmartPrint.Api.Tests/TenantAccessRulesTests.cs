@@ -13,4 +13,15 @@ public sealed class TenantAccessRulesTests
     [InlineData("", false)]
     public void OnlyAnExplicitActiveTenantCanUseShopOperations(string? status, bool expected)
         => Assert.Equal(expected, TenantAccessRules.IsActive(status));
+
+    
+    [Theory]
+    [InlineData("ACTIVE", true)]
+    [InlineData("aCtIvE", true)]
+    [InlineData(" Active ", false)]
+    [InlineData("Active ", false)]
+    [InlineData("Trial", false)]
+    [InlineData("Pending", false)]
+    public void RequiresAnExactActiveStatusIgnoringOnlyLetterCase(string? status, bool expected)
+        => Assert.Equal(expected, TenantAccessRules.IsActive(status));
 }
