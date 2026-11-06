@@ -155,6 +155,66 @@ The suite also reads payments/refunds, verifies refund preview is blocked withou
 - Verify that Shop One cannot access or mutate Shop Two's resources and job history.
 - Verify that customer/shop/admin tokens cannot cross their respective scopes.
 
+## Expanded functional acceptance catalogue and 90% gate
+
+The local real-data Playwright runner now carries **191 uniquely identified functional acceptance cases**. Each case ID is attached to the actual E2E record that performs its assertions. At the end of a run, report.json and report.txt show planned cases, reached cases, the coverage percentage, pass/fail counts, and any case IDs that were not reached.
+
+**Coverage definition:** functional test-case execution coverage = unique planned case IDs reached by the runner ÷ 191. The runner exits with a failure when this is below **90%**. A failed assertion still counts as an executed case, so coverage and pass rate are reported separately. A release-quality run should have 100% of the cases reached and 100% of executed assertions passing.
+
+This is **not source-code line or branch coverage**. No 90% code-coverage claim is made. Measuring line/branch coverage requires a separate instrumented Coverlet/Node coverage run and generated coverage reports; it must not be inferred from the count of functional cases.
+
+### Case catalogue
+
+| Area | Case IDs | Cases | Coverage intent |
+|---|---|---:|---|
+| Runtime and environment | ENV-001–004 | 4 | Local target, portal/API health, database readiness, expected local stack boundary |
+| Public routes | PUB-001–005 | 5 | Landing, shop sign-in, legacy sign-in, registration and admin sign-in render |
+| Responsive public routes | RESP-001–020 | 20 | Four public route surfaces across the five declared viewport sizes |
+| Shop registration/sign-in | SHOPAUTH-001–006 | 6 | Two independent real shops, registration/sign-in, wrong password and session continuity |
+| Customer identity/auth | CUSTAUTH-001–004 | 4 | Global customer registration, duplicate registration and successful/failed customer authentication |
+| Platform-admin authentication | ADMINAUTH-001–002 | 2 | Bootstrap-created administrator sign-in and invalid-password rejection |
+| Authentication negative/security lifecycle | AUTH-001–008 | 8 | Invalid/duplicate registrations, cross-role login denial, anonymous route denial, refresh rotation, replay prevention and logout revocation |
+| Plans and subscriptions | PLAN-001–006 | 6 | QA free plan creation, publish/version immutability path, tenant assignment and persisted subscription state |
+| Platform UI and operations | PLATFORM-001–009 | 9 | All control-centre areas, directory/plan/subscription/settings reads, settings validation, audit history and safe no-op save |
+| Shop setup and validation | SHOP-001–018 | 18 | Printer/station/rate/payment setup in two tenants; invalid pricing, invalid capabilities, unsupported printer type, foreign-printer binding, insecure logo and account validation; verify rejected writes did not mutate saved state |
+| Shop navigation/account tools | SHOPUI-001–027 | 27 | Both shop workspaces, all primary sections, account-menu tools and authenticated responsive navigation |
+| Authorization and isolation | RBAC-001–006 | 6 | Shop/admin/customer role separation, foreign tenant resource access and cross-tenant job-history denial |
+| QR station/session lifecycle | QR-001–010 | 10 | Session renewal/resume, session-to-station binding, station enable/disable, rotation invalidates old code and new code can create a session |
+| Customer account linkage | CUST-001–002 | 2 | QR print session tied to global customer identity and customer job-history endpoint |
+| Local upload validation | UPLOAD-001–002 | 2 | Invalid digest and unsupported extension fail closed before a local upload ticket can be issued |
+| Document upload | DOC-001–005 | 5 | Malformed PDF rejected without job creation, real synthetic PDF upload, two-page parsing, quote preparation and saved job metadata |
+| Job lifecycle | JOB-001–009 | 9 | Customer quote/submit, shop queue, customer history/status, unpaid rejection and rejection guards against approval/dispatch |
+| Batch workflow | BATCH-001–012 | 12 | Two real documents, shared Batch ID, distinct PrintJob IDs, queue/customer states, preview, accept-by-default, undo rejection and individual final decisions |
+| Payment workflow | PAY-001–010 | 10 | Payment verification/intent guards, one accepted-file total, synthetic reference idempotency, shop rejection and customer-visible rejected state; no actual money receipt |
+| Refund safety | REFUND-001–004 | 4 | Refund preview without verified funds, sent-confirmation requirement and refund-screen/list guard checks; no false refund record |
+| Agent lifecycle guardrails | AGENT-001–005 | 5 | Agent presence, no-Agent dispatch rejection and disposable enrollment-code generation without pairing a machine |
+| Printer/station controls | DEVICE-001–002 | 2 | QA printer and station disable/restore lifecycle |
+| Tenant lifecycle | TENANT-001–004 | 4 | Invalid status rejected, QA tenant suspension blocks normal work, restore is audited and idempotent duplicate state is safe |
+| Security guard | SEC-001 | 1 | Unpaid/rejected work cannot cross into a financial refund action |
+| Browser and resource diagnostics | OBS-001–004 | 4 | Same-origin runtime errors, console errors, failed resources and HTTP 5xx monitoring |
+| Photo Studio | PHOTO-001–006 | 6 | Real browser image selection, crop/look/background tools, optional form details, photo size/count and local multi-photo A4 PDF generation without a server print job |
+
+### Additional negative and lifecycle assertions
+
+The extra cases are intentionally run against QA-only identities and records:
+
+- **Authentication:** the refresh-token test uses a newly authenticated QA shop session, proves the old refresh token cannot be replayed, and verifies logout revokes the replacement token. This block runs after the longer UI/data journeys to reduce the risk of colliding with the API's authentication rate limit during startup.
+- **Shop configuration:** each invalid update is followed by a read-back. Rejected rate/printer/station writes must not change the rate-card version or create unintended rows. A station cannot be attached to another tenant's printer.
+- **QR/session:** tests prove the opaque session token cannot be read anonymously or resumed against another tenant's QR station. A disabled or rotated station code cannot create a new session; the new rotated code must work.
+- **Photo Studio:** a synthetic PNG is processed in a separate browser page. The test opens the actual editor, exercises crop/look/background and optional form controls, generates the prepared A4 photo PDF, verifies the preview, and confirms no server-side customer print job was created. The prepared file is not uploaded or sent to the shop.
+- **Payment/refund:** test-only payment references are explicitly marked synthetic. A rejected payment cannot be manually verified, an unpaid/rejected job cannot be approved/dispatched, refund preview without verified money is rejected, and the API refuses a refund request whose `confirmedSent` value is false. No real transfer, payment verification, refund, gateway or printer dispatch occurs.
+- **Platform/tenant:** only the generated QA shop is suspended; it is restored to Active in the same run. Operational settings are saved with their existing values only to prove the audit trail, so platform policy values are not changed. A duplicate Active transition must be idempotent.
+
+### Coverage boundaries that remain separate
+
+The 191-case gate measures the documented local functional catalogue. It does not replace these additional suites or acceptance requirements:
+
+- The portal Node regression suite and the API/Agent .NET unit suites remain separate test results. They provide domain/logic regression coverage beyond the mapped browser/API acceptance cases.
+- The Windows Agent's full live machine lifecycle—real enrollment, heartbeat, printer discovery, local queue claim/receipt, spooler accepted/failed/unconfirmed states, PDF export and output confirmation—is not exercised by the current non-paired QA E2E. Only safe Agent presence/dispatch guards and enrollment-code creation are tested here; the Agent unit suite and optional Microsoft Print to PDF integration remain separate.
+- The Android emulator test suite is conditional on an installed SDK and an already running emulator. Physical Android camera, permission, local-network and Wi-Fi readiness tests remain in docs/ANDROID_PHYSICAL_ACCEPTANCE.md.
+- Real LAN direct upload, Windows service identity, a physical printer, printed paper, power/network interruption recovery, concurrency/load, backup/restore rehearsal and payment-provider settlement require separate dedicated acceptance. They are not counted as passed by this 191-case browser suite.
+- No destructive tenant deactivation, data deletion, storage cleanup, real payment, actual refund, permanent printer pairing or physical print is performed by this runner.
+
 ## Android and Windows execution
 
 ### Android
