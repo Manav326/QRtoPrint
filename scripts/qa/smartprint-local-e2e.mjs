@@ -64,6 +64,7 @@ const report = {
 
 let browser;
 let context;
+let page;
 let pageErrors = [];
 let consoleErrors = [];
 let serverErrors = [];
