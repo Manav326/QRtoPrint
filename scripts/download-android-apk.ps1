@@ -14,7 +14,7 @@ if (Get-Variable -Name PSNativeCommandUseErrorActionPreference -ErrorAction Sile
 $workflow = 'ci.yml'
 $artifactName = 'smart-print-android-debug'
 # Older successful CI runs retain the pre-SmartPrint artifact label.
-$legacyArtifactName = 'qrtoprint-android-debug'
+$legacyArtifactNames = @('smartprint-android-debug', 'qrtoprint-android-debug')
 
 if (-not (Get-Command gh -ErrorAction SilentlyContinue)) {
     throw 'GitHub CLI (gh) was not found. Install it from https://cli.github.com/ and retry.'
@@ -105,7 +105,7 @@ try {
         throw ("No completed successful CI runs were found for branch '{0}'. Check GitHub Actions and try again." -f $Branch)
     }
 
-    $artifactNames = @($artifactName, $legacyArtifactName)
+    $artifactNames = @($artifactName) + $legacyArtifactNames
     $sourceRun = $null
     $sourceArtifactName = $null
     foreach ($run in $candidates) {
