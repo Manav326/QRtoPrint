@@ -31,8 +31,8 @@ function Assert-SmartPrintWorkspaceBuildIdentity {
         $portalManifest.name -ne "@smart-print/portal" -or
         $desktopManifest.name -ne "@smart-print/desktop" -or
         $portalDockerfile -notmatch 'pnpm --filter @smart-print/portal build' -or
-        $responsiveBrowserTest -notmatch '--filter',\s*'@smart-print/portal' -or
-        $responsiveBrowserTest -notmatch '--filter',\s*'@smart-print/desktop') {
+        $responsiveBrowserTest -notmatch '"--filter",\s*"@smart-print/portal"' -or
+        $responsiveBrowserTest -notmatch '"--filter",\s*"@smart-print/desktop"') {
         throw "The checkout still contains an old workspace/package identity. Expected smart-print, @smart-print/portal, @smart-print/desktop, and matching Docker/browser QA package filters. Pull the current main branch before building."
     }
     Write-Host "Verified workspace identity: smart-print / @smart-print/portal / @smart-print/desktop."
