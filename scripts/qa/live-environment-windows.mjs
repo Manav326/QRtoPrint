@@ -373,6 +373,135 @@ async function screenshot(name) {
   await page.screenshot({ path: join(screenshots, `${name}.png`), fullPage: true, animations: 'disabled' }).catch(() => {});
 }
 
+
+async function assertLiveResponsiveLayout(label, viewport) {
+  const result = await page.evaluate(() => {
+    const width = window.innerWidth;
+    const root = document.documentElement;
+    const body = document.body;
+    const controls = Array.from(document.querySelectorAll('button,a,input,select,textarea,[role="button"]'));
+    const offenders = [];
+    for (const element of controls) {
+      const style = getComputedStyle(element);
+      const rect = element.getBoundingClientRect();
+      if (style.display === 'none' || style.visibility === 'hidden' || rect.width <= 0 || rect.height <= 0) continue;
+      const sidebar = element.closest('.sidebar');
+      if (sidebar && !sidebar.classList.contains('sidebar-open') && width <= 850) continue;
+      let parent = element.parentElement;
+      let insideScroller = false;
+      while (parent && parent !== body) {
+        const parentStyle = getComputedStyle(parent);
+        const parentRect = parent.getBoundingClientRect();
+        if (['auto', 'scroll'].includes(parentStyle.overflowX) &&
+            parent.scrollWidth > parent.clientWidth + 1 &&
+            parentRect.left >= -1 && parentRect.right <= width + 1) {
+          insideScroller = true;
+          break;
+        }
+        parent = parent.parentElement;
+      }
+      if (!insideScroller && (rect.left < -1 || rect.right > width + 1)) {
+        offenders.push({
+          tag: element.tagName.toLowerCase(),
+          label: element.getAttribute('aria-label') || element.textContent?.trim().slice(0, 60) || '',
+          left: Math.round(rect.left),
+          right: Math.round(rect.right)
+        });
+      }
+    }
+    return {
+      viewportWidth: width,
+      rootScrollWidth: root.scrollWidth,
+      bodyScrollWidth: body.scrollWidth,
+      theme: root.dataset.theme || 'unset',
+      offenders: offenders.slice(0, 12)
+    };
+  });
+  assert.ok(result.rootScrollWidth <= viewport.width + 1,
+    label + ' root horizontally overflows at ' + viewport.width + 'px: ' + JSON.stringify(result));
+  assert.ok(result.bodyScrollWidth <= viewport.width + 1,
+    label + ' body horizontally overflows at ' + viewport.width + 'px: ' + JSON.stringify(result));
+  assert.equal(result.offenders.length, 0,
+    label + ' has visible interactive controls clipped at ' + viewport.width + 'px: ' + JSON.stringify(result.offenders));
+  return result;
+}
+
+async function ensureLiveTheme(theme) {
+  const current = await page.locator('html').getAttribute('data-theme');
+  if (current === theme) return;
+  const accessibleName = theme === 'dark' ? 'Switch to dark theme' : 'Switch to light theme';
+  await page.getByRole('button', { name: accessibleName }).first().click();
+  await page.waitForFunction(expected => document.documentElement.dataset.theme === expected, theme, { timeout: 10000 });
+}
+
+async function runPublicLiveResponsiveMatrix() {
+  const routes = [
+    { path: '/', selector: '.sp-public', label: 'public landing' },
+    { path: '/shop', selector: '.auth-screen', label: 'shop sign-in' },
+    { path: '/login', selector: '.auth-screen', label: 'legacy login' },
+    { path: '/signup', selector: '.auth-screen', label: 'shop registration' },
+    { path: '/admin', selector: '.platform-admin-auth-screen', label: 'platform-admin sign-in' }
+  ];
+  const viewports = [
+    { width: 1440, height: 1000 },
+    { width: 1024, height: 900 },
+    { width: 768, height: 1024 },
+    { width: 520, height: 900 },
+    { width: 390, height: 844 }
+  ];
+  const results = [];
+  for (const route of routes) {
+    await openPath(route.path, route.label);
+    await page.locator(route.selector).first().waitFor({ state: 'visible', timeout: 15000 });
+    for (const viewport of viewports) {
+      await page.setViewportSize(viewport);
+      await page.waitForTimeout(120);
+      results.push(await assertLiveResponsiveLayout(route.label, viewport));
+    }
+    await screenshot('responsive-' + route.label.replace(/[^a-z0-9-]/gi, '-'));
+  }
+  return { realPagesChecked: routes.length, viewportChecks: results.length, mockedApiRoutes: 0 };
+}
+
+async function runAuthenticatedLiveResponsiveMatrix(label, sections) {
+  const viewports = [
+    { width: 1440, height: 1000 },
+    { width: 1024, height: 900 },
+    { width: 768, height: 1024 },
+    { width: 520, height: 900 },
+    { width: 390, height: 844 }
+  ];
+  const results = [];
+  for (const theme of ['light', 'dark']) {
+    await ensureLiveTheme(theme);
+    for (const viewport of viewports) {
+      await page.setViewportSize(viewport);
+      for (const section of sections) {
+        if (viewport.width <= 850) {
+          const openNavigation = page.getByRole('button', { name: 'Open navigation' });
+          if (await openNavigation.count()) await openNavigation.first().click();
+        }
+        const item = page.locator('.sidebar .nav-item').filter({ hasText: section }).first();
+        await item.waitFor({ state: 'visible', timeout: 12000 });
+        await item.click();
+        await page.waitForFunction(
+          name => [...document.querySelectorAll('.sidebar .nav-item')]
+            .some(element => element.textContent.trim() === name && element.classList.contains('active')),
+          section,
+          { timeout: 12000 }
+        );
+        await page.waitForTimeout(100);
+        results.push({
+          section,
+          theme,
+          ...(await assertLiveResponsiveLayout(label + ' / ' + section + ' / ' + theme, viewport))
+        });
+      }
+    }
+  }
+  return { workspace: label, sections: sections.length, themes: 2, viewports: viewports.length, realApi: true, layoutChecks: results.length };
+}
+
 async function visitRoute(path, selector, name) {
   await openPath(path, name);
   await page.locator(selector).first().waitFor({ state: 'visible', timeout: 20000 });
