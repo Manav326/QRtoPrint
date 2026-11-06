@@ -1809,6 +1809,7 @@ try {
         body: { method: "UPI" }
       }), 200, "Start actual UPI batch payment intent");
     assert.ok(payment.id, "UPI intent did not return a payment identifier.");
+    paymentRejectedBatchPaymentId = payment.id;
     assert.equal(payment.method, "UPI");
     assert.equal(payment.status, "AWAITING_CUSTOMER_PAYMENT");
     assert.ok(payment.amountMinor > 0);
