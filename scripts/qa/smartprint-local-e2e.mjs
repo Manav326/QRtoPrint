@@ -369,38 +369,95 @@ async function uploadSyntheticPdf(page, sessionToken, batchId, idempotencyKey, f
   }, { sessionToken, batchId, idempotencyKey, fileName, base64 });
 }
 
-async function assignQaPlan(adminPage, adminToken, shopName) {
-  const plansResult = await request(adminPage, "GET", "/api/v1/platform/plans", { token: adminToken });
-  const plans = assertHttp(plansResult, 200, "Platform plans list");
+async function clickAdminSection(page, label) {
+  const viewportWidth = await page.evaluate(() => window.innerWidth);
+  if (viewportWidth <= 850) {
+    const openNavigation = page.getByRole("button", { name: "Open navigation" });
+    if (await openNavigation.isVisible().catch(() => false)) await openNavigation.click();
+  }
+  const item = page.locator(".sidebar .nav-item").filter({ hasText: label }).first();
+  await item.waitFor({ state: "visible", timeout: 12000 });
+  await item.click();
+  await page.waitForFunction(
+    expected => [...document.querySelectorAll(".sidebar .nav-item")]
+      .some(element => element.textContent.trim() === expected && element.classList.contains("active")),
+    label,
+    { timeout: 12000 }
+  );
+}
+
+async function fillQaPlanVersion(page) {
+  await page.getByLabel("Currency").fill("INR");
+  await page.getByLabel("Monthly price · minor units").fill("0");
+  await page.getByLabel("Annual price · minor units").fill("0");
+  await page.getByLabel("Printers", { exact: true }).fill("10");
+  await page.getByLabel("Agent computers").fill("3");
+  await page.getByLabel("QR stations").fill("10");
+  await page.getByLabel("Print jobs / month").fill("500");
+  await page.getByLabel("Maximum document size · bytes").fill("52428800");
+
+  const cloudFeature = page.locator(".platform-plan-feature").filter({ hasText: "Cloud-assisted printing" }).locator('input[type="checkbox"]');
+  const whiteLabelFeature = page.locator(".platform-plan-feature").filter({ hasText: "White-label experience" }).locator('input[type="checkbox"]');
+  const reportsFeature = page.locator(".platform-plan-feature").filter({ hasText: "Advanced reports" }).locator('input[type="checkbox"]');
+  if (!(await cloudFeature.isChecked())) await cloudFeature.check();
+  if (await whiteLabelFeature.isChecked()) await whiteLabelFeature.uncheck();
+  if (!(await reportsFeature.isChecked())) await reportsFeature.check();
+}
+
+async function ensureQaPlanThroughPlatformUi(adminPage, adminToken) {
   const code = "SMARTPRINT_QA_AUTOMATION";
-  let plan = plans.find(item => item.code === code);
-  const versionRequest = {
-    currency: "INR",
-    monthlyPriceMinor: 0,
-    annualPriceMinor: 0,
-    maxPrinters: 10,
-    maxAgentDevices: 3,
-    maxQrStations: 10,
-    maxMonthlyPrintJobs: 500,
-    maxDocumentBytes: 52428800,
-    cloudAssistedPrintingEnabled: true,
-    whiteLabelEnabled: false,
-    advancedReportsEnabled: true
-  };
+  const firstRead = assertHttp(await request(adminPage, "GET", "/api/v1/platform/plans", {
+    token: adminToken
+  }), 200, "Platform plans before QA-plan setup");
+  let plan = firstRead.find(item => item.code === code);
+
+  await clickAdminSection(adminPage, "Plans & entitlements");
 
   if (!plan) {
-    const created = await request(adminPage, "POST", "/api/v1/platform/plans", {
-      token: adminToken,
-      body: {
-        code,
-        name: "SmartPrint Local QA Automation",
-        description: "Free, local-only entitlement used by the automated SmartPrint QA runner.",
-        version: versionRequest
+    await adminPage.getByRole("button", { name: "New plan" }).click();
+    await adminPage.getByLabel("Plan code").fill(code);
+    await adminPage.getByLabel("Plan name").fill("SmartPrint Local QA Automation");
+    await adminPage.getByLabel("Description").fill("Free, local-only entitlement used by the automated SmartPrint QA runner.");
+    await fillQaPlanVersion(adminPage);
+    await adminPage.getByRole("button", { name: "Create plan draft" }).click();
+    await adminPage.locator(".platform-plan-list-item").filter({ hasText: code }).waitFor({ state: "visible", timeout: 20000 });
+  } else {
+    const row = adminPage.locator(".platform-plan-list-item").filter({ hasText: code }).first();
+    await row.waitFor({ state: "visible", timeout: 12000 });
+    await row.click();
+    await adminPage.locator(".platform-plan-panel").first().waitFor({ state: "visible", timeout: 10000 });
+    const activeToggle = adminPage.locator(".platform-plan-toggle input[type='checkbox']");
+    if (await activeToggle.count()) {
+      if (!(await activeToggle.isChecked())) {
+        await activeToggle.check();
+        await adminPage.getByRole("button", { name: "Save details" }).click();
+        await adminPage.getByRole("status").filter({ hasText: "Plan details updated." }).waitFor({ state: "visible", timeout: 12000 });
       }
-    });
-    const body = assertHttp(created, 201, "Create local QA plan");
-    plan = { id: body.id, code, versions: [body.version] };
+    }
+
+    const existingVersions = plan.versions || [];
+    const validPublished = existingVersions.some(version =>
+      version.status === "Published" &&
+      version.monthlyPriceMinor === 0 &&
+      version.cloudAssistedPrintingEnabled === true
+    );
+    if (!validPublished) {
+      const draftVersion = existingVersions.some(version => version.status === "Draft");
+      if (!draftVersion) {
+        // The selected plan panel automatically prepares the next version editor.
+      }
+      await fillQaPlanVersion(adminPage);
+      const saveButton = adminPage.getByRole("button", { name: "Save draft" });
+      await saveButton.click();
+      await adminPage.getByRole("status").filter({ hasText: "Draft version saved." }).waitFor({ state: "visible", timeout: 12000 });
+    }
   }
+
+  let latest = assertHttp(await request(adminPage, "GET", "/api/v1/platform/plans", {
+    token: adminToken
+  }), 200, "Platform QA plan after draft save");
+  plan = latest.find(item => item.code === code);
+  assert.ok(plan?.id, "The QA plan does not exist after the platform UI save.");
 
   let selectedVersion = (plan.versions || [])
     .filter(version => version.status === "Published" &&
@@ -409,39 +466,87 @@ async function assignQaPlan(adminPage, adminToken, shopName) {
     .sort((left, right) => right.version - left.version)[0];
 
   if (!selectedVersion) {
-    const draft = await request(adminPage, "PUT", "/api/v1/platform/plans/" + plan.id + "/draft", {
-      token: adminToken,
-      body: versionRequest
-    });
-    selectedVersion = assertHttp(draft, 200, "Create QA plan draft");
-    const published = await request(adminPage, "POST",
-      "/api/v1/platform/plans/" + plan.id + "/versions/" + selectedVersion.version + "/publish",
-      { token: adminToken });
-    selectedVersion = assertHttp(published, 200, "Publish QA plan version");
+    await clickAdminSection(adminPage, "Plans & entitlements");
+    await adminPage.locator(".platform-plan-list-item").filter({ hasText: code }).first().click();
+    await adminPage.getByRole("button", { name: "Publish version" }).waitFor({ state: "visible", timeout: 12000 });
+    await adminPage.getByRole("button", { name: "Publish version" }).click();
+    await adminPage.getByText(/Version \d+ published\./).waitFor({ state: "visible", timeout: 15000 });
+    latest = assertHttp(await request(adminPage, "GET", "/api/v1/platform/plans", {
+      token: adminToken
+    }), 200, "Platform QA plan after publish");
+    plan = latest.find(item => item.code === code);
+    selectedVersion = (plan?.versions || [])
+      .filter(version => version.status === "Published" &&
+        version.monthlyPriceMinor === 0 &&
+        version.cloudAssistedPrintingEnabled === true)
+      .sort((left, right) => right.version - left.version)[0];
   }
 
-  const tenantsResult = await request(adminPage, "GET",
-    "/api/v1/platform/tenants?search=" + encodeURIComponent(shopName) + "&page=1&pageSize=50",
-    { token: adminToken });
-  const tenants = assertHttp(tenantsResult, 200, "Find QA shop tenant");
-  const tenant = (tenants.items || []).find(item => item.businessName === shopName);
-  assert.ok(tenant?.id, "The exact QA shop tenant was not found in the platform directory.");
+  assert.ok(selectedVersion?.id, "A published, zero-price, cloud-assisted QA plan version is required.");
+  return { planId: plan.id, planVersionId: selectedVersion.id, planCode: code, version: selectedVersion.version };
+}
 
-  const assignment = await request(adminPage, "POST",
-    "/api/v1/platform/tenants/" + tenant.id + "/subscriptions",
-    {
-      token: adminToken,
-      body: {
-        planVersionId: selectedVersion.id,
-        billingInterval: "Monthly",
-        reason: "Local SmartPrint automated QA entitlement. No customer billing or payment.",
-        idempotencyKey: "smartprint-local-qa-" + tenant.id + "-" + selectedVersion.id,
-        paymentConfirmed: false
-      }
-    });
-  assertHttp(assignment, [200, 201], "Assign free QA plan");
+async function assignQaPlanThroughPlatformUi(adminPage, adminToken, shopName, planVersion) {
+  await clickAdminSection(adminPage, "Shop subscriptions");
+  const search = adminPage.getByPlaceholder("Search shop name or tenant slug");
+  await search.fill(shopName);
+  const tenantRow = adminPage.locator(".platform-subscription-table tbody tr").filter({ hasText: shopName }).first();
+  await tenantRow.waitFor({ state: "visible", timeout: 15000 });
 
-  return { tenantId: tenant.id, planId: plan.id, planVersionId: selectedVersion.id, planCode: code };
+  let subscriptions = assertHttp(await request(adminPage, "GET",
+    "/api/v1/platform/subscriptions?search=" + encodeURIComponent(shopName) + "&page=1&pageSize=20",
+    { token: adminToken }), 200, "QA shop subscription before assignment");
+  assert.ok(Array.isArray(subscriptions.items), "Subscription directory did not return its items array.");
+  let tenant = subscriptions.items.find(item => item.businessName === shopName);
+  assert.ok(tenant?.id, "The exact QA shop was not found in the subscription directory.");
+
+  const alreadyAssigned = tenant.subscription?.planVersionId === planVersion.planVersionId &&
+    tenant.subscription?.planCode === planVersion.planCode &&
+    tenant.subscription?.status === "Active" &&
+    tenant.subscription?.billingInterval === "Monthly" &&
+    Date.parse(tenant.subscription?.periodEndUtc || "") > Date.now();
+
+  if (!alreadyAssigned) {
+    await tenantRow.getByRole("button", { name: "Grant plan access" }).click();
+    const dialog = adminPage.getByRole("dialog", { name: "Grant plan access" });
+    await dialog.waitFor({ state: "visible", timeout: 10000 });
+    await dialog.getByLabel("Published plan").selectOption(planVersion.planVersionId + "|Monthly");
+    await dialog.getByLabel("Reason for access grant").fill(
+      "Local SmartPrint QA entitlement. Zero-priced plan; no payment or billing."
+    );
+    await dialog.getByRole("button", { name: "Grant access" }).click();
+    await dialog.waitFor({ state: "detached", timeout: 20000 });
+    await adminPage.getByRole("status").filter({ hasText: shopName }).waitFor({ state: "visible", timeout: 15000 });
+    subscriptions = assertHttp(await request(adminPage, "GET",
+      "/api/v1/platform/subscriptions?search=" + encodeURIComponent(shopName) + "&page=1&pageSize=20",
+      { token: adminToken }), 200, "QA shop subscription after UI assignment");
+    tenant = subscriptions.items.find(item => item.businessName === shopName);
+  }
+
+  assert.equal(tenant?.subscription?.planVersionId, planVersion.planVersionId);
+  assert.equal(tenant?.subscription?.planCode, planVersion.planCode);
+  assert.equal(tenant?.subscription?.status, "Active");
+  assert.equal(tenant?.subscription?.billingInterval, "Monthly");
+
+  // Open the real audit history UI and independently verify the read-only API record.
+  const updatedRow = adminPage.locator(".platform-subscription-table tbody tr").filter({ hasText: shopName }).first();
+  await updatedRow.getByRole("button", { name: "History" }).click();
+  await adminPage.locator(".platform-subscription-history").waitFor({ state: "visible", timeout: 12000 });
+  const history = assertHttp(await request(adminPage, "GET",
+    "/api/v1/platform/tenants/" + tenant.id + "/subscription-history",
+    { token: adminToken }), 200, "QA shop subscription audit history");
+  assert.ok(Array.isArray(history) && history.some(item =>
+    item.planCode === planVersion.planCode &&
+    item.reason === "Local SmartPrint QA entitlement. Zero-priced plan; no payment or billing."
+  ), "Subscription assignment audit history does not contain the QA reason and plan.");
+  return {
+    tenantId: tenant.id,
+    assignedThroughUi: !alreadyAssigned,
+    alreadyAssigned,
+    planVersionId: planVersion.planVersionId,
+    status: tenant.subscription.status,
+    auditRows: history.length
+  };
 }
 
 async function clickShopSection(page, label) {
