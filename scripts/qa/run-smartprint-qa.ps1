@@ -456,54 +456,19 @@ try {
                     $adb = [PSCustomObject]@{ Source = $platformToolsAdb }
                 }
             }
+
             if ($adb) {
                 $adbOutput = @(& $adb.Source "devices")
-                $emulatorDevices = @($adbOutput | Where-Object { $_ -match '^emulator-\d+\s+device
-catch {
-    $fatalError = $_.Exception.Message
-    $exitCode = 1
-    Add-QAResult -Name "QA orchestrator" -Status "FAIL" -Detail $fatalError
-    ($_ | Out-String) | Set-Content -LiteralPath (Join-Path $logDirectory "fatal-error.log")
-}
-finally {
-    foreach ($name in $environmentNames) {
-        [Environment]::SetEnvironmentVariable($name, $originalEnvironment[$name], "Process")
-    }
-
-    $summary = [PSCustomObject]@{
-        product = "SmartPrint"
-        environment = "LOCAL_DOCKER_POSTGRES_REAL_API"
-        target = $target
-        runId = $runId
-        startedLocal = $runStamp
-        completedUtc = [DateTime]::UtcNow.ToString("o")
-        result = if ($exitCode -eq 0) { "PASS" } else { "FAIL" }
-        passed = @($results | Where-Object status -eq "PASS").Count
-        failed = @($results | Where-Object status -eq "FAIL").Count
-        skipped = @($results | Where-Object status -eq "SKIPPED").Count
-        warnings = @($results | Where-Object status -eq "WARN").Count
-        steps = @($results)
-        fatalError = $fatalError
-        evidenceDirectory = $artifactRelative
-        qaCredentialsFile = ".secrets\smartprint-qa\qa-accounts.dpapi.json"
-        mockedApiRoutesUsed = $false
-        productionDatabaseTouched = $false
-    }
-    $summary | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath (Join-Path $artifactRoot "summary.json") -Encoding UTF8
-    $summary | Format-List | Out-String | Set-Content -LiteralPath (Join-Path $artifactRoot "summary.txt") -Encoding UTF8
-    Write-Host ([Environment]::NewLine + "=== SMARTPRINT LOCAL QA SUMMARY ===") -ForegroundColor Cyan
-    $summary | Format-Table result, passed, failed, skipped, warnings, target, evidenceDirectory -AutoSize
-    Write-Host "QA identities are stored encrypted for the current Windows user. No password was written to the report or Git."
-    Write-Host "Evidence: $artifactRoot" -ForegroundColor Cyan
-}
-
-if ($exitCode -ne 0) { exit 1 }
- })
+                $connectedDevices = @($adbOutput | Where-Object { $_ -match '^\S+\s+device(\s|$)' })
+                $emulatorDevices = @($connectedDevices | Where-Object { $_ -match '^emulator-\d+\s+device(\s|$)' })
             } else {
+                $connectedDevices = @()
                 $emulatorDevices = @()
             }
 
-            if ($androidBuildOk -and $emulatorDevices.Count -gt 0) {
+            # connectedDebugAndroidTest targets every online adb device. Run it only
+            # when the sole connected device is an emulator; never sideload to a phone.
+            if ($androidBuildOk -and $emulatorDevices.Count -eq 1 -and $connectedDevices.Count -eq 1) {
                 $instrumentationArgs = @(
                     "--no-daemon", "-p", "apps/android",
                     "-PsmartPrintServiceUrl=http://10.0.2.2:3000",
