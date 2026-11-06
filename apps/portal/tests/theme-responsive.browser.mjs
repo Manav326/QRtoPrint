@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 
 const moduleDirectory = process.env.PLAYWRIGHT_MODULE_DIR;
 if (!moduleDirectory) {
@@ -14,14 +14,46 @@ const desktopUrl = process.env.SMARTPRINT_DESKTOP_E2E_URL ?? "http://127.0.0.1:1
 const artifactDirectory = process.env.RESPONSIVE_ARTIFACT_DIR ?? "artifacts/theme-responsive";
 mkdirSync(artifactDirectory, { recursive: true });
 
-const server = spawn("pnpm", [
+function startWorkspaceProcess(args) {
+  const packageManager = process.env.SMARTPRINT_PNPM_COMMAND || "pnpm";
+  const prefix = (process.env.SMARTPRINT_PNPM_PREFIX || "").split(/\\s+/).filter(Boolean);
+  const options = { stdio: "inherit", env: process.env, windowsHide: true };
+  if (process.platform === "win32") {
+    // .cmd shims must be invoked through cmd.exe on Windows.
+    const quote = value => `"${String(value).replace(/"/g, '""')}"`;
+    const command = [quote(packageManager), ...prefix, ...args.map(quote)].join(" ");
+    const child = spawn(process.env.ComSpec || "cmd.exe", ["/d", "/c", command], options);
+    child.spawnError = null;
+    child.on("error", error => { child.spawnError = error; });
+    return child;
+  }
+  const child = spawn(packageManager, [...prefix, ...args], options);
+  child.spawnError = null;
+  child.on("error", error => { child.spawnError = error; });
+  return child;
+}
+
+function stopWorkspaceProcess(child) {
+  if (!child || child.exitCode !== null) return;
+  if (process.platform === "win32" && child.pid) {
+    // Stop the cmd.exe process and the Vite descendants it started.
+    spawnSync("taskkill.exe", ["/PID", String(child.pid), "/T", "/F"], {
+      stdio: "ignore",
+      windowsHide: true
+    });
+    return;
+  }
+  child.kill("SIGTERM");
+}
+
+const server = startWorkspaceProcess([
   "--filter", "@qrtoprint/portal", "dev",
   "--host", "127.0.0.1", "--port", "4173", "--strictPort"
-], { stdio: "inherit", env: process.env });
-const desktopServer = spawn("pnpm", [
+]);
+const desktopServer = startWorkspaceProcess([
   "--filter", "@qrtoprint/desktop", "dev",
   "--host", "127.0.0.1", "--port", "1420", "--strictPort"
-], { stdio: "inherit", env: process.env });
+]);
 
 let browser;
 const results = [];
@@ -49,6 +81,7 @@ const routes = [
 
 async function waitForServer(child, url, label) {
   for (let attempt = 0; attempt < 90; attempt += 1) {
+    if (child.spawnError) throw new Error(`${label} server could not be started: ${child.spawnError.message}`);
     if (child.exitCode !== null) throw new Error(`${label} server exited with code ${child.exitCode}.`);
     try {
       const response = await fetch(url);
@@ -872,6 +905,6 @@ try {
   for (const result of results) console.log(JSON.stringify(result));
 } finally {
   if (browser) await browser.close();
-  server.kill("SIGTERM");
-  desktopServer.kill("SIGTERM");
+  stopWorkspaceProcess(server);
+  stopWorkspaceProcess(desktopServer);
 }
