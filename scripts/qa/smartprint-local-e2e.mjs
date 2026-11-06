@@ -1478,6 +1478,7 @@ try {
       const studio = photoPage.getByRole("dialog", { name: "Photo Studio" });
       await studio.waitFor({ state: "visible", timeout: 15000 });
       await studio.locator("canvas").waitFor({ state: "visible", timeout: 15000 });
+      await screenshot(photoPage, "customer-photo-studio-editor");
 
       const cropTool = studio.getByRole("button", { name: "Crop" });
       await cropTool.click();
@@ -1517,6 +1518,7 @@ try {
       });
       const preparedPreview = photoPage.locator(".customer-edited-photo-preview");
       await preparedPreview.waitFor({ state: "visible", timeout: 15000 });
+      await screenshot(photoPage, "customer-photo-studio-prepared-sheet");
       const preparedImages = await preparedPreview.locator("img").count();
       assert.ok(preparedImages >= 1, "Prepared A4 photo sheet preview was not rendered.");
 
