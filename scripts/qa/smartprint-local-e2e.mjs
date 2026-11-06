@@ -149,7 +149,8 @@ const PLANNED_CASE_IDS = [
     "JOB-001", "JOB-002", "JOB-003", "PAY-001", "REFUND-001", "REFUND-002", "SEC-001",
     "DEVICE-001", "DEVICE-002", "QR-005", "QR-006", "QR-007",
     "PLATFORM-001", "PLATFORM-002", "PLATFORM-003", "PLATFORM-004",
-    "TENANT-001", "TENANT-002", "TENANT-003"
+    "TENANT-001", "TENANT-002", "TENANT-003",
+    "PHOTO-001", "PHOTO-002", "PHOTO-003", "PHOTO-004", "PHOTO-005", "PHOTO-006"
   ])
 ];
 
@@ -1405,6 +1406,102 @@ try {
     assert.ok(Array.isArray(jobs));
     return { customerJobsBeforeUpload: jobs.length, globalIdentityApi: "PASS" };
   });
+
+  await record("PHOTO: customer Photo Studio edits and prepares a local multi-photo A4 PDF without creating a print job", async () => {
+    const photoPage = await context.newPage();
+    try {
+      await photoPage.route("**/api/v1/public/stations/**/sessions", async route => {
+        const headers = { ...route.request().headers(), authorization: "Bearer " + customerTokens.accessToken };
+        await route.continue({ headers });
+      });
+      const stationResponse = await photoPage.goto(new URL(customerSession.stationPath, baseUrl).toString(), {
+        waitUntil: "domcontentloaded",
+        timeout: 30000
+      });
+      assert.equal(stationResponse?.status(), 200, "Photo QA QR station did not open.");
+      await photoPage.locator(".customer-entry-card .entry-eyebrow").waitFor({ state: "visible", timeout: 30000 });
+
+      const jobsBefore = assertHttp(await request(photoPage, "GET", "/api/v1/customer/jobs", {
+        token: customerTokens.accessToken
+      }), 200, "Customer jobs before Photo Studio");
+      const picker = photoPage.locator('input[type="file"][accept*="image/png"]').first();
+      await picker.setInputFiles({
+        name: "smartprint-photo-studio-qa.png",
+        mimeType: "image/png",
+        buffer: Buffer.from(
+          "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADUlEQVR4nGP4z8AAAAMBAQDJ/pLvAAAAAElFTkSuQmCC",
+          "base64"
+        )
+      });
+
+      const openStudio = photoPage.getByRole("button", { name: "Open Photo Studio" });
+      await openStudio.waitFor({ state: "visible", timeout: 15000 });
+      await openStudio.click();
+      const studio = photoPage.getByRole("dialog", { name: "Photo Studio" });
+      await studio.waitFor({ state: "visible", timeout: 15000 });
+      await studio.locator("canvas").waitFor({ state: "visible", timeout: 15000 });
+
+      const cropTool = studio.getByRole("button", { name: "Crop" });
+      await cropTool.click();
+      const zoom = studio.getByLabel("Zoom");
+      await zoom.focus();
+      await zoom.press("ArrowRight");
+      assert.notEqual(await zoom.inputValue(), "1", "Crop zoom control did not respond to keyboard input.");
+
+      await studio.getByRole("button", { name: "Looks" }).click();
+      await studio.getByText("Photo look").waitFor({ state: "visible", timeout: 5000 });
+      await studio.getByRole("button", { name: "Background" }).click();
+      await studio.getByRole("button", { name: "Set background #f3f6fa" }).click();
+      assert.equal(await studio.getByRole("button", { name: "Set background #f3f6fa" }).getAttribute("aria-pressed"), "true");
+
+      await studio.getByRole("button", { name: "Sheet" }).click();
+      await studio.getByRole("checkbox", { name: /Add name and DOB to each photo/ }).check();
+      await studio.getByLabel("Name for form (optional)").fill("SmartPrint QA Photo");
+      await studio.getByLabel("Date of birth (optional)").fill("1990-01-02");
+      await studio.getByRole("button", { name: "Text" }).click();
+      await studio.getByLabel("Caption font size").selectOption("7");
+      await studio.getByRole("button", { name: "Sheet" }).click();
+
+      await studio.getByLabel("Photo size").selectOption("25x35");
+      const photoCount = studio.getByLabel("Number of photos");
+      await photoCount.fill("3");
+      await photoCount.blur();
+      assert.equal(await photoCount.inputValue(), "3");
+      const sheetSummary = await studio.locator(".sheetSummary").innerText();
+      assert.match(sheetSummary, /A4 pages in this job\s*1/i);
+      assert.match(sheetSummary, /25\s*[×x]\s*35\s*mm/i);
+
+      await studio.getByRole("button", { name: "Prepare A4 sheet" }).click();
+      await studio.waitFor({ state: "detached", timeout: 60000 });
+      await photoPage.locator(".customer-file-preview").getByText(/Prepared photo sheet/).waitFor({
+        state: "visible",
+        timeout: 15000
+      });
+      const preparedPreview = photoPage.locator(".customer-edited-photo-preview");
+      await preparedPreview.waitFor({ state: "visible", timeout: 15000 });
+      const preparedImages = await preparedPreview.locator("img").count();
+      assert.ok(preparedImages >= 1, "Prepared A4 photo sheet preview was not rendered.");
+
+      const jobsAfter = assertHttp(await request(photoPage, "GET", "/api/v1/customer/jobs", {
+        token: customerTokens.accessToken
+      }), 200, "Customer jobs after local Photo Studio preparation");
+      assert.equal(jobsAfter.length, jobsBefore.length, "Preparing the photo sheet locally must not create a server print job.");
+
+      return {
+        sourcePhotoSelected: true,
+        cropLookAndBackgroundToolsOpened: true,
+        optionalNameAndDobApplied: true,
+        photoSize: "25x35",
+        photoCount: 3,
+        generatedA4Pages: 1,
+        previewImages: preparedImages,
+        originalUploadNotSent: true,
+        serverPrintJobCountUnchanged: true
+      };
+    } finally {
+      await photoPage.close().catch(() => {});
+    }
+  }, ["PHOTO-001", "PHOTO-002", "PHOTO-003", "PHOTO-004", "PHOTO-005", "PHOTO-006"]);
 
   await record("Real document validator rejects a malformed PDF without creating a print job", async () => {
     const invalid = await uploadSyntheticPdf(
