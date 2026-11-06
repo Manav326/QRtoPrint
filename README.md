@@ -1,6 +1,6 @@
 # SmartPrint by QuantaEdge
 
-SmartPrint by QuantaEdge (QRtoPrint) is a multi-tenant SaaS platform for QR-initiated document printing, combining customer web experiences, a native Windows shop-management desktop application, a separate local Windows Print Agent service, and platform-owner administration.
+SmartPrint by QuantaEdge (repository: smart-print) is a multi-tenant SaaS platform for QR-initiated document printing, combining customer web experiences, a native Windows shop-management desktop application, a separate local Windows Print Agent service, and platform-owner administration.
 
 ## Product principles
 
@@ -14,7 +14,7 @@ SmartPrint by QuantaEdge (QRtoPrint) is a multi-tenant SaaS platform for QR-init
 
 ## Deployment origin
 
-The application has one public origin, configured per deployment in PUBLIC_BASE_URL. The customer portal, shop portal, platform administration, API and station QR links all use that origin; do not add separate API or admin hostnames for this application. Set IMAGE_NAMESPACE in .env to the GHCR namespace that owns the API and portal images. Both values are required; neither has a baked-in production default.
+The application has one public origin, configured per deployment in PUBLIC_BASE_URL. The customer portal, shop portal, platform administration, API and station QR links all use that origin; do not add separate API or admin hostnames for this application. Set IMAGE_NAMESPACE in .env to `ghcr.io/manav326`; production images are published as `smart-print-api` and `smart-print-portal`. Set GITHUB_REPOSITORY to `Manav326/smart-print` for release downloads.
 
 ## Repository status
 
@@ -100,7 +100,7 @@ The phone opens that Cloudflare HTTPS URL. When the customer taps Check shop Wi-
 
 Use this only when deploying the Agent without the guided SmartPrint Desktop installer. Pair it against the same public URL and configure its browser origin with the same value:
 
-    $agentDir = Join-Path $env:USERPROFILE "Downloads\QRtoPrintAgent"
+    $agentDir = Join-Path $env:USERPROFILE "Downloads\SmartPrintAgent"
     $agentExe = Join-Path $agentDir "SmartPrint.Agent.exe"
     $publicBaseUrl = (Get-Content .env.local | Where-Object { $_ -like "PUBLIC_BASE_URL=*" } | Select-Object -First 1).Substring("PUBLIC_BASE_URL=".Length)
     & "$agentDir\pair-agent.ps1" -ApiBaseUrl $publicBaseUrl -AgentExePath $agentExe
@@ -110,7 +110,7 @@ Use the current PUBLIC_BASE_URL in those commands. After its first authenticated
 
 ### Changing the public URL later
 
-Change PUBLIC_BASE_URL in .env.local (or .env for production), update the matching exact-hostname Published application route in the central Cloudflare Tunnel to http://qrtoprint-portal:80, and restart the Compose stack. Cloudflare's route is infrastructure configuration and must match the chosen hostname. Keep the previous hostname routed to the same portal during migration: previously printed QR codes keep working, and already-paired Agents can heartbeat through the old hostname and learn the new URL. Remove the old route only after Agents have updated and old QR codes are no longer in circulation.
+Change PUBLIC_BASE_URL in .env.local (or .env for production), update the matching exact-hostname Published application route in the central Cloudflare Tunnel to http://smart-print-portal:80 (the legacy qrtoprint-portal alias remains available during migration), and restart the Compose stack. Cloudflare's route is infrastructure configuration and must match the chosen hostname. Keep the previous hostname routed to the same portal during migration: previously printed QR codes keep working, and already-paired Agents can heartbeat through the old hostname and learn the new URL. Remove the old route only after Agents have updated and old QR codes are no longer in circulation.
 
 ### Stop / restart
 
@@ -126,7 +126,7 @@ The production stack runs PostgreSQL, the ASP.NET Core API and the React portal.
 
 ### First start
 
-1. Ensure the central connector is running from QuantaEdge-Production and the shared `cloudflare-edge` network exists. The Cloudflare Published Application route for this hostname must target **http://qrtoprint-portal:80**.
+1. Ensure the central connector is running from QuantaEdge-Production and the shared `cloudflare-edge` network exists. The Cloudflare Published Application route for this hostname must target **http://smart-print-portal:80** (the legacy `qrtoprint-portal` alias is retained).
 2. From the repository directory, run:
 
     .\scripts\docker-up.ps1
@@ -181,3 +181,10 @@ Inspect the deployment with docker compose --env-file .env -f compose.yml ps and
 
 
 Platform administrators can manage versioned SaaS plans and grant published trial, free or paid versions to shops. Paid access can be granted after an operator confirms the funds were received and records the bank/UPI transaction reference; the granting actor and amount are kept in the append-only assignment audit. Automated gateway checkout, subscription invoices and payment reconciliation remain future work.
+
+
+After the GitHub repository is renamed, update an existing local checkout with:
+
+```powershell
+git remote set-url origin https://github.com/Manav326/smart-print.git
+```
