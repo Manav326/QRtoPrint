@@ -150,7 +150,8 @@ const PLANNED_CASE_IDS = [
     "DEVICE-001", "DEVICE-002", "QR-005", "QR-006", "QR-007",
     "PLATFORM-001", "PLATFORM-002", "PLATFORM-003", "PLATFORM-004",
     "TENANT-001", "TENANT-002", "TENANT-003",
-    "PHOTO-001", "PHOTO-002", "PHOTO-003", "PHOTO-004", "PHOTO-005", "PHOTO-006"
+    "PHOTO-001", "PHOTO-002", "PHOTO-003", "PHOTO-004", "PHOTO-005", "PHOTO-006",
+    "REPORT-001", "REPORT-002", "REPORT-003", "REPORT-004"
   ])
 ];
 
@@ -1205,6 +1206,43 @@ try {
       stationCountUnchanged: true
     };
   }, ["SHOP-001", "SHOP-002", "SHOP-003", "SHOP-004", "SHOP-005", "SHOP-006", "SHOP-007", "SHOP-008"]);
+
+  await record("REPORTS: supported reporting windows return tenant-scoped summary data and invalid periods are rejected", async () => {
+    const periods = [];
+    for (const days of [7, 30, 90]) {
+      const summary = assertHttp(await request(shop1Page, "GET",
+        "/api/v1/shop/reports/summary?days=" + days,
+        { token: shop1Tokens.accessToken }), 200, "Shop reports " + days + "-day window");
+      assert.equal(summary.periodDays, days);
+      assert.ok(Number.isInteger(summary.totalJobs) && summary.totalJobs >= 0);
+      assert.ok(Number.isInteger(summary.completedJobs) && summary.completedJobs >= 0);
+      assert.ok(Number.isInteger(summary.outputUnconfirmedJobs) && summary.outputUnconfirmedJobs >= 0);
+      assert.ok(Number.isInteger(summary.pagesRequested) && summary.pagesRequested >= 0);
+      assert.ok(Number.isInteger(summary.pendingPaymentCount) && summary.pendingPaymentCount >= 0);
+      assert.ok(Array.isArray(summary.jobsByStatus));
+      assert.ok(Array.isArray(summary.verifiedCollectionsByMethod));
+      assert.ok(Array.isArray(summary.refundsRecordedByMethod));
+      assert.ok(Date.parse(summary.fromUtc) < Date.parse(summary.toUtc));
+      periods.push({ days, totalJobs: summary.totalJobs, pendingPayments: summary.pendingPaymentCount });
+    }
+
+    const unsupported = await request(shop1Page, "GET",
+      "/api/v1/shop/reports/summary?days=14",
+      { token: shop1Tokens.accessToken });
+    assert.equal(unsupported.status, 400, "Unsupported reporting periods must be rejected.");
+
+    const secondTenant = assertHttp(await request(shop2Page, "GET",
+      "/api/v1/shop/reports/summary?days=30",
+      { token: shop2Tokens.accessToken }), 200, "Shop two's own reporting summary");
+    assert.equal(secondTenant.periodDays, 30);
+    assert.ok(Array.isArray(secondTenant.jobsByStatus));
+
+    return {
+      supportedPeriods: periods.map(item => item.days),
+      invalidPeriod: unsupported.status,
+      secondTenantReportScopedToItsOwnSession: true
+    };
+  }, ["REPORT-001", "REPORT-002", "REPORT-003", "REPORT-004"]);
 
   await record("Shop one navigates every real sidebar section and the account-menu-only tools", async () => {
     const sections = [
