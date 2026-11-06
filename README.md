@@ -116,7 +116,7 @@ Change PUBLIC_BASE_URL in .env.local (or .env for production), update the single
 
 Stop containers without deleting data:
 
-    docker compose --env-file .env.local -f compose.local.yml down
+    docker compose --project-name qrtoprint-local --env-file .env.local -f compose.local.yml down
 
 Restart with .\scripts\docker-up-local.ps1. Never use down -v; that deletes persistent application data.
 
