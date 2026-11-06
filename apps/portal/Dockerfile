@@ -8,7 +8,7 @@ COPY . .
 RUN pnpm install --frozen-lockfile
 ARG VITE_API_BASE_URL=
 ENV VITE_API_BASE_URL=${VITE_API_BASE_URL}
-RUN pnpm --filter @smartprint/portal build
+RUN pnpm --filter @smart-print/portal build
 
 FROM nginx:alpine AS runtime
 COPY apps/portal/nginx.conf /etc/nginx/conf.d/default.conf
