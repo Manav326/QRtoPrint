@@ -2136,6 +2136,7 @@ try {
     plannedCases: PLANNED_CASE_IDS.length,
     uniqueCasesExercised: caseResults.size,
     coveragePercent: Number(((caseResults.size / PLANNED_CASE_IDS.length) * 100).toFixed(1)),
+    coverageGatePassed: (caseResults.size / PLANNED_CASE_IDS.length) >= 0.9,
     passedCases,
     failedCases,
     skippedCases,
@@ -2150,6 +2151,7 @@ try {
     plannedCases: report.caseCoverage.plannedCases,
     uniqueCasesExercised: report.caseCoverage.uniqueCasesExercised,
     coveragePercent: report.caseCoverage.coveragePercent,
+    coverageGatePassed: report.caseCoverage.coverageGatePassed,
     passedCases: report.caseCoverage.passedCases,
     failedCases: report.caseCoverage.failedCases,
     missingCases: report.caseCoverage.missingCases
@@ -2162,6 +2164,11 @@ try {
     "Failed: " + report.summary.failed + "\n" +
     "Skipped: " + report.summary.skipped + "\n" +
     "Warnings: " + report.summary.warnings + "\n" +
+    "Test cases executed: " + report.caseCoverage.uniqueCasesExercised + "/" + report.caseCoverage.plannedCases + "\n" +
+    "Test case coverage: " + report.caseCoverage.coveragePercent + "% (minimum 90%)\n" +
+    "Test cases passed/failed: " + report.caseCoverage.passedCases + "/" + report.caseCoverage.failedCases + "\n" +
+    "Coverage gate: " + (report.caseCoverage.coverageGatePassed ? "PASS" : "FAIL") + "\n" +
+    "Missing test cases: " + report.caseCoverage.missingCases.join(", ") + "\n" +
     "Evidence: " + outputDirectory + "\n");
   console.log("\nSmartPrint local real-data QA summary:");
   console.log(JSON.stringify(report.summary, null, 2));
@@ -2170,4 +2177,4 @@ try {
   await browser?.close().catch(() => {});
 }
 
-if (report.summary.failed > 0) process.exitCode = 1;
+if (report.summary.failed > 0 || !report.caseCoverage.coverageGatePassed) process.exitCode = 1;
