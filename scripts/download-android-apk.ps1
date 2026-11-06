@@ -12,7 +12,7 @@ if (Get-Variable -Name PSNativeCommandUseErrorActionPreference -ErrorAction Sile
 }
 
 $workflow = 'ci.yml'
-$artifactName = 'smartprint-android-debug'
+$artifactName = 'smart-print-android-debug'
 # Older successful CI runs retain the pre-SmartPrint artifact label.
 $legacyArtifactName = 'qrtoprint-android-debug'
 
