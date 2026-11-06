@@ -12,7 +12,7 @@ $composeProjectName = "qrtoprint"
 $composeBaseArgs = @("--project-name", $composeProjectName, "--env-file", $envPath, "-f", $composeFile)
 
 if (-not (Test-Path -LiteralPath $envPath)) {
-    throw "No .env file exists. Start QRtoPrint with scripts\docker-up.ps1 first."
+    throw "No .env file exists. Start SmartPrint with scripts\docker-up.ps1 first."
 }
 if (-not (Get-Command docker -ErrorAction SilentlyContinue)) {
     throw "Docker was not found."
@@ -104,7 +104,7 @@ try {
     }
 
     Write-Host ""
-    Write-Host "QRtoPrint backup created:" -ForegroundColor Green
+    Write-Host "SmartPrint backup created:" -ForegroundColor Green
     Write-Host $dbFile
     Write-Host $docsFile
     Write-Host $envFile
