@@ -2475,26 +2475,34 @@ try {
   report.finishedUtc = new Date().toISOString();
   const caseResults = new Map();
   for (const check of report.checks) {
+    // Case IDs are grouped under a record. If that record aborts on an assertion,
+    // the runner cannot prove every grouped case completed, so do not award them
+    // completion coverage. This is intentionally conservative.
+    const caseStatus = check.status === "FAIL" || check.status === "WARN"
+      ? "INCOMPLETE"
+      : check.status;
     for (const caseId of check.caseIds || []) {
-      caseResults.set(caseId, check.status);
+      caseResults.set(caseId, caseStatus);
     }
   }
   const passedCases = [...caseResults.values()].filter(status => status === "PASS").length;
-  const failedCases = [...caseResults.values()].filter(status => status === "FAIL").length;
+  const incompleteCases = [...caseResults.values()].filter(status => status === "INCOMPLETE").length;
   const skippedCases = [...caseResults.values()].filter(status => status === "SKIPPED").length;
   const missingCases = PLANNED_CASE_IDS.filter(caseId => !caseResults.has(caseId));
-  const caseExecutionCoveragePercent = Number(((caseResults.size / PLANNED_CASE_IDS.length) * 100).toFixed(1));
-  const casePassPercent = Number(((passedCases / PLANNED_CASE_IDS.length) * 100).toFixed(1));
+  const caseExecutionCoveragePercent = Number(((passedCases / PLANNED_CASE_IDS.length) * 100).toFixed(1));
+  const casePassPercent = caseExecutionCoveragePercent;
   report.caseCoverage = {
     plannedCases: PLANNED_CASE_IDS.length,
-    uniqueCasesExercised: caseResults.size,
+    caseIdsMappedToChecks: caseResults.size,
+    uniqueCasesExercised: passedCases,
+    uniqueCasesFullyCompleted: passedCases,
     coveragePercent: caseExecutionCoveragePercent,
     caseExecutionCoveragePercent,
     casePassPercent,
     allPlannedCasesPassed: caseResults.size === PLANNED_CASE_IDS.length && passedCases === PLANNED_CASE_IDS.length,
-    coverageGatePassed: (caseResults.size / PLANNED_CASE_IDS.length) >= 0.9,
+    coverageGatePassed: (passedCases / PLANNED_CASE_IDS.length) >= 0.9,
     passedCases,
-    failedCases,
+    incompleteCases,
     skippedCases,
     missingCases,
     caseStatuses: Object.fromEntries([...caseResults.entries()].sort(([left], [right]) => left.localeCompare(right)))
@@ -2505,14 +2513,16 @@ try {
     skipped: report.checks.filter(check => check.status === "SKIPPED").length,
     warnings: report.warnings.length,
     plannedCases: report.caseCoverage.plannedCases,
+    caseIdsMappedToChecks: report.caseCoverage.caseIdsMappedToChecks,
     uniqueCasesExercised: report.caseCoverage.uniqueCasesExercised,
+    uniqueCasesFullyCompleted: report.caseCoverage.uniqueCasesFullyCompleted,
     coveragePercent: report.caseCoverage.coveragePercent,
     caseExecutionCoveragePercent: report.caseCoverage.caseExecutionCoveragePercent,
     casePassPercent: report.caseCoverage.casePassPercent,
     allPlannedCasesPassed: report.caseCoverage.allPlannedCasesPassed,
     coverageGatePassed: report.caseCoverage.coverageGatePassed,
     passedCases: report.caseCoverage.passedCases,
-    failedCases: report.caseCoverage.failedCases,
+    incompleteCases: report.caseCoverage.incompleteCases,
     missingCases: report.caseCoverage.missingCases
   };
   writeFileSync(join(outputDirectory, "report.json"), JSON.stringify(report, null, 2) + "\n");
@@ -2523,10 +2533,12 @@ try {
     "Failed: " + report.summary.failed + "\n" +
     "Skipped: " + report.summary.skipped + "\n" +
     "Warnings: " + report.summary.warnings + "\n" +
-    "Test cases executed: " + report.caseCoverage.uniqueCasesExercised + "/" + report.caseCoverage.plannedCases + "\n" +
-    "Functional case execution coverage: " + report.caseCoverage.caseExecutionCoveragePercent + "% (minimum 90%)\n" +
+    "Case IDs mapped to attempted checks: " + report.caseCoverage.caseIdsMappedToChecks + "/" + report.caseCoverage.plannedCases + "\n" +
+    "Functional case IDs fully completed: " + report.caseCoverage.uniqueCasesFullyCompleted + "/" + report.caseCoverage.plannedCases + "\n" +
+    "Functional case completion coverage: " + report.caseCoverage.caseExecutionCoveragePercent + "% (minimum 90%)\n" +
     "Functional case pass rate: " + report.caseCoverage.casePassPercent + "%\n" +
-    "Test cases passed/failed: " + report.caseCoverage.passedCases + "/" + report.caseCoverage.failedCases + "\n" +
+    "Case IDs linked to incomplete checks: " + report.caseCoverage.incompleteCases + "\n" +
+    "Skipped case IDs: " + report.caseCoverage.skippedCases + "\n" +
     "Coverage gate: " + (report.caseCoverage.coverageGatePassed ? "PASS" : "FAIL") + "\n" +
     "Missing test cases: " + report.caseCoverage.missingCases.join(", ") + "\n" +
     "Evidence: " + outputDirectory + "\n");
