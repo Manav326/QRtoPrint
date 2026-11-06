@@ -331,7 +331,7 @@ try {
     # Refuse to take a localhost port from another Compose project. In
     # particular, never stop or replace a QuantaEdge site container to make
     # room for SmartPrint.
-    $portPreflightOk = Invoke-QAStep -Name "Check localhost ports 3000 and 8080 are not owned by another Docker project" -LogName "docker-port-preflight.log" -Action {
+    $portPreflightOk = Invoke-QAStep -Name "Check localhost port 3000 is not owned by another Docker project" -LogName "docker-port-preflight.log" -Action {
         $runningContainers = @(& $docker.Source "ps" "--format" '{{.Names}}|{{.Ports}}|{{.Label "com.docker.compose.project"}}')
         if ($LASTEXITCODE -ne 0) { throw "Could not inspect running Docker containers." }
         $conflicts = @()
@@ -342,14 +342,14 @@ try {
             $publishedPorts = $parts[1]
             $containerProject = if ($parts.Count -ge 3) { $parts[2].Trim() } else { "" }
             if ($containerProject -eq $composeProjectName) { continue }
-            if ($publishedPorts -match '(^|,)\s*(?:\[[^\]]+\]:|(?:\d{1,3}\.){3}\d{1,3}:|:::)?(?:3000|8080)->') {
+            if ($publishedPorts -match '(^|,)\s*(?:\[[^\]]+\]:|(?:\d{1,3}\.){3}\d{1,3}:|:::)?3000->') {
                 $conflicts += "$containerName (project: $containerProject) : $publishedPorts"
             }
         }
         if ($conflicts.Count -gt 0) {
             Write-Host "Conflicting containers (left running; no automatic stop was attempted):" -ForegroundColor Yellow
             $conflicts | ForEach-Object { Write-Host ("  " + $_) -ForegroundColor Yellow }
-            throw "SmartPrint needs localhost ports 3000 and 8080. Resolve the listed container/port ownership safely before running QA again."
+            throw "SmartPrint needs localhost port 3000 for the portal. The API remains private behind Nginx on the Compose network. Resolve the listed port ownership safely before running QA again."
         }
         Write-Host "Ports 3000 and 8080 have no conflicting Docker container owners."
     }
