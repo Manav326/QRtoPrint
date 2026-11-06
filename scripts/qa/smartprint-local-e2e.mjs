@@ -1952,51 +1952,77 @@ try {
   });
 
   await record("DEVICE/QR: printer and station controls restore safely; QR rotation invalidates the old public code", async () => {
-    const disabledPrinter = assertHttp(await request(shop1Page, "PATCH",
-      "/api/v1/shop/printers/" + shop1Printer.id + "/active?isActive=false",
-      { token: shop1Tokens.accessToken }), 200, "Disable QA virtual printer");
-    assert.equal(disabledPrinter.isActive, false);
-    const enabledPrinter = assertHttp(await request(shop1Page, "PATCH",
-      "/api/v1/shop/printers/" + shop1Printer.id + "/active?isActive=true",
-      { token: shop1Tokens.accessToken }), 200, "Restore QA virtual printer");
-    assert.equal(enabledPrinter.isActive, true);
+    let printerNeedsRestore = false;
+    let stationNeedsRestore = false;
+    try {
+      const disabledPrinterResponse = await request(shop1Page, "PATCH",
+        "/api/v1/shop/printers/" + shop1Printer.id + "/active?isActive=false",
+        { token: shop1Tokens.accessToken });
+      if (disabledPrinterResponse.status === 200) printerNeedsRestore = true;
+      const disabledPrinter = assertHttp(disabledPrinterResponse, 200, "Disable QA virtual printer");
+      assert.equal(disabledPrinter.isActive, false);
 
-    const oldStationCode = new URL(shop1Station.publicUrl).pathname.split("/").filter(Boolean)[1];
-    const disabledStation = assertHttp(await request(shop1Page, "PATCH",
-      "/api/v1/shop/qr-stations/" + shop1Station.id + "/enabled?isEnabled=false",
-      { token: shop1Tokens.accessToken }), 200, "Disable QA QR station");
-    assert.equal(disabledStation.isEnabled, false);
+      const enabledPrinterResponse = await request(shop1Page, "PATCH",
+        "/api/v1/shop/printers/" + shop1Printer.id + "/active?isActive=true",
+        { token: shop1Tokens.accessToken });
+      if (enabledPrinterResponse.status === 200) printerNeedsRestore = false;
+      const enabledPrinter = assertHttp(enabledPrinterResponse, 200, "Restore QA virtual printer");
+      assert.equal(enabledPrinter.isActive, true);
 
-    const blockedSession = await request(page, "POST", "/api/v1/public/stations/" + oldStationCode + "/sessions");
-    assert.equal(blockedSession.status, 404, "A disabled QR station must not create new customer sessions.");
+      const oldStationCode = new URL(shop1Station.publicUrl).pathname.split("/").filter(Boolean)[1];
+      const disabledStationResponse = await request(shop1Page, "PATCH",
+        "/api/v1/shop/qr-stations/" + shop1Station.id + "/enabled?isEnabled=false",
+        { token: shop1Tokens.accessToken });
+      if (disabledStationResponse.status === 200) stationNeedsRestore = true;
+      const disabledStation = assertHttp(disabledStationResponse, 200, "Disable QA QR station");
+      assert.equal(disabledStation.isEnabled, false);
 
-    const enabledStation = assertHttp(await request(shop1Page, "PATCH",
-      "/api/v1/shop/qr-stations/" + shop1Station.id + "/enabled?isEnabled=true",
-      { token: shop1Tokens.accessToken }), 200, "Restore QA QR station");
-    assert.equal(enabledStation.isEnabled, true);
+      const blockedSession = await request(page, "POST", "/api/v1/public/stations/" + oldStationCode + "/sessions");
+      assert.equal(blockedSession.status, 404, "A disabled QR station must not create new customer sessions.");
 
-    const rotated = assertHttp(await request(shop1Page, "POST",
-      "/api/v1/shop/qr-stations/" + shop1Station.id + "/rotate-code",
-      { token: shop1Tokens.accessToken }), 200, "Rotate QA QR station public code");
-    const newStationCode = new URL(rotated.publicUrl).pathname.split("/").filter(Boolean)[1];
-    assert.ok(newStationCode && newStationCode !== oldStationCode, "QR rotation must issue a new public code.");
+      const enabledStationResponse = await request(shop1Page, "PATCH",
+        "/api/v1/shop/qr-stations/" + shop1Station.id + "/enabled?isEnabled=true",
+        { token: shop1Tokens.accessToken });
+      if (enabledStationResponse.status === 200) stationNeedsRestore = false;
+      const enabledStation = assertHttp(enabledStationResponse, 200, "Restore QA QR station");
+      assert.equal(enabledStation.isEnabled, true);
 
-    const oldCodeAfterRotation = await request(page, "POST", "/api/v1/public/stations/" + oldStationCode + "/sessions");
-    assert.equal(oldCodeAfterRotation.status, 404, "A rotated public QR code must no longer create sessions.");
+      const rotated = assertHttp(await request(shop1Page, "POST",
+        "/api/v1/shop/qr-stations/" + shop1Station.id + "/rotate-code",
+        { token: shop1Tokens.accessToken }), 200, "Rotate QA QR station public code");
+      const newStationCode = new URL(rotated.publicUrl).pathname.split("/").filter(Boolean)[1];
+      assert.ok(newStationCode && newStationCode !== oldStationCode, "QR rotation must issue a new public code.");
 
-    const newCodeSession = assertHttp(await request(page, "POST",
-      "/api/v1/public/stations/" + newStationCode + "/sessions",
-      { token: customerTokens.accessToken }), 201, "Create session from rotated QR code");
-    assert.ok(newCodeSession.id && newCodeSession.sessionToken);
-    shop1Station.publicUrl = rotated.publicUrl;
+      const oldCodeAfterRotation = await request(page, "POST", "/api/v1/public/stations/" + oldStationCode + "/sessions");
+      assert.equal(oldCodeAfterRotation.status, 404, "A rotated public QR code must no longer create sessions.");
 
-    return {
-      printerDisabledAndRestored: true,
-      stationDisabledAndRestored: true,
-      disabledCode: blockedSession.status,
-      oldCodeAfterRotation: oldCodeAfterRotation.status,
-      rotatedCodeCreatesSession: true
-    };
+      const newCodeSession = assertHttp(await request(page, "POST",
+        "/api/v1/public/stations/" + newStationCode + "/sessions",
+        { token: customerTokens.accessToken }), 201, "Create session from rotated QR code");
+      assert.ok(newCodeSession.id && newCodeSession.sessionToken);
+      shop1Station.publicUrl = rotated.publicUrl;
+
+      return {
+        printerDisabledAndRestored: true,
+        stationDisabledAndRestored: true,
+        disabledCode: blockedSession.status,
+        oldCodeAfterRotation: oldCodeAfterRotation.status,
+        rotatedCodeCreatesSession: true
+      };
+    } finally {
+      if (stationNeedsRestore) {
+        const restored = await request(shop1Page, "PATCH",
+          "/api/v1/shop/qr-stations/" + shop1Station.id + "/enabled?isEnabled=true",
+          { token: shop1Tokens.accessToken });
+        if (restored.status !== 200) throw new Error("QA cleanup could not re-enable its QR station; HTTP " + restored.status);
+      }
+      if (printerNeedsRestore) {
+        const restored = await request(shop1Page, "PATCH",
+          "/api/v1/shop/printers/" + shop1Printer.id + "/active?isActive=true",
+          { token: shop1Tokens.accessToken });
+        if (restored.status !== 200) throw new Error("QA cleanup could not re-enable its virtual printer; HTTP " + restored.status);
+      }
+    }
   }, ["DEVICE-001", "DEVICE-002", "QR-005", "QR-006", "QR-007"]);
 
   await record("Platform and shop routes remain isolated after creating real QA data", async () => {
@@ -2070,40 +2096,65 @@ try {
       });
     assert.equal(invalidTenantTransition.status, 400, "Unknown tenant states must be rejected.");
 
-    const suspended = assertHttp(await request(adminPage, "PATCH",
-      "/api/v1/platform/tenants/" + shop2TenantId + "/status",
-      {
-        token: adminTokens.accessToken,
-        body: { status: "Suspended", reason: "QA temporary suspension lifecycle test" }
-      }), 200, "Suspend QA shop two");
-    assert.equal(suspended.status, "Suspended");
+    let suspended = null;
+    let blockedShopRead = null;
+    let restored = null;
+    let duplicateActive = null;
+    let statusHistory = null;
+    let tenantRestored = false;
+    try {
+      const suspendedResponse = await request(adminPage, "PATCH",
+        "/api/v1/platform/tenants/" + shop2TenantId + "/status",
+        {
+          token: adminTokens.accessToken,
+          body: { status: "Suspended", reason: "QA temporary suspension lifecycle test" }
+        });
+      if (suspendedResponse.status === 200) {
+        const payload = suspendedResponse.body;
+        tenantRestored = payload?.status !== "Suspended";
+      }
+      suspended = assertHttp(suspendedResponse, 200, "Suspend QA shop two");
+      assert.equal(suspended.status, "Suspended");
 
-    const blockedShopRead = await request(shop2Page, "GET", "/api/v1/shop/profile", {
-      token: shop2Tokens.accessToken
-    });
-    assert.equal(blockedShopRead.status, 403, "A suspended shop must be blocked from ordinary shop API work.");
+      blockedShopRead = await request(shop2Page, "GET", "/api/v1/shop/profile", {
+        token: shop2Tokens.accessToken
+      });
+      assert.equal(blockedShopRead.status, 403, "A suspended shop must be blocked from ordinary shop API work.");
 
-    const restored = assertHttp(await request(adminPage, "PATCH",
-      "/api/v1/platform/tenants/" + shop2TenantId + "/status",
-      {
-        token: adminTokens.accessToken,
-        body: { status: "Active", reason: "QA restored shop after reversible lifecycle test" }
-      }), 200, "Restore QA shop two");
-    assert.equal(restored.status, "Active");
+      const restoredResponse = await request(adminPage, "PATCH",
+        "/api/v1/platform/tenants/" + shop2TenantId + "/status",
+        {
+          token: adminTokens.accessToken,
+          body: { status: "Active", reason: "QA restored shop after reversible lifecycle test" }
+        });
+      if (restoredResponse.status === 200) tenantRestored = true;
+      restored = assertHttp(restoredResponse, 200, "Restore QA shop two");
+      assert.equal(restored.status, "Active");
 
-    const duplicateActive = assertHttp(await request(adminPage, "PATCH",
-      "/api/v1/platform/tenants/" + shop2TenantId + "/status",
-      {
-        token: adminTokens.accessToken,
-        body: { status: "Active", reason: "QA duplicate active-state idempotency check" }
-      }), 200, "Duplicate active tenant status request");
-    assert.equal(duplicateActive.duplicateRequest, true);
+      duplicateActive = assertHttp(await request(adminPage, "PATCH",
+        "/api/v1/platform/tenants/" + shop2TenantId + "/status",
+        {
+          token: adminTokens.accessToken,
+          body: { status: "Active", reason: "QA duplicate active-state idempotency check" }
+        }), 200, "Duplicate active tenant status request");
+      assert.equal(duplicateActive.duplicateRequest, true);
 
-    const statusHistory = assertHttp(await request(adminPage, "GET",
-      "/api/v1/platform/tenants/" + shop2TenantId + "/status-history",
-      { token: adminTokens.accessToken }), 200, "QA tenant status history");
-    assert.ok(statusHistory.some(item => item.newStatus === "Suspended"));
-    assert.ok(statusHistory.some(item => item.newStatus === "Active" && /QA restored shop/.test(item.reason)));
+      statusHistory = assertHttp(await request(adminPage, "GET",
+        "/api/v1/platform/tenants/" + shop2TenantId + "/status-history",
+        { token: adminTokens.accessToken }), 200, "QA tenant status history");
+      assert.ok(statusHistory.some(item => item.newStatus === "Suspended"));
+      assert.ok(statusHistory.some(item => item.newStatus === "Active" && /QA restored shop/.test(item.reason)));
+    } finally {
+      if (!tenantRestored) {
+        const cleanup = await request(adminPage, "PATCH",
+          "/api/v1/platform/tenants/" + shop2TenantId + "/status",
+          {
+            token: adminTokens.accessToken,
+            body: { status: "Active", reason: "QA safety cleanup restored tenant to Active" }
+          });
+        if (cleanup.status !== 200) throw new Error("QA cleanup could not restore Shop Two to Active; HTTP " + cleanup.status);
+      }
+    }
 
     return {
       invalidOperationalSettings: invalidSettings.status,
