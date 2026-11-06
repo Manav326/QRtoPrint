@@ -66,7 +66,7 @@ test("plan-limited HTTPS fallback is only offered when the Agent is unavailable"
   const directUpload=api.slice(directUploadStart,directUploadEnd);
   assert.doesNotMatch(directUpload,/X-Print-Queue-Fallback/);
   assert.match(publicUploadSource,/jobCreation\.CreateAsync/);
-  assert.match(publicUploadService,/!subscription\.CloudAssistedPrintingEnabled && localAgentAvailable/);
+  assert.match(publicUploadService,/!subscription\.CloudAssistedPrintingEnabled\s*&&\s*localAgentAvailable/);
   assert.doesNotMatch(publicUploadService,/queueFallbackRequested/);
   assert.doesNotMatch(publicUploadSource,/X-Print-Queue-Fallback|queueFallbackRequested/);
   assert.doesNotMatch(api,/X-Print-Queue-Fallback|allowQueueFallback/);
@@ -989,4 +989,17 @@ test("signed-in customer order status remains scoped to a job's own customer ses
   assert.match(service, /customerSession\.CustomerUserId == customerId/);
   assert.match(service, /item\.TenantId == tenantId/);
   assert.match(service, /item\.CustomerSessionId == sessionId/);
+});
+
+ 
+test("customer upload selection is a presentational feature component wired to the parent print flow",()=>{
+ const flow=read("../src/features/customer/CustomerPrintFlow.tsx");
+ const selection=read("../src/features/customer/CustomerUploadSelection.tsx");
+ assert.match(flow,/import CustomerUploadSelection from "\.\/CustomerUploadSelection"/);
+ assert.match(flow,/<CustomerUploadSelection[\s\S]*?chooseFiles=\{chooseFiles\}[\s\S]*?removeSelectedFile=\{removeSelectedFile\}/);
+ assert.match(selection,/customer-upload-modes/);
+ assert.match(selection,/customer-folder-defaults/);
+ assert.match(selection,/customer-file-overrides/);
+ assert.match(selection,/setGroupSettings/);
+ assert.match(selection,/setFileSettings/);
 });

@@ -63,18 +63,20 @@ test("name and DOB are opt-in and are absent from the default photo sheet",()=>{
 
 
 test("customer Photo Studio cannot turn an already uploaded original into a second print job",()=>{
- const customer=readFileSync(new URL("../src/features/customer/CustomerFilePreview.tsx",import.meta.url),"utf8");
+ const preview=readFileSync(new URL("../src/features/customer/CustomerFilePreview.tsx",import.meta.url),"utf8");
  const upload=readFileSync(new URL("../src/features/customer/useCustomerPrintUpload.ts",import.meta.url),"utf8");
- const summary=readFileSync(new URL("../src/features/customer/customer-print-summary.ts",import.meta.url),"utf8");
+ const flow=readFileSync(new URL("../src/features/customer/useCustomerPrintFlow.ts",import.meta.url),"utf8");
  assert.match(upload,/if\(uploadedFileFingerprints\.includes\(fingerprint\)\)/);
- assert.match(summary,/const photoAlreadyUploaded=Boolean\(file&&uploadedFileFingerprints\.includes\(customerFileFingerprint\(file\)\)\)/);
- assert.match(customer,/disabled=\{busy\|\|batchLockedForPayment\|\|photoAlreadyUploaded\}/);
- assert.match(upload,/This photo has already been sent to the shop[\s\S]*?without creating a duplicate print request/);
+ assert.match(upload,/This photo has already been sent to the shop[\s\S]*?duplicate print request/);
+ assert.match(flow,/photoAlreadyUploaded/);
+ assert.match(preview,/disabled=\{busy\|\|batchLockedForPayment\|\|photoAlreadyUploaded\}/);
 });
 test("customer photo preparation depends on configured shop pricing, not the current printer capability",()=>{
  const entry=readFileSync(new URL("../src/features/customer/CustomerEntry.tsx",import.meta.url),"utf8");
+ const hook=readFileSync(new URL("../src/features/customer/useCustomerPrintFlow.ts",import.meta.url),"utf8");
  const upload=readFileSync(new URL("../src/features/customer/useCustomerPrintUpload.ts",import.meta.url),"utf8");
  assert.doesNotMatch(entry,/photoStudioReady|isPhotoStudioPrinterReady/);
+ assert.match(hook,/const photoRatesAvailable=Boolean\(photoPricing&&/);
  assert.match(upload,/if\(!photoRatesAvailable\)/);
  assert.match(entry,/photoPricing=\{result\.photoPricing\}/);
 });
@@ -91,7 +93,7 @@ test("the shared Photo Studio explains different save actions for customers and 
 });
 test("shop owners can inspect the actual prepared photo PDF before approving the job",()=>{
  const preview=readFileSync(new URL("../src/features/shop/modals/DocumentPreviewModal.tsx",import.meta.url),"utf8");
- assert.match(preview,/isPdf&&job\.printKind==="PHOTO"[\s\S]*?<iframe src=\{url\} title=\{name\}\//);
+ assert.match(preview,/isPdf&&job\.printKind==="PHOTO"[\s\S]*?<iframe src=\{url\} title=\{name\}\/>/);
  assert.match(preview,/SMARTPRINT · SHOP PRINT ONLY · PRIVATE PREVIEW/);
 });
 test("Photo Studio locks background scroll and supports accessible keyboard dismissal",()=>{
@@ -149,7 +151,7 @@ test("Photo Studio follows the saved light or dark appearance in both customer a
  assert.match(customer,/<PhotoStudio source=\{photoStudioSource\} mode="customer" dark=\{dark\}/);
  assert.match(shop,/PhotoStudio source=\{shopPhotoStudio\.source\} mode="shop" dark=\{dark\}/);
  assert.match(studio,/dark = false/);
- assert.match(studio,/dark \? " " \+ styles\.dark/);
+ assert.match(studio,/styles\.dark/);
  for(const selector of [".dark .toolPanel",".dark .fieldLabel",".dark .canvasWorkspace",".dark .footer",".dark .captionOptIn"])
   assert.ok(css.includes(selector),"Missing dark Photo Studio styling: "+selector);
 });

@@ -335,17 +335,15 @@ test("shop owner personal details are editable from the account menu without mix
 
 test("native customer UI follows explicit SmartPrint theme and marks selected upload mode", () => {
   const css = readStyles();
-  const customer = read("../src/features/customer/CustomerPrintFlow.tsx");
+  const selection = read("../src/features/customer/CustomerUploadSelection.tsx");
   assert.doesNotMatch(css, /@media\s*\(prefers-color-scheme:\s*dark\)/,
     "The OS dark preference must not override a saved SmartPrint light theme.");
   assert.match(css, /html\[data-theme="dark"\] \.customer-entry\.smartprint-native/);
   assert.match(css, /\.customer-entry\.smartprint-native \.customer-upload-mode\.selected/);
   assert.match(css, /customer-upload-mode\.selected::after[\s\S]*?Selected/);
-  assert.match(customer, /aria-pressed=\{uploadMode==="LOCAL"\}/);
-  assert.match(customer, /aria-pressed=\{uploadMode==="CLOUD"\}/);
+  assert.match(selection, /aria-pressed=\{uploadMode==="LOCAL"\}/);
+  assert.match(selection, /aria-pressed=\{uploadMode==="CLOUD"\}/);
 });
-
-
 test("customer print settings are preserved independently of printer capability reports", () => {
   const customer = read("../src/features/customer/CustomerPrintFlow.tsx");
   const flow = read("../src/features/customer/useCustomerPrintFlow.ts");

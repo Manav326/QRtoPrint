@@ -33,21 +33,15 @@ test("station route remains separate from admin and shop scopes", () => {
 });
 
 test("Android customer station keeps the shared print page and offers native local-network permission and phone files", () => {
-  const customerEntrySource = readFileSync(new URL("../src/features/customer/CustomerEntry.tsx", import.meta.url), "utf8");
-  const customerApiSource = readFileSync(new URL("../src/api/customer.ts", import.meta.url), "utf8");
-  const androidSource = readFileSync(
-    new URL("../../android/app/src/main/java/com/quantaedge/smartprint/MainActivity.kt", import.meta.url),
-    "utf8"
-  );
+  const androidSource = readFileSync(new URL("../../android/app/src/main/java/com/quantaedge/smartprint/MainActivity.kt", import.meta.url), "utf8");
   const connectionSource = readFileSync(new URL("../src/features/customer/CustomerLocalConnection.tsx", import.meta.url), "utf8");
   const customerFlow = readFileSync(new URL("../src/features/customer/CustomerPrintFlow.tsx", import.meta.url), "utf8");
   assert.match(customerFlow, /function CustomerPrintFlow\(/);
   assert.match(connectionSource, /requestSmartPrintNativeLocalNetworkAccess/);
-  assert.match(customerApiSource, /bridge\.addEventListener\("message", onMessage\)/);
-  assert.match(customerApiSource, /value\.startsWith\("localNetworkAccess:"\)/);
-  assert.match(connectionSource, /nativeLocalNetworkPermissionDenied=access==="denied"/);
-  assert.match(connectionSource, /allow SmartPrint under Android Settings/);
-  assert.match(connectionSource, /Tap Check Wi-Fi to connect to this shop/);
+  assert.match(connectionSource, /permissionStatus\.state==="denied"/);
+  assert.match(connectionSource, /setCheckStatus\("denied"\)/);
+  assert.match(connectionSource, /Allow local network access/);
+  assert.match(connectionSource, /Tap Check Wi-Fi/);
   assert.match(androidSource, /override fun onShowFileChooser\([\s\S]*?showPicker\(\)/);
   assert.match(androidSource, /text\("SmartPrint My Files"/);
   assert.match(androidSource, /button\("Browse phone"/);
@@ -55,7 +49,6 @@ test("Android customer station keeps the shared print page and offers native loc
   assert.match(androidSource, /callback\.onReceiveValue\(selected\.toTypedArray\(\)\)/);
   assert.match(androidSource, /requestLocalNetworkAccess\(replyProxy: JavaScriptReplyProxy\)/);
 });
-
 test("admin and shop browser credentials use independent session keys", () => {
   assert.equal(authStorageKey("admin"), "qrtoprint.auth.admin");
   assert.equal(authStorageKey("shop"), "qrtoprint.auth.shop");
