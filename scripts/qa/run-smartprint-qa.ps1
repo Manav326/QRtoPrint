@@ -318,14 +318,18 @@ try {
         throw "The shared Docker network 'cloudflare-edge' is missing. Start it from QuantaEdge-Production with .\scripts\local-ingress.ps1 up. The QA runner will not create or replace shared ingress infrastructure."
     }
 
-    $configArgs = @("compose", "--env-file", $envPath, "-f", $composeFile, "config", "--quiet")
-    $configOk = Invoke-QAStep -Name "Validate local SmartPrint Compose configuration" -LogName "compose-config.log" -Action {
+    # Pin this stack to its own namespace even when the calling shell or
+    # .env.local defines COMPOSE_PROJECT_NAME for QuantaEdge infrastructure.
+    $composeProjectName = "qrtoprint-local"
+    $composeBaseArgs = @("compose", "--project-name", $composeProjectName, "--env-file", $envPath, "-f", $composeFile)
+    $configArgs = $composeBaseArgs + @("config", "--quiet")
+    $configOk = Invoke-QAStep -Name "Validate local SmartPrint Compose configuration (project: $composeProjectName)" -LogName "compose-config.log" -Action {
         & $docker.Source @configArgs
     }
     if (-not $configOk) { throw "Local SmartPrint Compose configuration is invalid." }
 
-    $upArgs = @("compose", "--env-file", $envPath, "-f", $composeFile, "up", "-d", "--build")
-    $stackOk = Invoke-QAStep -Name "Rebuild and start current local portal, API and PostgreSQL services" -LogName "docker-compose-up.log" -Action {
+    $upArgs = $composeBaseArgs + @("up", "-d", "--build")
+    $stackOk = Invoke-QAStep -Name "Rebuild and start current local portal, API and PostgreSQL services (project: $composeProjectName)" -LogName "docker-compose-up.log" -Action {
         & $docker.Source @upArgs
     }
     if (-not $stackOk) { throw "Local SmartPrint Docker stack failed to build or start. Review logs/docker-compose-up.log." }
@@ -337,7 +341,7 @@ try {
         Start-Sleep -Seconds 2
     } while ([DateTime]::UtcNow -lt $deadline)
     if (-not $ready) {
-        $logsArgs = @("compose", "--env-file", $envPath, "-f", $composeFile, "logs", "--tail", "100", "portal", "api", "db")
+        $logsArgs = $composeBaseArgs + @("logs", "--tail", "100", "portal", "api", "db")
         & $docker.Source @logsArgs 2>&1 | Tee-Object -FilePath (Join-Path $logDirectory "docker-readiness-failure.log") | ForEach-Object { Write-Host $_ }
         throw "Local portal or API/PostgreSQL readiness did not become healthy at $target after rebuild. Review logs/docker-readiness-failure.log."
     }
@@ -350,7 +354,7 @@ try {
     $env:QRTP_PLATFORM_ADMIN_PASSWORD = Unprotect-QAPassword $accounts.admin.passwordProtected
 
     $dockerArgs = @(
-        "compose", "--env-file", $envPath, "-f", $composeFile, "exec", "-T",
+        "compose", "--project-name", $composeProjectName, "--env-file", $envPath, "-f", $composeFile, "exec", "-T",
         "-e", "QRTP_PLATFORM_ADMIN_EMAIL",
         "-e", "QRTP_PLATFORM_ADMIN_NAME",
         "-e", "QRTP_PLATFORM_ADMIN_PASSWORD",
