@@ -1364,6 +1364,22 @@ try {
     assert.equal(await decisions.nth(0).isChecked(), true);
     assert.equal(await decisions.nth(1).isChecked(), true);
 
+    // Exercise the real, read-only cloud document preview before applying decisions.
+    const previewResponse = shop1Page.waitForResponse(response =>
+      response.url().includes("/api/v1/shop/print-jobs/") &&
+      response.url().endsWith("/document") &&
+      response.status() === 200,
+      { timeout: 30000 }
+    );
+    await rows.nth(0).getByRole("button", { name: "Preview" }).click();
+    await previewResponse;
+    const previewDialog = shop1Page.getByRole("dialog", { name: /smartprint-qa-batch-a-/i });
+    await previewDialog.waitFor({ state: "visible", timeout: 15000 });
+    await previewDialog.locator(".shop-document-preview iframe").waitFor({ state: "visible", timeout: 10000 });
+    await screenshot(shop1Page, "shop-batch-real-document-preview");
+    await previewDialog.getByRole("button", { name: "Close preview" }).click();
+    await previewDialog.waitFor({ state: "detached", timeout: 10000 });
+
     await decisions.nth(1).uncheck();
     assert.equal(await decisions.nth(1).isChecked(), false, "The second file should be marked for rejection.");
     await decisions.nth(1).check();
@@ -1476,7 +1492,7 @@ try {
 
     return {
       jobNumber: job.jobNumber,
-      quoteAmountMinor: quote.quotedAmountMinor,
+      quoteAmountMinor: job.quotedAmountMinor,
       paymentMethod: payment.method,
       paymentId: payment.id,
       paymentReference: "[synthetic QA reference redacted]",
