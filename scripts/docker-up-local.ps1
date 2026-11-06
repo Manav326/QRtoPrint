@@ -117,11 +117,47 @@ Save-Utf8NoBom $envPath $lines
 & docker compose @composeBaseArgs config --quiet
 if ($LASTEXITCODE -ne 0) { throw "Local Cloudflare Compose configuration is invalid." }
 
-Write-Host "Building and starting the SmartPrint database, API and portal on the shared Cloudflare edge network..." -ForegroundColor Cyan
-& docker compose @composeBaseArgs up -d --build
+$expectedImages = @{
+    db = "postgres:17-alpine"
+    api = "localhost/smart-print/smart-print-api:local"
+    portal = "localhost/smart-print/smart-print-portal:local"
+}
+$configArgs = $composeBaseArgs + @("config", "--format", "json")
+$configOutput = & docker @configArgs
+if ($LASTEXITCODE -ne 0) { throw "Could not resolve the SmartPrint local Compose configuration." }
+$resolvedConfig = ($configOutput -join [Environment]::NewLine) | ConvertFrom-Json -ErrorAction Stop
+foreach ($serviceName in @("db", "api", "portal")) {
+    $configuredImage = [string]$resolvedConfig.services.$serviceName.image
+    if ($configuredImage -ne $expectedImages[$serviceName]) {
+        throw "Compose image mismatch for '$serviceName'. Expected '$($expectedImages[$serviceName])', found '$configuredImage'. Refusing to build or start a stale image configuration."
+    }
+    Write-Host ("Confirmed {0} image target: {1}" -f $serviceName, $configuredImage)
+}
+
+Write-Host "Building and verifying the exact SmartPrint API and portal images..." -ForegroundColor Cyan
+$buildArgs = $composeBaseArgs + @("build", "--progress", "plain", "api", "portal")
+& docker @buildArgs
 if ($LASTEXITCODE -ne 0) {
     & docker compose @composeBaseArgs logs --tail 100
-    throw "Local stack failed to build or start."
+    throw "SmartPrint API or portal image build failed."
+}
+foreach ($serviceName in @("api", "portal")) {
+    $expectedImage = $expectedImages[$serviceName]
+    $tagOutput = & docker image inspect --format '{{json .RepoTags}}' $expectedImage
+    if ($LASTEXITCODE -ne 0) { throw "The expected SmartPrint image was not created: $expectedImage" }
+    $repoTags = ($tagOutput -join "") | ConvertFrom-Json -ErrorAction Stop
+    if (@($repoTags) -notcontains $expectedImage) {
+        throw "Docker image inspection did not confirm the required tag '$expectedImage'."
+    }
+    Write-Host ("Verified built image: {0}" -f $expectedImage) -ForegroundColor Green
+}
+
+Write-Host "Starting the verified SmartPrint images and existing local PostgreSQL volume..." -ForegroundColor Cyan
+$upArgs = $composeBaseArgs + @("up", "-d", "--no-build")
+& docker @upArgs
+if ($LASTEXITCODE -ne 0) {
+    & docker compose @composeBaseArgs logs --tail 100
+    throw "The verified SmartPrint local stack failed to start."
 }
 
 $apiHealthy = $false
