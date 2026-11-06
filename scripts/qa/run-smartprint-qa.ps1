@@ -439,9 +439,13 @@ try {
         $apiProgram = Get-Content -LiteralPath $apiProgramPath -Raw
         $localCompose = Get-Content -LiteralPath $localComposePath -Raw
         $publicLandingCss = Get-Content -LiteralPath $publicLandingCssPath -Raw
-        if ($apiProgram -notmatch 'app\.MapGet\("/health/live"[\s\S]*?\}\)\.AllowAnonymous\(\);' -or
-            $localCompose -notmatch 'Cors__AllowedOrigins__2:\s*"http://127\.0\.0\.1:3000"' -or
-            $publicLandingCss -match 'fonts\.googleapis\.com|fonts\.gstatic\.com') {
+        $healthRouteStart = $apiProgram.IndexOf('app.MapGet("/health/live"')
+        $healthRouteAnonymousMarker = $apiProgram.IndexOf('})).AllowAnonymous();', $healthRouteStart)
+        $healthRouteIsAnonymous = $healthRouteStart -ge 0 -and $healthRouteAnonymousMarker -ge $healthRouteStart
+        $loopbackCorsIsAllowed = $localCompose.Contains('Cors__AllowedOrigins__2: "http://127.0.0.1:3000"')
+        $portalUsesOfflineFonts = -not $publicLandingCss.Contains("fonts.googleapis.com") -and
+            -not $publicLandingCss.Contains("fonts.gstatic.com")
+        if (-not $healthRouteIsAnonymous -or -not $loopbackCorsIsAllowed -or -not $portalUsesOfflineFonts) {
             throw "This checkout is missing the local health/CORS/offline-font fixes. No E2E browser test was started. Run 'git pull --ff-only origin main' and retry."
         }
         Write-Host "Verified source preflight: anonymous API liveness, 127.0.0.1 CORS and no external Google Fonts."
