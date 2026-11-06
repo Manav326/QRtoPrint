@@ -161,9 +161,9 @@ The suite also reads payments/refunds, verifies refund preview is blocked withou
 
 ## Expanded functional acceptance catalogue and 90% gate
 
-The local real-data Playwright runner now carries **219 uniquely identified functional acceptance cases**. Each case ID is attached to the actual E2E record that performs its assertions. At the end of a run, report.json and report.txt show planned cases, reached cases, functional case execution coverage, functional case pass rate, pass/fail counts, and any case IDs that were not reached. The pass rate is separate from execution coverage: an attempted test that fails is executed but does not pass.
+The local real-data Playwright runner now carries **219 uniquely identified functional acceptance cases**. Case IDs are grouped under E2E records. At the end of a run, report.json and report.txt show IDs mapped to attempted checks, IDs whose entire owning check completed successfully, IDs associated with failed/incomplete checks, the completion percentage, the pass rate, and IDs not mapped to a reached check.
 
-**Coverage definition:** functional test-case execution coverage = unique planned case IDs reached by the runner ÷ 219. The runner exits with a failure when this is below **90%**. A failed assertion still counts as an executed case, so coverage and pass rate are reported separately. A release-quality run should have 100% of the cases reached and 100% of executed assertions passing.
+**Coverage definition:** functional case completion coverage = case IDs belonging to records that completed all their assertions successfully ÷ 219. This is deliberately conservative: when a grouped record aborts on a failed assertion, the runner does not count every case ID attached to that record as fully completed because it cannot prove that the remaining assertions ran. The runner exits with a failure when this coverage is below **90%**; any failed record also fails the run. A release-quality run should complete all 219 cases with 100% of their assertions passing.
 
 This is **not source-code line or branch coverage**. No 90% code-coverage claim is made. Measuring line/branch coverage requires a separate instrumented Coverlet/Node coverage run and generated coverage reports; it must not be inferred from the count of functional cases.
 
