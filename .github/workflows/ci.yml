@@ -414,10 +414,6 @@ jobs:
       packages: write
     steps:
       - uses: actions/checkout@v7
-      - name: Prepare a CI-only Cloudflare Tunnel secret
-        run: |
-          mkdir -p .secrets/cloudflare
-          printf 'ci-placeholder-token' > .secrets/cloudflare/tunnel-token
       - name: Validate Docker Compose configuration
         env:
           PUBLIC_BASE_URL: https://example.invalid
@@ -480,7 +476,9 @@ jobs:
           set -euo pipefail
           project="qrtoprint-smoke-${GITHUB_RUN_ID}"
           env_file=".env.ci"
-          trap 'docker compose --project-name "$project" --env-file "$env_file" -f compose.yml logs --tail 100 || true; docker compose --project-name "$project" --env-file "$env_file" -f compose.yml down -v || true; rm -f "$env_file"' EXIT
+          trap 'docker compose --project-name "$project" --env-file "$env_file" -f compose.yml logs --tail 100 || true; docker compose --project-name "$project" --env-file "$env_file" -f compose.yml down -v || true; docker network rm cloudflare-edge || true; rm -f "$env_file"' EXIT
+
+          docker network create --driver bridge --attachable cloudflare-edge
 
           cat > "$env_file" <<EOF
           IMAGE_NAMESPACE="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}"
