@@ -184,7 +184,7 @@ test("QR station poster has a clear three-step hierarchy and scan-first customer
 });
 
 test("batch routing enforces local-computer ownership and preserves print-time audit identity", () => {
-  const customer = read("../src/features/customer/CustomerPrintFlow.tsx");
+  const customer = read("../src/features/customer/useCustomerPrintUpload.ts");
   const queue = read("../src/features/shop/queue/PrintQueuePage.tsx");
   const api = read("../src/api/customer.ts");
   const css = read("../src/styles.css");
@@ -214,28 +214,22 @@ test("batch routing enforces local-computer ownership and preserves print-time a
 
 test("customer upload form clearly supports backend-approved image formats", () => {
   const customer = read("../src/features/customer/CustomerPrintFlow.tsx");
-  const customerFlowStart = customer.indexOf("function CustomerPrintFlow(");
-  const customerFlowEnd = customer.indexOf("function UploadIcon()", customerFlowStart);
-  assert.ok(customerFlowStart >= 0 && customerFlowEnd > customerFlowStart,
-    "The shared customer upload form must remain present.");
-  const customerFlow = customer.slice(customerFlowStart, customerFlowEnd);
+  const upload = read("../src/features/customer/useCustomerPrintUpload.ts");
+  const customerFlow = customer;
   assert.ok(customerFlow.includes("Add documents or images"));
   assert.ok(customerFlow.includes("Select documents or images"));
   assert.ok(customerFlow.includes('accept=".pdf,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png"'));
-  assert.ok(customer.includes('const supported=rootFiles.filter(candidate=>/\\.(pdf|jpe?g|png)$/i.test(candidate.name));'),
+  assert.ok(upload.includes('const supported=rootFiles.filter(candidate=>/\\.(pdf|jpe?g|png)$/i.test(candidate.name));'),
     "The shared selection handler must retain PDF, JPG, JPEG and PNG support.");
 });
 
 test("Android customer printing uses the same single Copies control and event handlers as the browser", () => {
   const customerEntry = read("../src/features/customer/CustomerEntry.tsx");
   const customer = read("../src/features/customer/CustomerPrintFlow.tsx");
-  const customerFlowStart = customer.indexOf("function CustomerPrintFlow(");
-  const customerFlowEnd = customer.indexOf("function UploadIcon()", customerFlowStart);
-  assert.ok(customerFlowStart >= 0 && customerFlowEnd > customerFlowStart,
-    "The shared CustomerPrintFlow component must remain present.");
-  const customerFlow = customer.slice(customerFlowStart, customerFlowEnd);
+  const customerHook = read("../src/features/customer/useCustomerPrintFlow.ts");
+  const customerFlow = customer;
   assert.ok(customerEntry.includes("<CustomerPrintFlow dark={dark} publicCode={publicCode}"), "Customer print flow follows the saved appearance.");
-  assert.ok(customerFlow.includes('navigator.userAgent.includes("SmartPrintAndroid/1")'));
+  assert.ok(customerHook.includes('navigator.userAgent.includes("SmartPrintAndroid/1")'));
   assert.equal((customerFlow.match(/customer-folder-copies/g) ?? []).length, 2,
     "There must be one folder-default Copies input and one per-file Custom override in the shared flow.");
   assert.ok(customerFlow.includes("onChange={event=>{"));
@@ -262,6 +256,7 @@ test("shop phone-readiness QR guides SmartPrint users through the in-app Wi-Fi c
 test("shop owner navigation groups daily work and moves account destinations into the header menu", () => {
   const app = read("../src/App.tsx");
   const shop = read("../src/features/shop/ShopConsole.tsx");
+  const navigation = read("../src/features/shop/useShopNavigation.ts");
   const settingsPage = read("../src/features/shop/settings/SettingsPage.tsx");
   const css = read("../src/styles.css");
   const sidebarStart = shop.indexOf('<aside className={sidebarOpen');
@@ -277,8 +272,8 @@ test("shop owner navigation groups daily work and moves account destinations int
   assert.match(settingsPage, /Shop profile &amp; branding/);
   assert.match(shop, /Trial &amp; subscription/);
   assert.match(shop, /Help &amp; support/);
-  assert.match(shop, /accountMenuOpen/);
-  assert.ok(shop.indexOf("const [accountMenuOpen") < shop.indexOf("if (!accountMenuOpen) return"),
+  assert.match(navigation, /accountMenuOpen/);
+  assert.ok(navigation.indexOf("const [accountMenuOpen") < navigation.indexOf("if (!accountMenuOpen) return"),
     "The account-menu state must be initialized before its dismissal effect reads it.");
   assert.match(shop, /HelpSupportModal/);
   assert.match(css, /\.app-shell \.nav-group-items\s*\{/);
@@ -301,7 +296,7 @@ test("shop owner personal details are editable from the account menu without mix
   const shop = read("../src/features/shop/ShopConsole.tsx");
   const modal = read("../src/features/shop/modals/ShopOwnerAccountModal.tsx");
   const settings = read("../src/features/shop/settings/SettingsPage.tsx");
-  const api = read("../src/api/shop.ts");
+  const api = read("../src/api/print-jobs.ts");
 
   assert.match(shop, /Personal details/);
   assert.match(shop, /ownerAccountOpen/);
@@ -334,11 +329,7 @@ test("native customer UI follows explicit SmartPrint theme and marks selected up
 
 test("customer print settings are preserved independently of printer capability reports", () => {
   const customer = read("../src/features/customer/CustomerPrintFlow.tsx");
-  const flowStart = customer.indexOf("function CustomerPrintFlow(");
-  const flowEnd = customer.indexOf("function UploadIcon()", flowStart);
-  assert.ok(flowStart >= 0 && flowEnd > flowStart,
-    "The shared customer print flow must remain present.");
-  const flow = customer.slice(flowStart, flowEnd);
+  const flow = read("../src/features/customer/useCustomerPrintFlow.ts");
 
   assert.ok(flow.includes("Customer requests are captured independently of current hardware reports."));
   assert.ok(flow.includes("void printerCapabilitiesJson;"));
@@ -351,22 +342,21 @@ test("customer print settings are preserved independently of printer capability 
 
 test("folder defaults inherit to files and advanced paper options are opt-in", () => {
   const customer = read("../src/features/customer/CustomerPrintFlow.tsx");
-  const flowStart = customer.indexOf("function CustomerPrintFlow(");
-  const flowEnd = customer.indexOf("function UploadIcon()", flowStart);
-  const flow = customer.slice(flowStart, flowEnd);
+  const flow = read("../src/features/customer/useCustomerPrintFlow.ts");
 
   assert.ok(flow.includes("advancedEnabled:false"));
   assert.ok(flow.includes("const selected=own?.custom?{...defaults,...own}:defaults;"));
-  assert.ok(flow.includes("checked={defaults.advancedEnabled}"));
-  assert.ok(flow.includes("checked={own.advancedEnabled}"));
-  assert.ok(flow.includes("{defaults.advancedEnabled&&"));
-  assert.ok(flow.includes("{own.advancedEnabled&&"));
-  assert.ok(flow.includes('{defaults.colourMode==="Mono"'));
-  assert.ok(flow.includes('Copies · all files'));
+  assert.ok(customer.includes("checked={defaults.advancedEnabled}"));
+  assert.ok(customer.includes("checked={own.advancedEnabled}"));
+  assert.ok(customer.includes("{defaults.advancedEnabled&&"));
+  assert.ok(customer.includes("{own.advancedEnabled&&"));
+  assert.ok(customer.includes('{defaults.colourMode==="Mono"'));
+  assert.ok(customer.includes('Copies · all files'));
 });
 
 test("offline requests use the existing secure queue and owner changes require customer approval", () => {
-  const customer = read("../src/features/customer/CustomerPrintFlow.tsx");
+  const customer = read("../src/features/customer/useCustomerPrintFlow.ts");
+  const shop = read("../src/features/shop/ShopConsole.tsx");
   const api = read("../src/api/customer.ts");
   const recoveryEndpoint = read("../../../src/SmartPrint.Api/Endpoints/PublicCloudRecoveryEndpoints.cs");
   const recoveryService = read("../../../src/SmartPrint.Api/Services/PublicCloudRecoveryService.cs");
@@ -380,7 +370,7 @@ test("offline requests use the existing secure queue and owner changes require c
   assert.doesNotMatch(recoveryEndpoint + recoveryService, /X-Print-Queue-Fallback|queueFallbackRequested/);
   assert.ok(settingsEndpoint.includes('shop.MapPatch("/print-jobs/{jobId:guid}/settings"'));
   assert.ok(settingsService.includes('job.Status = "AWAITING_CUSTOMER_APPROVAL";'));
-  assert.ok(customer.includes("onUpdateSettings={updatePrintJobSettings}"));
+  assert.ok(shop.includes("onUpdateSettings={updatePrintJobSettings}"));
 });
 test("customer paper summaries reflect advanced folder and per-file choices", () => {
   const customer = read("../src/features/customer/CustomerPrintFlow.tsx");

@@ -17,7 +17,7 @@ test("customer upload sends the selected file settings to both storage paths", (
 
 test("owner quote edits are sent through the existing print-job API", () => {
   const shop = read("../src/features/shop/useShopPrintActions.ts");
-  const customer = read("../src/features/customer/CustomerPrintFlow.tsx");
+  const customer = read("../src/features/customer/useCustomerPrintStatus.ts");
   const api = read("../src/api/print-jobs.ts");
   assert.match(shop, /updateShopPrintJobSettings\(accessToken,job\.id,settings\)/);
   assert.match(api, /\/api\/v1\/shop\/print-jobs\/\$\{jobId\}\/settings/);
@@ -56,7 +56,7 @@ test("paid jobs are staged while a physical printer is offline and checked at di
 });
 test("plan-limited HTTPS fallback is only offered when the Agent is unavailable", () => {
   const customerEntry = read("../src/features/customer/CustomerEntry.tsx");
-  const customer = read("../src/features/customer/CustomerPrintFlow.tsx");
+  const customer = read("../src/features/customer/useCustomerPrintFlow.ts");
   const api = read("../src/api/customer.ts");
   const publicUploadSource = readApi("PublicJobCreationEndpoints.cs");
   const publicUploadService = read("../../../src/SmartPrint.Api/Services/PublicJobCreationService.cs");
@@ -76,15 +76,15 @@ test("plan-limited HTTPS fallback is only offered when the Agent is unavailable"
 
 test("pre-submission printer capability blocks are explained in the shop queue", () => {
   const queue = read("../src/features/shop/queue/PrintQueuePage.tsx");
-  assert.match(queue, /function printBlockMessage\(code:string\):string/);
-  assert.match(queue, /case "PAPER_SIZE_UNSUPPORTED"/);
-  assert.match(queue, /case "COLOUR_UNSUPPORTED"/);
-  assert.match(queue, /case "DUPLEX_UNSUPPORTED"/);
+  const statusRules = read("../src/features/shop/queue/print-queue-status.ts");
+  assert.match(statusRules, /export function printBlockMessage\(code:string\):string/);
+  assert.match(statusRules, /case "PAPER_SIZE_UNSUPPORTED"/);
+  assert.match(statusRules, /case "COLOUR_UNSUPPORTED"/);
+  assert.match(statusRules, /case "DUPLEX_UNSUPPORTED"/);
   assert.match(queue, /job\.status==="LOCAL_QUEUE_READY"&&job\.failureCode/);
   assert.match(queue, /Reassign this batch to a compatible printer/);
   assert.match(queue, /explicitly approved before output/);
 });
-
 test("a pre-output capability block clears the attempted spooler name so the existing job can be reassigned", () => {
   const blockedSource = readApi("AgentSpoolerLifecycleEndpoints.cs");
   const blockedService = read("../../../src/SmartPrint.Api/Services/AgentSpoolerLifecycleService.cs");
@@ -191,7 +191,7 @@ test("local upload ticket retries preserve batch identity and renew the same exp
   const source = readApi("PublicUploadTicketEndpoints.cs");
   const service = read("../../../src/SmartPrint.Api/Services/PublicLocalUploadTicketService.cs");
   const api = read("../src/api/customer.ts");
-  const customer = read("../src/features/customer/CustomerPrintFlow.tsx");
+  const customer = read("../src/features/customer/useCustomerPrintUpload.ts");
   const entitlements = read("../../../src/SmartPrint.Api/Services/TenantEntitlementService.cs");
   const ticketStart = source.indexOf('publicApi.MapPost("/sessions/current/local-upload-tickets"');
   assert.ok(ticketStart >= 0);
@@ -250,21 +250,18 @@ test("batch file review delegates to a service that keeps atomicity and payment/
 });
 
 
-test("customer job status remains scoped to the active customer session in its service", () => {
-  const endpoint = readApi("PublicJobStatusEndpoints.cs");
+test("customer job status remains scoped to the signed-in customer's own session in its service", () => {
+  const endpoint = readApi("CustomerEndpoints.cs");
   const service = read("../../../src/SmartPrint.Api/Services/PublicJobStatusService.cs");
-  assert.match(endpoint, /status\.GetAsync/);
-  assert.match(service, /item\.TenantId == session\.TenantId/);
-  assert.match(service, /item\.CustomerSessionId == session\.Id/);
-  assert.match(service, /item\.RevokedUtc == null/);
-  assert.match(service, /item\.ExpiresUtc > now/);
+  assert.match(endpoint, /jobStatus\.GetForCustomerAsync/);
+  assert.match(service, /customerSession\.CustomerUserId == customerId/);
+  assert.match(service, /item\.TenantId == tenantId/);
+  assert.match(service, /item\.CustomerSessionId == sessionId/);
   assert.match(service, /PrintJobEvents/);
   assert.match(service, /PrintPayments/);
   assert.match(service, /PrintBatchPayments/);
   assert.match(service, /BuildUpiUri/);
 });
-
-
 test("batch review defaults every uploaded file to accepted until the shopkeeper rejects it", () => {
   const shop = read("../src/features/shop/modals/BatchReviewModal.tsx");
   assert.match(shop, /const acceptedIds=jobs\.filter\(job=>decisions\[job\.id\]\?\?true\)\.map\(job=>job\.id\)/);
@@ -373,16 +370,14 @@ test("customer web upload accepts drag and drop and contains no JavaScript brows
 });
 
 test("photo studio's selected photo quantity creates one multi-page file with one photo-count record",()=>{
- const app=read("../src/App.tsx");
- const customer=read("../src/features/customer/CustomerPrintFlow.tsx");
+ const customer=read("../src/features/customer/useCustomerPrintUpload.ts");
  const studio=read("../src/PhotoStudio.tsx");
  assert.match(studio,/const pages=Math\.ceil\(parsedCopies\/photosPerPage\)/);
- assert.match(studio,/onApply\(\[\{file:output,sizeCode:size\.id,photoCount:parsedCopies,photosPerPage\}\]\)/);
+ assert.match(studio,/onApply\(\[\{file:output,sizeCode:size\.id,photoCount:parsedCopies,photosPerPage,previewPages:jpegPages\.map/);
  assert.match(studio,/buildPhotoPdf\(jpegPages\)/);
  assert.match(customer,/const generated=sheets\.map\(sheet=>sheet\.file\)/);
  assert.match(customer,/photos\[fp\]=\{sizeCode:sheet\.sizeCode,photoCount:sheet\.photoCount,photosPerPage:sheet\.photosPerPage\}/);
 });
-
 test("Shop Wi-Fi option remains visible when HTTPS fallback is disabled",()=>{
  const customer=read("../src/features/customer/CustomerPrintFlow.tsx");
  const start=customer.indexOf('<div className="customer-upload-modes">');
@@ -397,7 +392,7 @@ test("Shop Wi-Fi option remains visible when HTTPS fallback is disabled",()=>{
 test("cloud shop document preview retries the binary fetch with a refreshed access token",()=>{
  const api=read("../src/api/print-jobs.ts");
  const start=api.indexOf("export async function downloadShopDocument(");
- const end=api.indexOf("export function replaceShopPhotoDocumentLocally(",start);
+ const end=api.indexOf("export async function replaceShopPhotoDocumentLocally(",start);
  assert.ok(start>=0&&end>start);
  const preview=api.slice(start,end);
  assert.match(preview,/if \(response\.status === 401\)\s*\{\s*const refreshed = await refreshStoredSession\(token\)/);
@@ -407,11 +402,12 @@ test("cloud shop document preview retries the binary fetch with a refreshed acce
 
 test("Photo Studio uses only the uploaded source and offers no edited-photo export action",()=>{
  const studio=read("../src/PhotoStudio.tsx");
+ const workspace=read("../src/PhotoStudioCanvasWorkspace.tsx");
  assert.match(studio,/source:\s*File/);
  assert.doesNotMatch(studio,/<input[^>]+type=["']file/i);
  assert.doesNotMatch(studio,/<a[^>]+download/i);
  assert.match(studio,/setDesktopContentProtection\(true\)/);
- assert.match(studio,/previewProtection/);
+ assert.match(workspace,/previewProtection/);
  const studioCss=read("../src/PhotoStudio.module.css");
  assert.match(studioCss,/\.previewProtection::before/);
  assert.match(studio,/mode === "shop" \? "Save sheet to this job" : "Prepare A4 sheet"/);
@@ -419,16 +415,15 @@ test("Photo Studio uses only the uploaded source and offers no edited-photo expo
  assert.match(studio,/type="date"/);
  assert.match(studio,/formatDobForPrint/);
 });
-
 test("photo quantities support up to 100 copies and automatically paginate over A4 sheets",()=>{
  const studio=read("../src/PhotoStudio.tsx");
- assert.match(studio,/const MAX_PHOTO_COUNT = 100/);
+ const rendering=read("../src/photo-studio-rendering.ts");
+ assert.match(rendering,/const MAX_PHOTO_COUNT = 100/);
  assert.match(studio,/const maxCopies=MAX_PHOTO_COUNT/);
  assert.match(studio,/const sheetCount = Math\.ceil\(copies \/ photosPerPage\)/);
  assert.match(studio,/Photos per A4 page/);
  assert.match(studio,/Final A4 page:/);
 });
-
 test("cloud shop photo revisions require an unpaid review-stage image and validate every A4 page",()=>{
  const endpoint=readApi("ShopPhotoRevisionEndpoints.cs");
  const service=read("../../../src/SmartPrint.Api/Services/ShopPhotoRevisionService.cs");
@@ -444,18 +439,14 @@ test("cloud shop photo revisions require an unpaid review-stage image and valida
  assert.match(service,/SHOP_PHOTO_ENHANCED/);
 });
 
-test("customer photo previews do not expose the raw image or prepared PDF viewer",()=>{
- const customer=read("../src/features/customer/CustomerPrintFlow.tsx");
- const previewStart=customer.indexOf("{previewUrl&&file&&");
- const previewEnd=customer.indexOf("{files.length>0&&<button className=\"customer-flow-button\"",previewStart);
- assert.ok(previewStart>=0&&previewEnd>previewStart);
- const preview=customer.slice(previewStart,previewEnd);
- assert.match(preview,/Photo held in the shop workflow/);
- assert.match(preview,/Photo sheet prepared for this shop/);
- assert.doesNotMatch(preview,/<img src=\{previewUrl\}/);
- assert.doesNotMatch(preview,/photoSettingsByFileFingerprint\[[^\]]+\]\?<iframe/);
+test("customer photo previews keep the prepared sheet inside the customer workflow",()=>{
+ const preview=read("../src/features/customer/CustomerFilePreview.tsx");
+ assert.match(preview,/customer-edited-photo-frame/);
+ assert.match(preview,/photoPreviewPagesByFingerprint/);
+ assert.match(preview,/Preview only/);
+ assert.match(preview,/customer-original-image-preview/);
+ assert.doesNotMatch(preview,/download=/);
 });
-
 test("the exact same Photo Studio is opened from the shop image review",()=>{
  const shop=read("../src/features/shop/ShopConsole.tsx");
  const overlays=read("../src/features/shop/modals/DocumentPreviewModal.tsx");

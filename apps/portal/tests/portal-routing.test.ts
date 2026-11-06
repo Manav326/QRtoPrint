@@ -34,6 +34,7 @@ test("station route remains separate from admin and shop scopes", () => {
 
 test("Android customer station keeps the shared print page and offers native local-network permission and phone files", () => {
   const customerEntrySource = readFileSync(new URL("../src/features/customer/CustomerEntry.tsx", import.meta.url), "utf8");
+  const customerApiSource = readFileSync(new URL("../src/api/customer.ts", import.meta.url), "utf8");
   const androidSource = readFileSync(
     new URL("../../android/app/src/main/java/com/quantaedge/smartprint/MainActivity.kt", import.meta.url),
     "utf8"
@@ -42,8 +43,8 @@ test("Android customer station keeps the shared print page and offers native loc
   const customerFlow = readFileSync(new URL("../src/features/customer/CustomerPrintFlow.tsx", import.meta.url), "utf8");
   assert.match(customerFlow, /function CustomerPrintFlow\(/);
   assert.match(connectionSource, /requestSmartPrintNativeLocalNetworkAccess/);
-  assert.match(customerEntrySource, /bridge\.addEventListener\("message",handleReply\)/);
-  assert.match(customerEntrySource, /value\.startsWith\("localNetworkAccess:"\)/);
+  assert.match(customerApiSource, /bridge\.addEventListener\("message", onMessage\)/);
+  assert.match(customerApiSource, /value\.startsWith\("localNetworkAccess:"\)/);
   assert.match(customerEntrySource, /nativeLocalNetworkPermissionDenied=access==="denied"/);
   assert.match(connectionSource, /allow SmartPrint under Android Settings/);
   assert.match(connectionSource, /Tap Check Wi-Fi to connect to this shop/);
