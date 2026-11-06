@@ -10,6 +10,30 @@ $composeProjectName = "qrtoprint-local"
 $composeBaseArgs = @("--project-name", $composeProjectName, "--env-file", $envPath, "-f", $composeFile)
 $exampleEnvPath = Join-Path $repoRoot ".env.example"
 
+function Assert-SmartPrintWorkspaceBuildIdentity {
+    $rootManifestPath = Join-Path $repoRoot "package.json"
+    $portalManifestPath = Join-Path $repoRoot "apps/portal/package.json"
+    $desktopManifestPath = Join-Path $repoRoot "apps/desktop/package.json"
+    $portalDockerfilePath = Join-Path $repoRoot "apps/portal/Dockerfile"
+    foreach ($requiredPath in @($rootManifestPath, $portalManifestPath, $desktopManifestPath, $portalDockerfilePath)) {
+        if (-not (Test-Path -LiteralPath $requiredPath -PathType Leaf)) {
+            throw "Required SmartPrint workspace identity file is missing: $requiredPath"
+        }
+    }
+
+    $rootManifest = Get-Content -LiteralPath $rootManifestPath -Raw | ConvertFrom-Json -ErrorAction Stop
+    $portalManifest = Get-Content -LiteralPath $portalManifestPath -Raw | ConvertFrom-Json -ErrorAction Stop
+    $desktopManifest = Get-Content -LiteralPath $desktopManifestPath -Raw | ConvertFrom-Json -ErrorAction Stop
+    $portalDockerfile = Get-Content -LiteralPath $portalDockerfilePath -Raw
+    if ($rootManifest.name -ne "smart-print" -or
+        $portalManifest.name -ne "@smart-print/portal" -or
+        $desktopManifest.name -ne "@smart-print/desktop" -or
+        $portalDockerfile -notmatch 'pnpm --filter @smart-print/portal build') {
+        throw "The checkout still contains an old workspace/package identity. Expected smart-print, @smart-print/portal, @smart-print/desktop, and the matching portal Docker build filter. Pull the current main branch before building."
+    }
+    Write-Host "Verified workspace identity: smart-print / @smart-print/portal / @smart-print/desktop."
+}
+
 function New-RandomHex([int]$Length) {
     $bytes = New-Object byte[] $Length
     $rng = [Security.Cryptography.RandomNumberGenerator]::Create()
@@ -116,6 +140,8 @@ Save-Utf8NoBom $envPath $lines
 
 & docker compose @composeBaseArgs config --quiet
 if ($LASTEXITCODE -ne 0) { throw "Local Cloudflare Compose configuration is invalid." }
+
+Assert-SmartPrintWorkspaceBuildIdentity
 
 $expectedImages = @{
     db = "postgres:17-alpine"
