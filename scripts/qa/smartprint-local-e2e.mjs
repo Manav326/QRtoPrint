@@ -94,7 +94,7 @@ let paymentRejectedBatchId;
 let paymentRejectedBatchPaymentId;
 let qaPlanVersionId;
 
-async function record(name, action) {
+async function record(name, action, caseIds = []) {
   const started = Date.now();
   try {
     const details = await action();
@@ -103,6 +103,7 @@ async function record(name, action) {
     report.checks.push({
       id: "SP-LOCAL-" + String(report.checks.length + 1).padStart(3, "0"),
       name,
+      caseIds,
       status,
       durationMs: Date.now() - started,
       details: details ?? null
@@ -114,6 +115,7 @@ async function record(name, action) {
     report.checks.push({
       id: "SP-LOCAL-" + String(report.checks.length + 1).padStart(3, "0"),
       name,
+      caseIds,
       status: "FAIL",
       durationMs: Date.now() - started,
       error: message
@@ -952,6 +954,83 @@ try {
     return { account: "local platform admin", tenantCount: overview.tenantCount };
   });
 
+  await record("AUTH: registration validation, role boundaries, refresh rotation and logout revocation", async () => {
+    const invalidShopRegistration = await request(shop1Page, "POST", "/api/v1/auth/register-shop", {
+      body: { businessName: "", ownerName: "", email: "not-an-email", password: "invalid" }
+    });
+    assert.equal(invalidShopRegistration.status, 400, "Invalid shop registration data must be rejected.");
+
+    const duplicateShopRegistration = await request(shop1Page, "POST", "/api/v1/auth/register-shop", {
+      body: {
+        businessName: process.env.SMARTPRINT_QA_SHOP1_NAME,
+        ownerName: "SmartPrint QA Owner One",
+        email: process.env.SMARTPRINT_QA_SHOP1_EMAIL,
+        password: process.env.SMARTPRINT_QA_SHOP1_PASSWORD
+      }
+    });
+    assert.equal(duplicateShopRegistration.status, 409, "A duplicate shop email must not create a second tenant.");
+
+    const duplicateCustomerRegistration = await request(page, "POST", "/api/v1/auth/register-customer", {
+      body: {
+        displayName: process.env.SMARTPRINT_QA_CUSTOMER_NAME,
+        email: process.env.SMARTPRINT_QA_CUSTOMER_EMAIL,
+        password: process.env.SMARTPRINT_QA_CUSTOMER_PASSWORD
+      }
+    });
+    assert.equal(duplicateCustomerRegistration.status, 409, "A duplicate global customer email must be rejected.");
+
+    const customerThroughShopLogin = await request(page, "POST", "/api/v1/auth/login", {
+      body: { email: process.env.SMARTPRINT_QA_CUSTOMER_EMAIL, password: process.env.SMARTPRINT_QA_CUSTOMER_PASSWORD }
+    });
+    assert.equal(customerThroughShopLogin.status, 401, "A global customer must not authenticate as a shop owner.");
+
+    const shopThroughCustomerLogin = await request(page, "POST", "/api/v1/auth/customer-login", {
+      body: { email: process.env.SMARTPRINT_QA_SHOP2_EMAIL, password: process.env.SMARTPRINT_QA_SHOP2_PASSWORD }
+    });
+    assert.equal(shopThroughCustomerLogin.status, 401, "A shop owner must not authenticate as a global customer.");
+
+    const anonymousShopProfile = await request(page, "GET", "/api/v1/shop/profile");
+    const anonymousPlatformOverview = await request(page, "GET", "/api/v1/platform/overview");
+    assert.equal(anonymousShopProfile.status, 401, "Shop profile must require an access token.");
+    assert.equal(anonymousPlatformOverview.status, 401, "Platform administration must require an access token.");
+
+    const login = assertHttp(await request(shop2Page, "POST", "/api/v1/auth/login", {
+      body: { email: process.env.SMARTPRINT_QA_SHOP2_EMAIL, password: process.env.SMARTPRINT_QA_SHOP2_PASSWORD }
+    }), 200, "Independent shop token lifecycle login");
+    const rotated = assertHttp(await request(shop2Page, "POST", "/api/v1/auth/refresh", {
+      body: { refreshToken: login.refreshToken }
+    }), 200, "Refresh token rotation");
+    assert.ok(rotated.accessToken && rotated.refreshToken);
+    assert.notEqual(rotated.refreshToken, login.refreshToken, "Refresh must rotate the refresh token.");
+
+    const replay = await request(shop2Page, "POST", "/api/v1/auth/refresh", {
+      body: { refreshToken: login.refreshToken }
+    });
+    assert.equal(replay.status, 401, "A previously rotated refresh token must not be reusable.");
+
+    const logout = await request(shop2Page, "POST", "/api/v1/auth/logout", {
+      body: { refreshToken: rotated.refreshToken }
+    });
+    assert.equal(logout.status, 204, "Logout should revoke the active refresh token.");
+
+    const refreshAfterLogout = await request(shop2Page, "POST", "/api/v1/auth/refresh", {
+      body: { refreshToken: rotated.refreshToken }
+    });
+    assert.equal(refreshAfterLogout.status, 401, "A logged-out refresh token must not be reusable.");
+
+    return {
+      invalidRegistration: invalidShopRegistration.status,
+      duplicateShop: duplicateShopRegistration.status,
+      duplicateCustomer: duplicateCustomerRegistration.status,
+      crossRoleLogin: [customerThroughShopLogin.status, shopThroughCustomerLogin.status],
+      anonymousProtectedRoutes: [anonymousShopProfile.status, anonymousPlatformOverview.status],
+      refreshRotated: true,
+      oldRefreshReplay: replay.status,
+      logoutStatus: logout.status,
+      refreshAfterLogout: refreshAfterLogout.status
+    };
+  }, ["AUTH-001", "AUTH-002", "AUTH-003", "AUTH-004", "AUTH-005", "AUTH-006", "AUTH-007", "AUTH-008"]);
+
   await record("Create and publish a free QA-only plan, then assign it through the platform UI", async () => {
     const plan = await ensureQaPlanThroughPlatformUi(adminPage, adminTokens.accessToken);
     const one = await assignQaPlanThroughPlatformUi(
@@ -1037,6 +1116,112 @@ try {
       stationEnabled: shop2Station.isEnabled
     };
   });
+
+  await record("SHOP: invalid device, printer, profile, account and pricing inputs fail without changing saved settings", async () => {
+    const pricingBefore = assertHttp(await request(shop1Page, "GET", "/api/v1/shop/pricing", {
+      token: shop1Tokens.accessToken
+    }), 200, "Shop one pricing before validation");
+    const printerCountBefore = assertHttp(await request(shop1Page, "GET", "/api/v1/shop/printers", {
+      token: shop1Tokens.accessToken
+    }), 200, "Shop one printers before validation").length;
+    const stationCountBefore = assertHttp(await request(shop1Page, "GET", "/api/v1/shop/qr-stations", {
+      token: shop1Tokens.accessToken
+    }), 200, "Shop one stations before validation").length;
+
+    const commonPricing = {
+      monoPerSideMinor: pricingBefore.monoPerSideMinor,
+      colourPerSideMinor: pricingBefore.colourPerSideMinor,
+      monoDuplexPerSheetMinor: pricingBefore.monoDuplexPerSheetMinor,
+      colourDuplexPerSheetMinor: pricingBefore.colourDuplexPerSheetMinor,
+      minimumChargeMinor: pricingBefore.minimumChargeMinor,
+      photo35x45Minor: pricingBefore.photo35x45Minor,
+      photo25x35Minor: pricingBefore.photo25x35Minor,
+      photo2x2Minor: pricingBefore.photo2x2Minor,
+      photo4x6Minor: pricingBefore.photo4x6Minor
+    };
+    const negativeRate = await request(shop1Page, "PUT", "/api/v1/shop/pricing", {
+      token: shop1Tokens.accessToken,
+      body: { ...commonPricing, monoPerSideMinor: -1 }
+    });
+    assert.equal(negativeRate.status, 400, "Negative print rates must be rejected.");
+
+    const zeroBaseRate = await request(shop1Page, "PUT", "/api/v1/shop/pricing", {
+      token: shop1Tokens.accessToken,
+      body: { ...commonPricing, monoPerSideMinor: 0 }
+    });
+    assert.equal(zeroBaseRate.status, 400, "A zero mono base rate must be rejected.");
+
+    const invalidCapabilities = await request(shop1Page, "POST", "/api/v1/shop/printers", {
+      token: shop1Tokens.accessToken,
+      body: {
+        displayName: "QA invalid capabilities printer",
+        manufacturer: "Test",
+        model: "Validation only",
+        connectionType: "WindowsQueue",
+        queueName: "INVALID_QA_QUEUE",
+        capabilitiesJson: "[]"
+      }
+    });
+    assert.equal(invalidCapabilities.status, 400, "Printer capabilities must be a JSON object, not an array.");
+
+    const unsupportedConnection = await request(shop1Page, "POST", "/api/v1/shop/printers", {
+      token: shop1Tokens.accessToken,
+      body: {
+        displayName: "QA unsupported connection printer",
+        manufacturer: "Test",
+        model: "Validation only",
+        connectionType: "Bluetooth",
+        queueName: null,
+        capabilitiesJson: "{}"
+      }
+    });
+    assert.equal(unsupportedConnection.status, 400, "Unsupported printer connection types must be rejected.");
+
+    const foreignPrinterStation = await request(shop1Page, "POST", "/api/v1/shop/qr-stations", {
+      token: shop1Tokens.accessToken,
+      body: { displayName: "QA must not bind foreign printer", printerDeviceId: shop2Printer.id }
+    });
+    assert.equal(foreignPrinterStation.status, 400, "A station must not be attached to another shop's printer.");
+
+    const currentProfile = assertHttp(await request(shop1Page, "GET", "/api/v1/shop/profile", {
+      token: shop1Tokens.accessToken
+    }), 200, "Shop profile before validation");
+    const insecureLogo = await request(shop1Page, "PUT", "/api/v1/shop/profile", {
+      token: shop1Tokens.accessToken,
+      body: {
+        displayName: currentProfile.displayName,
+        accentColor: "#123456",
+        logoUrl: "http://example.invalid/logo.png"
+      }
+    });
+    assert.equal(insecureLogo.status, 400, "Shop branding must reject non-HTTPS logo URLs.");
+
+    const invalidAccount = await request(shop1Page, "PUT", "/api/v1/shop/account", {
+      token: shop1Tokens.accessToken,
+      body: { ownerName: "SmartPrint QA Owner One", email: "invalid-email", currentPassword: null }
+    });
+    assert.equal(invalidAccount.status, 400, "Owner account changes must reject invalid email addresses.");
+
+    const pricingAfter = assertHttp(await request(shop1Page, "GET", "/api/v1/shop/pricing", {
+      token: shop1Tokens.accessToken
+    }), 200, "Shop one pricing after validation");
+    const printersAfter = assertHttp(await request(shop1Page, "GET", "/api/v1/shop/printers", {
+      token: shop1Tokens.accessToken
+    }), 200, "Shop one printers after validation");
+    const stationsAfter = assertHttp(await request(shop1Page, "GET", "/api/v1/shop/qr-stations", {
+      token: shop1Tokens.accessToken
+    }), 200, "Shop one stations after validation");
+    assert.equal(pricingAfter.version, pricingBefore.version, "Rejected pricing input must not increment the rate-card version.");
+    assert.equal(printersAfter.length, printerCountBefore, "Rejected printer inputs must not create records.");
+    assert.equal(stationsAfter.length, stationCountBefore, "Rejected station inputs must not create records.");
+
+    return {
+      rejectedInputs: [negativeRate.status, zeroBaseRate.status, invalidCapabilities.status, unsupportedConnection.status, foreignPrinterStation.status, insecureLogo.status, invalidAccount.status],
+      rateCardVersionUnchanged: true,
+      printerCountUnchanged: true,
+      stationCountUnchanged: true
+    };
+  }, ["SHOP-001", "SHOP-002", "SHOP-003", "SHOP-004", "SHOP-005", "SHOP-006", "SHOP-007", "SHOP-008"]);
 
   await record("Shop one navigates every real sidebar section and the account-menu-only tools", async () => {
     const sections = [
@@ -1164,6 +1349,72 @@ try {
     customerSession = { sessionToken, publicCode, stationPath, id: session.id, shopName: session.shop.displayName };
     return { stationPath: "[local QA station path]", sessionId: session.id, shopName: session.shop.displayName, customerBound: true, expiresUtc: session.expiresUtc };
   });
+
+  await record("QR/UPLOAD: session renewal, scoped resume and invalid local-upload metadata are safely rejected", async () => {
+    const anonymousCurrent = await request(customerPage, "GET", "/api/v1/public/sessions/current");
+    assert.equal(anonymousCurrent.status, 401, "A customer session must not be readable without its opaque session token.");
+
+    const renewed = assertHttp(await request(customerPage, "POST", "/api/v1/public/sessions/current/renew", {
+      token: customerTokens.accessToken,
+      sessionToken: customerSession.sessionToken
+    }), 200, "Renew current QR session");
+    assert.ok(renewed.expiresUtc, "Session renewal must return an expiry.");
+
+    const resumed = assertHttp(await request(customerPage, "POST", "/api/v1/public/sessions/current/resume", {
+      token: customerTokens.accessToken,
+      sessionToken: customerSession.sessionToken,
+      body: { publicCode: customerSession.publicCode }
+    }), 200, "Resume current QR station session");
+    assert.equal(resumed.id, customerSession.id, "Resume must return the original session, not create another session.");
+
+    const shopTwoCode = new URL(shop2Station.publicUrl).pathname.split("/").filter(Boolean)[1];
+    const crossStationResume = await request(customerPage, "POST", "/api/v1/public/sessions/current/resume", {
+      token: customerTokens.accessToken,
+      sessionToken: customerSession.sessionToken,
+      body: { publicCode: shopTwoCode }
+    });
+    assert.equal(crossStationResume.status, 401, "A customer session must not be rebound to another shop's station.");
+
+    const invalidDigest = await request(customerPage, "POST", "/api/v1/public/sessions/current/local-upload-tickets", {
+      sessionToken: customerSession.sessionToken,
+      headers: { "Idempotency-Key": crypto.randomUUID() },
+      body: {
+        originalFileName: "smartprint-invalid-local-ticket.pdf",
+        sizeBytes: 1024,
+        sha256: "not-a-sha256-digest",
+        grantToken: "g".repeat(48),
+        colourMode: "Mono",
+        paperSize: "A4",
+        copies: 1,
+        orientation: "AUTO"
+      }
+    });
+    assert.equal(invalidDigest.status, 422, "A local upload ticket with an invalid SHA-256 digest must be rejected.");
+
+    const unsupportedExtension = await request(customerPage, "POST", "/api/v1/public/sessions/current/local-upload-tickets", {
+      sessionToken: customerSession.sessionToken,
+      headers: { "Idempotency-Key": crypto.randomUUID() },
+      body: {
+        originalFileName: "smartprint-invalid-local-ticket.exe",
+        sizeBytes: 1024,
+        sha256: "a".repeat(64),
+        grantToken: "g".repeat(48),
+        colourMode: "Mono",
+        paperSize: "A4",
+        copies: 1,
+        orientation: "AUTO"
+      }
+    });
+    assert.equal(unsupportedExtension.status, 422, "Local upload must reject unsupported file extensions.");
+
+    return {
+      sessionRenewed: true,
+      resumedSameSession: true,
+      crossTenantResume: crossStationResume.status,
+      invalidDigest: invalidDigest.status,
+      unsupportedExtension: unsupportedExtension.status
+    };
+  }, ["QR-001", "QR-002", "QR-003", "QR-004", "UPLOAD-001", "UPLOAD-002"]);
 
   await record("Customer QR session is linked to the global customer account", async () => {
     const jobs = assertHttp(await request(customerPage, "GET", "/api/v1/customer/jobs", {
@@ -1527,6 +1778,77 @@ try {
     };
   });
 
+  await record("JOB/PAYMENT/REFUND: rejected and unpaid files cannot be approved, dispatched, verified or refunded", async () => {
+    const verifyRejectedPayment = await request(shop1Page, "POST",
+      "/api/v1/shop/payments/" + paymentRejectedBatchPaymentId + "/verify",
+      { token: shop1Tokens.accessToken });
+    assert.equal(verifyRejectedPayment.status, 409, "A rejected UPI report must never be marked as received.");
+
+    const approveRejectedJob = await request(shop1Page, "POST",
+      "/api/v1/shop/print-jobs/" + uploadedJob.id + "/approve",
+      { token: shop1Tokens.accessToken });
+    assert.equal(approveRejectedJob.status, 409, "A rejected file cannot be approved for printing.");
+
+    const dispatchRejectedJob = await request(shop1Page, "POST",
+      "/api/v1/shop/print-jobs/" + uploadedJob.id + "/dispatch",
+      { token: shop1Tokens.accessToken });
+    assert.equal(dispatchRejectedJob.status, 409, "A rejected file cannot be dispatched to a printer.");
+
+    const refundPreview = await request(shop1Page, "POST",
+      "/api/v1/shop/print-jobs/" + paymentRejectedJob.id + "/refund-preview",
+      {
+        token: shop1Tokens.accessToken,
+        body: { rejectedPageNumbers: [1] }
+      });
+    assert.equal(refundPreview.status, 409, "A payment-rejected file has no verified payment to refund.");
+
+    const refundNotConfirmed = await request(shop1Page, "POST",
+      "/api/v1/shop/print-jobs/" + paymentRejectedJob.id + "/refund",
+      {
+        token: shop1Tokens.accessToken,
+        body: {
+          reason: "QA must not claim a refund was sent",
+          refundMethod: "UPI",
+          refundReference: "QA-NOT-SENT",
+          idempotencyKey: "qa-not-sent-" + crypto.randomUUID(),
+          confirmedSent: false,
+          rejectedPageNumbers: [1]
+        }
+      });
+    assert.equal(refundNotConfirmed.status, 400, "The system must require explicit confirmation that a refund was actually sent.");
+
+    const events = assertHttp(await request(shop1Page, "GET",
+      "/api/v1/shop/print-jobs/" + paymentRejectedJob.id + "/events",
+      { token: shop1Tokens.accessToken }), 200, "Rejected payment job event history");
+    assert.ok(Array.isArray(events) && events.some(item => item.newStatus === "PAYMENT_REJECTED"),
+      "The job audit history must preserve the payment rejection.");
+
+    const customerStatus = assertHttp(await request(batchCustomerPage, "GET",
+      "/api/v1/public/jobs/" + paymentRejectedJob.id + "/status",
+      { sessionToken: batchCustomerSession.sessionToken }), 200, "Customer payment-rejected job status");
+    assert.equal(customerStatus.job.status, "PAYMENT_REJECTED");
+    assert.equal(customerStatus.payment?.status, "REJECTED");
+
+    const refunds = assertHttp(await request(shop1Page, "GET", "/api/v1/shop/refunds", {
+      token: shop1Tokens.accessToken
+    }), 200, "Shop refunds after rejected/unpaid guard tests");
+    assert.ok(Array.isArray(refunds));
+
+    return {
+      rejectedPaymentVerification: verifyRejectedPayment.status,
+      rejectedApproval: approveRejectedJob.status,
+      rejectedDispatch: dispatchRejectedJob.status,
+      refundPreviewWithoutVerifiedPayment: refundPreview.status,
+      refundWithoutSentConfirmation: refundNotConfirmed.status,
+      auditEventsPreserved: true,
+      customerSeesPaymentRejected: true,
+      refundRecords: refunds.length,
+      moneyMarkedReceived: false,
+      refundRecordedAsSent: false,
+      printerDispatches: false
+    };
+  }, ["JOB-001", "JOB-002", "JOB-003", "PAY-001", "REFUND-001", "REFUND-002", "SEC-001"]);
+
   await record("Agent and printer prerequisites are visible; dispatch without a paired QA Agent is safely blocked", async () => {
     const agents = assertHttp(await request(shop1Page, "GET", "/api/v1/shop/agent-devices", {
       token: shop1Tokens.accessToken
@@ -1550,6 +1872,54 @@ try {
     return { codeCreated: true, expiresUtc: enrollment.expiresUtc, paired: false, existingAgentIdentityChanged: false };
   });
 
+  await record("DEVICE/QR: printer and station controls restore safely; QR rotation invalidates the old public code", async () => {
+    const disabledPrinter = assertHttp(await request(shop1Page, "PATCH",
+      "/api/v1/shop/printers/" + shop1Printer.id + "/active?isActive=false",
+      { token: shop1Tokens.accessToken }), 200, "Disable QA virtual printer");
+    assert.equal(disabledPrinter.isActive, false);
+    const enabledPrinter = assertHttp(await request(shop1Page, "PATCH",
+      "/api/v1/shop/printers/" + shop1Printer.id + "/active?isActive=true",
+      { token: shop1Tokens.accessToken }), 200, "Restore QA virtual printer");
+    assert.equal(enabledPrinter.isActive, true);
+
+    const oldStationCode = new URL(shop1Station.publicUrl).pathname.split("/").filter(Boolean)[1];
+    const disabledStation = assertHttp(await request(shop1Page, "PATCH",
+      "/api/v1/shop/qr-stations/" + shop1Station.id + "/enabled?isEnabled=false",
+      { token: shop1Tokens.accessToken }), 200, "Disable QA QR station");
+    assert.equal(disabledStation.isEnabled, false);
+
+    const blockedSession = await request(page, "POST", "/api/v1/public/stations/" + oldStationCode + "/sessions");
+    assert.equal(blockedSession.status, 404, "A disabled QR station must not create new customer sessions.");
+
+    const enabledStation = assertHttp(await request(shop1Page, "PATCH",
+      "/api/v1/shop/qr-stations/" + shop1Station.id + "/enabled?isEnabled=true",
+      { token: shop1Tokens.accessToken }), 200, "Restore QA QR station");
+    assert.equal(enabledStation.isEnabled, true);
+
+    const rotated = assertHttp(await request(shop1Page, "POST",
+      "/api/v1/shop/qr-stations/" + shop1Station.id + "/rotate-code",
+      { token: shop1Tokens.accessToken }), 200, "Rotate QA QR station public code");
+    const newStationCode = new URL(rotated.publicUrl).pathname.split("/").filter(Boolean)[1];
+    assert.ok(newStationCode && newStationCode !== oldStationCode, "QR rotation must issue a new public code.");
+
+    const oldCodeAfterRotation = await request(page, "POST", "/api/v1/public/stations/" + oldStationCode + "/sessions");
+    assert.equal(oldCodeAfterRotation.status, 404, "A rotated public QR code must no longer create sessions.");
+
+    const newCodeSession = assertHttp(await request(page, "POST",
+      "/api/v1/public/stations/" + newStationCode + "/sessions",
+      { token: customerTokens.accessToken }), 201, "Create session from rotated QR code");
+    assert.ok(newCodeSession.id && newCodeSession.sessionToken);
+    shop1Station.publicUrl = rotated.publicUrl;
+
+    return {
+      printerDisabledAndRestored: true,
+      stationDisabledAndRestored: true,
+      disabledCode: blockedSession.status,
+      oldCodeAfterRotation: oldCodeAfterRotation.status,
+      rotatedCodeCreatesSession: true
+    };
+  }, ["DEVICE-001", "DEVICE-002", "QR-005", "QR-006", "QR-007"]);
+
   await record("Platform and shop routes remain isolated after creating real QA data", async () => {
     const crossTenant = await request(shop2Page, "GET",
       "/api/v1/shop/print-jobs/" + uploadedJob.id + "/events",
@@ -1561,6 +1931,112 @@ try {
     assert.ok(shopOneTenantList.items.some(item => item.id === shop1TenantId));
     return { crossTenantJobEvents: crossTenant.status, adminCanFindQaTenant: true };
   });
+
+  await record("PLATFORM: operational settings validate, audit no-op saves, and tenant suspension is reversible", async () => {
+    const settings = assertHttp(await request(adminPage, "GET", "/api/v1/platform/settings/operations", {
+      token: adminTokens.accessToken
+    }), 200, "Platform settings before QA update");
+    const invalidSettings = await request(adminPage, "PUT", "/api/v1/platform/settings/operations", {
+      token: adminTokens.accessToken,
+      body: {
+        trialMaxMonthlyPrintJobs: 0,
+        cloudCompletedDocumentRetentionDays: settings.cloudCompletedDocumentRetentionDays,
+        agentCompletedDocumentRetentionDays: settings.agentCompletedDocumentRetentionDays,
+        abandonedDocumentRetentionDays: settings.abandonedDocumentRetentionDays,
+        pendingLocalUploadRetentionDays: settings.pendingLocalUploadRetentionDays,
+        expiredUploadTicketRetentionDays: settings.expiredUploadTicketRetentionDays,
+        emptyCustomerSessionRetentionDays: settings.emptyCustomerSessionRetentionDays,
+        staleRefreshTokenRetentionDays: settings.staleRefreshTokenRetentionDays,
+        apiRetentionSweepHours: settings.apiRetentionSweepHours,
+        agentRetentionSweepHours: settings.agentRetentionSweepHours,
+        allowPaidJobClaimsWhenSuspended: settings.allowPaidJobClaimsWhenSuspended,
+        reason: "QA invalid boundary"
+      }
+    });
+    assert.equal(invalidSettings.status, 400, "Platform operational settings must reject out-of-range quotas.");
+
+    const noOpUpdatePayload = {
+      trialMaxMonthlyPrintJobs: settings.trialMaxMonthlyPrintJobs,
+      cloudCompletedDocumentRetentionDays: settings.cloudCompletedDocumentRetentionDays,
+      agentCompletedDocumentRetentionDays: settings.agentCompletedDocumentRetentionDays,
+      abandonedDocumentRetentionDays: settings.abandonedDocumentRetentionDays,
+      pendingLocalUploadRetentionDays: settings.pendingLocalUploadRetentionDays,
+      expiredUploadTicketRetentionDays: settings.expiredUploadTicketRetentionDays,
+      emptyCustomerSessionRetentionDays: settings.emptyCustomerSessionRetentionDays,
+      staleRefreshTokenRetentionDays: settings.staleRefreshTokenRetentionDays,
+      apiRetentionSweepHours: settings.apiRetentionSweepHours,
+      agentRetentionSweepHours: settings.agentRetentionSweepHours,
+      allowPaidJobClaimsWhenSuspended: settings.allowPaidJobClaimsWhenSuspended,
+      reason: "QA audit verification with no effective policy change"
+    };
+    const savedSettings = assertHttp(await request(adminPage, "PUT", "/api/v1/platform/settings/operations", {
+      token: adminTokens.accessToken,
+      body: noOpUpdatePayload
+    }), 200, "Safe no-op platform settings save");
+    for (const key of Object.keys(noOpUpdatePayload)) {
+      if (key === "reason") continue;
+      assert.equal(savedSettings[key], noOpUpdatePayload[key], "QA no-op save changed platform policy field " + key);
+    }
+    const settingsHistory = assertHttp(await request(adminPage, "GET", "/api/v1/platform/settings/operations/history", {
+      token: adminTokens.accessToken
+    }), 200, "Platform settings audit history");
+    assert.ok(settingsHistory.some(item => item.reason === noOpUpdatePayload.reason),
+      "Platform settings save must append an audit event.");
+
+    const invalidTenantTransition = await request(adminPage, "PATCH",
+      "/api/v1/platform/tenants/" + shop2TenantId + "/status",
+      {
+        token: adminTokens.accessToken,
+        body: { status: "Frozen", reason: "QA invalid status" }
+      });
+    assert.equal(invalidTenantTransition.status, 400, "Unknown tenant states must be rejected.");
+
+    const suspended = assertHttp(await request(adminPage, "PATCH",
+      "/api/v1/platform/tenants/" + shop2TenantId + "/status",
+      {
+        token: adminTokens.accessToken,
+        body: { status: "Suspended", reason: "QA temporary suspension lifecycle test" }
+      }), 200, "Suspend QA shop two");
+    assert.equal(suspended.status, "Suspended");
+
+    const blockedShopRead = await request(shop2Page, "GET", "/api/v1/shop/profile", {
+      token: shop2Tokens.accessToken
+    });
+    assert.equal(blockedShopRead.status, 403, "A suspended shop must be blocked from ordinary shop API work.");
+
+    const restored = assertHttp(await request(adminPage, "PATCH",
+      "/api/v1/platform/tenants/" + shop2TenantId + "/status",
+      {
+        token: adminTokens.accessToken,
+        body: { status: "Active", reason: "QA restored shop after reversible lifecycle test" }
+      }), 200, "Restore QA shop two");
+    assert.equal(restored.status, "Active");
+
+    const duplicateActive = assertHttp(await request(adminPage, "PATCH",
+      "/api/v1/platform/tenants/" + shop2TenantId + "/status",
+      {
+        token: adminTokens.accessToken,
+        body: { status: "Active", reason: "QA duplicate active-state idempotency check" }
+      }), 200, "Duplicate active tenant status request");
+    assert.equal(duplicateActive.duplicateRequest, true);
+
+    const statusHistory = assertHttp(await request(adminPage, "GET",
+      "/api/v1/platform/tenants/" + shop2TenantId + "/status-history",
+      { token: adminTokens.accessToken }), 200, "QA tenant status history");
+    assert.ok(statusHistory.some(item => item.newStatus === "Suspended"));
+    assert.ok(statusHistory.some(item => item.newStatus === "Active" && /QA restored shop/.test(item.reason)));
+
+    return {
+      invalidOperationalSettings: invalidSettings.status,
+      noOpPolicyValuesPreserved: true,
+      settingsAuditAdded: true,
+      invalidTenantStatus: invalidTenantTransition.status,
+      suspendedShopBlocked: blockedShopRead.status,
+      tenantRestored: restored.status,
+      duplicateActiveIdempotent: duplicateActive.duplicateRequest,
+      tenantAuditEvents: statusHistory.length
+    };
+  }, ["PLATFORM-001", "PLATFORM-002", "PLATFORM-003", "PLATFORM-004", "TENANT-001", "TENANT-002", "TENANT-003"]);
 
   await record("Live local browser has no same-origin server errors or critical resource failures", async () => {
     assert.equal(serverErrors.length, 0, JSON.stringify(serverErrors));
@@ -1586,11 +2062,27 @@ try {
   });
 } finally {
   report.finishedUtc = new Date().toISOString();
+  const caseResults = new Map();
+  for (const check of report.checks) {
+    for (const caseId of check.caseIds || []) {
+      caseResults.set(caseId, check.status);
+    }
+  }
+  report.caseCoverage = {
+    uniqueCasesExercised: caseResults.size,
+    passedCases: [...caseResults.values()].filter(status => status === "PASS").length,
+    failedCases: [...caseResults.values()].filter(status => status === "FAIL").length,
+    skippedCases: [...caseResults.values()].filter(status => status === "SKIPPED").length,
+    caseStatuses: Object.fromEntries([...caseResults.entries()].sort(([left], [right]) => left.localeCompare(right)))
+  };
   report.summary = {
     passed: report.checks.filter(check => check.status === "PASS").length,
     failed: report.checks.filter(check => check.status === "FAIL").length,
     skipped: report.checks.filter(check => check.status === "SKIPPED").length,
-    warnings: report.warnings.length
+    warnings: report.warnings.length,
+    uniqueCasesExercised: report.caseCoverage.uniqueCasesExercised,
+    passedCases: report.caseCoverage.passedCases,
+    failedCases: report.caseCoverage.failedCases
   };
   writeFileSync(join(outputDirectory, "report.json"), JSON.stringify(report, null, 2) + "\n");
   writeFileSync(join(outputDirectory, "report.txt"),
