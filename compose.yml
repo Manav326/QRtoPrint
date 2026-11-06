@@ -1,3 +1,4 @@
+ # Keep the existing Compose project name to preserve deployed database and document volumes.
 name: qrtoprint
 
 services:
