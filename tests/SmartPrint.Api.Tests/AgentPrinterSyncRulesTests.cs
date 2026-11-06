@@ -111,4 +111,16 @@ public sealed class AgentPrinterSyncRulesTests
         string outputMode = "PHYSICAL",
         string capabilitiesJson = "{}") =>
         new(queueName, driverName, portName, status, false, outputMode, capabilitiesJson);
+    [Fact]
+    public void AcceptsBothPhysicalAndPdfExportOutputModes()
+    {
+        var result = AgentPrinterSyncRules.Validate([
+            Printer("Office Printer", "HP Driver", "USB001", outputMode: "PHYSICAL"),
+            Printer("PDF Export", "Microsoft Print To PDF", "PORTPROMPT:", outputMode: "PDF_EXPORT")
+        ]);
+
+        Assert.Equal(AgentPrinterSyncValidationFailure.None, result.Failure);
+        Assert.Equal(2, result.Printers.Count);
+    }
+
 }

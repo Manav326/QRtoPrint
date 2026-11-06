@@ -1,0 +1,438 @@
+/* Premium A5 customer QR poster. Kept outside the app root for print isolation. */
+.qr-print-document { display: none; }
+
+@media print {
+  @page {
+    size: A5 landscape;
+    margin: 0;
+  }
+
+  html,
+  body {
+    width: 210mm !important;
+    height: 148mm !important;
+    min-width: 210mm !important;
+    min-height: 148mm !important;
+    max-width: 210mm !important;
+    max-height: 148mm !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    overflow: hidden !important;
+    background: #fff !important;
+  }
+
+  body > #root { display: none !important; }
+
+  body > .qr-print-document {
+    display: block !important;
+    visibility: visible !important;
+    position: relative !important;
+    box-sizing: border-box !important;
+    width: 210mm !important;
+    height: 148mm !important;
+    min-height: 148mm !important;
+    max-height: 148mm !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    overflow: hidden !important;
+    break-after: avoid !important;
+    page-break-after: avoid !important;
+    background: #fff !important;
+    color: #172033 !important;
+  }
+
+  .qr-print-document,
+  .qr-print-document * {
+    visibility: visible !important;
+    box-sizing: border-box !important;
+    print-color-adjust: exact !important;
+    -webkit-print-color-adjust: exact !important;
+  }
+
+  .qr-print-poster {
+    display: grid !important;
+    grid-template-columns: minmax(0, 1fr) 83mm !important;
+    gap: 7mm !important;
+    width: 210mm !important;
+    height: 148mm !important;
+    min-height: 148mm !important;
+    max-height: 148mm !important;
+    padding: 8mm 10mm !important;
+    margin: 0 !important;
+    overflow: hidden !important;
+    background: #fff !important;
+    color: #172033 !important;
+    break-inside: avoid !important;
+    page-break-inside: avoid !important;
+    font-family: "DM Sans", Arial, sans-serif !important;
+  }
+
+  .qr-print-story {
+    min-width: 0 !important;
+    min-height: 0 !important;
+    display: flex !important;
+    flex-direction: column !important;
+    padding: 0 !important;
+  }
+
+  .qr-print-shop-brand {
+    display: flex !important;
+    align-items: center !important;
+    gap: 3mm !important;
+    min-width: 0 !important;
+    min-height: 16mm !important;
+    padding: 0 0 2.5mm !important;
+    border-bottom: .35mm solid #e8eaf1 !important;
+  }
+
+  .qr-print-shop-brand > img {
+    display: block !important;
+    flex: 0 0 13mm !important;
+    width: 13mm !important;
+    height: 13mm !important;
+    max-width: 13mm !important;
+    object-fit: contain !important;
+    border-radius: 3mm !important;
+  }
+
+  .qr-print-shop-copy {
+    display: flex !important;
+    flex-direction: column !important;
+    min-width: 0 !important;
+    gap: 1mm !important;
+  }
+
+  .qr-print-shop-copy strong {
+    color: #17233d !important;
+    font: 800 14pt/1.08 Manrope, Arial, sans-serif !important;
+    letter-spacing: -.25pt !important;
+    overflow-wrap: anywhere !important;
+  }
+
+  .qr-print-shop-copy small {
+    color: #78849a !important;
+    font: 800 5.2pt/1.15 "DM Sans", Arial, sans-serif !important;
+    letter-spacing: 1pt !important;
+  }
+
+  .qr-print-easy-tag {
+    display: inline-flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    flex: 0 0 auto !important;
+    margin-left: auto !important;
+    padding: 1.8mm 2.5mm !important;
+    border: .3mm solid #e6e0ff !important;
+    border-radius: 8mm !important;
+    background: #f5f2ff !important;
+    color: #6d57cf !important;
+    font: 800 5pt/1 "DM Sans", Arial, sans-serif !important;
+    letter-spacing: .7pt !important;
+  }
+
+  .qr-print-heading {
+    margin: 4mm 0 3mm !important;
+  }
+
+  .qr-print-eyebrow {
+    display: block !important;
+    margin-bottom: 1.4mm !important;
+    color: #755ce0 !important;
+    font: 800 5.6pt/1.15 "DM Sans", Arial, sans-serif !important;
+    letter-spacing: 1.25pt !important;
+  }
+
+  .qr-print-heading h1 {
+    margin: 0 0 1.5mm !important;
+    color: #18233b !important;
+    font: 800 24pt/1.02 Manrope, Arial, sans-serif !important;
+    letter-spacing: -.9pt !important;
+  }
+
+  .qr-print-heading p {
+    margin: 0 !important;
+    color: #69758b !important;
+    font: 500 8pt/1.35 "DM Sans", Arial, sans-serif !important;
+  }
+
+  .qr-print-steps {
+    display: grid !important;
+    gap: 2.2mm !important;
+    margin-top: 1.5mm !important;
+  }
+
+  .qr-print-step {
+    position: relative !important;
+    display: grid !important;
+    grid-template-columns: 13mm minmax(0, 1fr) 4mm !important;
+    align-items: center !important;
+    gap: 2.5mm !important;
+    min-height: 21mm !important;
+    padding: 2mm 2.5mm !important;
+    border: .3mm solid #e8ebf2 !important;
+    border-radius: 3.2mm !important;
+    background: #fbfcff !important;
+  }
+
+  .qr-print-step-visual {
+    position: relative !important;
+    display: grid !important;
+    place-items: center !important;
+    width: 11mm !important;
+    height: 11mm !important;
+    border: .35mm solid #e4defd !important;
+    border-radius: 3mm !important;
+    background: #f0edff !important;
+    color: #7058d8 !important;
+  }
+
+  .qr-print-step-number {
+    position: absolute !important;
+    top: -1.8mm !important;
+    right: -1.8mm !important;
+    display: grid !important;
+    place-items: center !important;
+    width: 5mm !important;
+    height: 5mm !important;
+    border: .35mm solid #fff !important;
+    border-radius: 50% !important;
+    background: #765ce5 !important;
+    color: #fff !important;
+    font: 800 4.7pt/1 "DM Sans", Arial, sans-serif !important;
+  }
+
+  .qr-print-step-scan .qr-print-step-visual {
+    border-color: #e4defd !important;
+    background: #f0edff !important;
+    color: #7058d8 !important;
+  }
+
+  .qr-print-step-scan .qr-print-step-number {
+    background: #765ce5 !important;
+  }
+
+  .qr-print-step-review .qr-print-step-visual {
+    border-color: #d9eee8 !important;
+    background: #eaf7f2 !important;
+    color: #24866a !important;
+  }
+
+  .qr-print-step-review .qr-print-step-number {
+    background: #249675 !important;
+  }
+
+  .qr-print-step-collect .qr-print-step-visual {
+    border-color: #f7e4d6 !important;
+    background: #fff2e8 !important;
+    color: #d56a2e !important;
+  }
+
+  .qr-print-step-collect .qr-print-step-number {
+    background: #df793e !important;
+  }
+
+  .qr-print-step-copy {
+    display: flex !important;
+    flex-direction: column !important;
+    gap: 1mm !important;
+    min-width: 0 !important;
+  }
+
+  .qr-print-step-copy strong {
+    color: #202b42 !important;
+    font: 800 10pt/1.1 Manrope, Arial, sans-serif !important;
+  }
+
+  .qr-print-step-copy p {
+    margin: 0 !important;
+    max-width: 82mm !important;
+    color: #657287 !important;
+    font: 500 7.8pt/1.28 "DM Sans", Arial, sans-serif !important;
+  }
+
+  .qr-print-step-arrow {
+    display: grid !important;
+    place-items: center !important;
+    width: 4mm !important;
+    height: 4mm !important;
+    border-radius: 50% !important;
+    background: #f0edff !important;
+    color: #755ce0 !important;
+    font: 800 8pt/1 Arial, sans-serif !important;
+  }
+
+  .qr-print-step-review .qr-print-step-arrow {
+    background: #eaf7f2 !important;
+    color: #24866a !important;
+  }
+
+  .qr-print-step-collect .qr-print-step-arrow {
+    background: #fff2e8 !important;
+    color: #d56a2e !important;
+  }
+
+  .qr-print-powered {
+    display: flex !important;
+    align-items: center !important;
+    justify-content: space-between !important;
+    gap: 3mm !important;
+    min-height: 11mm !important;
+    margin-top: auto !important;
+    padding-top: 2.2mm !important;
+    border-top: .35mm solid #e8eaf1 !important;
+  }
+
+  .qr-print-powered > img {
+    display: block !important;
+    width: 38mm !important;
+    height: auto !important;
+    max-height: 8mm !important;
+    max-width: 38mm !important;
+    object-fit: contain !important;
+    object-position: left center !important;
+  }
+
+  .qr-print-powered > span {
+    color: #8993a5 !important;
+    font: 800 4.6pt/1.25 "DM Sans", Arial, sans-serif !important;
+    letter-spacing: .75pt !important;
+    text-align: right !important;
+  }
+
+  .qr-print-scan-panel {
+    position: relative !important;
+    display: flex !important;
+    flex-direction: column !important;
+    align-items: center !important;
+    justify-content: center !important;
+    min-width: 0 !important;
+    min-height: 0 !important;
+    padding: 5mm 2mm !important;
+    border: .35mm solid #303c66 !important;
+    border-radius: 5mm !important;
+    background: linear-gradient(155deg, #252f59 0%, #151e39 100%) !important;
+    color: #fff !important;
+    text-align: center !important;
+    overflow: hidden !important;
+  }
+
+  .qr-print-scan-panel::before {
+    content: "" !important;
+    position: absolute !important;
+    top: -20mm !important;
+    right: -20mm !important;
+    width: 55mm !important;
+    height: 55mm !important;
+    border: .5mm solid rgba(255,255,255,.08) !important;
+    border-radius: 50% !important;
+  }
+
+  .qr-print-scan-panel::after {
+    content: "" !important;
+    position: absolute !important;
+    top: -13mm !important;
+    right: -13mm !important;
+    width: 41mm !important;
+    height: 41mm !important;
+    border: .5mm solid rgba(255,255,255,.08) !important;
+    border-radius: 50% !important;
+  }
+
+  .qr-print-scan-kicker {
+    position: relative !important;
+    z-index: 1 !important;
+    display: inline-flex !important;
+    align-items: center !important;
+    gap: 1.5mm !important;
+    margin-bottom: 3.5mm !important;
+    color: #d8d3ff !important;
+    font: 800 5.8pt/1 "DM Sans", Arial, sans-serif !important;
+    letter-spacing: 1.3pt !important;
+  }
+
+  .qr-print-scan-pulse {
+    display: block !important;
+    width: 2mm !important;
+    height: 2mm !important;
+    border-radius: 50% !important;
+    background: #7ee0bd !important;
+  }
+
+  .qr-print-code-frame {
+    position: relative !important;
+    z-index: 1 !important;
+    display: grid !important;
+    place-items: center !important;
+    width: 76mm !important;
+    height: 76mm !important;
+    padding: 5mm !important;
+    border: .3mm solid #e8eaf1 !important;
+    border-radius: 3.2mm !important;
+    background: #fff !important;
+  }
+
+  .qr-print-code-frame svg {
+    display: block !important;
+    width: 66mm !important;
+    height: 66mm !important;
+    max-width: none !important;
+    shape-rendering: crispEdges !important;
+  }
+
+  .qr-print-scan-panel h2 {
+    position: relative !important;
+    z-index: 1 !important;
+    margin: 3.2mm 0 1.3mm !important;
+    color: #fff !important;
+    font: 900 15pt/1 Manrope, Arial, sans-serif !important;
+    letter-spacing: .5pt !important;
+  }
+
+  .qr-print-scan-panel > p {
+    position: relative !important;
+    z-index: 1 !important;
+    margin: 0 !important;
+    max-width: 70mm !important;
+    color: #c7cee0 !important;
+    font: 600 6.4pt/1.25 "DM Sans", Arial, sans-serif !important;
+  }
+
+  .qr-print-station-name {
+    position: relative !important;
+    z-index: 1 !important;
+    display: inline-flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    gap: 1.7mm !important;
+    max-width: 72mm !important;
+    margin-top: 3mm !important;
+    padding: 1.8mm 4mm !important;
+    border: .3mm solid #525d86 !important;
+    border-radius: 10mm !important;
+    background: rgba(255,255,255,.08) !important;
+    color: #fff !important;
+    font: 800 7pt/1.2 "DM Sans", Arial, sans-serif !important;
+    overflow-wrap: anywhere !important;
+  }
+
+  .qr-print-station-dot {
+    display: block !important;
+    flex: 0 0 1.6mm !important;
+    width: 1.6mm !important;
+    height: 1.6mm !important;
+    border-radius: 50% !important;
+    background: #7ee0bd !important;
+  }
+
+  .qr-print-scan-foot {
+    position: relative !important;
+    z-index: 1 !important;
+    margin-top: auto !important;
+    padding-top: 3mm !important;
+    color: #919dbd !important;
+    font: 800 4.7pt/1 "DM Sans", Arial, sans-serif !important;
+    letter-spacing: 1.2pt !important;
+  }
+}
+
+

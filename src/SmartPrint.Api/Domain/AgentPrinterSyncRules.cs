@@ -13,7 +13,10 @@ public enum AgentPrinterSyncValidationFailure
 
 public sealed record AgentPrinterSyncValidationResult(
     AgentPrinterSyncValidationFailure Failure,
-    IReadOnlyList<AgentPrinterDiscoveryRequest> Printers);
+    IReadOnlyList<AgentPrinterDiscoveryRequest> Printers)
+{
+    public bool IsValid => Failure == AgentPrinterSyncValidationFailure.None;
+}
 
 /// <summary>
 /// Applies the same bounds and metadata checks used by the public Agent printer-sync endpoint

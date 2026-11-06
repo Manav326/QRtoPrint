@@ -5,18 +5,37 @@ import { readDarkModePreference } from "../src/ui-preferences.ts";
 import { getLocalPreviewEndpointCandidates, isPrivateLocalPreviewEndpoint } from "../src/local-preview-routing.ts";
 
 const read = (path: string) => readFileSync(new URL(path, import.meta.url), "utf8");
+const readStyles = () => [
+  "../src/styles/core-shell.css",
+  "../src/styles/quote-and-queue.css",
+  "../src/styles/document-review.css",
+  "../src/styles/agent-connectivity.css",
+  "../src/styles/payment-configuration.css",
+  "../src/styles/printer-queue.css",
+  "../src/styles/reports.css",
+  "../src/styles/platform-console.css",
+  "../src/styles/platform-plan-catalogue.css",
+  "../src/styles/subscription-summary.css",
+  "../src/styles/platform-subscriptions.css",
+  "../src/styles/typography-accessibility.css",
+  "../src/styles/customer-shell.css",
+  "../src/styles/shared-theme-responsive.css",
+  "../src/styles/print-poster.css",
+  "../src/styles/shop-workspace.css",
+  "../src/styles/customer-workflow.css"
+].map(read).join("\n");
 
 
 test("folder and per-file Copies inputs capture values before scheduling React state updates", () => {
-  const app = read("../src/App.tsx");
+  const customer = read("../src/features/customer/CustomerPrintFlow.tsx");
   const copyLabels: string[] = [];
   let cursor = 0;
   while (true) {
-    const start = app.indexOf('<label className="customer-folder-copies">', cursor);
+    const start = customer.indexOf('<label className="customer-folder-copies">', cursor);
     if (start < 0) break;
-    const end = app.indexOf("</label>", start);
+    const end = customer.indexOf("</label>", start);
     assert.ok(end > start, "Each Copies label must be properly closed.");
-    copyLabels.push(app.slice(start, end));
+    copyLabels.push(customer.slice(start, end));
     cursor = end + "</label>".length;
   }
   assert.equal(copyLabels.length, 2, "The shared flow must have folder-default and per-file Copies inputs.");
@@ -60,6 +79,7 @@ test("first web visit is light and saved selection is restored before rendering"
 test("one accessible theme control is available to all application route families", () => {
   const toggle = read("../src/ThemeToggleButton.tsx");
   const app = read("../src/App.tsx");
+  const customerEntry = read("../src/features/customer/CustomerEntry.tsx");
   const publicPage = read("../src/PublicLandingPage.tsx");
   const shopAuth = read("../src/AuthScreen.tsx");
   const adminAuth = read("../src/PlatformAdminAuthScreen.tsx");
@@ -77,7 +97,7 @@ test("one accessible theme control is available to all application route familie
 });
 
 test("light and dark palettes cover authentication, customer QR and public landing surfaces", () => {
-  const css = read("../src/styles.css");
+  const css = readStyles();
   const landing = read("../src/public-landing.css");
 
   assert.match(css, /html\[data-theme="light"\] \.auth-screen/);
@@ -87,7 +107,7 @@ test("light and dark palettes cover authentication, customer QR and public landi
 });
 
 test("web shell keeps navigation, header and workspace independently usable at desktop and mobile sizes", () => {
-  const css = read("../src/styles.css");
+  const css = readStyles();
   assert.match(css, /@media \(min-width: 851px\)/);
   assert.match(css, /@media \(max-width: 850px\)/);
   assert.match(css, /\.app-shell > \.sidebar > \.primary-nav\s*\{[^}]*overflow-y:\s*auto/s);
@@ -107,7 +127,7 @@ test("theme-color metadata exists before the first-paint preference script", () 
 });
 
 test("workspace secondary text palettes meet WCAG AA for normal-size labels", () => {
-  const css = read("../src/styles.css");
+  const css = readStyles();
   const color = (hex: string) => {
     const value = hex.replace("#", "");
     return [0, 2, 4].map(offset => parseInt(value.slice(offset, offset + 2), 16) / 255)
@@ -126,7 +146,7 @@ test("workspace secondary text palettes meet WCAG AA for normal-size labels", ()
 });
 
 test("workspace styles retain one authoritative appearance palette", () => {
-  const css = read("../src/styles.css");
+  const css = readStyles();
   const desktop = read("../../desktop/src/desktop.css");
   assert.ok(!css.includes("--accent:#ff9a52"));
   assert.ok(!css.includes("--accent:#e96f23"));
@@ -139,12 +159,14 @@ test("workspace styles retain one authoritative appearance palette", () => {
 
 
 test("QR station poster renders one canonical QR in an isolated single-page A5 print surface", () => {
-  const app = read("../src/App.tsx");
+  const shop = read("../src/features/shop/ShopConsole.tsx");
+  const stations = read("../src/features/shop/stations/StationsPage.tsx");
   const poster = read("../src/QrStationPrintDocument.tsx");
-  const css = read("../src/styles.css");
+  const css = readStyles();
 
-  assert.match(app, /<QrStationPrintDocument station=\{stations\.find\(station => station\.id === printingStationId\)/);
-  assert.match(app, /querySelectorAll<HTMLImageElement>\("\.qr-print-document img"\)/);
+  assert.match(shop, /import StationsPage from "\.\/stations\/StationsPage"/);
+  assert.match(stations, /<QrStationPrintDocument station=\{stations\.find\(station => station\.id === printingStationId\)/);
+  assert.match(stations, /querySelectorAll<HTMLImageElement>\("\.qr-print-document img"\)/);
   assert.match(poster, /createPortal\([\s\S]*document\.body/);
   assert.match(poster, /<QRCode value=\{station\.publicUrl\}/);
   assert.equal((poster.match(/<QRCode\b/g) ?? []).length, 1);
@@ -163,7 +185,7 @@ test("QR station poster renders one canonical QR in an isolated single-page A5 p
 
 test("QR station poster has a clear three-step hierarchy and scan-first customer call to action", () => {
   const poster = read("../src/QrStationPrintDocument.tsx");
-  const css = read("../src/styles.css");
+  const css = readStyles();
 
   assert.match(poster, /YOUR PRINTING, MADE SIMPLE/);
   assert.match(poster, /Scan, save &amp; send/);
@@ -181,25 +203,26 @@ test("QR station poster has a clear three-step hierarchy and scan-first customer
 });
 
 test("batch routing enforces local-computer ownership and preserves print-time audit identity", () => {
-  const app = read("../src/App.tsx");
-  const api = read("../src/api.ts");
-  const css = read("../src/styles.css");
+  const customer = read("../src/features/customer/useCustomerPrintUpload.ts");
+  const queue = read("../src/features/shop/queue/PrintQueuePage.tsx");
+  const api = read("../src/api/customer.ts");
+  const css = readStyles();
 
-  assert.match(app, /Assign one printer for all files in batch/);
-  assert.match(app, /One printer is used for all active files/);
-  assert.match(app, /pages requested/);
-  assert.match(app, /Save as PDF/);
-  assert.match(app, /Saves a PDF, not paper/);
-  assert.match(app, /requiredLocalAgentId/);
-  assert.match(app, /localComputerIdentityConflict/);
-  assert.match(app, /lockedPrinterOnWrongComputer/);
-  assert.match(app, /Shop computer:/);
-  assert.match(app, /Paper output manually confirmed by/);
-  assert.match(app, /Cloud-assisted upload is now selected/);
-  assert.match(app, /attached to its original job/);
-  assert.match(app, /resume that same upload without creating another print job/);
+  assert.match(queue, /Assign one printer for all files in batch/);
+  assert.match(queue, /One printer is used for all active files/);
+  assert.match(queue, /pages requested/);
+  assert.match(queue, /Save as PDF/);
+  assert.match(queue, /Saves a PDF, not paper/);
+  assert.match(queue, /requiredLocalAgentId/);
+  assert.match(queue, /localComputerIdentityConflict/);
+  assert.match(queue, /lockedPrinterOnWrongComputer/);
+  assert.match(queue, /Shop computer:/);
+  assert.match(queue, /Paper output manually confirmed by/);
+  assert.match(customer, /Cloud-assisted upload is now selected/);
+  assert.match(customer, /attached to its original job/);
+  assert.match(customer, /resume that same upload without creating another print job/);
   assert.match(api, /local-upload-tickets.*cloud-recovery/);
-  assert.doesNotMatch(app, /aria-label=\{"Assign printer for "\+job\.jobNumber\}/);
+  assert.doesNotMatch(queue, /aria-label=\{"Assign printer for "\+job\.jobNumber\}/);
   assert.match(api, /printerAgentName\?: string \| null/);
   assert.match(api, /outputConfirmedByName\?: string \| null/);
   assert.match(api, /documentAgentDeviceId\?: string \| null/);
@@ -209,28 +232,23 @@ test("batch routing enforces local-computer ownership and preserves print-time a
 });
 
 test("customer upload form clearly supports backend-approved image formats", () => {
-  const app = read("../src/App.tsx");
-  const customerFlowStart = app.indexOf("function CustomerPrintFlow(");
-  const customerFlowEnd = app.indexOf("function UploadIcon()", customerFlowStart);
-  assert.ok(customerFlowStart >= 0 && customerFlowEnd > customerFlowStart,
-    "The shared customer upload form must remain present.");
-  const customerFlow = app.slice(customerFlowStart, customerFlowEnd);
+  const customer = read("../src/features/customer/CustomerPrintFlow.tsx");
+  const upload = read("../src/features/customer/useCustomerPrintUpload.ts");
+  const customerFlow = customer;
   assert.ok(customerFlow.includes("Add documents or images"));
   assert.ok(customerFlow.includes("Select documents or images"));
   assert.ok(customerFlow.includes('accept=".pdf,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png"'));
-  assert.ok(app.includes('const supported=rootFiles.filter(candidate=>/\\.(pdf|jpe?g|png)$/i.test(candidate.name));'),
+  assert.ok(upload.includes('const supported=rootFiles.filter(candidate=>/\\.(pdf|jpe?g|png)$/i.test(candidate.name));'),
     "The shared selection handler must retain PDF, JPG, JPEG and PNG support.");
 });
 
 test("Android customer printing uses the same single Copies control and event handlers as the browser", () => {
-  const app = read("../src/App.tsx");
-  const customerFlowStart = app.indexOf("function CustomerPrintFlow(");
-  const customerFlowEnd = app.indexOf("function UploadIcon()", customerFlowStart);
-  assert.ok(customerFlowStart >= 0 && customerFlowEnd > customerFlowStart,
-    "The shared CustomerPrintFlow component must remain present.");
-  const customerFlow = app.slice(customerFlowStart, customerFlowEnd);
-  assert.ok(app.includes("<CustomerPrintFlow dark={dark} publicCode={publicCode}"), "Customer print flow follows the saved appearance.");
-  assert.ok(customerFlow.includes('navigator.userAgent.includes("SmartPrintAndroid/1")'));
+  const customerEntry = read("../src/features/customer/CustomerEntry.tsx");
+  const customer = read("../src/features/customer/CustomerPrintFlow.tsx");
+  const customerHook = read("../src/features/customer/useCustomerPrintFlow.ts");
+  const customerFlow = customer;
+  assert.ok(customerEntry.includes("<CustomerPrintFlow dark={dark} publicCode={publicCode}"), "Customer print flow follows the saved appearance.");
+  assert.ok(customerHook.includes('navigator.userAgent.includes("SmartPrintAndroid/1")'));
   assert.equal((customerFlow.match(/customer-folder-copies/g) ?? []).length, 2,
     "There must be one folder-default Copies input and one per-file Custom override in the shared flow.");
   assert.ok(customerFlow.includes("onChange={event=>{"));
@@ -243,7 +261,7 @@ test("Android customer printing uses the same single Copies control and event ha
 });
 
 test("shop phone-readiness QR guides SmartPrint users through the in-app Wi-Fi check", () => {
-  const app = read("../src/App.tsx");
+  const app = read("../src/features/shop/agent/PrintAgentPage.tsx");
   const start = app.indexOf('<strong>Scan with SmartPrint on your phone</strong>');
   assert.ok(start >= 0, "The shop QR should lead with the SmartPrint in-app flow.");
   const section = app.slice(start, start + 650);
@@ -256,53 +274,52 @@ test("shop phone-readiness QR guides SmartPrint users through the in-app Wi-Fi c
 
 test("shop owner navigation groups daily work and moves account destinations into the header menu", () => {
   const app = read("../src/App.tsx");
-  const css = read("../src/styles.css");
-  const sidebarStart = app.indexOf('<aside className={sidebarOpen');
-  const sidebarEnd = app.indexOf("</aside>", sidebarStart);
+  const shop = read("../src/features/shop/ShopConsole.tsx");
+  const navigation = read("../src/features/shop/useShopNavigation.ts");
+  const settingsPage = read("../src/features/shop/settings/SettingsPage.tsx");
+  const css = readStyles();
+  const sidebarStart = shop.indexOf('<aside className={sidebarOpen');
+  const sidebarEnd = shop.indexOf("</aside>", sidebarStart);
   assert.ok(sidebarStart >= 0 && sidebarEnd > sidebarStart, "The shop navigation sidebar must remain present.");
-  const sidebar = app.slice(sidebarStart, sidebarEnd);
+  const sidebar = shop.slice(sidebarStart, sidebarEnd);
 
-  assert.match(app, /const sectionGroups:/);
+  assert.match(shop, /const sectionGroups:/);
   assert.match(sidebar, /sectionGroups\.map/);
   assert.doesNotMatch(sidebar, /plan-card|support-link|profile-row/,
     "Trial, help and owner controls must not be permanently pinned in the sidebar.");
-  assert.match(app, /Personal details/);
-  assert.match(app, /Shop profile &amp; branding/);
-  assert.match(app, /Trial &amp; subscription/);
-  assert.match(app, /Help &amp; support/);
-  assert.match(app, /accountMenuOpen/);
-  assert.ok(app.indexOf("const [accountMenuOpen") < app.indexOf("if (!accountMenuOpen) return"),
+  assert.match(shop, /Personal details/);
+  assert.match(settingsPage, /Shop profile &amp; branding/);
+  assert.match(shop, /Trial &amp; subscription/);
+  assert.match(shop, /Help &amp; support/);
+  assert.match(navigation, /accountMenuOpen/);
+  assert.ok(navigation.indexOf("const [accountMenuOpen") < navigation.indexOf("if (!accountMenuOpen) return"),
     "The account-menu state must be initialized before its dismissal effect reads it.");
-  assert.match(app, /HelpSupportModal/);
+  assert.match(shop, /HelpSupportModal/);
   assert.match(css, /\.app-shell \.nav-group-items\s*\{/);
 });
 
 test("shop workspace content expands into the space left after the sidebar", () => {
-  const css = read("../src/styles.css");
-  const app = read("../src/App.tsx");
+  const css = readStyles();
+  const shop = read("../src/features/shop/ShopConsole.tsx");
 
   assert.match(css, /\.app-shell > \.main-panel\s*\{[^}]*flex:\s*1 1 0%/s);
   assert.match(css, /\.app-shell > \.main-panel > \.content-wrap\s*\{[^}]*width:\s*100%[^}]*max-width:\s*1920px/s);
   assert.match(css, /\.app-shell \.customers-search\s*\{[^}]*max-width:\s*none/s);
-  assert.match(app, /activePageTitle/);
+  assert.match(shop, /activePageTitle/);
   assert.match(css, /@media \(max-width: 850px\)/);
   assert.match(css, /@media \(max-width: 600px\)/);
 });
 
 
 test("shop owner personal details are editable from the account menu without mixing shop branding", () => {
-  const app = read("../src/App.tsx");
-  const api = read("../src/api.ts");
-  const settingsStart = app.indexOf("function SettingsPage");
-  const settingsEnd = app.indexOf("function ShopOwnerAccountModal", settingsStart);
-  const settings = app.slice(settingsStart, settingsEnd);
-  const modalStart = app.indexOf("function ShopOwnerAccountModal");
-  const modalEnd = app.indexOf("function HelpSupportModal", modalStart);
-  const modal = app.slice(modalStart, modalEnd);
+  const shop = read("../src/features/shop/ShopConsole.tsx");
+  const modal = read("../src/features/shop/modals/ShopOwnerAccountModal.tsx");
+  const settings = read("../src/features/shop/settings/SettingsPage.tsx");
+  const api = read("../src/api/shop.ts");
 
-  assert.match(app, /Personal details/);
-  assert.match(app, /ownerAccountOpen/);
-  assert.match(app, /ShopOwnerAccountModal/);
+  assert.match(shop, /Personal details/);
+  assert.match(shop, /ownerAccountOpen/);
+  assert.match(shop, /ShopOwnerAccountModal/);
   assert.match(api, /updateShopOwnerAccount/);
   assert.match(api, /ownerEmail: string/);
   assert.match(modal, /Your name/);
@@ -317,109 +334,118 @@ test("shop owner personal details are editable from the account menu without mix
 
 
 test("native customer UI follows explicit SmartPrint theme and marks selected upload mode", () => {
-  const css = read("../src/styles.css");
-  const app = read("../src/App.tsx");
+  const css = readStyles();
+  const selection = read("../src/features/customer/CustomerUploadSelection.tsx");
   assert.doesNotMatch(css, /@media\s*\(prefers-color-scheme:\s*dark\)/,
     "The OS dark preference must not override a saved SmartPrint light theme.");
   assert.match(css, /html\[data-theme="dark"\] \.customer-entry\.smartprint-native/);
   assert.match(css, /\.customer-entry\.smartprint-native \.customer-upload-mode\.selected/);
   assert.match(css, /customer-upload-mode\.selected::after[\s\S]*?Selected/);
-  assert.match(app, /aria-pressed=\{uploadMode==="LOCAL"\}/);
-  assert.match(app, /aria-pressed=\{uploadMode==="CLOUD"\}/);
+  assert.match(selection, /aria-pressed=\{uploadMode==="LOCAL"\}/);
+  assert.match(selection, /aria-pressed=\{uploadMode==="CLOUD"\}/);
 });
-
-
 test("customer print settings are preserved independently of printer capability reports", () => {
-  const app = read("../src/App.tsx");
-  const flowStart = app.indexOf("function CustomerPrintFlow(");
-  const flowEnd = app.indexOf("function UploadIcon()", flowStart);
-  assert.ok(flowStart >= 0 && flowEnd > flowStart,
-    "The shared customer print flow must remain present.");
-  const flow = app.slice(flowStart, flowEnd);
+  const customer = read("../src/features/customer/CustomerPrintFlow.tsx");
+  const flow = read("../src/features/customer/useCustomerPrintFlow.ts");
+  const checkout = read("../src/features/customer/useCustomerPrintCheckout.ts");
 
   assert.ok(flow.includes("Customer requests are captured independently of current hardware reports."));
   assert.ok(flow.includes("void printerCapabilitiesJson;"));
   assert.doesNotMatch(flow, /disabled=\{!supportsColour\}|disabled=\{!supportsDuplex\}|a4NotConfirmed/);
-  assert.ok(flow.includes('colourMode:photoSettings?"Colour":settings.colourMode'));
-  assert.ok(flow.includes("isDuplex:photoSettings?false:settings.isDuplex"));
-  assert.ok(flow.includes('paperSize:photoSettings?"A4":settings.paperSize'));
-  assert.ok(flow.includes('orientation:photoSettings?"AUTO":settings.orientation'));
+  assert.ok(checkout.includes('colourMode:photoSettings?"Colour":settings.colourMode'));
+  assert.ok(checkout.includes("isDuplex:photoSettings?false:settings.isDuplex"));
+  assert.ok(checkout.includes('paperSize:photoSettings?"A4":settings.paperSize'));
+  assert.ok(checkout.includes('orientation:photoSettings?"AUTO":settings.orientation'));
 });
 
 test("folder defaults inherit to files and advanced paper options are opt-in", () => {
-  const app = read("../src/App.tsx");
-  const flowStart = app.indexOf("function CustomerPrintFlow(");
-  const flowEnd = app.indexOf("function UploadIcon()", flowStart);
-  const flow = app.slice(flowStart, flowEnd);
+  const customer = read("../src/features/customer/CustomerPrintFlow.tsx");
+  const flow = read("../src/features/customer/useCustomerPrintFlow.ts");
 
   assert.ok(flow.includes("advancedEnabled:false"));
   assert.ok(flow.includes("const selected=own?.custom?{...defaults,...own}:defaults;"));
-  assert.ok(flow.includes("checked={defaults.advancedEnabled}"));
-  assert.ok(flow.includes("checked={own.advancedEnabled}"));
-  assert.ok(flow.includes("{defaults.advancedEnabled&&"));
-  assert.ok(flow.includes("{own.advancedEnabled&&"));
-  assert.ok(flow.includes('{defaults.colourMode==="Mono"'));
-  assert.ok(flow.includes('Copies · all files'));
+  assert.ok(customer.includes("checked={defaults.advancedEnabled}"));
+  assert.ok(customer.includes("checked={own.advancedEnabled}"));
+  assert.ok(customer.includes("{defaults.advancedEnabled&&"));
+  assert.ok(customer.includes("{own.advancedEnabled&&"));
+  assert.ok(customer.includes('{defaults.colourMode==="Mono"'));
+  assert.ok(customer.includes('Copies · all files'));
 });
 
 test("offline requests use the existing secure queue and owner changes require customer approval", () => {
-  const app = read("../src/App.tsx");
-  const api = read("../src/api.ts");
-  const server = read("../../../src/SmartPrint.Api/Program.cs");
+  const customer = read("../src/features/customer/useCustomerPrintFlow.ts");
+  const shop = read("../src/features/shop/ShopConsole.tsx");
+  const api = read("../src/api/customer.ts");
+  const recoveryEndpoint = read("../../../src/SmartPrint.Api/Endpoints/PublicCloudRecoveryEndpoints.cs");
+  const recoveryService = read("../../../src/SmartPrint.Api/Services/PublicCloudRecoveryService.cs");
+  const settingsEndpoint = read("../../../src/SmartPrint.Api/Endpoints/ShopPrintJobSettingsEndpoints.cs");
+  const settingsService = read("../../../src/SmartPrint.Api/Services/ShopPrintJobSettingsService.cs");
 
-  assert.ok(app.includes("secureQueueFallbackEnabled"));
-  assert.ok(server.includes('publicApi.MapPost("/sessions/current/local-upload-tickets/{ticketId:guid}/cloud-recovery"'));
-  assert.ok(server.includes("if (!subscription.CloudAssistedPrintingEnabled && recoveryAgentAvailable)"));
+  assert.ok(customer.includes("secureQueueFallbackEnabled"));
+  assert.ok(recoveryEndpoint.includes('publicApi.MapPost("/sessions/current/local-upload-tickets/{ticketId:guid}/cloud-recovery"'));
+  assert.ok(recoveryService.includes("if (!subscription.CloudAssistedPrintingEnabled && recoveryAgentAvailable)"));
   assert.doesNotMatch(api, /X-Print-Queue-Fallback|allowQueueFallback/);
-  assert.doesNotMatch(server, /X-Print-Queue-Fallback|queueFallbackRequested/);
-  assert.ok(server.includes('shop.MapPatch("/print-jobs/{jobId:guid}/settings"'));
-  assert.ok(server.includes('job.Status = "AWAITING_CUSTOMER_APPROVAL";'));
-  assert.ok(app.includes("onUpdateSettings={updatePrintJobSettings}"));
+  assert.doesNotMatch(recoveryEndpoint + recoveryService, /X-Print-Queue-Fallback|queueFallbackRequested/);
+  assert.ok(settingsEndpoint.includes('shop.MapPatch("/print-jobs/{jobId:guid}/settings"'));
+  assert.ok(settingsService.includes('job.Status = "AWAITING_CUSTOMER_APPROVAL";'));
+  assert.ok(shop.includes("onUpdateSettings={updatePrintJobSettings}"));
 });
-
 test("customer paper summaries reflect advanced folder and per-file choices", () => {
-  const app = read("../src/App.tsx");
-  assert.match(app, /customer-paper-default">\{defaults\.advancedEnabled\?defaults\.paperSize:"A4"\}/);
-  assert.match(app, /customer-paper-default">\{own\.advancedEnabled\?own\.paperSize:"A4"\}/);
-  assert.match(app, /entry\.quote!\.paperSize/);
-  assert.match(app, /item\.job\.paperSize\?\?"A4"/);
+  const customer = read("../src/features/customer/CustomerPrintFlow.tsx");
+  assert.match(customer, /customer-paper-default">\{defaults\.advancedEnabled\?defaults\.paperSize:"A4"\}/);
+  assert.match(customer, /customer-paper-default">\{own\.advancedEnabled\?own\.paperSize:"A4"\}/);
+  assert.match(customer, /entry\.quote!\.paperSize/);
+  assert.match(customer, /item\.job\.paperSize\?\?"A4"/);
 });
 
 test("all print settings controls capture React event values before state updaters", () => {
-  const app = read("../src/App.tsx");
+  const customer = read("../src/features/customer/CustomerPrintFlow.tsx");
+  const queue = read("../src/features/shop/queue/PrintQueuePage.tsx");
   const setters = ["setGroupSettings(current=>","setFileSettings(current=>","setEditingPrintSettings(current=>"];
   for (const setter of setters) {
-    const lines = app.split("\n").filter(line => line.includes(setter));
+    const source = setter === "setEditingPrintSettings(current=>" ? queue : customer;
+    const lines = source.split("\n").filter(line => line.includes(setter));
     assert.ok(lines.length > 0, `${setter} must remain part of the shared print settings flow.`);
     assert.ok(lines.every(line => !line.includes("event.currentTarget") && !line.includes("event.target")),
       `${setter} must use values captured before entering the state updater.`);
   }
-  assert.match(app, /const advancedEnabled=event\.currentTarget\.checked/);
-  assert.match(app, /const paperSize=event\.currentTarget\.value/);
-  assert.match(app, /const orientation=event\.currentTarget\.value/);
-  assert.match(app, /const copies=Math\.max\(1,Math\.min\(100,Number\(event\.currentTarget\.value\)\|\|1\)\)/);
+  assert.match(customer, /const advancedEnabled=event\.currentTarget\.checked/);
+  assert.match(customer, /const paperSize=event\.currentTarget\.value/);
+  assert.match(customer, /const orientation=event\.currentTarget\.value/);
+  assert.match(queue, /const copies=Math\.max\(1,Math\.min\(100,Number\(event\.currentTarget\.value\)\|\|1\)\)/);
 });
 
 
 test("PDF footer branding is opt-in per batch and cannot cover source content or paper output", () => {
-  const app = read("../src/App.tsx");
-  const api = read("../src/api.ts");
-  const server = read("../../../src/SmartPrint.Api/Program.cs");
+  const overlays = read("../src/features/shop/modals/BatchReviewModal.tsx");
+  const customer = read("../src/features/customer/CustomerPrintFlow.tsx");
+  const api = read("../src/api/print-jobs.ts");
+  const reviewEndpoint = read("../../../src/SmartPrint.Api/Endpoints/ShopPrintBatchReviewEndpoints.cs");
+  const reviewService = read("../../../src/SmartPrint.Api/Services/ShopPrintBatchReviewService.cs");
   const contracts = read("../../../src/SmartPrint.Api/Contracts/ApiContracts.cs");
+  const shopQueue = read("../../../src/SmartPrint.Api/Services/ShopPrintJobQueryService.cs");
+  const shopCustomers = read("../../../src/SmartPrint.Api/Services/ShopCustomerQueryService.cs");
+  const customerStatus = read("../../../src/SmartPrint.Api/Services/PublicJobStatusService.cs");
+  const agentJobs = read("../../../src/SmartPrint.Api/Endpoints/AgentJobEndpoints.cs");
+  const agentJobQueue = read("../../../src/SmartPrint.Api/Services/AgentJobQueueService.cs");
   const agent = read("../../../src/SmartPrint.Agent/WindowsPrintExecutor.cs");
   const pdfOverlay = read("../../../src/SmartPrint.Agent/PdfBrandingOverlay.cs");
   const queueModels = read("../../../src/SmartPrint.Agent/AgentQueueModels.cs");
   const safetyRules = read("../../../src/SmartPrint.Agent/PdfBrandingRules.cs");
 
-  assert.ok(app.includes('useState(()=>jobs.some(job=>job.pdfBrandingEnabled===true))'));
-  assert.ok(app.includes('checked={pdfBrandingEnabled} disabled={busy}'));
+  assert.ok(overlays.includes('useState(()=>jobs.some(job=>job.pdfBrandingEnabled===true))'));
+  assert.ok(overlays.includes('checked={pdfBrandingEnabled} disabled={busy}'));
   assert.ok(api.includes('body: JSON.stringify({ reviewedJobIds, acceptedJobIds, pdfBrandingEnabled })'));
   assert.ok(contracts.includes('bool PdfBrandingEnabled = false'));
-  assert.ok(server.includes('request.PdfBrandingEnabled'));
-  assert.ok(server.includes('job.PdfBrandingEnabled = request.PdfBrandingEnabled'));
-  assert.ok(server.includes('foreach (var job in lockedJobs)\n    {\n        if (job.PdfBrandingEnabled'));
-  assert.ok(!server.includes('foreach (var job in allBatchJobs)\n    {\n        if (job.PdfBrandingEnabled'));
-  assert.ok(server.includes('candidate.PdfBrandingEnabled'));
+  assert.ok(reviewEndpoint.includes('request.PdfBrandingEnabled'));
+  assert.ok(reviewService.includes('job.PdfBrandingEnabled = pdfBrandingEnabled'));
+  assert.ok(reviewService.includes('foreach (var job in lockedJobs)'));
+  assert.ok(!reviewService.includes('foreach (var job in allBatchJobs)'));
+  assert.ok(shopQueue.includes('job.PdfBrandingEnabled'));
+  assert.ok(shopCustomers.includes('job.PdfBrandingEnabled'));
+  assert.ok(customerStatus.includes('item.PdfBrandingEnabled'));
+  assert.ok(agentJobs.includes('queue.ClaimAvailableAsync'));
+  assert.ok(agentJobQueue.includes('candidate.PdfBrandingEnabled'));
   assert.ok(queueModels.includes('bool PdfBrandingEnabled = false'));
   assert.ok(agent.includes('"SMARTPRINT_BRANDED_PDF_RENDERER"'));
   assert.ok(agent.includes('PdfBrandingOverlay.TryCreate(entry, bytes, pdfRaster.HasDigitalSignatures, pdfRaster.HasInteractiveForms, cancellationToken)'));
@@ -427,43 +453,48 @@ test("PDF footer branding is opt-in per batch and cannot cover source content or
   assert.ok(!agent.includes('ApplySmartPrintFooter(page'));
   assert.ok(pdfOverlay.includes('PdfBrandingRules.HasSafeFooterBand(packed, width, height, bandHeight)'));
   assert.ok(safetyRules.includes('RequiredBlankBandPoints = 20f'));
-  assert.ok(server.includes('item.PdfBrandingEnabled'));
-  assert.ok(app.includes('jobStatus.pdfBrandingEnabled&&<div className="customer-branding-note">'));
-  assert.ok(app.includes('Footer only appears on PDFs with a verified blank bottom margin.'));
-  assert.ok(app.includes('Digitally signed or interactive PDFs remain unchanged.'));
+  assert.ok(customer.includes('jobStatus.pdfBrandingEnabled&&<div className="customer-branding-note">'));
+  assert.ok(customer.includes('Footer only appears on PDFs with a verified blank bottom margin.'));
+  assert.ok(customer.includes('Digitally signed or interactive PDFs remain unchanged.'));
 });
-
-
 test("contextual information stays concise and is accessible by hover, focus and tap", () => {
-  const app = read("../src/App.tsx");
-  const css = read("../src/styles.css");
-  assert.match(app, /function InfoTooltip/);
-  assert.match(app, /aria-describedby=\{tooltipId\}/);
-  assert.match(app, /onMouseEnter=\{\(\)=>setOpen\(true\)\}/);
-  assert.match(app, /onClick=\{\(\)=>setOpen\(true\)\}/);
-  assert.match(app, /Files stay on this computer\. Reconnect it to use its printers\./);
-  assert.match(app, /To switch computers, upload a new Cloud-assisted batch\./);
-  assert.match(app, /jobStatus\.pdfBrandingEnabled&&<div className="customer-branding-note">/);
-  assert.doesNotMatch(app, /If this request is saved as a PDF, a small SmartPrint by QuantaEdge footer/);
+  const customer = read("../src/features/customer/CustomerPrintFlow.tsx");
+  const overlays = read("../src/features/shop/modals/BatchReviewModal.tsx");
+  const tooltip = read("../src/shared/ui/InfoTooltip.tsx");
+  const css = readStyles();
+  assert.match(tooltip, /function InfoTooltip/);
+  assert.match(tooltip, /aria-describedby=\{tooltipId\}/);
+  assert.match(tooltip, /onMouseEnter=\{\(\)=>setOpen\(true\)\}/);
+  assert.match(tooltip, /onClick=\{\(\)=>setOpen\(true\)\}/);
+  assert.match(overlays, /<InfoTooltip label="PDF footer details">/);
+  assert.match(overlays, /Footer only appears on PDFs with a verified blank bottom margin\./);
+  assert.match(customer, /<InfoTooltip label="Why cash is unavailable">/);
+  assert.match(customer, /The shop must enable Cash at counter in Payments settings\./);
+  assert.match(customer, /jobStatus\.pdfBrandingEnabled&&<div className="customer-branding-note">/);
+  assert.doesNotMatch(overlays+customer, /If this request is saved as a PDF, a small SmartPrint by QuantaEdge footer/);
   assert.match(css, /\.context-info:focus-within \.context-info-tooltip/);
   assert.match(css, /\.context-info\.context-info-open \.context-info-tooltip/);
 });
 
 test("customer payment settings refresh without reopening the QR session and explain disabled cash", () => {
-  const app = read("../src/App.tsx");
-  const api = read("../src/api.ts");
-  const server = read("../../../src/SmartPrint.Api/Program.cs");
-  assert.match(app, /paymentOptions:session\.paymentOptions/);
-  assert.match(app, /Cash at counter unavailable/);
-  assert.match(app, /Disabled · customers will not see cash at the counter\./);
+  const customerEntry = read("../src/features/customer/CustomerEntry.tsx");
+  const customer = read("../src/features/customer/CustomerPrintFlow.tsx");
+  const paymentPage = read("../src/features/shop/payments/PaymentsPage.tsx");
+  const api = read("../src/api/customer.ts");
+  const sessionService = read("../../../src/SmartPrint.Api/Services/PublicCustomerSessionService.cs");
+  const registrationService = read("../../../src/SmartPrint.Api/Services/AccountRegistrationService.cs");
+  assert.match(customerEntry, /paymentOptions:session\.paymentOptions/);
+  assert.match(customer, /Cash at counter unavailable/);
+  assert.match(paymentPage, /Disabled · customers will not see cash at the counter\./);
   assert.match(api, /paymentOptions: \{ upiEnabled: boolean; upiId\?: string \| null; payeeName\?: string \| null; cashEnabled: boolean; instantPaymentEnabled: boolean \}/);
-  assert.match(server, /var paymentOptions = await db\.ShopPaymentProfiles\.AsNoTracking\(\)/);
-  assert.match(server, /PaymentOptions = paymentOptions/);
-  assert.match(server, /CashEnabled = false/);
+  assert.match(sessionService, /GetPaymentOptionsAsync\(session\.TenantId, cancellationToken\)/);
+  assert.match(sessionService, /new PublicCustomerSessionRenewalSnapshot\(session\.ExpiresUtc, localAgent, paymentOptions\)/);
+  assert.match(sessionService, /profile\.UpiEnabled/);
+  assert.match(sessionService, /profile\.CashEnabled/);
+  assert.match(registrationService, /CashEnabled = false/);
 });
-
 test("Windows local document previews prefer the paired Agent loopback endpoint", () => {
-  const api = read("../src/api.ts");
+  const api = read("../src/api/print-jobs.ts");
   const routing = read("../src/local-preview-routing.ts");
   const desktop = read("../../desktop/src-tauri/tauri.conf.json");
   assert.ok(routing.includes("function isPrivateLocalPreviewEndpoint(value: string, allowLoopback = false)"));
@@ -477,7 +508,7 @@ test("Windows local document previews prefer the paired Agent loopback endpoint"
 });
 
 test("customer uploader is centred and shared light-theme text tokens meet readable contrast", () => {
-  const css = read("../src/styles.css");
+  const css = readStyles();
   const uploaderThemeGuard = css.slice(css.indexOf("Theme foreground and surface must change together"));
   assert.ok(uploaderThemeGuard.includes(".customer-entry:not(.smartprint-native) .customer-upload-zone {"));
   assert.ok(uploaderThemeGuard.includes("transition: border-color .18s;"));
@@ -518,18 +549,24 @@ test("local preview endpoint candidates are deduplicated and bounded", () => {
 });
 
 test("session renewal refreshes customer payment choices and explains unavailable payment methods", () => {
-  const app = read("../src/App.tsx");
-  const api = read("../src/api.ts");
-  const backend = read("../../../src/SmartPrint.Api/Program.cs");
+  const customerEntry = read("../src/features/customer/CustomerEntry.tsx");
+  const customer = read("../src/features/customer/CustomerPrintFlow.tsx");
+  const api = read("../src/api/customer.ts");
+  const sessionService = read("../../../src/SmartPrint.Api/Services/PublicCustomerSessionService.cs");
   assert.match(api, /paymentOptions: \{ upiEnabled: boolean; upiId\?: string \| null; payeeName\?: string \| null; cashEnabled: boolean; instantPaymentEnabled: boolean \}/);
-  assert.match(app, /paymentOptions:session\.paymentOptions/);
-  assert.match(backend, /PaymentOptions = paymentOptions/);
-  assert.equal((app.match(/The shop has not enabled UPI or cash payment/g) ?? []).length, 2);
+  assert.match(customerEntry, /paymentOptions:session\.paymentOptions/);
+  assert.match(sessionService, /new PublicCustomerSessionRenewalSnapshot\(session\.ExpiresUtc, localAgent, paymentOptions\)/);
+  assert.equal((customer.match(/The shop has not enabled UPI or cash payment/g) ?? []).length, 2);
+});
+test("contextual help supports outside-click and Escape dismissal", () => {
+  const tooltip = read("../src/shared/ui/InfoTooltip.tsx");
+  assert.match(tooltip, /document\.addEventListener\("pointerdown",dismissOutside\)/);
+  assert.match(tooltip, /event\.key==="Escape"/);
+  assert.match(tooltip, /aria-expanded=\{open\}/);
 });
 
-test("contextual help supports outside-click and Escape dismissal", () => {
-  const app = read("../src/App.tsx");
-  assert.match(app, /document\.addEventListener\("pointerdown",dismissOutside\)/);
-  assert.match(app, /event\.key==="Escape"/);
-  assert.match(app, /aria-expanded=\{open\}/);
+
+test("global stylesheet entry preserves ordered modular imports", () => {
+  const entry = read("../src/styles.css");
+  assert.match(entry, /@import "\.\/styles\/core-shell\.css";[\s\S]*@import "\.\/styles\/customer-workflow\.css";/);
 });

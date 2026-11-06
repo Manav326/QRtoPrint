@@ -89,6 +89,34 @@ public sealed class PricingCalculatorTests
         Assert.Equal(1, PricingCalculator.MaximumPhotosPerA4Sheet("4x6"));
     }
 
+    [Theory]
+    [InlineData(1, "35x45", 25, 1)]
+    [InlineData(26, "35x45", 25, 2)]
+    [InlineData(50, "35x45", 25, 2)]
+    [InlineData(51, "35x45", 25, 3)]
+    [InlineData(50, "25x35", 49, 2)]
+    public void PhotoPageCountSupportsMultipleA4Sheets(
+        int photoCount, string size, int photosPerPage, int expectedPages)
+    {
+        Assert.Equal(expectedPages, PricingCalculator.PhotoPageCount(photoCount, size, photosPerPage));
+    }
+
+    [Fact]
+    public void PhotoPageRefundAllocationsFollowThePreparedSheetLayoutAndSumToQuote()
+    {
+        var allocations = PricingCalculator.CalculatePhotoPageRefundAllocations(50, "35x45", 25, 175);
+
+        Assert.Equal(new long[] { 4_375, 4_375 }, allocations);
+        Assert.Equal(8_750, allocations.Sum());
+    }
+
+    [Fact]
+    public void PhotoPageCountRejectsLayoutsAboveThePhysicalA4Capacity()
+    {
+        Assert.Throws<ArgumentOutOfRangeException>(() =>
+            PricingCalculator.PhotoPageCount(30, "35x45", 26));
+    }
+
     [Fact]
     public void MultiPagePhotoOrderUsesTheDeclaredLayoutCapacity()
     {
@@ -99,33 +127,25 @@ public sealed class PricingCalculatorTests
     [Fact]
     public void MultiPagePhotoRefundsFollowThePhotosOnEachPage()
     {
-        var allocations = PricingCalculator.CalculatePhotoPageRefundAllocations(
-            50, "35x45", 20, 175);
+        var allocations = PricingCalculator.CalculatePhotoPageRefundAllocations(50, "35x45", 20, 175);
 
         Assert.Equal(new long[] { 3_500, 3_500, 1_750 }, allocations);
         Assert.Equal(PricingCalculator.CalculatePhoto(50, "35x45", ConfiguredPricingWithPhotoRate(175)), allocations.Sum());
     }
-
 
     [Fact]
     public void FiftyPhotosAtNinePerPageProduceSixA4PagesAndCorrectLastPageRefund()
     {
         Assert.Equal(6, PricingCalculator.PhotoPageCount(50, "35x45", 9));
 
-        var allocations = PricingCalculator.CalculatePhotoPageRefundAllocations(
-            50, "35x45", 9, 175);
+        var allocations = PricingCalculator.CalculatePhotoPageRefundAllocations(50, "35x45", 9, 175);
 
         Assert.Equal(new long[] { 1_575, 1_575, 1_575, 1_575, 1_575, 875 }, allocations);
         Assert.Equal(PricingCalculator.CalculatePhoto(50, "35x45", ConfiguredPricingWithPhotoRate(175)), allocations.Sum());
     }
 
-    [Fact]
-    public void RejectsPageCapacityThatExceedsTheSelectedPhotoSize()
+    private static ShopPricingProfile ConfiguredPricingWithPhotoRate(long photoRate)
     {
-        Assert.Throws<ArgumentOutOfRangeException>(() => PricingCalculator.PhotoPageCount(50, "35x45", 26));
-    }
-
-    private static ShopPricingProfile ConfiguredPricingWithPhotoRate(long photoRate) {
         var pricing = ConfiguredPricing();
         pricing.Photo35x45Minor = photoRate;
         return pricing;
