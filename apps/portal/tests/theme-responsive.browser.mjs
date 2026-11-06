@@ -16,12 +16,12 @@ mkdirSync(artifactDirectory, { recursive: true });
 
 function startWorkspaceProcess(args) {
   const packageManager = process.env.SMARTPRINT_PNPM_COMMAND || "pnpm";
-  const prefix = (process.env.SMARTPRINT_PNPM_PREFIX || "").split(/\\s+/).filter(Boolean);
+  const prefix = (process.env.SMARTPRINT_PNPM_PREFIX || "").split(" ").filter(Boolean);
   const options = { stdio: "inherit", env: process.env, windowsHide: true };
   if (process.platform === "win32") {
     // .cmd shims must be invoked through cmd.exe on Windows.
-    // All arguments are fixed test-runner tokens without spaces, so this keeps
-    // cmd.exe invocation simple while still honoring an absolute pnpm/corepack path.
+    // All arguments are fixed test-runner tokens without spaces, so cmd.exe can
+    // invoke the pnpm/Corepack command selected by the Windows QA orchestrator.
     const command = [packageManager, ...prefix, ...args].join(" ");
     const child = spawn(process.env.ComSpec || "cmd.exe", ["/d", "/c", command], options);
     child.spawnError = null;
