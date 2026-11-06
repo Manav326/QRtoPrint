@@ -252,8 +252,11 @@ try {
     $node = Get-Command node.exe -ErrorAction SilentlyContinue
     if (-not $node) { $node = Get-Command node -ErrorAction Stop }
     $nodeVersion = (& $node.Source --version).Trim()
-    if ($nodeVersion -notmatch "^v(\d+)\." -or [int]$Matches[1] -lt 22) {
-        throw "Node.js 22 or newer is required. Found $nodeVersion."
+    $nodeVersionMatch = [regex]::Match($nodeVersion, '^v(?<major>\d+)\.(?<minor>\d+)\.')
+    $nodeMajor = if ($nodeVersionMatch.Success) { [int]$nodeVersionMatch.Groups["major"].Value } else { 0 }
+    $nodeMinor = if ($nodeVersionMatch.Success) { [int]$nodeVersionMatch.Groups["minor"].Value } else { 0 }
+    if (-not $nodeVersionMatch.Success -or $nodeMajor -lt 22 -or ($nodeMajor -eq 22 -and $nodeMinor -lt 6)) {
+        throw "Node.js 22.6 or newer is required for the built-in TypeScript strip-types test runner. Found $nodeVersion."
     }
     Add-QAResult -Name "Node.js runtime" -Status "PASS" -Detail $nodeVersion
 
