@@ -860,8 +860,14 @@ try {
     assert.ok(tenants.items.some(item => item.id === shop1TenantId));
     assert.ok(tenants.items.some(item => item.id === shop2TenantId));
     assert.ok(plans.some(item => item.code === "SMARTPRINT_QA_AUTOMATION"));
+    const responsive = await runAuthenticatedResponsiveMatrix(
+      adminPage,
+      sections,
+      "platform-admin"
+    );
     return {
       sectionsVisited: visited,
+      responsive,
       operationsSettingsLoaded: Boolean(operations),
       operationsHistoryRows: operationsHistory.length,
       tenantRows: tenants.items.length,
@@ -940,7 +946,12 @@ try {
     assert.ok(payload.printers.some(item => item.id === shop1Printer.id));
     assert.ok(payload.stations.some(item => item.id === shop1Station.id));
     assert.ok(payload.pricing.isConfigured);
-    return { sectionsVisited: visited, realApiReads: checks.length, printerRows: payload.printers.length, stationRows: payload.stations.length };
+    const responsive = await runAuthenticatedResponsiveMatrix(
+      shop1Page,
+      sections,
+      "shop-one"
+    );
+    return { sectionsVisited: visited, realApiReads: checks.length, printerRows: payload.printers.length, stationRows: payload.stations.length, responsive };
   });
 
   await record("Shop two navigates every real sidebar section and account-menu-only tools", async () => {
@@ -964,7 +975,12 @@ try {
       "/api/v1/shop/payments", "/api/v1/shop/refunds"
     ];
     for (const path of paths) assertHttp(await request(shop2Page, "GET", path, { token: shop2Tokens.accessToken }), 200, "Shop two " + path);
-    return { sectionsVisited: visited, realApiReads: paths.length };
+    const responsive = await runAuthenticatedResponsiveMatrix(
+      shop2Page,
+      sections,
+      "shop-two"
+    );
+    return { sectionsVisited: visited, realApiReads: paths.length, responsive };
   });
 
   await record("Shop, platform-admin and cross-tenant authorization boundaries", async () => {
