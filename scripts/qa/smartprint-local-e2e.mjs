@@ -400,41 +400,84 @@ async function assignQaPlan(adminPage, adminToken, shopName) {
   return { tenantId: tenant.id, planId: plan.id, planVersionId: selectedVersion.id, planCode: code };
 }
 
-async function setupShopResources(page, tokens, shopLabel) {
-  const printerList = assertHttp(await request(page, "GET", "/api/v1/shop/printers", { token: tokens.accessToken }), 200, shopLabel + " printer list");
-  let printer = printerList.find(item => item.displayName === "SmartPrint QA virtual no-dispatch queue");
-  if (!printer) {
-    const created = await request(page, "POST", "/api/v1/shop/printers", {
-      token: tokens.accessToken,
-      body: {
-        displayName: "SmartPrint QA virtual no-dispatch queue",
-        manufacturer: "SmartPrint QA",
-        model: "No physical hardware attached",
-        connectionType: "WindowsQueue",
-        connectionAddress: null,
-        queueName: "SMARTPRINT_QA_NO_DISPATCH",
-        capabilitiesJson: "{}"
-      }
-    });
-    printer = assertHttp(created, 201, shopLabel + " create QA printer");
+async function clickShopSection(page, label) {
+  const viewportWidth = await page.evaluate(() => window.innerWidth);
+  if (viewportWidth <= 850) {
+    const openNavigation = page.getByRole("button", { name: "Open navigation" });
+    if (await openNavigation.isVisible().catch(() => false)) await openNavigation.click();
   }
-  const stationList = assertHttp(await request(page, "GET", "/api/v1/shop/qr-stations", { token: tokens.accessToken }), 200, shopLabel + " QR station list");
-  let station = stationList.find(item => item.displayName === "SmartPrint QA customer station");
-  if (!station) {
-    const created = await request(page, "POST", "/api/v1/shop/qr-stations", {
-      token: tokens.accessToken,
-      body: { displayName: "SmartPrint QA customer station", printerDeviceId: printer.id }
-    });
-    station = assertHttp(created, 201, shopLabel + " create QA QR station");
-  }
-  if (!station.isEnabled) {
-    const enabled = await request(page, "PATCH",
-      "/api/v1/shop/qr-stations/" + station.id + "/enabled?isEnabled=true",
-      { token: tokens.accessToken });
-    assertHttp(enabled, 200, shopLabel + " enable QA station");
-  }
+  await page.locator(".sidebar .nav-item").filter({ hasText: label }).first().click();
+  await page.waitForFunction(
+    expected => [...document.querySelectorAll(".sidebar .nav-item")]
+      .some(element => element.textContent.trim() === expected && element.classList.contains("active")),
+    label,
+    { timeout: 12000 }
+  );
+}
 
-  const pricing = {
+async function setupShopResources(page, tokens, shopLabel) {
+  const printerName = "SmartPrint QA no-dispatch test queue";
+  const stationName = "SmartPrint QA customer station";
+
+  let printers = assertHttp(await request(page, "GET", "/api/v1/shop/printers", {
+    token: tokens.accessToken
+  }), 200, shopLabel + " printer list");
+  let printer = printers.find(item => item.displayName === printerName);
+
+  if (!printer) {
+    await clickShopSection(page, "Printers");
+    await page.getByRole("button", { name: "Add printer" }).click();
+    const dialog = page.getByRole("dialog", { name: "Add a printer" });
+    await dialog.waitFor({ state: "visible", timeout: 10000 });
+    await dialog.getByLabel("Display name").fill(printerName);
+    await dialog.getByLabel("Manufacturer").selectOption("Other");
+    await dialog.getByLabel("Model").fill("QA virtual queue — no physical device");
+    await dialog.getByLabel("Connection type").selectOption("WindowsQueue");
+    await dialog.getByLabel("Windows queue name").fill("SMARTPRINT_QA_NO_DISPATCH");
+    await dialog.getByRole("button", { name: "Add printer" }).click();
+    await dialog.waitFor({ state: "detached", timeout: 20000 });
+    printers = assertHttp(await request(page, "GET", "/api/v1/shop/printers", {
+      token: tokens.accessToken
+    }), 200, shopLabel + " printer list after UI creation");
+    printer = printers.find(item => item.displayName === printerName);
+  }
+  assert.ok(printer?.id, shopLabel + " QA printer was not persisted by the real UI flow.");
+
+  let stations = assertHttp(await request(page, "GET", "/api/v1/shop/qr-stations", {
+    token: tokens.accessToken
+  }), 200, shopLabel + " QR station list");
+  let station = stations.find(item => item.displayName === stationName);
+
+  if (!station) {
+    await clickShopSection(page, "QR Stations");
+    await page.getByRole("button", { name: "Create station" }).click();
+    const dialog = page.getByRole("dialog", { name: "Create a QR station" });
+    await dialog.waitFor({ state: "visible", timeout: 10000 });
+    await dialog.getByLabel("Station name").fill(stationName);
+    await dialog.getByLabel("Default printer").selectOption(printer.id);
+    await dialog.getByRole("button", { name: "Create station" }).click();
+    await dialog.waitFor({ state: "detached", timeout: 20000 });
+    stations = assertHttp(await request(page, "GET", "/api/v1/shop/qr-stations", {
+      token: tokens.accessToken
+    }), 200, shopLabel + " QR station list after UI creation");
+    station = stations.find(item => item.displayName === stationName);
+  }
+  assert.ok(station?.id, shopLabel + " QA QR station was not persisted by the real UI flow.");
+
+  if (!station.isEnabled) {
+    await clickShopSection(page, "QR Stations");
+    const stationCard = page.locator("#qr-station-" + station.id);
+    await stationCard.getByRole("button", { name: "Enable station" }).click();
+    await stationCard.getByRole("button", { name: "Disable station" }).waitFor({ state: "visible", timeout: 15000 });
+    stations = assertHttp(await request(page, "GET", "/api/v1/shop/qr-stations", {
+      token: tokens.accessToken
+    }), 200, shopLabel + " enabled QR station list");
+    station = stations.find(item => item.id === station.id);
+  }
+  assert.equal(station?.isEnabled, true, shopLabel + " QA QR station must be enabled.");
+  assert.equal(station?.printerDeviceId, printer.id, shopLabel + " QR station must use its own QA printer.");
+
+  const pricingValues = {
     monoPerSideMinor: 200,
     colourPerSideMinor: 500,
     monoDuplexPerSheetMinor: 300,
@@ -445,22 +488,66 @@ async function setupShopResources(page, tokens, shopLabel) {
     photo2x2Minor: 700,
     photo4x6Minor: 1000
   };
-  assertHttp(await request(page, "PUT", "/api/v1/shop/pricing", {
-    token: tokens.accessToken, body: pricing
-  }), 200, shopLabel + " configure QA pricing");
+  await clickShopSection(page, "Pricing");
+  await page.getByLabel("Black & white").fill("2.00");
+  await page.getByLabel("Colour").fill("5.00");
+  await page.getByLabel("Black & white duplex").fill("3.00");
+  await page.getByLabel("Colour duplex").fill("7.00");
+  await page.getByLabel("Minimum job charge").fill("1.00");
+  await page.getByLabel("35 × 45 mm").fill("5.00");
+  await page.getByLabel("25 × 35 mm").fill("5.00");
+  await page.getByLabel("2 × 2 inch").fill("7.00");
+  await page.getByLabel("4 × 6 inch").fill("10.00");
+  await page.getByRole("button", { name: "Save print prices" }).click();
+  await page.getByText(/Rate card version/i).waitFor({ state: "visible", timeout: 15000 });
 
-  const paymentSettings = {
-    upiEnabled: true,
-    upiId: "smartprintqa@upi",
-    payeeName: "SmartPrint Local QA",
-    cashEnabled: true,
-    instantPaymentEnabled: false
+  const pricing = assertHttp(await request(page, "GET", "/api/v1/shop/pricing", {
+    token: tokens.accessToken
+  }), 200, shopLabel + " persisted pricing");
+  assert.equal(pricing.isConfigured, true);
+  assert.equal(pricing.monoPerSideMinor, pricingValues.monoPerSideMinor);
+  assert.equal(pricing.colourPerSideMinor, pricingValues.colourPerSideMinor);
+  assert.equal(pricing.photo4x6Minor, pricingValues.photo4x6Minor);
+
+  await clickShopSection(page, "Payments");
+  const methodCards = page.locator(".payment-method-card");
+  await methodCards.nth(0).locator('input[type="checkbox"]').setChecked(true);
+  await page.getByLabel("Shop UPI ID").fill("smartprintqa@upi");
+  await page.getByLabel("Payee / business name").fill("SmartPrint Local QA");
+  await methodCards.nth(1).locator('input[type="checkbox"]').setChecked(true);
+  await methodCards.nth(2).locator('input[type="checkbox"]').setChecked(false);
+  await page.getByRole("button", { name: "Save payment methods" }).click();
+
+  const paymentSettings = assertHttp(await request(page, "GET", "/api/v1/shop/payment-settings", {
+    token: tokens.accessToken
+  }), 200, shopLabel + " persisted payment settings");
+  assert.equal(paymentSettings.upiEnabled, true);
+  assert.equal(paymentSettings.upiId, "smartprintqa@upi");
+  assert.equal(paymentSettings.payeeName, "SmartPrint Local QA");
+  assert.equal(paymentSettings.cashEnabled, true);
+  assert.equal(paymentSettings.instantPaymentEnabled, false);
+
+  return {
+    printer: {
+      id: printer.id,
+      displayName: printer.displayName,
+      outputMode: printer.outputMode,
+      agentDeviceId: printer.agentDeviceId ?? null,
+      queueName: printer.queueName
+    },
+    station: {
+      id: station.id,
+      displayName: station.displayName,
+      publicUrl: station.publicUrl,
+      isEnabled: station.isEnabled,
+      printerDeviceId: station.printerDeviceId
+    },
+    pricingVersion: pricing.version,
+    pricingConfiguredThroughUi: true,
+    paymentMethodsConfiguredThroughUi: true,
+    physicalPrinterPaired: false,
+    printDispatchEnabled: false
   };
-  assertHttp(await request(page, "PUT", "/api/v1/shop/payment-settings", {
-    token: tokens.accessToken, body: paymentSettings
-  }), 200, shopLabel + " configure QA payment methods");
-
-  return { printer, station };
 }
 
 async function assertResponsive(page, label, viewport) {
