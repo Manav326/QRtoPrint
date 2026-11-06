@@ -54,14 +54,23 @@ function Invoke-QAStep {
     Write-Host ([Environment]::NewLine + "=== " + $Name + " ===") -ForegroundColor Cyan
     $logPath = Join-Path $logDirectory $LogName
     $stepExit = 0
+    $previousErrorActionPreference = $ErrorActionPreference
     try {
+        # PowerShell can surface native stderr (including normal Docker Compose
+        # build progress) as NativeCommandError records. With the script-wide
+        # Stop preference, that can abort a successful process before its exit
+        # code is checked. Keep native stderr non-terminating here; the native
+        # process exit code below remains the source of truth for PASS or FAIL.
+        $ErrorActionPreference = "Continue"
         $global:LASTEXITCODE = 0
-        & $Action 2>&1 | Tee-Object -FilePath $logPath | ForEach-Object { Write-Host $_ }
+        & $Action 2>&1 | Tee-Object -FilePath $logPath -ErrorAction Stop | ForEach-Object { Write-Host $_ }
         if ($null -ne $LASTEXITCODE) { $stepExit = [int]$LASTEXITCODE }
     } catch {
         $stepExit = 1
         ($_ | Out-String) | Add-Content -LiteralPath $logPath
         Write-Host ($_ | Out-String) -ForegroundColor Red
+    } finally {
+        $ErrorActionPreference = $previousErrorActionPreference
     }
     $stepStatus = if ($stepExit -eq 0) { "PASS" } else { "FAIL" }
     Add-QAResult -Name $Name -Status $stepStatus -Detail ("Exit code " + $stepExit) -Log (Join-Path "logs" $LogName)
