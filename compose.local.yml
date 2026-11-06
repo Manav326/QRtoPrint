@@ -18,7 +18,7 @@ services:
       start_period: 10s
 
   api:
-    image: localhost/qrtoprint-local/qrtoprint-api:local
+    image: localhost/smart-print/smart-print-api:local
     pull_policy: build
     build:
       context: .
@@ -35,7 +35,7 @@ services:
       Database__ApplyMigrationsOnStartup: "true"
       ASPNETCORE_FORWARDEDHEADERS_ENABLED: "true"
       PublicPortal__BaseUrl: ${PUBLIC_BASE_URL:?Set PUBLIC_BASE_URL in .env.local}
-      PublicDownloads__GitHubRepository: ${GITHUB_REPOSITORY:-Manav326/QRtoPrint}
+      PublicDownloads__GitHubRepository: ${GITHUB_REPOSITORY:-Manav326/smart-print}
       Cors__AllowedOrigins__0: ${PUBLIC_BASE_URL:?Set PUBLIC_BASE_URL in .env.local}
       Cors__AllowedOrigins__1: "http://localhost:3000"
     ports:
@@ -53,7 +53,7 @@ services:
       start_period: 45s
 
   portal:
-    image: localhost/qrtoprint-local/qrtoprint-portal:local
+    image: localhost/smart-print/smart-print-portal:local
     pull_policy: build
     build:
       context: .
@@ -67,6 +67,7 @@ services:
       default: {}
       cloudflare-edge:
         aliases:
+          - smart-print-portal
           - qrtoprint-portal
           - portal
     depends_on:
