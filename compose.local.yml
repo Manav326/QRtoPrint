@@ -20,7 +20,6 @@ services:
 
   api:
     image: localhost/smart-print/smart-print-api:local
-    pull_policy: build
     build:
       context: .
       dockerfile: Dockerfile.api
@@ -55,7 +54,6 @@ services:
 
   portal:
     image: localhost/smart-print/smart-print-portal:local
-    pull_policy: build
     build:
       context: .
       dockerfile: apps/portal/Dockerfile
