@@ -85,6 +85,10 @@ let shop1Printer;
 let shop2Printer;
 let uploadedJob;
 let uploadedBatchId;
+let batchCustomerPage;
+let batchCustomerSession;
+let reviewedBatchId;
+let reviewedBatchShopJobs = [];
 let paymentRejectedJob;
 let paymentRejectedBatchId;
 let paymentRejectedBatchPaymentId;
@@ -575,7 +579,7 @@ async function setupShopResources(page, tokens, shopLabel) {
 
   if (!printer) {
     await clickShopSection(page, "Printers");
-    await page.getByRole("button", { name: "Add printer" }).click();
+    await page.locator(".collection-panel").getByRole("button", { name: "Add printer" }).click();
     const dialog = page.getByRole("dialog", { name: "Add a printer" });
     await dialog.waitFor({ state: "visible", timeout: 10000 });
     await dialog.getByLabel("Display name").fill(printerName);
@@ -599,7 +603,7 @@ async function setupShopResources(page, tokens, shopLabel) {
 
   if (!station) {
     await clickShopSection(page, "QR Stations");
-    await page.getByRole("button", { name: "Create station" }).click();
+    await page.locator(".collection-panel").getByRole("button", { name: "Create station" }).click();
     const dialog = page.getByRole("dialog", { name: "Create a QR station" });
     await dialog.waitFor({ state: "visible", timeout: 10000 });
     await dialog.getByLabel("Station name").fill(stationName);
@@ -1195,6 +1199,8 @@ try {
     }, customerSession.publicCode);
     const job = draft?.uploaded?.job || draft?.uploadedBatch?.[0]?.job;
     assert.ok(job?.id, "The customer UI did not persist the real uploaded job metadata.");
+    report.safety.syntheticDocumentsUploaded = true;
+    report.safety.realLocalDatabaseJobsCreated = true;
     uploadedJob = job;
     uploadedBatchId = draft.batchId;
     assert.equal(job.pageCount, 2);
