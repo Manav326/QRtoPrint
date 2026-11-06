@@ -1,4 +1,3 @@
-@import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@400;500;600;700;800&display=swap');
 
 .sp-public{--sp-ink:#172033;--sp-muted:#68758a;--sp-violet:#755be8;--sp-violet-dark:#6047d2;--sp-line:#e5e9f2;--sp-bg:#f8f9fc;--sp-panel:#fff;--sp-mint:#20a57b;color:var(--sp-ink);background:#fff;min-height:100vh;font-family:"DM Sans",sans-serif;overflow:hidden}
 .sp-public *{box-sizing:border-box}
