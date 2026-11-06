@@ -563,8 +563,9 @@ async function signInAndVisit(label, email, password, sections, formSelector, bu
     );
     visited.push(section);
   }
+  const responsive = await runAuthenticatedLiveResponsiveMatrix(label, sections);
   await screenshot(`${label}-workspace`);
-  return { sectionsVisited: visited, identityScopeChecks: 'passed', readOnly: true };
+  return { sectionsVisited: visited, identityScopeChecks: 'passed', responsive, readOnly: true };
 }
 
 try {
@@ -665,6 +666,8 @@ try {
     await page.locator('input[type="password"]').first().waitFor({ state: 'visible' });
     return { ...result, registrationSubmitted: false };
   });
+  await record('Live public/auth pages responsive across 5 viewport sizes', async () => runPublicLiveResponsiveMatrix());
+
   await record('Platform-admin sign-in route renders', async () => {
     const result = await visitRoute('/admin', '.platform-admin-auth-screen', 'platform admin login');
     await page.getByLabel('Email address').waitFor({ state: 'visible' });
