@@ -31,7 +31,7 @@ A native Android client is located in `apps/android`. It complements the custome
 - The local Agent upload exception permits only RFC1918 IPv4 addresses on TCP 17842 and the Agent upload route over cleartext HTTP; all other HTTP WebView requests are blocked. HTTPS remains required for the shop portal.
 - General library imports are capped at 100 MB per file. The app does not request broad storage access; Android file/folder pickers control import and export.
 
-CI builds the Android debug APK and runs JVM unit tests. A real-device matrix (QR scanning, file-provider interoperability, Android version coverage and shop-Wi-Fi Agent upload) is still required before production or Play Store release. The SmartPrint Android debug APK is published as the `smartprint-android-debug` workflow artifact.
+CI builds the Android debug APK and runs JVM unit tests. A real-device matrix (QR scanning, file-provider interoperability, Android version coverage and shop-Wi-Fi Agent upload) is still required before production or Play Store release. The SmartPrint Android debug APK is published as the `smart-print-android-debug` workflow artifact.
 
 ## Public SmartPrint downloads
 
@@ -77,9 +77,9 @@ On Windows with GitHub CLI authenticated and Android Debug Bridge (ADB) installe
 .\scripts\download-android-apk.ps1 -Install -DeviceSerial "YOUR_DEVICE_SERIAL"
 ```
 
-The script selects the latest successful main-branch CI run, downloads the `smartprint-android-debug` artifact, validates the APK and reports its SHA-256. It saves the file as `%USERPROFILE%\Downloads\SmartPrintAndroid\SmartPrint-Android-debug.apk` and also accepts retained APK artifacts from older CI runs created before the naming change. Use `-Install` only after enabling USB debugging and authorising the device. This is a development debug build, not a Play Store release.
+The script selects the latest successful main-branch CI run, downloads the `smart-print-android-debug` artifact, validates the APK and reports its SHA-256. It saves the file as `%USERPROFILE%\Downloads\SmartPrintAndroid\SmartPrint-Android-debug.apk` and also accepts retained APK artifacts from older CI runs created before the naming change. Use `-Install` only after enabling USB debugging and authorising the device. This is a development debug build, not a Play Store release.
 
-The same CI run publishes `smartprint-android-test-reports` with JVM and emulator test evidence.
+The same CI run publishes `smart-print-android-test-reports` with JVM and emulator test evidence.
 
 ## Run locally through Cloudflare Tunnel
 
