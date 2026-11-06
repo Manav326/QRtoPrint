@@ -268,22 +268,22 @@ function syntheticPdf(pageCount = 2, label = "SmartPrint local QA synthetic docu
     objects.push(
       "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 " + fontId + " 0 R >> >> /Contents " + contentId + " 0 R >>"
     );
-    objects.push("<< /Length " + Buffer.byteLength(stream, "ascii") + " >>\\nstream\\n" + stream + "\\nendstream");
+    objects.push("<< /Length " + Buffer.byteLength(stream, "ascii") + " >>\nstream\n" + stream + "\nendstream");
   }
   objects.push("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>");
-  let pdf = "%PDF-1.4\\n";
+  let pdf = "%PDF-1.4\n";
   const offsets = [0];
   for (let index = 0; index < objects.length; index++) {
     offsets.push(Buffer.byteLength(pdf, "ascii"));
-    pdf += (index + 1) + " 0 obj\\n" + objects[index] + "\\nendobj\\n";
+    pdf += (index + 1) + " 0 obj\n" + objects[index] + "\nendobj\n";
   }
   const xrefOffset = Buffer.byteLength(pdf, "ascii");
-  pdf += "xref\\n0 " + (objects.length + 1) + "\\n";
-  pdf += "0000000000 65535 f \\n";
+  pdf += "xref\n0 " + (objects.length + 1) + "\n";
+  pdf += "0000000000 65535 f \n";
   for (let index = 1; index < offsets.length; index++) {
-    pdf += String(offsets[index]).padStart(10, "0") + " 00000 n \\n";
+    pdf += String(offsets[index]).padStart(10, "0") + " 00000 n \n";
   }
-  pdf += "trailer\\n<< /Size " + (objects.length + 1) + " /Root 1 0 R >>\\nstartxref\\n" + xrefOffset + "\\n%%EOF\\n";
+  pdf += "trailer\n<< /Size " + (objects.length + 1) + " /Root 1 0 R >>\nstartxref\n" + xrefOffset + "\n%%EOF\n";
   return Buffer.from(pdf, "ascii");
 }
 
@@ -860,6 +860,118 @@ try {
     return { status: start.status, rejectedBeforeCheckout: true };
   });
 
+  await record("Real UPI payment intent, synthetic QA reference, and shop rejection without marking money received", async () => {
+    const paymentBatchId = crypto.randomUUID();
+    const idempotencyKey = crypto.randomUUID();
+    const fileName = "smartprint-payment-qa-" + runId + ".pdf";
+    const upload = await uploadSyntheticPdf(
+      customerPage,
+      customerSession.sessionToken,
+      paymentBatchId,
+      idempotencyKey,
+      fileName,
+      syntheticPdf(1, "SmartPrint local payment lifecycle QA")
+    );
+    assert.ok([200, 201].includes(upload.status),
+      "Second real QA upload failed: " + upload.status + " " + upload.text.slice(0, 700));
+    const job = upload.json?.job;
+    assert.ok(job?.id && job?.jobNumber, "Payment lifecycle upload did not create a real job.");
+    report.safety.syntheticDocumentsUploaded = true;
+    report.safety.realLocalDatabaseJobsCreated = true;
+
+    const quote = assertHttp(await request(customerPage, "POST",
+      "/api/v1/public/jobs/" + job.id + "/quote", {
+        sessionToken: customerSession.sessionToken,
+        body: {
+          colourMode: "Mono", paperSize: "A4", isDuplex: false, copies: 1, orientation: "AUTO"
+        }
+      }), 200, "Payment lifecycle quote");
+    assert.ok(quote.quotedAmountMinor > 0, "QA quote must be a positive INR amount.");
+
+    const accepted = assertHttp(await request(customerPage, "POST",
+      "/api/v1/public/jobs/" + job.id + "/accept-quote", {
+        sessionToken: customerSession.sessionToken
+      }), 200, "Payment lifecycle customer quote acceptance");
+    assert.equal(accepted.status, "AWAITING_SHOP_APPROVAL");
+
+    const approved = assertHttp(await request(shop1Page, "POST",
+      "/api/v1/shop/print-jobs/" + job.id + "/approve", {
+        token: shop1Tokens.accessToken
+      }), 200, "Payment lifecycle shop approval");
+    assert.equal(approved.status, "AWAITING_PAYMENT");
+
+    const payment = assertHttp(await request(customerPage, "POST",
+      "/api/v1/public/batches/" + paymentBatchId + "/payments", {
+        sessionToken: customerSession.sessionToken,
+        body: { method: "UPI" }
+      }), 200, "Start actual UPI batch payment intent");
+    assert.ok(payment.id, "UPI intent did not return a payment identifier.");
+    assert.equal(payment.method, "UPI");
+    assert.equal(payment.status, "AWAITING_CUSTOMER_PAYMENT");
+    assert.ok(payment.amountMinor > 0);
+    assert.equal(payment.currency, "INR");
+
+    const syntheticReference = "QA-NOT-REAL-" + runId.replace(/[^A-Za-z0-9_-]/g, "-");
+    const submitted = assertHttp(await request(customerPage, "POST",
+      "/api/v1/public/batch-payments/" + payment.id + "/report", {
+        sessionToken: customerSession.sessionToken,
+        body: { referenceNumber: syntheticReference }
+      }), 200, "Submit clearly synthetic QA payment reference");
+    assert.equal(submitted.status, "CUSTOMER_REPORTED");
+    assert.equal(submitted.paymentReference, syntheticReference);
+
+    const duplicateReport = assertHttp(await request(customerPage, "POST",
+      "/api/v1/public/batch-payments/" + payment.id + "/report", {
+        sessionToken: customerSession.sessionToken,
+        body: { referenceNumber: syntheticReference }
+      }), 200, "Idempotent duplicate payment-reference submission");
+    assert.equal(duplicateReport.duplicateRequest, true);
+
+    const reportedPayments = assertHttp(await request(shop1Page, "GET",
+      "/api/v1/shop/payments", { token: shop1Tokens.accessToken }), 200, "Shop payment list after customer report");
+    const reported = reportedPayments.find(item => item.id === payment.id);
+    assert.ok(reported, "The QA payment did not appear in the real shop payment list.");
+    assert.equal(reported.status, "CUSTOMER_REPORTED");
+
+    const rejected = assertHttp(await request(shop1Page, "POST",
+      "/api/v1/shop/payments/" + payment.id + "/reject", {
+        token: shop1Tokens.accessToken,
+        body: { reason: "Synthetic QA reference only; no real funds were transferred." }
+      }), 200, "Shop rejects non-real QA payment reference");
+    assert.equal(rejected.status, "REJECTED");
+
+    const duplicateReject = assertHttp(await request(shop1Page, "POST",
+      "/api/v1/shop/payments/" + payment.id + "/reject", {
+        token: shop1Tokens.accessToken,
+        body: { reason: "Synthetic QA reference only; no real funds were transferred." }
+      }), 200, "Idempotent duplicate payment rejection");
+    assert.equal(duplicateReject.duplicateRequest, true);
+
+    const finalCustomerStatus = assertHttp(await request(customerPage, "GET",
+      "/api/v1/public/jobs/" + job.id + "/status", {
+        sessionToken: customerSession.sessionToken
+      }), 200, "Customer sees rejected payment state");
+    assert.equal(finalCustomerStatus.job.status, "PAYMENT_REJECTED");
+    report.safety.syntheticUtrSubmitted = true;
+    report.safety.syntheticUtrMarkedVerified = false;
+
+    return {
+      jobNumber: job.jobNumber,
+      quoteAmountMinor: quote.quotedAmountMinor,
+      paymentMethod: payment.method,
+      paymentId: payment.id,
+      paymentReference: "[synthetic QA reference redacted]",
+      referenceStatus: submitted.status,
+      duplicateReferenceSubmission: duplicateReport.duplicateRequest,
+      shopPaymentStatus: rejected.status,
+      duplicateShopRejection: duplicateReject.duplicateRequest,
+      customerJobStatus: finalCustomerStatus.job.status,
+      fundsActuallyReceived: false,
+      paymentVerified: false,
+      printDispatchAttempted: false
+    };
+  });
+
   await record("Shop payment and refund screens load without recording false financial events", async () => {
     const payments = assertHttp(await request(shop1Page, "GET", "/api/v1/shop/payments", {
       token: shop1Tokens.accessToken
@@ -897,7 +1009,7 @@ try {
   await record("Dedicated QA Agent enrollment code can be generated without pairing or replacing a machine identity", async () => {
     const enrollment = assertHttp(await request(shop1Page, "POST", "/api/v1/shop/agent-enrollment-codes", {
       token: shop1Tokens.accessToken
-    }), 200, "Create Agent enrollment code");
+    }), 201, "Create Agent enrollment code");
     assert.ok(enrollment.code && Date.parse(enrollment.expiresUtc) > Date.now());
     return { codeCreated: true, expiresUtc: enrollment.expiresUtc, paired: false, existingAgentIdentityChanged: false };
   });
@@ -917,7 +1029,7 @@ try {
   await record("Live local browser has no same-origin server errors or critical resource failures", async () => {
     assert.equal(serverErrors.length, 0, JSON.stringify(serverErrors));
     assert.equal(resourceErrors.length, 0, JSON.stringify(resourceErrors));
-    assert.equal(pageErrors.length, 0, pageErrors.join("\\n"));
+    assert.equal(pageErrors.length, 0, pageErrors.join("\n"));
     return { serverErrors: serverErrors.length, resourceErrors: resourceErrors.length, pageErrors: pageErrors.length };
   });
 
@@ -937,16 +1049,16 @@ try {
     skipped: report.checks.filter(check => check.status === "SKIPPED").length,
     warnings: report.warnings.length
   };
-  writeFileSync(join(outputDirectory, "report.json"), JSON.stringify(report, null, 2) + "\\n");
+  writeFileSync(join(outputDirectory, "report.json"), JSON.stringify(report, null, 2) + "\n");
   writeFileSync(join(outputDirectory, "report.txt"),
-    "SmartPrint local real-data QA\\n" +
-    "Target: " + report.target + "\\n" +
-    "Passed: " + report.summary.passed + "\\n" +
-    "Failed: " + report.summary.failed + "\\n" +
-    "Skipped: " + report.summary.skipped + "\\n" +
-    "Warnings: " + report.summary.warnings + "\\n" +
-    "Evidence: " + outputDirectory + "\\n");
-  console.log("\\nSmartPrint local real-data QA summary:");
+    "SmartPrint local real-data QA\n" +
+    "Target: " + report.target + "\n" +
+    "Passed: " + report.summary.passed + "\n" +
+    "Failed: " + report.summary.failed + "\n" +
+    "Skipped: " + report.summary.skipped + "\n" +
+    "Warnings: " + report.summary.warnings + "\n" +
+    "Evidence: " + outputDirectory + "\n");
+  console.log("\nSmartPrint local real-data QA summary:");
   console.log(JSON.stringify(report.summary, null, 2));
   console.log("Evidence: " + outputDirectory);
   await context?.close().catch(() => {});
