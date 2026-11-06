@@ -168,10 +168,16 @@ async function openRoute(page, path, selector, label) {
   assert.equal(response.status(), 200, label + " returned HTTP " + response.status() + ".");
   assert.equal(new URL(response.url()).origin, baseUrl.origin, label + " left the local origin.");
   await page.locator(selector).first().waitFor({ state: "visible", timeout: 20000 });
-  const insecure = await page.evaluate(() =>
-    performance.getEntriesByType("resource").map(entry => entry.name).filter(url => url.startsWith("https://") === false && url.startsWith("http://"))
-  );
-  assert.equal(insecure.length, 0, label + " loaded cleartext HTTP resources.");
+  const offOrigin = await page.evaluate(() => {
+    const expected = window.location.origin;
+    return performance.getEntriesByType("resource")
+      .map(entry => entry.name)
+      .filter(value => {
+        try { return new URL(value, expected).origin !== expected; }
+        catch { return true; }
+      });
+  });
+  assert.equal(offOrigin.length, 0, label + " loaded resources outside the local SmartPrint origin: " + offOrigin.join(", "));
   await screenshot(page, label);
   return { status: response.status(), url: page.url(), title: await page.title() };
 }
