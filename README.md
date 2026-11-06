@@ -86,7 +86,7 @@ The same CI run publishes `smartprint-android-test-reports` with JVM and emulato
 This is the recommended local end-to-end test path. The phone opens the same publicly trusted HTTPS URL as production; no private CA certificate is installed on customer devices.
 
 1. Use the existing QuantaEdge Cloudflare Tunnel managed by the `QuantaEdge-Production` control plane. Do not create a product-specific connector or a second tunnel.
-2. In that tunnel, the SmartPrint Published Application route must target **http://qrtoprint-portal:80** on the shared Docker network `cloudflare-edge`. The compatibility alias `http://portal:80` is also retained.
+2. In that tunnel, configure exactly one SmartPrint Published Application origin: **http://smart-print-portal:80** on the shared Docker network `cloudflare-edge`. Do not add a second origin or legacy alias.
 3. Start the central connector once from the QuantaEdge-Production checkout with `.\scripts\local-ingress.ps1 up`. Then, from this repository root, run:
 
     .\scripts\docker-up-local.ps1
@@ -110,7 +110,7 @@ Use the current PUBLIC_BASE_URL in those commands. After its first authenticated
 
 ### Changing the public URL later
 
-Change PUBLIC_BASE_URL in .env.local (or .env for production), update the matching exact-hostname Published application route in the central Cloudflare Tunnel to http://smart-print-portal:80 (the legacy qrtoprint-portal alias remains available during migration), and restart the Compose stack. Cloudflare's route is infrastructure configuration and must match the chosen hostname. Keep the previous hostname routed to the same portal during migration: previously printed QR codes keep working, and already-paired Agents can heartbeat through the old hostname and learn the new URL. Remove the old route only after Agents have updated and old QR codes are no longer in circulation.
+Change PUBLIC_BASE_URL in .env.local (or .env for production), update the single SmartPrint Published application route in the central Cloudflare Tunnel to http://smart-print-portal:80, and restart the Compose stack. Cloudflare's route is infrastructure configuration and must match the chosen hostname. Keep the previous hostname routed to the same portal during migration: previously printed QR codes keep working, and already-paired Agents can heartbeat through the old hostname and learn the new URL. Remove the old route only after Agents have updated and old QR codes are no longer in circulation.
 
 ### Stop / restart
 
@@ -126,7 +126,7 @@ The production stack runs PostgreSQL, the ASP.NET Core API and the React portal.
 
 ### First start
 
-1. Ensure the central connector is running from QuantaEdge-Production and the shared `cloudflare-edge` network exists. The Cloudflare Published Application route for this hostname must target **http://smart-print-portal:80** (the legacy `qrtoprint-portal` alias is retained).
+1. Ensure the central connector is running from QuantaEdge-Production and the shared `cloudflare-edge` network exists. The Cloudflare Published Application route for this hostname must target **http://smart-print-portal:80**.
 2. From the repository directory, run:
 
     .\scripts\docker-up.ps1
@@ -136,7 +136,7 @@ The production stack runs PostgreSQL, the ASP.NET Core API and the React portal.
 
 ### One place to change the URL
 
-PUBLIC_BASE_URL in .env is the sole public application origin. It must be an HTTPS origin with no path. The Cloudflare Published application route for that hostname must point to http://portal:80. Browser API calls are same-origin through /api; no API_DOMAIN is required.
+PUBLIC_BASE_URL in .env is the sole public application origin. It must be an HTTPS origin with no path. The Cloudflare Published application route for that hostname must point to http://smart-print-portal:80. Browser API calls are same-origin through /api; no API_DOMAIN is required.
 
 ### First administrator
 
