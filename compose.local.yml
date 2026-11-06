@@ -67,8 +67,6 @@ services:
       cloudflare-edge:
         aliases:
           - smart-print-portal
-          - qrtoprint-portal
-          - portal
     depends_on:
       api:
         condition: service_healthy
