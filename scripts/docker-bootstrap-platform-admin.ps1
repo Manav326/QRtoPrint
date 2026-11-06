@@ -13,6 +13,8 @@ $ErrorActionPreference = "Stop"
 $repoRoot = Split-Path -Parent $PSScriptRoot
 $envPath = Join-Path $repoRoot ".env"
 $composeFile = Join-Path $repoRoot "compose.yml"
+# Admin bootstrap must target the existing production API container, never a caller-selected project.
+$composeProjectName = "qrtoprint"
 
 if (-not (Test-Path -LiteralPath $envPath)) {
     throw "No .env file found. Start the Docker stack with scripts\docker-up.ps1 first."
@@ -48,7 +50,7 @@ try {
     }
 
     $copyArgs = @(
-        "compose", "--env-file", $envPath, "-f", $composeFile,
+        "compose", "--project-name", $composeProjectName, "--env-file", $envPath, "-f", $composeFile,
         "cp", $tempPasswordFile, ("api:" + $containerPasswordPath)
     )
     & docker @copyArgs
@@ -58,7 +60,7 @@ try {
     $containerPasswordCopied = $true
 
     $ownerArgs = @(
-        "compose", "--env-file", $envPath, "-f", $composeFile,
+        "compose", "--project-name", $composeProjectName, "--env-file", $envPath, "-f", $composeFile,
         "exec", "-T", "-u", "root", "api", "chown", "app:app", $containerPasswordPath
     )
     & docker @ownerArgs
@@ -68,7 +70,7 @@ try {
 
     $shellCommand = 'QRTP_PLATFORM_ADMIN_PASSWORD="$(cat ' + $containerPasswordPath + ')"; export QRTP_PLATFORM_ADMIN_PASSWORD; rm -f ' + $containerPasswordPath + '; exec dotnet SmartPrint.Api.dll --bootstrap-platform-admin'
     $execArgs = @(
-        "compose", "--env-file", $envPath, "-f", $composeFile,
+        "compose", "--project-name", $composeProjectName, "--env-file", $envPath, "-f", $composeFile,
         "exec", "-T",
         "-e", ("QRTP_PLATFORM_ADMIN_EMAIL=" + $Email.Trim()),
         "-e", ("QRTP_PLATFORM_ADMIN_NAME=" + $DisplayName.Trim()),
@@ -85,7 +87,7 @@ try {
 finally {
     if ($containerPasswordCopied) {
         $cleanupArgs = @(
-            "compose", "--env-file", $envPath, "-f", $composeFile,
+            "compose", "--project-name", $composeProjectName, "--env-file", $envPath, "-f", $composeFile,
             "exec", "-T", "-u", "root", "api", "rm", "-f", $containerPasswordPath
         )
         & docker @cleanupArgs | Out-Null
