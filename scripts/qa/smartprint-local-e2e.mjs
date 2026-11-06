@@ -1410,48 +1410,15 @@ try {
   });
 
   await record("Real UPI payment intent, synthetic QA reference, and shop rejection without marking money received", async () => {
-    const paymentBatchId = crypto.randomUUID();
-    const idempotencyKey = crypto.randomUUID();
-    const fileName = "smartprint-payment-qa-" + runId + ".pdf";
-    const upload = await uploadSyntheticPdf(
-      customerPage,
-      customerSession.sessionToken,
-      paymentBatchId,
-      idempotencyKey,
-      fileName,
-      syntheticPdf(1, "SmartPrint local payment lifecycle QA")
-    );
-    assert.ok([200, 201].includes(upload.status),
-      "Second real QA upload failed: " + upload.status + " " + upload.text.slice(0, 700));
-    const job = upload.json?.job;
-    assert.ok(job?.id && job?.jobNumber, "Payment lifecycle upload did not create a real job.");
-    report.safety.syntheticDocumentsUploaded = true;
-    report.safety.realLocalDatabaseJobsCreated = true;
+    const paymentBatchId = reviewedBatchId;
+    const job = paymentRejectedJob;
+    assert.ok(paymentBatchId && job?.id, "The reviewed two-file QA batch must contain one accepted job.");
+    assert.equal(job.status, "AWAITING_PAYMENT", "Only the accepted file should be payable.");
+    assert.ok(job.quotedAmountMinor > 0, "The accepted QA file must have a positive saved quote.");
 
-    const quote = assertHttp(await request(customerPage, "POST",
-      "/api/v1/public/jobs/" + job.id + "/quote", {
-        sessionToken: customerSession.sessionToken,
-        body: {
-          colourMode: "Mono", paperSize: "A4", isDuplex: false, copies: 1, orientation: "AUTO"
-        }
-      }), 200, "Payment lifecycle quote");
-    assert.ok(quote.quotedAmountMinor > 0, "QA quote must be a positive INR amount.");
-
-    const accepted = assertHttp(await request(customerPage, "POST",
-      "/api/v1/public/jobs/" + job.id + "/accept-quote", {
-        sessionToken: customerSession.sessionToken
-      }), 200, "Payment lifecycle customer quote acceptance");
-    assert.equal(accepted.status, "AWAITING_SHOP_APPROVAL");
-
-    const approved = assertHttp(await request(shop1Page, "POST",
-      "/api/v1/shop/print-jobs/" + job.id + "/approve", {
-        token: shop1Tokens.accessToken
-      }), 200, "Payment lifecycle shop approval");
-    assert.equal(approved.status, "AWAITING_PAYMENT");
-
-    const payment = assertHttp(await request(customerPage, "POST",
+    const payment = assertHttp(await request(batchCustomerPage, "POST",
       "/api/v1/public/batches/" + paymentBatchId + "/payments", {
-        sessionToken: customerSession.sessionToken,
+        sessionToken: batchCustomerSession.sessionToken,
         body: { method: "UPI" }
       }), 200, "Start actual UPI batch payment intent");
     assert.ok(payment.id, "UPI intent did not return a payment identifier.");
@@ -1459,20 +1426,22 @@ try {
     assert.equal(payment.status, "AWAITING_CUSTOMER_PAYMENT");
     assert.ok(payment.amountMinor > 0);
     assert.equal(payment.currency, "INR");
+    assert.equal(payment.fileCount, 1, "The rejected file must be excluded from the consolidated payment.");
+    assert.equal(payment.amountMinor, job.quotedAmountMinor, "The payment total must equal only the accepted file quote.");
     report.safety.paymentIntentsCreated = true;
 
     const syntheticReference = "QA-NOT-REAL-" + runId.replace(/[^A-Za-z0-9_-]/g, "-");
-    const submitted = assertHttp(await request(customerPage, "POST",
+    const submitted = assertHttp(await request(batchCustomerPage, "POST",
       "/api/v1/public/batch-payments/" + payment.id + "/report", {
-        sessionToken: customerSession.sessionToken,
+        sessionToken: batchCustomerSession.sessionToken,
         body: { referenceNumber: syntheticReference }
       }), 200, "Submit clearly synthetic QA payment reference");
     assert.equal(submitted.status, "CUSTOMER_REPORTED");
     assert.equal(submitted.paymentReference, syntheticReference);
 
-    const duplicateReport = assertHttp(await request(customerPage, "POST",
+    const duplicateReport = assertHttp(await request(batchCustomerPage, "POST",
       "/api/v1/public/batch-payments/" + payment.id + "/report", {
-        sessionToken: customerSession.sessionToken,
+        sessionToken: batchCustomerSession.sessionToken,
         body: { referenceNumber: syntheticReference }
       }), 200, "Idempotent duplicate payment-reference submission");
     assert.equal(duplicateReport.duplicateRequest, true);
@@ -1497,9 +1466,9 @@ try {
       }), 200, "Idempotent duplicate payment rejection");
     assert.equal(duplicateReject.duplicateRequest, true);
 
-    const finalCustomerStatus = assertHttp(await request(customerPage, "GET",
+    const finalCustomerStatus = assertHttp(await request(batchCustomerPage, "GET",
       "/api/v1/public/jobs/" + job.id + "/status", {
-        sessionToken: customerSession.sessionToken
+        sessionToken: batchCustomerSession.sessionToken
       }), 200, "Customer sees rejected payment state");
     assert.equal(finalCustomerStatus.job.status, "PAYMENT_REJECTED");
     report.safety.syntheticUtrSubmitted = true;
