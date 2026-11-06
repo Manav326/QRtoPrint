@@ -67,7 +67,7 @@ test("batch totals include accepted document and photo quotes but exclude reject
   assert.equal(result.batchMonoPrintedPages, 6);
   assert.equal(result.batchPhotoAmount, 500);
   assert.equal(result.canSendBatch, true);
-  assert.equal(result.quoteEntries.length, 2);
+  assert.equal(result.quoteEntries.length, 3); // Includes the rejected quote for per-file history.
   assert.equal(result.acceptedQuoteEntries.length, 2);
 });
 

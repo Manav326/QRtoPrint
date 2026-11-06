@@ -3,7 +3,27 @@ import { readFileSync } from "node:fs";
 import test from "node:test";
 import { verifiedPdfExportPath } from "../src/print-output.ts";
 
-const styles = readFileSync(new URL("../src/styles.css", import.meta.url), "utf8");
+const stylePaths = [
+  "../src/styles/core-shell.css",
+  "../src/styles/quote-and-queue.css",
+  "../src/styles/document-review.css",
+  "../src/styles/agent-connectivity.css",
+  "../src/styles/payment-configuration.css",
+  "../src/styles/printer-queue.css",
+  "../src/styles/reports.css",
+  "../src/styles/platform-console.css",
+  "../src/styles/platform-plan-catalogue.css",
+  "../src/styles/subscription-summary.css",
+  "../src/styles/platform-subscriptions.css",
+  "../src/styles/typography-accessibility.css",
+  "../src/styles/customer-shell.css",
+  "../src/styles/shared-theme-responsive.css",
+  "../src/styles/print-poster.css",
+  "../src/styles/shop-workspace.css",
+  "../src/styles/customer-workflow.css"
+];
+const styles = stylePaths.map(path=>readFileSync(new URL(path, import.meta.url), "utf8")).join("\n");
+const styleEntry = readFileSync(new URL("../src/styles.css", import.meta.url), "utf8");
 const app = readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8");
 const queue = readFileSync(new URL("../src/features/shop/queue/PrintQueuePage.tsx", import.meta.url), "utf8");
 
@@ -59,4 +79,10 @@ test("platform tables retain a scroll container and intentional minimum widths",
   assert.match(styles, /\.platform-tenant-table\{[^}]*min-width:830px/s);
   assert.match(styles, /\.platform-subs-copy small\s*\{[^}]*white-space:\s*normal/s);
   assert.match(styles, /\.queue-jobs-table \.status-badge\s*\{[^}]*white-space:\s*normal/s);
+});
+
+
+test("shared style entry imports domain partials in a stable order", () => {
+  assert.match(styleEntry, /@import "\.\/styles\/core-shell\.css";[\s\S]*@import "\.\/styles\/customer-workflow\.css";/);
+  assert.equal(stylePaths.length, 17);
 });

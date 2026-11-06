@@ -307,3 +307,4 @@ export function useCustomerPrintFlow(props:CustomerPrintFlowProps) {
     chooseFiles,
     removeSelectedFile
   };
+}

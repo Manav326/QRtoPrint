@@ -65,36 +65,35 @@ test("name and DOB are opt-in and are absent from the default photo sheet",()=>{
 test("customer Photo Studio cannot turn an already uploaded original into a second print job",()=>{
  const customer=readFileSync(new URL("../src/features/customer/CustomerFilePreview.tsx",import.meta.url),"utf8");
  const upload=readFileSync(new URL("../src/features/customer/useCustomerPrintUpload.ts",import.meta.url),"utf8");
- const flow=readFileSync(new URL("../src/features/customer/useCustomerPrintFlow.ts",import.meta.url),"utf8");
+ const summary=readFileSync(new URL("../src/features/customer/customer-print-summary.ts",import.meta.url),"utf8");
  assert.match(upload,/if\(uploadedFileFingerprints\.includes\(fingerprint\)\)/);
- assert.match(flow,/const photoAlreadyUploaded=Boolean\(file&&uploadedFileFingerprints\.includes\(customerFileFingerprint\(file\)\)\)/);
+ assert.match(summary,/const photoAlreadyUploaded=Boolean\(file&&uploadedFileFingerprints\.includes\(customerFileFingerprint\(file\)\)\)/);
  assert.match(customer,/disabled=\{busy\|\|batchLockedForPayment\|\|photoAlreadyUploaded\}/);
- assert.match(upload,/This photo is already with the shop[\s\S]*?without creating another print job/);
+ assert.match(upload,/This photo has already been sent to the shop[\s\S]*?without creating a duplicate print request/);
 });
 test("customer photo preparation depends on configured shop pricing, not the current printer capability",()=>{
- const app=readFileSync(new URL("../src/App.tsx",import.meta.url),"utf8");
- assert.doesNotMatch(app,/photoStudioReady|isPhotoStudioPrinterReady/);
- assert.match(app,/if\(!photoRatesAvailable\)/);
- assert.match(app,/photoPricing=\{result\.photoPricing\}/);
+ const entry=readFileSync(new URL("../src/features/customer/CustomerEntry.tsx",import.meta.url),"utf8");
+ const upload=readFileSync(new URL("../src/features/customer/useCustomerPrintUpload.ts",import.meta.url),"utf8");
+ assert.doesNotMatch(entry,/photoStudioReady|isPhotoStudioPrinterReady/);
+ assert.match(upload,/if\(!photoRatesAvailable\)/);
+ assert.match(entry,/photoPricing=\{result\.photoPricing\}/);
 });
-
 test("the shared Photo Studio explains different save actions for customers and shop owners",()=>{
  const studio=readFileSync(new URL("../src/PhotoStudio.tsx",import.meta.url),"utf8");
- const app=readFileSync(new URL("../src/App.tsx",import.meta.url),"utf8");
+ const customer=readFileSync(new URL("../src/features/customer/CustomerPrintFlow.tsx",import.meta.url),"utf8");
+ const shop=readFileSync(new URL("../src/features/shop/ShopConsole.tsx",import.meta.url),"utf8");
  assert.match(studio,/mode = "customer"/);
  assert.match(studio,/mode === "shop"/);
  assert.match(studio,/Prepare A4 sheet/);
  assert.match(studio,/Save sheet to this job/);
- assert.match(app,/PhotoStudio source=\{photoStudioSource\} mode="customer"/);
- assert.match(app,/PhotoStudio source=\{shopPhotoStudio\.source\} mode="shop"/);
+ assert.match(customer,/PhotoStudio source=\{photoStudioSource\} mode="customer"/);
+ assert.match(shop,/PhotoStudio source=\{shopPhotoStudio\.source\} mode="shop"/);
 });
-
 test("shop owners can inspect the actual prepared photo PDF before approving the job",()=>{
- const app=readFileSync(new URL("../src/App.tsx",import.meta.url),"utf8");
- assert.match(app,/isPdf&&job\.printKind==="PHOTO"[\s\S]*?<iframe src=\{url\} title=\{name\}\//);
- assert.match(app,/SMARTPRINT · SHOP PRINT ONLY · PRIVATE PREVIEW/);
+ const preview=readFileSync(new URL("../src/features/shop/modals/DocumentPreviewModal.tsx",import.meta.url),"utf8");
+ assert.match(preview,/isPdf&&job\.printKind==="PHOTO"[\s\S]*?<iframe src=\{url\} title=\{name\}\//);
+ assert.match(preview,/SMARTPRINT · SHOP PRINT ONLY · PRIVATE PREVIEW/);
 });
-
 test("Photo Studio locks background scroll and supports accessible keyboard dismissal",()=>{
  const studio=readFileSync(new URL("../src/PhotoStudio.tsx",import.meta.url),"utf8");
  const css=readFileSync(new URL("../src/PhotoStudio.module.css",import.meta.url),"utf8");
@@ -107,12 +106,11 @@ test("Photo Studio locks background scroll and supports accessible keyboard dism
 });
 
 test("a successful shop photo PDF save is not misreported as failed when refreshing the queue fails",()=>{
- const app=readFileSync(new URL("../src/App.tsx",import.meta.url),"utf8");
- assert.match(app,/The enhanced multi-page A4 photo PDF is saved to the same print job/);
- assert.match(app,/The A4 photo PDF was saved to the existing print job, but the queue could not refresh/);
+ const actions=readFileSync(new URL("../src/features/shop/useShopPrintActions.ts",import.meta.url),"utf8");
+ assert.match(actions,/The enhanced multi-page A4 photo PDF is saved to the same print job/);
+ assert.match(actions,/The A4 photo PDF was saved to the existing print job, but the queue could not refresh/);
+ assert.match(actions,/await reload\(\)[\s\S]*?downloadShopDocument\(accessToken,editor\.job\.id,"original"\)/);
 });
-
-
 test("short portrait phones keep Photo Studio preview, controls and save actions usable",()=>{
  const css=readFileSync(new URL("../src/PhotoStudio.module.css",import.meta.url),"utf8");
  assert.match(css,/@media\(max-width:720px\) and \(max-height:620px\)/);
@@ -144,18 +142,17 @@ test("shop cancellation returns to the original document preview",()=>{
  assert.match(shop,/setPreview\(null\); setFocusShopPhotoEdit\(false\)/);
 });
 test("Photo Studio follows the saved light or dark appearance in both customer and shop routes",()=>{
- const app=readFileSync(new URL("../src/App.tsx",import.meta.url),"utf8");
+ const customer=readFileSync(new URL("../src/features/customer/CustomerPrintFlow.tsx",import.meta.url),"utf8");
+ const shop=readFileSync(new URL("../src/features/shop/ShopConsole.tsx",import.meta.url),"utf8");
  const studio=readFileSync(new URL("../src/PhotoStudio.tsx",import.meta.url),"utf8");
  const css=readFileSync(new URL("../src/PhotoStudio.module.css",import.meta.url),"utf8");
- assert.match(app,/<CustomerPrintFlow dark=\{dark\}/);
- assert.match(app,/PhotoStudio source=\{photoStudioSource\} mode="customer" dark=\{dark\}/);
- assert.match(app,/PhotoStudio source=\{shopPhotoStudio\.source\} mode="shop" dark=\{dark\}/);
+ assert.match(customer,/<PhotoStudio source=\{photoStudioSource\} mode="customer" dark=\{dark\}/);
+ assert.match(shop,/PhotoStudio source=\{shopPhotoStudio\.source\} mode="shop" dark=\{dark\}/);
  assert.match(studio,/dark = false/);
  assert.match(studio,/dark \? " " \+ styles\.dark/);
  for(const selector of [".dark .toolPanel",".dark .fieldLabel",".dark .canvasWorkspace",".dark .footer",".dark .captionOptIn"])
   assert.ok(css.includes(selector),"Missing dark Photo Studio styling: "+selector);
 });
-
 test("Photo Studio restores focus to the customer or shop control after it closes",()=>{
  const studio=readFileSync(new URL("../src/PhotoStudio.tsx",import.meta.url),"utf8");
  assert.match(studio,/const previouslyFocused = document\.activeElement instanceof HTMLElement/);

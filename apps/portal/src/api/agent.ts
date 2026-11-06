@@ -13,5 +13,3 @@ export function revokeAgentDevice(token: string, agentId: string) {
     token
   );
 }
-
-export function updateShopPaymentSettings(token: string, values: {

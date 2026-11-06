@@ -1,6 +1,7 @@
 import { apiRequest } from "./core";
 import type { ShopPaymentSettings } from "./shop";
 
+export function updateShopPaymentSettings(token: string, values: {
   upiEnabled: boolean;
   upiId: string | null;
   payeeName: string | null;

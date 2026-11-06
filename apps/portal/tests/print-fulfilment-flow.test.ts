@@ -54,26 +54,25 @@ test("paid jobs are staged while a physical printer is offline and checked at di
   assert.match(dispatchService, /printer\.Status == "Ready"/);
   assert.match(dispatchService, /printer\.LastSeenUtc/);
 });
-test("plan-limited HTTPS fallback is only offered when the Agent is unavailable", () => {
-  const customerEntry = read("../src/features/customer/CustomerEntry.tsx");
+test("plan-limited HTTPS fallback is only offered when the Agent is unavailable",()=>{
   const customer = read("../src/features/customer/useCustomerPrintFlow.ts");
+  const customerConnection = read("../src/features/customer/CustomerLocalConnection.tsx");
   const api = read("../src/api/customer.ts");
   const publicUploadSource = readApi("PublicJobCreationEndpoints.cs");
   const publicUploadService = read("../../../src/SmartPrint.Api/Services/PublicJobCreationService.cs");
-  assert.match(customer, /secureQueueFallbackEnabled = cloudAssistedPrintingEnabled \|\| !localAgent\?\.endpoints\.length \|\| localFallbackSuggested/);
-  const directUploadStart = api.indexOf("export async function uploadCustomerDocument(");
-  const directUploadEnd = api.indexOf("type CustomerLocalAgentApi", directUploadStart);
-  const directUpload = api.slice(directUploadStart, directUploadEnd);
-  assert.doesNotMatch(directUpload, /X-Print-Queue-Fallback/);
-  assert.match(publicUploadSource, /jobCreation\.CreateAsync/);
-  assert.match(publicUploadService, /!subscription\.CloudAssistedPrintingEnabled && localAgentAvailable/);
-  assert.doesNotMatch(publicUploadService, /queueFallbackRequested/);
-  assert.doesNotMatch(publicUploadSource, /X-Print-Queue-Fallback|queueFallbackRequested/);
-  assert.doesNotMatch(api, /X-Print-Queue-Fallback|allowQueueFallback/);
-  assert.match(customerEntry, /setCheckStatus\("unavailable"\);\s*onReady\(false\);[\s\S]*?onUnavailable\(\);/);
-  assert.match(customerEntry, /const agentHeartbeatOffline=readiness\?\.heartbeatFresh!==true;[\s\S]*?if\(cloudAssistedPrintingEnabled\|\|agentHeartbeatOffline\)onUnavailable\(\)/);
+  assert.match(customer,/secureQueueFallbackEnabled = cloudAssistedPrintingEnabled \|\| !localAgent\?\.endpoints\.length \|\| localFallbackSuggested/);
+  const directUploadStart=api.indexOf("export async function uploadCustomerDocument(");
+  const directUploadEnd=api.indexOf("type CustomerLocalAgentApi",directUploadStart);
+  const directUpload=api.slice(directUploadStart,directUploadEnd);
+  assert.doesNotMatch(directUpload,/X-Print-Queue-Fallback/);
+  assert.match(publicUploadSource,/jobCreation\.CreateAsync/);
+  assert.match(publicUploadService,/!subscription\.CloudAssistedPrintingEnabled && localAgentAvailable/);
+  assert.doesNotMatch(publicUploadService,/queueFallbackRequested/);
+  assert.doesNotMatch(publicUploadSource,/X-Print-Queue-Fallback|queueFallbackRequested/);
+  assert.doesNotMatch(api,/X-Print-Queue-Fallback|allowQueueFallback/);
+  assert.match(customerConnection,/setCheckStatus\("unavailable"\);\s*onReady\(false\);[\s\S]*?onUnavailable\(\);/);
+  assert.match(customerConnection,/const agentHeartbeatOffline=readiness\?\.heartbeatFresh!==true;[\s\S]*?if\(cloudAssistedPrintingEnabled\|\|agentHeartbeatOffline\)onUnavailable\(\)/);
 });
-
 test("pre-submission printer capability blocks are explained in the shop queue", () => {
   const queue = read("../src/features/shop/queue/PrintQueuePage.tsx");
   const statusRules = read("../src/features/shop/queue/print-queue-status.ts");
@@ -403,6 +402,7 @@ test("cloud shop document preview retries the binary fetch with a refreshed acce
 test("Photo Studio uses only the uploaded source and offers no edited-photo export action",()=>{
  const studio=read("../src/PhotoStudio.tsx");
  const workspace=read("../src/PhotoStudioCanvasWorkspace.tsx");
+ const rendering=read("../src/photo-studio-rendering.ts");
  assert.match(studio,/source:\s*File/);
  assert.doesNotMatch(studio,/<input[^>]+type=["']file/i);
  assert.doesNotMatch(studio,/<a[^>]+download/i);
@@ -413,7 +413,7 @@ test("Photo Studio uses only the uploaded source and offers no edited-photo expo
  assert.match(studio,/mode === "shop" \? "Save sheet to this job" : "Prepare A4 sheet"/);
  assert.match(studio,/This prepared multi-page A4 photo PDF replaces it in your batch/);
  assert.match(studio,/type="date"/);
- assert.match(studio,/formatDobForPrint/);
+ assert.match(rendering,/formatDobForPrint/);
 });
 test("photo quantities support up to 100 copies and automatically paginate over A4 sheets",()=>{
  const studio=read("../src/PhotoStudio.tsx");

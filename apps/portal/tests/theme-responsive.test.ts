@@ -5,6 +5,25 @@ import { readDarkModePreference } from "../src/ui-preferences.ts";
 import { getLocalPreviewEndpointCandidates, isPrivateLocalPreviewEndpoint } from "../src/local-preview-routing.ts";
 
 const read = (path: string) => readFileSync(new URL(path, import.meta.url), "utf8");
+const readStyles = () => [
+  "../src/styles/core-shell.css",
+  "../src/styles/quote-and-queue.css",
+  "../src/styles/document-review.css",
+  "../src/styles/agent-connectivity.css",
+  "../src/styles/payment-configuration.css",
+  "../src/styles/printer-queue.css",
+  "../src/styles/reports.css",
+  "../src/styles/platform-console.css",
+  "../src/styles/platform-plan-catalogue.css",
+  "../src/styles/subscription-summary.css",
+  "../src/styles/platform-subscriptions.css",
+  "../src/styles/typography-accessibility.css",
+  "../src/styles/customer-shell.css",
+  "../src/styles/shared-theme-responsive.css",
+  "../src/styles/print-poster.css",
+  "../src/styles/shop-workspace.css",
+  "../src/styles/customer-workflow.css"
+].map(read).join("\n");
 
 
 test("folder and per-file Copies inputs capture values before scheduling React state updates", () => {
@@ -78,7 +97,7 @@ test("one accessible theme control is available to all application route familie
 });
 
 test("light and dark palettes cover authentication, customer QR and public landing surfaces", () => {
-  const css = read("../src/styles.css");
+  const css = readStyles();
   const landing = read("../src/public-landing.css");
 
   assert.match(css, /html\[data-theme="light"\] \.auth-screen/);
@@ -88,7 +107,7 @@ test("light and dark palettes cover authentication, customer QR and public landi
 });
 
 test("web shell keeps navigation, header and workspace independently usable at desktop and mobile sizes", () => {
-  const css = read("../src/styles.css");
+  const css = readStyles();
   assert.match(css, /@media \(min-width: 851px\)/);
   assert.match(css, /@media \(max-width: 850px\)/);
   assert.match(css, /\.app-shell > \.sidebar > \.primary-nav\s*\{[^}]*overflow-y:\s*auto/s);
@@ -108,7 +127,7 @@ test("theme-color metadata exists before the first-paint preference script", () 
 });
 
 test("workspace secondary text palettes meet WCAG AA for normal-size labels", () => {
-  const css = read("../src/styles.css");
+  const css = readStyles();
   const color = (hex: string) => {
     const value = hex.replace("#", "");
     return [0, 2, 4].map(offset => parseInt(value.slice(offset, offset + 2), 16) / 255)
@@ -127,7 +146,7 @@ test("workspace secondary text palettes meet WCAG AA for normal-size labels", ()
 });
 
 test("workspace styles retain one authoritative appearance palette", () => {
-  const css = read("../src/styles.css");
+  const css = readStyles();
   const desktop = read("../../desktop/src/desktop.css");
   assert.ok(!css.includes("--accent:#ff9a52"));
   assert.ok(!css.includes("--accent:#e96f23"));
@@ -143,7 +162,7 @@ test("QR station poster renders one canonical QR in an isolated single-page A5 p
   const shop = read("../src/features/shop/ShopConsole.tsx");
   const stations = read("../src/features/shop/stations/StationsPage.tsx");
   const poster = read("../src/QrStationPrintDocument.tsx");
-  const css = read("../src/styles.css");
+  const css = readStyles();
 
   assert.match(shop, /import StationsPage from "\.\/stations\/StationsPage"/);
   assert.match(stations, /<QrStationPrintDocument station=\{stations\.find\(station => station\.id === printingStationId\)/);
@@ -166,7 +185,7 @@ test("QR station poster renders one canonical QR in an isolated single-page A5 p
 
 test("QR station poster has a clear three-step hierarchy and scan-first customer call to action", () => {
   const poster = read("../src/QrStationPrintDocument.tsx");
-  const css = read("../src/styles.css");
+  const css = readStyles();
 
   assert.match(poster, /YOUR PRINTING, MADE SIMPLE/);
   assert.match(poster, /Scan, save &amp; send/);
@@ -187,7 +206,7 @@ test("batch routing enforces local-computer ownership and preserves print-time a
   const customer = read("../src/features/customer/useCustomerPrintUpload.ts");
   const queue = read("../src/features/shop/queue/PrintQueuePage.tsx");
   const api = read("../src/api/customer.ts");
-  const css = read("../src/styles.css");
+  const css = readStyles();
 
   assert.match(queue, /Assign one printer for all files in batch/);
   assert.match(queue, /One printer is used for all active files/);
@@ -258,7 +277,7 @@ test("shop owner navigation groups daily work and moves account destinations int
   const shop = read("../src/features/shop/ShopConsole.tsx");
   const navigation = read("../src/features/shop/useShopNavigation.ts");
   const settingsPage = read("../src/features/shop/settings/SettingsPage.tsx");
-  const css = read("../src/styles.css");
+  const css = readStyles();
   const sidebarStart = shop.indexOf('<aside className={sidebarOpen');
   const sidebarEnd = shop.indexOf("</aside>", sidebarStart);
   assert.ok(sidebarStart >= 0 && sidebarEnd > sidebarStart, "The shop navigation sidebar must remain present.");
@@ -280,7 +299,7 @@ test("shop owner navigation groups daily work and moves account destinations int
 });
 
 test("shop workspace content expands into the space left after the sidebar", () => {
-  const css = read("../src/styles.css");
+  const css = readStyles();
   const shop = read("../src/features/shop/ShopConsole.tsx");
 
   assert.match(css, /\.app-shell > \.main-panel\s*\{[^}]*flex:\s*1 1 0%/s);
@@ -296,7 +315,7 @@ test("shop owner personal details are editable from the account menu without mix
   const shop = read("../src/features/shop/ShopConsole.tsx");
   const modal = read("../src/features/shop/modals/ShopOwnerAccountModal.tsx");
   const settings = read("../src/features/shop/settings/SettingsPage.tsx");
-  const api = read("../src/api/print-jobs.ts");
+  const api = read("../src/api/shop.ts");
 
   assert.match(shop, /Personal details/);
   assert.match(shop, /ownerAccountOpen/);
@@ -315,7 +334,7 @@ test("shop owner personal details are editable from the account menu without mix
 
 
 test("native customer UI follows explicit SmartPrint theme and marks selected upload mode", () => {
-  const css = read("../src/styles.css");
+  const css = readStyles();
   const customer = read("../src/features/customer/CustomerPrintFlow.tsx");
   assert.doesNotMatch(css, /@media\s*\(prefers-color-scheme:\s*dark\)/,
     "The OS dark preference must not override a saved SmartPrint light theme.");
@@ -330,14 +349,15 @@ test("native customer UI follows explicit SmartPrint theme and marks selected up
 test("customer print settings are preserved independently of printer capability reports", () => {
   const customer = read("../src/features/customer/CustomerPrintFlow.tsx");
   const flow = read("../src/features/customer/useCustomerPrintFlow.ts");
+  const checkout = read("../src/features/customer/useCustomerPrintCheckout.ts");
 
   assert.ok(flow.includes("Customer requests are captured independently of current hardware reports."));
   assert.ok(flow.includes("void printerCapabilitiesJson;"));
   assert.doesNotMatch(flow, /disabled=\{!supportsColour\}|disabled=\{!supportsDuplex\}|a4NotConfirmed/);
-  assert.ok(flow.includes('colourMode:photoSettings?"Colour":settings.colourMode'));
-  assert.ok(flow.includes("isDuplex:photoSettings?false:settings.isDuplex"));
-  assert.ok(flow.includes('paperSize:photoSettings?"A4":settings.paperSize'));
-  assert.ok(flow.includes('orientation:photoSettings?"AUTO":settings.orientation'));
+  assert.ok(checkout.includes('colourMode:photoSettings?"Colour":settings.colourMode'));
+  assert.ok(checkout.includes("isDuplex:photoSettings?false:settings.isDuplex"));
+  assert.ok(checkout.includes('paperSize:photoSettings?"A4":settings.paperSize'));
+  assert.ok(checkout.includes('orientation:photoSettings?"AUTO":settings.orientation'));
 });
 
 test("folder defaults inherit to files and advanced paper options are opt-in", () => {
@@ -401,7 +421,7 @@ test("all print settings controls capture React event values before state update
 test("PDF footer branding is opt-in per batch and cannot cover source content or paper output", () => {
   const overlays = read("../src/features/shop/modals/BatchReviewModal.tsx");
   const customer = read("../src/features/customer/CustomerPrintFlow.tsx");
-  const api = read("../src/api/shop.ts");
+  const api = read("../src/api/print-jobs.ts");
   const reviewEndpoint = read("../../../src/SmartPrint.Api/Endpoints/ShopPrintBatchReviewEndpoints.cs");
   const reviewService = read("../../../src/SmartPrint.Api/Services/ShopPrintBatchReviewService.cs");
   const contracts = read("../../../src/SmartPrint.Api/Contracts/ApiContracts.cs");
@@ -443,7 +463,7 @@ test("contextual information stays concise and is accessible by hover, focus and
   const customer = read("../src/features/customer/CustomerPrintFlow.tsx");
   const overlays = read("../src/features/shop/modals/BatchReviewModal.tsx");
   const tooltip = read("../src/shared/ui/InfoTooltip.tsx");
-  const css = read("../src/styles.css");
+  const css = readStyles();
   assert.match(tooltip, /function InfoTooltip/);
   assert.match(tooltip, /aria-describedby=\{tooltipId\}/);
   assert.match(tooltip, /onMouseEnter=\{\(\)=>setOpen\(true\)\}/);
@@ -490,7 +510,7 @@ test("Windows local document previews prefer the paired Agent loopback endpoint"
 });
 
 test("customer uploader is centred and shared light-theme text tokens meet readable contrast", () => {
-  const css = read("../src/styles.css");
+  const css = readStyles();
   const uploaderThemeGuard = css.slice(css.indexOf("Theme foreground and surface must change together"));
   assert.ok(uploaderThemeGuard.includes(".customer-entry:not(.smartprint-native) .customer-upload-zone {"));
   assert.ok(uploaderThemeGuard.includes("transition: border-color .18s;"));
@@ -545,4 +565,10 @@ test("contextual help supports outside-click and Escape dismissal", () => {
   assert.match(tooltip, /document\.addEventListener\("pointerdown",dismissOutside\)/);
   assert.match(tooltip, /event\.key==="Escape"/);
   assert.match(tooltip, /aria-expanded=\{open\}/);
+});
+
+
+test("global stylesheet entry preserves ordered modular imports", () => {
+  const entry = read("../src/styles.css");
+  assert.match(entry, /@import "\.\/styles\/core-shell\.css";[\s\S]*@import "\.\/styles\/customer-workflow\.css";/);
 });

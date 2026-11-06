@@ -45,7 +45,7 @@ test("Android customer station keeps the shared print page and offers native loc
   assert.match(connectionSource, /requestSmartPrintNativeLocalNetworkAccess/);
   assert.match(customerApiSource, /bridge\.addEventListener\("message", onMessage\)/);
   assert.match(customerApiSource, /value\.startsWith\("localNetworkAccess:"\)/);
-  assert.match(customerEntrySource, /nativeLocalNetworkPermissionDenied=access==="denied"/);
+  assert.match(connectionSource, /nativeLocalNetworkPermissionDenied=access==="denied"/);
   assert.match(connectionSource, /allow SmartPrint under Android Settings/);
   assert.match(connectionSource, /Tap Check Wi-Fi to connect to this shop/);
   assert.match(androidSource, /override fun onShowFileChooser\([\s\S]*?showPicker\(\)/);
