@@ -514,7 +514,14 @@ if ($exitCode -ne 0) { exit 1 }
                 }
                 if (-not $androidUiOk) { $exitCode = 1 }
             } elseif ($androidBuildOk) {
-                Add-QAResult -Name "Android emulator instrumentation suite" -Status "SKIPPED" -Detail "No Android emulator is running. Physical phones are deliberately not targeted by this script."
+                $deviceReason = if ($connectedDevices.Count -eq 0) {
+                    "No Android emulator is online."
+                } elseif ($connectedDevices.Count -gt 1) {
+                    "More than one adb device is online. Disconnect phones/extra emulators so Gradle cannot install to an unintended device."
+                } else {
+                    "The only connected Android device is not an emulator. Physical phones are deliberately not targeted by this script."
+                }
+                Add-QAResult -Name "Android emulator instrumentation suite" -Status "SKIPPED" -Detail $deviceReason
             }
         }
     }
