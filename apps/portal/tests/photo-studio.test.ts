@@ -335,5 +335,97 @@ test("automatic captioned A4 capacities stay within each photo size's printable 
 
 test("4x6 option explicitly means a portrait 4-inch by 6-inch tile on A4",()=>{
  const studio=readFileSync(new URL("../src/PhotoStudio.tsx",import.meta.url),"utf8");
- assert.match(studio,/id: "4x6", label: "4 × 6 inch · Portrait", detail: "Portrait tile on an A4 sheet", widthMm: 101\\.6, heightMm: 152\\.4/);
+ assert.match(studio,/id: "4x6", label: "4 × 6 inch · Portrait", detail: "Portrait tile on an A4 sheet", widthMm: 101\.6, heightMm: 152\.4/);
+});
+
+
+test("all supported photo sizes expose every valid manual density and reject the next slot",()=>{
+ const cases=[
+  {size:{widthMm:35,heightMm:45},maximum:25},
+  {size:{widthMm:25,heightMm:35},maximum:49},
+  {size:{widthMm:50.8,heightMm:50.8},maximum:15},
+  {size:{widthMm:101.6,heightMm:152.4},maximum:1}
+ ];
+ for(const item of cases){
+  for(let density=1;density<=item.maximum;density++){
+   const layout=getPhotoSheetLayout(item.size,0,density);
+   assert.equal(layout.perSheet,density);
+   assert.ok(layout.columns*layout.rows>=density);
+   const full=getPhotoSheetPhotoPositions(item.size,0,density,density);
+   assert.equal(full.length,density);
+   assert.equal(new Set(full.map(position=>position.row+":"+position.column)).size,density);
+  }
+  assert.throws(()=>getPhotoSheetLayout(item.size,0,item.maximum+1),/Photos per A4 page/);
+ }
+});
+
+test("page-count boundaries allocate every requested photo exactly once",()=>{
+ const cases=[
+  {size:{widthMm:35,heightMm:45},maximum:25},
+  {size:{widthMm:25,heightMm:35},maximum:49},
+  {size:{widthMm:50.8,heightMm:50.8},maximum:15},
+  {size:{widthMm:101.6,heightMm:152.4},maximum:1}
+ ];
+ for(const item of cases){
+  for(const density of [1,Math.max(1,Math.floor(item.maximum/2)),item.maximum]){
+   for(const quantity of new Set([1,Math.max(1,density-1),density,Math.min(100,density+1),Math.min(100,2*density),Math.min(100,2*density+1),100])){
+    const pages=Math.ceil(quantity/density);
+    let allocated=0;
+    for(let page=0;page<pages;page++){
+     const countOnPage=Math.min(density,quantity-page*density);
+     const positions=getPhotoSheetPhotoPositions(item.size,0,density,countOnPage);
+     assert.equal(positions.length,countOnPage);
+     allocated+=positions.length;
+    }
+    assert.equal(allocated,quantity);
+   }
+  }
+ }
+});
+
+test("photo coordinate helper rejects invalid page counts and invalid density",()=>{
+ const size={widthMm:35,heightMm:45};
+ assert.throws(()=>getPhotoSheetPhotoPositions(size,0,9,-1),/Photos on this A4 page/);
+ assert.throws(()=>getPhotoSheetPhotoPositions(size,0,9,10),/Photos on this A4 page/);
+ assert.throws(()=>getPhotoSheetPhotoPositions(size,0,1.5,1),/Photos per A4 page/);
+ assert.throws(()=>getPhotoSheetPhotoPositions(size,0,0,0),/Photos per A4 page/);
+});
+
+test("Photo Studio identifies custom manual image adjustments instead of marking Natural selected",()=>{
+ const studio=readFileSync(new URL("../src/PhotoStudio.tsx",import.meta.url),"utf8");
+ assert.match(studio,/type LookPreset = "natural" \\| "warm" \\| "crisp" \\| "mono" \\| "custom"/);
+ assert.match(studio,/setLook\\("custom"\\); setAdjustments\\(current => \\(\\{ ...current, brightness:/);
+ assert.match(studio,/setLook\\("custom"\\); setAdjustments\\(current => \\(\\{ ...current, contrast:/);
+ assert.match(studio,/setLook\\("custom"\\); setAdjustments\\(current => \\(\\{ ...current, saturation:/);
+ assert.match(studio,/aria-pressed=\\{look === item\\.id\\}/);
+});
+
+test("Photo Studio prevents apply without a whole-number quantity or any shop photo rates",()=>{
+ const studio=readFileSync(new URL("../src/PhotoStudio.tsx",import.meta.url),"utf8");
+ assert.match(studio,/const copiesInputValid = Number\\.isInteger\\(parsedCopiesInput\\) && parsedCopiesInput >= 1 && parsedCopiesInput <= maxCopies/);
+ assert.match(studio,/Enter a whole number from 1 to \\{maxCopies\\}/);
+ assert.match(studio,/Photo printing is not enabled for any size at this shop/);
+ assert.match(studio,/availableSizes\\.length === 0 \\|\\| !copiesInputValid/);
+});
+
+test("Photo Studio browser fixture inspects generated PDF page boxes and rendered pixel evidence",()=>{
+ const fixture=readFileSync(new URL("./photo-studio.browser.tsx",import.meta.url),"utf8");
+ assert.match(fixture,/mediaBoxCount/);
+ assert.match(fixture,/pdfImageSizes/);
+ assert.match(fixture,/pixelProbes/);
+ assert.match(fixture,/captionRedPixels/);
+ assert.match(fixture,/oversizedRaster/);
+});
+
+test("Photo Studio browser acceptance covers every editor tool and failure recovery path",()=>{
+ const browser=readFileSync(new URL("./theme-responsive.browser.mjs",import.meta.url),"utf8");
+ for(const label of [
+  "Crop","Looks","Background","Sheet","Text","Zoom in","Zoom out","Reset crop","Reset background",
+  "Photo size","Number of photos","Photos per A4 page","Caption font size","Caption colour",
+  "Replacement background","Background tolerance","Pick background from photo","Prepare A4 sheet"
+ ]) assert.ok(browser.includes(label),"Missing browser coverage for Photo Studio control: "+label);
+ assert.match(browser,/exercisePhotoStudioFeatureMatrix\\(\\)/);
+ assert.match(browser,/exercisePhotoStudioFailurePaths\\(\\)/);
+ assert.match(browser,/failRender=1/);
+ assert.match(browser,/oversizeRaster=1/);
 });
