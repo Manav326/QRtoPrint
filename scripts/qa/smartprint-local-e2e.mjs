@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
+import { getBlockingPrerequisites } from "./local-e2e-prerequisites.mjs";
 
 const moduleDirectory = process.env.PLAYWRIGHT_MODULE_DIR;
 if (!moduleDirectory) throw new Error("PLAYWRIGHT_MODULE_DIR is required.");
@@ -71,6 +72,7 @@ let pageErrors = [];
 let consoleErrors = [];
 let serverErrors = [];
 let resourceErrors = [];
+let requestFailures = [];
 let shop1Page;
 let shop2Page;
 let adminPage;
@@ -170,12 +172,35 @@ const PLANNED_CASE_IDS = [
   ])
 ];
 
+const recordStatuses = new Map();
+
 async function record(name, action, caseIds = CASE_IDS_BY_RECORD_NAME.get(name) ?? []) {
   const started = Date.now();
+  const blockedBy = getBlockingPrerequisites(name, recordStatuses);
+  if (blockedBy.length > 0) {
+    const details = {
+      status: "SKIPPED",
+      reason: "Required setup did not pass.",
+      blockedBy
+    };
+    report.checks.push({
+      id: "SP-LOCAL-" + String(report.checks.length + 1).padStart(3, "0"),
+      name,
+      caseIds,
+      status: "SKIPPED",
+      durationMs: Date.now() - started,
+      details
+    });
+    recordStatuses.set(name, "SKIPPED");
+    console.warn("SKIPPED " + name + " (blocked by: " + blockedBy.join("; ") + ")");
+    return null;
+  }
+
   try {
     const details = await action();
     const status = details?.status === "SKIPPED" ? "SKIPPED" : details?.warning ? "WARN" : "PASS";
     if (status === "WARN") report.warnings.push({ name, message: details.warning });
+    recordStatuses.set(name, status);
     report.checks.push({
       id: "SP-LOCAL-" + String(report.checks.length + 1).padStart(3, "0"),
       name,
@@ -197,6 +222,7 @@ async function record(name, action, caseIds = CASE_IDS_BY_RECORD_NAME.get(name) 
       error: message
     });
     report.errors.push({ name, message });
+    recordStatuses.set(name, "FAIL");
     console.error("FAIL " + name + ": " + message);
     return null;
   }
@@ -210,6 +236,18 @@ function assertHttp(result, expected, label) {
 }
 
 async function request(page, method, path, { token, sessionToken, body, headers = {}, expectedOrigin = baseUrl.origin } = {}) {
+  assert.ok(page && typeof page.url === "function", "QA request requires an initialised browser page.");
+  const currentPageUrl = page.url();
+  assert.ok(currentPageUrl && currentPageUrl !== "about:blank",
+    "QA request blocked: browser page is still about:blank. A required station/session navigation did not complete.");
+  let currentPageOrigin;
+  try {
+    currentPageOrigin = new URL(currentPageUrl).origin;
+  } catch {
+    throw new Error("QA request blocked: browser page has an invalid URL: " + currentPageUrl);
+  }
+  assert.equal(currentPageOrigin, expectedOrigin,
+    "QA request blocked: browser page is not on the expected local SmartPrint origin.");
   const url = new URL(path, baseUrl).toString();
   assert.equal(new URL(url).origin, expectedOrigin, "QA request attempted to leave the local SmartPrint origin.");
   const result = await page.evaluate(async ({ url, method, token, sessionToken, body, headers }) => {
@@ -237,6 +275,20 @@ async function request(page, method, path, { token, sessionToken, body, headers 
 
 function watchPage(targetPage) {
   targetPage.on("pageerror", error => pageErrors.push(String(error.message).slice(0, 500)));
+  targetPage.on("requestfailed", request => {
+    try {
+      const url = new URL(request.url());
+      if (url.origin !== baseUrl.origin) return;
+      const error = request.failure()?.errorText || "Unknown network request failure";
+      if (error === "net::ERR_ABORTED") return;
+      requestFailures.push({
+        method: request.method(),
+        path: url.pathname,
+        resourceType: request.resourceType(),
+        error: error.slice(0, 300)
+      });
+    } catch {}
+  });
   targetPage.on("console", message => {
     if (message.type() !== "error") return;
     const sourceUrl = message.location()?.url || "";
@@ -358,25 +410,52 @@ async function signInPlatformAdmin(page, email, password) {
   return tokens;
 }
 
+async function navigateSidebarSection(page, label) {
+  const viewportWidth = await page.evaluate(() => window.innerWidth);
+  const mobile = viewportWidth <= 850;
+  const sidebar = page.locator(".sidebar").first();
+
+  if (mobile) {
+    const isOpen = await sidebar.evaluate(element => element.classList.contains("sidebar-open"));
+    if (!isOpen) {
+      const openNavigation = page.getByRole("button", { name: "Open navigation", exact: true });
+      await openNavigation.waitFor({ state: "visible", timeout: 12000 });
+      await openNavigation.click({ timeout: 12000 });
+      await page.waitForFunction(
+        () => document.querySelector(".sidebar")?.classList.contains("sidebar-open") === true,
+        null,
+        { timeout: 10000 }
+      );
+    }
+  }
+
+  const item = sidebar.locator(".nav-item").filter({ hasText: label }).first();
+  await item.waitFor({ state: "visible", timeout: 12000 });
+  await item.scrollIntoViewIfNeeded();
+  await item.click({ timeout: 12000 });
+  await page.waitForFunction(
+    expected => [...document.querySelectorAll(".sidebar .nav-item")]
+      .some(element => element.classList.contains("active") &&
+        (element.getAttribute("aria-label") === expected ||
+         element.getAttribute("title") === expected ||
+         element.textContent.trim().startsWith(expected))),
+    label,
+    { timeout: 12000 }
+  );
+
+  if (mobile) {
+    await page.waitForFunction(
+      () => document.querySelector(".sidebar")?.classList.contains("sidebar-open") === false,
+      null,
+      { timeout: 10000 }
+    );
+  }
+}
+
 async function navigateSections(page, labels, prefix) {
   const visited = [];
   for (const label of labels) {
-    const viewportWidth = await page.evaluate(() => window.innerWidth);
-    if (viewportWidth <= 850) {
-      const openNavigation = page.getByRole("button", { name: "Open navigation" });
-      if (await openNavigation.isVisible().catch(() => false)) {
-        await openNavigation.click();
-      }
-    }
-    const item = page.locator(".sidebar .nav-item").filter({ hasText: label }).first();
-    await item.waitFor({ state: "visible", timeout: 12000 });
-    await item.click();
-    await page.waitForFunction(
-      expected => [...document.querySelectorAll(".sidebar .nav-item")]
-        .some(element => element.classList.contains("active") && (element.getAttribute("aria-label") === expected || element.getAttribute("title") === expected || element.textContent.trim().startsWith(expected))),
-      label,
-      { timeout: 12000 }
-    );
+    await navigateSidebarSection(page, label);
     await page.waitForTimeout(120);
     await screenshot(page, prefix + "-" + label);
     visited.push(label);
@@ -642,21 +721,10 @@ async function assignQaPlanThroughPlatformUi(adminPage, adminToken, shopName, pl
 }
 
 async function clickShopSection(page, label) {
-  const viewportWidth = await page.evaluate(() => window.innerWidth);
-  if (viewportWidth <= 850) {
-    const openNavigation = page.getByRole("button", { name: "Open navigation" });
-    if (await openNavigation.isVisible().catch(() => false)) await openNavigation.click();
-  }
-  await page.locator(".sidebar .nav-item").filter({ hasText: label }).first().click();
-  await page.waitForFunction(
-    expected => [...document.querySelectorAll(".sidebar .nav-item")]
-      .some(element => element.classList.contains("active") && (element.getAttribute("aria-label") === expected || element.getAttribute("title") === expected || element.textContent.trim().startsWith(expected))),
-    label,
-    { timeout: 12000 }
-  );
+  await navigateSidebarSection(page, label);
 }
 
-async function setupShopResources(page, tokens, shopLabel) {
+async function setupShopResources(page, tokens, shopLabel, onResourcesReady = () => {}) {
   const printerName = "SmartPrint QA no-dispatch test queue";
   const stationName = "SmartPrint QA customer station";
 
@@ -717,6 +785,17 @@ async function setupShopResources(page, tokens, shopLabel) {
   }
   assert.equal(station?.isEnabled, true, shopLabel + " QA QR station must be enabled.");
   assert.equal(station?.printerDeviceId, printer.id, shopLabel + " QR station must use its own QA printer.");
+  assert.ok(station?.publicUrl, shopLabel + " QA QR station must expose its public URL.");
+
+  // The resource records are persistent after this point. Publish the fixture
+  // before optional pricing/payment configuration so a later failure does not
+  // hide successfully created records from diagnostics or the next idempotent run.
+  onResourcesReady({
+    printer: { id: printer.id, displayName: printer.displayName, outputMode: printer.outputMode,
+      agentDeviceId: printer.agentDeviceId ?? null, queueName: printer.queueName },
+    station: { id: station.id, displayName: station.displayName, publicUrl: station.publicUrl,
+      isEnabled: station.isEnabled, printerDeviceId: station.printerDeviceId }
+  });
 
   const pricingValues = {
     monoPerSideMinor: 200,
@@ -865,19 +944,7 @@ async function runAuthenticatedResponsiveMatrix(page, sections, label) {
     for (const viewport of viewports) {
       await page.setViewportSize(viewport);
       for (const section of sections) {
-        if (viewport.width <= 850) {
-          const openNavigation = page.getByRole("button", { name: "Open navigation" });
-          if (await openNavigation.isVisible().catch(() => false)) await openNavigation.click();
-        }
-        const item = page.locator(".sidebar .nav-item").filter({ hasText: section }).first();
-        await item.waitFor({ state: "visible", timeout: 12000 });
-        await item.click();
-        await page.waitForFunction(
-          expected => [...document.querySelectorAll(".sidebar .nav-item")]
-            .some(element => element.classList.contains("active") && (element.getAttribute("aria-label") === expected || element.getAttribute("title") === expected || element.textContent.trim().startsWith(expected))),
-          section,
-          { timeout: 12000 }
-        );
+        await navigateSidebarSection(page, section);
         await assertResponsive(page, label + " / " + section + " / " + (dark ? "dark" : "light"), viewport);
         checks += 1;
       }
@@ -1096,7 +1163,10 @@ try {
   });
 
   await record("Shop one configures real QA printer/station, pricing and payment methods", async () => {
-    const resources = await setupShopResources(shop1Page, shop1Tokens, "Shop one");
+    const resources = await setupShopResources(shop1Page, shop1Tokens, "Shop one", ready => {
+      shop1Printer = ready.printer;
+      shop1Station = ready.station;
+    });
     shop1Printer = resources.printer;
     shop1Station = resources.station;
     return {
@@ -1108,7 +1178,10 @@ try {
   });
 
   await record("Shop two configures isolated real QA printer/station", async () => {
-    const resources = await setupShopResources(shop2Page, shop2Tokens, "Shop two");
+    const resources = await setupShopResources(shop2Page, shop2Tokens, "Shop two", ready => {
+      shop2Printer = ready.printer;
+      shop2Station = ready.station;
+    });
     shop2Printer = resources.printer;
     shop2Station = resources.station;
     return {
@@ -2587,26 +2660,26 @@ try {
   }, ["QR-011"]);
 
   await record("QR: an invalid opaque session token cannot read current session data", async () => {
-    const response = await request(customerPage, "GET", "/api/v1/public/sessions/current", { sessionToken: "SMARTPRINT-QA-INVALID-SESSION-TOKEN" });
+    const response = await request(page, "GET", "/api/v1/public/sessions/current", { sessionToken: "SMARTPRINT-QA-INVALID-SESSION-TOKEN" });
     assert.equal(response.status, 401, "An invalid opaque session token must be rejected.");
     return { invalidSessionRead: response.status, sessionDataReturned: false };
   }, ["QR-012"]);
 
   await record("QR: an invalid opaque session token cannot renew a session", async () => {
-    const response = await request(customerPage, "POST", "/api/v1/public/sessions/current/renew", { sessionToken: "SMARTPRINT-QA-INVALID-SESSION-TOKEN" });
+    const response = await request(page, "POST", "/api/v1/public/sessions/current/renew", { sessionToken: "SMARTPRINT-QA-INVALID-SESSION-TOKEN" });
     assert.equal(response.status, 401, "An invalid opaque session token must not be renewed.");
     return { invalidSessionRenewal: response.status, sessionChanged: false };
   }, ["QR-013"]);
 
   await record("UPLOAD: a print upload requires an Idempotency-Key", async () => {
-    const response = await request(customerPage, "POST", "/api/v1/public/sessions/current/jobs", { sessionToken: customerSession.sessionToken });
+    const response = await request(page, "POST", "/api/v1/public/sessions/current/jobs", { sessionToken: customerSession.sessionToken });
     assert.equal(response.status, 400, "A cloud document upload must require an idempotency key.");
     assert.equal(response.json?.code, "session_and_idempotency_required");
     return { missingIdempotencyKey: response.status, printJobCreated: false };
   }, ["UPLOAD-003"]);
 
   await record("UPLOAD: malformed batch identifiers are rejected before document ingestion", async () => {
-    const response = await request(customerPage, "POST", "/api/v1/public/sessions/current/jobs", {
+    const response = await request(page, "POST", "/api/v1/public/sessions/current/jobs", {
       sessionToken: customerSession.sessionToken,
       headers: { "Idempotency-Key": "smartprint-qa-invalid-batch-" + crypto.randomUUID(), "X-Print-Batch-Id": "not-a-guid" }
     });
@@ -2616,7 +2689,7 @@ try {
   }, ["UPLOAD-004"]);
 
   await record("DOC: cloud document upload rejects non-multipart requests", async () => {
-    const response = await request(customerPage, "POST", "/api/v1/public/sessions/current/jobs", {
+    const response = await request(page, "POST", "/api/v1/public/sessions/current/jobs", {
       sessionToken: customerSession.sessionToken,
       headers: { "Idempotency-Key": "smartprint-qa-non-multipart-" + crypto.randomUUID() },
       body: { unexpected: "json is not a document upload" }
@@ -2627,7 +2700,7 @@ try {
   }, ["DOC-006"]);
 
   await record("JOB: a customer session cannot read a job outside its session", async () => {
-    const response = await request(customerPage, "GET", "/api/v1/public/jobs/" + crypto.randomUUID() + "/status", { sessionToken: customerSession.sessionToken });
+    const response = await request(page, "GET", "/api/v1/public/jobs/" + crypto.randomUUID() + "/status", { sessionToken: customerSession.sessionToken });
     assert.equal(response.status, 404, "A customer session must not reveal jobs outside its own session.");
     return { foreignOrUnknownJobStatus: response.status, jobDataReturned: false };
   }, ["JOB-010"]);
@@ -2733,19 +2806,19 @@ try {
   }, ["SHOP-024"]);
 
   await record("PAYMENT: UPI references shorter than four characters are rejected", async () => {
-    const response = await request(customerPage, "POST", "/api/v1/public/batch-payments/" + crypto.randomUUID() + "/report", { body: { referenceNumber: "A1" } });
+    const response = await request(page, "POST", "/api/v1/public/batch-payments/" + crypto.randomUUID() + "/report", { body: { referenceNumber: "A1" } });
     assert.equal(response.status, 400, "UPI references shorter than four characters must be rejected.");
     return { shortReference: response.status, paymentUpdated: false };
   }, ["PAY-011"]);
 
   await record("PAYMENT: UPI references containing whitespace or punctuation are rejected", async () => {
-    const response = await request(customerPage, "POST", "/api/v1/public/batch-payments/" + crypto.randomUUID() + "/report", { body: { referenceNumber: "QA 1234!" } });
+    const response = await request(page, "POST", "/api/v1/public/batch-payments/" + crypto.randomUUID() + "/report", { body: { referenceNumber: "QA 1234!" } });
     assert.equal(response.status, 400, "UPI reference characters must be letters, digits, hyphens or underscores.");
     return { invalidReferenceCharacters: response.status, paymentUpdated: false };
   }, ["PAY-012"]);
 
   await record("PAYMENT: UPI references longer than one hundred characters are rejected", async () => {
-    const response = await request(customerPage, "POST", "/api/v1/public/batch-payments/" + crypto.randomUUID() + "/report", { body: { referenceNumber: "Q".repeat(101) } });
+    const response = await request(page, "POST", "/api/v1/public/batch-payments/" + crypto.randomUUID() + "/report", { body: { referenceNumber: "Q".repeat(101) } });
     assert.equal(response.status, 400, "UPI references must not exceed 100 characters.");
     return { overlongReference: response.status, paymentUpdated: false };
   }, ["PAY-013"]);
@@ -2756,11 +2829,13 @@ try {
     assert.equal(resourceErrors.length, 0, JSON.stringify(resourceErrors));
     assert.equal(pageErrors.length, 0, pageErrors.join("\n"));
     assert.equal(consoleErrors.length, 0, consoleErrors.join("\n"));
+    assert.equal(requestFailures.length, 0, JSON.stringify(requestFailures));
     return {
       serverErrors: serverErrors.length,
       resourceErrors: resourceErrors.length,
       pageErrors: pageErrors.length,
       consoleErrors: consoleErrors.length,
+      requestFailures: requestFailures.length,
       pagesObserved: context.pages().length
     };
   });
