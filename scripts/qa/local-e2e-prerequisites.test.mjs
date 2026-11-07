@@ -10,7 +10,9 @@ test("a Shop One pricing failure blocks quote-dependent work, not independent sh
     ["Create or sign in to the first real QA shop through the shop UI", "PASS"],
     ["Create or sign in to the second real QA shop through the shop UI", "PASS"],
     ["Create or sign in to the real global customer account", "PASS"],
-    ["Create and publish a free QA-only plan, then assign it through the platform UI", "PASS"],
+    ["Create and publish a free QA-only plan through the platform UI", "PASS"],
+    ["Assign the QA-only plan to Shop One through the platform UI", "PASS"],
+    ["Assign the QA-only plan to Shop Two through the platform UI", "PASS"],
     ["Shop one provisions real QA printer and QR station", "PASS"],
     ["Shop one configures print pricing through the real UI", "FAIL"],
     ["Customer opens the shop-one station with authenticated customer identity", "PASS"],
@@ -31,6 +33,7 @@ test("a Shop One payment-settings failure blocks only payment-dependent workflow
     ["Local portal and API health", "PASS"],
     ["Create or sign in to the first real QA shop through the shop UI", "PASS"],
     ["Create or sign in to the real global customer account", "PASS"],
+    ["Assign the QA-only plan to Shop One through the platform UI", "PASS"],
     ["Shop one provisions real QA printer and QR station", "PASS"],
     ["Shop one configures print pricing through the real UI", "PASS"],
     ["Shop one configures payment methods through the real UI", "FAIL"],
@@ -58,7 +61,7 @@ test("a station provisioning failure blocks its station journeys but not Shop Tw
     ["Create or sign in to the first real QA shop through the shop UI", "PASS"],
     ["Create or sign in to the second real QA shop through the shop UI", "PASS"],
     ["Create or sign in to the real global customer account", "PASS"],
-    ["Create and publish a free QA-only plan, then assign it through the platform UI", "PASS"],
+    ["Create and publish a free QA-only plan through the platform UI", "PASS"],
     ["Shop one provisions real QA printer and QR station", "FAIL"],
     ["Shop two configures isolated real QA printer/station", "FAIL"]
   ]);
@@ -81,8 +84,11 @@ test("a customer-session failure blocks its uploads without blocking other roles
     ["Create or sign in to the first real QA shop through the shop UI", "PASS"],
     ["Create or sign in to the second real QA shop through the shop UI", "PASS"],
     ["Create or sign in to the real global customer account", "PASS"],
+    ["Assign the QA-only plan to Shop One through the platform UI", "PASS"],
+    ["Assign the QA-only plan to Shop Two through the platform UI", "PASS"],
     ["Shop one provisions real QA printer and QR station", "PASS"],
     ["Shop one configures print pricing through the real UI", "PASS"],
+    ["Assign the QA-only plan to Shop Two through the platform UI", "PASS"],
     ["Shop two configures isolated real QA printer/station", "PASS"],
     ["Customer opens the shop-one station with authenticated customer identity", "FAIL"]
   ]);
@@ -114,7 +120,7 @@ test("health failure blocks local browser checks", () => {
 test("a missing prerequisite is fail-closed", () => {
   assert.deepEqual(
     getBlockingPrerequisites(
-      "Create and publish a free QA-only plan, then assign it through the platform UI",
+      "Create and publish a free QA-only plan through the platform UI",
       new Map([["Local portal and API health", "PASS"]])
     ),
     ["Bootstrap-created platform administrator signs in through the real admin UI"]
@@ -138,7 +144,9 @@ test("a failed Shop One setup skips only its dependants while Shop Two and unrel
     ["Create or sign in to the second real QA shop through the shop UI", "PASS"],
     ["Create or sign in to the real global customer account", "PASS"],
     ["Bootstrap-created platform administrator signs in through the real admin UI", "PASS"],
-    ["Create and publish a free QA-only plan, then assign it through the platform UI", "PASS"]
+    ["Create and publish a free QA-only plan through the platform UI", "PASS"],
+    ["Assign the QA-only plan to Shop One through the platform UI", "PASS"],
+    ["Assign the QA-only plan to Shop Two through the platform UI", "PASS"]
   ]);
   let independentRan = false;
   let blockedActionRan = false;
@@ -192,7 +200,9 @@ test("a failed pricing check blocks quote and upload descendants but not guest l
     ["Create or sign in to the first real QA shop through the shop UI", "PASS"],
     ["Create or sign in to the second real QA shop through the shop UI", "PASS"],
     ["Create or sign in to the real global customer account", "PASS"],
-    ["Create and publish a free QA-only plan, then assign it through the platform UI", "PASS"],
+    ["Create and publish a free QA-only plan through the platform UI", "PASS"],
+    ["Assign the QA-only plan to Shop One through the platform UI", "PASS"],
+    ["Assign the QA-only plan to Shop Two through the platform UI", "PASS"],
     ["Shop one provisions real QA printer and QR station", "PASS"],
     ["Shop one configures payment methods through the real UI", "PASS"],
     ["Customer opens the shop-one station with authenticated customer identity", "PASS"]
@@ -236,7 +246,9 @@ test("WARN and SKIPPED prerequisites are not treated as successful setup", async
   const statuses = new Map([
     [HEALTH_CHECK_RECORD, "PASS"],
     ["Create or sign in to the first real QA shop through the shop UI", "PASS"],
-    ["Create and publish a free QA-only plan, then assign it through the platform UI", "PASS"]
+    ["Create and publish a free QA-only plan through the platform UI", "PASS"],
+    ["Assign the QA-only plan to Shop One through the platform UI", "PASS"],
+    ["Create or sign in to the real global customer account", "PASS"]
   ]);
 
   const warning = await executeIsolatedQaRecord({
@@ -292,6 +304,105 @@ test("a health failure safely skips all browser/API records instead of producing
 });
 
 
+test("per-shop plan assignment isolates Shop One failure from Shop Two provisioning", async () => {
+  const statuses = new Map([
+    [HEALTH_CHECK_RECORD, "PASS"],
+    ["Bootstrap-created platform administrator signs in through the real admin UI", "PASS"],
+    ["Create and publish a free QA-only plan through the platform UI", "PASS"],
+    ["Create or sign in to the first real QA shop through the shop UI", "FAIL"],
+    ["Create or sign in to the second real QA shop through the shop UI", "PASS"]
+  ]);
+
+  const shopOneAssignment = await executeIsolatedQaRecord({
+    name: "Assign the QA-only plan to Shop One through the platform UI",
+    checkId: "SP-TEST-014",
+    recordStatuses: statuses,
+    action: async () => { throw new Error("Shop One assignment must not run without its tenant."); }
+  });
+  assert.equal(shopOneAssignment.status, "SKIPPED");
+  assert.deepEqual(shopOneAssignment.check.details.blockedBy, [
+    "Create or sign in to the first real QA shop through the shop UI"
+  ]);
+
+  const shopTwoAssignment = await executeIsolatedQaRecord({
+    name: "Assign the QA-only plan to Shop Two through the platform UI",
+    checkId: "SP-TEST-015",
+    recordStatuses: statuses,
+    action: async () => ({ tenantId: "shop-two", assigned: true })
+  });
+  assert.equal(shopTwoAssignment.status, "PASS");
+
+  const shopOneProvisioning = await executeIsolatedQaRecord({
+    name: "Shop one provisions real QA printer and QR station",
+    checkId: "SP-TEST-016",
+    recordStatuses: statuses,
+    action: async () => { throw new Error("Shop One provisioning must not run."); }
+  });
+  assert.equal(shopOneProvisioning.status, "SKIPPED");
+
+  const shopTwoProvisioning = await executeIsolatedQaRecord({
+    name: "Shop two configures isolated real QA printer/station",
+    checkId: "SP-TEST-017",
+    recordStatuses: statuses,
+    action: async () => ({ tenant: "Shop Two", resourcesPersisted: true })
+  });
+  assert.equal(shopTwoProvisioning.status, "PASS");
+});
+
+test("unauthenticated Agent endpoint probes remain runnable when Agent enrollment setup fails", async () => {
+  const statuses = new Map([
+    [HEALTH_CHECK_RECORD, "PASS"],
+    ["Create or sign in to the first real QA shop through the shop UI", "PASS"],
+    ["Dedicated QA Agent enrollment code can be generated without pairing or replacing a machine identity", "FAIL"]
+  ]);
+  let probeRan = false;
+
+  const probe = await executeIsolatedQaRecord({
+    name: "Agent API requires an authenticated paired identity for all protected endpoints",
+    checkId: "SP-TEST-018",
+    recordStatuses: statuses,
+    action: async () => { probeRan = true; return { endpointsRejectedWithoutIdentity: 17 }; }
+  });
+  assert.equal(probe.status, "PASS");
+  assert.equal(probeRan, true);
+});
+
+test("records declare cross-tenant and produced-document fixture dependencies", () => {
+  const statuses = new Map([
+    [HEALTH_CHECK_RECORD, "PASS"],
+    ["Customer opens the shop-one station with authenticated customer identity", "PASS"],
+    ["Create or sign in to the first real QA shop through the shop UI", "PASS"],
+    ["Create or sign in to the second real QA shop through the shop UI", "PASS"],
+    ["Customer uploads a synthetic two-page PDF through the real portal UI", "FAIL"],
+    ["Shop one provisions real QA printer and QR station", "PASS"],
+    ["Shop one configures print pricing through the real UI", "PASS"],
+    ["Shop two configures isolated real QA printer/station", "FAIL"],
+    ["Shop one configures payment methods through the real UI", "PASS"],
+    ["Real UPI payment intent, synthetic QA reference, and shop rejection without marking money received", "PASS"]
+  ]);
+
+  assert.ok(getBlockingPrerequisites(
+    "QR/UPLOAD: session renewal, scoped resume and invalid local-upload metadata are safely rejected",
+    statuses
+  ).includes("Shop two configures isolated real QA printer/station"));
+  assert.ok(getBlockingPrerequisites(
+    "Agent and printer prerequisites are visible; dispatch without a paired QA Agent is safely blocked",
+    statuses
+  ).includes("Customer uploads a synthetic two-page PDF through the real portal UI"));
+  assert.ok(getBlockingPrerequisites(
+    "Shop payment and refund screens load without recording false financial events",
+    statuses
+  ).includes("Customer uploads a synthetic two-page PDF through the real portal UI"));
+  assert.ok(getBlockingPrerequisites(
+    "DEVICE/QR: printer and station controls restore safely; QR rotation invalidates the old public code",
+    statuses
+  ).includes("Create or sign in to the real global customer account"));
+  assert.ok(getBlockingPrerequisites(
+    "SHOP: invalid device, printer, profile, account and pricing inputs fail without changing saved settings",
+    statuses
+  ).includes("Shop two configures isolated real QA printer/station"));
+});
+
 test("the release gate fails on any failed, warned, skipped, unmapped or incomplete run", () => {
   assert.equal(shouldFailQaRun({
     failed: 0,
@@ -326,6 +437,14 @@ test("the release gate fails on any failed, warned, skipped, unmapped or incompl
     warnings: 0,
     coverageGatePassed: true,
     caseMappingErrors: 1
+  }), true);
+
+  assert.equal(shouldFailQaRun({
+    failed: 0,
+    warnings: 0,
+    skipped: 1,
+    coverageGatePassed: true,
+    caseMappingErrors: 0
   }), true);
 
   assert.equal(shouldFailQaRun({
