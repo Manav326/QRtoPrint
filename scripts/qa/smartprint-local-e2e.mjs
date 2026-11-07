@@ -3,6 +3,7 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { getBlockingPrerequisites } from "./local-e2e-prerequisites.mjs";
+import { getUnexpectedHttpResponses } from "./local-e2e-http-audit.mjs";
 
 const moduleDirectory = process.env.PLAYWRIGHT_MODULE_DIR;
 if (!moduleDirectory) throw new Error("PLAYWRIGHT_MODULE_DIR is required.");
@@ -73,6 +74,9 @@ let consoleErrors = [];
 let serverErrors = [];
 let resourceErrors = [];
 let requestFailures = [];
+let httpErrorResponses = [];
+let expectedHttpErrors = [];
+let networkStatusConsoleErrors = [];
 let shop1Page;
 let shop2Page;
 let adminPage;
@@ -228,10 +232,29 @@ async function record(name, action, caseIds = CASE_IDS_BY_RECORD_NAME.get(name) 
   }
 }
 
+function markExpectedHttpError(result) {
+  if (!result || Number(result.status) < 400 || !result.method || !result.url) return;
+  const url = new URL(result.url, baseUrl);
+  expectedHttpErrors.push({
+    method: String(result.method).toUpperCase(),
+    path: url.pathname + url.search,
+    status: Number(result.status)
+  });
+}
+
+function assertExpectedHttpStatus(result, expected, label) {
+  const allowed = Array.isArray(expected) ? expected : [expected];
+  assert.ok(allowed.includes(result.status),
+    label + " returned HTTP " + result.status + "; expected " + allowed.join("/") + ". Body: " + String(result.text ?? "").slice(0, 900));
+  markExpectedHttpError(result);
+  return result;
+}
+
 function assertHttp(result, expected, label) {
   const allowed = Array.isArray(expected) ? expected : [expected];
   assert.ok(allowed.includes(result.status),
     label + " returned HTTP " + result.status + "; expected " + allowed.join("/") + ". Body: " + result.text.slice(0, 900));
+  markExpectedHttpError(result);
   return result.json;
 }
 
@@ -267,7 +290,7 @@ async function request(page, method, path, { token, sessionToken, body, headers 
     const text = await response.text();
     let json = null;
     try { json = text ? JSON.parse(text) : null; } catch {}
-    return { status: response.status, url: response.url, text, json };
+    return { status: response.status, url: response.url, method, text, json };
   }, { url, method, token, sessionToken, body, headers });
   assert.equal(new URL(result.url).origin, expectedOrigin, "Local API request redirected outside the local origin.");
   return result;
@@ -291,9 +314,14 @@ function watchPage(targetPage) {
   });
   targetPage.on("console", message => {
     if (message.type() !== "error") return;
+    const messageText = String(message.text()).slice(0, 500);
+    if (/^Failed to load resource: the server responded with a status of \d{3}\b/i.test(messageText)) {
+      networkStatusConsoleErrors.push({ pageUrl: targetPage.url(), message: messageText });
+      return;
+    }
     const sourceUrl = message.location()?.url || "";
     if (!sourceUrl || sourceUrl.startsWith(baseUrl.origin)) {
-      consoleErrors.push(String(message.text()).slice(0, 500));
+      consoleErrors.push(messageText);
     }
   });
   targetPage.on("response", response => {
@@ -301,6 +329,13 @@ function watchPage(targetPage) {
       const url = new URL(response.url());
       if (url.origin !== baseUrl.origin) return;
       if (response.status() >= 500) serverErrors.push({ status: response.status(), path: url.pathname });
+      if (response.status() >= 400) {
+        httpErrorResponses.push({
+          method: response.request().method().toUpperCase(),
+          path: url.pathname + url.search,
+          status: response.status()
+        });
+      }
       if (["script", "stylesheet", "font"].includes(response.request().resourceType()) && response.status() >= 400) {
         resourceErrors.push({ status: response.status(), path: url.pathname, type: response.request().resourceType() });
       }
@@ -378,7 +413,7 @@ async function registerOrSignInShop(page, email, password, businessName, ownerNa
     const invalidLogin = await request(page, "POST", "/api/v1/auth/login", {
       body: { email, password: password + "-wrong" }
     });
-    assert.equal(invalidLogin.status, 401, "Shop login accepted an incorrect password.");
+    assertExpectedHttpStatus(invalidLogin, 401, "Shop login accepted an incorrect password.");
 
     const accountMenu = page.getByRole("button", { name: /Account options for/ });
     await accountMenu.click();
@@ -400,7 +435,7 @@ async function signInPlatformAdmin(page, email, password) {
   const invalidLogin = await request(page, "POST", "/api/v1/auth/login", {
     body: { email, password: password + "-wrong" }
   });
-  assert.equal(invalidLogin.status, 401, "Platform admin login accepted an incorrect password.");
+  assertExpectedHttpStatus(invalidLogin, 401, "Platform admin login accepted an incorrect password.");
   await page.getByLabel("Email address").fill(email);
   await page.locator('input[type="password"]').first().fill(password);
   await page.getByRole("button", { name: "Sign in to administration" }).click();
@@ -526,25 +561,12 @@ async function uploadSyntheticPdf(page, sessionToken, batchId, idempotencyKey, f
     const text = await response.text();
     let json = null;
     try { json = text ? JSON.parse(text) : null; } catch {}
-    return { status: response.status, text, json };
+    return { status: response.status, url: response.url, method: "POST", text, json };
   }, { sessionToken, batchId, idempotencyKey, fileName, base64 });
 }
 
 async function clickAdminSection(page, label) {
-  const viewportWidth = await page.evaluate(() => window.innerWidth);
-  if (viewportWidth <= 850) {
-    const openNavigation = page.getByRole("button", { name: "Open navigation" });
-    if (await openNavigation.isVisible().catch(() => false)) await openNavigation.click();
-  }
-  const item = page.locator(".sidebar .nav-item").filter({ hasText: label }).first();
-  await item.waitFor({ state: "visible", timeout: 12000 });
-  await item.click();
-  await page.waitForFunction(
-    expected => [...document.querySelectorAll(".sidebar .nav-item")]
-      .some(element => element.classList.contains("active") && (element.getAttribute("aria-label") === expected || element.getAttribute("title") === expected || element.textContent.trim().startsWith(expected))),
-    label,
-    { timeout: 12000 }
-  );
+  await navigateSidebarSection(page, label);
 }
 
 async function fillQaPlanVersion(page) {
@@ -1057,8 +1079,7 @@ try {
       created = true;
       report.safety.registeredLocalQaCustomer = true;
     } else {
-      assert.equal(registration.status, 409,
-        "Customer registration returned an unexpected status: " + registration.status + " " + registration.text.slice(0, 500));
+      assertExpectedHttpStatus(registration, 409, "Customer registration returned an unexpected status: " + registration.status + " " + registration.text.slice(0, 500));
     }
     const invalidLogin = await request(page, "POST", "/api/v1/auth/customer-login", {
       body: {
@@ -1066,7 +1087,7 @@ try {
         password: process.env.SMARTPRINT_QA_CUSTOMER_PASSWORD + "-wrong"
       }
     });
-    assert.equal(invalidLogin.status, 401, "Customer login accepted an incorrect password.");
+    assertExpectedHttpStatus(invalidLogin, 401, "Customer login accepted an incorrect password.");
     const login = await request(page, "POST", "/api/v1/auth/customer-login", {
       body: {
         email: process.env.SMARTPRINT_QA_CUSTOMER_EMAIL,
@@ -1218,13 +1239,13 @@ try {
       token: shop1Tokens.accessToken,
       body: { ...commonPricing, monoPerSideMinor: -1 }
     });
-    assert.equal(negativeRate.status, 400, "Negative print rates must be rejected.");
+    assertExpectedHttpStatus(negativeRate, 400, "Negative print rates must be rejected.");
 
     const zeroBaseRate = await request(shop1Page, "PUT", "/api/v1/shop/pricing", {
       token: shop1Tokens.accessToken,
       body: { ...commonPricing, monoPerSideMinor: 0 }
     });
-    assert.equal(zeroBaseRate.status, 400, "A zero mono base rate must be rejected.");
+    assertExpectedHttpStatus(zeroBaseRate, 400, "A zero mono base rate must be rejected.");
 
     const invalidCapabilities = await request(shop1Page, "POST", "/api/v1/shop/printers", {
       token: shop1Tokens.accessToken,
@@ -1237,7 +1258,7 @@ try {
         capabilitiesJson: "[]"
       }
     });
-    assert.equal(invalidCapabilities.status, 400, "Printer capabilities must be a JSON object, not an array.");
+    assertExpectedHttpStatus(invalidCapabilities, 400, "Printer capabilities must be a JSON object, not an array.");
 
     const unsupportedConnection = await request(shop1Page, "POST", "/api/v1/shop/printers", {
       token: shop1Tokens.accessToken,
@@ -1250,13 +1271,13 @@ try {
         capabilitiesJson: "{}"
       }
     });
-    assert.equal(unsupportedConnection.status, 400, "Unsupported printer connection types must be rejected.");
+    assertExpectedHttpStatus(unsupportedConnection, 400, "Unsupported printer connection types must be rejected.");
 
     const foreignPrinterStation = await request(shop1Page, "POST", "/api/v1/shop/qr-stations", {
       token: shop1Tokens.accessToken,
       body: { displayName: "QA must not bind foreign printer", printerDeviceId: shop2Printer.id }
     });
-    assert.equal(foreignPrinterStation.status, 400, "A station must not be attached to another shop's printer.");
+    assertExpectedHttpStatus(foreignPrinterStation, 400, "A station must not be attached to another shop's printer.");
 
     const currentProfile = assertHttp(await request(shop1Page, "GET", "/api/v1/shop/profile", {
       token: shop1Tokens.accessToken
@@ -1269,13 +1290,13 @@ try {
         logoUrl: "http://example.invalid/logo.png"
       }
     });
-    assert.equal(insecureLogo.status, 400, "Shop branding must reject non-HTTPS logo URLs.");
+    assertExpectedHttpStatus(insecureLogo, 400, "Shop branding must reject non-HTTPS logo URLs.");
 
     const invalidAccount = await request(shop1Page, "PUT", "/api/v1/shop/account", {
       token: shop1Tokens.accessToken,
       body: { ownerName: "SmartPrint QA Owner One", email: "invalid-email", currentPassword: null }
     });
-    assert.equal(invalidAccount.status, 400, "Owner account changes must reject invalid email addresses.");
+    assertExpectedHttpStatus(invalidAccount, 400, "Owner account changes must reject invalid email addresses.");
 
     const pricingAfter = assertHttp(await request(shop1Page, "GET", "/api/v1/shop/pricing", {
       token: shop1Tokens.accessToken
@@ -1320,7 +1341,7 @@ try {
     const unsupported = await request(shop1Page, "GET",
       "/api/v1/shop/reports/summary?days=14",
       { token: shop1Tokens.accessToken });
-    assert.equal(unsupported.status, 400, "Unsupported reporting periods must be rejected.");
+    assertExpectedHttpStatus(unsupported, 400, "Unsupported reporting periods must be rejected.");
 
     const secondTenant = assertHttp(await request(shop2Page, "GET",
       "/api/v1/shop/reports/summary?days=30",
@@ -1420,14 +1441,13 @@ try {
 
   await record("Shop, platform-admin and cross-tenant authorization boundaries", async () => {
     const shopCannotSeePlatform = await request(shop1Page, "GET", "/api/v1/platform/overview", { token: shop1Tokens.accessToken });
-    assert.ok([401, 403].includes(shopCannotSeePlatform.status), "Shop owner unexpectedly accessed platform overview.");
+    assertExpectedHttpStatus(shopCannotSeePlatform, [401, 403], "Shop owner unexpectedly accessed platform overview.");
     const adminCannotSeeShopProfile = await request(adminPage, "GET", "/api/v1/shop/profile", { token: adminTokens.accessToken });
-    assert.ok([401, 403].includes(adminCannotSeeShopProfile.status), "Platform admin unexpectedly accessed shop profile.");
+    assertExpectedHttpStatus(adminCannotSeeShopProfile, [401, 403], "Platform admin unexpectedly accessed shop profile.");
     const shopOneCannotSeeShopTwoPrinter = await request(shop1Page, "PATCH",
       "/api/v1/shop/printers/" + shop2Printer.id + "/active?isActive=false",
       { token: shop1Tokens.accessToken });
-    assert.equal(shopOneCannotSeeShopTwoPrinter.status, 404,
-      "Shop one could alter a printer belonging to shop two.");
+    assertExpectedHttpStatus(shopOneCannotSeeShopTwoPrinter, 404, "Shop one could alter a printer belonging to shop two.");
     const customerCannotSeePlatform = await request(page, "GET", "/api/v1/platform/overview", {
       token: customerTokens.accessToken
     });
@@ -1464,7 +1484,7 @@ try {
 
   await record("QR/UPLOAD: session renewal, scoped resume and invalid local-upload metadata are safely rejected", async () => {
     const anonymousCurrent = await request(customerPage, "GET", "/api/v1/public/sessions/current");
-    assert.equal(anonymousCurrent.status, 401, "A customer session must not be readable without its opaque session token.");
+    assertExpectedHttpStatus(anonymousCurrent, 401, "A customer session must not be readable without its opaque session token.");
 
     const renewed = assertHttp(await request(customerPage, "POST", "/api/v1/public/sessions/current/renew", {
       token: customerTokens.accessToken,
@@ -1485,7 +1505,7 @@ try {
       sessionToken: customerSession.sessionToken,
       body: { publicCode: shopTwoCode }
     });
-    assert.equal(crossStationResume.status, 401, "A customer session must not be rebound to another shop's station.");
+    assertExpectedHttpStatus(crossStationResume, 401, "A customer session must not be rebound to another shop's station.");
 
     const invalidDigest = await request(customerPage, "POST", "/api/v1/public/sessions/current/local-upload-tickets", {
       sessionToken: customerSession.sessionToken,
@@ -1501,7 +1521,7 @@ try {
         orientation: "AUTO"
       }
     });
-    assert.equal(invalidDigest.status, 422, "A local upload ticket with an invalid SHA-256 digest must be rejected.");
+    assertExpectedHttpStatus(invalidDigest, 422, "A local upload ticket with an invalid SHA-256 digest must be rejected.");
 
     const unsupportedExtension = await request(customerPage, "POST", "/api/v1/public/sessions/current/local-upload-tickets", {
       sessionToken: customerSession.sessionToken,
@@ -1517,7 +1537,7 @@ try {
         orientation: "AUTO"
       }
     });
-    assert.equal(unsupportedExtension.status, 422, "Local upload must reject unsupported file extensions.");
+    assertExpectedHttpStatus(unsupportedExtension, 422, "Local upload must reject unsupported file extensions.");
 
     return {
       sessionRenewed: true,
@@ -1639,7 +1659,7 @@ try {
       customerPage, customerSession.sessionToken, crypto.randomUUID(), crypto.randomUUID(),
       "smartprint-invalid-qa.pdf", Buffer.from("This is not a PDF document.", "ascii")
     );
-    assert.equal(invalid.status, 422, "Malformed PDF was not rejected by the local document validator: " + invalid.text.slice(0, 500));
+    assertExpectedHttpStatus(invalid, 422, "Malformed PDF was not rejected by the local document validator: " + invalid.text.slice(0, 500));
     return { status: invalid.status, printJobCreated: false };
   });
 
@@ -1705,7 +1725,7 @@ try {
     const start = await request(customerPage, "POST",
       "/api/v1/public/batches/" + uploadedBatchId + "/payments",
       { sessionToken: customerSession.sessionToken, body: { method: "UPI" } });
-    assert.equal(start.status, 409, "A rejected QA job's batch should not enter checkout.");
+    assertExpectedHttpStatus(start, 409, "A rejected QA job's batch should not enter checkout.");
     return { status: start.status, rejectedBeforeCheckout: true };
   });
 
@@ -1980,7 +2000,7 @@ try {
     const noVerifiedPaymentRefund = await request(shop1Page, "POST",
       "/api/v1/shop/print-jobs/" + uploadedJob.id + "/refund-preview",
       { token: shop1Tokens.accessToken, body: { rejectedPageNumbers: [2] } });
-    assert.equal(noVerifiedPaymentRefund.status, 409, "Refund preview must be blocked without a verified payment.");
+    assertExpectedHttpStatus(noVerifiedPaymentRefund, 409, "Refund preview must be blocked without a verified payment.");
     return {
       paymentRows: payments.length,
       existingRefundRows: refunds.length,
@@ -1993,17 +2013,17 @@ try {
     const verifyRejectedPayment = await request(shop1Page, "POST",
       "/api/v1/shop/payments/" + paymentRejectedBatchPaymentId + "/verify",
       { token: shop1Tokens.accessToken });
-    assert.equal(verifyRejectedPayment.status, 409, "A rejected UPI report must never be marked as received.");
+    assertExpectedHttpStatus(verifyRejectedPayment, 409, "A rejected UPI report must never be marked as received.");
 
     const approveRejectedJob = await request(shop1Page, "POST",
       "/api/v1/shop/print-jobs/" + uploadedJob.id + "/approve",
       { token: shop1Tokens.accessToken });
-    assert.equal(approveRejectedJob.status, 409, "A rejected file cannot be approved for printing.");
+    assertExpectedHttpStatus(approveRejectedJob, 409, "A rejected file cannot be approved for printing.");
 
     const dispatchRejectedJob = await request(shop1Page, "POST",
       "/api/v1/shop/print-jobs/" + uploadedJob.id + "/dispatch",
       { token: shop1Tokens.accessToken });
-    assert.equal(dispatchRejectedJob.status, 409, "A rejected file cannot be dispatched to a printer.");
+    assertExpectedHttpStatus(dispatchRejectedJob, 409, "A rejected file cannot be dispatched to a printer.");
 
     const refundPreview = await request(shop1Page, "POST",
       "/api/v1/shop/print-jobs/" + paymentRejectedJob.id + "/refund-preview",
@@ -2011,7 +2031,7 @@ try {
         token: shop1Tokens.accessToken,
         body: { rejectedPageNumbers: [1] }
       });
-    assert.equal(refundPreview.status, 409, "A payment-rejected file has no verified payment to refund.");
+    assertExpectedHttpStatus(refundPreview, 409, "A payment-rejected file has no verified payment to refund.");
 
     const refundNotConfirmed = await request(shop1Page, "POST",
       "/api/v1/shop/print-jobs/" + paymentRejectedJob.id + "/refund",
@@ -2026,7 +2046,7 @@ try {
           rejectedPageNumbers: [1]
         }
       });
-    assert.equal(refundNotConfirmed.status, 400, "The system must require explicit confirmation that a refund was actually sent.");
+    assertExpectedHttpStatus(refundNotConfirmed, 400, "The system must require explicit confirmation that a refund was actually sent.");
 
     const events = assertHttp(await request(shop1Page, "GET",
       "/api/v1/shop/print-jobs/" + paymentRejectedJob.id + "/events",
@@ -2067,7 +2087,7 @@ try {
     const dispatch = await request(shop1Page, "POST",
       "/api/v1/shop/print-jobs/" + uploadedJob.id + "/dispatch",
       { token: shop1Tokens.accessToken });
-    assert.equal(dispatch.status, 409, "Rejected/unpaid/no-agent job dispatch must be rejected.");
+    assertExpectedHttpStatus(dispatch, 409, "Rejected/unpaid/no-agent job dispatch must be rejected.");
     return {
       pairedAgentsForQaTenant: agents.length,
       dispatchGuard: dispatch.status,
@@ -2122,7 +2142,7 @@ try {
     const outcomes = [];
     for (const [method, path, body] of protectedRequests) {
       const response = await request(page, method, path, { body });
-      assert.equal(response.status, 401, "Protected Agent endpoint must reject missing agent credentials: " + method + " " + path);
+      assertExpectedHttpStatus(response, 401, "Protected Agent endpoint must reject missing agent credentials: " + method + " " + path);
       outcomes.push({ method, path: path.replace(jobId, "[job]").replace(ticketId, "[ticket]"), status: response.status });
     }
     return { protectedAgentEndpoints: outcomes.length, allRejectedWithoutCredentials: true, outcomes };
@@ -2156,7 +2176,7 @@ try {
         },
         body: { version: "smartprint-local-qa", operatingSystem: "Windows", localEndpoints: [] }
       });
-      assert.equal(invalidAgentSecret.status, 401, "A known Agent ID with an incorrect secret must be rejected.");
+      assertExpectedHttpStatus(invalidAgentSecret, 401, "A known Agent ID with an incorrect secret must be rejected.");
 
       const malformedAgentId = await request(page, "POST", "/api/v1/agent/heartbeat", {
         headers: {
@@ -2165,7 +2185,7 @@ try {
         },
         body: { version: "smartprint-local-qa", operatingSystem: "Windows", localEndpoints: [] }
       });
-      assert.equal(malformedAgentId.status, 401, "A malformed Agent identity must be rejected.");
+      assertExpectedHttpStatus(malformedAgentId, 401, "A malformed Agent identity must be rejected.");
 
       const invalidEnrollmentCode = await request(page, "POST", "/api/v1/agent/enroll", {
         body: {
@@ -2174,12 +2194,12 @@ try {
           deviceName: "SmartPrint QA Invalid Enrollment"
         }
       });
-      assert.equal(invalidEnrollmentCode.status, 401, "An unknown Agent enrollment code must be rejected.");
+      assertExpectedHttpStatus(invalidEnrollmentCode, 401, "An unknown Agent enrollment code must be rejected.");
 
       const invalidEnrollmentMetadata = await request(page, "POST", "/api/v1/agent/enroll", {
         body: { code: qaAgentEnrollment.code, fingerprint: "", deviceName: "" }
       });
-      assert.equal(invalidEnrollmentMetadata.status, 400, "Enrollment must reject missing device identity metadata.");
+      assertExpectedHttpStatus(invalidEnrollmentMetadata, 400, "Enrollment must reject missing device identity metadata.");
 
       enrollmentReplay = await request(page, "POST", "/api/v1/agent/enroll", {
         body: {
@@ -2188,7 +2208,7 @@ try {
           deviceName: "SmartPrint QA Enrollment Replay"
         }
       });
-      assert.equal(enrollmentReplay.status, 401, "A one-time enrollment code must not be reusable.");
+      assertExpectedHttpStatus(enrollmentReplay, 401, "A one-time enrollment code must not be reusable.");
 
       const agentHeaders = {
         "X-Print-Agent-Id": qaAgentIdentity.id,
@@ -2216,7 +2236,7 @@ try {
           }]
         }
       });
-      assert.equal(invalidSync.status, 400, "Invalid printer capability payload must be rejected.");
+      assertExpectedHttpStatus(invalidSync, 400, "Invalid printer capability payload must be rejected.");
 
       emptySync = assertHttp(await request(page, "POST", "/api/v1/agent/printers/sync", {
         headers: agentHeaders,
@@ -2241,7 +2261,7 @@ try {
         headers: agentHeaders,
         body: { version: "smartprint-local-qa", operatingSystem: "Windows", localEndpoints: [] }
       });
-      assert.equal(heartbeatAfterRevoke.status, 401, "A revoked Agent credential must no longer authenticate.");
+      assertExpectedHttpStatus(heartbeatAfterRevoke, 401, "A revoked Agent credential must no longer authenticate.");
 
       const finalDevices = assertHttp(await request(shop1Page, "GET", "/api/v1/shop/agent-devices", {
         token: shop1Tokens.accessToken
@@ -2310,7 +2330,7 @@ try {
       assert.equal(disabledStation.isEnabled, false);
 
       const blockedSession = await request(page, "POST", "/api/v1/public/stations/" + oldStationCode + "/sessions");
-      assert.equal(blockedSession.status, 404, "A disabled QR station must not create new customer sessions.");
+      assertExpectedHttpStatus(blockedSession, 404, "A disabled QR station must not create new customer sessions.");
 
       const enabledStationResponse = await request(shop1Page, "PATCH",
         "/api/v1/shop/qr-stations/" + shop1Station.id + "/enabled?isEnabled=true",
@@ -2326,7 +2346,7 @@ try {
       assert.ok(newStationCode && newStationCode !== oldStationCode, "QR rotation must issue a new public code.");
 
       const oldCodeAfterRotation = await request(page, "POST", "/api/v1/public/stations/" + oldStationCode + "/sessions");
-      assert.equal(oldCodeAfterRotation.status, 404, "A rotated public QR code must no longer create sessions.");
+      assertExpectedHttpStatus(oldCodeAfterRotation, 404, "A rotated public QR code must no longer create sessions.");
 
       const newCodeSession = assertHttp(await request(page, "POST",
         "/api/v1/public/stations/" + newStationCode + "/sessions",
@@ -2361,7 +2381,7 @@ try {
     const crossTenant = await request(shop2Page, "GET",
       "/api/v1/shop/print-jobs/" + uploadedJob.id + "/events",
       { token: shop2Tokens.accessToken });
-    assert.equal(crossTenant.status, 404, "Shop two could read shop one's job events.");
+    assertExpectedHttpStatus(crossTenant, 404, "Shop two could read shop one's job events.");
     const shopOneTenantList = assertHttp(await request(adminPage, "GET",
       "/api/v1/platform/tenants?search=" + encodeURIComponent(process.env.SMARTPRINT_QA_SHOP1_NAME) + "&page=1&pageSize=20",
       { token: adminTokens.accessToken }), 200, "Platform tenant search");
@@ -2390,7 +2410,7 @@ try {
         reason: "QA invalid boundary"
       }
     });
-    assert.equal(invalidSettings.status, 400, "Platform operational settings must reject out-of-range quotas.");
+    assertExpectedHttpStatus(invalidSettings, 400, "Platform operational settings must reject out-of-range quotas.");
 
     const noOpUpdatePayload = {
       trialMaxMonthlyPrintJobs: settings.trialMaxMonthlyPrintJobs,
@@ -2426,7 +2446,7 @@ try {
         token: adminTokens.accessToken,
         body: { status: "Frozen", reason: "QA invalid status" }
       });
-    assert.equal(invalidTenantTransition.status, 400, "Unknown tenant states must be rejected.");
+    assertExpectedHttpStatus(invalidTenantTransition, 400, "Unknown tenant states must be rejected.");
 
     let suspended = null;
     let blockedShopRead = null;
@@ -2447,8 +2467,7 @@ try {
       blockedShopRead = await request(shop2Page, "GET", "/api/v1/shop/profile", {
         token: shop2Tokens.accessToken
       });
-      assert.equal(blockedShopRead.status, 403,
-        "A suspended shop must be blocked from reading its ordinary workspace profile. Actual HTTP " +
+      assertExpectedHttpStatus(blockedShopRead, 403, "A suspended shop must be blocked from reading its ordinary workspace profile. Actual HTTP " +
         blockedShopRead.status + " from " + blockedShopRead.url + ". Body: " + blockedShopRead.text.slice(0, 600));
 
       const restoredResponse = await request(adminPage, "PATCH",
@@ -2502,7 +2521,7 @@ try {
     const invalidShopRegistration = await request(shop1Page, "POST", "/api/v1/auth/register-shop", {
       body: { businessName: "", ownerName: "", email: "not-an-email", password: "invalid" }
     });
-    assert.equal(invalidShopRegistration.status, 400, "Invalid shop registration data must be rejected.");
+    assertExpectedHttpStatus(invalidShopRegistration, 400, "Invalid shop registration data must be rejected.");
 
     const duplicateShopRegistration = await request(shop1Page, "POST", "/api/v1/auth/register-shop", {
       body: {
@@ -2512,7 +2531,7 @@ try {
         password: process.env.SMARTPRINT_QA_SHOP1_PASSWORD
       }
     });
-    assert.equal(duplicateShopRegistration.status, 409, "A duplicate shop email must not create a second tenant.");
+    assertExpectedHttpStatus(duplicateShopRegistration, 409, "A duplicate shop email must not create a second tenant.");
 
     const duplicateCustomerRegistration = await request(page, "POST", "/api/v1/auth/register-customer", {
       body: {
@@ -2521,22 +2540,22 @@ try {
         password: process.env.SMARTPRINT_QA_CUSTOMER_PASSWORD
       }
     });
-    assert.equal(duplicateCustomerRegistration.status, 409, "A duplicate global customer email must be rejected.");
+    assertExpectedHttpStatus(duplicateCustomerRegistration, 409, "A duplicate global customer email must be rejected.");
 
     const customerThroughShopLogin = await request(page, "POST", "/api/v1/auth/login", {
       body: { email: process.env.SMARTPRINT_QA_CUSTOMER_EMAIL, password: process.env.SMARTPRINT_QA_CUSTOMER_PASSWORD }
     });
-    assert.equal(customerThroughShopLogin.status, 401, "A global customer must not authenticate as a shop owner.");
+    assertExpectedHttpStatus(customerThroughShopLogin, 401, "A global customer must not authenticate as a shop owner.");
 
     const shopThroughCustomerLogin = await request(page, "POST", "/api/v1/auth/customer-login", {
       body: { email: process.env.SMARTPRINT_QA_SHOP2_EMAIL, password: process.env.SMARTPRINT_QA_SHOP2_PASSWORD }
     });
-    assert.equal(shopThroughCustomerLogin.status, 401, "A shop owner must not authenticate as a global customer.");
+    assertExpectedHttpStatus(shopThroughCustomerLogin, 401, "A shop owner must not authenticate as a global customer.");
 
     const anonymousShopProfile = await request(page, "GET", "/api/v1/shop/profile");
     const anonymousPlatformOverview = await request(page, "GET", "/api/v1/platform/overview");
-    assert.equal(anonymousShopProfile.status, 401, "Shop profile must require an access token.");
-    assert.equal(anonymousPlatformOverview.status, 401, "Platform administration must require an access token.");
+    assertExpectedHttpStatus(anonymousShopProfile, 401, "Shop profile must require an access token.");
+    assertExpectedHttpStatus(anonymousPlatformOverview, 401, "Platform administration must require an access token.");
 
     const login = assertHttp(await request(shop2Page, "POST", "/api/v1/auth/login", {
       body: { email: process.env.SMARTPRINT_QA_SHOP2_EMAIL, password: process.env.SMARTPRINT_QA_SHOP2_PASSWORD }
@@ -2550,17 +2569,17 @@ try {
     const replay = await request(shop2Page, "POST", "/api/v1/auth/refresh", {
       body: { refreshToken: login.refreshToken }
     });
-    assert.equal(replay.status, 401, "A previously rotated refresh token must not be reusable.");
+    assertExpectedHttpStatus(replay, 401, "A previously rotated refresh token must not be reusable.");
 
     const logout = await request(shop2Page, "POST", "/api/v1/auth/logout", {
       body: { refreshToken: rotated.refreshToken }
     });
-    assert.equal(logout.status, 204, "Logout should revoke the active refresh token.");
+    assertExpectedHttpStatus(logout, 204, "Logout should revoke the active refresh token.");
 
     const refreshAfterLogout = await request(shop2Page, "POST", "/api/v1/auth/refresh", {
       body: { refreshToken: rotated.refreshToken }
     });
-    assert.equal(refreshAfterLogout.status, 401, "A logged-out refresh token must not be reusable.");
+    assertExpectedHttpStatus(refreshAfterLogout, 401, "A logged-out refresh token must not be reusable.");
 
     return {
       invalidRegistration: invalidShopRegistration.status,
@@ -2578,31 +2597,31 @@ try {
 
   await record("RBAC: a global customer token cannot enter shop-owner APIs", async () => {
     const response = await request(page, "GET", "/api/v1/shop/profile", { token: customerTokens.accessToken });
-    assert.equal(response.status, 403, "Customer identity must not be accepted as a shop owner.");
+    assertExpectedHttpStatus(response, 403, "Customer identity must not be accepted as a shop owner.");
     return { customerToShopProfile: response.status, shopDataReturned: false };
   }, ["RBAC-007"]);
 
   await record("RBAC: a shop-owner token cannot enter customer identity APIs", async () => {
     const response = await request(page, "GET", "/api/v1/customer/me", { token: shop1Tokens.accessToken });
-    assert.equal(response.status, 403, "Shop-owner identity must not be accepted as a global customer.");
+    assertExpectedHttpStatus(response, 403, "Shop-owner identity must not be accepted as a global customer.");
     return { shopToCustomerProfile: response.status, customerDataReturned: false };
   }, ["RBAC-008"]);
 
   await record("RBAC: a shop-owner token cannot access the platform control plane", async () => {
     const response = await request(page, "GET", "/api/v1/platform/overview", { token: shop1Tokens.accessToken });
-    assert.equal(response.status, 403, "Tenant shop owners must not access platform administration.");
+    assertExpectedHttpStatus(response, 403, "Tenant shop owners must not access platform administration.");
     return { shopToPlatformOverview: response.status, platformDataReturned: false };
   }, ["RBAC-009"]);
 
   await record("RBAC: a customer token cannot access the platform control plane", async () => {
     const response = await request(page, "GET", "/api/v1/platform/overview", { token: customerTokens.accessToken });
-    assert.equal(response.status, 403, "Global customers must not access platform administration.");
+    assertExpectedHttpStatus(response, 403, "Global customers must not access platform administration.");
     return { customerToPlatformOverview: response.status, platformDataReturned: false };
   }, ["RBAC-010"]);
 
   await record("TENANT: Shop One cannot disable Shop Two's printer", async () => {
     const attempt = await request(shop1Page, "PATCH", "/api/v1/shop/printers/" + shop2Printer.id + "/active?isActive=false", { token: shop1Tokens.accessToken });
-    assert.equal(attempt.status, 404, "Foreign tenant printer IDs must be indistinguishable from missing printer IDs.");
+    assertExpectedHttpStatus(attempt, 404, "Foreign tenant printer IDs must be indistinguishable from missing printer IDs.");
     const printers = assertHttp(await request(shop2Page, "GET", "/api/v1/shop/printers", { token: shop2Tokens.accessToken }), 200, "Shop Two printer read-back");
     assert.ok(printers.find(item => item.id === shop2Printer.id)?.isActive, "Cross-tenant access must not disable Shop Two's printer.");
     return { foreignPrinterMutation: attempt.status, foreignPrinterStillActive: true };
@@ -2610,7 +2629,7 @@ try {
 
   await record("TENANT: Shop One cannot disable Shop Two's QR station", async () => {
     const attempt = await request(shop1Page, "PATCH", "/api/v1/shop/qr-stations/" + shop2Station.id + "/enabled?isEnabled=false", { token: shop1Tokens.accessToken });
-    assert.equal(attempt.status, 404, "Foreign tenant QR station IDs must be rejected.");
+    assertExpectedHttpStatus(attempt, 404, "Foreign tenant QR station IDs must be rejected.");
     const stations = assertHttp(await request(shop2Page, "GET", "/api/v1/shop/qr-stations", { token: shop2Tokens.accessToken }), 200, "Shop Two station read-back");
     assert.ok(stations.find(item => item.id === shop2Station.id)?.isEnabled, "Cross-tenant access must not disable Shop Two's station.");
     return { foreignStationMutation: attempt.status, foreignStationStillEnabled: true };
@@ -2618,7 +2637,7 @@ try {
 
   await record("TENANT: Shop One cannot rotate Shop Two's QR station code", async () => {
     const attempt = await request(shop1Page, "POST", "/api/v1/shop/qr-stations/" + shop2Station.id + "/rotate-code", { token: shop1Tokens.accessToken });
-    assert.equal(attempt.status, 404, "Foreign station QR-code rotation must be rejected.");
+    assertExpectedHttpStatus(attempt, 404, "Foreign station QR-code rotation must be rejected.");
     const stations = assertHttp(await request(shop2Page, "GET", "/api/v1/shop/qr-stations", { token: shop2Tokens.accessToken }), 200, "Shop Two station code read-back");
     assert.equal(stations.find(item => item.id === shop2Station.id)?.publicUrl, shop2Station.publicUrl,
       "A foreign tenant must not rotate or replace the station's public code.");
@@ -2656,26 +2675,26 @@ try {
 
   await record("QR: unknown public station codes cannot create a customer session", async () => {
     const response = await request(page, "POST", "/api/v1/public/stations/SMARTPRINT-QA-NO-SUCH-STATION/sessions");
-    assert.equal(response.status, 404, "An unknown or disabled public station code must not create a session.");
+    assertExpectedHttpStatus(response, 404, "An unknown or disabled public station code must not create a session.");
     assert.equal(response.json?.code, "station_not_available");
     return { unknownStationStatus: response.status, sessionCreated: false };
   }, ["QR-011"]);
 
   await record("QR: an invalid opaque session token cannot read current session data", async () => {
     const response = await request(page, "GET", "/api/v1/public/sessions/current", { sessionToken: "SMARTPRINT-QA-INVALID-SESSION-TOKEN" });
-    assert.equal(response.status, 401, "An invalid opaque session token must be rejected.");
+    assertExpectedHttpStatus(response, 401, "An invalid opaque session token must be rejected.");
     return { invalidSessionRead: response.status, sessionDataReturned: false };
   }, ["QR-012"]);
 
   await record("QR: an invalid opaque session token cannot renew a session", async () => {
     const response = await request(page, "POST", "/api/v1/public/sessions/current/renew", { sessionToken: "SMARTPRINT-QA-INVALID-SESSION-TOKEN" });
-    assert.equal(response.status, 401, "An invalid opaque session token must not be renewed.");
+    assertExpectedHttpStatus(response, 401, "An invalid opaque session token must not be renewed.");
     return { invalidSessionRenewal: response.status, sessionChanged: false };
   }, ["QR-013"]);
 
   await record("UPLOAD: a print upload requires an Idempotency-Key", async () => {
     const response = await request(page, "POST", "/api/v1/public/sessions/current/jobs", { sessionToken: customerSession.sessionToken });
-    assert.equal(response.status, 400, "A cloud document upload must require an idempotency key.");
+    assertExpectedHttpStatus(response, 400, "A cloud document upload must require an idempotency key.");
     assert.equal(response.json?.code, "session_and_idempotency_required");
     return { missingIdempotencyKey: response.status, printJobCreated: false };
   }, ["UPLOAD-003"]);
@@ -2685,7 +2704,7 @@ try {
       sessionToken: customerSession.sessionToken,
       headers: { "Idempotency-Key": "smartprint-qa-invalid-batch-" + crypto.randomUUID(), "X-Print-Batch-Id": "not-a-guid" }
     });
-    assert.equal(response.status, 400, "Malformed batch IDs must be rejected.");
+    assertExpectedHttpStatus(response, 400, "Malformed batch IDs must be rejected.");
     assert.equal(response.json?.code, "invalid_batch_id");
     return { invalidBatchId: response.status, printJobCreated: false };
   }, ["UPLOAD-004"]);
@@ -2696,32 +2715,32 @@ try {
       headers: { "Idempotency-Key": "smartprint-qa-non-multipart-" + crypto.randomUUID() },
       body: { unexpected: "json is not a document upload" }
     });
-    assert.equal(response.status, 400, "Document ingestion must require multipart form data.");
+    assertExpectedHttpStatus(response, 400, "Document ingestion must require multipart form data.");
     assert.equal(response.json?.code, "multipart_form_required");
     return { nonMultipartUpload: response.status, printJobCreated: false };
   }, ["DOC-006"]);
 
   await record("JOB: a customer session cannot read a job outside its session", async () => {
     const response = await request(page, "GET", "/api/v1/public/jobs/" + crypto.randomUUID() + "/status", { sessionToken: customerSession.sessionToken });
-    assert.equal(response.status, 404, "A customer session must not reveal jobs outside its own session.");
+    assertExpectedHttpStatus(response, 404, "A customer session must not reveal jobs outside its own session.");
     return { foreignOrUnknownJobStatus: response.status, jobDataReturned: false };
   }, ["JOB-010"]);
 
   await record("JOB: a signed-in customer cannot read another customer's job history entry", async () => {
     const response = await request(customerPage, "GET", "/api/v1/customer/jobs/" + crypto.randomUUID() + "/status", { token: customerTokens.accessToken });
-    assert.equal(response.status, 404, "Customer account job status must hide jobs not owned by that customer.");
+    assertExpectedHttpStatus(response, 404, "Customer account job status must hide jobs not owned by that customer.");
     return { foreignOrUnknownCustomerJob: response.status, jobDataReturned: false };
   }, ["JOB-011"]);
 
   await record("PLATFORM: tenant directory rejects overlong search input", async () => {
     const response = await request(adminPage, "GET", "/api/v1/platform/tenants?search=" + encodeURIComponent("x".repeat(101)), { token: adminTokens.accessToken });
-    assert.equal(response.status, 400, "Tenant search must reject more than 100 characters.");
+    assertExpectedHttpStatus(response, 400, "Tenant search must reject more than 100 characters.");
     return { overlongSearch: response.status };
   }, ["PLATFORM-010"]);
 
   await record("PLATFORM: tenant directory rejects overlong status filters", async () => {
     const response = await request(adminPage, "GET", "/api/v1/platform/tenants?status=" + encodeURIComponent("S".repeat(25)), { token: adminTokens.accessToken });
-    assert.equal(response.status, 400, "Tenant status filters must reject more than 24 characters.");
+    assertExpectedHttpStatus(response, 400, "Tenant status filters must reject more than 24 characters.");
     return { overlongStatus: response.status };
   }, ["PLATFORM-011"]);
 
@@ -2743,7 +2762,7 @@ try {
 
   await record("PLATFORM: unknown tenant status history does not disclose audit data", async () => {
     const response = await request(adminPage, "GET", "/api/v1/platform/tenants/" + crypto.randomUUID() + "/status-history", { token: adminTokens.accessToken });
-    assert.equal(response.status, 404, "Unknown tenant IDs must not return a status history.");
+    assertExpectedHttpStatus(response, 404, "Unknown tenant IDs must not return a status history.");
     return { unknownTenantHistory: response.status, auditRowsReturned: false };
   }, ["PLATFORM-014"]);
 
@@ -2753,7 +2772,7 @@ try {
       token: shop1Tokens.accessToken,
       body: { displayName: "Q".repeat(181), accentColor: before.accentColor, logoUrl: before.logoUrl }
     });
-    assert.equal(rejected.status, 400, "Shop display names must be limited to 180 characters.");
+    assertExpectedHttpStatus(rejected, 400, "Shop display names must be limited to 180 characters.");
     const after = assertHttp(await request(shop1Page, "GET", "/api/v1/shop/profile", { token: shop1Tokens.accessToken }), 200, "Shop profile after display-name boundary test");
     assert.equal(after.displayName, before.displayName, "Rejected profile changes must not persist.");
     return { rejectedStatus: rejected.status, savedDisplayNameUnchanged: true };
@@ -2765,7 +2784,7 @@ try {
       token: shop1Tokens.accessToken,
       body: { displayName: before.displayName, accentColor: "#12X45G", logoUrl: before.logoUrl }
     });
-    assert.equal(rejected.status, 400, "Accent colors must be six-digit hexadecimal colors.");
+    assertExpectedHttpStatus(rejected, 400, "Accent colors must be six-digit hexadecimal colors.");
     const after = assertHttp(await request(shop1Page, "GET", "/api/v1/shop/profile", { token: shop1Tokens.accessToken }), 200, "Shop profile after accent-color boundary test");
     assert.equal(after.accentColor, before.accentColor, "Rejected accent colors must not persist.");
     return { rejectedStatus: rejected.status, savedAccentColorUnchanged: true };
@@ -2777,7 +2796,7 @@ try {
       token: shop1Tokens.accessToken,
       body: { displayName: "SmartPrint QA Incomplete Printer", manufacturer: "", model: "", connectionType: "USB", capabilitiesJson: "{}" }
     });
-    assert.equal(rejected.status, 400, "Printer creation must require manufacturer and model.");
+    assertExpectedHttpStatus(rejected, 400, "Printer creation must require manufacturer and model.");
     const after = assertHttp(await request(shop1Page, "GET", "/api/v1/shop/printers", { token: shop1Tokens.accessToken }), 200, "Printer list after required-field test");
     assert.equal(after.length, before.length, "Rejected printer creation must not create a record.");
     return { rejectedStatus: rejected.status, printerCountUnchanged: true };
@@ -2789,7 +2808,7 @@ try {
       token: shop1Tokens.accessToken,
       body: { displayName: " ", printerDeviceId: shop1Printer.id }
     });
-    assert.equal(rejected.status, 400, "QR station creation must require a non-empty name.");
+    assertExpectedHttpStatus(rejected, 400, "QR station creation must require a non-empty name.");
     const after = assertHttp(await request(shop1Page, "GET", "/api/v1/shop/qr-stations", { token: shop1Tokens.accessToken }), 200, "Station list after required-field test");
     assert.equal(after.length, before.length, "Rejected station creation must not create a row.");
     return { rejectedStatus: rejected.status, stationCountUnchanged: true };
@@ -2797,47 +2816,53 @@ try {
 
   await record("SHOP: an unknown printer ID cannot be changed", async () => {
     const response = await request(shop1Page, "PATCH", "/api/v1/shop/printers/" + crypto.randomUUID() + "/active?isActive=false", { token: shop1Tokens.accessToken });
-    assert.equal(response.status, 404, "Unknown printer IDs must return not found.");
+    assertExpectedHttpStatus(response, 404, "Unknown printer IDs must return not found.");
     return { unknownPrinterMutation: response.status, recordsChanged: false };
   }, ["SHOP-023"]);
 
   await record("SHOP: an unknown QR station ID cannot be changed", async () => {
     const response = await request(shop1Page, "PATCH", "/api/v1/shop/qr-stations/" + crypto.randomUUID() + "/enabled?isEnabled=false", { token: shop1Tokens.accessToken });
-    assert.equal(response.status, 404, "Unknown station IDs must return not found.");
+    assertExpectedHttpStatus(response, 404, "Unknown station IDs must return not found.");
     return { unknownStationMutation: response.status, recordsChanged: false };
   }, ["SHOP-024"]);
 
   await record("PAYMENT: UPI references shorter than four characters are rejected", async () => {
     const response = await request(page, "POST", "/api/v1/public/batch-payments/" + crypto.randomUUID() + "/report", { body: { referenceNumber: "A1" } });
-    assert.equal(response.status, 400, "UPI references shorter than four characters must be rejected.");
+    assertExpectedHttpStatus(response, 400, "UPI references shorter than four characters must be rejected.");
     return { shortReference: response.status, paymentUpdated: false };
   }, ["PAY-011"]);
 
   await record("PAYMENT: UPI references containing whitespace or punctuation are rejected", async () => {
     const response = await request(page, "POST", "/api/v1/public/batch-payments/" + crypto.randomUUID() + "/report", { body: { referenceNumber: "QA 1234!" } });
-    assert.equal(response.status, 400, "UPI reference characters must be letters, digits, hyphens or underscores.");
+    assertExpectedHttpStatus(response, 400, "UPI reference characters must be letters, digits, hyphens or underscores.");
     return { invalidReferenceCharacters: response.status, paymentUpdated: false };
   }, ["PAY-012"]);
 
   await record("PAYMENT: UPI references longer than one hundred characters are rejected", async () => {
     const response = await request(page, "POST", "/api/v1/public/batch-payments/" + crypto.randomUUID() + "/report", { body: { referenceNumber: "Q".repeat(101) } });
-    assert.equal(response.status, 400, "UPI references must not exceed 100 characters.");
+    assertExpectedHttpStatus(response, 400, "UPI references must not exceed 100 characters.");
     return { overlongReference: response.status, paymentUpdated: false };
   }, ["PAY-013"]);
 
 
   await record("Live local browser has no same-origin server errors or critical resource failures", async () => {
+    const unexpectedHttpErrors = getUnexpectedHttpResponses(httpErrorResponses, expectedHttpErrors);
     assert.equal(serverErrors.length, 0, JSON.stringify(serverErrors));
     assert.equal(resourceErrors.length, 0, JSON.stringify(resourceErrors));
     assert.equal(pageErrors.length, 0, pageErrors.join("\n"));
     assert.equal(consoleErrors.length, 0, consoleErrors.join("\n"));
     assert.equal(requestFailures.length, 0, JSON.stringify(requestFailures));
+    assert.equal(unexpectedHttpErrors.length, 0, JSON.stringify(unexpectedHttpErrors));
     return {
       serverErrors: serverErrors.length,
       resourceErrors: resourceErrors.length,
       pageErrors: pageErrors.length,
       consoleErrors: consoleErrors.length,
+      networkStatusConsoleMessages: networkStatusConsoleErrors.length,
       requestFailures: requestFailures.length,
+      unexpectedHttpErrors: unexpectedHttpErrors.length,
+      expectedHttpErrors: expectedHttpErrors.length,
+      observedHttpErrors: httpErrorResponses.length,
       pagesObserved: context.pages().length
     };
   });
