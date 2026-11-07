@@ -81,6 +81,9 @@ let shop1Page;
 let shop2Page;
 let adminPage;
 let customerPage;
+let guestCustomerPage;
+let guestCustomerSession;
+let guestCustomerSessionCount = 0;
 let shop1Tokens;
 let shop2Tokens;
 let adminTokens;
@@ -121,7 +124,9 @@ const CASE_IDS_BY_RECORD_NAME = new Map([
   ["Bootstrap-created platform administrator signs in through the real admin UI", ["ADMINAUTH-001", "ADMINAUTH-002"]],
   ["Create and publish a free QA-only plan, then assign it through the platform UI", ["PLAN-001", "PLAN-002", "PLAN-003", "PLAN-004", "PLAN-005", "PLAN-006"]],
   ["Platform admin navigates every real control-centre section", ["PLATFORM-005", "PLATFORM-006", "PLATFORM-007", "PLATFORM-008", "PLATFORM-009"]],
-  ["Shop one configures real QA printer/station, pricing and payment methods", ["SHOP-009", "SHOP-010", "SHOP-011", "SHOP-012", "SHOP-013", "SHOP-014"]],
+  ["Shop one provisions real QA printer and QR station", ["SHOP-009", "SHOP-010"]],
+  ["Shop one configures print pricing through the real UI", ["SHOP-011", "SHOP-012"]],
+  ["Shop one configures payment methods through the real UI", ["SHOP-013", "SHOP-014"]],
   ["Shop two configures isolated real QA printer/station", ["SHOP-015", "SHOP-016", "SHOP-017", "SHOP-018"]],
   ["Shop one navigates every real sidebar section and the account-menu-only tools", [
     "SHOPUI-001", "SHOPUI-002", "SHOPUI-003", "SHOPUI-004", "SHOPUI-005",
@@ -134,7 +139,8 @@ const CASE_IDS_BY_RECORD_NAME = new Map([
     "SHOPUI-026", "SHOPUI-027"
   ]],
   ["Shop, platform-admin and cross-tenant authorization boundaries", ["RBAC-001", "RBAC-002", "RBAC-003", "RBAC-004", "RBAC-005"]],
-  ["Customer opens shop-one QR station and receives a customer-bound real session", ["QR-008", "QR-009", "QR-010"]],
+  ["Customer opens the shop-one station link in a guest browser session", ["QR-008", "QR-009"]],
+  ["Customer opens the shop-one station with authenticated customer identity", ["QR-010"]],
   ["Customer QR session is linked to the global customer account", ["CUST-001", "CUST-002"]],
   ["Real document validator rejects a malformed PDF without creating a print job", ["DOC-001", "DOC-002"]],
   ["Customer uploads a synthetic two-page PDF through the real portal UI", ["DOC-003", "DOC-004", "DOC-005"]],
@@ -839,6 +845,31 @@ async function setupShopResources(page, tokens, shopLabel, onResourcesReady = ()
       isEnabled: station.isEnabled, printerDeviceId: station.printerDeviceId }
   });
 
+
+  return {
+    printer: {
+      id: printer.id,
+      displayName: printer.displayName,
+      outputMode: printer.outputMode,
+      agentDeviceId: printer.agentDeviceId ?? null,
+      queueName: printer.queueName
+    },
+    station: {
+      id: station.id,
+      displayName: station.displayName,
+      publicUrl: station.publicUrl,
+      isEnabled: station.isEnabled,
+      printerDeviceId: station.printerDeviceId
+    },
+    pricingVersion: pricing.version,
+    pricingConfiguredThroughUi: true,
+    paymentMethodsConfiguredThroughUi: true,
+    physicalPrinterPaired: false,
+    printDispatchEnabled: false
+  };
+}
+
+async function configureShopPricing(page, tokens, shopLabel) {
   const pricingValues = {
     monoPerSideMinor: 200,
     colourPerSideMinor: 500,
@@ -955,6 +986,11 @@ async function setupShopResources(page, tokens, shopLabel, onResourcesReady = ()
   assert.equal(pricing.colourPerSideMinor, pricingValues.colourPerSideMinor, shopLabel + " colour rate read-back differs.");
   assert.equal(pricing.photo4x6Minor, pricingValues.photo4x6Minor, shopLabel + " 4x6 photo rate read-back differs.");
 
+
+  return { pricingVersion: pricing.version, pricingConfiguredThroughUi: true };
+}
+
+async function configureShopPaymentMethods(page, tokens, shopLabel) {
   await clickShopSection(page, "Payments");
   const methodCards = page.locator(".payment-method-card");
   const setVisiblePaymentSwitch = async (card, inputId, enabled, description) => {
@@ -1003,27 +1039,7 @@ async function setupShopResources(page, tokens, shopLabel, onResourcesReady = ()
   assert.equal(paymentSettings.cashEnabled, true, shopLabel + " payment settings read-back did not enable cash.");
   assert.equal(paymentSettings.instantPaymentEnabled, false, shopLabel + " payment settings read-back unexpectedly enabled instant payment.");
 
-  return {
-    printer: {
-      id: printer.id,
-      displayName: printer.displayName,
-      outputMode: printer.outputMode,
-      agentDeviceId: printer.agentDeviceId ?? null,
-      queueName: printer.queueName
-    },
-    station: {
-      id: station.id,
-      displayName: station.displayName,
-      publicUrl: station.publicUrl,
-      isEnabled: station.isEnabled,
-      printerDeviceId: station.printerDeviceId
-    },
-    pricingVersion: pricing.version,
-    pricingConfiguredThroughUi: true,
-    paymentMethodsConfiguredThroughUi: true,
-    physicalPrinterPaired: false,
-    printDispatchEnabled: false
-  };
+  return { paymentMethodsConfiguredThroughUi: true, paymentSettingsVerified: true };
 }
 
 async function assertResponsive(page, label, viewport) {
@@ -1317,7 +1333,7 @@ try {
     };
   });
 
-  await record("Shop one configures real QA printer/station, pricing and payment methods", async () => {
+  await record("Shop one provisions real QA printer and QR station", async () => {
     const resources = await setupShopResources(shop1Page, shop1Tokens, "Shop one", ready => {
       shop1Printer = ready.printer;
       shop1Station = ready.station;
@@ -1328,9 +1344,21 @@ try {
       tenant: process.env.SMARTPRINT_QA_SHOP1_NAME,
       printerId: shop1Printer.id,
       stationId: shop1Station.id,
-      stationEnabled: shop1Station.isEnabled
+      stationEnabled: shop1Station.isEnabled,
+      printerAndStationPersisted: true,
+      printDispatchEnabled: false
     };
   });
+
+  await record("Shop one configures print pricing through the real UI", async () => ({
+    tenant: process.env.SMARTPRINT_QA_SHOP1_NAME,
+    ...(await configureShopPricing(shop1Page, shop1Tokens, "Shop one"))
+  }));
+
+  await record("Shop one configures payment methods through the real UI", async () => ({
+    tenant: process.env.SMARTPRINT_QA_SHOP1_NAME,
+    ...(await configureShopPaymentMethods(shop1Page, shop1Tokens, "Shop one"))
+  }));
 
   await record("Shop two configures isolated real QA printer/station", async () => {
     const resources = await setupShopResources(shop2Page, shop2Tokens, "Shop two", ready => {
@@ -1589,31 +1617,122 @@ try {
     return { shopToPlatform: shopCannotSeePlatform.status, adminToShop: adminCannotSeeShopProfile.status, crossTenantPrinter: shopOneCannotSeeShopTwoPrinter.status, customerToPlatform: customerCannotSeePlatform.status };
   });
 
-  await record("Customer opens shop-one QR station and receives a customer-bound real session", async () => {
+  await record("Customer opens the shop-one station link in a guest browser session", async () => {
+    guestCustomerPage = await context.newPage();
+    const stationPath = new URL(shop1Station.publicUrl).pathname;
+    const publicCode = stationPath.split("/").filter(Boolean)[1];
+    const customerQuery = "/api/v1/shop/customers?search=" +
+      encodeURIComponent(process.env.SMARTPRINT_QA_CUSTOMER_EMAIL) + "&page=1&pageSize=50";
+    const customersBefore = assertHttp(await request(shop1Page, "GET", customerQuery, {
+      token: shop1Tokens.accessToken
+    }), 200, "Shop customer directory before guest station entry");
+    const customerBefore = customersBefore.items.find(item => item.displayName === process.env.SMARTPRINT_QA_CUSTOMER_NAME);
+    const sessionCountBefore = customerBefore?.sessionCount ?? 0;
+
+    const creationResponsePromise = guestCustomerPage.waitForResponse(response => {
+      const request = response.request();
+      const url = new URL(response.url());
+      return request.method() === "POST" && url.origin === baseUrl.origin &&
+        url.pathname === "/api/v1/public/stations/" + publicCode + "/sessions";
+    }, { timeout: 20000 });
+
+    const navigation = await guestCustomerPage.goto(new URL(stationPath, baseUrl).toString(), {
+      waitUntil: "domcontentloaded", timeout: 30000
+    });
+    assert.equal(navigation?.status(), 200,
+      "Opening the printed station link in an ordinary browser must render the customer entry page.");
+
+    const creationResponse = await creationResponsePromise;
+    assert.equal(creationResponse.status(), 201, "A public station URL must create a short-lived guest session.");
+    const requestHeaders = await creationResponse.request().allHeaders();
+    assert.equal(requestHeaders.authorization, undefined,
+      "An ordinary browser link must not inherit a native SmartPrint account bearer token.");
+
+    const created = await creationResponse.json();
+    await guestCustomerPage.locator(".customer-entry-card .entry-eyebrow").waitFor({ state: "visible", timeout: 30000 });
+    assert.equal((await guestCustomerPage.locator(".customer-entry-card .entry-eyebrow").innerText()).trim(), "SECURE SESSION CREATED");
+
+    const sessionToken = await guestCustomerPage.evaluate(code =>
+      sessionStorage.getItem("qrtoprint.customer-session:" + code), publicCode);
+    assert.ok(sessionToken, "The browser must keep its QR session token in tab-scoped sessionStorage.");
+    assert.equal(sessionToken, created.sessionToken, "The browser must persist the exact server-issued token.");
+    assert.ok(!guestCustomerPage.url().includes(sessionToken),
+      "The opaque session token must never appear in the QR URL or browser address bar.");
+
+    const session = assertHttp(await request(guestCustomerPage, "GET", "/api/v1/public/sessions/current", {
+      sessionToken
+    }), 200, "Guest browser current customer session");
+    assert.equal(session.id, created.id);
+    assert.equal(session.shop.displayName, process.env.SMARTPRINT_QA_SHOP1_NAME);
+
+    const customersAfter = assertHttp(await request(shop1Page, "GET", customerQuery, {
+      token: shop1Tokens.accessToken
+    }), 200, "Shop customer directory after guest station entry");
+    const customerAfter = customersAfter.items.find(item => item.displayName === process.env.SMARTPRINT_QA_CUSTOMER_NAME);
+    guestCustomerSessionCount = customerAfter?.sessionCount ?? 0;
+    assert.equal(guestCustomerSessionCount, sessionCountBefore,
+      "A guest session without an Authorization header must not bind to or increment the global customer's shop session count.");
+
+    guestCustomerSession = { sessionToken, publicCode, stationPath, id: session.id, shopName: session.shop.displayName };
+    return {
+      entryMode: "ordinary HTTPS browser link",
+      authorizationHeaderSent: false,
+      sessionId: session.id,
+      sessionStoredInTabSessionStorage: true,
+      tokenInUrl: false,
+      globalCustomerSessionCountBefore: sessionCountBefore,
+      globalCustomerSessionCountAfter: guestCustomerSessionCount,
+      shopName: session.shop.displayName
+    };
+  });
+
+  await record("Customer opens the shop-one station with authenticated customer identity", async () => {
     customerPage = await context.newPage();
+    let observedAuthorizationHeader = null;
     await customerPage.route("**/api/v1/public/stations/**/sessions", async route => {
       const headers = { ...route.request().headers(), authorization: "Bearer " + customerTokens.accessToken };
+      observedAuthorizationHeader = headers.authorization;
       await route.continue({ headers });
     });
     const stationPath = new URL(shop1Station.publicUrl).pathname;
+    const publicCode = stationPath.split("/").filter(Boolean)[1];
     const response = await customerPage.goto(new URL(stationPath, baseUrl).toString(), {
-      waitUntil: "domcontentloaded",
-      timeout: 30000
+      waitUntil: "domcontentloaded", timeout: 30000
     });
     assert.equal(response?.status(), 200);
     await customerPage.locator(".customer-entry-card .entry-eyebrow").waitFor({ state: "visible", timeout: 30000 });
-    const state = (await customerPage.locator(".customer-entry-card .entry-eyebrow").innerText()).trim();
-    assert.equal(state, "SECURE SESSION CREATED");
-    const publicCode = stationPath.split("/").filter(Boolean)[1];
+    assert.equal((await customerPage.locator(".customer-entry-card .entry-eyebrow").innerText()).trim(), "SECURE SESSION CREATED");
+    assert.equal(observedAuthorizationHeader, "Bearer " + customerTokens.accessToken,
+      "The authenticated native-account header contract must pass the global customer's bearer token only in Authorization.");
+
     const sessionToken = await customerPage.evaluate(code =>
       sessionStorage.getItem("qrtoprint.customer-session:" + code), publicCode);
-    assert.ok(sessionToken, "Customer session token was not saved in the browser session.");
+    assert.ok(sessionToken, "The authenticated customer station token must be persisted in tab storage.");
+    assert.ok(!customerPage.url().includes(sessionToken), "The opaque session token must never appear in the authenticated station URL.");
     const session = assertHttp(await request(customerPage, "GET", "/api/v1/public/sessions/current", {
       sessionToken
-    }), 200, "Current customer session");
+    }), 200, "Authenticated customer current station session");
     assert.equal(session.shop.displayName, process.env.SMARTPRINT_QA_SHOP1_NAME);
+
+    const customerQuery = "/api/v1/shop/customers?search=" +
+      encodeURIComponent(process.env.SMARTPRINT_QA_CUSTOMER_EMAIL) + "&page=1&pageSize=50";
+    const customersAfter = assertHttp(await request(shop1Page, "GET", customerQuery, {
+      token: shop1Tokens.accessToken
+    }), 200, "Shop customer directory after authenticated station entry");
+    const customerAfter = customersAfter.items.find(item => item.displayName === process.env.SMARTPRINT_QA_CUSTOMER_NAME);
+    assert.ok(customerAfter, "The authenticated station session must appear in the shop customer directory.");
+    assert.equal(customerAfter.sessionCount, guestCustomerSessionCount + 1,
+      "The authenticated station session must bind exactly once to the global customer account.");
+
     customerSession = { sessionToken, publicCode, stationPath, id: session.id, shopName: session.shop.displayName };
-    return { stationPath: "[local QA station path]", sessionId: session.id, shopName: session.shop.displayName, customerBound: true, expiresUtc: session.expiresUtc };
+    return {
+      entryMode: "authenticated native-account header contract",
+      accountBoundSession: true,
+      sessionId: session.id,
+      globalCustomerSessionCount: customerAfter.sessionCount,
+      tokenInUrl: false,
+      shopName: session.shop.displayName
+    };
   });
 
   await record("QR/UPLOAD: session renewal, scoped resume and invalid local-upload metadata are safely rejected", async () => {
@@ -3038,7 +3157,10 @@ try {
     caseExecutionCoveragePercent,
     casePassPercent,
     allPlannedCasesPassed: caseResults.size === PLANNED_CASE_IDS.length && passedCases === PLANNED_CASE_IDS.length,
-    coverageGatePassed: (passedCases / PLANNED_CASE_IDS.length) >= 0.9,
+    coverageGatePassed: caseResults.size === PLANNED_CASE_IDS.length &&
+      passedCases === PLANNED_CASE_IDS.length &&
+      incompleteCases === 0 &&
+      skippedCases === 0,
     passedCases,
     incompleteCases,
     skippedCases,
@@ -3073,7 +3195,7 @@ try {
     "Warnings: " + report.summary.warnings + "\n" +
     "Case IDs mapped to attempted checks: " + report.caseCoverage.caseIdsMappedToChecks + "/" + report.caseCoverage.plannedCases + "\n" +
     "Functional case IDs fully completed: " + report.caseCoverage.uniqueCasesFullyCompleted + "/" + report.caseCoverage.plannedCases + "\n" +
-    "Functional case completion coverage: " + report.caseCoverage.caseExecutionCoveragePercent + "% (minimum 90%)\n" +
+    "Functional case completion coverage: " + report.caseCoverage.caseExecutionCoveragePercent + "% (every planned case must pass)\n" +
     "Functional case pass rate: " + report.caseCoverage.casePassPercent + "%\n" +
     "Case IDs linked to incomplete checks: " + report.caseCoverage.incompleteCases + "\n" +
     "Skipped case IDs: " + report.caseCoverage.skippedCases + "\n" +
