@@ -838,7 +838,7 @@ async function setPhotoInputValue(locator, value) {
     element.dispatchEvent(new Event("input", { bubbles: true }));
     element.dispatchEvent(new Event("change", { bubbles: true }));
   }, value);
-  await locator.page().waitForTimeout(60);
+  await locator.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
 }
 
 async function setPhotoRange(dialog, label, value) {
@@ -846,7 +846,7 @@ async function setPhotoRange(dialog, label, value) {
   assert.equal(await range.count(), 1, "Photo Studio must expose exactly one " + label + " range.");
   await setPhotoInputValue(range, value);
   await range.evaluate(element => element.blur());
-  await dialog.page().waitForTimeout(60);
+  await dialog.locator("canvas").evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
   assert.equal(Number(await range.inputValue()), Number(value), label + " must accept its configured boundary.");
   return range;
 }
