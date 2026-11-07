@@ -202,11 +202,12 @@ test("Android native UI automation uses stable resource IDs and tolerates UIAuto
 });
 
 
-test("Android live smoke accepts a restored connected-shop Print screen before navigating Home and Files", () => {
-  assert.match(publishedAppsSource, /saved shop connection intentionally restores the Print\/WebView tab/);
-  assert.match(publishedAppsSource, /"SmartPrint".*"Your space"/);
-  assert.match(publishedAppsSource, /Invoke-AndroidUiNavigation \$adb \$serial "My Files" "New folder"/);
-  assert.match(publishedAppsSource, /Invoke-AndroidUiNavigation \$adb \$serial "Home" "Your space"/);
+test("Android live smoke handles a restored Print screen and navigates by stable IDs with legacy label fallback", () => {
+  assert.match(publishedAppsSource, /saved shop connection can restore the Print\/WebView tab/);
+  assert.match(publishedAppsSource, /Find-AndroidUiNode \$ui .*"Home" .*\$package/);
+  assert.match(publishedAppsSource, /Find-AndroidUiNode \$ui .*"My Files" .*\$package/);
+  assert.match(publishedAppsSource, /Invoke-AndroidUiNavigation/);
+  assert.match(publishedAppsSource, /"Your space" \$package/);
 });
 
 
@@ -224,4 +225,13 @@ test("Android instrumented tests assert stable Home and Files landmarks", () => 
   assert.match(instrumented, /R\.id\.smartprint_files_heading/);
   assert.match(instrumented, /R\.id\.smartprint_nav_home/);
   assert.match(instrumented, /R\.id\.smartprint_nav_files/);
+});
+
+
+test("Android stable resource IDs are preferred, with semantic fallback for the already-published APK", () => {
+  assert.match(publishedAppsSource, /function Find-AndroidUiNodeByResourceId/);
+  assert.match(publishedAppsSource, /function Find-AndroidUiNodeByLabel/);
+  assert.match(publishedAppsSource, /return \(Find-AndroidUiNodeByLabel/);
+  assert.match(publishedAppsSource, /smartprint_home_heading/);
+  assert.match(publishedAppsSource, /smartprint_files_heading/);
 });

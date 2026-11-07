@@ -673,7 +673,13 @@ class MainActivity : AppCompatActivity() {
             FILES to R.id.smartprint_nav_files
         )
         fun applyTo(view: View) {
-            destinationIds[view.id]?.let { stableId -> view.id = stableId }
+            val stableId = destinationIds[view.id]
+                ?: when (view.contentDescription?.toString()) {
+                    "Home" -> R.id.smartprint_nav_home
+                    "My Files" -> R.id.smartprint_nav_files
+                    else -> null
+                }
+            stableId?.let { view.id = it }
             if (view is ViewGroup) {
                 for (index in 0 until view.childCount) {
                     applyTo(view.getChildAt(index))

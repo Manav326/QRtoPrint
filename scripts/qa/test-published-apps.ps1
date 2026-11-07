@@ -211,11 +211,28 @@ function Find-AndroidUiNodeByResourceId($Document,[string]$ResourceId,[string]$P
   }
   return $null
 }
+function Find-AndroidUiNodeByLabel($Document,[string]$Label,[string]$Package) {
+  foreach($node in $Document.SelectNodes("//node")) {
+    if(-not (Test-AndroidUiNodeVisible $node)){continue}
+    if($node.GetAttribute("package") -ne $Package){continue}
+    if($node.GetAttribute("text") -eq $Label -or $node.GetAttribute("content-desc") -eq $Label){return $node}
+  }
+  return $null
+}
+function Find-AndroidUiNode($Document,[string]$ResourceId,[string]$FallbackLabel,[string]$Package) {
+  $node=Find-AndroidUiNodeByResourceId $Document $ResourceId $Package
+  if($node){return $node}
+  # Backward-compatible selector for already-published APKs that predate the
+  # explicit QA resource IDs. New builds always prefer stable resource IDs.
+  return (Find-AndroidUiNodeByLabel $Document $FallbackLabel $Package)
+}
 function Invoke-AndroidUiNavigation(
   [string]$Adb,
   [string]$Serial,
   [string]$NavigationResourceId,
+  [string]$NavigationFallbackLabel,
   [string]$ExpectedScreenResourceId,
+  [string]$ExpectedScreenFallbackLabel,
   [string]$Package,
   [int]$TimeoutSeconds=10
 ) {
@@ -223,23 +240,23 @@ function Invoke-AndroidUiNavigation(
   $afterPath="/sdcard/smartprint-qa-ui-after-$([Guid]::NewGuid().ToString('N')).xml"
   try {
     $before=Get-AndroidUiHierarchy $Adb $Serial $beforePath
-    $navNode=Find-AndroidUiNodeByResourceId $before $NavigationResourceId $Package
+    $navNode=Find-AndroidUiNode $before $NavigationResourceId $NavigationFallbackLabel $Package
     if(-not $navNode){
-      throw "The live app does not expose navigation resource ID '$NavigationResourceId'."
+      throw "The live app does not expose navigation '$NavigationFallbackLabel' (resource ID '$NavigationResourceId')."
     }
     $bounds=[regex]::Match($navNode.GetAttribute("bounds"),'^\[(-?\d+),(-?\d+)\]\[(-?\d+),(-?\d+)\]$')
-    if(-not $bounds.Success){throw "Android did not expose usable bounds for '$NavigationResourceId'."}
+    if(-not $bounds.Success){throw "Android did not expose usable bounds for '$NavigationFallbackLabel'."}
     $x=[int][math]::Floor(([int]$bounds.Groups[1].Value+[int]$bounds.Groups[3].Value)/2)
     $y=[int][math]::Floor(([int]$bounds.Groups[2].Value+[int]$bounds.Groups[4].Value)/2)
     $tap=@(& $Adb -s $Serial shell input tap $x $y 2>&1)
-    if($LASTEXITCODE -ne 0){throw "Could not tap '$NavigationResourceId': $($tap -join ' ')"}
+    if($LASTEXITCODE -ne 0){throw "Could not tap '$NavigationFallbackLabel': $($tap -join ' ')"}
     $deadline=[DateTime]::UtcNow.AddSeconds($TimeoutSeconds)
     do {
       Start-Sleep -Milliseconds 350
       $after=Get-AndroidUiHierarchy $Adb $Serial $afterPath
-      if(Find-AndroidUiNodeByResourceId $after $ExpectedScreenResourceId $Package){return $true}
+      if(Find-AndroidUiNode $after $ExpectedScreenResourceId $ExpectedScreenFallbackLabel $Package){return $true}
     } while([DateTime]::UtcNow -lt $deadline)
-    throw "Tapping '$NavigationResourceId' did not render '$ExpectedScreenResourceId'."
+    throw "Tapping '$NavigationFallbackLabel' did not render '$ExpectedScreenFallbackLabel'."
   } finally {
     & $Adb -s $Serial shell rm -f $beforePath $afterPath 2>$null | Out-Null
   }
@@ -437,9 +454,11 @@ function Test-AndroidApp([string]$Apk,[bool]$ApkVerified,$Settings,[string]$Devi
   $uiPath="/sdcard/smartprint-qa-ui-$([Guid]::NewGuid().ToString('N')).xml"
   try {
     $ui=Get-AndroidUiHierarchy $adb $serial $uiPath
+    # A saved shop connection can restore the Print/WebView tab at cold start.
+    # Require the app root and both navigation destinations, not a specific initial page.
     $nativeRoot=Find-AndroidUiNodeByResourceId $ui ([string]$Settings.uiAutomationIds.nativeRoot) $package
-    $homeNavigation=Find-AndroidUiNodeByResourceId $ui ([string]$Settings.uiAutomationIds.homeNavigation) $package
-    $filesNavigation=Find-AndroidUiNodeByResourceId $ui ([string]$Settings.uiAutomationIds.filesNavigation) $package
+    $homeNavigation=Find-AndroidUiNode $ui ([string]$Settings.uiAutomationIds.homeNavigation) "Home" $package
+    $filesNavigation=Find-AndroidUiNode $ui ([string]$Settings.uiAutomationIds.filesNavigation) "My Files" $package
     $visibleAppNodes=@($ui.SelectNodes("//node") | Where-Object {
       $_.GetAttribute("package") -eq $package -and (Test-AndroidUiNodeVisible $_)
     })
@@ -450,15 +469,17 @@ function Test-AndroidApp([string]$Apk,[bool]$ApkVerified,$Settings,[string]$Devi
     if($missingIds.Count -gt 0){
       $resourceIds=@($visibleAppNodes | ForEach-Object {$_.GetAttribute("resource-id")} |
         Where-Object {$_} | Select-Object -Unique | Select-Object -First 40)
-      throw ("SmartPrint is foreground, but stable native UI landmarks are missing: " +
+      throw ("SmartPrint is foreground, but native UI landmarks are missing: " +
         ($missingIds -join ", ") + ". Visible app nodes: $($visibleAppNodes.Count). " +
         "Observed resource IDs: $($resourceIds -join ', ')")
     }
-    Add-Result "Android native UI rendered" "PASS" "UIAutomator found the SmartPrint root and both native navigation controls by stable resource ID." -Evidence @{
+    Add-Result "Android native UI rendered" "PASS" "UIAutomator found the native app root and both Home/Files navigation controls." -Evidence @{
       serial=$serial
       nativeRootResourceId=$nativeRoot.GetAttribute("resource-id")
       homeNavigationResourceId=$homeNavigation.GetAttribute("resource-id")
       filesNavigationResourceId=$filesNavigation.GetAttribute("resource-id")
+      homeNavigationSelector=if($homeNavigation.GetAttribute("resource-id") -eq ($package+":id/"+[string]$Settings.uiAutomationIds.homeNavigation)){"resource-id"}else{"content-description/text fallback"}
+      filesNavigationSelector=if($filesNavigation.GetAttribute("resource-id") -eq ($package+":id/"+[string]$Settings.uiAutomationIds.filesNavigation)){"resource-id"}else{"content-description/text fallback"}
       visibleAppNodes=$visibleAppNodes.Count
     }
   } catch {
@@ -470,14 +491,14 @@ function Test-AndroidApp([string]$Apk,[bool]$ApkVerified,$Settings,[string]$Devi
   # Each live interaction is recorded independently. One failed screen does not
   # prevent the remaining native navigation or process-health checks from running.
   try {
-    $filesOpened=Invoke-AndroidUiNavigation $adb $serial ([string]$Settings.uiAutomationIds.filesNavigation) ([string]$Settings.uiAutomationIds.filesHeading) $package ([int]$Settings.uiNavigationTimeoutSeconds)
+    $filesOpened=Invoke-AndroidUiNavigation $adb $serial ([string]$Settings.uiAutomationIds.filesNavigation) "My Files" ([string]$Settings.uiAutomationIds.filesHeading) "My Files" $package ([int]$Settings.uiNavigationTimeoutSeconds)
     if(-not $filesOpened){throw "My Files navigation did not complete."}
     Add-Result "Android native Files navigation" "PASS" "Tapped the actual My Files navigation control and verified the native Files screen." -Evidence @{serial=$serial;screen="Files"}
   } catch {
     Add-Result "Android native Files navigation" "FAIL" $_.Exception.Message
   }
   try {
-    $homeOpened=Invoke-AndroidUiNavigation $adb $serial ([string]$Settings.uiAutomationIds.homeNavigation) ([string]$Settings.uiAutomationIds.homeHeading) $package ([int]$Settings.uiNavigationTimeoutSeconds)
+    $homeOpened=Invoke-AndroidUiNavigation $adb $serial ([string]$Settings.uiAutomationIds.homeNavigation) "Home" ([string]$Settings.uiAutomationIds.homeHeading) "Your space" $package ([int]$Settings.uiNavigationTimeoutSeconds)
     if(-not $homeOpened){throw "Home navigation did not complete."}
     Add-Result "Android native Home navigation" "PASS" "Returned to Home using the actual native navigation control." -Evidence @{serial=$serial;screen="Home"}
   } catch {
