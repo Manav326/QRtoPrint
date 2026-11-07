@@ -1,7 +1,8 @@
 [CmdletBinding()]
 param(
     [switch]$SkipUnitTests,
-    [switch]$SkipPlaywrightInstall
+    [switch]$SkipPlaywrightInstall,
+    [switch]$E2EOnly
 )
 
 $ErrorActionPreference = "Stop"
@@ -308,6 +309,54 @@ try {
         throw "Node.js 22.6 or newer is required for the built-in TypeScript strip-types test runner. Found $nodeVersion."
     }
     Add-QAResult -Name "Node.js runtime" -Status "PASS" -Detail $nodeVersion
+
+    if ($E2EOnly) {
+        Write-Host "E2E-only mode: reusing the running local stack. No Docker build/start, admin bootstrap, migrations, or secret regeneration will be performed." -ForegroundColor Yellow
+
+        $portalResponse = Invoke-WebRequest -Uri "$target/" -UseBasicParsing -TimeoutSec 8 -ErrorAction Stop
+        if ($portalResponse.StatusCode -ne 200) { throw "The existing local portal is not healthy (HTTP $($portalResponse.StatusCode))." }
+
+        $liveResponse = Invoke-WebRequest -Uri "$target/health/live" -UseBasicParsing -TimeoutSec 8 -ErrorAction Stop
+        if ($liveResponse.StatusCode -ne 200) { throw "The existing local API is not live (HTTP $($liveResponse.StatusCode))." }
+
+        $readyResponse = Invoke-WebRequest -Uri "$target/health/ready" -UseBasicParsing -TimeoutSec 8 -ErrorAction Stop
+        if ($readyResponse.StatusCode -ne 200) { throw "The existing local API is not ready (HTTP $($readyResponse.StatusCode))." }
+        $ready = $readyResponse.Content | ConvertFrom-Json -ErrorAction Stop
+        if ($ready.database -ne "connected") {
+            throw "The existing local API does not report a connected database. E2E-only mode will not change the stack."
+        }
+        Add-QAResult -Name "Reuse existing local portal, API and PostgreSQL" -Status "PASS" -Detail "Portal/API healthy; database connected."
+
+        $accountsFile = Join-Path $repoRoot ".secrets\smartprint-qa\qa-accounts.dpapi.json"
+        if (-not (Test-Path -LiteralPath $accountsFile -PathType Leaf)) {
+            throw "E2E-only mode requires the existing DPAPI QA identity file: $accountsFile. It will not create or bootstrap accounts."
+        }
+        $accounts = Get-OrCreateQAAccounts
+        Set-QAProcessEnvironment $accounts
+
+        $script:playwrightModule = $null
+        $playwrightOk = Invoke-QAStep -Name "Locate pinned Playwright 1.56.1 for E2E-only run" -LogName "playwright-install.log" -Action {
+            $script:playwrightModule = Install-OrLocatePlaywright
+            if (-not $script:playwrightModule) { throw "Playwright module resolution failed." }
+            Write-Host ("Pinned Playwright module: " + $script:playwrightModule)
+        }
+        if (-not $playwrightOk -or -not $script:playwrightModule) { throw "Playwright is not ready." }
+        $env:PLAYWRIGHT_MODULE_DIR = $script:playwrightModule
+
+        $liveSuite = Join-Path $PSScriptRoot "smartprint-local-e2e.mjs"
+        if (-not (Test-Path -LiteralPath $liveSuite -PathType Leaf)) { throw "Local E2E suite is missing: $liveSuite" }
+        $syntaxOk = Invoke-QAStep -Name "Validate local Playwright suite JavaScript syntax" -LogName "playwright-syntax-check.log" -Action {
+            & $node.Source "--check" $liveSuite
+        }
+        if (-not $syntaxOk) { throw "The local Playwright suite has a syntax error. Review logs/playwright-syntax-check.log." }
+
+        $e2eOk = Invoke-QAStep -Name "Real local Playwright E2E using the existing stack and QA identities" -LogName "local-real-data-e2e.log" -Action {
+            & $node.Source $liveSuite
+        }
+        if (-not $e2eOk) { $exitCode = 1 }
+        Add-QAResult -Name "Portal/API/Agent/Android build and unit suites" -Status "SKIPPED" -Detail "E2E-only mode deliberately skips builds, platform unit tests, and device tests."
+        return
+    }
 
     $docker = Get-Command docker.exe -ErrorAction SilentlyContinue
     if (-not $docker) { $docker = Get-Command docker -ErrorAction Stop }
