@@ -122,6 +122,7 @@ if ($RequireDevTools) {
 
 $process = $null
 $webSocket = $null
+$desktopSmokeEvidence = $null
 
 try {
     if ($RequireDevTools) {
@@ -248,6 +249,15 @@ try {
         Write-Host "PASS: Windows UI Automation exposed visible SmartPrint application content." -ForegroundColor Green
         Write-Host "PASS: Production WebView2 rendered an app-owned workspace or sign-in screen." -ForegroundColor Green
         Write-Host "Desktop accessibility evidence: mode='$renderedMode', visibleNamedElements=$($accessibility.visibleNamedElementCount), matchedWorkspaceLabels=$($matchedWorkspaceLabels.Count), matchedSignInLabels=$($matchedAuthLabels.Count)"
+        $desktopSmokeEvidence = [PSCustomObject]@{
+            verification = "windows-ui-automation"
+            mode = $renderedMode
+            nativeWindowOpened = $true
+            visibleNamedElementCount = $accessibility.visibleNamedElementCount
+            visibleControlTypeCount = $accessibility.visibleControlTypeCount
+            matchedWorkspaceLabels = @($matchedWorkspaceLabels)
+            matchedSignInLabels = @($matchedAuthLabels)
+        }
     }
     else {
         if (-not $pageTarget) {
@@ -396,6 +406,15 @@ new Promise(resolve => {
         Write-Host "PASS: Desktop shell marker is present." -ForegroundColor Green
         Write-Host "PASS: React rendered visible application content." -ForegroundColor Green
         Write-Host "Desktop startup evidence: title='$($probe.title)', shell='$($probe.appShell)', rootChildren=$($probe.rootChildCount), textLength=$($probe.rootTextLength)"
+        $desktopSmokeEvidence = [PSCustomObject]@{
+            verification = "webview2-devtools"
+            mode = "ci-diagnostic"
+            nativeWindowOpened = $true
+            documentTitle = [string]$probe.title
+            appShell = [string]$probe.appShell
+            rootChildCount = [int]$probe.rootChildCount
+            rootTextLength = [int]$probe.rootTextLength
+        }
     }
 }
 finally {
@@ -466,3 +485,4 @@ finally {
         }
     }
 }
+`nif ($desktopSmokeEvidence) {`n    Write-Output $desktopSmokeEvidence`n}`n
