@@ -212,6 +212,7 @@ async function record(name, action, caseIds = CASE_IDS_BY_RECORD_NAME.get(name) 
     console.error("CASE MAPPING ERROR " + name + ": " + JSON.stringify(mappingError));
   }
 
+  console.log("[QA-START] " + name);
   const outcome = await executeIsolatedQaRecord({
     name,
     action,
@@ -230,7 +231,10 @@ async function record(name, action, caseIds = CASE_IDS_BY_RECORD_NAME.get(name) 
   } else if (outcome.status === "SKIPPED") {
     console.warn("SKIPPED " + name + " (blocked by: " + (outcome.check.details?.blockedBy || []).join("; ") + ")");
   } else {
-    console.log("PASS " + name);
+    console.log("PASS " + name + " (" + outcome.check.durationMs + " ms)");
+  }
+  if (outcome.status !== "PASS") {
+    console.log("[QA-END] " + name + " | " + outcome.status + " | " + outcome.check.durationMs + " ms");
   }
 
   return outcome.check.details ?? null;
@@ -351,8 +355,11 @@ async function screenshot(page, name) {
   await page.screenshot({
     path: join(screenshotsDirectory, name.replace(/[^a-z0-9-]/gi, "-").toLowerCase() + ".png"),
     fullPage: true,
-    animations: "disabled"
-  }).catch(() => {});
+    animations: "disabled",
+    timeout: 15000
+  }).catch(error => {
+    console.warn("[QA-SCREENSHOT-WARN] " + name + ": " + String(error?.message || error).slice(0, 240));
+  });
 }
 
 async function openRoute(page, path, selector, label) {
@@ -469,7 +476,8 @@ async function signInPlatformAdmin(page, email, password) {
   return tokens;
 }
 
-async function navigateSidebarSection(page, label) {
+async function navigateSidebarSection(page, label, progressContext = "") {
+  if (progressContext) console.log("[QA-PROGRESS] " + progressContext + " | opening " + label);
   const viewportWidth = await page.evaluate(() => window.innerWidth);
   const mobile = viewportWidth <= 850;
   const sidebar = page.locator(".sidebar").first();
@@ -509,16 +517,20 @@ async function navigateSidebarSection(page, label) {
       { timeout: 10000 }
     );
   }
+  if (progressContext) console.log("[QA-PROGRESS] " + progressContext + " | opened " + label);
 }
 
 async function navigateSections(page, labels, prefix) {
   const visited = [];
-  for (const label of labels) {
-    await navigateSidebarSection(page, label);
+  for (let index = 0; index < labels.length; index++) {
+    const label = labels[index];
+    const progressContext = prefix + " sidebar " + (index + 1) + "/" + labels.length;
+    await navigateSidebarSection(page, label, progressContext);
     await page.waitForTimeout(120);
     await screenshot(page, prefix + "-" + label);
     visited.push(label);
   }
+  console.log("[QA-PROGRESS] " + prefix + " sidebar complete: " + visited.length + "/" + labels.length);
   return visited;
 }
 
@@ -1107,15 +1119,21 @@ async function runAuthenticatedResponsiveMatrix(page, sections, label) {
     { width: 390, height: 844 }
   ];
   let checks = 0;
+  const totalChecks = sections.length * viewports.length * 2;
   for (const dark of [false, true]) {
+    const themeLabel = dark ? "dark" : "light";
+    console.log("[QA-PROGRESS] " + label + " responsive matrix | starting " + themeLabel + " theme");
     await setWorkspaceTheme(page, dark);
     for (const viewport of viewports) {
+      console.log("[QA-PROGRESS] " + label + " responsive matrix | " + themeLabel + " theme at " + viewport.width + "px");
       await page.setViewportSize(viewport);
       for (const section of sections) {
-        await navigateSidebarSection(page, section);
-        await assertResponsive(page, label + " / " + section + " / " + (dark ? "dark" : "light"), viewport);
+        const progressContext = label + " responsive " + themeLabel + " " + viewport.width + "px (" + (checks + 1) + "/" + totalChecks + ")";
+        await navigateSidebarSection(page, section, progressContext);
+        await assertResponsive(page, label + " / " + section + " / " + themeLabel, viewport);
         checks += 1;
       }
+      console.log("[QA-PROGRESS] " + label + " responsive matrix | completed " + themeLabel + " " + viewport.width + "px (" + checks + "/" + totalChecks + ")");
     }
   }
   await page.setViewportSize({ width: 1440, height: 1000 });
