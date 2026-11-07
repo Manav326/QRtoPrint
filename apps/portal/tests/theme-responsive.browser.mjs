@@ -844,7 +844,7 @@ async function setPhotoInputValue(locator, value) {
 }
 
 async function setPhotoRange(dialog, label, value) {
-  const range = dialog.locator("label").filter({ hasText: new RegExp("^" + label + "\\b") }).locator('input[type="range"]');
+  const range = dialog.locator("label").filter({ hasText: label }).locator('input[type="range"]');
   assert.equal(await range.count(), 1, "Photo Studio must expose exactly one " + label + " range.");
   await setPhotoInputValue(range, value);
   await range.evaluate(element => element.blur());
