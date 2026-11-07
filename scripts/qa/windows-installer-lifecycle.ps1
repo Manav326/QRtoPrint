@@ -66,7 +66,12 @@ function Assert-True([bool]$Condition, [string]$Message) {
 function Wait-Service([ValidateSet("Running", "Stopped", "Absent")][string]$State, [int]$TimeoutSeconds = 45) {
     Write-Host "[QA-WAIT] Agent Windows service -> $State (timeout $TimeoutSeconds seconds)." -ForegroundColor DarkCyan
     $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
+    $poll = 0
     do {
+        $poll++
+        if ($poll -eq 1 -or $poll % 10 -eq 0) {
+            Write-Host "[QA-PROGRESS] Agent service state | target=$State | poll=$poll | elapsed=$($poll)s." -ForegroundColor DarkCyan
+        }
         $service = Get-Service -Name $serviceName -ErrorAction SilentlyContinue
         if ($State -eq "Absent" -and -not $service) { return }
         if ($State -eq "Stopped" -and $service -and $service.Status -eq "Stopped") { return }
@@ -118,7 +123,12 @@ function Wait-LocalApiReady([int]$TimeoutSeconds = 45) {
     Write-Host "[QA-WAIT] Agent local API and preserved device identity (timeout $TimeoutSeconds seconds)." -ForegroundColor DarkCyan
     $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
     $uri = "http://127.0.0.1:17842/api/v1/local/status"
+    $poll = 0
     do {
+        $poll++
+        if ($poll -eq 1 -or $poll % 10 -eq 0) {
+            Write-Host "[QA-PROGRESS] Agent local API and identity readiness | poll=$poll | elapsed=$($poll)s." -ForegroundColor DarkCyan
+        }
         try {
             $status = Invoke-RestMethod -Uri $uri -Method Get -TimeoutSec 3
             if ($status.status -eq "LOCAL_ENDPOINT_READY" -and
@@ -185,7 +195,12 @@ function Assert-SystemCanDiscoverFixturePrinter {
         $script:ownsTask = $true
         Start-ScheduledTask -TaskName $taskName
         $deadline = (Get-Date).AddSeconds(40)
+        $poll = 0
         while (-not (Test-Path -LiteralPath $resultPath) -and (Get-Date) -lt $deadline) {
+            $poll++
+            if ($poll -eq 1 -or $poll % 10 -eq 0) {
+                Write-Host "[QA-PROGRESS] LocalSystem printer discovery task | poll=$poll | elapsed=$([Math]::Round($poll / 2, 1))s." -ForegroundColor DarkCyan
+            }
             Start-Sleep -Milliseconds 500
         }
         Assert-True (Test-Path -LiteralPath $resultPath) "The LocalSystem printer-discovery task did not produce a result."
