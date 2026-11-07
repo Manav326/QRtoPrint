@@ -652,6 +652,7 @@ try {
 
             $qaUnitTests = @(
                 (Join-Path $PSScriptRoot "live-node-test-reporter.test.mjs"),
+                (Join-Path $PSScriptRoot "smartprint-qa-config.test.mjs"),
                 (Join-Path $PSScriptRoot "local-e2e-http-audit.test.mjs"),
                 (Join-Path $PSScriptRoot "local-e2e-prerequisites.test.mjs")
             )
