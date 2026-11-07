@@ -84,6 +84,10 @@ test("light and dark palettes cover authentication, customer QR and public landi
   assert.match(css, /html\[data-theme="dark"\] \.customer-entry/);
   assert.match(css, /\.theme-toggle-button/);
   assert.match(landing, /html\[data-theme="dark"\] \.sp-public/);
+  assert.match(css, /html\[data-theme="dark"\] \.customer-entry:not\(\.smartprint-native\) \.entry-local-agent\s*\{[^}]*background:\s*#182335[^}]*border-color:\s*#344158/s,
+    "The browser customer local-agent card must switch to a dark surface with readable copy.");
+  assert.match(landing, /html\[data-theme="dark"\] \.sp-public \.sp-download-card h3\s*\{[^}]*color:\s*#edf1fa/s,
+    "Download card titles must not retain dark foregrounds on dark card surfaces.");
 });
 
 test("web shell keeps navigation, header and workspace independently usable at desktop and mobile sizes", () => {
