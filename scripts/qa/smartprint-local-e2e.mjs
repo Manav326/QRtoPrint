@@ -1398,8 +1398,11 @@ try {
     const subscriptions = assertHttp(await request(adminPage, "GET", "/api/v1/platform/subscriptions?page=1&pageSize=50", {
       token: adminTokens.accessToken
     }), 200, "Platform subscriptions");
-    assert.ok(tenants.items.some(item => item.id === shop1TenantId));
-    assert.ok(tenants.items.some(item => item.id === shop2TenantId));
+    const subscriptionShopNames = new Set(subscriptions.items.map(item => item.businessName));
+    assert.ok(subscriptionShopNames.has(process.env.SMARTPRINT_QA_SHOP1_NAME),
+      "The platform control centre cannot find QA Shop One.");
+    assert.ok(subscriptionShopNames.has(process.env.SMARTPRINT_QA_SHOP2_NAME),
+      "The platform control centre cannot find QA Shop Two.");
     assert.ok(plans.some(item => item.code === "SMARTPRINT_QA_AUTOMATION"));
     const responsive = await runAuthenticatedResponsiveMatrix(
       adminPage,
