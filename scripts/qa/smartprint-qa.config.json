@@ -25,7 +25,8 @@
       "agentServiceName": "QRtoPrintSmartPrintAgent",
       "programDataDirectoryName": "QRtoPrint",
       "agentIdentityFileName": "agent.identity",
-      "smokeTimeoutSeconds": 45
+      "smokeTimeoutSeconds": 45,
+      "webViewDevToolsPort": 9237
     },
     "android": {
       "applicationId": "com.quantaedge.smartprint",

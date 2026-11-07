@@ -40,19 +40,23 @@ if (-not $webViewRuntime) {
 $webViewRuntimeVersion = (Get-Item -LiteralPath $webViewRuntime.Path).VersionInfo.ProductVersion
 Write-Host "WebView2 Runtime: $webViewRuntimeVersion ($($webViewRuntime.Path))" -ForegroundColor Cyan
 
-# Give this smoke-test process a private WebView2 DevTools port so the test can
-# verify that the embedded frontend rendered, not merely that an EXE stayed alive.
-$listener = [System.Net.Sockets.TcpListener]::new([System.Net.IPAddress]::Loopback, 0)
-$listener.Start()
-$debugPort = ([System.Net.IPEndPoint]$listener.LocalEndpoint).Port
-$listener.Stop()
-
-$environmentName = "WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS"
-$previousWebViewArguments = [Environment]::GetEnvironmentVariable($environmentName, "Process")
-$testWebViewArguments = "--remote-debugging-port=$debugPort --remote-allow-origins=*"
-if (-not [string]::IsNullOrWhiteSpace($previousWebViewArguments)) {
-    $testWebViewArguments = "$previousWebViewArguments $testWebViewArguments"
+# Read the DevTools port from the shared QA configuration. The CI build
+# injects this exact port through Tauri's supported additionalBrowserArgs config;
+# setting WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS alone is not reliable when WRY
+# already supplies its own browser argument string.
+$qaConfigPath = Join-Path $PSScriptRoot "smartprint-qa.config.json"
+$qaConfig = Get-Content -LiteralPath $qaConfigPath -Raw | ConvertFrom-Json -ErrorAction Stop
+$debugPort = [int]$qaConfig.apps.windows.webViewDevToolsPort
+if ($debugPort -lt 1024 -or $debugPort -gt 65535) {
+    throw "The configured WebView2 DevTools port is outside the valid non-privileged TCP range."
 }
+$listener = [System.Net.Sockets.TcpListener]::new([System.Net.IPAddress]::Loopback, $debugPort)
+try {
+    $listener.Start()
+} catch {
+    throw "Configured WebView2 DevTools port $debugPort is already in use; the desktop smoke test cannot safely probe this process."
+}
+$listener.Stop()
 
 # WebView2 can reuse an existing browser process when it shares a user-data
 # folder. That process may not inherit this run's private DevTools port. Give
@@ -67,7 +71,7 @@ $process = $null
 $webSocket = $null
 
 try {
-    [Environment]::SetEnvironmentVariable($environmentName, $testWebViewArguments, "Process")
+    Write-Host "Using the CI-only Tauri WebView2 DevTools port $debugPort and an isolated temporary profile." -ForegroundColor DarkCyan
     [Environment]::SetEnvironmentVariable($dataDirectoryEnvironmentName, $testWebViewDataDirectory, "Process")
     Write-Host "Using an isolated temporary WebView2 profile for this smoke test." -ForegroundColor DarkCyan
 
@@ -316,7 +320,6 @@ finally {
         $process.Dispose()
     }
 
-    [Environment]::SetEnvironmentVariable($environmentName, $previousWebViewArguments, "Process")
     [Environment]::SetEnvironmentVariable($dataDirectoryEnvironmentName, $previousWebViewDataDirectory, "Process")
 
     # WebView2 may finish shutting down its browser child shortly after the

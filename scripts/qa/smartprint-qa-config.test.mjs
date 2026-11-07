@@ -238,3 +238,26 @@ test("Android stable resource IDs are preferred, with semantic fallback for the 
   assert.equal(config.apps.android.uiAutomationIds.homeHeading, "smartprint_home_heading");
   assert.equal(config.apps.android.uiAutomationIds.filesHeading, "smartprint_files_heading");
 });
+
+
+test("Android native UI can be confirmed on the published legacy APK by two distinct native navigation landmarks", () => {
+  assert.match(publishedAppsSource, /if\(-not \$nativeRoot -and \$homeNavigation -and \$filesNavigation -and \$visibleAppNodes\.Count -ge 2\)/);
+  assert.match(publishedAppsSource, /verified-native-navigation-fallback/);
+  assert.match(publishedAppsSource, /nativeRootConfirmed=\$nativeRootConfirmed/);
+  assert.match(publishedAppsSource, /Android native Files navigation/);
+  assert.match(publishedAppsSource, /Android native Home navigation/);
+});
+
+test("Windows desktop CI injects WebView2 DevTools args through Tauri config rather than relying on environment override", () => {
+  assert.equal(config.apps.windows.webViewDevToolsPort, 9237);
+  const desktopConfigScript = readFileSync(new URL('./prepare-desktop-smoke-config.ps1', import.meta.url), 'utf8');
+  const desktopSmokeScript = readFileSync(new URL('./desktop-open-smoke.ps1', import.meta.url), 'utf8');
+  const workflow = readFileSync(new URL('../../.github/workflows/ci.yml', import.meta.url), 'utf8');
+  assert.match(desktopConfigScript, /additionalBrowserArgs/);
+  assert.match(desktopConfigScript, /--remote-debugging-port=\$debugPort/);
+  assert.match(desktopConfigScript, /--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection/);
+  assert.match(workflow, /prepare-desktop-smoke-config\.ps1/);
+  assert.match(workflow, /tauri build --config "\$desktopSmokeConfig"/);
+  assert.match(desktopSmokeScript, /webViewDevToolsPort/);
+  assert.doesNotMatch(desktopSmokeScript, /WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS/);
+});

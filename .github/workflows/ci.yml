@@ -268,7 +268,10 @@ jobs:
             throw "Configure the SMARTPRINT_PUBLIC_BASE_URL Actions variable before building the desktop application."
           }
           $env:VITE_API_BASE_URL = $env:SMARTPRINT_PUBLIC_BASE_URL
-          pnpm --filter @smart-print/desktop exec tauri build --no-bundle --ci
+          $desktopSmokeConfig = Join-Path $env:RUNNER_TEMP "smartprint-desktop-smoke-tauri.conf.json"
+          ./scripts/qa/prepare-desktop-smoke-config.ps1 -OutputPath $desktopSmokeConfig
+          if ($LASTEXITCODE -ne 0) { throw "Could not prepare the isolated desktop smoke configuration." }
+          pnpm --filter @smart-print/desktop exec tauri build --config "$desktopSmokeConfig" --no-bundle --ci
           if ($LASTEXITCODE -ne 0) { throw "SmartPrint native desktop build failed." }
           $nativeExe = "apps/desktop/src-tauri/target/release/smartprint-desktop.exe"
           if (-not (Test-Path -LiteralPath $nativeExe)) { throw "The SmartPrint native desktop executable was not produced." }
