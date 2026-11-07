@@ -24,11 +24,6 @@ if ($PullLatest) {
         throw "-PullLatest requires an attached local branch; detached HEAD is not supported."
     }
     $expectedBranch = $activeBranch
-    $workingTree = @(& $git.Source "status" "--porcelain" "--untracked-files=all")
-    if ($LASTEXITCODE -ne 0) { throw "Could not verify the Git working tree; no pull was attempted." }
-    if ($workingTree.Count -gt 0) {
-        throw "The working tree contains local changes. Commit or safely move them before -PullLatest; this runner will not stash, overwrite, or discard user work."
-    }
     $beforePull = (& $git.Source "rev-parse" "HEAD").Trim()
     if ($LASTEXITCODE -ne 0 -or -not $beforePull) { throw "Could not resolve the current source revision." }
     & $git.Source "fetch" "--no-tags" "origin" $expectedBranch
@@ -37,10 +32,20 @@ if ($PullLatest) {
     $upstreamRevision = (& $git.Source "rev-parse" $upstreamRef).Trim()
     if ($LASTEXITCODE -ne 0 -or -not $upstreamRevision) { throw "Could not resolve origin/$expectedBranch after fetch." }
     if ($beforePull -ne $upstreamRevision) {
+        # A dirty tree is harmless when GitHub has no newer commit. If an update
+        # is actually needed, refuse before merge so tracked and untracked user
+        # files remain exactly where they are.
+        $workingTree = @(& $git.Source "status" "--porcelain" "--untracked-files=all")
+        if ($LASTEXITCODE -ne 0) { throw "Could not verify the Git working tree; no merge was attempted." }
+        if ($workingTree.Count -gt 0) {
+            throw "GitHub has newer commits, but the working tree contains local changes. No merge was attempted; all local files were preserved."
+        }
         $pullChangedPaths = @(& $git.Source "diff" "--name-only" "--diff-filter=ACDMRT" "$beforePull..$upstreamRevision")
         if ($LASTEXITCODE -ne 0) { throw "Could not classify the pulled changes; no merge was attempted." }
         & $git.Source "merge" "--ff-only" $upstreamRef
         if ($LASTEXITCODE -ne 0) { throw "The update is not a fast-forward. No reset, rebase, or force update was attempted." }
+    } else {
+        Write-Host "Local source is already at the GitHub branch head. Existing local modifications/untracked files are preserved; no merge is needed." -ForegroundColor Green
     }
     $sourceRevision = (& $git.Source "rev-parse" "HEAD").Trim()
     if ($LASTEXITCODE -ne 0 -or -not $sourceRevision) { throw "Could not verify the resulting source revision." }
