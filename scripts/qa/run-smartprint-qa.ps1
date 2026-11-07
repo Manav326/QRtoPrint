@@ -311,21 +311,76 @@ try {
     Add-QAResult -Name "Node.js runtime" -Status "PASS" -Detail $nodeVersion
 
     if ($E2EOnly) {
-        Write-Host "E2E-only mode: reusing the running local stack. No Docker build/start, admin bootstrap, migrations, or secret regeneration will be performed." -ForegroundColor Yellow
+        Write-Host "E2E-only mode: rebuild and refresh only the API and Portal containers. PostgreSQL, its data volume, QA identities and Agent are preserved." -ForegroundColor Yellow
 
-        $portalResponse = Invoke-WebRequest -Uri "$target/" -UseBasicParsing -TimeoutSec 8 -ErrorAction Stop
-        if ($portalResponse.StatusCode -ne 200) { throw "The existing local portal is not healthy (HTTP $($portalResponse.StatusCode))." }
+        $docker = Get-Command docker.exe -ErrorAction SilentlyContinue
+        if (-not $docker) { $docker = Get-Command docker -ErrorAction Stop }
+        & $docker.Source compose version | Out-Null
+        if ($LASTEXITCODE -ne 0) { throw "Docker Compose v2 is required for the targeted API/Portal refresh." }
+        & $docker.Source info | Out-Null
+        if ($LASTEXITCODE -ne 0) { throw "Docker Desktop engine is not running." }
 
-        $liveResponse = Invoke-WebRequest -Uri "$target/health/live" -UseBasicParsing -TimeoutSec 8 -ErrorAction Stop
-        if ($liveResponse.StatusCode -ne 200) { throw "The existing local API is not live (HTTP $($liveResponse.StatusCode))." }
+        $envPath = Join-Path $repoRoot ".env.local"
+        $composeFile = Join-Path $repoRoot "compose.local.yml"
+        if (-not (Test-Path -LiteralPath $envPath -PathType Leaf)) { throw "E2E-only mode requires the existing .env.local file." }
+        if (-not (Test-Path -LiteralPath $composeFile -PathType Leaf)) { throw "E2E-only mode requires compose.local.yml." }
 
-        $readyResponse = Invoke-WebRequest -Uri "$target/health/ready" -UseBasicParsing -TimeoutSec 8 -ErrorAction Stop
-        if ($readyResponse.StatusCode -ne 200) { throw "The existing local API is not ready (HTTP $($readyResponse.StatusCode))." }
-        $ready = $readyResponse.Content | ConvertFrom-Json -ErrorAction Stop
-        if ($ready.database -ne "connected") {
-            throw "The existing local API does not report a connected database. E2E-only mode will not change the stack."
+        $composeProjectName = "qrtoprint-local"
+        $composeBaseArgs = @("compose", "--project-name", $composeProjectName, "--env-file", $envPath, "-f", $composeFile)
+        $configOk = Invoke-QAStep -Name "Validate existing local Compose configuration" -LogName "compose-config.log" -Action {
+            & $docker.Source @($composeBaseArgs + @("config", "--quiet"))
         }
-        Add-QAResult -Name "Reuse existing local portal, API and PostgreSQL" -Status "PASS" -Detail "Portal/API healthy; database connected."
+        if (-not $configOk) { throw "Existing local Compose configuration is invalid." }
+
+        & $docker.Source network inspect "cloudflare-edge" *> $null
+        if ($LASTEXITCODE -ne 0) { throw "The existing shared cloudflare-edge Docker network is unavailable. E2E-only mode will not create or replace it." }
+
+        $dbContainerIdBefore = ((& $docker.Source @($composeBaseArgs + @("ps", "-q", "db"))) -join "").Trim()
+        if (-not $dbContainerIdBefore) { throw "The existing qrtoprint-local PostgreSQL container was not found. E2E-only mode will not create a database." }
+        $dbStateBefore = (& $docker.Source inspect --format "{{.State.Status}}" $dbContainerIdBefore).Trim()
+        if ($LASTEXITCODE -ne 0 -or $dbStateBefore -ne "running") {
+            throw "The existing PostgreSQL container is not running; no attempt will be made to recreate it."
+        }
+
+        foreach ($service in @("api", "portal")) {
+            $containerId = ((& $docker.Source @($composeBaseArgs + @("ps", "-q", $service))) -join "").Trim()
+            if (-not $containerId) { throw "The existing $service container was not found. E2E-only mode will not create missing stack services." }
+        }
+
+        $buildOk = Invoke-QAStep -Name "Build only SmartPrint API and Portal images" -LogName "targeted-app-image-build.log" -Action {
+            & $docker.Source @($composeBaseArgs + @("build", "api", "portal"))
+        }
+        if (-not $buildOk) { throw "The targeted API/Portal image build failed. Existing containers and PostgreSQL were not replaced." }
+
+        $refreshOk = Invoke-QAStep -Name "Refresh only API and Portal containers (no dependencies, no orphan removal)" -LogName "targeted-app-refresh.log" -Action {
+            & $docker.Source @($composeBaseArgs + @("up", "-d", "--no-deps", "api", "portal"))
+        }
+        if (-not $refreshOk) { throw "API/Portal refresh failed. PostgreSQL was excluded from the Compose up operation." }
+
+        $dbContainerIdAfter = ((& $docker.Source @($composeBaseArgs + @("ps", "-q", "db"))) -join "").Trim()
+        if ($dbContainerIdAfter -ne $dbContainerIdBefore) {
+            throw "PostgreSQL container identity changed during the targeted refresh. Stop QA and inspect the existing database before proceeding."
+        }
+        Add-QAResult -Name "PostgreSQL container preserved during API/Portal refresh" -Status "PASS" -Detail "The existing database container ID is unchanged."
+
+        $runtimeReady = $false
+        for ($attempt = 1; $attempt -le 45; $attempt++) {
+            try {
+                $portalResponse = Invoke-WebRequest -Uri "$target/" -UseBasicParsing -TimeoutSec 5 -ErrorAction Stop
+                $liveResponse = Invoke-WebRequest -Uri "$target/health/live" -UseBasicParsing -TimeoutSec 5 -ErrorAction Stop
+                $readyResponse = Invoke-WebRequest -Uri "$target/health/ready" -UseBasicParsing -TimeoutSec 5 -ErrorAction Stop
+                $ready = $readyResponse.Content | ConvertFrom-Json -ErrorAction Stop
+                if ($portalResponse.StatusCode -eq 200 -and $liveResponse.StatusCode -eq 200 -and
+                    $readyResponse.StatusCode -eq 200 -and $ready.database -eq "connected") {
+                    $runtimeReady = $true
+                    break
+                }
+            } catch {
+                Start-Sleep -Seconds 2
+            }
+        }
+        if (-not $runtimeReady) { throw "The refreshed API/Portal did not become healthy with PostgreSQL connected. Review targeted-app-refresh.log and runtime logs." }
+        Add-QAResult -Name "Refreshed local Portal/API and existing PostgreSQL readiness" -Status "PASS" -Detail "HTTP 200; database connected."
 
         $accountsFile = Join-Path $repoRoot ".secrets\smartprint-qa\qa-accounts.dpapi.json"
         if (-not (Test-Path -LiteralPath $accountsFile -PathType Leaf)) {
