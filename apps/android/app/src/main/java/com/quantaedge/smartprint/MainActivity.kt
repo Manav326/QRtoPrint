@@ -628,14 +628,14 @@ class MainActivity : AppCompatActivity() {
         ViewCompat.requestApplyInsets(root)
     }
 
-    private fun addBottomNavigationItem(id: Int, label: String, description: String, iconResource: Int) {
+    private fun addBottomNavigationItem(destinationId: Int, label: String, description: String, iconResource: Int) {
         val item = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER
             setPadding(dp(11), 0, dp(11), 0)
             minimumWidth = dp(48)
             minimumHeight = dp(48)
-            id = when (id) {
+            id = when (destinationId) {
                 HOME -> R.id.smartprint_nav_home
                 FILES -> R.id.smartprint_nav_files
                 else -> View.NO_ID
@@ -647,7 +647,7 @@ class MainActivity : AppCompatActivity() {
             if (this@MainActivity.theme.resolveAttribute(android.R.attr.selectableItemBackgroundBorderless, selectable, true)) {
                 foreground = this@MainActivity.getDrawable(selectable.resourceId)
             }
-            setOnClickListener { navigation.selectedItemId = id }
+            setOnClickListener { navigation.selectedItemId = destinationId }
         }
         val icon = ImageView(this).apply {
             setImageResource(iconResource)
@@ -663,7 +663,7 @@ class MainActivity : AppCompatActivity() {
         }
         item.addView(icon, LinearLayout.LayoutParams(dp(21), dp(21)))
         item.addView(title, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT))
-        bottomNavigationItemViews[id] = Triple(item, icon, title)
+        bottomNavigationItemViews[destinationId] = Triple(item, icon, title)
         bottomNavigationContent.addView(item, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, dp(52)))
     }
 
