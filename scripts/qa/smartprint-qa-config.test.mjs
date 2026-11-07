@@ -168,3 +168,15 @@ test('installed Android package is read-only compared with the published APK bef
   assert.match(publishedAppsSource, /No uninstall, reinstall, update or data clear was attempted/);
   assert.doesNotMatch(publishedAppsSource, /adb\s+-s\s+\$serial\s+install\s+-r/);
 });
+
+
+test("Android published APK updates require explicit opt-in and never use uninstall or data-clear fallbacks", () => {
+  assert.match(runnerSource, /\[switch\]\$InstallPublishedAndroidApk/);
+  assert.match(runnerSource, /-InstallPublishedAndroidApk:\$InstallPublishedAndroidApk/);
+  assert.match(publishedAppsSource, /if\(\$versionMismatch -and \$AllowInPlaceUpdate\)/);
+  assert.match(publishedAppsSource, /install -r \$Apk/);
+  assert.match(publishedAppsSource, /uninstallAttempted=\$false/);
+  assert.match(publishedAppsSource, /dataClearAttempted=\$false/);
+  assert.match(publishedAppsSource, /Android published APK in-place update/);
+  assert.doesNotMatch(publishedAppsSource, /shell pm clear|adb\s+-s\s+\$serial\s+uninstall/);
+});

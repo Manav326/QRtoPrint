@@ -7,10 +7,14 @@ param(
     [switch]$ReuseRunningStack,
     [switch]$TestPublishedApps,
     [switch]$AndroidAppOnly,
-    [string]$AndroidDeviceSerial = ""
+    [string]$AndroidDeviceSerial = "",
+    [switch]$InstallPublishedAndroidApk
 )
 
 $ErrorActionPreference = "Stop"
+if ($InstallPublishedAndroidApk -and -not $AndroidAppOnly) {
+    throw "-InstallPublishedAndroidApk can only be used with -AndroidAppOnly."
+}
 if (-not [string]::IsNullOrWhiteSpace($AndroidDeviceSerial) -and -not $AndroidAppOnly) {
     throw "-AndroidDeviceSerial can only be used with -AndroidAppOnly."
 }
@@ -484,7 +488,7 @@ try {
             $exitCode = 1
         } else {
             $androidOnlyOk = Invoke-QAStep -Name "Download and acceptance-test the website-published Android APK only" -LogName "android-published-app.log" -Action {
-                & $publishedAppScript -AndroidOnly -PublicOrigin $canonicalPublicUrl -OutputDirectory (Join-Path $artifactRoot "android-published-app") -ConfigPath $qaConfigPath -AndroidDeviceSerial $AndroidDeviceSerial
+                & $publishedAppScript -AndroidOnly -PublicOrigin $canonicalPublicUrl -OutputDirectory (Join-Path $artifactRoot "android-published-app") -ConfigPath $qaConfigPath -AndroidDeviceSerial $AndroidDeviceSerial -InstallPublishedAndroidApk:$InstallPublishedAndroidApk
             }
             if (-not $androidOnlyOk) { $exitCode = 1 }
         }

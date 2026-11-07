@@ -4,7 +4,8 @@ param(
   [Parameter(Mandatory=$true)][string]$OutputDirectory,
   [Parameter(Mandatory=$true)][string]$ConfigPath,
   [switch]$AndroidOnly,
-  [string]$AndroidDeviceSerial = ""
+  [string]$AndroidDeviceSerial = "",
+  [switch]$InstallPublishedAndroidApk
 )
 $ErrorActionPreference = "Stop"
 Add-Type -AssemblyName System.Net.Http
@@ -299,6 +300,7 @@ function Test-AndroidApp([string]$Apk,[bool]$ApkVerified,$Settings,[string]$Devi
   $check=@(& $adb -s $serial shell pm path $package 2>&1)
   $installed=$LASTEXITCODE -eq 0 -and (($check -join [Environment]::NewLine) -match '(?m)^package:')
   $newInstall=$false
+  $updatedInstall=$false
   if(-not $installed){
     if(-not $Apk -or -not (Test-Path -LiteralPath $Apk -PathType Leaf) -or -not $ApkVerified){
       Add-Result "Android app live device launch" "SKIPPED" "App absent; APK is unavailable or its package ID has not been verified."
@@ -323,10 +325,30 @@ function Test-AndroidApp([string]$Apk,[bool]$ApkVerified,$Settings,[string]$Devi
     return
   }
 
-  # Read-only preflight: compare the installed package against the exact public
-  # release metadata and resolve its launcher for the selected Android user.
-  # Never update, uninstall, clear data or replace an existing installation.
+  # Compare installed package against the exact public release. Updating an
+  # existing app requires explicit caller consent; uninstall/data-clear fallback is forbidden.
   $installedInfo=Get-AndroidInstalledPackageDiagnostics $adb $serial $package
+  $versionMismatch = $installed -and $installedInfo.installedVersionCode -and
+    ([string]$installedInfo.installedVersionCode -ne [string]$ApkMetadata.versionCode -or
+     [string]$installedInfo.installedVersionName -ne [string]$ApkMetadata.versionName)
+  if($versionMismatch -and $AllowInPlaceUpdate) {
+    Write-Host "Explicit update consent supplied. Attempting an in-place Android package update; no uninstall or data clear."
+    $updateOutput=@(& $adb -s $serial install -r $Apk 2>&1)
+    $updateExit=$LASTEXITCODE
+    if($updateExit -ne 0) {
+      $reason=("In-place APK update failed (exit {0}); Android may have rejected signing identity or package compatibility. No uninstall fallback was attempted. Device response: {1}" -f $updateExit,($updateOutput -join " " -replace "[\r\n]+"," ").Trim())
+      Add-Result "Android published APK in-place update" "FAIL" $reason -Evidence @{serial=$serial;updateAttempted=$true;updateExitCode=$updateExit;uninstallAttempted=$false;dataClearAttempted=$false}
+      Add-Result "Android installed package matches published APK and launcher" "SKIPPED" $reason
+      Add-Result "Android app live device launch" "SKIPPED" $reason
+      Add-AndroidLaunchDependentSkips $reason
+      return
+    }
+    $updatedInstall=$true
+    $installedInfo=Get-AndroidInstalledPackageDiagnostics $adb $serial $package
+    Add-Result "Android published APK in-place update" "PASS" "Android accepted adb install -r. Post-update package verification follows; no uninstall or data clear was attempted." -Evidence @{serial=$serial;updateAttempted=$true;updateExitCode=0;uninstallAttempted=$false;dataClearAttempted=$false}
+  } elseif($versionMismatch) {
+    Add-Result "Android published APK in-place update" "SKIPPED" "Installed version differs from the published APK. Re-run with -InstallPublishedAndroidApk to explicitly authorise an in-place update; no app or data was changed." -Evidence @{serial=$serial;updateAttempted=$false;uninstallAttempted=$false;dataClearAttempted=$false}
+  }
   $publishedActivity=Normalize-AndroidActivityClass $package ([string]$ApkMetadata.launcherActivity)
   $preflightProblems=@()
   if($installedInfo.dumpExitCode -ne 0){$preflightProblems += "Android could not read the installed package metadata."}
@@ -347,11 +369,11 @@ function Test-AndroidApp([string]$Apk,[bool]$ApkVerified,$Settings,[string]$Devi
     resolvedLauncherActivity=$installedInfo.resolvedLauncherActivity
     launcherResolveExitCode=$installedInfo.launcherResolveExitCode
     launcherResolveOutput=$installedInfo.launcherResolveOutput
-    installedDuringQa=$newInstall;installationReplaced=$false
+    installedDuringQa=$newInstall;updatedDuringQa=$updatedInstall;installationReplaced=$false;dataClearAttempted=$false
   }
   if($preflightProblems.Count -gt 0) {
     $reason=$preflightProblems -join " "
-    Add-Result "Android installed package matches published APK and launcher" "FAIL" ($reason+" No uninstall, reinstall, update or data clear was attempted.") -Evidence $preflightEvidence
+    Add-Result "Android installed package matches published APK and launcher" "FAIL" ($reason+" No uninstall or data clear was attempted.") -Evidence $preflightEvidence
     Add-Result "Android app live device launch" "SKIPPED" ("Blocked by the installed-package preflight failure. "+$reason)
     Add-AndroidLaunchDependentSkips $reason
     return
@@ -380,7 +402,7 @@ function Test-AndroidApp([string]$Apk,[bool]$ApkVerified,$Settings,[string]$Devi
     Start-Sleep -Milliseconds 500
   } while([DateTime]::UtcNow -lt $deadline)
   if(-not $started){Add-Result "Android app live device launch" "FAIL" "SmartPrint did not become the resumed foreground activity with a running process.";return}
-  Add-Result "Android app live device launch" "PASS" "SmartPrint is the resumed foreground activity on the $deviceKind; existing app data and installation were preserved." -Evidence @{serial=$serial;deviceKind=$deviceKind;packageId=$package;installedDuringQa=$newInstall;installationReplaced=$false;processId=$appPid}
+  Add-Result "Android app live device launch" "PASS" "SmartPrint is the resumed foreground activity on the $deviceKind; existing app data was not intentionally cleared; updatedDuringQa=$updatedInstall." -Evidence @{serial=$serial;deviceKind=$deviceKind;packageId=$package;installedDuringQa=$newInstall;updatedDuringQa=$updatedInstall;installationReplaced=$false;dataClearAttempted=$false;processId=$appPid}
 
   $uiPath="/sdcard/smartprint-qa-ui-$([Guid]::NewGuid().ToString('N')).xml"
   try {
@@ -545,7 +567,7 @@ try {
     try {Test-WindowsApp $downloads.windows $config.apps.windows}
     catch {Add-Result "Windows installed-app acceptance" "FAIL" $_.Exception.Message}
   }
-  try {Test-AndroidApp $downloads.android $androidApkVerified $config.apps.android $AndroidDeviceSerial $androidApkMetadata}
+  try {Test-AndroidApp $downloads.android $androidApkVerified $config.apps.android $AndroidDeviceSerial $androidApkMetadata ([bool]$InstallPublishedAndroidApk)}
   catch {Add-Result "Android app live acceptance" "FAIL" $_.Exception.Message}
   if($AndroidOnly){
     $requiredAndroidChecks=@("Public release metadata","Download current android asset from website","Verify Android APK application ID","Verify Android APK build metadata","Verify Android APK launcher activity","Android installed package matches published APK and launcher","Android app live device launch","Android native UI rendered","Android native Files navigation","Android native Home navigation","Android app crash-log probe")
@@ -570,7 +592,7 @@ finally {
     failed=$failed
     skipped=@($script:results | Where-Object status -eq "SKIPPED").Count
     warnings=@($script:results | Where-Object status -eq "WARN").Count
-    safety=@{windowsChecksPerformed=(-not [bool]$AndroidOnly);windowsExistingInstallReplaced=$false;androidExistingInstallReplaced=$false;physicalAndroidDevicesTargeted=[bool]$script:androidDeviceWasPhysical;shopPairingAttempted=$false;printerConfigurationChanged=$false}
+    safety=@{windowsChecksPerformed=(-not [bool]$AndroidOnly);windowsExistingInstallReplaced=$false;androidExistingInstallReplaced=$false;androidExistingInstallUpdated=$false;androidDataClearAttempted=$false;physicalAndroidDevicesTargeted=[bool]$script:androidDeviceWasPhysical;shopPairingAttempted=$false;printerConfigurationChanged=$false}
     results=@($script:results)
   }
   $summary | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath (Join-Path $outputRoot "results.json") -Encoding UTF8
