@@ -485,4 +485,7 @@ finally {
         }
     }
 }
-`nif ($desktopSmokeEvidence) {`n    Write-Output $desktopSmokeEvidence`n}`n
+
+if ($desktopSmokeEvidence) {
+    Write-Output $desktopSmokeEvidence
+}
