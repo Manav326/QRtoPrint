@@ -1539,19 +1539,23 @@ try {
     ];
     const visited = await navigateSections(shop1Page, sections, "shop-one");
     const accountMenu = shop1Page.getByRole("button", { name: /Account options for/ });
+    console.log("[QA-PROGRESS] shop-one account tools | Personal details");
     await accountMenu.click();
     await shop1Page.getByRole("button", { name: "Personal details" }).click();
     await shop1Page.getByRole("dialog", { name: "Personal details" }).waitFor({ state: "visible", timeout: 10000 });
     await screenshot(shop1Page, "shop-one-personal-details");
     await shop1Page.getByRole("button", { name: "Close" }).last().click();
+    console.log("[QA-PROGRESS] shop-one account tools | Shop profile & branding");
     await accountMenu.click();
     await shop1Page.getByRole("button", { name: "Shop profile & branding" }).click();
     await shop1Page.locator(".settings-panel").waitFor({ state: "visible", timeout: 10000 });
     await screenshot(shop1Page, "shop-one-profile-branding");
+    console.log("[QA-PROGRESS] shop-one account tools | Trial & subscription");
     await accountMenu.click();
     await shop1Page.getByRole("button", { name: "Trial & subscription" }).click();
     await shop1Page.locator(".subscription-workspace").waitFor({ state: "visible", timeout: 10000 });
     await screenshot(shop1Page, "shop-one-subscription");
+    console.log("[QA-PROGRESS] shop-one account tools | Help & support");
     await accountMenu.click();
     await shop1Page.getByRole("button", { name: "Help & support" }).click();
     await shop1Page.getByRole("dialog", { name: "Help & support" }).waitFor({ state: "visible", timeout: 10000 });
@@ -1572,8 +1576,12 @@ try {
       ["/api/v1/shop/refunds", "refunds"]
     ];
     const payload = {};
-    for (const [path, key] of checks) {
+    for (let index = 0; index < checks.length; index++) {
+      const [path, key] = checks[index];
+      const progress = "shop-one API reads " + (index + 1) + "/" + checks.length + " | " + key;
+      console.log("[QA-PROGRESS] " + progress + " | started");
       payload[key] = assertHttp(await request(shop1Page, "GET", path, { token: shop1Tokens.accessToken }), 200, "Shop one " + key);
+      console.log("[QA-PROGRESS] " + progress + " | completed");
     }
     assert.ok(payload.printers.some(item => item.id === shop1Printer.id));
     assert.ok(payload.stations.some(item => item.id === shop1Station.id));
@@ -1593,9 +1601,11 @@ try {
     ];
     const visited = await navigateSections(shop2Page, sections, "shop-two");
     const accountMenu = shop2Page.getByRole("button", { name: /Account options for/ });
+    console.log("[QA-PROGRESS] shop-two account tools | Shop profile & branding");
     await accountMenu.click();
     await shop2Page.getByRole("button", { name: "Shop profile & branding" }).click();
     await shop2Page.locator(".settings-panel").waitFor({ state: "visible", timeout: 10000 });
+    console.log("[QA-PROGRESS] shop-two account tools | Trial & subscription");
     await accountMenu.click();
     await shop2Page.getByRole("button", { name: "Trial & subscription" }).click();
     await shop2Page.locator(".subscription-workspace").waitFor({ state: "visible", timeout: 10000 });
@@ -1606,7 +1616,12 @@ try {
       "/api/v1/shop/agent-devices", "/api/v1/shop/payment-settings",
       "/api/v1/shop/payments", "/api/v1/shop/refunds"
     ];
-    for (const path of paths) assertHttp(await request(shop2Page, "GET", path, { token: shop2Tokens.accessToken }), 200, "Shop two " + path);
+    for (let index = 0; index < paths.length; index++) {
+      const path = paths[index];
+      console.log("[QA-PROGRESS] shop-two API reads " + (index + 1) + "/" + paths.length + " | " + path + " | started");
+      assertHttp(await request(shop2Page, "GET", path, { token: shop2Tokens.accessToken }), 200, "Shop two " + path);
+      console.log("[QA-PROGRESS] shop-two API reads " + (index + 1) + "/" + paths.length + " | completed");
+    }
     const responsive = await runAuthenticatedResponsiveMatrix(
       shop2Page,
       sections,
