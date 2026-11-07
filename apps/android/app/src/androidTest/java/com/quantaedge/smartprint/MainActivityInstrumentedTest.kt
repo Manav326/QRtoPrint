@@ -161,20 +161,52 @@ class MainActivityInstrumentedTest {
     @Test
     fun shopWifiVerificationUsesBrandedBottomSheet() {
         ActivityScenario.launch(MainActivity::class.java).use { scenario ->
-            // ActivityScenario reaches RESUMED before Android necessarily grants its window focus.
-            // Let Espresso synchronize with the real activity window before opening the modal sheet.
-            onView(withId(android.R.id.content)).check(matches(isDisplayed()))
+            // Inspect the real BottomSheetDialog view tree directly. Espresso's RootViewPicker
+            // requires the emulator window to own focus, which is not guaranteed for a
+            // headless emulator even while ActivityScenario has the activity RESUMED.
+            val dialogReference = AtomicReference<com.google.android.material.bottomsheet.BottomSheetDialog>()
             scenario.onActivity { activity ->
-                MainActivity::class.java.getDeclaredMethod(
+                val dialog = MainActivity::class.java.getDeclaredMethod(
                     "showShopWifiVerificationResult", String::class.java, String::class.java, Boolean::class.javaPrimitiveType!!
                 ).apply { isAccessible = true }.invoke(
                     activity, "Shop Wi-Fi verified",
                     "This phone reached the shop computer over the selected network.", true
-                )
+                ) as com.google.android.material.bottomsheet.BottomSheetDialog
+                dialogReference.set(dialog)
             }
-            onView(withText("Shop Wi-Fi verified")).check(matches(isDisplayed()))
-            onView(withContentDescription("Wi-Fi verified")).check(matches(isDisplayed()))
-            onView(withText("Done")).perform(click())
+
+            val dialog = dialogReference.get()
+            assertNotNull("The Wi-Fi verification sheet must be created.", dialog)
+            assertTrue("The Wi-Fi verification sheet must be shown.", dialog.isShowing)
+            val root = dialog.window?.decorView
+            assertNotNull("The Wi-Fi verification sheet must have a window view.", root)
+
+            fun collectViews(view: View): List<View> {
+                val result = mutableListOf(view)
+                if (view is ViewGroup) {
+                    for (index in 0 until view.childCount) {
+                        result += collectViews(view.getChildAt(index))
+                    }
+                }
+                return result
+            }
+
+            val views = collectViews(root!!)
+            assertTrue(
+                "The sheet must show the verified title.",
+                views.any { it is android.widget.TextView && it.text.toString() == "Shop Wi-Fi verified" }
+            )
+            assertTrue("The sheet must show the verified Wi-Fi icon.", views.any {
+                it.contentDescription?.toString() == "Wi-Fi verified"
+            })
+            val done = views.firstOrNull {
+                it is android.widget.TextView && it.text.toString() == "Done"
+            }
+            assertNotNull("The sheet must include its Done action.", done)
+            androidx.test.platform.app.InstrumentationRegistry.getInstrumentation().runOnMainSync {
+                done!!.performClick()
+            }
+            assertTrue("The Done action must dismiss the verification sheet.", !dialog.isShowing)
         }
     }
 

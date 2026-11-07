@@ -2848,7 +2848,7 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun showShopWifiVerificationResult(title: String, detail: String, verified: Boolean) {
+    private fun showShopWifiVerificationResult(title: String, detail: String, verified: Boolean): BottomSheetDialog {
         val (dialog, root) = sheetRoot(title)
         val iconFrame = FrameLayout(this).apply { background = roundedDrawable(getColor(R.color.qp_soft), dp(22)) }
         val statusIcon = ImageView(this).apply {
@@ -2874,6 +2874,7 @@ class MainActivity : AppCompatActivity() {
         }, linearParams().apply { topMargin = dp(15) })
         dialog.setCancelable(true)
         dialog.show()
+        return dialog
     }
 
     private fun verifyShopPhoneConnection(link: LocalPhoneTestQrLink) {
