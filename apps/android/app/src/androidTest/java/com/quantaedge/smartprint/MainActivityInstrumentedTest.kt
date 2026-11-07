@@ -11,6 +11,8 @@ import android.webkit.WebViewClient
 import android.webkit.WebResourceResponse
 import android.webkit.WebResourceRequest
 import java.io.File
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicReference
 import androidx.test.core.app.ActivityScenario
 import androidx.test.core.app.ApplicationProvider
@@ -370,6 +372,7 @@ class MainActivityInstrumentedTest {
 
         val stationUrl = BuildConfig.SERVICE_BASE_URL.trimEnd('/') + "/s/" + "Q".repeat(32)
         val stationHost = Uri.parse(stationUrl).host.orEmpty()
+        val pageLoaded = CountDownLatch(1)
 
         try {
             ActivityScenario.launch(MainActivity::class.java).use { scenario ->
@@ -393,6 +396,10 @@ class MainActivityInstrumentedTest {
                                 ByteArrayInputStream(html.toByteArray(Charsets.UTF_8))
                             )
                         }
+
+                        override fun onPageFinished(view: WebView, url: String) {
+                            if (url == stationUrl) pageLoaded.countDown()
+                        }
                     }
 
                     MainActivity::class.java.getDeclaredMethod(
@@ -401,7 +408,17 @@ class MainActivityInstrumentedTest {
                         QrScanPurpose::class.java
                     ).apply { isAccessible = true }
                         .invoke(activity, stationUrl, QrScanPurpose.SHOP_CONNECTION)
+                }
 
+                assertTrue(
+                    "The accepted station URL must finish loading in the SmartPrint WebView.",
+                    pageLoaded.await(10, TimeUnit.SECONDS)
+                )
+
+                scenario.onActivity { activity ->
+                    val webView = MainActivity::class.java.getDeclaredMethod("ensureWebView")
+                        .apply { isAccessible = true }
+                        .invoke(activity) as WebView
                     val savedUrl = MainActivity::class.java.getDeclaredField("portalUrl")
                         .apply { isAccessible = true }
                         .get(activity) as? String
@@ -419,7 +436,11 @@ class MainActivityInstrumentedTest {
                         stationUrl,
                         webView.url
                     )
-                    assertEquals("The URL ends at the public station code.", "Q".repeat(32), Uri.parse(webView.url).lastPathSegment)
+                    assertEquals(
+                        "The URL ends at the public station code.",
+                        "Q".repeat(32),
+                        Uri.parse(webView.url).lastPathSegment
+                    )
                     assertTrue(
                         "The public station URL must not contain a customer session secret.",
                         !webView.url.orEmpty().contains("sessionToken", ignoreCase = true)
@@ -441,7 +462,6 @@ class MainActivityInstrumentedTest {
             editor.commit()
         }
     }
-
     @Test
     fun launcherIntentOpensMainActivityAndInflatesSmartPrintShell() {
         val context = ApplicationProvider.getApplicationContext<Context>()

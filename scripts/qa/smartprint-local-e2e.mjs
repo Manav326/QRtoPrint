@@ -63,7 +63,8 @@ const report = {
   },
   checks: [],
   warnings: [],
-  errors: []
+  errors: [],
+  caseMappingErrors: []
 };
 
 let browser;
@@ -83,7 +84,7 @@ let adminPage;
 let customerPage;
 let guestCustomerPage;
 let guestCustomerSession;
-let guestCustomerSessionCount = 0;
+
 let shop1Tokens;
 let shop2Tokens;
 let adminTokens;
@@ -183,9 +184,34 @@ const PLANNED_CASE_IDS = [
 ];
 
 const recordStatuses = new Map();
+const recordCaseIdOwners = new Map();
+const plannedCaseIdSet = new Set(PLANNED_CASE_IDS);
 
 async function record(name, action, caseIds = CASE_IDS_BY_RECORD_NAME.get(name) ?? []) {
   const started = Date.now();
+  const checkId = "SP-LOCAL-" + String(report.checks.length + 1).padStart(3, "0");
+  const seenInThisRecord = new Set();
+  const duplicateCaseIds = [];
+  const unplannedCaseIds = [];
+  for (const caseId of caseIds) {
+    if (seenInThisRecord.has(caseId) || recordCaseIdOwners.has(caseId)) {
+      duplicateCaseIds.push(caseId);
+    } else {
+      recordCaseIdOwners.set(caseId, { checkId, name });
+    }
+    seenInThisRecord.add(caseId);
+    if (!plannedCaseIdSet.has(caseId)) unplannedCaseIds.push(caseId);
+  }
+  if (duplicateCaseIds.length > 0 || unplannedCaseIds.length > 0) {
+    const mappingError = {
+      checkId,
+      name,
+      duplicateCaseIds: [...new Set(duplicateCaseIds)],
+      unplannedCaseIds: [...new Set(unplannedCaseIds)]
+    };
+    report.caseMappingErrors.push(mappingError);
+    console.error("CASE MAPPING ERROR " + name + ": " + JSON.stringify(mappingError));
+  }
   const blockedBy = getBlockingPrerequisites(name, recordStatuses);
   if (blockedBy.length > 0) {
     const details = {
@@ -194,7 +220,7 @@ async function record(name, action, caseIds = CASE_IDS_BY_RECORD_NAME.get(name) 
       blockedBy
     };
     report.checks.push({
-      id: "SP-LOCAL-" + String(report.checks.length + 1).padStart(3, "0"),
+      id: checkId,
       name,
       caseIds,
       status: "SKIPPED",
@@ -212,7 +238,7 @@ async function record(name, action, caseIds = CASE_IDS_BY_RECORD_NAME.get(name) 
     if (status === "WARN") report.warnings.push({ name, message: details.warning });
     recordStatuses.set(name, status);
     report.checks.push({
-      id: "SP-LOCAL-" + String(report.checks.length + 1).padStart(3, "0"),
+      id: checkId,
       name,
       caseIds,
       status,
@@ -224,7 +250,7 @@ async function record(name, action, caseIds = CASE_IDS_BY_RECORD_NAME.get(name) 
   } catch (error) {
     const message = String(error instanceof Error ? error.message : error).slice(0, 1600);
     report.checks.push({
-      id: "SP-LOCAL-" + String(report.checks.length + 1).padStart(3, "0"),
+      id: checkId,
       name,
       caseIds,
       status: "FAIL",
@@ -1669,8 +1695,8 @@ try {
       token: shop1Tokens.accessToken
     }), 200, "Shop customer directory after guest station entry");
     const customerAfter = customersAfter.items.find(item => item.displayName === process.env.SMARTPRINT_QA_CUSTOMER_NAME);
-    guestCustomerSessionCount = customerAfter?.sessionCount ?? 0;
-    assert.equal(guestCustomerSessionCount, sessionCountBefore,
+    const sessionCountAfter = customerAfter?.sessionCount ?? 0;
+    assert.equal(sessionCountAfter, sessionCountBefore,
       "A guest session without an Authorization header must not bind to or increment the global customer's shop session count.");
 
     guestCustomerSession = { sessionToken, publicCode, stationPath, id: session.id, shopName: session.shop.displayName };
@@ -1681,13 +1707,22 @@ try {
       sessionStoredInTabSessionStorage: true,
       tokenInUrl: false,
       globalCustomerSessionCountBefore: sessionCountBefore,
-      globalCustomerSessionCountAfter: guestCustomerSessionCount,
+      globalCustomerSessionCountAfter: sessionCountAfter,
       shopName: session.shop.displayName
     };
   });
 
   await record("Customer opens the shop-one station with authenticated customer identity", async () => {
     customerPage = await context.newPage();
+    const customerQuery = "/api/v1/shop/customers?search=" +
+      encodeURIComponent(process.env.SMARTPRINT_QA_CUSTOMER_EMAIL) + "&page=1&pageSize=50";
+    const customersBefore = assertHttp(await request(shop1Page, "GET", customerQuery, {
+      token: shop1Tokens.accessToken
+    }), 200, "Shop customer directory before authenticated station entry");
+    const customerBefore = customersBefore.items.find(item =>
+      item.displayName === process.env.SMARTPRINT_QA_CUSTOMER_NAME
+    );
+    const sessionCountBefore = customerBefore?.sessionCount ?? 0;
     let observedAuthorizationHeader = null;
     await customerPage.route("**/api/v1/public/stations/**/sessions", async route => {
       const headers = { ...route.request().headers(), authorization: "Bearer " + customerTokens.accessToken };
@@ -1714,14 +1749,14 @@ try {
     }), 200, "Authenticated customer current station session");
     assert.equal(session.shop.displayName, process.env.SMARTPRINT_QA_SHOP1_NAME);
 
-    const customerQuery = "/api/v1/shop/customers?search=" +
-      encodeURIComponent(process.env.SMARTPRINT_QA_CUSTOMER_EMAIL) + "&page=1&pageSize=50";
     const customersAfter = assertHttp(await request(shop1Page, "GET", customerQuery, {
       token: shop1Tokens.accessToken
     }), 200, "Shop customer directory after authenticated station entry");
-    const customerAfter = customersAfter.items.find(item => item.displayName === process.env.SMARTPRINT_QA_CUSTOMER_NAME);
+    const customerAfter = customersAfter.items.find(item =>
+      item.displayName === process.env.SMARTPRINT_QA_CUSTOMER_NAME
+    );
     assert.ok(customerAfter, "The authenticated station session must appear in the shop customer directory.");
-    assert.equal(customerAfter.sessionCount, guestCustomerSessionCount + 1,
+    assert.equal(customerAfter.sessionCount, sessionCountBefore + 1,
       "The authenticated station session must bind exactly once to the global customer account.");
 
     customerSession = { sessionToken, publicCode, stationPath, id: session.id, shopName: session.shop.displayName };
@@ -3131,17 +3166,33 @@ try {
 } finally {
   report.finishedUtc = new Date().toISOString();
   const caseResults = new Map();
+  const caseOwners = new Map();
+  const duplicateCaseIds = new Set();
+  const unplannedCaseIds = new Set();
   for (const check of report.checks) {
-    // Case IDs are grouped under a record. If that record aborts on an assertion,
-    // the runner cannot prove every grouped case completed, so do not award them
-    // completion coverage. This is intentionally conservative.
+    // Failed/uncertain checks cannot earn coverage. Duplicate assignments
+    // are incomplete; unplanned IDs are reported and fail the coverage gate.
     const caseStatus = check.status === "FAIL" || check.status === "WARN"
       ? "INCOMPLETE"
       : check.status;
     for (const caseId of check.caseIds || []) {
-      caseResults.set(caseId, caseStatus);
+      if (caseOwners.has(caseId)) duplicateCaseIds.add(caseId);
+      else caseOwners.set(caseId, check.id);
+      if (!plannedCaseIdSet.has(caseId)) unplannedCaseIds.add(caseId);
+      const previousStatus = caseResults.get(caseId);
+      if (previousStatus === "INCOMPLETE" || caseStatus === "INCOMPLETE") {
+        caseResults.set(caseId, "INCOMPLETE");
+      } else if (previousStatus === "SKIPPED" || caseStatus === "SKIPPED") {
+        caseResults.set(caseId, "SKIPPED");
+      } else {
+        caseResults.set(caseId, caseStatus);
+      }
     }
   }
+  for (const caseId of duplicateCaseIds) {
+    if (caseResults.has(caseId)) caseResults.set(caseId, "INCOMPLETE");
+  }
+  for (const caseId of unplannedCaseIds) caseResults.set(caseId, "INCOMPLETE");
   const passedCases = [...caseResults.values()].filter(status => status === "PASS").length;
   const incompleteCases = [...caseResults.values()].filter(status => status === "INCOMPLETE").length;
   const skippedCases = [...caseResults.values()].filter(status => status === "SKIPPED").length;
@@ -3156,11 +3207,20 @@ try {
     coveragePercent: caseExecutionCoveragePercent,
     caseExecutionCoveragePercent,
     casePassPercent,
-    allPlannedCasesPassed: caseResults.size === PLANNED_CASE_IDS.length && passedCases === PLANNED_CASE_IDS.length,
+    allPlannedCasesPassed: caseResults.size === PLANNED_CASE_IDS.length &&
+      passedCases === PLANNED_CASE_IDS.length &&
+      duplicateCaseIds.size === 0 &&
+      unplannedCaseIds.size === 0,
     coverageGatePassed: caseResults.size === PLANNED_CASE_IDS.length &&
       passedCases === PLANNED_CASE_IDS.length &&
       incompleteCases === 0 &&
-      skippedCases === 0,
+      skippedCases === 0 &&
+      duplicateCaseIds.size === 0 &&
+      unplannedCaseIds.size === 0 &&
+      report.caseMappingErrors.length === 0,
+    duplicateCaseIds: [...duplicateCaseIds].sort(),
+    unplannedCaseIds: [...unplannedCaseIds].sort(),
+    caseMappingErrors: report.caseMappingErrors.length,
     passedCases,
     incompleteCases,
     skippedCases,
@@ -3183,6 +3243,9 @@ try {
     coverageGatePassed: report.caseCoverage.coverageGatePassed,
     passedCases: report.caseCoverage.passedCases,
     incompleteCases: report.caseCoverage.incompleteCases,
+    duplicateCaseIds: report.caseCoverage.duplicateCaseIds,
+    unplannedCaseIds: report.caseCoverage.unplannedCaseIds,
+    caseMappingErrors: report.caseCoverage.caseMappingErrors,
     missingCases: report.caseCoverage.missingCases
   };
   writeFileSync(join(outputDirectory, "report.json"), JSON.stringify(report, null, 2) + "\n");
@@ -3209,4 +3272,4 @@ try {
   await browser?.close().catch(() => {});
 }
 
-if (report.summary.failed > 0 || !report.caseCoverage.coverageGatePassed) process.exitCode = 1;
+if (report.summary.failed > 0 || !report.caseCoverage.coverageGatePassed || report.caseCoverage.caseMappingErrors > 0) process.exitCode = 1;
