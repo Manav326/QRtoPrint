@@ -24,7 +24,6 @@ public sealed class TenantAccessRulesTests
     [InlineData("Pending", false)]
     public void RequiresAnExactActiveStatusIgnoringOnlyLetterCase(string? status, bool expected)
         => Assert.Equal(expected, TenantAccessRules.IsActive(status));
-}
 
     [Theory]
     [InlineData("GET", "/api/v1/shop/profile", true, false)]
@@ -39,3 +38,4 @@ public sealed class TenantAccessRulesTests
     public void SuspendedShopRecoveryReadsExcludeTheShopProfile(
         string method, string path, bool shopWorkspace, bool expected)
         => Assert.Equal(expected, TenantAccessRules.IsReadRecoveryOperation(method, path, shopWorkspace));
+}
