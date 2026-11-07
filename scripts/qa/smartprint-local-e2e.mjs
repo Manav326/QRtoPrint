@@ -907,8 +907,15 @@ async function setupShopResources(page, tokens, shopLabel, onResourcesReady = ()
     await input.waitFor({ state: "visible", timeout: 10000 });
     assert.equal(await input.count(), 1,
       shopLabel + " expected exactly one #" + pricingInput.id + " pricing input.");
+    assert.equal(await input.getAttribute("aria-label"), pricingInput.label,
+      shopLabel + " #" + pricingInput.id + " has an unexpected explicit accessible name.");
     assert.equal(await pricingPanel.getByLabel(pricingInput.label, { exact: true }).count(), 1,
-      shopLabel + " #" + pricingInput.id + " is missing its associated accessible label.");
+      shopLabel + " #" + pricingInput.id + " is missing its accessible label.");
+    const hasNativeLabel = await input.evaluate(element =>
+      Array.from(element.labels || []).some(label => label.htmlFor === element.id)
+    );
+    assert.equal(hasNativeLabel, true,
+      shopLabel + " #" + pricingInput.id + " is missing its native label[for] association.");
     await input.fill(pricingInput.value);
   }
   await page.getByRole("button", { name: "Save print prices" }).click();
