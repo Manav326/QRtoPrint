@@ -912,6 +912,8 @@ async function exercisePhotoStudioFeatureMatrix() {
     await dialog.getByRole("button", { name: "Crop", exact: true }).click();
     let pixels = await readPhotoCanvasPixels(page);
     await setPhotoRange(dialog, "Zoom", 3);
+    assert.equal(await dialog.getByText(/This crop may look soft at the selected size/).count(), 1,
+      "Resolution warning must account for the zoomed crop, not just the original image dimensions.");
     await setPhotoRange(dialog, "Horizontal position", 100);
     await setPhotoRange(dialog, "Vertical position", 0);
     const zoomed = await readPhotoCanvasPixels(page);
@@ -1015,7 +1017,22 @@ async function exercisePhotoStudioFeatureMatrix() {
       "Disabling captions from Text must return to the Sheet tool.");
     assert.equal(await dialog.getByLabel("Name for form (optional)").count(), 0,
       "Turning captions off must clear the sensitive name/DOB inputs.");
+
+    // Enabling captions can reduce automatic capacity. A now-invalid manual density must return to Auto.
+    const sizeForDensity = dialog.getByLabel("Photo size");
+    const densityForDensity = dialog.getByLabel("Photos per A4 page");
+    await sizeForDensity.selectOption("25x35");
+    await densityForDensity.selectOption("49");
+    assert.equal(await densityForDensity.inputValue(), "49");
     await captionToggle.check();
+    await dialog.getByLabel("Name for form (optional)").fill("QA");
+    await page.waitForFunction(() => {
+      const row = Array.from(document.querySelectorAll("[class*='sheetSummary'] > div"))
+        .find(element => element.textContent?.includes("Photos per A4 page"));
+      return row?.querySelector("strong")?.textContent === "42";
+    });
+    assert.equal(await densityForDensity.inputValue(), "auto",
+      "The 49-up layout must return to Auto when captions reduce 25x35 capacity to 42.");
     await dialog.getByLabel("Name for form (optional)").fill("Photo Studio QA");
     await dialog.getByLabel("Date of birth (optional)").fill("2000-01-02");
     await dialog.getByRole("button", { name: "Text", exact: true }).click();
@@ -1057,6 +1074,8 @@ async function exercisePhotoStudioFeatureMatrix() {
     await count.fill("101");
     await count.blur();
     assert.equal(await count.inputValue(),"100");
+    assert.equal(await readSummary("A4 pages in this job"), "4",
+      "100 photos at 25 per A4 page must produce four sheets.");
     await count.fill("0");
     await count.blur();
     assert.equal(await count.inputValue(),"1");
