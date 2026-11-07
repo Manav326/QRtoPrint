@@ -327,15 +327,17 @@ try {
 
         $composeProjectName = "qrtoprint-local"
         $composeBaseArgs = @("compose", "--project-name", $composeProjectName, "--env-file", $envPath, "-f", $composeFile)
+        $composeConfigArgs = $composeBaseArgs + @("config", "--quiet")
         $configOk = Invoke-QAStep -Name "Validate existing local Compose configuration" -LogName "compose-config.log" -Action {
-            & $docker.Source @($composeBaseArgs + @("config", "--quiet"))
+            & $docker.Source @composeConfigArgs
         }
         if (-not $configOk) { throw "Existing local Compose configuration is invalid." }
 
         & $docker.Source network inspect "cloudflare-edge" *> $null
         if ($LASTEXITCODE -ne 0) { throw "The existing shared cloudflare-edge Docker network is unavailable. E2E-only mode will not create or replace it." }
 
-        $dbContainerIdBefore = ((& $docker.Source @($composeBaseArgs + @("ps", "-q", "db"))) -join "").Trim()
+        $dbListArgs = $composeBaseArgs + @("ps", "-q", "db")
+        $dbContainerIdBefore = (& $docker.Source @dbListArgs | Out-String).Trim()
         if (-not $dbContainerIdBefore) { throw "The existing qrtoprint-local PostgreSQL container was not found. E2E-only mode will not create a database." }
         $dbStateBefore = (& $docker.Source inspect --format "{{.State.Status}}" $dbContainerIdBefore).Trim()
         if ($LASTEXITCODE -ne 0 -or $dbStateBefore -ne "running") {
@@ -343,21 +345,24 @@ try {
         }
 
         foreach ($service in @("api", "portal")) {
-            $containerId = ((& $docker.Source @($composeBaseArgs + @("ps", "-q", $service))) -join "").Trim()
+            $serviceListArgs = $composeBaseArgs + @("ps", "-q", $service)
+            $containerId = (& $docker.Source @serviceListArgs | Out-String).Trim()
             if (-not $containerId) { throw "The existing $service container was not found. E2E-only mode will not create missing stack services." }
         }
 
+        $buildArgs = $composeBaseArgs + @("build", "api", "portal")
         $buildOk = Invoke-QAStep -Name "Build only SmartPrint API and Portal images" -LogName "targeted-app-image-build.log" -Action {
-            & $docker.Source @($composeBaseArgs + @("build", "api", "portal"))
+            & $docker.Source @buildArgs
         }
         if (-not $buildOk) { throw "The targeted API/Portal image build failed. Existing containers and PostgreSQL were not replaced." }
 
+        $refreshArgs = $composeBaseArgs + @("up", "-d", "--no-deps", "api", "portal")
         $refreshOk = Invoke-QAStep -Name "Refresh only API and Portal containers (no dependencies, no orphan removal)" -LogName "targeted-app-refresh.log" -Action {
-            & $docker.Source @($composeBaseArgs + @("up", "-d", "--no-deps", "api", "portal"))
+            & $docker.Source @refreshArgs
         }
         if (-not $refreshOk) { throw "API/Portal refresh failed. PostgreSQL was excluded from the Compose up operation." }
 
-        $dbContainerIdAfter = ((& $docker.Source @($composeBaseArgs + @("ps", "-q", "db"))) -join "").Trim()
+        $dbContainerIdAfter = (& $docker.Source @dbListArgs | Out-String).Trim()
         if ($dbContainerIdAfter -ne $dbContainerIdBefore) {
             throw "PostgreSQL container identity changed during the targeted refresh. Stop QA and inspect the existing database before proceeding."
         }
