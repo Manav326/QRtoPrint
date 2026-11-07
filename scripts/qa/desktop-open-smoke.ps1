@@ -81,7 +81,17 @@ try {
 
     $webSocket = [System.Net.WebSockets.ClientWebSocket]::new()
     $webSocket.Options.SetRequestHeader("Origin", "http://localhost")
-    $webSocket.ConnectAsync([Uri]$pageTarget.webSocketDebuggerUrl, [Threading.CancellationToken]::None).GetAwaiter().GetResult()
+    $connectTimeoutSeconds = 10
+    $connectCancellation = [Threading.CancellationTokenSource]::new([TimeSpan]::FromSeconds($connectTimeoutSeconds))
+    try {
+        $webSocket.ConnectAsync([Uri]$pageTarget.webSocketDebuggerUrl, $connectCancellation.Token).GetAwaiter().GetResult()
+    }
+    catch [System.OperationCanceledException] {
+        throw "WebView2 DevTools connection did not open within $connectTimeoutSeconds seconds."
+    }
+    finally {
+        $connectCancellation.Dispose()
+    }
 
     $probeExpression = @"
 new Promise(resolve => {
@@ -124,35 +134,63 @@ new Promise(resolve => {
     } | ConvertTo-Json -Depth 8 -Compress
 
     $payload = [Text.Encoding]::UTF8.GetBytes($command)
-    $webSocket.SendAsync([System.ArraySegment[byte]]::new($payload), [System.Net.WebSockets.WebSocketMessageType]::Text, $true, [Threading.CancellationToken]::None).GetAwaiter().GetResult()
+    $sendTimeoutSeconds = 10
+    $sendCancellation = [Threading.CancellationTokenSource]::new([TimeSpan]::FromSeconds($sendTimeoutSeconds))
+    try {
+        $webSocket.SendAsync(
+            [System.ArraySegment[byte]]::new($payload),
+            [System.Net.WebSockets.WebSocketMessageType]::Text,
+            $true,
+            $sendCancellation.Token
+        ).GetAwaiter().GetResult()
+    }
+    catch [System.OperationCanceledException] {
+        throw "WebView2 DevTools did not accept the startup probe within $sendTimeoutSeconds seconds."
+    }
+    finally {
+        $sendCancellation.Dispose()
+    }
 
     $responseText = [Text.StringBuilder]::new()
     $buffer = New-Object byte[] 8192
-    $responseDeadline = [DateTime]::UtcNow.AddSeconds(20)
+    $responseTimeoutSeconds = 20
+    $responseDeadline = [DateTime]::UtcNow.AddSeconds($responseTimeoutSeconds)
+    $receiveCancellation = [Threading.CancellationTokenSource]::new([TimeSpan]::FromSeconds($responseTimeoutSeconds))
     $probeResponse = $null
 
-    do {
-        $received = $webSocket.ReceiveAsync([System.ArraySegment[byte]]::new($buffer), [Threading.CancellationToken]::None).GetAwaiter().GetResult()
+    try {
+        do {
+            $received = $webSocket.ReceiveAsync(
+                [System.ArraySegment[byte]]::new($buffer),
+                $receiveCancellation.Token
+            ).GetAwaiter().GetResult()
 
-        if ($received.MessageType -eq [System.Net.WebSockets.WebSocketMessageType]::Close) {
-            throw "WebView2 closed its DevTools connection before returning the startup probe."
-        }
-
-        [void]$responseText.Append([Text.Encoding]::UTF8.GetString($buffer, 0, $received.Count))
-
-        if ($received.EndOfMessage) {
-            $message = $responseText.ToString() | ConvertFrom-Json -ErrorAction Stop
-            $responseText.Clear() | Out-Null
-
-            if ($message.id -eq 1) {
-                $probeResponse = $message
-                break
+            if ($received.MessageType -eq [System.Net.WebSockets.WebSocketMessageType]::Close) {
+                throw "WebView2 closed its DevTools connection before returning the startup probe."
             }
-        }
-    } while ([DateTime]::UtcNow -lt $responseDeadline)
+
+            [void]$responseText.Append([Text.Encoding]::UTF8.GetString($buffer, 0, $received.Count))
+
+            if ($received.EndOfMessage) {
+                $message = $responseText.ToString() | ConvertFrom-Json -ErrorAction Stop
+                $responseText.Clear() | Out-Null
+
+                if ($message.id -eq 1) {
+                    $probeResponse = $message
+                    break
+                }
+            }
+        } while ([DateTime]::UtcNow -lt $responseDeadline)
+    }
+    catch [System.OperationCanceledException] {
+        throw "WebView2 did not return the desktop frontend startup probe within $responseTimeoutSeconds seconds."
+    }
+    finally {
+        $receiveCancellation.Dispose()
+    }
 
     if (-not $probeResponse) {
-        throw "WebView2 did not return the desktop frontend startup probe."
+        throw "WebView2 did not return the desktop frontend startup probe within $responseTimeoutSeconds seconds."
     }
     if ($probeResponse.error) {
         throw "WebView2 startup probe failed: $($probeResponse.error.message)"
@@ -187,7 +225,17 @@ finally {
     if ($webSocket) {
         try {
             if ($webSocket.State -eq [System.Net.WebSockets.WebSocketState]::Open) {
-                $webSocket.CloseAsync([System.Net.WebSockets.WebSocketCloseStatus]::NormalClosure, "Smoke test complete", [Threading.CancellationToken]::None).GetAwaiter().GetResult()
+                $closeCancellation = [Threading.CancellationTokenSource]::new([TimeSpan]::FromSeconds(2))
+                try {
+                    $webSocket.CloseAsync(
+                        [System.Net.WebSockets.WebSocketCloseStatus]::NormalClosure,
+                        "Smoke test complete",
+                        $closeCancellation.Token
+                    ).GetAwaiter().GetResult()
+                }
+                finally {
+                    $closeCancellation.Dispose()
+                }
             }
         }
         catch { }
