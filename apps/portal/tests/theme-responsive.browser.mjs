@@ -960,7 +960,7 @@ async function exercisePhotoStudioFeatureMatrix() {
     await dialog.getByRole("button", { name: "Zoom in" }).click();
     assert.equal(await dialog.getByText("1.1×", { exact: true }).innerText(), "1.1×");
     await dialog.getByRole("button", { name: "Zoom out" }).click();
-    assert.equal(await dialog.getByText("1.1×", { exact: true }).innerText(), "1.0×");
+    assert.equal(await dialog.getByText("1.0×", { exact: true }).innerText(), "1.0×");
 
     // Edge-only sampled background replacement. A blank A4 margin must not be sampleable.
     await dialog.getByRole("button", { name: "Background", exact: true }).click();
