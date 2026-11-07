@@ -32,6 +32,7 @@ jobs:
               per_page: 100,
             });
             let tag = tags.find(({ name }) => /^v\d+\.\d+\.\d+$/.test(name))?.name;
+            let createdTag = false;
             if (!tag) {
               const gradleFile = fs.readFileSync("apps/android/app/build.gradle.kts", "utf8");
               const match = gradleFile.match(
@@ -50,13 +51,22 @@ jobs:
                   ref: `refs/tags/${tag}`,
                   sha: context.sha,
                 });
-                core.notice(`Created ${tag} at ${context.sha}.`);
+                createdTag = true;
+                core.notice(`Created ${tag} at ${context.sha}; its tag-push event will trigger the release workflow.`);
               } catch (error) {
                 if (error.status !== 422) throw error;
                 core.notice(`Tag ${tag} already exists; leaving the existing tag untouched.`);
               }
             } else {
               core.notice(`Found existing stable tag ${tag}; checking whether its release still needs publishing.`);
+            }
+
+            if (createdTag) {
+              // Creating the tag already emits a push event that starts release.yml.
+              // A workflow_dispatch here would race the tag-triggered release and both
+              // runs would attempt to publish the same immutable version.
+              core.notice(`Tag ${tag} was just created; skipping duplicate workflow dispatch.`);
+              return;
             }
 
             try {
