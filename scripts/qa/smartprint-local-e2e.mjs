@@ -2283,15 +2283,19 @@ try {
       await photoCount.fill("3");
       await photoCount.blur();
       assert.equal(await photoCount.inputValue(), "3");
+      await studio.getByLabel("Photos per A4 page").selectOption("2");
       // PhotoStudio.module.css is a CSS Module: its class names are hashed at build time.
       // Assert the visible summary rows through their user-facing labels instead of
       // querying the source-only ".sheetSummary" class name.
       const photoDimensionsRow = studio.getByText("Photo dimensions", { exact: true }).locator("xpath=..");
       const pageCountRow = studio.getByText("A4 pages in this job", { exact: true }).locator("xpath=..");
+      const photosPerPageRow = studio.getByText("Photos per A4 page", { exact: true }).locator("xpath=..");
       assert.equal(await photoDimensionsRow.locator("strong").innerText(), "25 × 35 mm",
         "The selected photo dimensions must be reflected in the sheet summary.");
-      assert.equal(await pageCountRow.locator("strong").innerText(), "1",
-        "Three selected photos must fit on one A4 sheet.");
+      assert.equal(await photosPerPageRow.locator("strong").innerText(), "2",
+        "Manual density must be reflected in the sheet summary.");
+      assert.equal(await pageCountRow.locator("strong").innerText(), "2",
+        "Three selected photos at two per page must generate exactly two A4 pages.");
 
       await studio.getByRole("button", { name: "Prepare A4 sheet" }).click();
       await studio.waitFor({ state: "detached", timeout: 60000 });
@@ -2302,6 +2306,17 @@ try {
       const preparedPreview = photoPage.locator(".customer-edited-photo-preview");
       await preparedPreview.waitFor({ state: "visible", timeout: 15000 });
       await screenshot(photoPage, "customer-photo-studio-prepared-sheet");
+      const pdfEvidence = JSON.parse(await photoPage.locator("#photo-studio-result").innerText());
+      assert.equal(pdfEvidence.photoCount, 3);
+      assert.equal(pdfEvidence.photosPerPage, 2);
+      assert.equal(pdfEvidence.pageCount, 2);
+      assert.equal(pdfEvidence.previewPageCount, 2);
+      assert.equal(pdfEvidence.mediaBoxCount, 2, "Every generated page must carry an exact A4 MediaBox.");
+      assert.deepEqual(pdfEvidence.pdfImageSizes, [[2480, 3508], [2480, 3508]], "Every page must embed the expected A4 raster size.");
+      assert.equal(pdfEvidence.fullPageImageTransforms, 2, "Every page raster must map to the complete A4 MediaBox.");
+      assert.equal(pdfEvidence.pixelProbes.length, 3, "All three requested photo tiles must be present exactly once.");
+      assert.ok(pdfEvidence.pixelProbes.every(probe => probe.rgb.some(channel => channel < 245)), "Each requested photo slot must contain non-white photo pixels.");
+      assert.ok(Array.isArray(pdfEvidence.finalUnusedSlotRgb) && pdfEvidence.finalUnusedSlotRgb.every(channel => channel > 245), "Unused slots on the partial final page must remain blank.");
       const preparedImages = await preparedPreview.locator("img").count();
       assert.ok(preparedImages >= 1, "Prepared A4 photo sheet preview was not rendered.");
 
