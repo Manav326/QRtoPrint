@@ -971,10 +971,10 @@ async function exercisePhotoStudioFeatureMatrix() {
     assert.equal(await dialog.getByText("Not selected", { exact: true }).count(), 1,
       "Clicking the A4 safe margin must not sample a colour.");
     assert.equal(await dialog.getByRole("button", { name: /Click the background in the preview/ }).count(), 1);
-    await clickAtMm(10,10);
+    await clickAtMm(13.5,10);
     assert.equal(await dialog.getByText("#D8E7F5", { exact: true }).count(), 1);
     await setPhotoInputValue(dialog.getByLabel("Replacement background"), "#f3f6fa");
-    const replacedBackground = await preview.evaluate(element => Array.from(element.getContext("2d").getImageData(20,20,1,1).data).slice(0,3));
+    const replacedBackground = await preview.evaluate(element => Array.from(element.getContext("2d").getImageData(27,20,1,1).data).slice(0,3));
     assert.deepEqual(replacedBackground, [243,246,250]);
     const retainedFace = await preview.evaluate(element => Array.from(element.getContext("2d").getImageData(51,47,1,1).data).slice(0,3));
     assert.ok(retainedFace[0] > 170 && retainedFace[1] > 130 && retainedFace[2] > 110,
