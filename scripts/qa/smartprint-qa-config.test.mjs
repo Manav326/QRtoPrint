@@ -259,5 +259,5 @@ test("Windows desktop CI injects WebView2 DevTools args through Tauri config rat
   assert.match(workflow, /prepare-desktop-smoke-config\.ps1/);
   assert.match(workflow, /tauri build --config "\$desktopSmokeConfig"/);
   assert.match(desktopSmokeScript, /webViewDevToolsPort/);
-  assert.doesNotMatch(desktopSmokeScript, /WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS/);
+  assert.doesNotMatch(desktopSmokeScript, /SetEnvironmentVariable\(\$environmentName/);
 });
