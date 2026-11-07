@@ -911,41 +911,97 @@ async function setupShopResources(page, tokens, shopLabel, onResourcesReady = ()
       shopLabel + " #" + pricingInput.id + " has an unexpected explicit accessible name.");
     assert.equal(await pricingPanel.getByLabel(pricingInput.label, { exact: true }).count(), 1,
       shopLabel + " #" + pricingInput.id + " is missing its accessible label.");
-    const hasNativeLabel = await input.evaluate(element =>
-      Array.from(element.labels || []).some(label => label.htmlFor === element.id)
-    );
-    assert.equal(hasNativeLabel, true,
-      shopLabel + " #" + pricingInput.id + " is missing its native label[for] association.");
+    const nativeLabelDetails = await input.evaluate(element => ({
+      id: element.id,
+      ariaLabel: element.getAttribute("aria-label"),
+      labels: Array.from(element.labels || []).map(label => ({
+        htmlFor: label.htmlFor,
+        text: (label.innerText || "").trim()
+      })),
+      enclosingLabel: element.closest("label")?.outerHTML ?? null,
+      outerHTML: element.outerHTML
+    }));
+    assert.ok(nativeLabelDetails.labels.some(label => label.htmlFor === nativeLabelDetails.id),
+      shopLabel + " #" + pricingInput.id + " is missing its native label[for] association. DOM: " +
+      JSON.stringify(nativeLabelDetails));
     await input.fill(pricingInput.value);
   }
+  const pricingSaveResponsePromise = page.waitForResponse(response => {
+    const request = response.request();
+    const url = new URL(response.url());
+    return url.origin === baseUrl.origin &&
+      url.pathname === "/api/v1/shop/pricing" &&
+      request.method() === "PUT";
+  }, { timeout: 20000 });
   await page.getByRole("button", { name: "Save print prices" }).click();
-  await page.getByText(/Rate card version/i).waitFor({ state: "visible", timeout: 15000 });
+  const pricingSaveResponse = await pricingSaveResponsePromise;
+  const pricingSaveBody = await pricingSaveResponse.json().catch(() => null);
+  assert.equal(pricingSaveResponse.status(), 200,
+    shopLabel + " pricing save must return HTTP 200. Body: " + JSON.stringify(pricingSaveBody));
+  assert.equal(pricingSaveBody?.isConfigured, true,
+    shopLabel + " pricing save response did not mark the rate card configured.");
+  for (const [field, expected] of Object.entries(pricingValues)) {
+    assert.equal(pricingSaveBody?.[field], expected,
+      shopLabel + " pricing save response did not persist " + field + ".");
+  }
+  await page.locator(".inline-success").filter({ hasText: "Print rate card saved." })
+    .waitFor({ state: "visible", timeout: 15000 });
 
   const pricing = assertHttp(await request(page, "GET", "/api/v1/shop/pricing", {
     token: tokens.accessToken
   }), 200, shopLabel + " persisted pricing");
-  assert.equal(pricing.isConfigured, true);
-  assert.equal(pricing.monoPerSideMinor, pricingValues.monoPerSideMinor);
-  assert.equal(pricing.colourPerSideMinor, pricingValues.colourPerSideMinor);
-  assert.equal(pricing.photo4x6Minor, pricingValues.photo4x6Minor);
+  assert.equal(pricing.isConfigured, true, shopLabel + " saved pricing read-back is not configured.");
+  assert.equal(pricing.monoPerSideMinor, pricingValues.monoPerSideMinor, shopLabel + " mono rate read-back differs.");
+  assert.equal(pricing.colourPerSideMinor, pricingValues.colourPerSideMinor, shopLabel + " colour rate read-back differs.");
+  assert.equal(pricing.photo4x6Minor, pricingValues.photo4x6Minor, shopLabel + " 4x6 photo rate read-back differs.");
 
   await clickShopSection(page, "Payments");
   const methodCards = page.locator(".payment-method-card");
-  await methodCards.nth(0).locator('input[type="checkbox"]').setChecked(true);
+  const setVisiblePaymentSwitch = async (card, inputId, enabled, description) => {
+    const input = card.locator("#" + inputId);
+    assert.equal(await input.count(), 1, shopLabel + " " + description + " switch ID is missing or duplicated.");
+    if (await input.isChecked() !== enabled) {
+      const visibleSwitch = card.locator("label.switch");
+      assert.equal(await visibleSwitch.count(), 1, shopLabel + " " + description + " visible switch is missing or duplicated.");
+      await visibleSwitch.click();
+    }
+    assert.equal(await input.isChecked(), enabled,
+      shopLabel + " " + description + " did not change through its visible switch.");
+  };
+  await setVisiblePaymentSwitch(methodCards.nth(0), "payment-upi-enabled", true, "UPI");
   await page.getByLabel("Shop UPI ID").fill("smartprintqa@upi");
   await page.getByLabel("Payee / business name").fill("SmartPrint Local QA");
-  await methodCards.nth(1).locator('input[type="checkbox"]').setChecked(true);
-  await methodCards.nth(2).locator('input[type="checkbox"]').setChecked(false);
+  await setVisiblePaymentSwitch(methodCards.nth(1), "payment-cash-enabled", true, "cash");
+  await setVisiblePaymentSwitch(methodCards.nth(2), "payment-instant-enabled", false, "instant payment");
+
+  const paymentSaveResponsePromise = page.waitForResponse(response => {
+    const request = response.request();
+    const url = new URL(response.url());
+    return url.origin === baseUrl.origin &&
+      url.pathname === "/api/v1/shop/payment-settings" &&
+      request.method() === "PUT";
+  }, { timeout: 20000 });
   await page.getByRole("button", { name: "Save payment methods" }).click();
+  const paymentSaveResponse = await paymentSaveResponsePromise;
+  const paymentSaveBody = await paymentSaveResponse.json().catch(() => null);
+  assert.equal(paymentSaveResponse.status(), 200,
+    shopLabel + " payment settings save must return HTTP 200. Body: " + JSON.stringify(paymentSaveBody));
+  assert.equal(paymentSaveBody?.upiEnabled, true, shopLabel + " save response did not enable UPI.");
+  assert.equal(paymentSaveBody?.upiId, "smartprintqa@upi", shopLabel + " save response returned the wrong UPI ID.");
+  assert.equal(paymentSaveBody?.payeeName, "SmartPrint Local QA", shopLabel + " save response returned the wrong payee.");
+  assert.equal(paymentSaveBody?.cashEnabled, true, shopLabel + " save response did not enable cash.");
+  assert.equal(paymentSaveBody?.instantPaymentEnabled, false, shopLabel + " instant payment must remain disabled.");
+  await page.locator(".inline-success").filter({ hasText: "Shop payment settings saved." })
+    .waitFor({ state: "visible", timeout: 15000 });
 
   const paymentSettings = assertHttp(await request(page, "GET", "/api/v1/shop/payment-settings", {
     token: tokens.accessToken
   }), 200, shopLabel + " persisted payment settings");
-  assert.equal(paymentSettings.upiEnabled, true);
-  assert.equal(paymentSettings.upiId, "smartprintqa@upi");
-  assert.equal(paymentSettings.payeeName, "SmartPrint Local QA");
-  assert.equal(paymentSettings.cashEnabled, true);
-  assert.equal(paymentSettings.instantPaymentEnabled, false);
+  assert.equal(paymentSettings.upiEnabled, true, shopLabel + " payment settings read-back did not enable UPI.");
+  assert.equal(paymentSettings.upiId, "smartprintqa@upi", shopLabel + " payment settings read-back returned the wrong UPI ID.");
+  assert.equal(paymentSettings.payeeName, "SmartPrint Local QA", shopLabel + " payment settings read-back returned the wrong payee.");
+  assert.equal(paymentSettings.cashEnabled, true, shopLabel + " payment settings read-back did not enable cash.");
+  assert.equal(paymentSettings.instantPaymentEnabled, false, shopLabel + " payment settings read-back unexpectedly enabled instant payment.");
 
   return {
     printer: {
