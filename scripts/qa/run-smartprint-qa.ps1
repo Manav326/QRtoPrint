@@ -1085,7 +1085,7 @@ try {
             if (-not $androidUnitTestsOk) { $exitCode = 1 }
 
             $androidBuildArgs = @(
-                "--no-daemon", "-p", "apps/android",
+                "--no-daemon", "--console=plain", "-p", "apps/android",
                 "-PsmartPrintServiceUrl=$androidEmulatorOrigin",
                 ":app:assembleDebug"
             )
@@ -1114,7 +1114,7 @@ try {
 
             if ($androidApkBuildOk -and $emulatorDevices.Count -eq 1 -and $connectedDevices.Count -eq 1) {
                 $instrumentationArgs = @(
-                    "--no-daemon", "-p", "apps/android",
+                    "--no-daemon", "--console=plain", "-p", "apps/android",
                     "-PsmartPrintServiceUrl=$androidEmulatorOrigin",
                     "--info", ":app:connectedDebugAndroidTest"
                 )
