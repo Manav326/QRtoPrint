@@ -123,7 +123,7 @@ test("a missing prerequisite is fail-closed", () => {
 
 
 const runnerSource = readFileSync(new URL("./smartprint-local-e2e.mjs", import.meta.url), "utf8");
-const runnerRecordNames = [...runnerSource.matchAll(/\\bawait\\s+record\\(\\s*"([^"]+)"/g)].map(match => match[1]);
+const runnerRecordNames = [...runnerSource.matchAll(/\bawait\s+record\(\s*"([^"]+)"/g)].map(match => match[1]);
 
 test("every E2E record has an explicit prerequisite or independence contract and dependencies run first", () => {
   const result = validateRecordPrerequisites(runnerRecordNames);
