@@ -921,6 +921,7 @@ export interface ShopPrintJob {
   printKind?: string;
   photoSizeCode?: string | null;
   photoCount?: number;
+  photosPerPage?: number | null;
   photoUnitPriceMinorSnapshot?: number;
   currency: string;
   quotedAmountMinor: number;
@@ -1445,6 +1446,7 @@ export interface CustomerJobStatus {
   printKind?: string;
   photoSizeCode?: string | null;
   photoCount?: number;
+  photosPerPage?: number | null;
   photoUnitPriceMinorSnapshot?: number;
   currency: string;
   quotedAmountMinor: number;
