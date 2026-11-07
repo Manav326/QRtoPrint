@@ -168,39 +168,74 @@ class PhotoStudioWebViewInstrumentedTest {
         value: Int
     ) {
         val label = JSONObject.quote(labelText)
-        val changed = evaluate(
+        val rectText = evaluate(
             scenario,
             """(() => {
               const dialog = document.querySelector('[role="dialog"]');
               const label = Array.from(dialog?.querySelectorAll('label') ?? [])
                 .find(item => item.textContent.trim().startsWith($label));
               const range = label?.querySelector('input[type="range"]');
-              if (!range) return false;
-              const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set;
-              setter.call(range, '$value');
-              range.dispatchEvent(new Event('input', { bubbles: true }));
-              range.dispatchEvent(new Event('change', { bubbles: true }));
-              range.blur();
-              return Number(range.value) === $value;
+              if (!range) return null;
+              const rect = range.getBoundingClientRect();
+              const min = Number(range.min || 0);
+              const max = Number(range.max || 100);
+              const current = Number(range.value);
+              const point = (v) => rect.left + (max === min ? 0.5 : (v - min) / (max - min)) * rect.width;
+              return JSON.stringify({
+                startX: point(current), endX: point($value),
+                y: rect.top + rect.height / 2,
+                min, max
+              });
             })()"""
         )
-        assertEquals("Could not set Photo Studio range: " + labelText, "true", changed)
+        val bounds = JSONObject(decodeJavascriptString(rectText))
+        val minimum = bounds.getDouble("min")
+        val maximum = bounds.getDouble("max")
+        require(value.toDouble() in minimum..maximum) {
+            "Photo Studio range value $value is outside $labelText bounds $minimum..$maximum."
+        }
+        scenario.onActivity { activity ->
+            val view = getWebView(activity)
+            val density = activity.resources.displayMetrics.density
+            val startX = (bounds.getDouble("startX") * density).toFloat().coerceIn(1f, (view.width - 2).toFloat())
+            val endX = (bounds.getDouble("endX") * density).toFloat().coerceIn(1f, (view.width - 2).toFloat())
+            val y = (bounds.getDouble("y") * density).toFloat().coerceIn(1f, (view.height - 2).toFloat())
+            val downTime = SystemClock.uptimeMillis()
+            val down = MotionEvent.obtain(downTime, downTime, MotionEvent.ACTION_DOWN, startX, y, 0)
+            try {
+                view.dispatchTouchEvent(down)
+                val steps = 8
+                for (step in 1..steps) {
+                    val x = startX + (endX - startX) * step / steps
+                    val move = MotionEvent.obtain(
+                        downTime, downTime + step * 25L, MotionEvent.ACTION_MOVE, x, y, 0
+                    )
+                    try { view.dispatchTouchEvent(move) } finally { move.recycle() }
+                }
+                val up = MotionEvent.obtain(
+                    downTime, downTime + (steps + 1) * 25L, MotionEvent.ACTION_UP, endX, y, 0
+                )
+                try { view.dispatchTouchEvent(up) } finally { up.recycle() }
+            } finally {
+                down.recycle()
+            }
+        }
+        waitFor(
+            scenario,
+            "(() => { const dialog = document.querySelector('[role=dialog]'); const label = Array.from(dialog?.querySelectorAll('label') ?? []).find(item => item.textContent.trim().startsWith($label)); return Number(label?.querySelector('input[type=range]')?.value) === $value; })()",
+            "$labelText range to reach $value through touch input"
+        )
     }
 
     private fun clickButton(scenario: ActivityScenario<MainActivity>, prefix: String) {
-        val text = JSONObject.quote(prefix)
-        val clicked = evaluate(
+        // Use a real Android MotionEvent against the native WebView for each visible tool/button.
+        tapButtonText(scenario, prefix)
+        waitFor(
             scenario,
-            """(() => {
-              const dialog = document.querySelector('[role="dialog"]');
-              const button = Array.from(dialog?.querySelectorAll('button') ?? [])
-                .find(item => item.innerText.trim().startsWith($text));
-              if (!button || button.disabled) return false;
-              button.click();
-              return true;
-            })()"""
+            "Array.from(document.querySelectorAll('[role=dialog] button')).some(button => button.innerText.trim().startsWith(" +
+                JSONObject.quote(prefix) + ") && document.activeElement === button)",
+            "Photo Studio button focus after touch: $prefix"
         )
-        assertEquals("Could not activate Photo Studio button: " + prefix, "true", clicked)
     }
 
     private fun isSecure(scenario: ActivityScenario<MainActivity>): Boolean {
