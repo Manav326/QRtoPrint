@@ -49,7 +49,7 @@ For routine test-harness changes, use the incremental runner instead of rebuildi
 .\scripts\qa\run-smartprint-qa.ps1 -E2EOnly -PullLatest
 ~~~
 
-The runner fetches the current checked-out branch from origin and fast-forwards only when the working tree is clean. It does not stash, reset, rebase, or discard local changes. It compares the files changed by that pull:
+The runner fetches the current checked-out branch from origin. If GitHub has newer commits, it requires a completely clean working tree and uses `git merge --ff-only`; it never stashes, resets, rebases, force-updates, or discards local changes. If the local commit already matches GitHub, it skips the merge and preserves local edits/untracked files. In that no-op case, tracked local QA/docs/test edits are allowed, but tracked application/runtime edits cause a safe refusal before any container operation so the run cannot silently test stale images. Untracked files are not modified. It compares the files changed by an actual pull:
 
 - Changes limited to scripts/qa/, test folders, docs/, .github/, or Markdown files: it reuses the running API, Portal, PostgreSQL and Agent. **No Docker image build and no container restart.** It also uses the already cached Playwright package/browser rather than installing them again.
 - Before Chromium starts, it syntax-checks every QA JavaScript module and runs the existing prerequisite/isolation and HTTP-audit regression tests with Node's built-in test runner. A failure stops before the live journey.
