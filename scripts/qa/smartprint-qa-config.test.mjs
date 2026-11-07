@@ -74,3 +74,10 @@ test('published Android app identity only accepts emulator serials', () => {
   assert.ok(!emulatorSerial.test('R58M123456A device'));
   assert.ok(!emulatorSerial.test('emulator-5554 offline'));
 });
+
+test('Compose local CORS fallback matches the central local origin', () => {
+  const compose = readFileSync(new URL('../../compose.local.yml', import.meta.url), 'utf8');
+  const localOrigin = new URL(config.origins.local).origin;
+  const expected = 'Cors__AllowedOrigins__2: "${SMARTPRINT_LOCAL_ORIGIN:-' + localOrigin + '}"';
+  assert.ok(compose.includes(expected), 'compose.local.yml CORS fallback must match scripts/qa/smartprint-qa.config.json');
+});

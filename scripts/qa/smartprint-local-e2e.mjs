@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, writeFileSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { executeIsolatedQaRecord, shouldFailQaRun } from "./local-e2e-record-runner.mjs";
@@ -7,10 +7,19 @@ import { getUnexpectedHttpResponses } from "./local-e2e-http-audit.mjs";
 
 const moduleDirectory = process.env.PLAYWRIGHT_MODULE_DIR;
 if (!moduleDirectory) throw new Error("PLAYWRIGHT_MODULE_DIR is required.");
-const baseUrl = new URL(process.env.SMARTPRINT_QA_BASE_URL || "http://127.0.0.1:3000");
-const allowedHosts = new Set(["127.0.0.1", "localhost"]);
-if (baseUrl.protocol !== "http:" || !allowedHosts.has(baseUrl.hostname) || baseUrl.port !== "3000" || baseUrl.pathname !== "/" || baseUrl.search || baseUrl.hash) {
-  throw new Error("The full E2E suite is restricted to the local SmartPrint portal at http://127.0.0.1:3000. It will not create QA data on production.");
+const qaConfig = JSON.parse(readFileSync(new URL("./smartprint-qa.config.json", import.meta.url), "utf8"));
+const configuredLocalUrl = new URL(qaConfig.origins.local);
+const allowedHosts = new Set(["127.0.0.1", "localhost", "[::1]"]);
+if (configuredLocalUrl.protocol !== "http:" || !allowedHosts.has(configuredLocalUrl.hostname) ||
+    configuredLocalUrl.pathname !== "/" || configuredLocalUrl.search || configuredLocalUrl.hash ||
+    configuredLocalUrl.username || configuredLocalUrl.password) {
+  throw new Error("The central SmartPrint local origin must be a plain loopback HTTP origin.");
+}
+const baseUrl = new URL(process.env.SMARTPRINT_QA_BASE_URL || configuredLocalUrl.origin);
+if (baseUrl.origin !== configuredLocalUrl.origin || baseUrl.pathname !== "/" ||
+    baseUrl.search || baseUrl.hash || baseUrl.username || baseUrl.password) {
+  throw new Error("The full E2E suite is restricted to the configured local SmartPrint portal at " +
+    configuredLocalUrl.origin + ". It will not create QA data on production.");
 }
 
 const requiredEnvironment = [

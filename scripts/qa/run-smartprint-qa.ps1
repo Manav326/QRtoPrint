@@ -746,13 +746,14 @@ try {
         $healthRouteStart = $apiProgram.IndexOf('app.MapGet("/health/live"')
         $healthRouteAnonymousMarker = $apiProgram.IndexOf('})).AllowAnonymous();', $healthRouteStart)
         $healthRouteIsAnonymous = $healthRouteStart -ge 0 -and $healthRouteAnonymousMarker -ge $healthRouteStart
-        $loopbackCorsIsAllowed = $localCompose.Contains('Cors__AllowedOrigins__2: "${SMARTPRINT_LOCAL_ORIGIN:-http://127.0.0.1:3000}"')
+        $expectedCorsOriginLine = 'Cors__AllowedOrigins__2: "${SMARTPRINT_LOCAL_ORIGIN:-' + $target + '}"'
+        $loopbackCorsIsAllowed = $localCompose.Contains($expectedCorsOriginLine)
         $portalUsesOfflineFonts = -not $publicLandingCss.Contains("fonts.googleapis.com") -and
             -not $publicLandingCss.Contains("fonts.gstatic.com")
         if (-not $healthRouteIsAnonymous -or -not $loopbackCorsIsAllowed -or -not $portalUsesOfflineFonts) {
-            throw "This checkout is missing the local health/CORS/offline-font fixes. No E2E browser test was started. Run 'git pull --ff-only origin main' and retry."
+            throw "This checkout is missing the local health/CORS/offline-font fixes or its CORS fallback does not match the central QA origin. No E2E browser test was started."
         }
-        Write-Host "Verified source preflight: anonymous API liveness, 127.0.0.1 CORS and no external Google Fonts."
+        Write-Host ("Verified source preflight: anonymous API liveness, " + $target + " CORS and no external Google Fonts.")
         if ($rootManifest.name -ne "smart-print" -or
             $portalManifest.name -ne "@smart-print/portal" -or
             $desktopManifest.name -ne "@smart-print/desktop" -or
