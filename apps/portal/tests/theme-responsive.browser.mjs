@@ -82,12 +82,20 @@ const routes = [
 ];
 
 async function waitForServer(child, url, label) {
+  const startedAt = Date.now();
+  console.log(`[QA-STEP-START] ${label} browser test server | waiting for ${url}`);
   for (let attempt = 0; attempt < 90; attempt += 1) {
+    if (attempt === 0 || (attempt + 1) % 15 === 0) {
+      console.log(`[QA-PROGRESS] ${label} server readiness | attempt=${attempt + 1}/90 | elapsed=${Math.round((Date.now() - startedAt) / 1000)}s`);
+    }
     if (child.spawnError) throw new Error(`${label} server could not be started: ${child.spawnError.message}`);
     if (child.exitCode !== null) throw new Error(`${label} server exited with code ${child.exitCode}.`);
     try {
       const response = await fetch(url);
-      if (response.ok) return;
+      if (response.ok) {
+        console.log(`[QA-STEP-END] ${label} server ready | HTTP ${response.status} | elapsed=${Math.round((Date.now() - startedAt) / 1000)}s`);
+        return;
+      }
     } catch {}
     await new Promise(resolve => setTimeout(resolve, 1000));
   }
@@ -679,7 +687,10 @@ async function exercisePhotoStudioBrowser() {
     { mode: "shop", theme: "dark", width: 1440, height: 1000 }
   ];
 
-  for (const item of cases) {
+  for (const [index, item] of cases.entries()) {
+    const caseName = `Photo Studio ${item.mode} / ${item.theme} / ${item.width}x${item.height}`;
+    const caseStartedAt = Date.now();
+    console.log(`[QA-CASE-START] ${index + 1}/${cases.length} | ${caseName} | opening editor and verifying layout, focus, page preview and PDF output`);
     const context = await browser.newContext({ viewport: { width: item.width, height: item.height } });
     const page = await context.newPage();
     await page.goto(
@@ -796,6 +807,7 @@ async function exercisePhotoStudioBrowser() {
       photosPerPage: output.photosPerPage,
       pdfPageCount: output.pageCount
     });
+    console.log(`[QA-CASE-END] PASS | elapsed=${((Date.now() - caseStartedAt) / 1000).toFixed(1)}s | ${caseName} | PDF pages=${output.pageCount} | bytes=${output.bytes}`);
   }
 }
 
@@ -812,13 +824,16 @@ async function assertThemeToggle(page) {
 }
 
 try {
+  console.log("[QA-STEP-START] Responsive browser QA | start isolated portal and Desktop Vite servers.");
   await Promise.all([
     waitForServer(server, baseUrl, "Portal"),
     waitForServer(desktopServer, desktopUrl, "Windows desktop frontend")
   ]);
   browser = await chromium.launch({ headless: true, args: ["--no-sandbox"] });
+  console.log("[QA-STEP-END] Chromium browser launched; isolated API fixtures are active and no live API is contacted.");
 
   // First-run theme, route continuity, refresh, and an auth-storage sign-out.
+  console.log("[QA-CASE-START] Appearance persistence | first-run light, dark persistence, route continuity and auth-storage separation.");
   {
     const context = await browser.newContext({ viewport: { width: 1440, height: 1000 } });
     const page = await context.newPage();
@@ -844,11 +859,18 @@ try {
     assert.equal(await page.locator("html").getAttribute("data-theme"), "dark");
     await context.close();
     results.push({ check: "default-light, dark persistence, route continuity, auth-storage separation", passed: true });
+    console.log("[QA-CASE-END] PASS | Appearance persistence and route continuity.");
   }
 
   // Real browser layout checks across the requested viewport matrix and both themes.
+  let routeMatrixIndex = 0;
+  const totalRouteMatrixCases = widths.length * routes.length;
   for (const viewport of widths) {
     for (const route of routes) {
+      routeMatrixIndex += 1;
+      const caseName = `Responsive route ${route.label} / ${viewport.label} / light + dark`;
+      const caseStartedAt = Date.now();
+      console.log(`[QA-CASE-START] ${routeMatrixIndex}/${totalRouteMatrixCases} | ${caseName} | checking overflow, contrast, navigation and screenshots`);
       const context = await browser.newContext({ viewport: { width: viewport.width, height: viewport.height } });
       const page = await preparePage(context, route);
       await page.goto(`${baseUrl}${route.path}`, { waitUntil: "domcontentloaded" });
@@ -877,14 +899,19 @@ try {
         passed: true
       });
       await context.close();
+      console.log(`[QA-CASE-END] PASS | elapsed=${((Date.now() - caseStartedAt) / 1000).toFixed(1)}s | ${caseName} | both themes/screenshots verified`);
     }
   }
 
   // Exercise the actual shared Photo Studio component on phone, tablet and desktop.
+  console.log("[QA-STEP-START] Photo Studio browser acceptance | six customer/shop and light/dark viewport combinations.");
   await exercisePhotoStudioBrowser();
+  console.log("[QA-STEP-END] Photo Studio browser acceptance | all configured cases completed.");
 
   // Exercise the Windows desktop webview at its declared minimum window size.
   {
+    console.log("[QA-CASE-START] Windows Desktop minimum viewport | 1000x680 | light/dark, navigation, contrast and persisted theme.");
+    const caseStartedAt = Date.now();
     const context = await browser.newContext({ viewport: { width: 1000, height: 680 } });
     const desktopRoute = { label: "windows-desktop", auth: "shop" };
     const page = await preparePage(context, desktopRoute);
@@ -925,10 +952,14 @@ try {
     await page.screenshot({ path: join(artifactDirectory, "windows-desktop-minimum-dark.png"), fullPage: true, animations: "disabled" });
     results.push({ check: "Windows desktop minimum 1000x680 light and dark", passed: true, lightWidth: lightDesktop.rootWidth, darkWidth: darkDesktop.rootWidth });
     await context.close();
+    console.log(`[QA-CASE-END] PASS | elapsed=${((Date.now() - caseStartedAt) / 1000).toFixed(1)}s | Windows Desktop minimum viewport`);
   }
 
   // Exercise the actual shop and admin sign-out controls after changing theme.
-  for (const route of routes.filter(item => item.auth)) {
+  for (const [index, route] of routes.filter(item => item.auth).entries()) {
+    const caseName = `${route.label} sign-out/sign-in and theme persistence`;
+    const caseStartedAt = Date.now();
+    console.log(`[QA-CASE-START] ${index + 1}/2 | ${caseName}`);
     const context = await browser.newContext({ viewport: { width: 1280, height: 900 } });
     const page = await preparePage(context, route);
     const signedInToken = route.auth === "admin" ? adminToken : shopToken;
@@ -967,9 +998,10 @@ try {
     assert.equal(await page.locator("html").getAttribute("data-theme"), "dark", `${route.label} refresh after sign-in must preserve Dark.`);
     results.push({ check: `${route.label} actual sign-out, sign-in and refresh preserve theme`, passed: true });
     await context.close();
+    console.log(`[QA-CASE-END] PASS | elapsed=${((Date.now() - caseStartedAt) / 1000).toFixed(1)}s | ${caseName}`);
   }
 
-  console.log(`SmartPrint responsive browser QA passed: ${results.length} checks.`);
+  console.log(`[QA-STEP-END] Responsive browser QA passed: ${results.length} checks.`);
   for (const result of results) console.log(JSON.stringify(result));
 } finally {
   if (browser) await browser.close();
