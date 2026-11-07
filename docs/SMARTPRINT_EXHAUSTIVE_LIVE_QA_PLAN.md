@@ -32,7 +32,7 @@ The runner:
 5. Creates or reuses four clearly labelled QA identities: two shop owners, one global customer and one platform administrator. Shop/customer registration uses the real app registration path; the platform administrator uses the existing protected one-time bootstrap command in the local API container. The bootstrap refuses to elevate a shop user.
 6. Stores generated passwords in .secrets/smartprint-qa/qa-accounts.dpapi.json, protected with Windows DPAPI for the current Windows user. Passwords are not printed, placed in test reports or committed to Git.
 7. Installs/locates the pinned Playwright package and Chromium in the npm cache.
-8. Validates the E2E JavaScript syntax and runs the headed Playwright-managed Chromium browser against the real local portal and API. It does not launch or fall back to the system-installed Microsoft Edge.
+8. Validates the E2E JavaScript syntax and runs the headed Playwright-managed Chromium browser against the real local portal and API. It does not launch or fall back to the system-installed Microsoft Edge. It then runs the separate synthetic-fixture visual suite `apps/portal/tests/theme-responsive.browser.mjs`, which covers responsive routes, light/dark layouts, the full shared customer/shop Photo Studio control and failure matrix, A4 PDF raster/pagination checks and the Windows Desktop WebView viewport. The fixture suite intercepts API calls with 503 responses; it creates no real customer data, job, payment, refund or physical print. Its portal/Desktop Vite servers use loopback ports 4173 and 1420, are started and stopped by that suite, and a busy port fails safely without stopping its existing owner.
 9. Runs the existing portal logic tests, API/.NET tests and Windows Agent tests when the corresponding SDKs are installed. The destructive PostgreSQL migration test is excluded from the local application database by leaving SMARTPRINT_TEST_POSTGRES unset.
 10. If the Microsoft Print to PDF virtual queue is installed, opts in to the Agent's real GDI spooler integration test. That test verifies the Windows virtual printer produced a PDF; it does not send paper to a physical printer.
 11. If system Gradle and the Android SDK are installed, runs Android JVM tests and builds a local-portal debug APK. If an Android emulator is already running, it also runs connected instrumentation tests. It never installs the APK on an attached physical phone.
@@ -68,7 +68,7 @@ For routine test-harness changes, use the incremental runner instead of rebuildi
 The runner fetches the current checked-out branch from origin. If GitHub has newer commits, it requires a completely clean working tree and uses `git merge --ff-only`; it never stashes, resets, rebases, force-updates, or discards local changes. If the local commit already matches GitHub, it skips the merge and preserves local edits/untracked files. In that no-op case, tracked local QA/docs/test edits are allowed, but tracked application/runtime edits cause a safe refusal before any container operation so the run cannot silently test stale images. Untracked files are not modified. It compares the files changed by an actual pull:
 
 - Changes limited to scripts/qa/, test folders, docs/, .github/, or Markdown files: it reuses the running API, Portal, PostgreSQL and Agent. **No Docker image build and no container restart.** It also uses the already cached Playwright package/browser rather than installing them again.
-- Before Chromium starts, it syntax-checks every QA JavaScript module and runs the existing prerequisite/isolation and HTTP-audit regression tests with Node's built-in test runner. A failure stops before the live journey.
+- Before Chromium starts, it syntax-checks every QA JavaScript module and runs the existing prerequisite/isolation and HTTP-audit regression tests with Node's built-in test runner. A failure stops before the live journey. After the real-data journey, it also runs the isolated synthetic-fixture visual/Photo Studio matrix on loopback ports 4173 and 1420; those servers are owned by the test process and existing listeners are never stopped.
 - Any other changed path is conservatively treated as application/runtime-affecting. Only the existing API and Portal services are built/refreshed; PostgreSQL and its data volume, QA identities and Agent remain untouched.
 - If the existing services are missing, stopped, or unhealthy in reuse mode, the runner stops with a diagnostic instead of recreating them.
 
@@ -103,7 +103,7 @@ These are isolated logic tests. They are reported separately from the real-data 
 
 ### Existing Playwright UI fixture suite
 
-apps/portal/tests/theme-responsive.browser.mjs remains available for UI component development and mock-fixture regression. It deliberately intercepts API calls; it is not executed by the exhaustive real-data runner and does not count as a real-data acceptance pass.
+apps/portal/tests/theme-responsive.browser.mjs runs as a separate fixture-based visual acceptance stage in both the full local runner and the incremental `-E2EOnly` runner. It deliberately intercepts API calls and uses synthetic photo fixtures; it is not counted among the 262 real-data acceptance cases or a real-data/shop/physical-print pass. Its evidence is saved under `artifacts/smartprint-qa/<run-id>/photo-studio-browser/`.
 
 ### Existing live-production smoke suite
 
