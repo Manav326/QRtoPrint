@@ -11,7 +11,7 @@ This is a supplement, not a replacement, for:
 - [Android physical-device acceptance](ANDROID_PHYSICAL_ACCEPTANCE.md) — physical camera, QR, shop-Wi-Fi and Windows-to-Android readiness workflow.
 - [Local native application QA](LOCAL_NATIVE_APP_QA.md) — local Windows Desktop build/smoke and side-by-side Android QA app execution.
 
-The 130 cases below add role-focused, cross-surface assertions for the newer Android customer account/document-studio workflows and for the actual Windows Desktop owner experience. They must be recorded independently. They are **not** counted as passed by the 262-case browser run or by a native build.
+The 131 cases below add role-focused, cross-surface assertions for the newer Android customer account/document-studio workflows and for the actual Windows Desktop owner experience. They must be recorded independently. They are **not** counted as passed by the 262-case browser run or by a native build.
 
 ## 1. Product and role contract
 
@@ -279,7 +279,7 @@ The current generator creates each A4 page as a 2480 × 3508 pixel JPEG (nominal
 
 For repeatable cutting, use one fixed A4 grid origin, fixed row/column coordinates, fixed gutters and fixed photo dimensions for **every page in the same order**. The last page should occupy the first N grid slots and leave all remaining slots blank. Do not move a partial last page or short row to a new centre position; that makes cutting coordinates change from sheet to sheet. If a different centred-last-page layout is intentionally desired, it must be an explicit, documented layout option with a separate preview and cutting workflow—not an invisible pagination side effect.
 
-**Implementation finding to resolve:** The getPhotoSheetLayout helper returns offsetYmm = 8, but drawPhotoSheetPage currently computes a new vertical centre from the number of populated rows on each page and does not use offsetYmm. It also centres a short row horizontally within the full content width. Therefore the existing helper-only assertions do not prove where pixels land in the generated PDF. This must be fixed or the physical-position specification deliberately changed before treating geometry as certified.
+**Implementation change now in this QA branch:** The renderer uses `getPhotoSheetPhotoPositions` for both live preview and PDF generation. That helper applies the same 8 mm top origin, fixed column slots and 3 mm gutters on every page; a partial final page fills the first slots and leaves the remaining cells blank. Background sampling uses the same positions. The raster uses separate horizontal and vertical pixel-per-millimetre scales so the exact-A4 image mapping does not introduce an avoidable aspect-ratio stretch. Physical ruler/caliper validation is still required before certification.
 
 | ID | Priority | Scenario and procedure | Expected result |
 |---|---:|---|---|
@@ -313,17 +313,18 @@ For repeatable cutting, use one fixed A4 grid origin, fixed row/column coordinat
 | PSHT-028 | P0 | Print to QA-PRINTER using PDF viewer/browser/Windows Desktop/Agent; test Actual size, Fit, Shrink oversized pages, borderless mode, driver margins and paper-size mismatch. | Supported print path explicitly selects intended A4 media and 100% scale; any Fit/Shrink/borderless scaling effect is detected and warned/blocked; exact tile dimensions are preserved in approved configuration. |
 | PSHT-029 | P0 | Select 4×6 inch size and inspect customer wording, PDF MediaBox, printer media selection and physical result. | UI clearly distinguishes a 4×6 inch photo tile placed on an A4 sheet (current design) from a PDF/page printed on 4×6 inch stock. No one should infer the latter unless a separate 4×6 page layout/output mode exists and is tested. |
 | PSHT-030 | P0 | Inspect dashed tile outlines/cut guides, 3 mm gutters, edge margins and colour in preview and physical print; cut several sample tiles using the intended shop process. | Guides are visible enough to cut accurately but do not intrude into photo area or alter measured photo size; margins/gutters remain safe for the designated cutter/printer. Record whether guides are printed trim marks or merely preview boundaries. |
+| PSHT-031 | P0 | Select the current 4×6 inch option and verify the displayed orientation, PDF crop/MediaBox, printer sheet and physical tile. Compare with a 6×4 landscape requirement before enabling it as an advertised option. | Current option is stated explicitly as a 4-inch-wide × 6-inch-high portrait tile on A4 paper. A landscape 6×4 tile is not implied or silently rotated; if landscape support is required, it gets an explicit orientation control, distinct preview and metadata/test coverage. |
 
 ### Geometry implementation review findings
 
 | Finding | Current source behaviour | Required decision / closure |
 |---|---|---|
-| Vertical position mismatch | Layout helper reports an 8 mm top origin; page renderer vertically centres populated rows and ignores the helper's offsetYmm. | Adopt fixed 8 mm origin as the recommended cutting-safe rule, or define another one explicitly; make preview, raster and PDF agree. |
-| Short-row alignment | Renderer centres short rows in the full grid width. | Prefer fixed cell slots for cut consistency; if centred rows are deliberate, document and show the different cut positions. |
-| Final partial page | Renderer vertically centres only the populated row count, moving photos compared with a full page. | Keep the same page grid and leave unused slots blank, unless the product explicitly offers a different layout mode. |
+| Vertical position | Renderer now uses the shared position helper's fixed 8 mm origin on all pages; preview and generated raster use the same coordinate source. | Unit regression added; still require generated-PDF raster inspection and physical measurement. |
+| Short-row alignment | Renderer now anchors short rows to the first grid columns and leaves unused cells blank. | Confirm cut positions with PDF raster inspection and a physical cutting trial. |
+| Final partial page | Renderer now uses the exact same slot coordinates as the corresponding first page; unfilled slots remain blank. | Regression compares partial-page coordinates; confirm real PDF output and physical sheets. |
 | Server composition trust | Current API validates size code, quantity, photos-per-page, PDF page count, file size and pricing, but does not inspect the raster PDF to verify every tile's dimensions/position/count. | Decide whether client-rendered sheets plus owner preview are the accepted trust model, or introduce server-side/PDF-geometry validation. Never describe page-count validation as physical-size proof. |
 | A4 versus 4×6 paper | All generated PDFs have A4 MediaBox; 4×6 refers to the photo tile, not page stock. | Keep labels explicit or build and certify separate 4×6-page output if that is promised. |
-| Physical scale | PDF geometry is exact in source, but printer drivers/viewers can apply Fit/Shrink and non-printable margins. | Maintain a named printer/driver/media/scale compatibility list with ruler-measured output and calibration evidence. |
+| Physical scale | Raster now uses independent X/Y scale factors mapped to the exact A4 PDF MediaBox; print dialogs/drivers can still apply Fit/Shrink or non-printable margins. | Maintain named printer/driver/media/scale compatibility and ruler-measured output evidence. |
 
 **Photo-print release gate:** No photo-printing feature is certified by the six browser Photo Studio tests alone. At minimum, all P0 PSHT cases must pass on each supported named printer/driver configuration, with actual PDF retained and physical measurements recorded. A generated PDF with the correct number of pages is not sufficient proof that the requested number of correctly sized, correctly positioned photos was physically printed.
 
@@ -336,7 +337,7 @@ For repeatable cutting, use one fixed A4 grid origin, fixed row/column coordinat
 A candidate is not accepted merely because CI is green or the automated local runner exits successfully.
 
 - Every P0 case in the master plan and this supplement must PASS on the candidate, or be a confirmed NOT APPLICABLE with written approval. BLOCKED, NOT RUN, FAIL and NOT IMPLEMENTED are not passes.
-- All 130 supplemental cases must have an explicit result. The native Windows Desktop cases must be run in the native window; Android physical cases must be run on real supported hardware for their hardware-dependent scenarios.
+- All 131 supplemental cases must have an explicit result. The native Windows Desktop cases must be run in the native window; Android physical cases must be run on real supported hardware for their hardware-dependent scenarios.
 - No unresolved P0 defect is permitted. P1 issues require correction/retest or an explicit, time-bound risk decision by the release authority.
 - No claims of complete manager/operator roles, email verification/recovery, live gateway payments/refunds, encrypted direct-LAN payloads, malware scanning, offline printing, universal printer support, signed release readiness or physical-device compatibility beyond the evidence actually collected.
 - Any test involving an actual physical print must use synthetic content and a specifically designated QA printer. Output confirmation must be based on observed output, never spooler acceptance alone.
