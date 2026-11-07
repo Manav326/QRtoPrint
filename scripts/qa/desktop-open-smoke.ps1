@@ -38,6 +38,7 @@ try {
     $deadline = [DateTime]::UtcNow.AddSeconds($StartupTimeoutSeconds)
     $pageTarget = $null
     $mainWindowReady = $false
+    $observedTargets = @()
 
     do {
         $process.Refresh()
@@ -52,13 +53,30 @@ try {
 
         try {
             $targets = @(Invoke-RestMethod -Uri "http://127.0.0.1:$debugPort/json/list" -TimeoutSec 2 -ErrorAction Stop)
-            $pageTarget = $targets |
+            $observedTargets = @($targets | ForEach-Object {
+                [PSCustomObject]@{
+                    type = $_.type
+                    title = $_.title
+                    url = $_.url
+                    hasDevToolsSocket = -not [string]::IsNullOrWhiteSpace($_.webSocketDebuggerUrl)
+                }
+            })
+            # The page target can be published before WebView2 has finished
+            # loading index.html and setting document.title. Attach to the app's
+            # page first; the Runtime.evaluate probe below remains the authority
+            # for title, desktop-shell marker and rendered React content.
+            $pageTarget = @($targets |
                 Where-Object {
                     $_.type -eq "page" -and
-                    $_.title -eq "SmartPrint by QuantaEdge" -and
-                    $_.webSocketDebuggerUrl
+                    -not [string]::IsNullOrWhiteSpace($_.webSocketDebuggerUrl)
                 } |
-                Select-Object -First 1
+                Sort-Object {
+                    if ($_.title -eq "SmartPrint by QuantaEdge") { 0 }
+                    elseif ($_.url -match "^https?://tauri\\.localhost(?:/|$)") { 1 }
+                    elseif ($_.url -eq "about:blank") { 2 }
+                    else { 3 }
+                } |
+                Select-Object -First 1)
         }
         catch {
             # WebView2 may take several seconds to create its first page target.
@@ -74,7 +92,8 @@ try {
     }
 
     if (-not $pageTarget) {
-        throw "The native window opened, but its embedded WebView2 page did not become available."
+        $targetEvidence = $observedTargets | ConvertTo-Json -Depth 5 -Compress
+        throw "The native window opened, but WebView2 exposed no page target on the private DevTools port. Observed targets: $targetEvidence"
     }
 
     Write-Host "PASS: Native desktop window opened." -ForegroundColor Green
