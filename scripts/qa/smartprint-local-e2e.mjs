@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
-import { executeIsolatedQaRecord } from "./local-e2e-record-runner.mjs";
+import { executeIsolatedQaRecord, shouldFailQaRun } from "./local-e2e-record-runner.mjs";
 import { getUnexpectedHttpResponses } from "./local-e2e-http-audit.mjs";
 
 const moduleDirectory = process.env.PLAYWRIGHT_MODULE_DIR;
@@ -3355,4 +3355,9 @@ try {
   await browser?.close().catch(() => {});
 }
 
-if (report.summary.failed > 0 || !report.caseCoverage.coverageGatePassed || report.caseCoverage.caseMappingErrors > 0) process.exitCode = 1;
+if (shouldFailQaRun({
+  failed: report.summary.failed,
+  warnings: report.summary.warnings,
+  coverageGatePassed: report.caseCoverage.coverageGatePassed,
+  caseMappingErrors: report.caseCoverage.caseMappingErrors
+})) process.exitCode = 1;
