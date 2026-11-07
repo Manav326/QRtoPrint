@@ -282,7 +282,7 @@ async function request(page, method, path, { token, sessionToken, body, headers 
     requestHeaders.set("Accept", "application/json");
     if (token) requestHeaders.set("Authorization", "Bearer " + token);
     if (sessionToken) requestHeaders.set("X-Print-Session", sessionToken);
-    const options = { method, headers: requestHeaders, cache: "no-store", credentials: "same-origin" };
+    const options = { method, headers: requestHeaders, cache: "no-store", credentials: "same-origin", signal: AbortSignal.timeout(15000) };
     if (body !== undefined) {
       if (body instanceof FormData || body instanceof Blob) options.body = body;
       else {
@@ -580,6 +580,7 @@ async function uploadSyntheticPdf(page, sessionToken, batchId, idempotencyKey, f
         "Idempotency-Key": idempotencyKey,
         "X-Print-Batch-Id": batchId
       },
+      signal: AbortSignal.timeout(30000),
       body: form
     });
     const text = await response.text();
@@ -859,9 +860,6 @@ async function setupShopResources(page, tokens, shopLabel, onResourcesReady = ()
       isEnabled: station.isEnabled,
       printerDeviceId: station.printerDeviceId
     },
-    pricingVersion: pricing.version,
-    pricingConfiguredThroughUi: true,
-    paymentMethodsConfiguredThroughUi: true,
     physicalPrinterPaired: false,
     printDispatchEnabled: false
   };
