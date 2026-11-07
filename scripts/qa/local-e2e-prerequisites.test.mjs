@@ -1,6 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { getBlockingPrerequisites } from "./local-e2e-prerequisites.mjs";
+import { readFileSync } from "node:fs";
+import { getBlockingPrerequisites, validateRecordPrerequisites, HEALTH_CHECK_RECORD } from "./local-e2e-prerequisites.mjs";
+import { executeIsolatedQaRecord } from "./local-e2e-record-runner.mjs";
 
 test("a Shop One pricing failure blocks quote-dependent work, not independent shop work", () => {
   const statuses = new Map([
@@ -117,4 +119,174 @@ test("a missing prerequisite is fail-closed", () => {
     ),
     ["Bootstrap-created platform administrator signs in through the real admin UI"]
   );
+});
+
+
+const runnerSource = readFileSync(new URL("./smartprint-local-e2e.mjs", import.meta.url), "utf8");
+const runnerRecordNames = [...runnerSource.matchAll(/\\bawait\\s+record\\(\\s*"([^"]+)"/g)].map(match => match[1]);
+
+test("every E2E record has an explicit prerequisite or independence contract and dependencies run first", () => {
+  const result = validateRecordPrerequisites(runnerRecordNames);
+  assert.deepEqual(result.errors, []);
+  assert.equal(result.valid, true);
+});
+
+test("a failed Shop One setup skips only its dependants while Shop Two and unrelated checks still execute", async () => {
+  const statuses = new Map([
+    [HEALTH_CHECK_RECORD, "PASS"],
+    ["Create or sign in to the first real QA shop through the shop UI", "PASS"],
+    ["Create or sign in to the second real QA shop through the shop UI", "PASS"],
+    ["Create or sign in to the real global customer account", "PASS"],
+    ["Bootstrap-created platform administrator signs in through the real admin UI", "PASS"],
+    ["Create and publish a free QA-only plan, then assign it through the platform UI", "PASS"]
+  ]);
+  let independentRan = false;
+  let blockedActionRan = false;
+
+  const failedSetup = await executeIsolatedQaRecord({
+    name: "Shop one provisions real QA printer and QR station",
+    checkId: "SP-TEST-001",
+    caseIds: ["SHOP-009", "SHOP-010"],
+    recordStatuses: statuses,
+    action: async () => { throw new Error("Synthetic setup failure for isolation test."); }
+  });
+  assert.equal(failedSetup.status, "FAIL");
+  assert.match(failedSetup.check.error, /Synthetic setup failure/);
+
+  const blockedGuestJourney = await executeIsolatedQaRecord({
+    name: "Customer opens the shop-one station link in a guest browser session",
+    checkId: "SP-TEST-002",
+    caseIds: ["QR-008", "QR-009"],
+    recordStatuses: statuses,
+    action: async () => { blockedActionRan = true; }
+  });
+  assert.equal(blockedGuestJourney.status, "SKIPPED");
+  assert.deepEqual(blockedGuestJourney.check.details.blockedBy, [
+    "Shop one provisions real QA printer and QR station"
+  ]);
+  assert.equal(blockedActionRan, false);
+
+  const shopTwo = await executeIsolatedQaRecord({
+    name: "Shop two configures isolated real QA printer/station",
+    checkId: "SP-TEST-003",
+    caseIds: ["SHOP-015", "SHOP-016", "SHOP-017", "SHOP-018"],
+    recordStatuses: statuses,
+    action: async () => ({ tenant: "Shop Two", isolated: true })
+  });
+  assert.equal(shopTwo.status, "PASS");
+  assert.equal(independentRan, false);
+
+  const shopOneNavigation = await executeIsolatedQaRecord({
+    name: "Shop one navigates every real sidebar section and the account-menu-only tools",
+    checkId: "SP-TEST-004",
+    recordStatuses: statuses,
+    action: async () => { independentRan = true; return { navigation: "passed" }; }
+  });
+  assert.equal(shopOneNavigation.status, "PASS");
+  assert.equal(independentRan, true);
+});
+
+test("a failed pricing check blocks quote and upload descendants but not guest link, security, or Shop Two checks", async () => {
+  const statuses = new Map([
+    [HEALTH_CHECK_RECORD, "PASS"],
+    ["Create or sign in to the first real QA shop through the shop UI", "PASS"],
+    ["Create or sign in to the second real QA shop through the shop UI", "PASS"],
+    ["Create or sign in to the real global customer account", "PASS"],
+    ["Create and publish a free QA-only plan, then assign it through the platform UI", "PASS"],
+    ["Shop one provisions real QA printer and QR station", "PASS"],
+    ["Shop one configures payment methods through the real UI", "PASS"],
+    ["Customer opens the shop-one station with authenticated customer identity", "PASS"]
+  ]);
+
+  const pricing = await executeIsolatedQaRecord({
+    name: "Shop one configures print pricing through the real UI",
+    checkId: "SP-TEST-005",
+    recordStatuses: statuses,
+    action: async () => { throw new Error("Synthetic pricing failure."); }
+  });
+  assert.equal(pricing.status, "FAIL");
+
+  const upload = await executeIsolatedQaRecord({
+    name: "Customer uploads a synthetic two-page PDF through the real portal UI",
+    checkId: "SP-TEST-006",
+    recordStatuses: statuses,
+    action: async () => ({ uploaded: true })
+  });
+  assert.equal(upload.status, "SKIPPED");
+  assert.ok(upload.check.details.blockedBy.includes("Shop one configures print pricing through the real UI"));
+
+  const guestLink = await executeIsolatedQaRecord({
+    name: "Customer opens the shop-one station link in a guest browser session",
+    checkId: "SP-TEST-007",
+    recordStatuses: statuses,
+    action: async () => ({ guestSession: true })
+  });
+  assert.equal(guestLink.status, "PASS");
+
+  const shopTwoNavigation = await executeIsolatedQaRecord({
+    name: "Shop two navigates every real sidebar section and account-menu-only tools",
+    checkId: "SP-TEST-008",
+    recordStatuses: statuses,
+    action: async () => ({ sectionsVisited: 10 })
+  });
+  assert.equal(shopTwoNavigation.status, "PASS");
+});
+
+test("WARN and SKIPPED prerequisites are not treated as successful setup", async () => {
+  const statuses = new Map([
+    [HEALTH_CHECK_RECORD, "PASS"],
+    ["Create or sign in to the first real QA shop through the shop UI", "PASS"],
+    ["Create and publish a free QA-only plan, then assign it through the platform UI", "PASS"]
+  ]);
+
+  const warning = await executeIsolatedQaRecord({
+    name: "Shop one provisions real QA printer and QR station",
+    checkId: "SP-TEST-009",
+    recordStatuses: statuses,
+    action: async () => ({ warning: "Station metadata could not be read back." })
+  });
+  assert.equal(warning.status, "WARN");
+
+  const dependent = await executeIsolatedQaRecord({
+    name: "DEVICE/QR: printer and station controls restore safely; QR rotation invalidates the old public code",
+    checkId: "SP-TEST-010",
+    recordStatuses: statuses,
+    action: async () => ({ rotated: true })
+  });
+  assert.equal(dependent.status, "SKIPPED");
+  assert.deepEqual(dependent.check.details.blockedBy, [
+    "Shop one provisions real QA printer and QR station"
+  ]);
+});
+
+test("an undeclared new record fails closed without aborting the next independent record", async () => {
+  const statuses = new Map([[HEALTH_CHECK_RECORD, "PASS"]]);
+  const missingContract = await executeIsolatedQaRecord({
+    name: "NEW RECORD WITHOUT DEPENDENCY CONTRACT",
+    checkId: "SP-TEST-011",
+    recordStatuses: statuses,
+    action: async () => { throw new Error("Must not run without a contract."); }
+  });
+  assert.equal(missingContract.status, "FAIL");
+  assert.match(missingContract.check.error, /explicit prerequisite contract/);
+
+  const next = await executeIsolatedQaRecord({
+    name: "QR: unknown public station codes cannot create a customer session",
+    checkId: "SP-TEST-012",
+    recordStatuses: statuses,
+    action: async () => ({ status: 404 })
+  });
+  assert.equal(next.status, "PASS");
+});
+
+test("a health failure safely skips all browser/API records instead of producing misleading passes", async () => {
+  const statuses = new Map([[HEALTH_CHECK_RECORD, "FAIL"]]);
+  const result = await executeIsolatedQaRecord({
+    name: "Create or sign in to the second real QA shop through the shop UI",
+    checkId: "SP-TEST-013",
+    recordStatuses: statuses,
+    action: async () => { throw new Error("Must not touch a failed environment."); }
+  });
+  assert.equal(result.status, "SKIPPED");
+  assert.deepEqual(result.check.details.blockedBy, [HEALTH_CHECK_RECORD]);
 });
