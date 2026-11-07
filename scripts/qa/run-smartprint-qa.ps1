@@ -4,7 +4,8 @@ param(
     [switch]$SkipPlaywrightInstall,
     [switch]$E2EOnly,
     [switch]$PullLatest,
-    [switch]$ReuseRunningStack
+    [switch]$ReuseRunningStack,
+    [switch]$TestPublishedApps
 )
 
 $ErrorActionPreference = "Stop"
@@ -144,6 +145,21 @@ foreach ($assetName in @($qaConfig.downloads.windowsAssetName, $qaConfig.downloa
 if ([long]$qaConfig.downloads.maxTransferBytes -lt 1 -or [long]$qaConfig.downloads.maxTransferBytes -gt 536870912) {
     throw "Public download QA transfer limit must be between 1 byte and 512 MiB."
 }
+
+$windowsAppConfig = $qaConfig.apps.windows
+$androidAppConfig = $qaConfig.apps.android
+foreach ($value in @($windowsAppConfig.installDirectoryName,$windowsAppConfig.executableName,$windowsAppConfig.agentServiceName,$windowsAppConfig.programDataDirectoryName,$windowsAppConfig.agentIdentityFileName)) {
+    if ([string]$value -notmatch '^[A-Za-z0-9][A-Za-z0-9._ -]{0,63}$') { throw "Invalid Windows app identity in central QA configuration." }
+}
+if ([IO.Path]::GetFileName([string]$windowsAppConfig.executableName) -ne [string]$windowsAppConfig.executableName -or
+    -not ([string]$windowsAppConfig.executableName).EndsWith(".exe",[StringComparison]::OrdinalIgnoreCase)) {
+    throw "Windows executable name must be a simple .exe filename."
+}
+if ([int]$windowsAppConfig.smokeTimeoutSeconds -lt 10 -or [int]$windowsAppConfig.smokeTimeoutSeconds -gt 120) {
+    throw "Windows smoke timeout must be 10 to 120 seconds."
+}
+if ([string]$androidAppConfig.applicationId -notmatch '^[A-Za-z][A-Za-z0-9_]*(\.[A-Za-z][A-Za-z0-9_]*)+$') { throw "Invalid Android application ID." }
+try { [void][regex]::new([string]$androidAppConfig.emulatorSerialPattern) } catch { throw "Invalid emulator serial pattern." }
 $runStamp = Get-Date -Format "yyyyMMdd-HHmmss"
 $runSuffix = [Guid]::NewGuid().ToString("N").Substring(0, 8)
 $runId = "local-" + $runStamp + "-" + $runSuffix
@@ -1058,6 +1074,22 @@ try {
         }
     }
     }
+
+    if ($TestPublishedApps) {
+        $publishedAppScript = Join-Path $PSScriptRoot "test-published-apps.ps1"
+        if (-not (Test-Path -LiteralPath $publishedAppScript -PathType Leaf)) {
+            Add-QAResult -Name "Published Windows/Android optional QA" -Status "FAIL" -Detail "Missing helper: $publishedAppScript"
+            $exitCode = 1
+        } else {
+            $publishedAppsOk = Invoke-QAStep -Name "Official website Windows installer and Android APK acceptance" -LogName "published-apps.log" -Action {
+                & $publishedAppScript -PublicOrigin $canonicalPublicUrl -OutputDirectory (Join-Path $artifactRoot "published-apps") -ConfigPath $qaConfigPath
+            }
+            if (-not $publishedAppsOk) { $exitCode = 1 }
+        }
+    } else {
+        Write-Host "Optional published Windows/Android app QA was not requested. Pass -TestPublishedApps to enable it." -ForegroundColor DarkCyan
+    }
+
 }
 catch {
     $fatalError = $_.Exception.Message
@@ -1077,6 +1109,7 @@ finally {
         changedFilesFromPull = @($pullChangedPaths)
         applicationRefreshRequiredByPull = if ($pulledLatest) { $requiresAppRefresh } else { $null }
         reusedExistingAppContainers = if ($E2EOnly) { $reuseExistingStack } else { $null }
+        publishedAppsTestRequested = [bool]$TestPublishedApps
         environment = "LOCAL_DOCKER_POSTGRES_REAL_API"
         target = $target
         runId = $runId

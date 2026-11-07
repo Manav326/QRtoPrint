@@ -17,5 +17,19 @@
     "windowsAssetName": "SmartPrint-Windows-Setup.exe",
     "androidAssetName": "SmartPrint-Android.apk",
     "maxTransferBytes": 268435456
+  },
+  "apps": {
+    "windows": {
+      "installDirectoryName": "SmartPrint",
+      "executableName": "SmartPrint.Desktop.exe",
+      "agentServiceName": "QRtoPrintSmartPrintAgent",
+      "programDataDirectoryName": "QRtoPrint",
+      "agentIdentityFileName": "agent.identity",
+      "smokeTimeoutSeconds": 45
+    },
+    "android": {
+      "applicationId": "com.quantaedge.smartprint",
+      "emulatorSerialPattern": "^emulator-\\d+\\s+device(?:\\s|$)"
+    }
   }
 }

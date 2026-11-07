@@ -16,7 +16,7 @@ The Cloudflare Free/Bot Fight Mode 403 issue is therefore irrelevant to this loc
 
 ## One-command run
 
-From a Windows PowerShell window opened in the local QRtoPrint repository:
+From a Windows PowerShell window opened in the local SmartPrint repository:
 
 ~~~powershell
 git pull --ff-only origin main
@@ -38,6 +38,22 @@ The runner:
 10. If system Gradle and the Android SDK are installed, runs Android JVM tests and builds a local-portal debug APK. If an Android emulator is already running, it also runs connected instrumentation tests. It never installs the APK on an attached physical phone.
 
 Generated logs, screenshots and JSON/TXT reports are written under `artifacts/smartprint-qa/`; this directory is Git-ignored. QA account passwords remain DPAPI-protected under `.secrets/`.
+
+### Optional published Windows and Android app acceptance
+
+The published app check is opt-in and runs after the local QA suites:
+
+~~~powershell
+.\scripts\qa\run-smartprint-qa.ps1 -TestPublishedApps
+~~~
+
+It reads `scripts/qa/smartprint-qa.config.json`, checks the public release status endpoint, and downloads the published Windows installer and Android APK through the website's same-origin download routes. Transfer length, attachment names, package structure and SHA-256 evidence are recorded under the run's `published-apps` directory.
+
+For Windows, an existing SmartPrint installation is only launched and smoke-tested; its installer is never run over it. A new install is considered only when the install folder, Agent service and SmartPrint machine-data directory are all absent and the current PowerShell session is elevated. A running desktop session or ambiguous/partial install is left untouched and reported as skipped.
+
+For Android, app checks run only when exactly one connected ADB device matches the configured emulator serial pattern. The APK package ID is checked with Android SDK tooling before installation. An existing emulator install is launched without replacement; the APK is installed only when that package is absent. Physical phones and multiple connected devices are never targeted. The suite does not pair a shop, change printer settings, or uninstall an app.
+
+Windows and Android checks are independent: a failure in one platform is recorded without preventing the other platform from running. Downloads and result evidence remain in the QA artifacts folder; successfully installed apps are left in place for inspection.
 
 No extra branch, remote QA secret, Cloudflare rule or manual account setup is required.
 

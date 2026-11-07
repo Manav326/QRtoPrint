@@ -56,3 +56,21 @@ test('release download routes, names and byte limit are configured together', ()
   assert.ok(config.downloads.maxTransferBytes >= 1024 * 1024);
   assert.ok(config.downloads.maxTransferBytes <= 512 * 1024 * 1024);
 });
+
+test('published Windows app identity and smoke limits are centralised', () => {
+  assert.equal(config.apps.windows.installDirectoryName, 'SmartPrint');
+  assert.equal(config.apps.windows.executableName, 'SmartPrint.Desktop.exe');
+  assert.equal(config.apps.windows.agentServiceName, 'QRtoPrintSmartPrintAgent');
+  assert.equal(config.apps.windows.programDataDirectoryName, 'QRtoPrint');
+  assert.equal(config.apps.windows.agentIdentityFileName, 'agent.identity');
+  assert.ok(config.apps.windows.smokeTimeoutSeconds >= 10);
+  assert.ok(config.apps.windows.smokeTimeoutSeconds <= 120);
+});
+
+test('published Android app identity only accepts emulator serials', () => {
+  assert.equal(config.apps.android.applicationId, 'com.quantaedge.smartprint');
+  const emulatorSerial = new RegExp(config.apps.android.emulatorSerialPattern);
+  assert.ok(emulatorSerial.test('emulator-5554 device'));
+  assert.ok(!emulatorSerial.test('R58M123456A device'));
+  assert.ok(!emulatorSerial.test('emulator-5554 offline'));
+});
