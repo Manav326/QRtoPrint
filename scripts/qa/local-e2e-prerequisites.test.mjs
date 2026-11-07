@@ -49,11 +49,23 @@ test("unrelated negative security checks remain runnable", () => {
   );
 });
 
+test("a failed portal/API health prerequisite blocks all subsequent browser checks", () => {
+  const statuses = new Map([["Local portal and API health", "FAIL"]]);
+  assert.deepEqual(
+    getBlockingPrerequisites("Public pages and registration/login/admin route rendering", statuses),
+    ["Local portal and API health"]
+  );
+  assert.deepEqual(
+    getBlockingPrerequisites("Create or sign in to the first real QA shop through the shop UI", statuses),
+    ["Local portal and API health"]
+  );
+});
+
 test("a missing prerequisite is treated as blocked, not silently accepted", () => {
   assert.deepEqual(
     getBlockingPrerequisites(
       "Create and publish a free QA-only plan, then assign it through the platform UI",
-      new Map()
+      new Map([["Local portal and API health", "PASS"]])
     ),
     ["Bootstrap-created platform administrator signs in through the real admin UI"]
   );

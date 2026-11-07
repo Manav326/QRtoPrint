@@ -9344,10 +9344,9 @@ static bool IsTenantRecoveryOperation(
     bool shopOperations,
     bool allowPaidJobClaimsWhileSuspended = false)
 {
-    if (HttpMethods.IsGet(context.Request.Method) || HttpMethods.IsHead(context.Request.Method))
-        return true;
-
     var path = context.Request.Path.Value ?? string.Empty;
+    if (TenantAccessRules.IsReadRecoveryOperation(context.Request.Method, path, shopOperations))
+        return true;
     if (!shopOperations && allowPaidJobClaimsWhileSuspended &&
         HttpMethods.IsPost(context.Request.Method) &&
         (path.EndsWith("/jobs/claim", StringComparison.OrdinalIgnoreCase) ||

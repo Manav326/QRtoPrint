@@ -2447,7 +2447,9 @@ try {
       blockedShopRead = await request(shop2Page, "GET", "/api/v1/shop/profile", {
         token: shop2Tokens.accessToken
       });
-      assert.equal(blockedShopRead.status, 403, "A suspended shop must be blocked from ordinary shop API work.");
+      assert.equal(blockedShopRead.status, 403,
+        "A suspended shop must be blocked from reading its ordinary workspace profile. Actual HTTP " +
+        blockedShopRead.status + " from " + blockedShopRead.url + ". Body: " + blockedShopRead.text.slice(0, 600));
 
       const restoredResponse = await request(adminPage, "PATCH",
         "/api/v1/platform/tenants/" + shop2TenantId + "/status",

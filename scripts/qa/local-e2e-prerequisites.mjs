@@ -62,6 +62,10 @@ export const RECORD_PREREQUISITES = Object.freeze({
 });
 
 export function getBlockingPrerequisites(recordName, recordStatuses) {
-  const prerequisites = RECORD_PREREQUISITES[recordName] ?? [];
-  return prerequisites.filter(prerequisite => recordStatuses.get(prerequisite) !== "PASS");
+  const prerequisites = [
+    ...(recordName === "Local portal and API health" ? [] : ["Local portal and API health"]),
+    ...(RECORD_PREREQUISITES[recordName] ?? [])
+  ];
+  return [...new Set(prerequisites)]
+    .filter(prerequisite => recordStatuses.get(prerequisite) !== "PASS");
 }
