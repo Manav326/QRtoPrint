@@ -925,9 +925,9 @@ async function exercisePhotoStudioFeatureMatrix() {
     await setPhotoRange(dialog, "Vertical position", 100);
     assert.notDeepEqual(await readPhotoCanvasPixels(page), zoomed, "Opposite crop focus boundaries must change the frame.");
     await dialog.getByRole("button", { name: "Reset crop" }).click();
-    assert.equal(Number(await dialog.locator("label").filter({ hasText: /^Zoom\\b/ }).locator('input[type="range"]').inputValue()), 1);
-    assert.equal(Number(await dialog.locator("label").filter({ hasText: /^Horizontal position\\b/ }).locator('input[type="range"]').inputValue()), 50);
-    assert.equal(Number(await dialog.locator("label").filter({ hasText: /^Vertical position\\b/ }).locator('input[type="range"]').inputValue()), 50);
+    assert.equal(Number(await dialog.locator("label").filter({ hasText: /^Zoom\b/ }).locator('input[type="range"]').inputValue()), 1);
+    assert.equal(Number(await dialog.locator("label").filter({ hasText: /^Horizontal position\b/ }).locator('input[type="range"]').inputValue()), 50);
+    assert.equal(Number(await dialog.locator("label").filter({ hasText: /^Vertical position\b/ }).locator('input[type="range"]').inputValue()), 50);
 
     // Named looks, monochrome output and custom manual adjustments.
     await dialog.getByRole("button", { name: "Looks", exact: true }).click();
