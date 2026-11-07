@@ -1,0 +1,174 @@
+name: Printer Driver Qualification
+
+on:
+  pull_request:
+    paths:
+      - "scripts/printer-qualification/**"
+      - "tests/SmartPrint.Agent.Tests/WindowsPrinterDriverQualificationTests.cs"
+      - ".github/workflows/printer-driver-qualification.yml"
+      - "docs/PRINTER_DRIVER_QUALIFICATION.md"
+  workflow_dispatch:
+    inputs:
+      driver_id:
+        description: "Run manifest validation only, or qualify one explicitly approved driver"
+        required: true
+        type: choice
+        default: manifest-only
+        options:
+          - manifest-only
+          - hp-universal-pcl6-x64
+          - canon-generic-plus-ufr-ii-x64
+          - epson-universal-print-driver-x64
+          - brother-universal-printer-driver-x64
+          - pantum-p2503-x64
+          - pantum-universal-printing-driver-x64
+
+permissions:
+  contents: read
+
+concurrency:
+  group: printer-driver-qualification-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  manifest:
+    name: Validate driver registry
+    runs-on: windows-2025
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - name: Validate manufacturer driver manifest (no downloads)
+        shell: pwsh
+        run: ./scripts/printer-qualification/Invoke-PrinterDriverQualification.ps1 -DriverId manifest-only
+
+
+
+  vendor-package-audit:
+    name: Audit official Ricoh and Kyocera packages without execution
+    if: github.event_name == 'pull_request'
+    needs: manifest
+    runs-on: windows-2025
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v7
+      - name: Download, hash, extract and inspect official driver packages
+        shell: pwsh
+        run: ./scripts/printer-qualification/Invoke-VendorPackageAudit.ps1
+      - name: Upload package metadata only (never vendor binaries)
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: printer-vendor-package-audit
+          path: artifacts/printer-driver-package-audit/*.json
+          if-no-files-found: warn
+          retention-days: 14
+
+
+  virtual-fixture:
+    name: Exercise Agent with isolated file-backed printer port
+    needs: manifest
+    runs-on: windows-2025
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: 10.0.x
+      - name: Build Windows Print Agent
+        run: dotnet build src/SmartPrint.Agent/SmartPrint.Agent.csproj --configuration Release
+      - name: Prepare Microsoft driver fixture and file-backed local port
+        shell: pwsh
+        run: |
+          $driverName = "Microsoft Print To PDF"
+          $driver = Get-PrinterDriver -Name $driverName -ErrorAction Stop
+          $driverDetails = Get-PrinterDriver -Name $driver.Name -ErrorAction Stop
+          $fixtureRoot = Join-Path $env:RUNNER_TEMP "smartprint-driver-fixture"
+          New-Item -ItemType Directory -Force -Path $fixtureRoot | Out-Null
+          $portName = Join-Path $fixtureRoot "rendered-output.prn"
+          $queueName = "SmartPrint Driver Fixture " + [guid]::NewGuid().ToString("N")
+          Add-PrinterPort -Name $portName -ErrorAction Stop
+          Add-Printer -Name $queueName -DriverName $driver.Name -PortName $portName -ErrorAction Stop
+          $queue = Get-Printer -Name $queueName -ErrorAction Stop
+          if ($queue.DriverName -ne $driver.Name -or $queue.PortName -ne $portName) {
+            throw "The virtual fixture queue does not use the expected driver and file-backed local port."
+          }
+          @(
+            "SMARTPRINT_DRIVER_QUALIFICATION_QUEUE=$queueName"
+            "SMARTPRINT_DRIVER_QUALIFICATION_PORT=$portName"
+            "SMARTPRINT_DRIVER_QUALIFICATION_DRIVER=$($driver.Name)"
+            "SMARTPRINT_DRIVER_QUALIFICATION_VERSION=$($driverDetails.DriverVersion)"
+            "SMARTPRINT_DRIVER_QUALIFICATION_MANUFACTURER=$($driverDetails.Manufacturer)"
+            "SMARTPRINT_DRIVER_QUALIFICATION_ID=microsoft-print-to-pdf-fixture"
+            "SMARTPRINT_DRIVER_QUALIFICATION_OUTPUT=$portName"
+            "SMARTPRINT_DRIVER_QUALIFICATION_REPORT=$((Join-Path $env:GITHUB_WORKSPACE 'artifacts/printer-driver-qualification/driver-rendering.json'))"
+          ) | Add-Content -LiteralPath $env:GITHUB_ENV -Encoding utf8
+          Write-Host "Fixture queue: $queueName"
+          Write-Host "Driver: $($driver.Name)"
+          Write-Host "Driver version: $($driverDetails.DriverVersion)"
+          Write-Host "Manufacturer: $($driverDetails.Manufacturer)"
+          Write-Host "File-backed port: $portName"
+      - name: Render through the production Agent spooler path
+        env:
+          SMARTPRINT_RUN_DRIVER_QUALIFICATION: "1"
+        run: dotnet test tests/SmartPrint.Agent.Tests/SmartPrint.Agent.Tests.csproj --configuration Release --filter "FullyQualifiedName~WindowsPrinterDriverQualificationTests"
+      - name: Upload virtual driver evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: printer-driver-virtual-fixture
+          path: artifacts/printer-driver-qualification/
+          if-no-files-found: warn
+          retention-days: 14
+      - name: Remove fixture queue and local port
+        if: always()
+        shell: pwsh
+        run: |
+          if ($env:SMARTPRINT_DRIVER_QUALIFICATION_QUEUE) {
+            Remove-Printer -Name $env:SMARTPRINT_DRIVER_QUALIFICATION_QUEUE -ErrorAction SilentlyContinue
+          }
+          if ($env:SMARTPRINT_DRIVER_QUALIFICATION_PORT) {
+            Remove-PrinterPort -Name $env:SMARTPRINT_DRIVER_QUALIFICATION_PORT -ErrorAction SilentlyContinue
+          }
+
+  qualify:
+    name: Qualify selected Windows driver
+    if: github.event_name == 'workflow_dispatch' && inputs.driver_id != 'manifest-only'
+    needs: manifest
+    environment:
+      name: printer-driver-qualification
+    runs-on: windows-2025
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: 10.0.x
+      - name: Build Windows Print Agent
+        run: dotnet build src/SmartPrint.Agent/SmartPrint.Agent.csproj --configuration Release
+      - name: Install approved signed driver and create isolated queue
+        shell: pwsh
+        env:
+          DRIVER_ID: ${{ inputs.driver_id }}
+        run: ./scripts/printer-qualification/Invoke-PrinterDriverQualification.ps1 -DriverId "$env:DRIVER_ID"
+      - name: Render a QA document and capture driver capabilities
+        env:
+          SMARTPRINT_RUN_DRIVER_QUALIFICATION: "1"
+        run: dotnet test tests/SmartPrint.Agent.Tests/SmartPrint.Agent.Tests.csproj --configuration Release --filter "FullyQualifiedName~WindowsPrinterDriverQualificationTests"
+      - name: Upload qualification evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: printer-driver-qualification-${{ inputs.driver_id }}
+          path: artifacts/printer-driver-qualification/
+          if-no-files-found: warn
+          retention-days: 30
+      - name: Remove temporary Windows printer queue and file port
+        if: always()
+        shell: pwsh
+        run: |
+          if ($env:SMARTPRINT_DRIVER_QUALIFICATION_QUEUE) {
+            Remove-Printer -Name $env:SMARTPRINT_DRIVER_QUALIFICATION_QUEUE -ErrorAction SilentlyContinue
+          }
+          if ($env:SMARTPRINT_DRIVER_QUALIFICATION_PORT) {
+            Remove-PrinterPort -Name $env:SMARTPRINT_DRIVER_QUALIFICATION_PORT -ErrorAction SilentlyContinue
+          }
