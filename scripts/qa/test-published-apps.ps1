@@ -551,7 +551,8 @@ $origin=[Uri]$PublicOrigin;$configured=[Uri]$config.origins.public
 if($origin.Scheme -ne "https" -or $origin.GetLeftPart([UriPartial]::Authority) -ne $configured.GetLeftPart([UriPartial]::Authority) -or $origin.AbsolutePath -ne "/" -or $origin.UserInfo -or $origin.Query -or $origin.Fragment){
   throw "Published-app QA only accepts the configured SmartPrint HTTPS origin."
 }
-$outputRoot=[IO.Path]::GetFullPath($OutputDirectory)
+$outputRoot=$ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($OutputDirectory)
+$outputRoot=[IO.Path]::GetFullPath($outputRoot)
 New-Item -ItemType Directory -Force -Path $outputRoot | Out-Null
 $script:results=[System.Collections.Generic.List[object]]::new()
 $downloads=@{windows=$null;android=$null}
