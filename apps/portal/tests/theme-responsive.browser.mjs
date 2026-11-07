@@ -1043,7 +1043,7 @@ async function exercisePhotoStudioFeatureMatrix() {
     await dialog.getByLabel("Caption font size").selectOption("7");
     await setPhotoInputValue(dialog.getByLabel("Caption colour"), "#ff0000");
     const redPreviewPixels = await preview.evaluate(element => {
-      const canvas = element as HTMLCanvasElement;
+      const canvas = element;
       const context = canvas.getContext("2d");
       if (!context) throw new Error("Photo preview canvas is unavailable for caption inspection.");
       // First 35x45 mm tile is centred in the 5-column grid at x=11.5 mm,
