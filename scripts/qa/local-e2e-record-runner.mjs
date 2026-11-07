@@ -204,3 +204,15 @@ export async function executeIsolatedQaRecord({
     };
   }
 }
+
+export function shouldFailQaRun({
+  failed = 0,
+  warnings = 0,
+  coverageGatePassed = false,
+  caseMappingErrors = 0
+} = {}) {
+  return Number(failed) > 0 ||
+    Number(warnings) > 0 ||
+    coverageGatePassed !== true ||
+    Number(caseMappingErrors) > 0;
+}
