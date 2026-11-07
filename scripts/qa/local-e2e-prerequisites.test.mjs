@@ -11,6 +11,7 @@ test("a Shop One pricing failure blocks quote-dependent work, not independent sh
     ["Create and publish a free QA-only plan, then assign it through the platform UI", "PASS"],
     ["Shop one provisions real QA printer and QR station", "PASS"],
     ["Shop one configures print pricing through the real UI", "FAIL"],
+    ["Customer opens the shop-one station with authenticated customer identity", "PASS"],
     ["Shop two configures isolated real QA printer/station", "PASS"]
   ]);
 
@@ -33,7 +34,8 @@ test("a Shop One payment-settings failure blocks only payment-dependent workflow
     ["Shop one configures payment methods through the real UI", "FAIL"],
     ["Customer opens the shop-one station with authenticated customer identity", "PASS"],
     ["Customer uploads a synthetic two-page PDF through the real portal UI", "PASS"],
-    ["Shopkeeper rejects one file, undoes that rejection, then applies the individual file decision", "PASS"]
+    ["Shopkeeper rejects one file, undoes that rejection, then applies the individual file decision", "PASS"],
+    ["Real UPI payment intent, synthetic QA reference, and shop rejection without marking money received", "PASS"]
   ]);
 
   assert.deepEqual(getBlockingPrerequisites("Customer opens the shop-one station link in a guest browser session", statuses), []);
@@ -93,7 +95,10 @@ test("a customer-session failure blocks its uploads without blocking other roles
 });
 
 test("health failure blocks local browser checks", () => {
-  const statuses = new Map([["Local portal and API health", "FAIL"]]);
+  const statuses = new Map([
+    ["Local portal and API health", "FAIL"],
+    ["Create or sign in to the second real QA shop through the shop UI", "PASS"]
+  ]);
   assert.deepEqual(
     getBlockingPrerequisites("Public pages and registration/login/admin route rendering", statuses),
     ["Local portal and API health"]
