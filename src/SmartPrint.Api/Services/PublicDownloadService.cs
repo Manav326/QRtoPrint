@@ -139,11 +139,7 @@ public sealed class PublicDownloadService(HttpClient httpClient, IConfiguration 
         var apiUri = new Uri($"https://api.github.com/repos/{_repository}/releases/latest");
         using var metadataTimeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         metadataTimeout.CancelAfter(TimeSpan.FromSeconds(15));
-        using var request = new HttpRequestMessage(HttpMethod.Get, apiUri);
-        request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/vnd.github+json"));
-
-        using var response = await httpClient.SendAsync(
-            request, HttpCompletionOption.ResponseHeadersRead, metadataTimeout.Token);
+        using var response = await SendReleaseMetadataRequestAsync(apiUri, metadataTimeout.Token);
 
         if (response.StatusCode == HttpStatusCode.NotFound)
         {
@@ -171,6 +167,10 @@ public sealed class PublicDownloadService(HttpClient httpClient, IConfiguration 
             return null;
         }
 
+        // GitHub may permanently move a renamed repository's /repos/{owner}/{repo}
+        // API route to /repositories/{id}. The numeric endpoint's release URL is
+        // authoritative for the canonical owner/repository used by download assets.
+        var assetRepository = GetReleaseRepository(root, _repository);
         var assets = new Dictionary<string, Uri>(StringComparer.Ordinal);
         if (root.TryGetProperty("assets", out var assetsProperty) &&
             assetsProperty.ValueKind == JsonValueKind.Array)
@@ -191,7 +191,7 @@ public sealed class PublicDownloadService(HttpClient httpClient, IConfiguration 
                     continue;
                 }
 
-                if (TryValidateAssetUri(urlProperty.GetString(), name, out var validatedUri))
+                if (TryValidateAssetUri(urlProperty.GetString(), name, assetRepository, out var validatedUri))
                 {
                     assets[name] = validatedUri;
                 }
@@ -203,7 +203,86 @@ public sealed class PublicDownloadService(HttpClient httpClient, IConfiguration 
         return release;
     }
 
-    private bool TryValidateAssetUri(string? value, string assetName, out Uri uri)
+    private async Task<HttpResponseMessage> SendReleaseMetadataRequestAsync(
+        Uri initialUri,
+        CancellationToken cancellationToken)
+    {
+        var currentUri = initialUri;
+        var visited = new HashSet<string>(StringComparer.Ordinal);
+
+        for (var redirectCount = 0; redirectCount <= MaximumRedirects; redirectCount++)
+        {
+            if (!visited.Add(currentUri.AbsoluteUri))
+            {
+                throw new HttpRequestException("The release metadata redirect loop was detected.");
+            }
+
+            using var request = new HttpRequestMessage(HttpMethod.Get, currentUri);
+            request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/vnd.github+json"));
+
+            var response = await httpClient.SendAsync(
+                request, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
+
+            if (response.StatusCode is not (
+                HttpStatusCode.MovedPermanently or
+                HttpStatusCode.Redirect or
+                HttpStatusCode.SeeOther or
+                HttpStatusCode.TemporaryRedirect or
+                HttpStatusCode.PermanentRedirect))
+            {
+                return response;
+            }
+
+            var location = response.Headers.Location;
+            response.Dispose();
+
+            if (location is null ||
+                !Uri.TryCreate(currentUri, location, out var nextUri) ||
+                !IsAllowedMetadataRedirect(nextUri) ||
+                redirectCount == MaximumRedirects)
+            {
+                throw new HttpRequestException(
+                    "The release metadata redirect was invalid or exceeded its limit.");
+            }
+
+            currentUri = nextUri;
+        }
+
+        throw new HttpRequestException("The release metadata redirect limit was exceeded.");
+    }
+
+    private static bool IsAllowedMetadataRedirect(Uri uri) =>
+        uri.Scheme == Uri.UriSchemeHttps &&
+        uri.IdnHost.Equals("api.github.com", StringComparison.OrdinalIgnoreCase) &&
+        uri.IsDefaultPort &&
+        string.IsNullOrEmpty(uri.UserInfo) &&
+        string.IsNullOrEmpty(uri.Query) &&
+        string.IsNullOrEmpty(uri.Fragment) &&
+        Regex.IsMatch(uri.AbsolutePath, @"^/repositories/[0-9]+/releases/latest$", RegexOptions.CultureInvariant);
+
+    private static string GetReleaseRepository(JsonElement root, string fallback)
+    {
+        if (!root.TryGetProperty("url", out var urlProperty) ||
+            urlProperty.ValueKind != JsonValueKind.String ||
+            !Uri.TryCreate(urlProperty.GetString(), UriKind.Absolute, out var releaseUri) ||
+            releaseUri.Scheme != Uri.UriSchemeHttps ||
+            !releaseUri.IdnHost.Equals("api.github.com", StringComparison.OrdinalIgnoreCase) ||
+            !releaseUri.IsDefaultPort ||
+            !string.IsNullOrEmpty(releaseUri.UserInfo) ||
+            !string.IsNullOrEmpty(releaseUri.Query) ||
+            !string.IsNullOrEmpty(releaseUri.Fragment))
+        {
+            return fallback;
+        }
+
+        var match = Regex.Match(
+            releaseUri.AbsolutePath,
+            @"^/repos/(?<repository>[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+)/releases/[0-9]+$",
+            RegexOptions.CultureInvariant);
+        return match.Success ? match.Groups["repository"].Value : fallback;
+    }
+
+    private bool TryValidateAssetUri(string? value, string assetName, string repository, out Uri uri)
     {
         uri = null!;
         if (!Uri.TryCreate(value, UriKind.Absolute, out var candidate) ||
@@ -218,7 +297,7 @@ public sealed class PublicDownloadService(HttpClient httpClient, IConfiguration 
         }
 
         var path = Uri.UnescapeDataString(candidate.AbsolutePath);
-        var expectedPrefix = $"/{_repository}/releases/download/";
+        var expectedPrefix = $"/{repository}/releases/download/";
         if (!path.StartsWith(expectedPrefix, StringComparison.Ordinal) ||
             !path.EndsWith("/" + assetName, StringComparison.Ordinal))
         {

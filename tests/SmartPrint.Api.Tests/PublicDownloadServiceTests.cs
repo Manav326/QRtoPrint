@@ -37,6 +37,58 @@ public sealed class PublicDownloadServiceTests
     }
 
     [Fact]
+    public async Task FollowsGithubPermanentRepositoryMoveAndValidatesAssetsAgainstCanonicalRepository()
+    {
+        var handler = new QueueMessageHandler(
+            _ => new HttpResponseMessage(HttpStatusCode.MovedPermanently)
+            {
+                Headers = { Location = new Uri("https://api.github.com/repositories/1439868781/releases/latest") }
+            },
+            _ => JsonResponse("""
+                {
+                  "url": "https://api.github.com/repos/Manav326/smart-print/releases/437206158",
+                  "tag_name": "v0.1.34",
+                  "assets": [
+                    {
+                      "name": "SmartPrint-Windows-Setup.exe",
+                      "browser_download_url": "https://github.com/Manav326/smart-print/releases/download/v0.1.34/SmartPrint-Windows-Setup.exe"
+                    },
+                    {
+                      "name": "SmartPrint-Android.apk",
+                      "browser_download_url": "https://github.com/Manav326/smart-print/releases/download/v0.1.34/SmartPrint-Android.apk"
+                    }
+                  ]
+                }
+                """));
+
+        var status = await CreateService(handler).GetStatusAsync(CancellationToken.None);
+
+        Assert.Equal("v0.1.34", status.Version);
+        Assert.True(status.WindowsAvailable);
+        Assert.True(status.AndroidAvailable);
+        Assert.Equal(2, handler.RequestedUris.Count);
+        Assert.Equal(
+            "https://api.github.com/repositories/1439868781/releases/latest",
+            handler.RequestedUris[1].AbsoluteUri);
+    }
+
+    [Fact]
+    public async Task RejectsReleaseMetadataRedirectOutsideGithubApi()
+    {
+        var handler = new QueueMessageHandler(
+            _ => new HttpResponseMessage(HttpStatusCode.MovedPermanently)
+            {
+                Headers = { Location = new Uri("https://example.invalid/releases/latest") }
+            });
+
+        var service = CreateService(handler);
+
+        await Assert.ThrowsAsync<HttpRequestException>(
+            () => service.GetStatusAsync(CancellationToken.None));
+        Assert.Single(handler.RequestedUris);
+    }
+
+    [Fact]
     public async Task IgnoresReleaseAssetsOutsideTheConfiguredGithubRepository()
     {
         var handler = new QueueMessageHandler(
