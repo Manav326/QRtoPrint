@@ -2457,6 +2457,7 @@ shop.MapPost("/photo-jobs", async (
                     existingJob.PageCount,
                     existingJob.PhotoUnitPriceMinorSnapshot,
                     existingJob.QuotedAmountMinor,
+                    existingJob.Currency,
                     existingJob.QuoteExpiresUtc,
                     existingJob.CreatedUtc
                 },
@@ -2592,6 +2593,7 @@ shop.MapPost("/photo-jobs", async (
                 job.PageCount,
                 job.PhotoUnitPriceMinorSnapshot,
                 job.QuotedAmountMinor,
+                job.Currency,
                 job.QuoteExpiresUtc,
                 job.CreatedUtc
             },
