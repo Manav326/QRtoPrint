@@ -490,6 +490,30 @@ try {
         }
         if (-not $syntaxOk) { throw "The local Playwright suite has a syntax error. Review logs/playwright-syntax-check.log." }
 
+        $qaHarnessPreflightOk = Invoke-QAStep -Name "Validate QA harness modules and run existing prerequisite/isolation/HTTP audit tests" -LogName "qa-harness-preflight-tests.log" -Action {
+            $qaModuleFiles = @(Get-ChildItem -LiteralPath $PSScriptRoot -Filter "*.mjs" -File)
+            if ($qaModuleFiles.Count -eq 0) { throw "No QA JavaScript modules were found for syntax validation." }
+            foreach ($qaModule in $qaModuleFiles) {
+                & $node.Source "--check" $qaModule.FullName
+                if ($LASTEXITCODE -ne 0) { throw "QA module syntax validation failed: $($qaModule.Name)" }
+            }
+
+            $qaUnitTests = @(
+                (Join-Path $PSScriptRoot "local-e2e-http-audit.test.mjs"),
+                (Join-Path $PSScriptRoot "local-e2e-prerequisites.test.mjs")
+            )
+            $missingQaUnitTests = @($qaUnitTests | Where-Object { -not (Test-Path -LiteralPath $_ -PathType Leaf) })
+            if ($missingQaUnitTests.Count -gt 0) {
+                throw "QA harness regression tests are missing: $($missingQaUnitTests -join ', ')"
+            }
+            $qaTestArgs = @("--test") + $qaUnitTests
+            & $node.Source @qaTestArgs
+            if ($LASTEXITCODE -ne 0) { throw "QA harness regression tests failed." }
+        }
+        if (-not $qaHarnessPreflightOk) {
+            throw "QA harness preflight failed; the live browser suite was not started."
+        }
+
         $e2eOk = Invoke-QAStep -Name "Real local Playwright E2E using the existing stack and QA identities" -LogName "local-real-data-e2e.log" -Action {
             & $node.Source $liveSuite
         }
