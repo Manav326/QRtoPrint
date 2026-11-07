@@ -23,6 +23,8 @@ This is the master production-readiness suite for the capabilities currently rep
 
 One P0 failure blocks release. P1 failures require a fix/retest or a documented, time-bound risk acceptance by the release authority.
 
+**Mandatory role/surface supplement:** In addition to the 333 baseline catalogue cases in this file, execute the 70 role-based cases in [ROLE_BASED_CROSS_PLATFORM_QA.md](ROLE_BASED_CROSS_PLATFORM_QA.md). That supplement specifically verifies the current Android customer account/document studio, the actual Windows Desktop owner window, Web owner/customer journeys and complete cross-platform owner-to-customer continuity. The 70 cases are separate and are not implicitly passed by CI or the 262-case local Playwright gate.
+
 ## 2. Product scope and known limitations
 
 ### 2.1 Implemented scope to verify
