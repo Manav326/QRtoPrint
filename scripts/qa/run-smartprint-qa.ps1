@@ -1197,6 +1197,8 @@ finally {
         publishedAppsTestRequested = [bool]($TestPublishedApps -or $AndroidAppOnly)
         androidAppOnly = [bool]$AndroidAppOnly
         androidDeviceSerial = if (-not [string]::IsNullOrWhiteSpace($AndroidDeviceSerial)) { $AndroidDeviceSerial } else { $null }
+        localAndroidDeviceSerial = if (-not [string]::IsNullOrWhiteSpace($LocalAndroidDeviceSerial)) { $LocalAndroidDeviceSerial } else { $null }
+        localNativeAppsTestIncluded = (-not [bool]$AndroidAppOnly -and -not [bool]$E2EOnly)
         webE2eExecuted = -not [bool]$AndroidAppOnly
         environment = if ($AndroidAppOnly) { "PUBLISHED_ANDROID_APP_ONLY" } else { "LOCAL_DOCKER_POSTGRES_REAL_API" }
         target = if ($AndroidAppOnly) { $canonicalPublicUrl } else { $target }
@@ -1227,8 +1229,8 @@ if ($exitCode -ne 0) { exit 1 }
 ) {
     throw "-AndroidDeviceSerial contains unsupported characters. Copy the exact serial shown by 'adb devices'."
 }
-if (-not [string]::IsNullOrWhiteSpace($LocalAndroidDeviceSerial) -and $AndroidAppOnly) {
-    throw "-LocalAndroidDeviceSerial is for the full local QA run; it cannot be combined with -AndroidAppOnly."
+if (-not [string]::IsNullOrWhiteSpace($LocalAndroidDeviceSerial) -and ($AndroidAppOnly -or $E2EOnly)) {
+    throw "-LocalAndroidDeviceSerial is for the full local QA run; it cannot be combined with -AndroidAppOnly or -E2EOnly."
 }
 if (-not [string]::IsNullOrWhiteSpace($LocalAndroidDeviceSerial) -and $LocalAndroidDeviceSerial -notmatch '^[A-Za-z0-9._:-]{1,128}if ($AndroidAppOnly -and ($E2EOnly -or $PullLatest -or $ReuseRunningStack -or $TestPublishedApps)) {
     throw "-AndroidAppOnly is a standalone mode. Do not combine it with -E2EOnly, -PullLatest, -ReuseRunningStack or -TestPublishedApps."
