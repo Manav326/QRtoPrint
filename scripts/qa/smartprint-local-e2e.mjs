@@ -330,7 +330,8 @@ async function sendBatchAndWaitForShopApproval(page, sessionToken, jobIds, label
     const response = await page.waitForResponse(candidate => {
       if (candidate.request().method() !== "POST") return false;
       try {
-        return new URL(candidate.url()).pathname === expectedPath;
+        const candidateUrl = new URL(candidate.url());
+        return candidateUrl.origin === baseUrl.origin && candidateUrl.pathname === expectedPath;
       } catch {
         return false;
       }
