@@ -92,6 +92,9 @@ test("light and dark palettes cover authentication, customer QR and public landi
     "Dark authentication placeholders must remain readable on dark input surfaces.");
   assert.match(css, /html\[data-theme="dark"\] \.auth-card-footer,[\s\S]*?color:\s*#aab6ca/s,
     "Dark authentication helper text must not use the legacy low-contrast footer colour.");
+  const photoStudio = read("../src/PhotoStudio.module.css");
+  assert.match(photoStudio, /\.panelHeading\s*>\s*div\s*\{[^}]*display:grid[^}]*\}/s,
+    "Photo Studio title and helper copy must render on separate lines.");
 });
 
 test("web shell keeps navigation, header and workspace independently usable at desktop and mobile sizes", () => {
