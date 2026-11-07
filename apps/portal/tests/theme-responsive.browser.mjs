@@ -774,7 +774,9 @@ async function exercisePhotoStudioBrowser() {
 
     const largePhotoBatch = item.mode === "shop" && item.width === 768;
     if (largePhotoBatch) {
-      await reopened.getByLabel("Number of photos").fill("50");
+      const batchQuantity = reopened.locator("label").filter({ hasText: "Number of photos" }).locator('input[type="number"]');
+      assert.equal(await batchQuantity.count(),1,"Shop Photo Studio must show one number-of-photos input in Sheet settings.");
+      await batchQuantity.fill("50");
       await reopened.getByLabel("Photos per A4 page").selectOption("9");
       const pageSummary = reopened.locator("[class*='sheetSummary'] > div").filter({ hasText: "A4 pages in this job" }).locator("strong");
       await page.waitForFunction(() => {
@@ -1087,7 +1089,8 @@ async function exercisePhotoStudioFeatureMatrix() {
     assert.equal(await readSummary("A4 pages in this job"),"1");
 
     // Quantity boundaries and explicit rejection of fractions.
-    const count = dialog.getByLabel("Number of photos");
+    const count = dialog.locator("label").filter({ hasText: "Number of photos" }).locator('input[type="number"]');
+    assert.equal(await count.count(),1,"Photo Studio must expose one quantity input.");
     await count.fill("101");
     await count.evaluate(element => element.blur());
     assert.equal(await count.inputValue(),"100");
