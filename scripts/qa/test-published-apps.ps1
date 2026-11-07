@@ -63,7 +63,9 @@ function Test-Admin {
 function Run-DesktopSmoke([string]$Exe,[int]$Timeout) {
   $smoke=Join-Path $PSScriptRoot "desktop-open-smoke.ps1"
   if(-not (Test-Path -LiteralPath $smoke -PathType Leaf)){throw "Desktop smoke script missing: $smoke"}
-  & $smoke -ExecutablePath ([IO.Path]::GetFullPath($Exe)) -StartupTimeoutSeconds $Timeout
+  $evidence = & $smoke -ExecutablePath ([IO.Path]::GetFullPath($Exe)) -StartupTimeoutSeconds $Timeout
+  if(-not $evidence){throw "Desktop smoke test completed without returning structured acceptance evidence."}
+  return $evidence
 }
 function Test-WindowsApp([string]$Installer,$Settings) {
   $pf=[Environment]::GetFolderPath([Environment+SpecialFolder]::ProgramFiles)
@@ -87,7 +89,10 @@ function Test-WindowsApp([string]$Installer,$Settings) {
       return
     }
     if($running.Count -gt 0){Add-Result "Windows desktop launch" "SKIPPED" "SmartPrint is already running; the user's session is untouched.";return}
-    try {Run-DesktopSmoke $exe ([int]$Settings.smokeTimeoutSeconds);Add-Result "Windows desktop launch" "PASS" "Installed desktop UI rendered."}
+    try {
+      $desktopEvidence=Run-DesktopSmoke $exe ([int]$Settings.smokeTimeoutSeconds)
+      Add-Result "Windows desktop launch" "PASS" "Installed desktop UI rendered and app-owned visible content was verified." -Evidence @{desktopSmoke=$desktopEvidence}
+    }
     catch {Add-Result "Windows desktop launch" "FAIL" $_.Exception.Message}
     return
   }
@@ -130,7 +135,10 @@ function Test-WindowsApp([string]$Installer,$Settings) {
     if(-not (Test-Path -LiteralPath $exe -PathType Leaf)){throw "Setup finished but desktop executable is missing."}
     if(-not $serviceNow -or $serviceNow.Status -ne "Running"){throw "Agent service did not reach Running state."}
     Add-Result "Windows install when missing" "PASS" "Installed on clean elevated host; no existing app was replaced."
-    try {Run-DesktopSmoke $exe ([int]$Settings.smokeTimeoutSeconds);Add-Result "Windows desktop launch" "PASS" "New desktop UI rendered."}
+    try {
+      $desktopEvidence=Run-DesktopSmoke $exe ([int]$Settings.smokeTimeoutSeconds)
+      Add-Result "Windows desktop launch" "PASS" "New desktop UI rendered and app-owned visible content was verified." -Evidence @{desktopSmoke=$desktopEvidence}
+    }
     catch {Add-Result "Windows desktop launch" "FAIL" $_.Exception.Message}
   } catch {
     Add-Result "Windows install when missing" "FAIL" $_.Exception.Message
