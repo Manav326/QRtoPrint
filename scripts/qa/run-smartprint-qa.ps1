@@ -5,10 +5,14 @@ param(
     [switch]$E2EOnly,
     [switch]$PullLatest,
     [switch]$ReuseRunningStack,
-    [switch]$TestPublishedApps
+    [switch]$TestPublishedApps,
+    [switch]$AndroidAppOnly
 )
 
 $ErrorActionPreference = "Stop"
+if ($AndroidAppOnly -and ($E2EOnly -or $PullLatest -or $ReuseRunningStack -or $TestPublishedApps)) {
+    throw "-AndroidAppOnly is a standalone mode. Do not combine it with -E2EOnly, -PullLatest, -ReuseRunningStack or -TestPublishedApps."
+}
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..\..")).Path
 Set-Location $repoRoot
 
@@ -431,7 +435,11 @@ foreach ($name in $environmentNames) {
 }
 $env:SMARTPRINT_LOCAL_ORIGIN = $target
 
-Write-Host "SMARTPRINT LOCAL REAL-DATA ACCEPTANCE TEST" -ForegroundColor Green
+if ($AndroidAppOnly) {
+    Write-Host "SMARTPRINT ANDROID-ONLY RELEASE ACCEPTANCE TEST" -ForegroundColor Green
+} else {
+    Write-Host "SMARTPRINT LOCAL REAL-DATA ACCEPTANCE TEST" -ForegroundColor Green
+}
 $gitCommand = Get-Command git.exe -ErrorAction SilentlyContinue
 if (-not $gitCommand) { $gitCommand = Get-Command git -ErrorAction SilentlyContinue }
 if ($gitCommand) {
@@ -442,14 +450,32 @@ if ($gitCommand) {
         Write-Host "Local source revision: unavailable (not a Git checkout)" -ForegroundColor Yellow
     }
 }
-Write-Host "Only browser/API target: $target"
-Write-Host "QR and public links use: $canonicalPublicUrl"
-Write-Host "Playwright uses the local Docker API and local PostgreSQL. No production database is used."
-Write-Host "No mocked API routes, synthetic JWTs, real customer data or real payment verification."
+if ($AndroidAppOnly) {
+    Write-Host "APK source: $canonicalPublicUrl (release metadata and APK download only)"
+    Write-Host "Local website UI/API E2E, Windows QA, Docker and PostgreSQL suites: NOT RUN"
+} else {
+    Write-Host "Only browser/API target: $target"
+    Write-Host "QR and public links use: $canonicalPublicUrl"
+    Write-Host "Playwright uses the local Docker API and local PostgreSQL. No production database is used."
+    Write-Host "No mocked API routes, synthetic JWTs, real customer data or real payment verification."
+}
 Write-Host "Evidence directory: $artifactRoot"
 
 try {
-    if ($env:OS -ne "Windows_NT") { throw "This runner is designed for Windows PowerShell on the local shop/deployment machine." }
+    if ($AndroidAppOnly) {
+        if ($env:OS -ne "Windows_NT") { throw "Android-only published-app QA is designed for Windows PowerShell." }
+        $publishedAppScript = Join-Path $PSScriptRoot "test-published-apps.ps1"
+        if (-not (Test-Path -LiteralPath $publishedAppScript -PathType Leaf)) {
+            Add-QAResult -Name "Android-only published app QA" -Status "FAIL" -Detail "Missing helper: $publishedAppScript"
+            $exitCode = 1
+        } else {
+            $androidOnlyOk = Invoke-QAStep -Name "Download and acceptance-test the website-published Android APK only" -LogName "android-published-app.log" -Action {
+                & $publishedAppScript -AndroidOnly -PublicOrigin $canonicalPublicUrl -OutputDirectory (Join-Path $artifactRoot "android-published-app") -ConfigPath $qaConfigPath
+            }
+            if (-not $androidOnlyOk) { $exitCode = 1 }
+        }
+    } else {
+        if ($env:OS -ne "Windows_NT") { throw "This runner is designed for Windows PowerShell on the local shop/deployment machine." }
     $node = Get-Command node.exe -ErrorAction SilentlyContinue
     if (-not $node) { $node = Get-Command node -ErrorAction Stop }
     $nodeVersion = (& $node.Source --version).Trim()
@@ -1090,7 +1116,7 @@ try {
     } else {
         Write-Host "Optional published Windows/Android app QA was not requested. Pass -TestPublishedApps to enable it." -ForegroundColor DarkCyan
     }
-
+    }
 }
 catch {
     $fatalError = $_.Exception.Message
@@ -1110,9 +1136,11 @@ finally {
         changedFilesFromPull = @($pullChangedPaths)
         applicationRefreshRequiredByPull = if ($pulledLatest) { $requiresAppRefresh } else { $null }
         reusedExistingAppContainers = if ($E2EOnly) { $reuseExistingStack } else { $null }
-        publishedAppsTestRequested = [bool]$TestPublishedApps
-        environment = "LOCAL_DOCKER_POSTGRES_REAL_API"
-        target = $target
+        publishedAppsTestRequested = [bool]($TestPublishedApps -or $AndroidAppOnly)
+        androidAppOnly = [bool]$AndroidAppOnly
+        webE2eExecuted = -not [bool]$AndroidAppOnly
+        environment = if ($AndroidAppOnly) { "PUBLISHED_ANDROID_APP_ONLY" } else { "LOCAL_DOCKER_POSTGRES_REAL_API" }
+        target = if ($AndroidAppOnly) { $canonicalPublicUrl } else { $target }
         runId = $runId
         startedLocal = $runStamp
         completedUtc = [DateTime]::UtcNow.ToString("o")

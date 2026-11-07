@@ -81,3 +81,21 @@ test('Compose local CORS fallback matches the central local origin', () => {
   const expected = 'Cors__AllowedOrigins__2: "${SMARTPRINT_LOCAL_ORIGIN:-' + localOrigin + '}"';
   assert.ok(compose.includes(expected), 'compose.local.yml CORS fallback must match scripts/qa/smartprint-qa.config.json');
 });
+
+
+const runnerSource = readFileSync(new URL('./run-smartprint-qa.ps1', import.meta.url), 'utf8');
+const publishedAppsSource = readFileSync(new URL('./test-published-apps.ps1', import.meta.url), 'utf8');
+
+test('Android-only published app mode bypasses the normal local web/API QA runner', () => {
+  assert.match(runnerSource, /\[switch\]\$AndroidAppOnly/);
+  assert.match(runnerSource, /if \(\$AndroidAppOnly\)/);
+  assert.match(runnerSource, /-AndroidOnly -PublicOrigin/);
+  assert.match(runnerSource, /webE2eExecuted = -not \[bool\]\$AndroidAppOnly/);
+});
+
+test('Android-only published app mode does not download or run Windows acceptance', () => {
+  assert.match(publishedAppsSource, /\[switch\]\$AndroidOnly/);
+  assert.match(publishedAppsSource, /if\(\$AndroidOnly\)\{ @\("android"\) \}/);
+  assert.match(publishedAppsSource, /if\(\$AndroidOnly\)\{/);
+  assert.match(publishedAppsSource, /no Windows installer was downloaded/);
+});

@@ -2,7 +2,8 @@
 param(
   [Parameter(Mandatory=$true)][string]$PublicOrigin,
   [Parameter(Mandatory=$true)][string]$OutputDirectory,
-  [Parameter(Mandatory=$true)][string]$ConfigPath
+  [Parameter(Mandatory=$true)][string]$ConfigPath,
+  [switch]$AndroidOnly
 )
 $ErrorActionPreference = "Stop"
 Add-Type -AssemblyName System.Net.Http
@@ -252,7 +253,8 @@ try {
     Add-Result "Public release metadata" "WARN" ("Could not retrieve release metadata: "+$_.Exception.Message)
   }
 
-  foreach($platform in @("windows","android")){
+  $platformsToCheck = if($AndroidOnly){ @("android") } else { @("windows","android") }
+  foreach($platform in $platformsToCheck){
     if(-not $release){
       Add-Result ("Download current "+$platform+" asset") "SKIPPED" "No verified release metadata; no hard-coded URL used."
       continue
@@ -298,8 +300,12 @@ try {
       Add-Result ("Download current "+$platform+" asset from website") "FAIL" $_.Exception.Message
     }
   }
-  try {Test-WindowsApp $downloads.windows $config.apps.windows}
-  catch {Add-Result "Windows installed-app acceptance" "FAIL" $_.Exception.Message}
+  if($AndroidOnly){
+    Add-Result "Windows installer/app acceptance" "SKIPPED" "Android-only mode; no Windows installer was downloaded, installed, launched or modified."
+  } else {
+    try {Test-WindowsApp $downloads.windows $config.apps.windows}
+    catch {Add-Result "Windows installed-app acceptance" "FAIL" $_.Exception.Message}
+  }
   try {Test-AndroidApp $downloads.android $androidApkVerified $config.apps.android}
   catch {Add-Result "Android emulator app acceptance" "FAIL" $_.Exception.Message}
 }
@@ -307,13 +313,13 @@ finally {
   $client.Dispose()
   $failed=@($script:results | Where-Object status -eq "FAIL").Count
   $summary=[pscustomobject]@{
-    product="SmartPrint";publicOrigin=$origin.GetLeftPart([UriPartial]::Authority);completedUtc=[DateTime]::UtcNow.ToString("o")
+    product="SmartPrint";scope=if($AndroidOnly){"ANDROID_ONLY"}else{"WINDOWS_AND_ANDROID"};publicOrigin=$origin.GetLeftPart([UriPartial]::Authority);completedUtc=[DateTime]::UtcNow.ToString("o")
     result=if($failed -eq 0){"PASS"}else{"FAIL"}
     passed=@($script:results | Where-Object status -eq "PASS").Count
     failed=$failed
     skipped=@($script:results | Where-Object status -eq "SKIPPED").Count
     warnings=@($script:results | Where-Object status -eq "WARN").Count
-    safety=@{windowsExistingInstallReplaced=$false;androidExistingInstallReplaced=$false;physicalAndroidDevicesTargeted=$false;shopPairingAttempted=$false;printerConfigurationChanged=$false}
+    safety=@{windowsChecksPerformed=(-not [bool]$AndroidOnly);windowsExistingInstallReplaced=$false;androidExistingInstallReplaced=$false;physicalAndroidDevicesTargeted=$false;shopPairingAttempted=$false;printerConfigurationChanged=$false}
     results=@($script:results)
   }
   $summary | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath (Join-Path $outputRoot "results.json") -Encoding UTF8

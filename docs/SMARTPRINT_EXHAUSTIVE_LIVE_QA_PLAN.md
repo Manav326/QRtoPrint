@@ -291,6 +291,17 @@ When system Gradle and Android SDK are installed, the orchestrator:
 
 Physical Android devices are not targeted automatically. Camera permission flows, real camera scanning, the phone's document picker, Android Wi-Fi permissions and actual phone-to-shop LAN upload still require device acceptance.
 
+### Website-published Android APK only
+
+To test only the APK published on the SmartPrint website, without rerunning the local portal/browser/API E2E suite, Windows tests, Docker builds or PostgreSQL checks:
+
+~~~powershell
+adb devices
+.\scripts\qa\run-smartprint-qa.ps1 -AndroidAppOnly
+~~~
+
+This standalone mode checks the configured HTTPS release metadata, downloads and verifies the published APK, validates its application ID, and launches the app on exactly one connected configured Android emulator. It installs the APK only when the app is absent; it never replaces an existing installation and never targets a physical phone. The public website is used only as the APK/release download source—no website UI journey is run. Windows installer checks are not performed in this mode. Results are saved under `artifacts/smartprint-qa/<run-id>/android-published-app/`.
+
 ### Windows virtual printer
 
 If Microsoft Print to PDF is installed, the Agent test run enables only SMARTPRINT_RUN_WINDOWS_SPOOLER_INTEGRATION=1. This exercises the real Windows GDI → virtual spooler → generated PDF output path. The secondary queue integration flag remains off. This is not a physical printer acceptance test.
