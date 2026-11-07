@@ -958,9 +958,9 @@ async function exercisePhotoStudioFeatureMatrix() {
     assert.equal(await natural.getAttribute("aria-pressed"), "true");
     assert.notDeepEqual(await readPhotoCanvasPixels(page), pixels);
     await dialog.getByRole("button", { name: "Zoom in" }).click();
-    assert.equal(await dialog.locator(".zoomLabel").innerText(), "1.1×");
+    assert.equal(await dialog.getByText("1.1×", { exact: true }).innerText(), "1.1×");
     await dialog.getByRole("button", { name: "Zoom out" }).click();
-    assert.equal(await dialog.locator(".zoomLabel").innerText(), "1.0×");
+    assert.equal(await dialog.getByText("1.1×", { exact: true }).innerText(), "1.0×");
 
     // Edge-only sampled background replacement. A blank A4 margin must not be sampleable.
     await dialog.getByRole("button", { name: "Background", exact: true }).click();
@@ -1099,7 +1099,7 @@ async function exercisePhotoStudioFeatureMatrix() {
     for(let index=0; index<5; index+=1) await nextPage.click();
     assert.equal(await dialog.getByText("Page 6 of 6",{exact:true}).count(),1);
     assert.equal(await nextPage.isDisabled(),true);
-    assert.match(await dialog.locator(".canvasFooter").innerText(),/Page 6: 5 photos/);
+    assert.match(await dialog.locator("[class*='canvasFooter']").innerText(),/Page 6: 5 photos/);
     await previousPage.click();
     assert.equal(await dialog.getByText("Page 5 of 6",{exact:true}).count(),1);
     await count.fill("8");
