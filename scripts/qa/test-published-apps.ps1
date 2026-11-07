@@ -262,7 +262,7 @@ function Get-AndroidInstalledPackageDiagnostics([string]$Adb,[string]$Serial,[st
   }
 }
 
-function Test-AndroidApp([string]$Apk,[bool]$ApkVerified,$Settings,[string]$DeviceSerial="",[hashtable]$ApkMetadata=@{}) {
+function Test-AndroidApp([string]$Apk,[bool]$ApkVerified,$Settings,[string]$DeviceSerial="",[hashtable]$ApkMetadata=@{},[bool]$AllowInPlaceUpdate=$false) {
   $adb=Resolve-Adb
   if(-not $adb){Add-Result "Android app live device launch" "SKIPPED" "ADB unavailable.";return}
   $list=@(& $adb devices -l)
@@ -344,6 +344,7 @@ function Test-AndroidApp([string]$Apk,[bool]$ApkVerified,$Settings,[string]$Devi
       return
     }
     $updatedInstall=$true
+    $script:androidExistingInstallWasUpdated=$true
     $installedInfo=Get-AndroidInstalledPackageDiagnostics $adb $serial $package
     Add-Result "Android published APK in-place update" "PASS" "Android accepted adb install -r. Post-update package verification follows; no uninstall or data clear was attempted." -Evidence @{serial=$serial;updateAttempted=$true;updateExitCode=0;uninstallAttempted=$false;dataClearAttempted=$false}
   } elseif($versionMismatch) {
@@ -466,6 +467,7 @@ $handler.AllowAutoRedirect=$true;$handler.MaxAutomaticRedirections=5
 $client=[System.Net.Http.HttpClient]::new($handler);$client.Timeout=[TimeSpan]::FromMinutes(3)
 $release=$null;$summary=$null
 $script:androidDeviceWasPhysical=$false
+$script:androidExistingInstallWasUpdated=$false
 try {
   try {
     $url=[Uri]::new($origin,[string]$config.downloads.statusPath)
@@ -592,7 +594,7 @@ finally {
     failed=$failed
     skipped=@($script:results | Where-Object status -eq "SKIPPED").Count
     warnings=@($script:results | Where-Object status -eq "WARN").Count
-    safety=@{windowsChecksPerformed=(-not [bool]$AndroidOnly);windowsExistingInstallReplaced=$false;androidExistingInstallReplaced=$false;androidExistingInstallUpdated=$false;androidDataClearAttempted=$false;physicalAndroidDevicesTargeted=[bool]$script:androidDeviceWasPhysical;shopPairingAttempted=$false;printerConfigurationChanged=$false}
+    safety=@{windowsChecksPerformed=(-not [bool]$AndroidOnly);windowsExistingInstallReplaced=$false;androidExistingInstallReplaced=$false;androidExistingInstallUpdated=[bool]$script:androidExistingInstallWasUpdated;androidDataClearAttempted=$false;physicalAndroidDevicesTargeted=[bool]$script:androidDeviceWasPhysical;shopPairingAttempted=$false;printerConfigurationChanged=$false}
     results=@($script:results)
   }
   $summary | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath (Join-Path $outputRoot "results.json") -Encoding UTF8
