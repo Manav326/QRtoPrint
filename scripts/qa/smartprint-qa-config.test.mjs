@@ -105,3 +105,29 @@ test('Android-only acceptance cannot pass when the emulator/app launch check is 
   assert.match(publishedAppsSource, /\$androidAcceptance\.Count -ne 1/);
   assert.match(publishedAppsSource, /a skipped device\/app check is not a successful QA run/);
 });
+
+
+test('Android-only published app mode supports explicit physical-device serial targeting', () => {
+  assert.match(runnerSource, /\[string\]\$AndroidDeviceSerial/);
+  assert.match(runnerSource, /-AndroidDeviceSerial \$AndroidDeviceSerial/);
+  assert.match(publishedAppsSource, /\[string\]\$AndroidDeviceSerial/);
+  assert.match(publishedAppsSource, /physical phone\. Supply -AndroidDeviceSerial/);
+  assert.match(publishedAppsSource, /-ceq \$DeviceSerial/);
+});
+
+test('Android live acceptance verifies foreground launch and native Home/Files navigation', () => {
+  assert.match(publishedAppsSource, /uiautomator dump --compressed/);
+  assert.match(publishedAppsSource, /Android native UI rendered/);
+  assert.match(publishedAppsSource, /Android native Files navigation/);
+  assert.match(publishedAppsSource, /Android native Home navigation/);
+  assert.match(publishedAppsSource, /Android app crash-log probe/);
+  assert.match(publishedAppsSource, /installationReplaced=\$false/);
+});
+
+test('Android-only completion gate requires artifact verification and all live app checks', () => {
+  assert.match(publishedAppsSource, /\$requiredAndroidChecks=@\(/);
+  assert.match(publishedAppsSource, /Verify Android APK application ID/);
+  assert.match(publishedAppsSource, /Android native Files navigation/);
+  assert.match(publishedAppsSource, /Android app crash-log probe/);
+  assert.match(publishedAppsSource, /A skipped or warning result is not a successful app QA run/);
+});

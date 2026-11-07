@@ -297,10 +297,10 @@ To test only the APK published on the SmartPrint website, without rerunning the 
 
 ~~~powershell
 adb devices
-.\scripts\qa\run-smartprint-qa.ps1 -AndroidAppOnly
+.\scripts\qa\run-smartprint-qa.ps1 -AndroidAppOnly -AndroidDeviceSerial "YOUR_ADB_SERIAL"
 ~~~
 
-This standalone mode checks the configured HTTPS release metadata, downloads and verifies the published APK, validates its application ID, and launches the app on exactly one connected configured Android emulator. It installs the APK only when the app is absent; it never replaces an existing installation and never targets a physical phone. The public website is used only as the APK/release download source—no website UI journey is run. Windows installer checks are not performed in this mode. If no single eligible emulator is online, or package verification/app launch does not pass, this Android-only run fails rather than reporting a green run with the device suite skipped. Results are saved under `artifacts/smartprint-qa/<run-id>/android-published-app/`.
+This standalone mode checks the configured HTTPS release metadata, downloads and verifies the published APK, validates its application ID, and launches SmartPrint on the exact ADB serial supplied with `-AndroidDeviceSerial`. Supplying the serial is the explicit opt-in to target that physical phone; no other connected device is selected. When no serial is supplied, the runner remains emulator-only. It installs the APK only when the app is absent; it never replaces an existing installation. The live app check verifies the resumed foreground process, inspects the Android accessibility hierarchy, opens the native **My Files** screen, returns to **Home**, and checks the current process log for fatal crashes. It does not create/delete user files, change settings, clear app data, access credentials, open a shop session or run website UI E2E. The public website is used only as the APK/release download source. Windows installer checks are not performed in this mode. If the selected serial is absent/offline or any required live app check does not pass, the run fails. Results are saved under `artifacts/smartprint-qa/<run-id>/android-published-app/`.
 
 ### Windows virtual printer
 

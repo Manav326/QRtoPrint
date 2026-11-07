@@ -6,10 +6,17 @@ param(
     [switch]$PullLatest,
     [switch]$ReuseRunningStack,
     [switch]$TestPublishedApps,
-    [switch]$AndroidAppOnly
+    [switch]$AndroidAppOnly,
+    [string]$AndroidDeviceSerial = ""
 )
 
 $ErrorActionPreference = "Stop"
+if (-not [string]::IsNullOrWhiteSpace($AndroidDeviceSerial) -and -not $AndroidAppOnly) {
+    throw "-AndroidDeviceSerial can only be used with -AndroidAppOnly."
+}
+if (-not [string]::IsNullOrWhiteSpace($AndroidDeviceSerial) -and $AndroidDeviceSerial -notmatch '^[A-Za-z0-9._:-]{1,128}$') {
+    throw "-AndroidDeviceSerial contains unsupported characters. Copy the exact serial shown by 'adb devices'."
+}
 if ($AndroidAppOnly -and ($E2EOnly -or $PullLatest -or $ReuseRunningStack -or $TestPublishedApps)) {
     throw "-AndroidAppOnly is a standalone mode. Do not combine it with -E2EOnly, -PullLatest, -ReuseRunningStack or -TestPublishedApps."
 }
@@ -470,7 +477,7 @@ try {
             $exitCode = 1
         } else {
             $androidOnlyOk = Invoke-QAStep -Name "Download and acceptance-test the website-published Android APK only" -LogName "android-published-app.log" -Action {
-                & $publishedAppScript -AndroidOnly -PublicOrigin $canonicalPublicUrl -OutputDirectory (Join-Path $artifactRoot "android-published-app") -ConfigPath $qaConfigPath
+                & $publishedAppScript -AndroidOnly -PublicOrigin $canonicalPublicUrl -OutputDirectory (Join-Path $artifactRoot "android-published-app") -ConfigPath $qaConfigPath -AndroidDeviceSerial $AndroidDeviceSerial
             }
             if (-not $androidOnlyOk) { $exitCode = 1 }
         }
@@ -1138,6 +1145,7 @@ finally {
         reusedExistingAppContainers = if ($E2EOnly) { $reuseExistingStack } else { $null }
         publishedAppsTestRequested = [bool]($TestPublishedApps -or $AndroidAppOnly)
         androidAppOnly = [bool]$AndroidAppOnly
+        androidDeviceSerial = if (-not [string]::IsNullOrWhiteSpace($AndroidDeviceSerial)) { $AndroidDeviceSerial } else { $null }
         webE2eExecuted = -not [bool]$AndroidAppOnly
         environment = if ($AndroidAppOnly) { "PUBLISHED_ANDROID_APP_ONLY" } else { "LOCAL_DOCKER_POSTGRES_REAL_API" }
         target = if ($AndroidAppOnly) { $canonicalPublicUrl } else { $target }
