@@ -23,6 +23,7 @@ export const RECORD_PREREQUISITES = Object.freeze({
   "Shop one configures print pricing through the real UI": ["Create or sign in to the first real QA shop through the shop UI", "Create and publish a free QA-only plan, then assign it through the platform UI"],
   "Shop one configures payment methods through the real UI": ["Create or sign in to the first real QA shop through the shop UI"],
   "Customer opens the shop-one station link in a guest browser session": ["Shop one provisions real QA printer and QR station"],
+  "Guest customer completes a no-account upload from the shop station link": ["Customer opens the shop-one station link in a guest browser session", "Shop one configures print pricing through the real UI", "Create or sign in to the real global customer account"],
   "Shop two configures isolated real QA printer/station": ["Create or sign in to the second real QA shop through the shop UI", "Create and publish a free QA-only plan, then assign it through the platform UI"],
   "SHOP: invalid device, printer, profile, account and pricing inputs fail without changing saved settings": ["Shop one provisions real QA printer and QR station", "Shop one configures print pricing through the real UI"],
   "REPORTS: supported reporting windows return tenant-scoped summary data and invalid periods are rejected": ["Create or sign in to the first real QA shop through the shop UI", "Create or sign in to the second real QA shop through the shop UI"],
