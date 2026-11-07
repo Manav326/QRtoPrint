@@ -30,9 +30,14 @@ jobs:
       - name: Install portal dependencies
         id: portal_dependencies
         run: pnpm install --frozen-lockfile
-      - name: Validate local real-data Playwright suite syntax
+      - name: Validate every QA harness JavaScript module
         if: ${{ !cancelled() && steps.portal_dependencies.outcome == 'success' }}
-        run: node --check scripts/qa/smartprint-local-e2e.mjs
+        run: |
+          set -euo pipefail
+          for file in scripts/qa/*.mjs; do
+            echo "Syntax-checking $file"
+            node --check "$file"
+          done
       - name: Test local E2E prerequisite and HTTP audit helpers
         if: ${{ !cancelled() && steps.portal_dependencies.outcome == 'success' }}
         run: node --test --test-concurrency=1 scripts/qa/local-e2e-prerequisites.test.mjs scripts/qa/local-e2e-http-audit.test.mjs
