@@ -222,21 +222,20 @@ if ($pnpm -and $desktopBuildOk -and $desktopRustOk) {
 
 if ($desktopBuildNativeOk -and (Test-Path -LiteralPath $desktopExe -PathType Leaf)) {
     $existingDesktop = @()
+    $desktopProcessInspectionSucceeded = $true
     try {
-        $existingDesktop = @(Get-CimInstance -ClassName Win32_Process -Filter "Name='smartprint-desktop.exe'" -ErrorAction Stop |
-            Where-Object {
-                $_.ExecutablePath -and
-                [IO.Path]::GetFullPath($_.ExecutablePath).Equals(
-                    [IO.Path]::GetFullPath($desktopExe),
-                    [StringComparison]::OrdinalIgnoreCase
-                )
-            })
+        # Do not launch a second copy when the installed app or a previous QA
+        # copy is already open, even when its executable path differs.
+        $existingDesktop = @(Get-CimInstance -ClassName Win32_Process -Filter "Name='smartprint-desktop.exe'" -ErrorAction Stop)
     } catch {
-        Write-QA "Could not safely prove whether the local QA Desktop executable is already running." "Yellow"
+        $desktopProcessInspectionSucceeded = $false
+        Write-QA "Could not safely inspect running SmartPrint Desktop processes." "Yellow"
     }
 
-    if ($existingDesktop.Count -gt 0) {
-        Add-NativeResult "Windows Desktop native window and rendered workspace" "SKIPPED" "The exact executable is already running. The QA runner will not take over or close the user's active Desktop session."
+    if (-not $desktopProcessInspectionSucceeded) {
+        Add-NativeResult "Windows Desktop native window and rendered workspace" "SKIPPED" "Process inspection failed. The QA runner will not launch a second Desktop session when it cannot prove the workspace is closed."
+    } elseif ($existingDesktop.Count -gt 0) {
+        Add-NativeResult "Windows Desktop native window and rendered workspace" "SKIPPED" "A SmartPrint Desktop session is already running. Close it manually and rerun this step; QA will not take over or close the user's active workspace."
     } else {
         $smokeScript = Join-Path $PSScriptRoot "desktop-open-smoke.ps1"
         if (Test-Path -LiteralPath $smokeScript -PathType Leaf) {
