@@ -54,11 +54,22 @@ if (-not [string]::IsNullOrWhiteSpace($previousWebViewArguments)) {
     $testWebViewArguments = "$previousWebViewArguments $testWebViewArguments"
 }
 
+# WebView2 can reuse an existing browser process when it shares a user-data
+# folder. That process may not inherit this run's private DevTools port. Give
+# the smoke-test instance its own short-lived profile so the probe is reliable
+# and cannot attach to, or change, a user's normal Edge/WebView2 profile.
+$dataDirectoryEnvironmentName = "WEBVIEW2_USER_DATA_FOLDER"
+$previousWebViewDataDirectory = [Environment]::GetEnvironmentVariable($dataDirectoryEnvironmentName, "Process")
+$testWebViewDataDirectory = Join-Path ([IO.Path]::GetTempPath()) ("smartprint-desktop-smoke-" + [Guid]::NewGuid().ToString("N"))
+New-Item -ItemType Directory -Force -Path $testWebViewDataDirectory | Out-Null
+
 $process = $null
 $webSocket = $null
 
 try {
     [Environment]::SetEnvironmentVariable($environmentName, $testWebViewArguments, "Process")
+    [Environment]::SetEnvironmentVariable($dataDirectoryEnvironmentName, $testWebViewDataDirectory, "Process")
+    Write-Host "Using an isolated temporary WebView2 profile for this smoke test." -ForegroundColor DarkCyan
 
     Write-Host "Launching SmartPrint Desktop: $executable" -ForegroundColor Cyan
     $process = Start-Process -FilePath $executable -WorkingDirectory (Split-Path -Parent $executable) -PassThru
@@ -306,4 +317,33 @@ finally {
     }
 
     [Environment]::SetEnvironmentVariable($environmentName, $previousWebViewArguments, "Process")
+    [Environment]::SetEnvironmentVariable($dataDirectoryEnvironmentName, $previousWebViewDataDirectory, "Process")
+
+    # WebView2 may finish shutting down its browser child shortly after the
+    # native window closes. Wait for only the process using this unique profile;
+    # never terminate a shared Edge/WebView2 process or touch another profile.
+    try {
+        $profileProcessDeadline = [DateTime]::UtcNow.AddSeconds(10)
+        $profileProcesses = @()
+        do {
+            $profileProcesses = @(
+                Get-CimInstance -ClassName Win32_Process -Filter "Name='msedgewebview2.exe'" -ErrorAction Stop |
+                    Where-Object {
+                        $_.CommandLine -and
+                        $_.CommandLine.IndexOf($testWebViewDataDirectory, [StringComparison]::OrdinalIgnoreCase) -ge 0
+                    }
+            )
+            if ($profileProcesses.Count -eq 0) { break }
+            Start-Sleep -Milliseconds 250
+        } while ([DateTime]::UtcNow -lt $profileProcessDeadline)
+
+        if ($profileProcesses.Count -eq 0) {
+            Remove-Item -LiteralPath $testWebViewDataDirectory -Recurse -Force -ErrorAction SilentlyContinue
+        } else {
+            Write-Warning "The isolated WebView2 browser is still exiting. Its temporary profile was left untouched at: $testWebViewDataDirectory"
+        }
+    }
+    catch {
+        Write-Warning "Could not verify that the isolated WebView2 profile is unused; leaving it untouched at: $testWebViewDataDirectory"
+    }
 }
