@@ -2240,6 +2240,7 @@ shop.MapPost("/photo-jobs", async (
     ClaimsPrincipal principal,
     SmartPrintDbContext db,
     DocumentStorage storage,
+    TenantEntitlementService entitlements,
     HttpContext context,
     CancellationToken ct) =>
 {
