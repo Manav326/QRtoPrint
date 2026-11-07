@@ -416,3 +416,32 @@ test("native customer account identity accompanies QR session renewal",()=>{
  const renewal=api.slice(start,end);
  assert.match(renewal,/headers: \{ "X-Print-Session": sessionToken, \.\.\.await nativeCustomerAuthorizationHeaders\(\) \}/);
 });
+
+
+test("shop-originated photo orders use their own tenant-owned job and the shared Photo Studio",()=>{
+ const app=read("../src/App.tsx");
+ const studio=read("../src/PhotoStudio.tsx");
+ const api=read("../src/api.ts");
+ const program=read("../../../src/SmartPrint.Api/Program.cs");
+ const endpointStart=program.indexOf('shop.MapPost("/photo-jobs"');
+ const endpointEnd=program.indexOf('shop.MapGet("/reports/summary"',endpointStart);
+ assert.ok(endpointStart>=0&&endpointEnd>endpointStart);
+ const endpoint=program.slice(endpointStart,endpointEnd);
+ assert.match(app,/New photo order/);
+ assert.match(app,/ShopPhotoOrderModal/);
+ assert.match(app,/mode="shop-create"/);
+ assert.match(studio,/"SHOP · NEW PHOTO ORDER"/);
+ assert.match(api,/createShopPhotoJob/);
+ assert.match(endpoint,/if \(!IsShopOwner\(principal\) \|\| !TryGetTenantId\(principal, out var tenantId\)\)/);
+ assert.match(endpoint,/Origin = "SHOP_OWNER"/);
+ assert.match(endpoint,/QrStationId = null/);
+ assert.match(endpoint,/CustomerSessionId = null/);
+ assert.match(endpoint,/Status = paymentMethod == "UPI" \? "AWAITING_CUSTOMER_PAYMENT" : "AWAITING_COUNTER_PAYMENT"/);
+ assert.match(endpoint,/new PrintPayment/);
+ assert.match(endpoint,/PhotoSheetPdfRules\.HasExactlyA4PortraitPages/);
+ assert.match(endpoint,/existingJob\.IdempotencyKey == idempotencyKey/);
+ assert.match(endpoint,/session\.TenantId == tenantId && session\.CustomerUserId == user\.Id/);
+ assert.match(endpoint,/SHOP_PHOTO_ORDER_CREATED_AWAITING_PAYMENT/);
+ assert.match(api,/form\.append\("paymentMethod", values\.paymentMethod\)/);
+ assert.match(app,/buildCustomerUpiIntent\(/);
+});
