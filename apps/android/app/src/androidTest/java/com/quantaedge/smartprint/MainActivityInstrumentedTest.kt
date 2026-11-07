@@ -358,9 +358,9 @@ class MainActivityInstrumentedTest {
     fun launcherIntentOpensMainActivityAndInflatesSmartPrintShell() {
         val context = ApplicationProvider.getApplicationContext<Context>()
         val launcherIntent = context.packageManager.getLaunchIntentForPackage(context.packageName)
+            ?: throw AssertionError("SmartPrint must be discoverable through an Android launcher intent.")
 
-        assertNotNull("SmartPrint must be discoverable through an Android launcher intent.", launcherIntent)
-        assertEquals(android.content.Intent.ACTION_MAIN, launcherIntent!!.action)
+        assertEquals(android.content.Intent.ACTION_MAIN, launcherIntent.action)
         assertTrue(
             "The app's launch intent must include CATEGORY_LAUNCHER.",
             launcherIntent.hasCategory(android.content.Intent.CATEGORY_LAUNCHER)
