@@ -391,22 +391,42 @@ async function registerOrSignInShop(page, email, password, businessName, ownerNa
   await page.getByLabel("Your name").fill(ownerName);
   await page.getByLabel("Email address").fill(email);
   await page.locator('input[type="password"]').first().fill(password);
+  const registrationResponsePromise = page.waitForResponse(response => {
+    const request = response.request();
+    const url = new URL(response.url());
+    return request.method() === "POST" &&
+      url.origin === baseUrl.origin &&
+      url.pathname === "/api/v1/auth/register-shop";
+  }, { timeout: 30000 });
   await page.getByRole("button", { name: "Create my shop" }).click();
+  const registrationResponse = await registrationResponsePromise;
 
   let registered = false;
-  try {
-    await page.locator(".app-shell").waitFor({ state: "visible", timeout: 20000 });
+  if (registrationResponse.status() === 201) {
     registered = true;
-  } catch {
-    const error = (await page.locator(".auth-error").allTextContents().catch(() => [])).join(" ");
-    if (!/already registered|already exists/i.test(error)) {
-      throw new Error("The real shop-registration flow failed: " + (error || "No workspace appeared after registration."));
-    }
+    await page.locator(".app-shell").waitFor({ state: "visible", timeout: 20000 });
+  } else if (registrationResponse.status() === 409) {
+    const errorMessage = page.locator(".auth-error");
+    await errorMessage.waitFor({ state: "visible", timeout: 10000 });
+    const error = (await errorMessage.innerText()).trim();
+    assert.match(error, /already registered|already exists/i,
+      "Shop registration returned HTTP 409 without the expected existing-account message: " + error);
+    markExpectedHttpError({
+      method: "POST",
+      url: registrationResponse.url(),
+      status: registrationResponse.status()
+    });
     await openRoute(page, "/shop", ".auth-screen", "shop-sign-in");
     await page.getByLabel("Email address").fill(email);
     await page.locator('input[type="password"]').first().fill(password);
     await page.getByRole("button", { name: "Sign in to workspace" }).click();
     await page.locator(".app-shell").waitFor({ state: "visible", timeout: 20000 });
+  } else {
+    const responseBody = await registrationResponse.text().catch(() => "");
+    throw new Error(
+      "The real shop-registration flow returned HTTP " + registrationResponse.status() +
+      " instead of 201 or the expected existing-account 409. Body: " + responseBody.slice(0, 700)
+    );
   }
 
   if (registered) {
