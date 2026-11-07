@@ -256,6 +256,31 @@ public sealed class PostgresMigrationUpgradeTests
         Assert.Equal(6, savedPhotoJob.PageCount);
         Assert.Equal(50, legacyPhotoJob.PhotoCount);
         Assert.Null(legacyPhotoJob.PhotosPerPage); // Existing records are not assigned a guessed density.
+
+        // The database must reject a layout density that the selected physical size cannot fit.
+        var invalidDensityScenarios = new[]
+        {
+            (PhotoSizeCode: "35x45", PhotoCount: 50, PhotosPerPage: 26, PrintKind: "PHOTO"),
+            (PhotoSizeCode: "4x6", PhotoCount: 2, PhotosPerPage: 2, PrintKind: "PHOTO"),
+            (PhotoSizeCode: (string?)null, PhotoCount: 0, PhotosPerPage: 1, PrintKind: "DOCUMENT")
+        };
+        foreach (var scenario in invalidDensityScenarios)
+        {
+            await using var invalidDensityContext = new SmartPrintDbContext(options);
+            invalidDensityContext.PrintJobs.Add(new PrintJob
+            {
+                Id = Guid.NewGuid(), TenantId = tenant.Id, QrStationId = station.Id,
+                CustomerSessionId = session.Id, JobNumber = $"SP-PHOTO-INVALID-{Guid.NewGuid():N}"[..24],
+                IdempotencyKey = $"PHOTO-INVALID-DENSITY-{Guid.NewGuid():N}",
+                Status = "AWAITING_PAYMENT", PageCount = 1, Copies = 1,
+                Currency = "INR", QuotedAmountMinor = 100,
+                PrintKind = scenario.PrintKind, PhotoSizeCode = scenario.PhotoSizeCode,
+                PhotoCount = scenario.PhotoCount, PhotosPerPage = scenario.PhotosPerPage,
+                PhotoUnitPriceMinorSnapshot = scenario.PrintKind == "PHOTO" ? 100 : 0,
+                CreatedUtc = now, UpdatedUtc = now
+            });
+            await Assert.ThrowsAsync<DbUpdateException>(() => invalidDensityContext.SaveChangesAsync());
+        }
     }
 
     private static async Task VerifyConcurrentLocalBatchReservationsStayOnOneComputerAsync(
