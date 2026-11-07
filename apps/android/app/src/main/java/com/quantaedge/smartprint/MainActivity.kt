@@ -608,7 +608,6 @@ class MainActivity : AppCompatActivity() {
             foreground = SmartPrintGlass.edge(this@MainActivity)
             if (!useRail) addView(bottomNavigationContent, FrameLayout.LayoutParams(-1, dp(66), Gravity.BOTTOM))
         }
-        navigation.post { applyNavigationAutomationIds() }
         if (useRail) {
             root.addView(navigation, FrameLayout.LayoutParams(dp(80), -1, Gravity.START or Gravity.TOP).apply {
                 topMargin = dp(64)
@@ -665,28 +664,6 @@ class MainActivity : AppCompatActivity() {
         item.addView(title, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT))
         bottomNavigationItemViews[destinationId] = Triple(item, icon, title)
         bottomNavigationContent.addView(item, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, dp(52)))
-    }
-
-    private fun applyNavigationAutomationIds() {
-        val destinationIds = mapOf(
-            HOME to R.id.smartprint_nav_home,
-            FILES to R.id.smartprint_nav_files
-        )
-        fun applyTo(view: View) {
-            val stableId = destinationIds[view.id]
-                ?: when (view.contentDescription?.toString()) {
-                    "Home" -> R.id.smartprint_nav_home
-                    "My Files" -> R.id.smartprint_nav_files
-                    else -> null
-                }
-            stableId?.let { view.id = it }
-            if (view is ViewGroup) {
-                for (index in 0 until view.childCount) {
-                    applyTo(view.getChildAt(index))
-                }
-            }
-        }
-        applyTo(navigation)
     }
 
     private fun updateBottomNavigationSelection(selectedId: Int) {
