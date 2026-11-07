@@ -36,7 +36,7 @@ const PHOTO_SIZES: PhotoSize[] = [
   { id: "35x45", label: "35 × 45 mm", detail: "Portrait ID photo", widthMm: 35, heightMm: 45 },
   { id: "25x35", label: "25 × 35 mm", detail: "Compact ID photo", widthMm: 25, heightMm: 35 },
   { id: "2x2", label: "2 × 2 inch", detail: "Square photo", widthMm: 50.8, heightMm: 50.8 },
-  { id: "4x6", label: "4 × 6 inch", detail: "Standard photo print", widthMm: 101.6, heightMm: 152.4 }
+  { id: "4x6", label: "4 × 6 inch · Portrait", detail: "Portrait tile on an A4 sheet", widthMm: 101.6, heightMm: 152.4 }
 ];
 
 const LOOKS: Array<{ id: LookPreset; label: string; note: string; adjustments: Adjustments }> = [
