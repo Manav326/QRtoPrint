@@ -63,6 +63,16 @@ kotlin {
     }
 }
 
+// Stream each Android JVM test as it starts and completes so local QA and CI
+// show the exact test currently executing instead of a silent Gradle wait.
+tasks.withType<org.gradle.api.tasks.testing.Test>().configureEach {
+    testLogging {
+        events("started", "passed", "skipped", "failed")
+        showStandardStreams = true
+        exceptionFormat = org.gradle.api.tasks.testing.logging.TestExceptionFormat.FULL
+    }
+}
+
 dependencies {
     implementation("androidx.core:core-ktx:1.15.0")
     implementation("androidx.appcompat:appcompat:1.7.0")
