@@ -5,7 +5,7 @@ import {
 } from "lucide-react";
 import styles from "./PhotoStudio.module.css";
 import { isDesktopApp, setDesktopContentProtection } from "./desktop-bridge";
-import { A4_HEIGHT_MM, A4_WIDTH_MM, A4_HEIGHT_PX, A4_WIDTH_PX, buildPhotoPdf, getPhotoSheetLayout } from "./photo-studio-layout";
+import { A4_HEIGHT_MM, A4_WIDTH_MM, A4_HEIGHT_PX, A4_WIDTH_PX, buildPhotoPdf, getPhotoSheetLayout, getPhotoSheetPhotoPositions, hasSufficientPhotoResolution } from "./photo-studio-layout";
 
 export type PreparedPhotoSheet = { file: File; sizeCode: string; photoCount: number; photosPerPage: number; previewPages?: Blob[] };
 
@@ -83,23 +83,17 @@ function drawPhotoSheetPage(
   caption:{name:string;dob:string;fontSizePt:number;color:string},
   background:{sourceColor:string|null;targetColor:string;tolerance:number},captionHeightMm:number
 ){
-  const scale=canvasWidth/A4_WIDTH_MM,layout=getPhotoSheetLayout(size,captionHeightMm,photosPerPage);
-  const tileHeight=size.heightMm+captionHeightMm,pageStart=pageIndex*photosPerPage;
+  const scaleX=canvasWidth/A4_WIDTH_MM,scaleY=context.canvas.height/A4_HEIGHT_MM;
+  const pageStart=pageIndex*photosPerPage;
   const pageCopies=Math.max(0,Math.min(photosPerPage,copies-pageStart));
-  const visibleRows=Math.max(1,Math.ceil(pageCopies/layout.columns));
-  const visibleContentHeightMm=visibleRows*tileHeight+(visibleRows-1)*3;
-  const pageOffsetY=Math.max(8,(A4_HEIGHT_MM-visibleContentHeightMm)/2);
+  const positions=getPhotoSheetPhotoPositions(size,captionHeightMm,photosPerPage,pageCopies);
   context.save();context.setTransform(1,0,0,1,0,0);context.fillStyle="#fff";
-  context.fillRect(0,0,canvasWidth,context.canvas.height);context.scale(scale,scale);
+  context.fillRect(0,0,canvasWidth,context.canvas.height);context.scale(scaleX,scaleY);
   const source=cropSource(image,size,zoom,focusX,focusY);
   const filter=`brightness(${adjustments.brightness}%) contrast(${adjustments.contrast}%) saturate(${adjustments.saturation}%)`;
   const photoW=Math.max(1,Math.round(size.widthMm/25.4*300)),photoH=Math.max(1,Math.round(size.heightMm/25.4*300));
-  for(let index=0;index<pageCopies;index++){
-    const col=index%layout.columns,row=Math.floor(index/layout.columns);
-    const rowStart=row*layout.columns,rowCount=Math.min(layout.columns,pageCopies-rowStart);
-    const rowWidth=rowCount*size.widthMm+(rowCount-1)*3;
-    const rowOffset=(layout.contentWidthMm-rowWidth)/2;
-    const x=layout.offsetXmm+rowOffset+col*(size.widthMm+3),y=pageOffsetY+row*(tileHeight+3);
+  for(const position of positions){
+    const x=position.xMm,y=position.yMm;
     const crop=document.createElement("canvas");crop.width=photoW;crop.height=photoH;
     const cropContext=crop.getContext("2d");if(!cropContext)throw new Error("A photo crop could not be prepared.");
     cropContext.filter=filter;cropContext.drawImage(image,source.x,source.y,source.width,source.height,0,0,photoW,photoH);cropContext.filter="none";
@@ -145,16 +139,10 @@ function safeBaseName(fileName: string) {
   return withoutExtension.replace(/[^a-zA-Z0-9_-]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 48) || "photo";
 }
 
-function sourceResolutionNote(image: HTMLImageElement, size: PhotoSize) {
-  const requiredWidth = Math.round(size.widthMm / 25.4 * 300);
-  const requiredHeight = Math.round(size.heightMm / 25.4 * 300);
-  const targetAspect = size.widthMm / size.heightMm;
-  const sourceAspect = image.naturalWidth / image.naturalHeight;
-  const availableShortSide = sourceAspect > targetAspect ? image.naturalHeight : image.naturalWidth;
-  const targetShortSide = Math.min(requiredWidth, requiredHeight);
-  return availableShortSide >= targetShortSide
-    ? "Source resolution is suitable for this print size."
-    : "This photo may look soft at the selected size. A sharper original is recommended.";
+function sourceResolutionNote(image: HTMLImageElement, size: PhotoSize, zoom: number) {
+  return hasSufficientPhotoResolution(image.naturalWidth,image.naturalHeight,size,zoom)
+    ? "Source resolution is suitable for this print size and crop."
+    : "This crop may look soft at the selected size. Use a sharper original or reduce the zoom.";
 }
 
 export default function PhotoStudio({
@@ -339,19 +327,10 @@ export default function PhotoStudio({
     if(!bounds.width||!bounds.height)return;
     const px=(event.clientX-bounds.left)/bounds.width*canvas.width,py=(event.clientY-bounds.top)/bounds.height*canvas.height;
     const xMm=px/(canvas.width/A4_WIDTH_MM),yMm=py/(canvas.height/A4_HEIGHT_MM);
-    const tileH=size.heightMm+captionHeightMm;
-    const visibleRows=Math.max(1,Math.ceil(previewPhotoCount/layout.columns));
-    const visibleContentHeightMm=visibleRows*tileH+(visibleRows-1)*3;
-    const pageOffsetY=Math.max(8,(A4_HEIGHT_MM-visibleContentHeightMm)/2);
-    const row=Math.floor((yMm-pageOffsetY)/(tileH+3));
-    if(row<0||row>=visibleRows)return;
-    const rowStart=row*layout.columns,rowCount=Math.min(layout.columns,previewPhotoCount-rowStart);
-    const rowWidth=rowCount*size.widthMm+(rowCount-1)*3;
-    const rowOffset=(layout.contentWidthMm-rowWidth)/2;
-    const col=Math.floor((xMm-layout.offsetXmm-rowOffset)/(size.widthMm+3));
-    if(col<0||col>=rowCount)return;
-    const localX=xMm-layout.offsetXmm-rowOffset-col*(size.widthMm+3),localY=yMm-pageOffsetY-row*(tileH+3);
-    if(localX<0||localX>size.widthMm||localY<0||localY>size.heightMm)return;
+    const positions=getPhotoSheetPhotoPositions(size,captionHeightMm,photosPerPage,previewPhotoCount);
+    const position=positions.find(item=>xMm>=item.xMm&&xMm<=item.xMm+size.widthMm&&yMm>=item.yMm&&yMm<=item.yMm+size.heightMm);
+    if(!position)return;
+    const localX=xMm-position.xMm,localY=yMm-position.yMm;
     const crop=cropSource(image,size,zoom,focusX,focusY);
     const sx=Math.max(0,Math.min(image.naturalWidth-1,Math.floor(crop.x+localX/size.widthMm*crop.width)));
     const sy=Math.max(0,Math.min(image.naturalHeight-1,Math.floor(crop.y+localY/size.heightMm*crop.height)));
@@ -403,7 +382,7 @@ export default function PhotoStudio({
     finally{setBusy(false);}
   }
 
-  const resolutionMessage = image ? sourceResolutionNote(image, size) : "";
+  const resolutionMessage = image ? sourceResolutionNote(image, size, zoom) : "";
   const footerHint = mode === "shop"
     ? "Save your prepared multi-page A4 photo PDF to this existing unpaid job. It returns to the review queue; printing still requires shop approval, verified payment and dispatch."
     : "The original upload stays untouched. This prepared multi-page A4 photo PDF replaces it in your batch when you submit your print request.";
