@@ -477,6 +477,33 @@ async function assertRouteContrast(page, route) {
           });
         }
       }
+      const authInput = auth.querySelector(".auth-input");
+      const authPlaceholder = auth.querySelector(".auth-input input");
+      if (authInput && authPlaceholder) {
+        const placeholderColor = getComputedStyle(authPlaceholder, "::placeholder").color;
+        const inputBackground = getComputedStyle(authInput).backgroundColor;
+        checks.push({
+          scope: "authentication input",
+          foreground: "email/password placeholder",
+          background: "auth input",
+          foregroundColor: placeholderColor,
+          backgroundColor: inputBackground,
+          ratio: contrast(placeholderColor, inputBackground)
+        });
+      }
+      const cardFooter = auth.querySelector(".auth-card-footer");
+      if (cardFooter) {
+        const foregroundColor = getComputedStyle(cardFooter).color;
+        const backgroundColor = style.getPropertyValue("--auth-panel");
+        checks.push({
+          scope: "authentication helper",
+          foreground: ".auth-card-footer",
+          background: "auth panel",
+          foregroundColor,
+          backgroundColor,
+          ratio: contrast(foregroundColor, backgroundColor)
+        });
+      }
     }
     return checks;
   });
