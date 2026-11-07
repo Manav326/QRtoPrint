@@ -125,6 +125,48 @@ class PhotoStudioWebViewInstrumentedTest {
         tapElement(scenario, "document.querySelector(" + JSONObject.quote(selector) + ")")
     }
 
+    private fun tapCssPoint(scenario: ActivityScenario<MainActivity>, xCss: Double, yCss: Double) {
+        val coordinates = evaluate(
+            scenario,
+            "JSON.stringify({ x: $xCss, y: $yCss })"
+        )
+        val point = JSONObject(decodeJavascriptString(coordinates))
+        scenario.onActivity { activity ->
+            val view = getWebView(activity)
+            val density = activity.resources.displayMetrics.density
+            val x = (point.getDouble("x") * density).toFloat().coerceIn(1f, (view.width - 2).toFloat())
+            val y = (point.getDouble("y") * density).toFloat().coerceIn(1f, (view.height - 2).toFloat())
+            val downTime = SystemClock.uptimeMillis()
+            val down = MotionEvent.obtain(downTime, downTime, MotionEvent.ACTION_DOWN, x, y, 0)
+            val up = MotionEvent.obtain(downTime, downTime + 70, MotionEvent.ACTION_UP, x, y, 0)
+            try {
+                view.dispatchTouchEvent(down)
+                view.dispatchTouchEvent(up)
+            } finally {
+                down.recycle()
+                up.recycle()
+            }
+        }
+    }
+
+    private fun tapPhotoSheetPoint(scenario: ActivityScenario<MainActivity>, xMm: Double, yMm: Double) {
+        val x = xMm / 210.0
+        val y = yMm / 297.0
+        val coordinates = evaluate(
+            scenario,
+            """(() => {
+              const canvas = document.querySelector('[role="dialog"] canvas');
+              const rect = canvas.getBoundingClientRect();
+              return JSON.stringify({
+                x: rect.left + rect.width * $x,
+                y: rect.top + rect.height * $y
+              });
+            })()"""
+        )
+        val point = JSONObject(decodeJavascriptString(coordinates))
+        tapCssPoint(scenario, point.getDouble("x"), point.getDouble("y"))
+    }
+
     private fun tapButtonText(scenario: ActivityScenario<MainActivity>, prefix: String) {
         val quoted = JSONObject.quote(prefix)
         tapElement(
@@ -276,17 +318,16 @@ class PhotoStudioWebViewInstrumentedTest {
 
             clickButton(scenario, "Background")
             clickButton(scenario, "Pick background from photo")
-            evaluate(
-                scenario,
-                """(() => {
-                  const canvas = document.querySelector('[role="dialog"] canvas');
-                  const rect = canvas.getBoundingClientRect();
-                  const x = rect.left + rect.width * (13.5 / 210);
-                  const y = rect.top + rect.height * (10 / 297);
-                  canvas.dispatchEvent(new MouseEvent('click', { bubbles: true, clientX: x, clientY: y }));
-                  return true;
-                })()"""
+            tapPhotoSheetPoint(scenario, 5.0, 10.0)
+            assertEquals(
+                "A4 page margin must not sample a background colour.",
+                "true",
+                evaluate(
+                    scenario,
+                    "document.querySelector('[role=dialog]')?.innerText.includes('Not selected')"
+                )
             )
+            tapPhotoSheetPoint(scenario, 13.5, 10.0)
             waitFor(
                 scenario,
                 "document.querySelector('[role=dialog]')?.innerText.includes('#D8E7F5')",
