@@ -316,3 +316,24 @@ test("Photo Studio resolution warning is recomputed when crop zoom changes",()=>
  assert.match(studio,/sourceResolutionNote\(image, size, zoom\)/);
  assert.match(studio,/reduce the zoom/i);
 });
+
+
+test("automatic captioned A4 capacities stay within each photo size's printable bounds",()=>{
+ const sizes=[
+  {widthMm:35,heightMm:45},
+  {widthMm:25,heightMm:35},
+  {widthMm:50.8,heightMm:50.8},
+  {widthMm:101.6,heightMm:152.4}
+ ];
+ const expected=[25,42,12,1];
+ sizes.forEach((size,index)=>{
+  const layout=getPhotoSheetLayout(size,7);
+  assert.equal(layout.perSheet,expected[index]);
+  assert.ok(layout.offsetYmm+layout.contentHeightMm<=289.001);
+ });
+});
+
+test("4x6 option explicitly means a portrait 4-inch by 6-inch tile on A4",()=>{
+ const studio=readFileSync(new URL("../src/PhotoStudio.tsx",import.meta.url),"utf8");
+ assert.match(studio,/id: "4x6", label: "4 × 6 inch · Portrait", detail: "Portrait tile on an A4 sheet", widthMm: 101\\.6, heightMm: 152\\.4/);
+});
