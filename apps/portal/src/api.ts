@@ -708,6 +708,7 @@ export interface ShopPhotoJobResult {
     pageCount: number;
     photoUnitPriceMinorSnapshot: number;
     quotedAmountMinor: number;
+    currency: string;
     quoteExpiresUtc: string;
     createdUtc: string;
   };
@@ -749,7 +750,7 @@ export async function createShopPhotoJob(token: string, file: File, values: {
   form.append("photosPerPage", String(values.photosPerPage));
   form.append("recipientType", values.recipientType);
   form.append("paymentMethod", values.paymentMethod);
-    form.append("idempotencyKey", values.idempotencyKey);
+  form.append("idempotencyKey", values.idempotencyKey);
   if (values.customerUserId) form.append("customerUserId", values.customerUserId);
   if (values.recipientName) form.append("recipientName", values.recipientName);
   if (values.recipientPhone) form.append("recipientPhone", values.recipientPhone);
