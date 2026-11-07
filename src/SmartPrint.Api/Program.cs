@@ -2271,13 +2271,6 @@ shop.MapPost("/photo-jobs", async (
             ["paymentMethod"] = ["Choose UPI or cash at counter."]
         });
 
-    var paymentSettings = await db.ShopPaymentProfiles.AsNoTracking()
-        .SingleOrDefaultAsync(item => item.TenantId == tenantId, ct);
-    if (paymentSettings is null ||
-        (paymentMethod == "UPI" && (!paymentSettings.UpiEnabled || string.IsNullOrWhiteSpace(paymentSettings.UpiId))) ||
-        (paymentMethod == "CASH" && !paymentSettings.CashEnabled))
-        return Results.Conflict(new { code = "payment_method_unavailable", message = "The selected payment method is not enabled for this shop. Update Payment Settings and try again." });
-
     var photoSizeCode = form["photoSizeCode"].FirstOrDefault() ?? string.Empty;
     if (photoSizeCode is not ("35x45" or "25x35" or "2x2" or "4x6") ||
         !int.TryParse(form["photoCount"].FirstOrDefault(), out var photoCount) ||
@@ -2473,6 +2466,18 @@ shop.MapPost("/photo-jobs", async (
                 Payment = existingPayment,
                 DuplicateRequest = true
             });
+        }
+
+        var paymentSettings = await db.ShopPaymentProfiles.AsNoTracking()
+            .SingleOrDefaultAsync(item => item.TenantId == tenantId, ct);
+        if (paymentSettings is null ||
+            (paymentMethod == "UPI" && (!paymentSettings.UpiEnabled || string.IsNullOrWhiteSpace(paymentSettings.UpiId))) ||
+            (paymentMethod == "CASH" && !paymentSettings.CashEnabled))
+        {
+            await storage.DeleteAsync(stored.StorageKey);
+            stored = null;
+            await transaction.RollbackAsync(ct);
+            return Results.Conflict(new { code = "payment_method_unavailable", message = "The selected payment method is not enabled for this shop. Update Payment Settings and try again." });
         }
 
         await entitlements.AcquireQuotaLockAsync(tenantId, TenantQuotaResource.MonthlyPrintJob, ct);
