@@ -420,6 +420,30 @@ if ($androidDevice) {
         }
 
         if ($androidInstallOk) {
+            # Run the repository's full Espresso/ActivityScenario suite on the
+            # explicitly selected physical device, against only the isolated
+            # .localqa application. ANDROID_SERIAL prevents Gradle from targeting
+            # any other connected phone or emulator.
+            $previousAndroidSerial = [Environment]::GetEnvironmentVariable("ANDROID_SERIAL", "Process")
+            try {
+                [Environment]::SetEnvironmentVariable("ANDROID_SERIAL", $androidDevice, "Process")
+                $androidInstrumentationArgs = @(
+                    "--no-daemon", "--console=plain",
+                    "-p", "apps/android",
+                    "-PsmartPrintServiceUrl=$publicOrigin",
+                    "-PsmartPrintLocalQa=true",
+                    "-PsmartPrintVersionCode=$versionCode",
+                    "-PsmartPrintVersionName=$versionName",
+                    "--info", ":app:connectedDebugAndroidTest"
+                )
+                $androidInstrumentationOk = Invoke-NativeStep -Name "Run the full Android Espresso instrumentation suite on the selected physical phone (.localqa only)" -Evidence (Join-Path $outputRoot "android-physical-instrumentation.log") -Action {
+                    & $gradle.Source @androidInstrumentationArgs
+                }
+                if (-not $androidInstrumentationOk) { $exitCode = 1 }
+            } finally {
+                [Environment]::SetEnvironmentVariable("ANDROID_SERIAL", $previousAndroidSerial, "Process")
+            }
+
             $androidLaunchOk = Invoke-NativeStep -Name "Launch Android local QA app and verify the actual resumed Activity" -Evidence (Join-Path $outputRoot "android-local-qa-launch.log") -Action {
                 $component = "$androidPackage/$([string]$qaConfig.apps.android.launcherActivity)"
                 $launchOutput = @(& $adbCommand.Source -s $androidDevice shell am start -W -n $component 2>&1)
