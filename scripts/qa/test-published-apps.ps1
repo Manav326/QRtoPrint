@@ -242,7 +242,7 @@ function Get-AndroidInstalledPackageDiagnostics([string]$Adb,[string]$Serial,[st
   $disabledExit=$LASTEXITCODE
   $isDisabled=$disabledExit -eq 0 -and (($disabledOutput -join [Environment]::NewLine) -match ("(?m)^package:"+[regex]::Escape($Package)+"\s*$"))
 
-  $resolveOutput=@(& $Adb -s $Serial shell cmd package resolve-activity --brief -a android.intent.action.MAIN -c android.intent.category.LAUNCHER -p $Package 2>&1)
+  $resolveOutput=@(& $Adb -s $Serial shell cmd package resolve-activity --brief --user $currentUser -a android.intent.action.MAIN -c android.intent.category.LAUNCHER -p $Package 2>&1)
   $resolveExit=$LASTEXITCODE
   $resolveText=$resolveOutput -join [Environment]::NewLine
   $componentMatch=[regex]::Match($resolveText,"(?m)^\s*"+[regex]::Escape($Package)+"/([A-Za-z0-9_.$]+)\s*$")
@@ -381,13 +381,16 @@ function Test-AndroidApp([string]$Apk,[bool]$ApkVerified,$Settings,[string]$Devi
   }
   Add-Result "Android installed package matches published APK and launcher" "PASS" "Installed version $($installedInfo.installedVersionName) (code $($installedInfo.installedVersionCode)) resolves the published launcher $publishedActivity for Android user $($installedInfo.currentUser)." -Evidence $preflightEvidence
 
-  # Use ActivityManager directly. This avoids OEM differences in Monkey CLI argument parsing.
-  $launch=@(& $adb -s $serial shell am start -W -a android.intent.action.MAIN -c android.intent.category.LAUNCHER -p $package 2>&1)
+  # Start the exact component already resolved by Package Manager for the active
+  # Android user. An explicit ComponentName avoids OEM differences in implicit
+  # MAIN/LAUNCHER resolution while still testing the actual published launcher.
+  $launcherComponent="$package/$publishedActivity"
+  $launch=@(& $adb -s $serial shell am start -W --user $installedInfo.currentUser -n $launcherComponent 2>&1)
   $launchExit=$LASTEXITCODE
   $launchText=$launch -join [Environment]::NewLine
   if($launchExit -ne 0 -or $launchText -notmatch '(?im)^\s*Status:\s*ok\s*') {
-    $reason=("ActivityManager could not launch SmartPrint (exit {0}). Device response: {1}" -f $launchExit,($launchText -replace '[\r\n]+',' ').Trim())
-    Add-Result "Android app live device launch" "FAIL" $reason
+    $reason=("ActivityManager could not launch resolved SmartPrint component {0} for Android user {1} (exit {2}). Device response: {3}" -f $launcherComponent,$installedInfo.currentUser,$launchExit,($launchText -replace '[\r\n]+',' ').Trim())
+    Add-Result "Android app live device launch" "FAIL" $reason -Evidence @{serial=$serial;androidUser=$installedInfo.currentUser;resolvedLauncherActivity=$publishedActivity;launchComponent=$launcherComponent;launchExitCode=$launchExit;deviceResponse=$launchText}
     Add-AndroidLaunchDependentSkips $reason
     return
   }

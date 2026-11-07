@@ -180,3 +180,10 @@ test("Android published APK updates require explicit opt-in and never use uninst
   assert.match(publishedAppsSource, /Android published APK in-place update/);
   assert.doesNotMatch(publishedAppsSource, /shell pm clear|adb\s+-s\s+\$serial\s+uninstall/);
 });
+
+
+test("Android live launch targets the exact Package Manager-resolved component and active user", () => {
+  assert.match(publishedAppsSource, /resolve-activity --brief --user \$currentUser/);
+  assert.match(publishedAppsSource, /shell am start -W --user \$installedInfo\.currentUser -n \$launcherComponent/);
+  assert.match(publishedAppsSource, /launchComponent=\$launcherComponent/);
+});
