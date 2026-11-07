@@ -266,3 +266,80 @@ test("Windows desktop CI injects WebView2 DevTools args through Tauri config rat
   assert.match(desktopSmokeScript, /webViewDevToolsPort/);
   assert.doesNotMatch(desktopSmokeScript, /SetEnvironmentVariable\(\$environmentName/);
 });
+
+
+const liveReporterSource = readFileSync(new URL('./live-node-test-reporter.mjs', import.meta.url), 'utf8');
+const liveReporterTestsSource = readFileSync(new URL('./live-node-test-reporter.test.mjs', import.meta.url), 'utf8');
+const localE2ESource = readFileSync(new URL('./smartprint-local-e2e.mjs', import.meta.url), 'utf8');
+const desktopSmokeSource = readFileSync(new URL('./desktop-open-smoke.ps1', import.meta.url), 'utf8');
+const installerLifecycleSource = readFileSync(new URL('./windows-installer-lifecycle.ps1', import.meta.url), 'utf8');
+const androidLifecycleSource = readFileSync(new URL('./android-install-lifecycle.sh', import.meta.url), 'utf8');
+const androidCiSource = readFileSync(new URL('./android-emulator-ci.sh', import.meta.url), 'utf8');
+const androidGradleSource = readFileSync(new URL('../../apps/android/app/build.gradle.kts', import.meta.url), 'utf8');
+const responsiveBrowserSource = readFileSync(new URL('../../apps/portal/tests/theme-responsive.browser.mjs', import.meta.url), 'utf8');
+const ciWorkflowSource = readFileSync(new URL('../../.github/workflows/ci.yml', import.meta.url), 'utf8');
+
+test('local QA runner streams named Node and xUnit test cases and does not stop on the first test failure', () => {
+  assert.match(runnerSource, /live-node-test-reporter\.mjs/);
+  assert.match(runnerSource, /--test-concurrency=1/);
+  assert.match(runnerSource, /xUnit\.ReporterSwitch=verbose/);
+  assert.match(runnerSource, /xUnit\.ShowLiveOutput=true/);
+  assert.match(runnerSource, /xUnit\.StopOnFail=false/);
+  assert.match(runnerSource, /xUnit\.ParallelizeTestCollections=false/);
+  assert.match(runnerSource, /\[QA-STEP-START\]/);
+  assert.match(runnerSource, /\[QA-STEP-END\]/);
+});
+
+test('custom Node reporter announces case starts, outcomes, source locations and suite totals', () => {
+  assert.match(liveReporterSource, /test:dequeue/);
+  assert.match(liveReporterSource, /test:complete/);
+  assert.match(liveReporterSource, /TEST ERROR/);
+  assert.match(liveReporterSource, /test:summary/);
+  assert.match(liveReporterTestsSource, /announces the exact case before execution/);
+  assert.match(liveReporterTestsSource, /identifies failures, errors, skipped tests and run totals/);
+});
+
+test('live E2E record output includes case IDs, case names and immediate end statuses', () => {
+  assert.match(localE2ESource, /\[QA-CASE-START\]/);
+  assert.match(localE2ESource, /caseIds\.join/);
+  assert.match(localE2ESource, /\[QA-CASE-END\]/);
+});
+
+test('published Windows and Android acceptance announces the active operation and polling stage', () => {
+  assert.match(publishedAppsSource, /function Write-QAProgress/);
+  assert.match(publishedAppsSource, /Windows installation and Agent service preflight/);
+  assert.match(publishedAppsSource, /Android device and installed-package preflight/);
+  assert.match(publishedAppsSource, /Android foreground activity/);
+});
+
+test('Desktop startup smoke reports native-window and WebView2 readiness polling', () => {
+  assert.match(desktopSmokeSource, /\[QA-ACTION\] Launch SmartPrint Desktop/);
+  assert.match(desktopSmokeSource, /\[QA-PROGRESS\] Waiting for native window/);
+  assert.match(desktopSmokeSource, /React workspace\/sign-in content via Windows UI Automation/);
+  assert.match(desktopSmokeSource, /\[QA-CHECK-PASS\]/);
+});
+
+test('Windows installer lifecycle reports each case, wait and safe cleanup stage', () => {
+  assert.match(installerLifecycleSource, /\[QA-CASE-START\]/);
+  assert.match(installerLifecycleSource, /\[QA-CASE-END\]/);
+  assert.match(installerLifecycleSource, /\[QA-PROGRESS\] Agent service state/);
+  assert.match(installerLifecycleSource, /\[QA-PROGRESS\] Agent local API and identity readiness/);
+  assert.match(installerLifecycleSource, /\[QA-CLEANUP\]/);
+});
+
+test('Android JVM and emulator test tasks expose per-test and package lifecycle progress', () => {
+  assert.match(androidGradleSource, /events\("started", "passed", "skipped", "failed"\)/);
+  assert.match(androidCiSource, /\[QA-STEP-START\] Android Espresso instrumentation/);
+  assert.match(androidCiSource, /\[QA-STEP-START\] Android package install\/upgrade\/downgrade lifecycle/);
+  assert.match(androidLifecycleSource, /\[QA-PROGRESS\] Android emulator boot/);
+  assert.match(runnerSource, /--console=plain/);
+  assert.match(ciWorkflowSource, /Run Android JVM unit tests/);
+});
+
+test('responsive browser visual QA reports each route, viewport, workspace section and Photo Studio case', () => {
+  assert.match(responsiveBrowserSource, /\[QA-STEP-START\] Responsive browser QA/);
+  assert.match(responsiveBrowserSource, /\[QA-CASE-START\]/);
+  assert.match(responsiveBrowserSource, /\[QA-CASE-END\]/);
+  assert.match(responsiveBrowserSource, /Photo Studio/);
+  assert.match(responsiveBrowserSource, /workspace QA/);
+});
