@@ -157,7 +157,7 @@ export default function PhotoStudio({
   onCancel: () => void;
   photoPrices: Record<string, number>;
   onApply: (sheets: PreparedPhotoSheet[]) => void | Promise<void>;
-  mode?: "customer" | "shop";
+  mode?: "customer" | "shop" | "shop-create";
   dark?: boolean;
 }) {
   const dialogRef = useRef<HTMLDivElement | null>(null);
@@ -391,11 +391,13 @@ export default function PhotoStudio({
   }
 
   const resolutionMessage = image ? sourceResolutionNote(image, size, zoom) : "";
-  const footerHint = mode === "shop"
-    ? "Save your prepared multi-page A4 photo PDF to this existing unpaid job. It returns to the review queue; printing still requires shop approval, verified payment and dispatch."
-    : "The original upload stays untouched. This prepared multi-page A4 photo PDF replaces it in your batch when you submit your print request.";
-  const actionLabel = mode === "shop" ? "Save sheet to this job" : "Prepare A4 sheet";
-  const busyLabel = mode === "shop" ? "Saving to the existing job…" : "Preparing your A4 sheet…";
+  const footerHint = mode === "shop-create"
+    ? "Create one new shop-owned photo order from this original. The original photo stays unchanged; payment remains pending until the shop verifies receipt, and printing still requires explicit dispatch."
+    : mode === "shop"
+      ? "Save your prepared multi-page A4 photo PDF to this existing unpaid job. It returns to the review queue; printing still requires shop approval, verified payment and dispatch."
+      : "The original upload stays untouched. This prepared multi-page A4 photo PDF replaces it in your batch when you submit your print request.";
+  const actionLabel = mode === "shop-create" ? "Create photo order" : mode === "shop" ? "Save sheet to this job" : "Prepare A4 sheet";
+  const busyLabel = mode === "shop-create" ? "Creating photo order…" : mode === "shop" ? "Saving to the existing job…" : "Preparing your A4 sheet…";
   const cropPanel=activeTool==="crop",lookPanel=activeTool==="look",textPanel=activeTool==="text",backgroundPanel=activeTool==="background";
 
   return (
@@ -403,7 +405,7 @@ export default function PhotoStudio({
       <header className={styles.topbar}>
         <div className={styles.brand}>
           <span className={styles.brandMark}><ImageIcon size={17}/></span>
-          <span><strong id="photo-studio-title">Photo Studio</strong><small>{mode === "shop" ? "SHOP · EDIT EXISTING JOB" : "CUSTOMER · BEFORE UPLOAD"}</small></span>
+          <span><strong id="photo-studio-title">Photo Studio</strong><small>{mode === "shop-create" ? "SHOP · NEW PHOTO ORDER" : mode === "shop" ? "SHOP · EDIT EXISTING JOB" : "CUSTOMER · BEFORE UPLOAD"}</small></span>
         </div>
         <div className={styles.topbarMeta}><span>A4 · 210 × 297 mm</span><span>300 DPI</span></div>
         <button type="button" className={styles.iconButton} onClick={onCancel} disabled={busy} aria-label="Close Photo Studio" title="Close"><X size={18}/></button>
