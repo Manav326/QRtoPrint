@@ -3271,3 +3271,24 @@ html[data-theme="dark"] .customer-entry:not(.smartprint-native) .entry-local-age
   border-color: #344158;
   color: #e8edf7;
 }
+
+
+/* Dark authentication had a few legacy helper and placeholder colours that
+   were too dim on the dark input/card surfaces. */
+html[data-theme="dark"] .auth-input input::placeholder {
+  color: #aab6ca;
+  opacity: 1;
+}
+html[data-theme="dark"] .auth-card-footer,
+html[data-theme="dark"] .auth-footer,
+html[data-theme="dark"] .auth-proof {
+  color: #aab6ca;
+}
+@media (max-width: 650px) {
+  .auth-card-footer,
+  .auth-footer,
+  .auth-proof {
+    font-size: 9px;
+    line-height: 1.55;
+  }
+}
