@@ -3262,3 +3262,12 @@ html[data-theme="dark"] .customer-entry.smartprint-native .customer-session-comp
  .customer-session-complete{align-items:stretch;flex-direction:column}
  .customer-session-complete .customer-flow-button{width:100%;min-width:0}
 }
+
+
+/* Dark customer web sessions must not leave the optional local-agent card
+   on its original pale surface while its copy switches to light text. */
+html[data-theme="dark"] .customer-entry:not(.smartprint-native) .entry-local-agent {
+  background: #182335;
+  border-color: #344158;
+  color: #e8edf7;
+}
