@@ -199,46 +199,79 @@ try {
         # The installed production binary intentionally has no remote-debugging
         # endpoint. Verify visible, app-owned content through the Windows
         # accessibility tree instead of weakening production WebView2 flags.
-        $accessibility = Get-DesktopAccessibilitySnapshot $process.MainWindowHandle
         $workspaceLabels = @(
             "Order Journey", "Overview", "Print Queue", "Printers", "QR Stations",
             "Print Agent", "Pricing", "Subscription", "Payments", "Customers",
             "Reports", "Settings"
         )
-        $matchedWorkspaceLabels = [System.Collections.Generic.List[string]]::new()
-        foreach ($expected in $workspaceLabels) {
-            foreach ($observed in $accessibility.names) {
-                if ($observed.IndexOf($expected, [StringComparison]::OrdinalIgnoreCase) -ge 0) {
-                    [void]$matchedWorkspaceLabels.Add($expected)
-                    break
-                }
-            }
-        }
-
         $authLabels = @("Welcome back", "Sign in to workspace")
+        $accessibility = $null
+        $matchedWorkspaceLabels = [System.Collections.Generic.List[string]]::new()
         $matchedAuthLabels = [System.Collections.Generic.List[string]]::new()
-        foreach ($expected in $authLabels) {
-            foreach ($observed in $accessibility.names) {
-                if ($observed.IndexOf($expected, [StringComparison]::OrdinalIgnoreCase) -ge 0) {
-                    [void]$matchedAuthLabels.Add($expected)
-                    break
-                }
-            }
-        }
-
         $renderedMode = $null
-        if ($matchedWorkspaceLabels.Count -ge 2) {
-            $renderedMode = "authenticated-workspace"
-        }
-        elseif ($matchedAuthLabels.Count -eq $authLabels.Count) {
-            $renderedMode = "sign-in"
-        }
-        else {
-            throw ("Windows UI Automation did not find enough SmartPrint-owned visible content. " +
-                "Visible named elements: $($accessibility.visibleNamedElementCount); " +
-                "visible control types: $($accessibility.visibleControlTypeCount); " +
-                "workspace labels matched: $($matchedWorkspaceLabels -join ', '); " +
-                "sign-in labels matched: $($matchedAuthLabels -join ', ').")
+        $uiAutomationError = $null
+        $uiDeadline = [DateTime]::UtcNow.AddSeconds($StartupTimeoutSeconds)
+        $uiAttempt = 0
+
+        # The native HWND can appear before WebView2 finishes its document,
+        # Tauri bridge startup, credential restoration and React rendering.
+        # Poll for app-owned content rather than taking a single early snapshot.
+        do {
+            $uiAttempt++
+            try {
+                $accessibility = Get-DesktopAccessibilitySnapshot $process.MainWindowHandle
+                $matchedWorkspaceLabels.Clear()
+                $matchedAuthLabels.Clear()
+
+                foreach ($expected in $workspaceLabels) {
+                    foreach ($observed in $accessibility.names) {
+                        if ($observed.IndexOf($expected, [StringComparison]::OrdinalIgnoreCase) -ge 0) {
+                            [void]$matchedWorkspaceLabels.Add($expected)
+                            break
+                        }
+                    }
+                }
+
+                foreach ($expected in $authLabels) {
+                    foreach ($observed in $accessibility.names) {
+                        if ($observed.IndexOf($expected, [StringComparison]::OrdinalIgnoreCase) -ge 0) {
+                            [void]$matchedAuthLabels.Add($expected)
+                            break
+                        }
+                    }
+                }
+
+                if ($matchedWorkspaceLabels.Count -ge 2) {
+                    $renderedMode = "authenticated-workspace"
+                }
+                elseif ($matchedAuthLabels.Count -eq $authLabels.Count) {
+                    $renderedMode = "sign-in"
+                }
+                $uiAutomationError = $null
+            }
+            catch {
+                $uiAutomationError = $_.Exception.Message
+            }
+
+            if ($renderedMode) { break }
+            Start-Sleep -Milliseconds 500
+        } while ([DateTime]::UtcNow -lt $uiDeadline)
+
+        if (-not $renderedMode) {
+            $visibleNames = if ($accessibility) {
+                (@($accessibility.names | Select-Object -First 40) -join " | ")
+            } else {
+                "<no accessibility snapshot>"
+            }
+            $visibleCount = if ($accessibility) { $accessibility.visibleNamedElementCount } else { 0 }
+            $controlCount = if ($accessibility) { $accessibility.visibleControlTypeCount } else { 0 }
+            $uiError = if ($uiAutomationError) { " Last UI Automation error: $uiAutomationError" } else { "" }
+            throw ("Windows UI Automation did not find the SmartPrint workspace or sign-in interface within " +
+                "$StartupTimeoutSeconds seconds after the native window opened. " +
+                "Attempts: $uiAttempt; visible named elements: $visibleCount; " +
+                "visible control types: $controlCount; workspace labels matched: " +
+                "$($matchedWorkspaceLabels -join ', '); sign-in labels matched: " +
+                "$($matchedAuthLabels -join ', '); visible names: $visibleNames.$uiError")
         }
 
         $process.Refresh()
@@ -248,13 +281,16 @@ try {
 
         Write-Host "PASS: Windows UI Automation exposed visible SmartPrint application content." -ForegroundColor Green
         Write-Host "PASS: Production WebView2 rendered an app-owned workspace or sign-in screen." -ForegroundColor Green
-        Write-Host "Desktop accessibility evidence: mode='$renderedMode', visibleNamedElements=$($accessibility.visibleNamedElementCount), matchedWorkspaceLabels=$($matchedWorkspaceLabels.Count), matchedSignInLabels=$($matchedAuthLabels.Count)"
+        Write-Host "Desktop accessibility evidence: mode='$renderedMode', attempts=$uiAttempt, visibleNamedElements=$($accessibility.visibleNamedElementCount), matchedWorkspaceLabels=$($matchedWorkspaceLabels.Count), matchedSignInLabels=$($matchedAuthLabels.Count)"
         $desktopSmokeEvidence = [PSCustomObject]@{
             verification = "windows-ui-automation"
             mode = $renderedMode
             nativeWindowOpened = $true
+            attempts = $uiAttempt
+            waitedSeconds = [Math]::Round(($StartupTimeoutSeconds - [Math]::Max(0, ($uiDeadline - [DateTime]::UtcNow).TotalSeconds)), 1)
             visibleNamedElementCount = $accessibility.visibleNamedElementCount
             visibleControlTypeCount = $accessibility.visibleControlTypeCount
+            visibleNames = @($accessibility.names)
             matchedWorkspaceLabels = @($matchedWorkspaceLabels)
             matchedSignInLabels = @($matchedAuthLabels)
         }
