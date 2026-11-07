@@ -250,7 +250,7 @@ Each record runs through `scripts/qa/local-e2e-record-runner.mjs`. An assertion 
 | Browser and resource diagnostics | OBS-001–004 | 4 | Same-origin runtime errors, console errors, failed resources and HTTP 5xx monitoring |
 | Photo Studio | PHOTO-001–006 | 6 | Real browser image selection, crop/look/background tools, optional form details, photo size/count and local multi-photo A4 PDF generation without a server print job |
 
-The six cases above are local editor/browser regressions only. They do not verify physical photo dimensions or PDF tile coordinates. Run PHOX-001–014 and PSHT-001–031 in [ROLE_BASED_CROSS_PLATFORM_QA.md](ROLE_BASED_CROSS_PLATFORM_QA.md) for the server-side photo order, fixed A4 grid coordinates, page-count arithmetic, exact physical geometry, partial sheets, refunds, orientation and measured physical printer output.
+The six cases above are local editor/browser regressions only. They do not verify physical photo dimensions or PDF tile coordinates. They also do not certify the Android native WebView; APHO-001–036 require separate physical-device evidence. Run PHOX-001–014, PSHT-001–031 and APHO-001–036 in [ROLE_BASED_CROSS_PLATFORM_QA.md](ROLE_BASED_CROSS_PLATFORM_QA.md) for the server-side photo order, fixed A4 grid coordinates, page-count arithmetic, exact physical geometry, partial sheets, refunds, Android customer Photo Studio touch/file-provider/device-lifecycle parity and measured physical printer output.
 
 ### Additional negative and lifecycle assertions
 
