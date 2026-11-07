@@ -13,6 +13,12 @@ val smartPrintServiceUrl = providers.gradleProperty("smartPrintServiceUrl")
     )
 val smartPrintVersionCode = providers.gradleProperty("smartPrintVersionCode").orNull?.toIntOrNull() ?: 1
 val smartPrintVersionName = providers.gradleProperty("smartPrintVersionName").orElse("0.1.0").get()
+val smartPrintLocalQa = providers.gradleProperty("smartPrintLocalQa").orNull?.toBooleanStrictOrNull() ?: false
+val smartPrintApplicationId = if (smartPrintLocalQa) {
+    "com.quantaedge.smartprint.localqa"
+} else {
+    "com.quantaedge.smartprint"
+}
 val releaseKeystorePath = providers.environmentVariable("ANDROID_SIGNING_KEYSTORE_FILE").orNull
 val releaseKeystorePassword = providers.environmentVariable("ANDROID_SIGNING_KEYSTORE_PASSWORD").orNull
 val releaseKeyAlias = providers.environmentVariable("ANDROID_SIGNING_KEY_ALIAS").orNull
@@ -24,7 +30,9 @@ android {
     namespace = "com.quantaedge.smartprint"
     compileSdk = 36
     defaultConfig {
-        applicationId = "com.quantaedge.smartprint"
+        // Local physical-device QA installs side-by-side with the customer app.
+        // It must never replace the production-signed package or clear its data.
+        applicationId = smartPrintApplicationId
         minSdk = 26
         targetSdk = 36
         versionCode = smartPrintVersionCode
