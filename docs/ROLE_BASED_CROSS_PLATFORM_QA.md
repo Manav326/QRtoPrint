@@ -11,7 +11,7 @@ This is a supplement, not a replacement, for:
 - [Android physical-device acceptance](ANDROID_PHYSICAL_ACCEPTANCE.md) — physical camera, QR, shop-Wi-Fi and Windows-to-Android readiness workflow.
 - [Local native application QA](LOCAL_NATIVE_APP_QA.md) — local Windows Desktop build/smoke and side-by-side Android QA app execution.
 
-The 99 cases below add role-focused, cross-surface assertions for the newer Android customer account/document-studio workflows and for the actual Windows Desktop owner experience. They must be recorded independently. They are **not** counted as passed by the 262-case browser run or by a native build.
+The 100 cases below add role-focused, cross-surface assertions for the newer Android customer account/document-studio workflows and for the actual Windows Desktop owner experience. They must be recorded independently. They are **not** counted as passed by the 262-case browser run or by a native build.
 
 ## 1. Product and role contract
 
@@ -129,6 +129,7 @@ Run on the side-by-side local QA package against the local stack. Emulator instr
 | ANDX-020 | P0 | On the actual phone, upload one synthetic document over direct Shop Wi-Fi to the paired QA Agent; repeat with local access denied/unreachable and choose Cloud-assisted mode. | Direct transfer reaches only the paired SHOP-A Agent on the approved local endpoint; denial/unreachable state gives safe guidance; fallback uses the same PrintJob, quote and owner review; no duplicate upload/job. |
 | ANDX-021 | P0 | Force-stop the app during import, document preview, station session and after upload begins; restore internet/Wi-Fi and reopen. | The app never claims an unpersisted operation succeeded; recoverable files/session state returns or a clear retry is offered; no duplicate job or cross-shop session appears. |
 | ANDX-022 | P1 | Test TalkBack, font scale 1.3×/2×, Android display scaling, system/light/dark themes, camera denial, low memory, tablet portrait/landscape and supported Android 8+ baseline where available. | Controls remain named/reachable; text and focus remain legible; navigation adapts; unsupported device/service states explain the limitation; no crash or clipped critical action. |
+| ANDX-023 | P0 | On a physical QA Android device, start an enabled UPI payment for a synthetic job using a non-routable QA payee or intent-capture test handler; open the Android UPI chooser/app, inspect payee/amount/currency/reference, return or cancel, and repeat with no compatible app installed. Never transfer real money. | The server-authoritative UPI URI is passed intact when complete; otherwise the rebuilt intent uses the exact saved payee, amount and transaction reference. Returning/cancelling preserves the same job/session and creates no duplicate payment; it never marks the payment VERIFIED. No-app fallback shows safe copy/QR guidance and the shop must independently verify a submitted reference. |
 
 ## 6. Windows Desktop shop-owner acceptance
 
@@ -264,7 +265,7 @@ The existing local Photo Studio browser checks cover image selection/editing and
 A candidate is not accepted merely because CI is green or the automated local runner exits successfully.
 
 - Every P0 case in the master plan and this supplement must PASS on the candidate, or be a confirmed NOT APPLICABLE with written approval. BLOCKED, NOT RUN, FAIL and NOT IMPLEMENTED are not passes.
-- All 99 supplemental cases must have an explicit result. The native Windows Desktop cases must be run in the native window; Android physical cases must be run on real supported hardware for their hardware-dependent scenarios.
+- All 100 supplemental cases must have an explicit result. The native Windows Desktop cases must be run in the native window; Android physical cases must be run on real supported hardware for their hardware-dependent scenarios.
 - No unresolved P0 defect is permitted. P1 issues require correction/retest or an explicit, time-bound risk decision by the release authority.
 - No claims of complete manager/operator roles, email verification/recovery, live gateway payments/refunds, encrypted direct-LAN payloads, malware scanning, offline printing, universal printer support, signed release readiness or physical-device compatibility beyond the evidence actually collected.
 - Any test involving an actual physical print must use synthetic content and a specifically designated QA printer. Output confirmation must be based on observed output, never spooler acceptance alone.
