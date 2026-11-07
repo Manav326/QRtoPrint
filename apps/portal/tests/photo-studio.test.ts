@@ -393,11 +393,11 @@ test("photo coordinate helper rejects invalid page counts and invalid density",(
 
 test("Photo Studio identifies custom manual image adjustments instead of marking Natural selected",()=>{
  const studio=readFileSync(new URL("../src/PhotoStudio.tsx",import.meta.url),"utf8");
- assert.match(studio,/type LookPreset = "natural" \\| "warm" \\| "crisp" \\| "mono" \\| "custom"/);
+ assert.ok(studio.includes('type LookPreset = "natural" | "warm" | "crisp" | "mono" | "custom"'));
  assert.ok(studio.includes('setLook("custom"); setAdjustments(current => ({ ...current, brightness:'));
  assert.ok(studio.includes('setLook("custom"); setAdjustments(current => ({ ...current, contrast:'));
  assert.ok(studio.includes('setLook("custom"); setAdjustments(current => ({ ...current, saturation:'));
- assert.match(studio,/aria-pressed=\\{look === item\\.id\\}/);
+ assert.ok(studio.includes("aria-pressed={look === item.id}"));
 });
 
 test("Photo Studio prevents apply without a whole-number quantity or any shop photo rates",()=>{
