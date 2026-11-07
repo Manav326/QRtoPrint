@@ -352,7 +352,7 @@ function Test-AndroidApp([string]$Apk,[bool]$ApkVerified,$Settings,[string]$Devi
   if($preflightProblems.Count -gt 0) {
     $reason=$preflightProblems -join " "
     Add-Result "Android installed package matches published APK and launcher" "FAIL" ($reason+" No uninstall, reinstall, update or data clear was attempted.") -Evidence $preflightEvidence
-    Add-Result "Android app live device launch" "SKIPPED" "Blocked by the installed-package preflight failure. "+$reason
+    Add-Result "Android app live device launch" "SKIPPED" ("Blocked by the installed-package preflight failure. "+$reason)
     Add-AndroidLaunchDependentSkips $reason
     return
   }
