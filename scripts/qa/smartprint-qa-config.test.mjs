@@ -207,6 +207,7 @@ test("Android live smoke handles a restored Print screen and navigates by stable
   assert.match(publishedAppsSource, /Find-AndroidUiNode \$ui .*"Home" .*\$package/);
   assert.match(publishedAppsSource, /Find-AndroidUiNode \$ui .*"My Files" .*\$package/);
   assert.match(publishedAppsSource, /Invoke-AndroidUiNavigation/);
+  assert.match(publishedAppsSource, /"New folder" \$package/);
   assert.match(publishedAppsSource, /"Your space" \$package/);
 });
 

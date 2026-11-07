@@ -211,20 +211,28 @@ function Find-AndroidUiNodeByResourceId($Document,[string]$ResourceId,[string]$P
   }
   return $null
 }
-function Find-AndroidUiNodeByLabel($Document,[string]$Label,[string]$Package) {
+function Find-AndroidUiNodeByLabel($Document,[string]$Label,[string]$Package,[switch]$ContentDescriptionOnly) {
   foreach($node in $Document.SelectNodes("//node")) {
     if(-not (Test-AndroidUiNodeVisible $node)){continue}
     if($node.GetAttribute("package") -ne $Package){continue}
-    if($node.GetAttribute("text") -eq $Label -or $node.GetAttribute("content-desc") -eq $Label){return $node}
+    if($node.GetAttribute("content-desc") -eq $Label){return $node}
+    if(-not $ContentDescriptionOnly -and $node.GetAttribute("text") -eq $Label){return $node}
   }
   return $null
 }
-function Find-AndroidUiNode($Document,[string]$ResourceId,[string]$FallbackLabel,[string]$Package) {
+function Find-AndroidUiNode(
+  $Document,
+  [string]$ResourceId,
+  [string]$FallbackLabel,
+  [string]$Package,
+  [switch]$ContentDescriptionOnly
+) {
   $node=Find-AndroidUiNodeByResourceId $Document $ResourceId $Package
   if($node){return $node}
   # Backward-compatible selector for already-published APKs that predate the
-  # explicit QA resource IDs. New builds always prefer stable resource IDs.
-  return (Find-AndroidUiNodeByLabel $Document $FallbackLabel $Package)
+  # explicit QA resource IDs. Navigation uses content descriptions only so a
+  # page heading cannot masquerade as a successful navigation tap.
+  return (Find-AndroidUiNodeByLabel $Document $FallbackLabel $Package -ContentDescriptionOnly:$ContentDescriptionOnly)
 }
 function Invoke-AndroidUiNavigation(
   [string]$Adb,
@@ -240,7 +248,7 @@ function Invoke-AndroidUiNavigation(
   $afterPath="/sdcard/smartprint-qa-ui-after-$([Guid]::NewGuid().ToString('N')).xml"
   try {
     $before=Get-AndroidUiHierarchy $Adb $Serial $beforePath
-    $navNode=Find-AndroidUiNode $before $NavigationResourceId $NavigationFallbackLabel $Package
+    $navNode=Find-AndroidUiNode $before $NavigationResourceId $NavigationFallbackLabel $Package -ContentDescriptionOnly
     if(-not $navNode){
       throw "The live app does not expose navigation '$NavigationFallbackLabel' (resource ID '$NavigationResourceId')."
     }
@@ -457,8 +465,8 @@ function Test-AndroidApp([string]$Apk,[bool]$ApkVerified,$Settings,[string]$Devi
     # A saved shop connection can restore the Print/WebView tab at cold start.
     # Require the app root and both navigation destinations, not a specific initial page.
     $nativeRoot=Find-AndroidUiNodeByResourceId $ui ([string]$Settings.uiAutomationIds.nativeRoot) $package
-    $homeNavigation=Find-AndroidUiNode $ui ([string]$Settings.uiAutomationIds.homeNavigation) "Home" $package
-    $filesNavigation=Find-AndroidUiNode $ui ([string]$Settings.uiAutomationIds.filesNavigation) "My Files" $package
+    $homeNavigation=Find-AndroidUiNode $ui ([string]$Settings.uiAutomationIds.homeNavigation) "Home" $package -ContentDescriptionOnly
+    $filesNavigation=Find-AndroidUiNode $ui ([string]$Settings.uiAutomationIds.filesNavigation) "My Files" $package -ContentDescriptionOnly
     $visibleAppNodes=@($ui.SelectNodes("//node") | Where-Object {
       $_.GetAttribute("package") -eq $package -and (Test-AndroidUiNodeVisible $_)
     })
@@ -491,7 +499,7 @@ function Test-AndroidApp([string]$Apk,[bool]$ApkVerified,$Settings,[string]$Devi
   # Each live interaction is recorded independently. One failed screen does not
   # prevent the remaining native navigation or process-health checks from running.
   try {
-    $filesOpened=Invoke-AndroidUiNavigation $adb $serial ([string]$Settings.uiAutomationIds.filesNavigation) "My Files" ([string]$Settings.uiAutomationIds.filesHeading) "My Files" $package ([int]$Settings.uiNavigationTimeoutSeconds)
+    $filesOpened=Invoke-AndroidUiNavigation $adb $serial ([string]$Settings.uiAutomationIds.filesNavigation) "My Files" ([string]$Settings.uiAutomationIds.filesHeading) "New folder" $package ([int]$Settings.uiNavigationTimeoutSeconds)
     if(-not $filesOpened){throw "My Files navigation did not complete."}
     Add-Result "Android native Files navigation" "PASS" "Tapped the actual My Files navigation control and verified the native Files screen." -Evidence @{serial=$serial;screen="Files"}
   } catch {
