@@ -197,6 +197,7 @@ $logDirectory = Join-Path $artifactRoot "logs"
 New-Item -ItemType Directory -Force -Path $logDirectory | Out-Null
 
 $results = [System.Collections.Generic.List[object]]::new()
+$script:qaStepNumber = 0
 $fatalError = $null
 $exitCode = 0
 
@@ -229,7 +230,11 @@ function Invoke-QAStep {
         [Parameter(Mandatory)][string]$LogName,
         [Parameter(Mandatory)][scriptblock]$Action
     )
-    Write-Host ([Environment]::NewLine + "=== " + $Name + " ===") -ForegroundColor Cyan
+    $script:qaStepNumber += 1
+    $stepTimer = [System.Diagnostics.Stopwatch]::StartNew()
+    $stepLabel = "[QA-STEP-START] {0:00} | {1} | {2}" -f $script:qaStepNumber, (Get-Date -Format "HH:mm:ss"), $Name
+    Write-Host ([Environment]::NewLine + $stepLabel) -ForegroundColor Cyan
+    Write-Host ("[QA-STEP-ACTION] Log: " + $LogName) -ForegroundColor DarkCyan
     $logPath = Join-Path $logDirectory $LogName
     $stepExit = 0
     $previousErrorActionPreference = $ErrorActionPreference
@@ -250,8 +255,10 @@ function Invoke-QAStep {
     } finally {
         $ErrorActionPreference = $previousErrorActionPreference
     }
+    $stepTimer.Stop()
     $stepStatus = if ($stepExit -eq 0) { "PASS" } else { "FAIL" }
-    Add-QAResult -Name $Name -Status $stepStatus -Detail ("Exit code " + $stepExit) -Log (Join-Path "logs" $LogName)
+    Write-Host ("[QA-STEP-END] {0} | {1} | exit={2} | elapsed={3:n1}s" -f (Get-Date -Format "HH:mm:ss"), $stepStatus, $stepExit, $stepTimer.Elapsed.TotalSeconds) -ForegroundColor $(if ($stepStatus -eq "PASS") { "Green" } else { "Red" })
+    Add-QAResult -Name $Name -Status $stepStatus -Detail ("Exit code " + $stepExit + "; elapsed " + [Math]::Round($stepTimer.Elapsed.TotalSeconds, 1) + "s") -Log (Join-Path "logs" $LogName)
     return ($stepExit -eq 0)
 }
 
@@ -651,7 +658,7 @@ try {
             if ($missingQaUnitTests.Count -gt 0) {
                 throw "QA harness regression tests are missing: $($missingQaUnitTests -join ', ')"
             }
-            $qaTestArgs = @("--test") + $qaUnitTests
+            $qaTestArgs = @("--test", "--test-concurrency=1", "--test-reporter=./scripts/qa/live-node-test-reporter.mjs") + $qaUnitTests
             & $node.Source @qaTestArgs
             if ($LASTEXITCODE -ne 0) { throw "QA harness regression tests failed." }
         }
@@ -1010,7 +1017,7 @@ try {
         $missingPortalTests = @($portalTests | Where-Object { -not (Test-Path -LiteralPath (Join-Path $repoRoot $_) -PathType Leaf) })
         if ($missingPortalTests.Count -eq 0) {
             $portalOk = Invoke-QAStep -Name "Existing portal logic regression tests (separate from live API E2E)" -LogName "portal-logic-tests.log" -Action {
-                & $node.Source "--experimental-strip-types" "--test" @portalTests
+                & $node.Source "--experimental-strip-types" "--test" "--test-concurrency=1" "--test-reporter=./scripts/qa/live-node-test-reporter.mjs" @portalTests
             }
             if (-not $portalOk) { $exitCode = 1 }
         } else {
@@ -1023,7 +1030,8 @@ try {
         if ($dotnet) {
             $env:SMARTPRINT_TEST_POSTGRES = $null
             $apiTestOk = Invoke-QAStep -Name "Existing SmartPrint API unit/regression tests (destructive migration DB test disabled)" -LogName "api-dotnet-tests.log" -Action {
-                & $dotnet.Source "test" "tests/SmartPrint.Api.Tests/SmartPrint.Api.Tests.csproj" "--configuration" "Release" "--logger" "console;verbosity=minimal"
+                Write-Host "[QA-SUITE-START] API .NET tests | per-test results will stream as cases finish." -ForegroundColor Cyan
+                & $dotnet.Source "test" "tests/SmartPrint.Api.Tests/SmartPrint.Api.Tests.csproj" "--configuration" "Release" "--logger" "console;verbosity=normal"
             }
             if (-not $apiTestOk) { $exitCode = 1 }
 
@@ -1041,7 +1049,8 @@ try {
             }
             $env:SMARTPRINT_RUN_MULTI_QUEUE_INTEGRATION = $null
             $agentTestOk = Invoke-QAStep -Name "Existing SmartPrint Windows Agent unit/regression tests and optional virtual spooler integration" -LogName "agent-dotnet-tests.log" -Action {
-                & $dotnet.Source "test" "tests/SmartPrint.Agent.Tests/SmartPrint.Agent.Tests.csproj" "--configuration" "Release" "--logger" "console;verbosity=minimal"
+                Write-Host "[QA-SUITE-START] Windows Agent .NET tests | per-test results will stream as cases finish." -ForegroundColor Cyan
+                & $dotnet.Source "test" "tests/SmartPrint.Agent.Tests/SmartPrint.Agent.Tests.csproj" "--configuration" "Release" "--logger" "console;verbosity=normal"
             }
             if (-not $agentTestOk) { $exitCode = 1 }
             if ($pdfPrinterAvailable -and $agentTestOk) {
