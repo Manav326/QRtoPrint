@@ -439,7 +439,7 @@ test("shop-originated photo orders use their own tenant-owned job and the shared
  assert.match(endpoint,/Status = paymentMethod == "UPI" \? "AWAITING_CUSTOMER_PAYMENT" : "AWAITING_COUNTER_PAYMENT"/);
  assert.match(endpoint,/new PrintPayment/);
  assert.match(endpoint,/PhotoSheetPdfRules\.HasExactlyA4PortraitPages/);
- assert.match(endpoint,/existingJob\.IdempotencyKey == idempotencyKey/);
+ assert.match(endpoint,/item\.IdempotencyKey == idempotencyKey/);
  assert.match(endpoint,/session\.TenantId == tenantId && session\.CustomerUserId == user\.Id/);
  assert.match(endpoint,/SHOP_PHOTO_ORDER_CREATED_AWAITING_PAYMENT/);
  assert.match(api,/form\.append\("paymentMethod", values\.paymentMethod\)/);
