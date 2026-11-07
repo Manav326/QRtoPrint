@@ -151,3 +151,20 @@ test('Android dependent checks are skipped after launch failure instead of multi
   assert.match(publishedAppsSource, /Blocked because the Android app did not launch successfully/);
   assert.match(publishedAppsSource, /\$alreadyFailed\.Count -eq 0/);
 });
+
+
+test('published Android APK identity, version and launcher metadata are all verified', () => {
+  assert.match(publishedAppsSource, /launchable-activity:/);
+  assert.match(publishedAppsSource, /versionCode=/);
+  assert.match(publishedAppsSource, /versionName=/);
+  assert.match(publishedAppsSource, /Verify Android APK build metadata/);
+  assert.match(publishedAppsSource, /Verify Android APK launcher activity/);
+});
+
+test('installed Android package is read-only compared with the published APK before launch', () => {
+  assert.match(publishedAppsSource, /dumpsys package \$Package/);
+  assert.match(publishedAppsSource, /cmd package resolve-activity/);
+  assert.match(publishedAppsSource, /Android installed package matches published APK and launcher/);
+  assert.match(publishedAppsSource, /No uninstall, reinstall, update or data clear was attempted/);
+  assert.doesNotMatch(publishedAppsSource, /adb\s+-s\s+\$serial\s+install\s+-r/);
+});
