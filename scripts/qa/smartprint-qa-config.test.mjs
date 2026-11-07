@@ -341,5 +341,6 @@ test('responsive browser visual QA reports each route, viewport, workspace secti
   assert.match(responsiveBrowserSource, /\[QA-CASE-START\]/);
   assert.match(responsiveBrowserSource, /\[QA-CASE-END\]/);
   assert.match(responsiveBrowserSource, /Photo Studio/);
-  assert.match(responsiveBrowserSource, /workspace section layout\\/contrast/);
+  assert.match(responsiveBrowserSource, /workspace section layout\/contrast/);
+  assert.match(ciWorkflowSource, /test-reporter=\.\/scripts\/qa\/live-node-test-reporter\.mjs/);
 });
