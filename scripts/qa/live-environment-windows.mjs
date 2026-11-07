@@ -48,7 +48,6 @@ const report = {
     printDispatches: false,
     shopSettingsChanged: false,
     temporaryCustomerSession: runStation,
-    documentsUploaded: false,
     printJobsCreated: false,
     testJobRejectedBeforePayment: false
   },
@@ -213,6 +212,7 @@ function createSyntheticPdfBase64() {
 }
 
 async function uploadSyntheticPdf(sessionToken, batchId, idempotencyKey, fileName, base64) {
+  await page.bringToFront();
   const result = await page.evaluate(async ({ sessionToken, batchId, idempotencyKey, fileName, base64 }) => {
     const bytes = Uint8Array.from(atob(base64), character => character.charCodeAt(0));
     const form = new FormData();
@@ -227,6 +227,7 @@ async function uploadSyntheticPdf(sessionToken, batchId, idempotencyKey, fileNam
       method: 'POST',
       credentials: 'same-origin',
       cache: 'no-store',
+      signal: AbortSignal.timeout(30000),
       headers: {
         'X-Print-Session': sessionToken,
         'Idempotency-Key': idempotencyKey,
