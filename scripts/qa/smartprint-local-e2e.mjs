@@ -2245,8 +2245,12 @@ try {
 
       const cropTool = studio.getByRole("button", { name: "Crop" });
       await cropTool.click();
-      const zoom = studio.getByRole("slider", { name: /^Zoom\b/i });
-      assert.equal(await zoom.count(), 1, "Photo Studio must expose one accessible zoom range slider.");
+      const zoomLabel = studio.locator("label").filter({ hasText: /^Zoom\b/ });
+      const zoom = zoomLabel.locator('input[type="range"]');
+      await zoom.waitFor({ state: "visible", timeout: 10000 });
+      assert.equal(await zoomLabel.count(), 1, "Photo Studio must render exactly one Zoom control in the Crop tool.");
+      assert.equal(await zoom.count(), 1, "Photo Studio Zoom must be a single native range input.");
+      assert.equal(await zoom.getAttribute("type"), "range");
       await zoom.focus();
       await zoom.press("ArrowRight");
       assert.notEqual(await zoom.inputValue(), "1", "Crop zoom control did not respond to keyboard input.");
@@ -2522,19 +2526,47 @@ try {
     assert.ok(reviewedBatchJobIdsByFileName?.fileA && reviewedBatchJobIdsByFileName?.fileB,
       "The reviewed batch must retain filename-to-job identity.");
 
-    const queueRows = shop1Page.locator(".queue-batch-summary-row");
-    const queueRowCount = await queueRows.count();
-    const matchingQueueRows = [];
-    for (let index = 0; index < queueRowCount; index++) {
-      const candidate = queueRows.nth(index);
-      const candidateText = await candidate.innerText();
-      if (reviewedBatchShopJobs.some(job => candidateText.includes(job.jobNumber))) {
-        matchingQueueRows.push(candidate);
+    assert.ok(reviewedBatchShopJobs.length === 2,
+      "The tenant-scoped API must contain both persisted files before opening the shop UI review.");
+    const targetJob = reviewedBatchShopJobs[0];
+    assert.ok(targetJob?.jobNumber && targetJob?.id,
+      "The batch lookup must return a persisted job number and ID.");
+
+    // Print Queue is paged and keeps its own loaded data. Search by the exact
+    // real job number so this test does not assume a background refresh already
+    // inserted a just-created batch into the current first page.
+    const queueSearch = shop1Page.getByRole("searchbox", { name: "Search all print jobs" });
+    await queueSearch.fill(targetJob.jobNumber);
+    const searchResponsePromise = shop1Page.waitForResponse(response => {
+      if (response.request().method() !== "GET") return false;
+      try {
+        const url = new URL(response.url());
+        return url.origin === baseUrl.origin &&
+          url.pathname === "/api/v1/shop/print-jobs" &&
+          url.searchParams.get("offset") === "0" &&
+          url.searchParams.get("take") === "100" &&
+          url.searchParams.get("search") === targetJob.jobNumber;
+      } catch {
+        return false;
       }
-    }
-    assert.equal(matchingQueueRows.length, 1,
-      "The shop queue must expose exactly one summary row for this batch's PrintJob numbers.");
-    const reviewButton = matchingQueueRows[0].getByRole("button", { name: /Preview & review/ });
+    }, { timeout: 20000 });
+    await shop1Page.locator(".queue-search-form button[type='submit']").click();
+    const searchResponse = await searchResponsePromise;
+    assert.equal(searchResponse.status(), 200, "The shop's real queue search must return HTTP 200.");
+    const searchedJobs = await searchResponse.json();
+    assert.ok(Array.isArray(searchedJobs), "The shop queue search must return a job array.");
+    assert.deepEqual(
+      searchedJobs.map(job => job.id),
+      [targetJob.id],
+      "Searching the exact persisted job number must return that one file in the authenticated shop."
+    );
+
+    const matchingQueueRows = shop1Page.locator(".queue-batch-summary-row")
+      .filter({ hasText: targetJob.jobNumber });
+    await matchingQueueRows.waitFor({ state: "visible", timeout: 15000 });
+    assert.equal(await matchingQueueRows.count(), 1,
+      "The exact searched job must appear in one shop batch summary row.");
+    const reviewButton = matchingQueueRows.getByRole("button", { name: /Preview & review/ });
     await reviewButton.waitFor({ state: "visible", timeout: 15000 });
     await reviewButton.click();
 
