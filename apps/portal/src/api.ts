@@ -460,6 +460,9 @@ export interface ShopPayment {
   printJobId: string;
   jobNumber: string;
   documentName: string;
+  origin?: "CUSTOMER_QR" | "SHOP_OWNER" | string;
+  recipientName?: string | null;
+  recipientPhone?: string | null;
   batchPaymentId?: string | null;
   batchFileCount?: number | null;
   method: "UPI" | "CASH";
