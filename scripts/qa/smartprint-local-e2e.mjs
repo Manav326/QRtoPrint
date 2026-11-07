@@ -2274,9 +2274,15 @@ try {
       await photoCount.fill("3");
       await photoCount.blur();
       assert.equal(await photoCount.inputValue(), "3");
-      const sheetSummary = await studio.locator(".sheetSummary").innerText();
-      assert.match(sheetSummary, /A4 pages in this job\s*1/i);
-      assert.match(sheetSummary, /25\s*[×x]\s*35\s*mm/i);
+      // PhotoStudio.module.css is a CSS Module: its class names are hashed at build time.
+      // Assert the visible summary rows through their user-facing labels instead of
+      // querying the source-only ".sheetSummary" class name.
+      const photoDimensionsRow = studio.getByText("Photo dimensions", { exact: true }).locator("xpath=..");
+      const pageCountRow = studio.getByText("A4 pages in this job", { exact: true }).locator("xpath=..");
+      assert.equal(await photoDimensionsRow.locator("strong").innerText(), "25 × 35 mm",
+        "The selected photo dimensions must be reflected in the sheet summary.");
+      assert.equal(await pageCountRow.locator("strong").innerText(), "1",
+        "Three selected photos must fit on one A4 sheet.");
 
       await studio.getByRole("button", { name: "Prepare A4 sheet" }).click();
       await studio.waitFor({ state: "detached", timeout: 60000 });
