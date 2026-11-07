@@ -344,3 +344,66 @@ test('responsive browser visual QA reports each route, viewport, workspace secti
   assert.match(responsiveBrowserSource, /checking section layout\/contrast/);
   assert.match(ciWorkflowSource, /test-reporter=\.\/scripts\/qa\/live-node-test-reporter\.mjs/);
 });
+
+
+const nativeLocalRunnerSource = readFileSync(new URL('./run-smartprint-native-local.ps1', import.meta.url), 'utf8');
+const localNativeOrchestratorSource = readFileSync(new URL('./run-smartprint-qa.ps1', import.meta.url), 'utf8');
+const androidBuildConfigSource = readFileSync(new URL('../../apps/android/app/build.gradle.kts', import.meta.url), 'utf8');
+
+test('local native QA application identities and executable names are configured centrally', () => {
+  assert.equal(config.apps.windows.nativeExecutableName, 'smartprint-desktop.exe');
+  assert.equal(config.apps.android.applicationId, 'com.quantaedge.smartprint');
+  assert.equal(config.apps.android.localQaApplicationId, 'com.quantaedge.smartprint.localqa');
+  assert.equal(config.apps.android.launcherActivity, 'com.quantaedge.smartprint.MainActivity');
+  assert.ok(config.apps.android.localQaApplicationId !== config.apps.android.applicationId);
+});
+
+test('Android local QA build uses a distinct application ID and preserves the production identity', () => {
+  assert.match(androidBuildConfigSource, /smartPrintLocalQa/);
+  assert.match(androidBuildConfigSource, /com\.quantaedge\.smartprint\.localqa/);
+  assert.match(androidBuildConfigSource, /com\.quantaedge\.smartprint"/);
+  assert.match(androidBuildConfigSource, /applicationId = smartPrintApplicationId/);
+  assert.match(nativeLocalRunnerSource, /-PsmartPrintLocalQa=true/);
+  assert.match(nativeLocalRunnerSource, /adbCommand\.Source -s \$androidDevice install -r/);
+  assert.doesNotMatch(nativeLocalRunnerSource, /shell pm clear/);
+  assert.doesNotMatch(nativeLocalRunnerSource, /adbCommand\.Source -s \$androidDevice uninstall/);
+});
+
+test('full local QA runner invokes native Desktop and physical Android acceptance without published downloads', () => {
+  assert.match(localNativeOrchestratorSource, /run-smartprint-native-local\.ps1/);
+  assert.match(localNativeOrchestratorSource, /-LocalAndroidDeviceSerial/);
+  assert.match(nativeLocalRunnerSource, /\.env\.local/);
+  assert.match(nativeLocalRunnerSource, /PUBLIC_BASE_URL/);
+  assert.match(nativeLocalRunnerSource, /health\/ready/);
+  assert.match(nativeLocalRunnerSource, /apps\/desktop\/src-tauri\/target\/release/);
+  assert.match(nativeLocalRunnerSource, /desktop-open-smoke\.ps1/);
+  assert.match(nativeLocalRunnerSource, /WEBVIEW2_USER_DATA_FOLDER/);
+  assert.match(nativeLocalRunnerSource, /connectedDebugAndroidTest/);
+  assert.match(nativeLocalRunnerSource, /ANDROID_SERIAL/);
+  assert.doesNotMatch(nativeLocalRunnerSource, /test-published-apps\.ps1/);
+  assert.doesNotMatch(nativeLocalRunnerSource, /downloads\/windows|downloads\/android/);
+});
+
+test('native local QA refuses to mutate existing Agent pairing, network and printer configuration', () => {
+  assert.match(nativeLocalRunnerSource, /Get-Service -Name \$agentServiceName/);
+  assert.match(nativeLocalRunnerSource, /127\.0\.0\.1:17842\/api\/v1\/local\/status/);
+  assert.match(nativeLocalRunnerSource, /LOCAL_ENDPOINT_READY/);
+  assert.doesNotMatch(nativeLocalRunnerSource, /pair-agent\.ps1/);
+  assert.doesNotMatch(nativeLocalRunnerSource, /enroll_local_agent/);
+  assert.doesNotMatch(nativeLocalRunnerSource, /select_local_network/);
+  assert.doesNotMatch(nativeLocalRunnerSource, /Set-Printer|Add-Printer|Remove-Printer/);
+});
+
+test('native local QA refuses to take over an already-running Desktop session', () => {
+  assert.match(nativeLocalRunnerSource, /Get-CimInstance -ClassName Win32_Process -Filter "Name='smartprint-desktop\.exe'"/);
+  assert.match(nativeLocalRunnerSource, /A SmartPrint Desktop session is already running/);
+  assert.match(nativeLocalRunnerSource, /will not take over or close the user's active workspace/);
+});
+
+test('native QA logs each named step and produces separate machine-readable evidence', () => {
+  assert.match(nativeLocalRunnerSource, /\[QA-STEP-START\]/);
+  assert.match(nativeLocalRunnerSource, /\[QA-STEP-END\]/);
+  assert.match(nativeLocalRunnerSource, /Tee-Object -FilePath \$logPath/);
+  assert.match(nativeLocalRunnerSource, /results\.json/);
+  assert.match(nativeLocalRunnerSource, /results\.txt/);
+});
