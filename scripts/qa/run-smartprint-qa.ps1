@@ -2,12 +2,65 @@
 param(
     [switch]$SkipUnitTests,
     [switch]$SkipPlaywrightInstall,
-    [switch]$E2EOnly
+    [switch]$E2EOnly,
+    [switch]$PullLatest,
+    [switch]$ReuseRunningStack
 )
 
 $ErrorActionPreference = "Stop"
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..\..")).Path
 Set-Location $repoRoot
+
+$pullChangedPaths = @()
+$pulledLatest = $false
+$requiresAppRefresh = $true
+$sourceRevision = $null
+if ($PullLatest) {
+    if (-not $E2EOnly) { throw "-PullLatest is supported only with -E2EOnly." }
+    $git = Get-Command git.exe -ErrorAction SilentlyContinue
+    if (-not $git) { $git = Get-Command git -ErrorAction Stop }
+    $expectedBranch = "feature/smartprint-clean-qa-runtime"
+    $activeBranch = (& $git.Source "branch" "--show-current").Trim()
+    if ($LASTEXITCODE -ne 0 -or $activeBranch -ne $expectedBranch) {
+        throw "-PullLatest requires the existing '$expectedBranch' branch. Current branch: '$activeBranch'."
+    }
+    $workingTree = @(& $git.Source "status" "--porcelain" "--untracked-files=all")
+    if ($LASTEXITCODE -ne 0) { throw "Could not verify the Git working tree; no pull was attempted." }
+    if ($workingTree.Count -gt 0) {
+        throw "The working tree contains local changes. Commit or safely move them before -PullLatest; this runner will not stash, overwrite, or discard user work."
+    }
+    $beforePull = (& $git.Source "rev-parse" "HEAD").Trim()
+    if ($LASTEXITCODE -ne 0 -or -not $beforePull) { throw "Could not resolve the current source revision." }
+    & $git.Source "fetch" "--no-tags" "origin" $expectedBranch
+    if ($LASTEXITCODE -ne 0) { throw "Git fetch failed. Existing files and containers were left unchanged." }
+    $upstreamRef = "refs/remotes/origin/$expectedBranch"
+    $upstreamRevision = (& $git.Source "rev-parse" $upstreamRef).Trim()
+    if ($LASTEXITCODE -ne 0 -or -not $upstreamRevision) { throw "Could not resolve origin/$expectedBranch after fetch." }
+    if ($beforePull -ne $upstreamRevision) {
+        $pullChangedPaths = @(& $git.Source "diff" "--name-only" "--diff-filter=ACDMRT" "$beforePull..$upstreamRevision")
+        if ($LASTEXITCODE -ne 0) { throw "Could not classify the pulled changes; no merge was attempted." }
+        & $git.Source "merge" "--ff-only" $upstreamRef
+        if ($LASTEXITCODE -ne 0) { throw "The update is not a fast-forward. No reset, rebase, or force update was attempted." }
+    }
+    $sourceRevision = (& $git.Source "rev-parse" "HEAD").Trim()
+    if ($LASTEXITCODE -ne 0 -or -not $sourceRevision) { throw "Could not verify the resulting source revision." }
+    $pulledLatest = $true
+    $runtimeChanges = @($pullChangedPaths | Where-Object {
+        $normalisedPath = ([string]$_).Replace('', '/')
+        $qaOrDocsOnly = $normalisedPath -match '^(scripts/qa/|docs/|\.github/|tests/|apps/[^/]+/tests/)' -or
+            $normalisedPath -match '\.md$'
+        -not $qaOrDocsOnly
+    })
+    $requiresAppRefresh = $runtimeChanges.Count -gt 0
+    $decision = if ($requiresAppRefresh) { "application/runtime change: refresh API and Portal" } else { "QA scripts/tests/docs only: reuse running containers" }
+    Write-Host ("Pulled source revision: " + $sourceRevision.Substring(0, [Math]::Min(12, $sourceRevision.Length))) -ForegroundColor Green
+    Write-Host ("Changed files: " + $pullChangedPaths.Count + " | " + $decision) -ForegroundColor Cyan
+    $pullChangedPaths | ForEach-Object { Write-Host ("  " + $_) }
+}
+if ($ReuseRunningStack -and -not $E2EOnly) { throw "-ReuseRunningStack requires -E2EOnly." }
+if ($PullLatest -and $ReuseRunningStack -and $requiresAppRefresh) {
+    throw "Application/runtime files changed in the pull. Refusing to test stale containers in reuse-only mode."
+}
 
 $target = "http://127.0.0.1:3000"
 $canonicalPublicUrl = "https://smartprint.quantaedge.in"
@@ -227,10 +280,11 @@ function Set-QAProcessEnvironment {
 }
 
 function Install-OrLocatePlaywright {
+    param([switch]$ForceSkipInstall)
     $npm = Get-Command npm.cmd -ErrorAction SilentlyContinue
     if (-not $npm) { $npm = Get-Command npm -ErrorAction Stop }
 
-    if (-not $SkipPlaywrightInstall) {
+    if (-not $SkipPlaywrightInstall -and -not $ForceSkipInstall) {
         # Capture npm's browser-download output so PowerShell does not return
         # those progress lines as part of this function's module-path result.
         $installOutput = @(& $npm.Source "exec" "--yes" "--package=playwright@1.56.1" "--" "playwright" "install" "chromium" 2>&1)
@@ -311,7 +365,12 @@ try {
     Add-QAResult -Name "Node.js runtime" -Status "PASS" -Detail $nodeVersion
 
     if ($E2EOnly) {
-        Write-Host "E2E-only mode: rebuild and refresh only the API and Portal containers. PostgreSQL, its data volume, QA identities and Agent are preserved." -ForegroundColor Yellow
+        $reuseExistingStack = $ReuseRunningStack -or ($PullLatest -and -not $requiresAppRefresh)
+        if ($reuseExistingStack) {
+            Write-Host "E2E-only reuse mode: no Docker build, container restart, or dependency recreation. Running PostgreSQL, API, Portal and Agent are reused." -ForegroundColor Green
+        } else {
+            Write-Host "E2E-only refresh mode: only API and Portal images/containers may be rebuilt/refreshed. PostgreSQL, its data volume, QA identities and Agent are preserved." -ForegroundColor Yellow
+        }
 
         $docker = Get-Command docker.exe -ErrorAction SilentlyContinue
         if (-not $docker) { $docker = Get-Command docker -ErrorAction Stop }
@@ -348,8 +407,13 @@ try {
             $serviceListArgs = $composeBaseArgs + @("ps", "-q", $service)
             $containerId = (& $docker.Source @serviceListArgs | Out-String).Trim()
             if (-not $containerId) { throw "The existing $service container was not found. E2E-only mode will not create missing stack services." }
+            $serviceState = (& $docker.Source inspect --format "{{.State.Status}}" $containerId).Trim()
+            if ($LASTEXITCODE -ne 0 -or $serviceState -ne "running") {
+                throw "The existing $service container is not running. Reuse mode will not start or replace it."
+            }
         }
 
+        if (-not $reuseExistingStack) {
         $buildArgs = $composeBaseArgs + @("build", "api", "portal")
         $buildOk = Invoke-QAStep -Name "Build only SmartPrint API and Portal images" -LogName "targeted-app-image-build.log" -Action {
             & $docker.Source @buildArgs
@@ -367,25 +431,41 @@ try {
             throw "PostgreSQL container identity changed during the targeted refresh. Stop QA and inspect the existing database before proceeding."
         }
         Add-QAResult -Name "PostgreSQL container preserved during API/Portal refresh" -Status "PASS" -Detail "The existing database container ID is unchanged."
+        } else {
+            $dbContainerIdAfter = (& $docker.Source @dbListArgs | Out-String).Trim()
+            if ($dbContainerIdAfter -ne $dbContainerIdBefore) {
+                throw "PostgreSQL container identity changed during reuse preflight. Stop QA and inspect the existing database before proceeding."
+            }
+            $changedSummary = if ($pullChangedPaths.Count -eq 0) { "No new files were pulled." } else { "Only QA scripts, tests, or documentation changed." }
+            Add-QAResult -Name "Reused existing API/Portal containers without building or restarting" -Status "PASS" -Detail $changedSummary
+        }
 
         $runtimeReady = $false
-        for ($attempt = 1; $attempt -le 45; $attempt++) {
-            try {
-                $portalResponse = Invoke-WebRequest -Uri "$target/" -UseBasicParsing -TimeoutSec 5 -ErrorAction Stop
-                $liveResponse = Invoke-WebRequest -Uri "$target/health/live" -UseBasicParsing -TimeoutSec 5 -ErrorAction Stop
-                $readyResponse = Invoke-WebRequest -Uri "$target/health/ready" -UseBasicParsing -TimeoutSec 5 -ErrorAction Stop
-                $ready = $readyResponse.Content | ConvertFrom-Json -ErrorAction Stop
-                if ($portalResponse.StatusCode -eq 200 -and $liveResponse.StatusCode -eq 200 -and
-                    $readyResponse.StatusCode -eq 200 -and $ready.database -eq "connected") {
-                    $runtimeReady = $true
-                    break
-                }
-            } catch {
-                Start-Sleep -Seconds 2
+        if ($reuseExistingStack) {
+            $runtimeReady = Test-LocalSmartPrint
+            if (-not $runtimeReady) {
+                throw "The existing Portal/API stack is not healthy or cannot reach PostgreSQL. Reuse mode will not restart or repair containers automatically."
             }
+            Add-QAResult -Name "Existing local Portal/API and PostgreSQL readiness" -Status "PASS" -Detail "Reused running services; HTTP 200 and database connected."
+        } else {
+            for ($attempt = 1; $attempt -le 45; $attempt++) {
+                try {
+                    $portalResponse = Invoke-WebRequest -Uri "$target/" -UseBasicParsing -TimeoutSec 5 -ErrorAction Stop
+                    $liveResponse = Invoke-WebRequest -Uri "$target/health/live" -UseBasicParsing -TimeoutSec 5 -ErrorAction Stop
+                    $readyResponse = Invoke-WebRequest -Uri "$target/health/ready" -UseBasicParsing -TimeoutSec 5 -ErrorAction Stop
+                    $ready = $readyResponse.Content | ConvertFrom-Json -ErrorAction Stop
+                    if ($portalResponse.StatusCode -eq 200 -and $liveResponse.StatusCode -eq 200 -and
+                        $readyResponse.StatusCode -eq 200 -and $ready.database -eq "connected") {
+                        $runtimeReady = $true
+                        break
+                    }
+                } catch {
+                    Start-Sleep -Seconds 2
+                }
+            }
+            if (-not $runtimeReady) { throw "The refreshed API/Portal did not become healthy with PostgreSQL connected. Review targeted-app-refresh.log and runtime logs." }
+            Add-QAResult -Name "Refreshed local Portal/API and existing PostgreSQL readiness" -Status "PASS" -Detail "HTTP 200; database connected."
         }
-        if (-not $runtimeReady) { throw "The refreshed API/Portal did not become healthy with PostgreSQL connected. Review targeted-app-refresh.log and runtime logs." }
-        Add-QAResult -Name "Refreshed local Portal/API and existing PostgreSQL readiness" -Status "PASS" -Detail "HTTP 200; database connected."
 
         $accountsFile = Join-Path $repoRoot ".secrets\smartprint-qa\qa-accounts.dpapi.json"
         if (-not (Test-Path -LiteralPath $accountsFile -PathType Leaf)) {
@@ -396,7 +476,7 @@ try {
 
         $script:playwrightModule = $null
         $playwrightOk = Invoke-QAStep -Name "Locate pinned Playwright 1.56.1 for E2E-only run" -LogName "playwright-install.log" -Action {
-            $script:playwrightModule = Install-OrLocatePlaywright
+            $script:playwrightModule = Install-OrLocatePlaywright -ForceSkipInstall:$reuseExistingStack
             if (-not $script:playwrightModule) { throw "Playwright module resolution failed." }
             Write-Host ("Pinned Playwright module: " + $script:playwrightModule)
         }
@@ -890,6 +970,11 @@ finally {
 
     $summary = [PSCustomObject]@{
         product = "SmartPrint"
+        sourceRevision = if ($sourceRevision) { $sourceRevision } else { $null }
+        pulledLatestFromGitHub = $pulledLatest
+        changedFilesFromPull = @($pullChangedPaths)
+        applicationRefreshRequiredByPull = if ($pulledLatest) { $requiresAppRefresh } else { $null }
+        reusedExistingAppContainers = if ($E2EOnly) { $reuseExistingStack } else { $null }
         environment = "LOCAL_DOCKER_POSTGRES_REAL_API"
         target = $target
         runId = $runId
