@@ -355,9 +355,7 @@ try {
         }
         if (-not $e2eOk) { $exitCode = 1 }
         Add-QAResult -Name "Portal/API/Agent/Android build and unit suites" -Status "SKIPPED" -Detail "E2E-only mode deliberately skips builds, platform unit tests, and device tests."
-        return
-    }
-
+    } else {
     $docker = Get-Command docker.exe -ErrorAction SilentlyContinue
     if (-not $docker) { $docker = Get-Command docker -ErrorAction Stop }
     & $docker.Source compose version | Out-Null
@@ -806,6 +804,7 @@ try {
                 Add-QAResult -Name "Android emulator instrumentation suite" -Status "SKIPPED" -Detail $deviceReason
             }
         }
+    }
     }
 }
 catch {
