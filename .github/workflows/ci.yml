@@ -359,7 +359,7 @@ jobs:
       - name: Smoke-test native desktop launch and rendered WebView2 frontend
         if: ${{ !cancelled() && steps.desktop_executable_build.outcome == 'success' && steps.webview2_runtime.outcome == 'success' }}
         shell: pwsh
-        run: ./scripts/qa/desktop-open-smoke.ps1 -ExecutablePath (Join-Path $env:RUNNER_TEMP "smartprint-desktop-smoke-target/release/smartprint-desktop.exe")
+        run: ./scripts/qa/desktop-open-smoke.ps1 -ExecutablePath (Join-Path $env:RUNNER_TEMP "smartprint-desktop-smoke-target/release/smartprint-desktop.exe") -RequireDevTools
       - name: Upload Windows desktop package
         id: desktop_package_upload
         if: ${{ always() && steps.desktop_executable_build.outcome == 'success' }}
