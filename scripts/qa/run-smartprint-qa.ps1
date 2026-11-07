@@ -651,6 +651,7 @@ try {
             }
 
             $qaUnitTests = @(
+                (Join-Path $PSScriptRoot "live-node-test-reporter.test.mjs"),
                 (Join-Path $PSScriptRoot "local-e2e-http-audit.test.mjs"),
                 (Join-Path $PSScriptRoot "local-e2e-prerequisites.test.mjs")
             )
@@ -1030,8 +1031,8 @@ try {
         if ($dotnet) {
             $env:SMARTPRINT_TEST_POSTGRES = $null
             $apiTestOk = Invoke-QAStep -Name "Existing SmartPrint API unit/regression tests (destructive migration DB test disabled)" -LogName "api-dotnet-tests.log" -Action {
-                Write-Host "[QA-SUITE-START] API .NET tests | per-test results will stream as cases finish." -ForegroundColor Cyan
-                & $dotnet.Source "test" "tests/SmartPrint.Api.Tests/SmartPrint.Api.Tests.csproj" "--configuration" "Release" "--logger" "console;verbosity=normal"
+                Write-Host "[QA-SUITE-START] API .NET tests | xUnit verbose reporter announces each case start/end; StopOnFail=false." -ForegroundColor Cyan
+                & $dotnet.Source "test" "tests/SmartPrint.Api.Tests/SmartPrint.Api.Tests.csproj" "--configuration" "Release" "--logger" "console;verbosity=normal" "--" "xUnit.ReporterSwitch=verbose" "xUnit.ShowLiveOutput=true" "xUnit.StopOnFail=false"
             }
             if (-not $apiTestOk) { $exitCode = 1 }
 
@@ -1049,8 +1050,8 @@ try {
             }
             $env:SMARTPRINT_RUN_MULTI_QUEUE_INTEGRATION = $null
             $agentTestOk = Invoke-QAStep -Name "Existing SmartPrint Windows Agent unit/regression tests and optional virtual spooler integration" -LogName "agent-dotnet-tests.log" -Action {
-                Write-Host "[QA-SUITE-START] Windows Agent .NET tests | per-test results will stream as cases finish." -ForegroundColor Cyan
-                & $dotnet.Source "test" "tests/SmartPrint.Agent.Tests/SmartPrint.Agent.Tests.csproj" "--configuration" "Release" "--logger" "console;verbosity=normal"
+                Write-Host "[QA-SUITE-START] Windows Agent .NET tests | xUnit verbose reporter announces each case start/end; StopOnFail=false." -ForegroundColor Cyan
+                & $dotnet.Source "test" "tests/SmartPrint.Agent.Tests/SmartPrint.Agent.Tests.csproj" "--configuration" "Release" "--logger" "console;verbosity=normal" "--" "xUnit.ReporterSwitch=verbose" "xUnit.ShowLiveOutput=true" "xUnit.StopOnFail=false"
             }
             if (-not $agentTestOk) { $exitCode = 1 }
             if ($pdfPrinterAvailable -and $agentTestOk) {
@@ -1074,7 +1075,7 @@ try {
             Add-QAResult -Name "Android local JVM and emulator suites" -Status "SKIPPED" -Detail "System Gradle and Android SDK are required; the script will not install to physical phones."
         } else {
             $androidUnitTestArgs = @(
-                "--no-daemon", "-p", "apps/android",
+                "--no-daemon", "--console=plain", "-p", "apps/android",
                 "-PsmartPrintServiceUrl=$androidEmulatorOrigin",
                 ":app:testDebugUnitTest"
             )
@@ -1115,7 +1116,7 @@ try {
                 $instrumentationArgs = @(
                     "--no-daemon", "-p", "apps/android",
                     "-PsmartPrintServiceUrl=$androidEmulatorOrigin",
-                    ":app:connectedDebugAndroidTest"
+                    "--info", ":app:connectedDebugAndroidTest"
                 )
                 $androidUiOk = Invoke-QAStep -Name "Android emulator instrumentation tests against local SmartPrint portal" -LogName "android-emulator-tests.log" -Action {
                     & $gradle.Source @instrumentationArgs
