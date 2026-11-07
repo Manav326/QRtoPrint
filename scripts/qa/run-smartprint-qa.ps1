@@ -46,7 +46,7 @@ if ($PullLatest) {
     if ($LASTEXITCODE -ne 0 -or -not $sourceRevision) { throw "Could not verify the resulting source revision." }
     $pulledLatest = $true
     $runtimeChanges = @($pullChangedPaths | Where-Object {
-        $normalisedPath = ([string]$_).Replace('', '/')
+        $normalisedPath = ([string]$_).Replace([char]92, [char]47)
         $qaOrDocsOnly = $normalisedPath -match '^(scripts/qa/|docs/|\.github/|tests/|apps/[^/]+/tests/)' -or
             $normalisedPath -match '\.md$'
         -not $qaOrDocsOnly
