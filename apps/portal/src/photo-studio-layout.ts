@@ -97,7 +97,9 @@ export function hasSufficientPhotoResolution(
 
   const requiredWidth = size.widthMm / 25.4 * dpi;
   const requiredHeight = size.heightMm / 25.4 * dpi;
-  return cropWidth >= requiredWidth && cropHeight >= requiredHeight;
+  // Avoid rejecting exact-DPI sources because of sub-pixel floating-point division drift.
+  const pixelTolerance = 1e-6;
+  return cropWidth + pixelTolerance >= requiredWidth && cropHeight + pixelTolerance >= requiredHeight;
 }
 
 /** One exact-A4 multi-page PDF: one upload/job, with the requested number of photos. */
