@@ -41,6 +41,28 @@ Generated logs, screenshots and JSON/TXT reports are written under `artifacts/sm
 
 No extra branch, remote QA secret, Cloudflare rule or manual account setup is required.
 
+### Fast incremental E2E after a GitHub update
+
+For routine test-harness changes, use the incremental runner instead of rebuilding the app:
+
+~~~powershell
+.\scripts\qa\run-smartprint-qa.ps1 -E2EOnly -PullLatest
+~~~
+
+The runner fetches the current checked-out branch from origin and fast-forwards only when the working tree is clean. It does not stash, reset, rebase, or discard local changes. It compares the files changed by that pull:
+
+- Changes limited to scripts/qa/, test folders, docs/, .github/, or Markdown files: it reuses the running API, Portal, PostgreSQL and Agent. **No Docker image build and no container restart.** It also uses the already cached Playwright package/browser rather than installing them again.
+- Any other changed path is conservatively treated as application/runtime-affecting. Only the existing API and Portal services are built/refreshed; PostgreSQL and its data volume, QA identities and Agent remain untouched.
+- If the existing services are missing, stopped, or unhealthy in reuse mode, the runner stops with a diagnostic instead of recreating them.
+
+The first time this runner version is used, pull it once manually so the new switches are available:
+
+~~~powershell
+git pull --ff-only origin feature/smartprint-clean-qa-runtime
+~~~
+
+Then use the incremental command for later updates. -E2EOnly without -PullLatest retains the previous explicit API/Portal refresh behaviour.
+
 The public landing page uses system font fallbacks so local acceptance testing does not fetch Google Fonts or another third-party asset.
 
 ## Existing test coverage retained
