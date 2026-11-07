@@ -545,4 +545,6 @@ Write-Host ""
 Write-Host "=== SMARTPRINT LOCAL NATIVE APPLICATION QA SUMMARY ===" -ForegroundColor Green
 Write-Host ($summary | Format-Table result, passed, failed, skipped -AutoSize | Out-String)
 Write-Host ("Evidence: " + $outputRoot) -ForegroundColor Cyan
-if ($failed -gt 0) { exit 1 }
+if ($failed -gt 0) {
+    throw "Local native application QA recorded $failed failed check(s). Review the per-step logs in $outputRoot."
+}
