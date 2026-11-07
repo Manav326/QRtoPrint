@@ -308,6 +308,12 @@ try {
   }
   try {Test-AndroidApp $downloads.android $androidApkVerified $config.apps.android}
   catch {Add-Result "Android emulator app acceptance" "FAIL" $_.Exception.Message}
+  if($AndroidOnly){
+    $androidAcceptance=@($script:results | Where-Object {$_.name -eq "Android emulator app" -and $_.status -eq "PASS"})
+    if($androidAcceptance.Count -ne 1){
+      Add-Result "Android-only completion gate" "FAIL" "A configured Android emulator must complete package verification and app launch; a skipped device/app check is not a successful QA run."
+    }
+  }
 }
 finally {
   $client.Dispose()

@@ -99,3 +99,9 @@ test('Android-only published app mode does not download or run Windows acceptanc
   assert.match(publishedAppsSource, /if\(\$AndroidOnly\)\{/);
   assert.match(publishedAppsSource, /no Windows installer was downloaded/);
 });
+
+test('Android-only acceptance cannot pass when the emulator/app launch check is skipped', () => {
+  assert.match(publishedAppsSource, /Android-only completion gate/);
+  assert.match(publishedAppsSource, /\$androidAcceptance\.Count -ne 1/);
+  assert.match(publishedAppsSource, /a skipped device\/app check is not a successful QA run/);
+});
