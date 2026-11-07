@@ -412,6 +412,7 @@ test('physical Android QA runs the full existing Espresso instrumentation suite 
   assert.match(nativeLocalRunnerSource, /Run the full Android Espresso instrumentation suite on the selected physical phone/);
   assert.match(nativeLocalRunnerSource, /:app:connectedDebugAndroidTest/);
   assert.match(nativeLocalRunnerSource, /ANDROID_SERIAL/);
+  assert.match(nativeLocalRunnerSource, /"--serial", \$androidDevice/);
   assert.match(nativeLocalRunnerSource, /-PsmartPrintLocalQa=true/);
   assert.match(nativeLocalRunnerSource, /-PsmartPrintServiceUrl=\$publicOrigin/);
   assert.match(nativeLocalRunnerSource, /-PsmartPrintVersionCode=\$versionCode/);
