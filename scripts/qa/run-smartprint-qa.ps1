@@ -1,7 +1,8 @@
 [CmdletBinding()]
 param(
     [switch]$SkipUnitTests,
-    [switch]$SkipPlaywrightInstall
+    [switch]$SkipPlaywrightInstall,
+    [switch]$E2EOnly
 )
 
 $ErrorActionPreference = "Stop"
@@ -309,6 +310,112 @@ try {
     }
     Add-QAResult -Name "Node.js runtime" -Status "PASS" -Detail $nodeVersion
 
+    if ($E2EOnly) {
+        Write-Host "E2E-only mode: rebuild and refresh only the API and Portal containers. PostgreSQL, its data volume, QA identities and Agent are preserved." -ForegroundColor Yellow
+
+        $docker = Get-Command docker.exe -ErrorAction SilentlyContinue
+        if (-not $docker) { $docker = Get-Command docker -ErrorAction Stop }
+        & $docker.Source compose version | Out-Null
+        if ($LASTEXITCODE -ne 0) { throw "Docker Compose v2 is required for the targeted API/Portal refresh." }
+        & $docker.Source info | Out-Null
+        if ($LASTEXITCODE -ne 0) { throw "Docker Desktop engine is not running." }
+
+        $envPath = Join-Path $repoRoot ".env.local"
+        $composeFile = Join-Path $repoRoot "compose.local.yml"
+        if (-not (Test-Path -LiteralPath $envPath -PathType Leaf)) { throw "E2E-only mode requires the existing .env.local file." }
+        if (-not (Test-Path -LiteralPath $composeFile -PathType Leaf)) { throw "E2E-only mode requires compose.local.yml." }
+
+        $composeProjectName = "smart-print"
+        $composeBaseArgs = @("compose", "--project-name", $composeProjectName, "--env-file", $envPath, "-f", $composeFile)
+        $composeConfigArgs = $composeBaseArgs + @("config", "--quiet")
+        $configOk = Invoke-QAStep -Name "Validate existing local Compose configuration" -LogName "compose-config.log" -Action {
+            & $docker.Source @composeConfigArgs
+        }
+        if (-not $configOk) { throw "Existing local Compose configuration is invalid." }
+
+        & $docker.Source network inspect "cloudflare-edge" *> $null
+        if ($LASTEXITCODE -ne 0) { throw "The existing shared cloudflare-edge Docker network is unavailable. E2E-only mode will not create or replace it." }
+
+        $dbListArgs = $composeBaseArgs + @("ps", "-q", "db")
+        $dbContainerIdBefore = (& $docker.Source @dbListArgs | Out-String).Trim()
+        if (-not $dbContainerIdBefore) { throw "The existing smart-print PostgreSQL container was not found. E2E-only mode will not create a database." }
+        $dbStateBefore = (& $docker.Source inspect --format "{{.State.Status}}" $dbContainerIdBefore).Trim()
+        if ($LASTEXITCODE -ne 0 -or $dbStateBefore -ne "running") {
+            throw "The existing PostgreSQL container is not running; no attempt will be made to recreate it."
+        }
+
+        foreach ($service in @("api", "portal")) {
+            $serviceListArgs = $composeBaseArgs + @("ps", "-q", $service)
+            $containerId = (& $docker.Source @serviceListArgs | Out-String).Trim()
+            if (-not $containerId) { throw "The existing $service container was not found. E2E-only mode will not create missing stack services." }
+        }
+
+        $buildArgs = $composeBaseArgs + @("build", "api", "portal")
+        $buildOk = Invoke-QAStep -Name "Build only SmartPrint API and Portal images" -LogName "targeted-app-image-build.log" -Action {
+            & $docker.Source @buildArgs
+        }
+        if (-not $buildOk) { throw "The targeted API/Portal image build failed. Existing containers and PostgreSQL were not replaced." }
+
+        $refreshArgs = $composeBaseArgs + @("up", "-d", "--no-deps", "api", "portal")
+        $refreshOk = Invoke-QAStep -Name "Refresh only API and Portal containers (no dependencies, no orphan removal)" -LogName "targeted-app-refresh.log" -Action {
+            & $docker.Source @refreshArgs
+        }
+        if (-not $refreshOk) { throw "API/Portal refresh failed. PostgreSQL was excluded from the Compose up operation." }
+
+        $dbContainerIdAfter = (& $docker.Source @dbListArgs | Out-String).Trim()
+        if ($dbContainerIdAfter -ne $dbContainerIdBefore) {
+            throw "PostgreSQL container identity changed during the targeted refresh. Stop QA and inspect the existing database before proceeding."
+        }
+        Add-QAResult -Name "PostgreSQL container preserved during API/Portal refresh" -Status "PASS" -Detail "The existing database container ID is unchanged."
+
+        $runtimeReady = $false
+        for ($attempt = 1; $attempt -le 45; $attempt++) {
+            try {
+                $portalResponse = Invoke-WebRequest -Uri "$target/" -UseBasicParsing -TimeoutSec 5 -ErrorAction Stop
+                $liveResponse = Invoke-WebRequest -Uri "$target/health/live" -UseBasicParsing -TimeoutSec 5 -ErrorAction Stop
+                $readyResponse = Invoke-WebRequest -Uri "$target/health/ready" -UseBasicParsing -TimeoutSec 5 -ErrorAction Stop
+                $ready = $readyResponse.Content | ConvertFrom-Json -ErrorAction Stop
+                if ($portalResponse.StatusCode -eq 200 -and $liveResponse.StatusCode -eq 200 -and
+                    $readyResponse.StatusCode -eq 200 -and $ready.database -eq "connected") {
+                    $runtimeReady = $true
+                    break
+                }
+            } catch {
+                Start-Sleep -Seconds 2
+            }
+        }
+        if (-not $runtimeReady) { throw "The refreshed API/Portal did not become healthy with PostgreSQL connected. Review targeted-app-refresh.log and runtime logs." }
+        Add-QAResult -Name "Refreshed local Portal/API and existing PostgreSQL readiness" -Status "PASS" -Detail "HTTP 200; database connected."
+
+        $accountsFile = Join-Path $repoRoot ".secrets\smartprint-qa\qa-accounts.dpapi.json"
+        if (-not (Test-Path -LiteralPath $accountsFile -PathType Leaf)) {
+            throw "E2E-only mode requires the existing DPAPI QA identity file: $accountsFile. It will not create or bootstrap accounts."
+        }
+        $accounts = Get-OrCreateQAAccounts
+        Set-QAProcessEnvironment $accounts
+
+        $script:playwrightModule = $null
+        $playwrightOk = Invoke-QAStep -Name "Locate pinned Playwright 1.56.1 for E2E-only run" -LogName "playwright-install.log" -Action {
+            $script:playwrightModule = Install-OrLocatePlaywright
+            if (-not $script:playwrightModule) { throw "Playwright module resolution failed." }
+            Write-Host ("Pinned Playwright module: " + $script:playwrightModule)
+        }
+        if (-not $playwrightOk -or -not $script:playwrightModule) { throw "Playwright is not ready." }
+        $env:PLAYWRIGHT_MODULE_DIR = $script:playwrightModule
+
+        $liveSuite = Join-Path $PSScriptRoot "smartprint-local-e2e.mjs"
+        if (-not (Test-Path -LiteralPath $liveSuite -PathType Leaf)) { throw "Local E2E suite is missing: $liveSuite" }
+        $syntaxOk = Invoke-QAStep -Name "Validate local Playwright suite JavaScript syntax" -LogName "playwright-syntax-check.log" -Action {
+            & $node.Source "--check" $liveSuite
+        }
+        if (-not $syntaxOk) { throw "The local Playwright suite has a syntax error. Review logs/playwright-syntax-check.log." }
+
+        $e2eOk = Invoke-QAStep -Name "Real local Playwright E2E using the existing stack and QA identities" -LogName "local-real-data-e2e.log" -Action {
+            & $node.Source $liveSuite
+        }
+        if (-not $e2eOk) { $exitCode = 1 }
+        Add-QAResult -Name "Portal/API/Agent/Android build and unit suites" -Status "SKIPPED" -Detail "E2E-only mode deliberately skips builds, platform unit tests, and device tests."
+    } else {
     $docker = Get-Command docker.exe -ErrorAction SilentlyContinue
     if (-not $docker) { $docker = Get-Command docker -ErrorAction Stop }
     & $docker.Source compose version | Out-Null
@@ -360,7 +467,7 @@ try {
 
     # Pin this stack to its own namespace even when the calling shell or
     # .env.local defines COMPOSE_PROJECT_NAME for QuantaEdge infrastructure.
-    $composeProjectName = "qrtoprint-local"
+    $composeProjectName = "smart-print"
     $composeBaseArgs = @("compose", "--project-name", $composeProjectName, "--env-file", $envPath, "-f", $composeFile)
     $configArgs = $composeBaseArgs + @("config", "--quiet")
     $configOk = Invoke-QAStep -Name "Validate local SmartPrint Compose configuration (project: $composeProjectName)" -LogName "compose-config.log" -Action {
@@ -757,6 +864,7 @@ try {
                 Add-QAResult -Name "Android emulator instrumentation suite" -Status "SKIPPED" -Detail $deviceReason
             }
         }
+    }
     }
 }
 catch {
