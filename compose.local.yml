@@ -83,9 +83,14 @@ services:
       start_period: 10s
 
 volumes:
+  # These are the existing persistent data volumes from the pre-rename stack.
+  # Mark them external so Compose reuses them regardless of the new project name
+  # and does not try to adopt/recreate data owned by the old Compose project.
   smart_print_database:
+    external: true
     name: qrtoprint-local_qrtoprint_local_database
   smart_print_documents:
+    external: true
     name: qrtoprint-local_qrtoprint_local_documents
 
 networks:
