@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { readFileSync } from "node:fs";
-import { buildPhotoPdf,getPhotoSheetLayout } from "../src/photo-studio-layout.ts";
+import { A4_HEIGHT_POINTS, A4_WIDTH_POINTS, buildPhotoPdf, getPhotoSheetLayout, getPhotoSheetPhotoPositions, hasSufficientPhotoResolution } from "../src/photo-studio-layout.ts";
 
 test("exact physical photo layout starts at the top safe margin on A4",()=>{
  const layout=getPhotoSheetLayout({widthMm:35,heightMm:45});
@@ -208,4 +208,111 @@ test("live Photo Studio QA reads summary rows by accessible labels, not unhashed
  assert.match(qa,/getByText\("Photo dimensions", \{ exact: true \}\)/);
  assert.match(qa,/getByText\("A4 pages in this job", \{ exact: true \}\)/);
  assert.doesNotMatch(qa,/locator\(["']\.sheetSummary["']\)/);
+});
+
+
+test("photo slots use the declared fixed 8 mm origin and 3 mm cut gutter",()=>{
+ const size={widthMm:35,heightMm:45};
+ const layout=getPhotoSheetLayout(size,0,9);
+ const positions=getPhotoSheetPhotoPositions(size,0,9,9);
+ assert.equal(layout.offsetYmm,8);
+ assert.equal(positions.length,9);
+ assert.deepEqual(positions[0],{photoIndex:0,row:0,column:0,xMm:layout.offsetXmm,yMm:8});
+ assert.equal(positions[1].xMm-positions[0].xMm,38);
+ assert.equal(positions[5].yMm-positions[0].yMm,48);
+ assert.equal(positions[5].xMm,positions[0].xMm);
+});
+
+test("partial final page keeps the exact same grid slots instead of recentering",()=>{
+ const size={widthMm:35,heightMm:45};
+ const firstPage=getPhotoSheetPhotoPositions(size,0,9,9);
+ const lastPage=getPhotoSheetPhotoPositions(size,0,9,5);
+ assert.deepEqual(lastPage,firstPage.slice(0,5));
+ assert.equal(lastPage[0].yMm,8);
+ assert.equal(lastPage[4].xMm,firstPage[4].xMm);
+});
+
+test("short rows are anchored to fixed grid columns rather than centred independently",()=>{
+ const size={widthMm:35,heightMm:45};
+ const positions=getPhotoSheetPhotoPositions(size,0,9,7);
+ assert.deepEqual(positions.slice(5).map(item=>item.column),[0,1]);
+ assert.equal(positions[5].xMm,positions[0].xMm);
+ assert.equal(positions[6].xMm-positions[5].xMm,38);
+});
+
+test("fixed photo positions stay inside safe A4 margins for every supported size",()=>{
+ const sizes=[
+  {widthMm:35,heightMm:45},
+  {widthMm:25,heightMm:35},
+  {widthMm:50.8,heightMm:50.8},
+  {widthMm:101.6,heightMm:152.4}
+ ];
+ const expectedCapacities=[25,49,15,1];
+ sizes.forEach((size,index)=>{
+  const layout=getPhotoSheetLayout(size);
+  const positions=getPhotoSheetPhotoPositions(size,0,layout.perSheet,layout.perSheet);
+  assert.equal(positions.length,expectedCapacities[index]);
+  for(const position of positions){
+   assert.ok(position.xMm>=8);
+   assert.ok(position.yMm>=8);
+   assert.ok(position.xMm+size.widthMm<=202.001);
+   assert.ok(position.yMm+size.heightMm<=289.001);
+  }
+ });
+});
+
+test("caption space shifts only the next grid row and never shrinks the photo tile",()=>{
+ const size={widthMm:35,heightMm:45};
+ const plain=getPhotoSheetPhotoPositions(size,0,9,9);
+ const labelled=getPhotoSheetPhotoPositions(size,7,9,9);
+ assert.equal(labelled[0].xMm,plain[0].xMm);
+ assert.equal(labelled[0].yMm,plain[0].yMm);
+ assert.equal(labelled[5].yMm-plain[5].yMm,7);
+ assert.equal(size.widthMm,35);
+ assert.equal(size.heightMm,45);
+});
+
+test("source resolution checks both cropped axes at the selected physical size",()=>{
+ const size={widthMm:35,heightMm:45};
+ assert.equal(hasSufficientPhotoResolution(800,1100,size,1),true);
+ assert.equal(hasSufficientPhotoResolution(900,500,size,1),false);
+ assert.equal(hasSufficientPhotoResolution(800,1100,size,2),false);
+ assert.equal(hasSufficientPhotoResolution(1800,2700,{widthMm:101.6,heightMm:152.4},1),true);
+ assert.equal(hasSufficientPhotoResolution(1800,2700,{widthMm:101.6,heightMm:152.4},1.5),false);
+});
+
+test("source resolution helper rejects invalid dimensions and zoom values",()=>{
+ const size={widthMm:35,heightMm:45};
+ assert.equal(hasSufficientPhotoResolution(0,1000,size),false);
+ assert.equal(hasSufficientPhotoResolution(1000,0,size),false);
+ assert.equal(hasSufficientPhotoResolution(1000,1000,size,0),false);
+ assert.equal(hasSufficientPhotoResolution(1000,1000,size,Number.NaN),false);
+});
+
+test("live Photo Studio uses the same deterministic slot helper for preview, PDF and background sampling",()=>{
+ const studio=readFileSync(new URL("../src/PhotoStudio.tsx",import.meta.url),"utf8");
+ assert.match(studio,/getPhotoSheetPhotoPositions\(size,captionHeightMm,photosPerPage,pageCopies\)/);
+ assert.match(studio,/getPhotoSheetPhotoPositions\(size,captionHeightMm,photosPerPage,previewPhotoCount\)/);
+ assert.match(studio,/const x=position\.xMm,y=position\.yMm/);
+ assert.match(studio,/const localX=xMm-position\.xMm,localY=yMm-position\.yMm/);
+ assert.doesNotMatch(studio,/const pageOffsetY=Math\.max\(8,\(A4_HEIGHT_MM-visibleContentHeightMm\)\/2\)/);
+ assert.doesNotMatch(studio,/const rowOffset=\(layout\.contentWidthMm-rowWidth\)\/2/);
+});
+
+test("A4 raster uses independent physical x and y scales before exact-A4 PDF placement",()=>{
+ const studio=readFileSync(new URL("../src/PhotoStudio.tsx",import.meta.url),"utf8");
+ assert.match(studio,/scaleX=canvasWidth\/A4_WIDTH_MM,scaleY=context\.canvas\.height\/A4_HEIGHT_MM/);
+ assert.match(studio,/context\.scale\(scaleX,scaleY\)/);
+ const jpeg=new Uint8Array([0xff,0xd8,0xff,0xd9]);
+ const value=new TextDecoder("latin1").decode(buildPhotoPdf([jpeg,jpeg]));
+ const pageBoxPattern=new RegExp("/MediaBox \\\\[0 0 "+A4_WIDTH_POINTS+" "+A4_HEIGHT_POINTS+"\\\\]","g");
+ const fullPageImagePattern=new RegExp(A4_WIDTH_POINTS+" 0 0 "+A4_HEIGHT_POINTS+" 0 0 cm","g");
+ assert.equal((value.match(pageBoxPattern)??[]).length,2);
+ assert.equal((value.match(fullPageImagePattern)??[]).length,2);
+});
+
+test("Photo Studio resolution warning is recomputed when crop zoom changes",()=>{
+ const studio=readFileSync(new URL("../src/PhotoStudio.tsx",import.meta.url),"utf8");
+ assert.match(studio,/sourceResolutionNote\(image, size, zoom\)/);
+ assert.match(studio,/Reduce the zoom/);
 });
