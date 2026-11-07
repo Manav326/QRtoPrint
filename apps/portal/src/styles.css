@@ -3292,3 +3292,16 @@ html[data-theme="dark"] .auth-proof {
     line-height: 1.55;
   }
 }
+
+
+/* Shop-originated photo-order receipt: compact, legible and responsive. */
+.photo-order-receipt{display:grid;gap:14px;min-width:0}
+.photo-order-receipt-summary{display:grid;gap:5px;padding:14px;border:1px solid var(--border);border-radius:10px;background:var(--surface-2)}
+.photo-order-receipt-summary>span,.photo-order-receipt-summary>small{color:var(--muted);font-size:12px}
+.photo-order-receipt-summary>strong{font-size:24px;font-weight:800;letter-spacing:-.02em;color:var(--text);font-variant-numeric:tabular-nums}
+.photo-order-upi{display:grid;justify-items:center;gap:8px;padding:16px;border:1px solid var(--border);border-radius:10px;background:var(--surface)}
+.photo-order-upi svg{display:block;max-width:100%;height:auto;padding:8px;border-radius:8px;background:#fff}
+.photo-order-upi>strong{font-size:14px;color:var(--text);text-align:center}
+.photo-order-upi>span{font-size:12px;color:var(--muted);overflow-wrap:anywhere;text-align:center}
+.photo-order-upi>small{max-width:420px;text-align:center;color:var(--muted);font-size:11px;line-height:1.55}
+@media(max-width:520px){.photo-order-receipt .modal-actions{display:grid;grid-template-columns:1fr}.photo-order-receipt .modal-actions button{width:100%}.photo-order-upi{padding:12px}}
