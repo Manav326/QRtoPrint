@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import PhotoStudio, { type PreparedPhotoSheet } from "../src/PhotoStudio";
 import { getPhotoSheetPhotoPositions, type PhotoSheetSize } from "../src/photo-studio-layout";
@@ -6,18 +6,22 @@ import { getPhotoSheetPhotoPositions, type PhotoSheetSize } from "../src/photo-s
 const query = new URLSearchParams(window.location.search);
 const mode = query.get("mode") === "shop" ? "shop" : "customer";
 const dark = query.get("theme") === "dark";
-const photoPrices = { "35x45": 2500, "25x35": 1800, "2x2": 3000, "4x6": 6000 };
+const photoPrices = query.get("prices") === "disabled"
+  ? { "35x45": 0, "25x35": 0, "2x2": 0, "4x6": 0 }
+  : { "35x45": 2500, "25x35": 1800, "2x2": 3000, "4x6": 6000 };
+const failFirstApply = query.get("failApply") === "1";
+const invalidSource = query.get("source") === "invalid";
 
 function createFixturePhoto(): Promise<File> {
+  if (invalidSource) {
+    return Promise.resolve(new File(["not an image"], "invalid-photo.png", { type: "image/png" }));
+  }
   const canvas = document.createElement("canvas");
   canvas.width = 720;
   canvas.height = 960;
   const context = canvas.getContext("2d");
   if (!context) return Promise.reject(new Error("Could not prepare the browser fixture image."));
-  const background = context.createLinearGradient(0, 0, 720, 960);
-  background.addColorStop(0, "#d8e7f5");
-  background.addColorStop(1, "#f4dfd0");
-  context.fillStyle = background;
+  context.fillStyle = "#d8e7f5";
   context.fillRect(0, 0, 720, 960);
   context.fillStyle = "#526783";
   context.beginPath();
@@ -52,6 +56,7 @@ function PhotoStudioBrowserFixture() {
   const [open, setOpen] = useState(false);
   const [result, setResult] = useState("");
   const [error, setError] = useState("");
+  const applyAttempts = useRef(0);
 
   useEffect(() => {
     let active = true;
@@ -65,6 +70,10 @@ function PhotoStudioBrowserFixture() {
 
   async function apply(sheets: PreparedPhotoSheet[]) {
     const sheet = sheets[0];
+    applyAttempts.current += 1;
+    if (failFirstApply && applyAttempts.current === 1) {
+      throw new Error("Simulated Photo Studio save failure. Your original photo is unchanged; retry is safe.");
+    }
     const pdfBytes = new Uint8Array(await sheet.file.arrayBuffer());
     const pdfText = new TextDecoder("latin1").decode(pdfBytes);
     const pageCount = Number(pdfText.match(/\/Count (\d+)/)?.[1] ?? 0);
@@ -96,12 +105,35 @@ function PhotoStudioBrowserFixture() {
         const countOnPage = Math.min(sheet.photosPerPage, sheet.photoCount - pageIndex * sheet.photosPerPage);
         const positions = getPhotoSheetPhotoPositions(photoSize, captionHeightMm, sheet.photosPerPage, countOnPage);
         const fullGrid = getPhotoSheetPhotoPositions(photoSize, captionHeightMm, sheet.photosPerPage, sheet.photosPerPage);
-        const sample = (position: { xMm: number; yMm: number }) => {
-          const x = Math.round((position.xMm + photoSize.widthMm / 2) * bitmap.width / 210);
-          const y = Math.round((position.yMm + photoSize.heightMm / 2) * bitmap.height / 297);
+        const sampleMm = (xMm: number, yMm: number) => {
+          const x = Math.max(0, Math.min(bitmap.width - 1, Math.round(xMm * bitmap.width / 210)));
+          const y = Math.max(0, Math.min(bitmap.height - 1, Math.round(yMm * bitmap.height / 297)));
           return Array.from(context.getImageData(x, y, 1, 1).data).slice(0, 3);
         };
-        positions.forEach((position, slot) => pixelProbes.push({ page: pageIndex + 1, slot, rgb: sample(position) }));
+        const sample = (position: { xMm: number; yMm: number }) =>
+          sampleMm(position.xMm + photoSize.widthMm / 2, position.yMm + photoSize.heightMm * 0.35);
+        const sampleBackground = (position: { xMm: number; yMm: number }) =>
+          sampleMm(position.xMm + 2, position.yMm + 2);
+        const countRedCaptionPixels = (position: { xMm: number; yMm: number }) => {
+          if (captionHeightMm <= 0) return 0;
+          const left = Math.max(0, Math.floor(position.xMm * bitmap.width / 210));
+          const top = Math.max(0, Math.floor((position.yMm + photoSize.heightMm) * bitmap.height / 297));
+          const width = Math.min(bitmap.width - left, Math.ceil(photoSize.widthMm * bitmap.width / 210));
+          const height = Math.min(bitmap.height - top, Math.ceil(captionHeightMm * bitmap.height / 297));
+          const pixels = context.getImageData(left, top, width, height).data;
+          let matches = 0;
+          for (let index = 0; index < pixels.length; index += 4) {
+            if (pixels[index] > 140 && pixels[index + 1] < 100 && pixels[index + 2] < 100) matches += 1;
+          }
+          return matches;
+        };
+        positions.forEach((position, slot) => pixelProbes.push({
+          page: pageIndex + 1,
+          slot,
+          rgb: sample(position),
+          backgroundRgb: sampleBackground(position),
+          captionRedPixels: countRedCaptionPixels(position)
+        }));
         if (pageIndex === jpegPages.length - 1 && countOnPage < sheet.photosPerPage) {
           finalUnusedSlotRgb = sample(fullGrid[countOnPage]);
         }
