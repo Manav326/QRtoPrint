@@ -242,7 +242,8 @@ function Invoke-AndroidUiNavigation(
   [string]$ExpectedScreenResourceId,
   [string]$ExpectedScreenFallbackLabel,
   [string]$Package,
-  [int]$TimeoutSeconds=10
+  [int]$TimeoutSeconds=10,
+  [switch]$ExpectedScreenContentDescriptionOnly
 ) {
   $beforePath="/sdcard/smartprint-qa-ui-before-$([Guid]::NewGuid().ToString('N')).xml"
   $afterPath="/sdcard/smartprint-qa-ui-after-$([Guid]::NewGuid().ToString('N')).xml"
@@ -262,7 +263,7 @@ function Invoke-AndroidUiNavigation(
     do {
       Start-Sleep -Milliseconds 350
       $after=Get-AndroidUiHierarchy $Adb $Serial $afterPath
-      if(Find-AndroidUiNode $after $ExpectedScreenResourceId $ExpectedScreenFallbackLabel $Package){return $true}
+      if(Find-AndroidUiNode $after $ExpectedScreenResourceId $ExpectedScreenFallbackLabel $Package -ContentDescriptionOnly:$ExpectedScreenContentDescriptionOnly){return $true}
     } while([DateTime]::UtcNow -lt $deadline)
     throw "Tapping '$NavigationFallbackLabel' did not render '$ExpectedScreenFallbackLabel'."
   } finally {
@@ -499,7 +500,7 @@ function Test-AndroidApp([string]$Apk,[bool]$ApkVerified,$Settings,[string]$Devi
   # Each live interaction is recorded independently. One failed screen does not
   # prevent the remaining native navigation or process-health checks from running.
   try {
-    $filesOpened=Invoke-AndroidUiNavigation $adb $serial ([string]$Settings.uiAutomationIds.filesNavigation) "My Files" ([string]$Settings.uiAutomationIds.filesHeading) "New folder" $package ([int]$Settings.uiNavigationTimeoutSeconds)
+    $filesOpened=Invoke-AndroidUiNavigation $adb $serial ([string]$Settings.uiAutomationIds.filesNavigation) "My Files" ([string]$Settings.uiAutomationIds.filesHeading) "Create a new folder" $package ([int]$Settings.uiNavigationTimeoutSeconds) -ExpectedScreenContentDescriptionOnly
     if(-not $filesOpened){throw "My Files navigation did not complete."}
     Add-Result "Android native Files navigation" "PASS" "Tapped the actual My Files navigation control and verified the native Files screen." -Evidence @{serial=$serial;screen="Files"}
   } catch {
