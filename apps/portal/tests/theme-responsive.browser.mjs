@@ -1046,15 +1046,15 @@ async function exercisePhotoStudioFeatureMatrix() {
       const canvas = element;
       const context = canvas.getContext("2d");
       if (!context) throw new Error("Photo preview canvas is unavailable for caption inspection.");
-      // First 35x45 mm tile is centred in the 5-column grid at x=11.5 mm,
-      // starts at the 8 mm top safe margin, and reserves 7 mm below the photo.
-      // Inspect the actual caption rectangle in A4 raster pixels, not a point
-      // near the canvas origin inside the photo's blank page margin.
+      // At this point the selected size is 25x35 mm and captions are enabled.
+      // Its 7-column grid is 193 mm wide, so the first tile starts at x=8.5 mm;
+      // it starts at the 8 mm top safe margin and reserves 7 mm below the photo.
+      // Inspect the actual caption rectangle in A4 raster pixels, not the photo.
       const scaleX = canvas.width / 210;
       const scaleY = canvas.height / 297;
-      const left = Math.floor(11.5 * scaleX);
-      const top = Math.floor((8 + 45) * scaleY);
-      const width = Math.ceil(35 * scaleX);
+      const left = Math.floor(8.5 * scaleX);
+      const top = Math.floor((8 + 35) * scaleY);
+      const width = Math.ceil(25 * scaleX);
       const height = Math.ceil(7 * scaleY);
       const data = context.getImageData(left, top, width, height).data;
       let count = 0;
