@@ -19,11 +19,11 @@ if ($PullLatest) {
     if (-not $E2EOnly) { throw "-PullLatest is supported only with -E2EOnly." }
     $git = Get-Command git.exe -ErrorAction SilentlyContinue
     if (-not $git) { $git = Get-Command git -ErrorAction Stop }
-    $expectedBranch = "feature/smartprint-clean-qa-runtime"
     $activeBranch = (& $git.Source "branch" "--show-current").Trim()
-    if ($LASTEXITCODE -ne 0 -or $activeBranch -ne $expectedBranch) {
-        throw "-PullLatest requires the existing '$expectedBranch' branch. Current branch: '$activeBranch'."
+    if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($activeBranch)) {
+        throw "-PullLatest requires an attached local branch; detached HEAD is not supported."
     }
+    $expectedBranch = $activeBranch
     $workingTree = @(& $git.Source "status" "--porcelain" "--untracked-files=all")
     if ($LASTEXITCODE -ne 0) { throw "Could not verify the Git working tree; no pull was attempted." }
     if ($workingTree.Count -gt 0) {
