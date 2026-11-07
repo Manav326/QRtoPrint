@@ -23,7 +23,7 @@ This is the master production-readiness suite for the capabilities currently rep
 
 One P0 failure blocks release. P1 failures require a fix/retest or a documented, time-bound risk acceptance by the release authority.
 
-**Mandatory role/surface supplement:** In addition to the 333 baseline catalogue cases in this file, execute the 75 role-based cases in [ROLE_BASED_CROSS_PLATFORM_QA.md](ROLE_BASED_CROSS_PLATFORM_QA.md). That supplement specifically verifies the current Android customer account/document studio, the actual Windows Desktop owner window, Web owner/customer journeys and complete cross-platform owner-to-customer continuity. The 75 cases are separate and are not implicitly passed by CI or the 262-case local Playwright gate. History-based session continuity, restoration from customer Print History, terminal-job reprint rules and token/session isolation are separately covered by HST-001 through HST-005. A valid current-session/draft restore must not be confused with history-driven restoration; the latter is not currently implemented in the Android Activity history UI.
+**Mandatory role/surface supplement:** In addition to the 333 baseline catalogue cases in this file, execute the 84 role-based cases in [ROLE_BASED_CROSS_PLATFORM_QA.md](ROLE_BASED_CROSS_PLATFORM_QA.md). That supplement specifically verifies the current Android customer account/document studio, the actual Windows Desktop owner window, Web owner/customer journeys and complete cross-platform owner-to-customer continuity. The 84 cases are separate and are not implicitly passed by CI or the 262-case local Playwright gate. HST-001 through HST-014 separately cover session continuity, history viewing, history-based restoration/reprint gaps, the 100-job history cap, QR-session expiry, concurrent customer-token refresh, sign-out races, multi-shop and cross-device isolation, corrupted storage and draft restoration boundaries. A valid current-session/draft restore must not be confused with history-driven restoration; the latter is not currently implemented in the Android Activity history UI.
 
 ## 2. Product scope and known limitations
 
@@ -57,10 +57,12 @@ One P0 failure blocks release. P1 failures require a fix/retest or a documented,
 | PostgreSQL concurrency/integration coverage for simultaneous critical operations | DOCUMENTED TEST GAP. Execute concurrency cases against an isolated PostgreSQL instance before sign-off. |
 | Encrypted off-host backup and complete restore rehearsal | DOCUMENTED OPERATIONS BLOCKER. A successful local backup is not proof of recoverability. |
 | Per-tenant storage quota and local-Agent disk-loss re-upload recovery | DOCUMENTED GAP. |
+| Customer all-time history pagination | Current customer history endpoint returns the latest 100 jobs only; there is no older-page cursor in the current Android UI. Verify the cap and do not claim unlimited history. |
 | Universal printer support, IPP and vendor-specific capability adapters | NOT IMPLEMENTED. Validate only named printer/driver combinations actually tested. |
 | Agent tray companion and automatic Agent updater | NOT IMPLEMENTED. |
 | iOS app, Play Store distribution, Microsoft Store/MSIX, Office upload/conversion and fully offline printing | OUT OF CURRENT RELEASE SCOPE. |
 | Automatic Android App Link launch from external camera/message links | NOT IMPLEMENTED. Ordinary HTTPS browser opening is the expected external-link behaviour. |
+| Restore an unfinished request/draft or reprint directly from customer Print History | NOT IMPLEMENTED. Activity supports history search and viewing order details/timeline only. Do not call that session restoration or reprint. |
 
 ### 2.3 Safety rules
 
