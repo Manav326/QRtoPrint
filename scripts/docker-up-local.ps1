@@ -153,7 +153,7 @@ $expectedImages = @{
     portal = "localhost/smart-print/smart-print-portal:local"
 }
 $configArgs = $composeBaseArgs + @("config", "--format", "json")
-$configOutput = & docker @configArgs
+$configOutput = & docker compose @configArgs
 if ($LASTEXITCODE -ne 0) { throw "Could not resolve the SmartPrint local Compose configuration." }
 $resolvedConfig = ($configOutput -join [Environment]::NewLine) | ConvertFrom-Json -ErrorAction Stop
 foreach ($serviceName in @("db", "api", "portal")) {
@@ -166,7 +166,7 @@ foreach ($serviceName in @("db", "api", "portal")) {
 
 Write-Host "Building and verifying the exact SmartPrint API and portal images..." -ForegroundColor Cyan
 $buildArgs = $composeBaseArgs + @("build", "--progress", "plain", "api", "portal")
-& docker @buildArgs
+& docker compose @buildArgs
 if ($LASTEXITCODE -ne 0) {
     & docker compose @composeBaseArgs logs --tail 100
     throw "SmartPrint API or portal image build failed."
@@ -184,7 +184,7 @@ foreach ($serviceName in @("api", "portal")) {
 
 Write-Host "Starting the verified SmartPrint images and existing local PostgreSQL volume..." -ForegroundColor Cyan
 $upArgs = $composeBaseArgs + @("up", "-d", "--no-build")
-& docker @upArgs
+& docker compose @upArgs
 if ($LASTEXITCODE -ne 0) {
     & docker compose @composeBaseArgs logs --tail 100
     throw "The verified SmartPrint local stack failed to start."
