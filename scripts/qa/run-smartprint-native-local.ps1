@@ -36,7 +36,11 @@ if (-not [string]::IsNullOrWhiteSpace($AndroidDeviceSerial) -and
     throw "Android device serial contains unsupported characters."
 }
 
-$outputRoot = [IO.Path]::GetFullPath((Join-Path $repoRoot $OutputDirectory))
+$outputRoot = if ([IO.Path]::IsPathRooted($OutputDirectory)) {
+    [IO.Path]::GetFullPath($OutputDirectory)
+} else {
+    [IO.Path]::GetFullPath((Join-Path $repoRoot $OutputDirectory))
+}
 New-Item -ItemType Directory -Force -Path $outputRoot | Out-Null
 $results = [System.Collections.Generic.List[object]]::new()
 $runStamp = Get-Date -Format "yyyyMMdd-HHmmss"
@@ -134,6 +138,28 @@ $readinessOk = Invoke-NativeStep -Name "Verify local portal and local PostgreSQL
 }
 if (-not $readinessOk) {
     throw "Local native application tests cannot start while the local Portal/API/PostgreSQL stack is unhealthy."
+}
+
+# Read-only check of the already installed Windows Agent. QA never pairs,
+# revokes, reconnects, changes the selected network, or changes a printer.
+$qaConfigPath = Join-Path $PSScriptRoot "smartprint-qa.config.json"
+$qaConfig = Get-Content -LiteralPath $qaConfigPath -Raw | ConvertFrom-Json -ErrorAction Stop
+$agentServiceName = [string]$qaConfig.apps.windows.agentServiceName
+$agentServiceOk = Invoke-NativeStep -Name "Verify existing Windows Print Agent service is installed and running" -Evidence (Join-Path $outputRoot "windows-agent-service.json") -Action {
+    $service = Get-Service -Name $agentServiceName -ErrorAction SilentlyContinue
+    if (-not $service) { throw "Windows service '$agentServiceName' is not installed." }
+    if ($service.Status -ne "Running") { throw "Windows service '$agentServiceName' is $($service.Status), not Running. QA will not start or reconfigure it." }
+    [PSCustomObject]@{ serviceName = $agentServiceName; status = [string]$service.Status; checkedUtc = [DateTime]::UtcNow.ToString("o") } |
+        ConvertTo-Json -Depth 4 | Set-Content -LiteralPath (Join-Path $outputRoot "windows-agent-service.json") -Encoding UTF8
+    Write-QA ("Existing Agent service is Running: " + $agentServiceName) "Green"
+}
+$agentLocalStatusOk = Invoke-NativeStep -Name "Read-only Windows Agent pairing and local endpoint readiness" -Evidence (Join-Path $outputRoot "windows-agent-local-status.json") -Action {
+    $status = Invoke-RestMethod -Uri "http://127.0.0.1:17842/api/v1/local/status" -Method Get -TimeoutSec 5
+    if ($status.status -ne "LOCAL_ENDPOINT_READY" -or [string]::IsNullOrWhiteSpace([string]$status.agentDeviceId)) {
+        throw "The Agent local endpoint is reachable but did not report LOCAL_ENDPOINT_READY with a paired device identity."
+    }
+    $status | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath (Join-Path $outputRoot "windows-agent-local-status.json") -Encoding UTF8
+    Write-QA ("Paired local Agent is ready. Device ID: " + $status.agentDeviceId) "Green"
 }
 
 # ---------------- Windows SmartPrint Desktop ----------------
