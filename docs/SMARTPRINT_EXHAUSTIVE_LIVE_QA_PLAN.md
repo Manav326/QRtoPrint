@@ -250,6 +250,8 @@ Each record runs through `scripts/qa/local-e2e-record-runner.mjs`. An assertion 
 | Browser and resource diagnostics | OBS-001–004 | 4 | Same-origin runtime errors, console errors, failed resources and HTTP 5xx monitoring |
 | Photo Studio | PHOTO-001–006 | 6 | Real browser image selection, crop/look/background tools, optional form details, photo size/count and local multi-photo A4 PDF generation without a server print job |
 
+The six cases above are local editor/browser regressions only. They do not verify physical photo dimensions or PDF tile coordinates. Run PHOX-001–014 and PSHT-001–030 in [ROLE_BASED_CROSS_PLATFORM_QA.md](ROLE_BASED_CROSS_PLATFORM_QA.md) for the server-side photo order, page-count arithmetic, exact A4 geometry, partial sheets, refunds and measured physical printer output.
+
 ### Additional negative and lifecycle assertions
 
 The extra cases are intentionally run against QA-only identities and records:
