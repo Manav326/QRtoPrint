@@ -305,14 +305,14 @@ test("A4 raster uses independent physical x and y scales before exact-A4 PDF pla
  assert.match(studio,/context\.scale\(scaleX,scaleY\)/);
  const jpeg=new Uint8Array([0xff,0xd8,0xff,0xd9]);
  const value=new TextDecoder("latin1").decode(buildPhotoPdf([jpeg,jpeg]));
- const pageBoxPattern=new RegExp("/MediaBox \\\\[0 0 "+A4_WIDTH_POINTS+" "+A4_HEIGHT_POINTS+"\\\\]","g");
- const fullPageImagePattern=new RegExp(A4_WIDTH_POINTS+" 0 0 "+A4_HEIGHT_POINTS+" 0 0 cm","g");
- assert.equal((value.match(pageBoxPattern)??[]).length,2);
- assert.equal((value.match(fullPageImagePattern)??[]).length,2);
+ const pageBox="/MediaBox [0 0 "+A4_WIDTH_POINTS+" "+A4_HEIGHT_POINTS+"]";
+ const fullPageImage=A4_WIDTH_POINTS+" 0 0 "+A4_HEIGHT_POINTS+" 0 0 cm";
+ assert.equal(value.split(pageBox).length-1,2);
+ assert.equal(value.split(fullPageImage).length-1,2);
 });
 
 test("Photo Studio resolution warning is recomputed when crop zoom changes",()=>{
  const studio=readFileSync(new URL("../src/PhotoStudio.tsx",import.meta.url),"utf8");
  assert.match(studio,/sourceResolutionNote\(image, size, zoom\)/);
- assert.match(studio,/Reduce the zoom/);
+ assert.match(studio,/reduce the zoom/i);
 });
