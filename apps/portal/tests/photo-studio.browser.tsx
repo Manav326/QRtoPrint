@@ -113,7 +113,7 @@ function PhotoStudioBrowserFixture() {
     const photoSize = sizeByCode[sheet.sizeCode];
     if (!photoSize) throw new Error("Photo Studio returned an unsupported photo size.");
     const jpegPages = sheet.previewPages ?? [];
-    const captionHeightMm = mode === "customer" ? 7 : 0;
+    const captionHeightMm = sheet.captionHeightMm;
     const pixelProbes: Array<{ page: number; slot: number; rgb: number[] }> = [];
     let finalUnusedSlotRgb: number[] | null = null;
     for (let pageIndex = 0; pageIndex < jpegPages.length; pageIndex++) {
