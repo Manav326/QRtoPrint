@@ -1259,6 +1259,15 @@ class MainActivity : AppCompatActivity() {
                                 .apply { setPadding(0, dp(5), 0, dp(5)) })
                             body.addView(text(batch.size.toString() + " file(s) · " +
                                 batch.sumOf { it.pageCount } + " pages", 10, R.color.qp_muted, false))
+                            val photoLayouts = batch.filter { it.printKind == "PHOTO" }
+                            if (photoLayouts.isNotEmpty()) {
+                                val layoutSummary = photoLayouts.joinToString(" · ") { photo ->
+                                    val density = photo.photosPerPage?.let { "$it/A4" } ?: "layout not recorded"
+                                    "${photo.photoCount} × ${photo.photoSizeCode ?: "photo"} · ${density} · ${photo.pageCount} A4 page(s)"
+                                }
+                                body.addView(text("Photo layout · " + layoutSummary, 10, R.color.qp_muted, false)
+                                    .apply { setPadding(0, dp(5), 0, 0) })
+                            }
                             val paid = batch.sumOf { it.paidAmountMinor }
                             val refunded = batch.sumOf { it.refundedAmountMinor }
                             val net = maxOf(0L, paid - refunded)
@@ -1372,6 +1381,16 @@ class MainActivity : AppCompatActivity() {
                             " pages · " + summary.optInt("copies", historyItem.copies) + " copies · " +
                             summary.optString("paperSize", "A4"), 10, R.color.qp_muted, false)
                             .apply { setPadding(0, dp(4), 0, dp(5)) })
+                        if (historyItem.printKind == "PHOTO" || summary.optString("printKind") == "PHOTO") {
+                            val density = summary.takeIf { it.has("photosPerPage") && !it.isNull("photosPerPage") }
+                                ?.optInt("photosPerPage")
+                                ?.takeIf { it > 0 } ?: historyItem.photosPerPage
+                            val densityLabel = density?.let { "$it per A4 page" } ?: "Layout density not recorded for this older order"
+                            detailColumn.addView(text(
+                                "${summary.optInt("photoCount", historyItem.photoCount)} ${summary.optString("photoSizeCode", historyItem.photoSizeCode ?: "photo")} · ${densityLabel} · ${historyItem.pageCount} A4 PDF page(s)",
+                                10, R.color.qp_muted, false
+                            ).apply { setPadding(0, 0, 0, dp(5)) })
+                        }
                         val payment = response.optJSONObject("payment")
                         val paymentStatus = payment?.optString("status")?.takeIf { it.isNotBlank() }
                             ?: historyItem.paymentStatus
