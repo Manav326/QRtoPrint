@@ -19,7 +19,16 @@ if ($InstallPublishedAndroidApk -and -not $AndroidAppOnly) {
 if (-not [string]::IsNullOrWhiteSpace($AndroidDeviceSerial) -and -not $AndroidAppOnly) {
     throw "-AndroidDeviceSerial can only be used with -AndroidAppOnly."
 }
-if (-not [string]::IsNullOrWhiteSpace($AndroidDeviceSerial) -and $AndroidDeviceSerial -notmatch '^[A-Za-z0-9._:-]{1,128}if ($AndroidAppOnly -and ($E2EOnly -or $PullLatest -or $ReuseRunningStack -or $TestPublishedApps)) {
+if (-not [string]::IsNullOrWhiteSpace($AndroidDeviceSerial) -and $AndroidDeviceSerial -notmatch '^[A-Za-z0-9._:-]{1,128}$') {
+    throw "-AndroidDeviceSerial contains unsupported characters. Copy the exact serial shown by 'adb devices'."
+}
+if (-not [string]::IsNullOrWhiteSpace($LocalAndroidDeviceSerial) -and ($AndroidAppOnly -or $E2EOnly)) {
+    throw "-LocalAndroidDeviceSerial is for the full local QA run; it cannot be combined with -AndroidAppOnly or -E2EOnly."
+}
+if (-not [string]::IsNullOrWhiteSpace($LocalAndroidDeviceSerial) -and $LocalAndroidDeviceSerial -notmatch '^[A-Za-z0-9._:-]{1,128}$') {
+    throw "-LocalAndroidDeviceSerial contains unsupported characters. Copy the exact serial shown by 'adb devices'."
+}
+if ($AndroidAppOnly -and ($E2EOnly -or $PullLatest -or $ReuseRunningStack -or $TestPublishedApps)) {
     throw "-AndroidAppOnly is a standalone mode. Do not combine it with -E2EOnly, -PullLatest, -ReuseRunningStack or -TestPublishedApps."
 }
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..\..")).Path
