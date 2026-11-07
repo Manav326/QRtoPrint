@@ -29,7 +29,10 @@
     },
     "android": {
       "applicationId": "com.quantaedge.smartprint",
-      "emulatorSerialPattern": "^emulator-\\d+\\s+device(?:\\s|$)"
+      "emulatorSerialPattern": "^emulator-\\d+\\s+device(?:\\s|$)",
+      "launchTimeoutSeconds": 25,
+      "uiNavigationTimeoutSeconds": 10,
+      "crashLogLineCount": 300
     }
   }
 }

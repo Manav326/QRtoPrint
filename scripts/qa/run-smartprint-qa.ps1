@@ -171,6 +171,13 @@ if ([int]$windowsAppConfig.smokeTimeoutSeconds -lt 10 -or [int]$windowsAppConfig
 }
 if ([string]$androidAppConfig.applicationId -notmatch '^[A-Za-z][A-Za-z0-9_]*(\.[A-Za-z][A-Za-z0-9_]*)+$') { throw "Invalid Android application ID." }
 try { [void][regex]::new([string]$androidAppConfig.emulatorSerialPattern) } catch { throw "Invalid emulator serial pattern." }
+foreach ($timeoutName in @("launchTimeoutSeconds","uiNavigationTimeoutSeconds")) {
+    $timeoutValue = [int]$androidAppConfig.$timeoutName
+    if ($timeoutValue -lt 5 -or $timeoutValue -gt 120) { throw "Android $timeoutName must be between 5 and 120 seconds." }
+}
+if ([int]$androidAppConfig.crashLogLineCount -lt 50 -or [int]$androidAppConfig.crashLogLineCount -gt 2000) {
+    throw "Android crashLogLineCount must be between 50 and 2000."
+}
 $runStamp = Get-Date -Format "yyyyMMdd-HHmmss"
 $runSuffix = [Guid]::NewGuid().ToString("N").Substring(0, 8)
 $runId = "local-" + $runStamp + "-" + $runSuffix

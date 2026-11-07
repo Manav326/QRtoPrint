@@ -130,3 +130,23 @@ test('Android-only completion gate requires artifact verification and all live a
   assert.match(publishedAppsSource, /Android app crash-log probe/);
   assert.match(publishedAppsSource, /A skipped or warning result is not a successful app QA run/);
 });
+
+
+test('Android published app launch uses ActivityManager instead of Monkey CLI parsing', () => {
+  assert.match(publishedAppsSource, /shell am start -W -a android\.intent\.action\.MAIN -c android\.intent\.category\.LAUNCHER -p \$package/);
+  assert.match(publishedAppsSource, /Status:\\s\*ok/);
+  assert.doesNotMatch(publishedAppsSource, /shell monkey -p \$package/);
+});
+
+test('Android live smoke timeouts and crash-log bounds are centrally configured', () => {
+  assert.equal(config.apps.android.launchTimeoutSeconds, 25);
+  assert.equal(config.apps.android.uiNavigationTimeoutSeconds, 10);
+  assert.equal(config.apps.android.crashLogLineCount, 300);
+  assert.match(runnerSource, /Android launchTimeoutSeconds must be between/);
+});
+
+test('Android dependent checks are skipped after launch failure instead of multiplying the root failure', () => {
+  assert.match(publishedAppsSource, /Add-AndroidLaunchDependentSkips/);
+  assert.match(publishedAppsSource, /Blocked because the Android app did not launch successfully/);
+  assert.match(publishedAppsSource, /\$alreadyFailed\.Count -eq 0/);
+});

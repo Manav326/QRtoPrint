@@ -167,6 +167,11 @@ function Resolve-Aapt {
   }
   return $null
 }
+function Add-AndroidLaunchDependentSkips([string]$Reason) {
+  foreach($name in @("Android native UI rendered","Android native Files navigation","Android native Home navigation","Android app crash-log probe")) {
+    Add-Result $name "SKIPPED" ("Blocked because the Android app did not launch successfully. "+$Reason)
+  }
+}
 function Get-AndroidUiHierarchy([string]$Adb,[string]$Serial,[string]$RemotePath) {
   $dump=@(& $Adb -s $Serial shell uiautomator dump --compressed $RemotePath 2>&1)
   if($LASTEXITCODE -ne 0){throw "Android UI hierarchy capture failed: $($dump -join ' ')"}
@@ -188,7 +193,7 @@ function Find-AndroidUiNode($Document,[string]$Label) {
   }
   return $null
 }
-function Invoke-AndroidUiNavigation([string]$Adb,[string]$Serial,[string]$Label,[string]$ExpectedScreen,[int]$TimeoutSeconds=8) {
+function Invoke-AndroidUiNavigation([string]$Adb,[string]$Serial,[string]$Label,[string]$ExpectedScreen,[int]$TimeoutSeconds=10) {
   $beforePath="/sdcard/smartprint-qa-ui-before-$([Guid]::NewGuid().ToString('N')).xml"
   $afterPath="/sdcard/smartprint-qa-ui-after-$([Guid]::NewGuid().ToString('N')).xml"
   try {
@@ -266,9 +271,17 @@ function Test-AndroidApp([string]$Apk,[bool]$ApkVerified,$Settings,[string]$Devi
   }
   $verify=@(& $adb -s $serial shell pm path $package 2>&1)
   if($LASTEXITCODE -ne 0 -or (($verify -join [Environment]::NewLine) -notmatch '(?m)^package:')){Add-Result "Android app live device launch" "FAIL" "Package missing after install check.";return}
-  $launch=@(& $adb -s $serial shell monkey -p $package -c android.intent.category.LAUNCHER 1 2>&1)
-  if($LASTEXITCODE -ne 0 -or (($launch -join ' ') -notmatch 'Events injected:\s*1')){Add-Result "Android app live device launch" "FAIL" ("Launcher intent failed: "+($launch -join " "));return}
-  $started=$false;$deadline=[DateTime]::UtcNow.AddSeconds(25);$appPid=$null
+  # Use ActivityManager directly. This avoids OEM differences in Monkey CLI argument parsing.
+  $launch=@(& $adb -s $serial shell am start -W -a android.intent.action.MAIN -c android.intent.category.LAUNCHER -p $package 2>&1)
+  $launchExit=$LASTEXITCODE
+  $launchText=$launch -join [Environment]::NewLine
+  if($launchExit -ne 0 -or $launchText -notmatch '(?im)^\s*Status:\s*ok\s*') {
+    $reason=("ActivityManager could not launch SmartPrint (exit {0}). Device response: {1}" -f $launchExit,($launchText -replace '[\r\n]+',' ').Trim())
+    Add-Result "Android app live device launch" "FAIL" $reason
+    Add-AndroidLaunchDependentSkips $reason
+    return
+  }
+  $started=$false;$deadline=[DateTime]::UtcNow.AddSeconds([int]$Settings.launchTimeoutSeconds);$appPid=$null
   do {
     $activity=@(& $adb -s $serial shell dumpsys activity activities 2>&1) -join [Environment]::NewLine
     $resumedLine=@($activity -split "`r?`n" | Where-Object {$_ -match '(?i)mResumedActivity|topResumedActivity|ResumedActivity|mFocusedApp'}) -join ' '
@@ -293,29 +306,35 @@ function Test-AndroidApp([string]$Apk,[bool]$ApkVerified,$Settings,[string]$Devi
       throw "The Android window is foreground, but no recognisable SmartPrint native UI label was found."
     }
     Add-Result "Android native UI rendered" "PASS" "Android accessibility hierarchy confirms visible SmartPrint UI; matched navigation/screen labels: $($matchedLabels -join ', ')." -Evidence @{serial=$serial;visibleSmartPrintNodes=$packageNodes.Count;matchedLabels=$matchedLabels}
+  } catch {
+    Add-Result "Android native UI rendered" "FAIL" $_.Exception.Message
   } finally {
     & $adb -s $serial shell rm -f $uiPath 2>$null | Out-Null
   }
 
-  # Exercise two real native navigation surfaces without creating/deleting user files,
-  # changing preferences, opening a shop session, or touching account credentials.
+  # Each live interaction is recorded independently. One failed screen does not
+  # prevent the remaining native navigation or process-health checks from running.
   try {
-    $filesOpened=Invoke-AndroidUiNavigation $adb $serial "My Files" "New folder" 10
+    $filesOpened=Invoke-AndroidUiNavigation $adb $serial "My Files" "New folder" ([int]$Settings.uiNavigationTimeoutSeconds)
     if(-not $filesOpened){throw "My Files navigation did not complete."}
     Add-Result "Android native Files navigation" "PASS" "Tapped the actual My Files navigation control and verified the native Files screen." -Evidence @{serial=$serial;screen="Files"}
-    $homeOpened=Invoke-AndroidUiNavigation $adb $serial "Home" "Your space" 10
+  } catch {
+    Add-Result "Android native Files navigation" "FAIL" $_.Exception.Message
+  }
+  try {
+    $homeOpened=Invoke-AndroidUiNavigation $adb $serial "Home" "Your space" ([int]$Settings.uiNavigationTimeoutSeconds)
     if(-not $homeOpened){throw "Home navigation did not complete."}
     Add-Result "Android native Home navigation" "PASS" "Returned to Home using the actual native navigation control." -Evidence @{serial=$serial;screen="Home"}
   } catch {
-    Add-Result "Android native navigation" "FAIL" $_.Exception.Message
+    Add-Result "Android native Home navigation" "FAIL" $_.Exception.Message
   }
 
   $currentPid=($appPid -split '\s+')[0]
-  $logcat=@(& $adb -s $serial logcat -d --pid=$currentPid -t 300 2>&1)
+  $logcat=@(& $adb -s $serial logcat -d --pid=$currentPid -t ([int]$Settings.crashLogLineCount) 2>&1)
   if($LASTEXITCODE -ne 0){
     Add-Result "Android app crash-log probe" "WARN" "Could not read the current app process logcat; foreground UI checks remain recorded."
   } elseif(($logcat -join [Environment]::NewLine) -match '(?i)FATAL EXCEPTION|Fatal signal'){
-    Add-Result "Android app crash-log probe" "FAIL" "A fatal runtime error was recorded for the running SmartPrint process."
+    Add-Result "Android app crash-log probe" "FAIL" "A fatal exception or native fatal signal was recorded for the running SmartPrint process."
   } else {
     Add-Result "Android app crash-log probe" "PASS" "No fatal exception or native fatal signal was found for the live SmartPrint process."
   }
@@ -415,11 +434,14 @@ try {
   catch {Add-Result "Android app live acceptance" "FAIL" $_.Exception.Message}
   if($AndroidOnly){
     $requiredAndroidChecks=@("Public release metadata","Download current android asset from website","Verify Android APK application ID","Android app live device launch","Android native UI rendered","Android native Files navigation","Android native Home navigation","Android app crash-log probe")
+    $notPassing=@()
     foreach($requiredCheck in $requiredAndroidChecks){
       $checkResults=@($script:results | Where-Object {$_.name -eq $requiredCheck})
-      if($checkResults.Count -ne 1 -or $checkResults[0].status -ne "PASS"){
-        Add-Result "Android-only completion gate" "FAIL" "Required live physical-device acceptance check '$requiredCheck' did not PASS. A skipped or warning result is not a successful app QA run."
-      }
+      if($checkResults.Count -ne 1 -or $checkResults[0].status -ne "PASS"){$notPassing += $requiredCheck}
+    }
+    $alreadyFailed=@($script:results | Where-Object {$_.name -in $requiredAndroidChecks -and $_.status -eq "FAIL"})
+    if($notPassing.Count -gt 0 -and $alreadyFailed.Count -eq 0){
+      Add-Result "Android-only completion gate" "FAIL" ("Required checks did not PASS: "+($notPassing -join ", ")+". A skipped or warning result is not a successful app QA run.")
     }
   }
 }
