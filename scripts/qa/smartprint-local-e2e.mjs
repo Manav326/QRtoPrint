@@ -1818,7 +1818,7 @@ try {
 
   await record("Guest customer completes a no-account upload from the shop station link", async () => {
     let guestJobId = null;
-    let guestJobSubmitted = false;
+    let guestJobSubmissionAttempted = false;
     let guestJobRejected = false;
     let guestUploadRequestHeaders = null;
     try {
@@ -1893,8 +1893,8 @@ try {
       assert.equal(job.pageCount, 2);
       assert.equal(job.status, "AWAITING_CONFIGURATION");
 
+      guestJobSubmissionAttempted = true;
       await guestCustomerPage.getByRole("button", { name: "Send batch to shop" }).click();
-      guestJobSubmitted = true;
       await guestCustomerPage.locator(".customer-job-state").waitFor({
         state: "visible",
         timeout: 25000
@@ -1903,6 +1903,7 @@ try {
         "/api/v1/public/jobs/" + job.id + "/status",
         { sessionToken: guestCustomerSession.sessionToken }), 200, "Guest customer submitted job status");
       assert.equal(queued.job.status, "AWAITING_SHOP_APPROVAL");
+      await screenshot(guestCustomerPage, "guest-customer-queued-job");
 
       const shopQueue = assertHttp(await request(shop1Page, "GET",
         "/api/v1/shop/print-jobs?offset=0&take=100&search=" + encodeURIComponent(job.jobNumber),
@@ -1934,6 +1935,7 @@ try {
         "/api/v1/public/jobs/" + job.id + "/status",
         { sessionToken: guestCustomerSession.sessionToken }), 200, "Guest sees rejected job status");
       assert.equal(guestStatusAfterRejection.job.status, "REJECTED");
+      await screenshot(guestCustomerPage, "guest-customer-rejected-job");
 
       report.safety.syntheticDocumentsUploaded = true;
       report.safety.realLocalDatabaseJobsCreated = true;
@@ -1956,14 +1958,14 @@ try {
       // A failure after submit must not leave an unattended unpaid job in the
       // QA shop queue. Resolve only this exact disposable guest job; never touch
       // another job, payment, customer account or printer.
-      if (guestJobSubmitted && guestJobId && !guestJobRejected) {
+      if (guestJobSubmissionAttempted && guestJobId && !guestJobRejected) {
         let current = null;
         for (let attempt = 0; attempt < 10; attempt++) {
           current = await request(guestCustomerPage, "GET",
             "/api/v1/public/jobs/" + guestJobId + "/status",
             { sessionToken: guestCustomerSession.sessionToken });
           if (current.status === 200 &&
-              ["AWAITING_SHOP_APPROVAL", "REJECTED"].includes(current.json?.job?.status)) break;
+              ["AWAITING_CONFIGURATION", "AWAITING_SHOP_APPROVAL", "REJECTED"].includes(current.json?.job?.status)) break;
           await guestCustomerPage.waitForTimeout(500);
         }
         assertExpectedHttpStatus(current, 200, "QA cleanup reads the disposable guest job state");
@@ -1974,9 +1976,13 @@ try {
           assertExpectedHttpStatus(cleanup, 200, "QA cleanup rejects the unpaid guest job");
           assert.equal(cleanup.json?.status, "REJECTED",
             "QA cleanup must leave the guest job in a terminal rejected state.");
+        } else if (current.json.job.status === "REJECTED") {
+          // The normal assertion path may have completed the rejection already.
         } else {
-          assert.equal(current.json.job.status, "REJECTED",
+          assert.equal(current.json.job.status, "AWAITING_CONFIGURATION",
             "QA cleanup found an unexpected guest job state and will not mutate it.");
+          // The upload never entered the shop queue, so no shop-side work exists
+          // to resolve. Leave its local guest draft untouched for diagnosis. 
         }
         guestJobRejected = true;
       }
