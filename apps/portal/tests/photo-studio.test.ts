@@ -277,8 +277,8 @@ test("source resolution checks both cropped axes at the selected physical size",
  assert.equal(hasSufficientPhotoResolution(800,1100,size,1),true);
  assert.equal(hasSufficientPhotoResolution(900,500,size,1),false);
  assert.equal(hasSufficientPhotoResolution(800,1100,size,2),false);
- assert.equal(hasSufficientPhotoResolution(1800,2700,{widthMm:101.6,heightMm:152.4},1),true);
- assert.equal(hasSufficientPhotoResolution(1800,2700,{widthMm:101.6,heightMm:152.4},1.5),false);
+ assert.equal(hasSufficientPhotoResolution(1800,2700,{widthMm:101.6,heightMm:152.4},1.5),true);
+ assert.equal(hasSufficientPhotoResolution(1800,2700,{widthMm:101.6,heightMm:152.4},1.51),false);
 });
 
 test("source resolution helper rejects invalid dimensions and zoom values",()=>{
