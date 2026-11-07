@@ -6,6 +6,10 @@ import android.net.Uri
 import android.webkit.ValueCallback
 import android.webkit.WebSettings
 import android.webkit.WebView
+import java.io.ByteArrayInputStream
+import android.webkit.WebViewClient
+import android.webkit.WebResourceResponse
+import android.webkit.WebResourceRequest
 import java.io.File
 import java.util.concurrent.atomic.AtomicReference
 import androidx.test.core.app.ActivityScenario
@@ -351,6 +355,90 @@ class MainActivityInstrumentedTest {
             SmartPrintThemePreference.save(context, SmartPrintTheme.LIGHT)
             firstImage.delete()
             secondImage.delete()
+        }
+    }
+
+    @Test
+    fun acceptedShopQrIsSavedAsTheSelectedShopAndOpenedInTheWebView() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val shopPreferences = context.getSharedPreferences(
+            "smartprint.customer.last-shop",
+            Context.MODE_PRIVATE
+        )
+        val previousPreferences = shopPreferences.all.toMap()
+        shopPreferences.edit().clear().commit()
+
+        val stationUrl = BuildConfig.SERVICE_BASE_URL.trimEnd('/') + "/s/" + "Q".repeat(32)
+        val stationHost = Uri.parse(stationUrl).host.orEmpty()
+
+        try {
+            ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+                scenario.onActivity { activity ->
+                    val webView = MainActivity::class.java.getDeclaredMethod("ensureWebView")
+                        .apply { isAccessible = true }
+                        .invoke(activity) as WebView
+                    webView.webViewClient = object : WebViewClient() {
+                        override fun shouldInterceptRequest(
+                            view: WebView,
+                            request: WebResourceRequest
+                        ): WebResourceResponse? {
+                            if (!request.isForMainFrame) return null
+                            val html = "<!doctype html><html><head><title>SmartPrint QR handoff QA</title></head><body>Station link received</body></html>"
+                            return WebResourceResponse(
+                                "text/html",
+                                "UTF-8",
+                                200,
+                                "OK",
+                                mapOf("Cache-Control" to "no-store"),
+                                ByteArrayInputStream(html.toByteArray(Charsets.UTF_8))
+                            )
+                        }
+                    }
+
+                    MainActivity::class.java.getDeclaredMethod(
+                        "handleScannedQr",
+                        String::class.java,
+                        QrScanPurpose::class.java
+                    ).apply { isAccessible = true }
+                        .invoke(activity, stationUrl, QrScanPurpose.SHOP_CONNECTION)
+
+                    val savedUrl = MainActivity::class.java.getDeclaredField("portalUrl")
+                        .apply { isAccessible = true }
+                        .get(activity) as? String
+                    val savedHost = MainActivity::class.java.getDeclaredField("portalHost")
+                        .apply { isAccessible = true }
+                        .get(activity) as? String
+
+                    assertEquals(stationUrl, savedUrl)
+                    assertEquals(stationHost, savedHost)
+                    assertEquals(stationUrl, shopPreferences.getString("portalUrl", null))
+                    assertEquals(stationHost, shopPreferences.getString("portalHost", null))
+                    assertTrue("The selected shop WebView must be visible.", webView.isShown)
+                    assertEquals(
+                        "The accepted station URL must be loaded into the existing SmartPrint WebView.",
+                        stationUrl,
+                        webView.url
+                    )
+                    assertEquals("The URL ends at the public station code.", "Q".repeat(32), Uri.parse(webView.url).lastPathSegment)
+                    assertTrue(
+                        "The public station URL must not contain a customer session secret.",
+                        !webView.url.orEmpty().contains("sessionToken", ignoreCase = true)
+                    )
+                }
+            }
+        } finally {
+            val editor = shopPreferences.edit().clear()
+            previousPreferences.forEach { (key, value) ->
+                when (value) {
+                    is String -> editor.putString(key, value)
+                    is Boolean -> editor.putBoolean(key, value)
+                    is Int -> editor.putInt(key, value)
+                    is Long -> editor.putLong(key, value)
+                    is Float -> editor.putFloat(key, value)
+                    is Set<*> -> editor.putStringSet(key, value.filterIsInstance<String>().toSet())
+                }
+            }
+            editor.commit()
         }
     }
 

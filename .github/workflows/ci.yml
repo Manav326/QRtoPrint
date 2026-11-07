@@ -116,6 +116,8 @@ jobs:
         run: dotnet test tests/SmartPrint.Api.Tests/SmartPrint.Api.Tests.csproj --configuration Release
 
   agent_dotnet:
+    outputs:
+      agent_package_ready: ${{ steps.agent_package_upload.outcome == 'success' }}
     runs-on: windows-latest
     timeout-minutes: 30
     steps:
@@ -216,6 +218,7 @@ jobs:
           New-Item -ItemType Directory -Force -Path artifacts/agent | Out-Null
           Copy-Item scripts/pair-agent.ps1, scripts/install-agent-service.ps1, scripts/uninstall-agent-service.ps1, scripts/verify-agent-local.ps1, src/SmartPrint.Agent/appsettings.example.json, src/SmartPrint.Agent/README.md artifacts/agent/
       - name: Upload Windows Agent package
+        id: agent_package_upload
         if: ${{ always() && steps.agent_publish.outcome == 'success' }}
         uses: actions/upload-artifact@v7
         with:
@@ -225,6 +228,8 @@ jobs:
           retention-days: 30
 
   windows_desktop:
+    outputs:
+      desktop_package_ready: ${{ steps.desktop_package_upload.outcome == 'success' }}
     runs-on: windows-latest
     timeout-minutes: 45
     steps:
@@ -281,6 +286,7 @@ jobs:
             throw "The downloaded WebView2 prerequisite did not pass Microsoft Authenticode verification."
           }
       - name: Upload Windows desktop package
+        id: desktop_package_upload
         if: ${{ always() && steps.desktop_executable_build.outcome == 'success' }}
         uses: actions/upload-artifact@v7
         with:
@@ -291,6 +297,7 @@ jobs:
 
   windows_installer:
     needs: [agent_dotnet, windows_desktop]
+    if: ${{ always() && needs.agent_dotnet.outputs.agent_package_ready == 'true' && needs.windows_desktop.outputs.desktop_package_ready == 'true' }}
     runs-on: windows-latest
     timeout-minutes: 45
     steps:
