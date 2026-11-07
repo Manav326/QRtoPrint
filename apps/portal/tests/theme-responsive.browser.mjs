@@ -830,6 +830,327 @@ async function exercisePhotoStudioBrowser() {
   }
 }
 
+async function setPhotoInputValue(locator, value) {
+  await locator.evaluate((element, nextValue) => {
+    const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;
+    if (!setter) throw new Error("Native input value setter is unavailable.");
+    setter.call(element, String(nextValue));
+    element.dispatchEvent(new Event("input", { bubbles: true }));
+    element.dispatchEvent(new Event("change", { bubbles: true }));
+  }, value);
+}
+
+async function setPhotoRange(dialog, label, value) {
+  const range = dialog.locator("label").filter({ hasText: new RegExp("^" + label + "\\b") }).locator('input[type="range"]');
+  assert.equal(await range.count(), 1, "Photo Studio must expose exactly one " + label + " range.");
+  await setPhotoInputValue(range, value);
+  await range.evaluate(element => element.blur());
+  assert.equal(Number(await range.inputValue()), Number(value), label + " must accept its configured boundary.");
+  return range;
+}
+
+async function readPhotoCanvasPixels(page) {
+  return page.locator('[role="dialog"] canvas').evaluate(canvas => {
+    const context = canvas.getContext("2d");
+    if (!context) throw new Error("Photo preview canvas is unavailable.");
+    const points = [[20,20],[30,30],[51,47],[51,65],[51,90],[80,25],[80,80],[120,120],[200,200],[300,400]];
+    return points.map(([x,y]) => Array.from(context.getImageData(x,y,1,1).data).slice(0,3));
+  });
+}
+
+async function openPhotoStudioFixture(page, queryString = "") {
+  await page.goto(baseUrl + "/tests/photo-studio.browser.html" + queryString, { waitUntil: "domcontentloaded" });
+  const openButton = page.getByRole("button", { name: "Open Photo Studio" });
+  await openButton.waitFor({ state: "visible" });
+  await page.waitForFunction(() => document.querySelector("#photo-studio-result")?.getAttribute("data-ready") === "true");
+  await openButton.click();
+  const dialog = page.getByRole("dialog", { name: "Photo Studio" });
+  await dialog.waitFor({ state: "visible" });
+  return { dialog, openButton };
+}
+
+async function exercisePhotoStudioFeatureMatrix() {
+  console.log("[QA-STEP-START] Photo Studio exhaustive control matrix | crop, looks, background, captions, sizes, quantities, pagination, access and recovery.");
+  const context = await browser.newContext({ viewport: { width: 1280, height: 920 } });
+  const page = await context.newPage();
+  try {
+    const opened = await openPhotoStudioFixture(page, "?mode=customer&theme=light");
+    const editor = opened.dialog;
+    const canvas = editor.locator("canvas");
+    await canvas.waitFor({ state: "visible" });
+    assert.equal(await page.evaluate(() => document.body.style.overflow), "hidden");
+    assert.equal(await page.evaluate(() => document.activeElement?.getAttribute("aria-label")), "Close Photo Studio");
+
+    // Focus loop, Escape close, focus restoration and browser capture deterrents.
+    const closeButton = editor.getByRole("button", { name: "Close Photo Studio" });
+    await closeButton.focus();
+    await page.keyboard.press("Shift+Tab");
+    assert.equal(await page.evaluate(() => document.activeElement?.textContent?.trim().includes("Prepare A4 sheet")), true);
+    await page.keyboard.press("Tab");
+    assert.equal(await page.evaluate(() => document.activeElement?.getAttribute("aria-label")), "Close Photo Studio");
+    const shortcutPrevented = await page.evaluate(() => {
+      const event = new KeyboardEvent("keydown", { key: "p", ctrlKey: true, bubbles: true, cancelable: true });
+      window.dispatchEvent(event);
+      return event.defaultPrevented;
+    });
+    assert.equal(shortcutPrevented, true, "Ctrl+P must be suppressed while the photo preview is open.");
+    const contextMenuPrevented = await canvas.evaluate(element =>
+      !element.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true }))
+    );
+    assert.equal(contextMenuPrevented, true);
+    await page.keyboard.press("Escape");
+    await editor.waitFor({ state: "hidden" });
+    assert.equal(await page.evaluate(() => document.body.style.overflow), "");
+    assert.equal(await page.evaluate(() => document.activeElement?.id), "open-photo-studio");
+
+    const reopened = await openPhotoStudioFixture(page, "?mode=customer&theme=light");
+    const dialog = reopened.dialog;
+    const preview = dialog.locator("canvas");
+    await preview.waitFor({ state: "visible" });
+
+    // Crop, framing, focus boundaries and reset.
+    await dialog.getByRole("button", { name: "Crop", exact: true }).click();
+    let pixels = await readPhotoCanvasPixels(page);
+    await setPhotoRange(dialog, "Zoom", 3);
+    await setPhotoRange(dialog, "Horizontal position", 100);
+    await setPhotoRange(dialog, "Vertical position", 0);
+    const zoomed = await readPhotoCanvasPixels(page);
+    assert.notDeepEqual(zoomed, pixels, "Crop zoom/focus must change the actual preview pixels.");
+    await setPhotoRange(dialog, "Zoom", 1);
+    await setPhotoRange(dialog, "Horizontal position", 0);
+    await setPhotoRange(dialog, "Vertical position", 100);
+    assert.notDeepEqual(await readPhotoCanvasPixels(page), zoomed, "Opposite crop focus boundaries must change the frame.");
+    await dialog.getByRole("button", { name: "Reset crop" }).click();
+    assert.equal(Number(await dialog.locator("label").filter({ hasText: /^Zoom\\b/ }).locator('input[type="range"]').inputValue()), 1);
+    assert.equal(Number(await dialog.locator("label").filter({ hasText: /^Horizontal position\\b/ }).locator('input[type="range"]').inputValue()), 50);
+    assert.equal(Number(await dialog.locator("label").filter({ hasText: /^Vertical position\\b/ }).locator('input[type="range"]').inputValue()), 50);
+
+    // Named looks, monochrome output and custom manual adjustments.
+    await dialog.getByRole("button", { name: "Looks", exact: true }).click();
+    const natural = dialog.getByRole("button", { name: /^Natural/ });
+    const warm = dialog.getByRole("button", { name: /^Warm/ });
+    const crisp = dialog.getByRole("button", { name: /^Crisp/ });
+    const mono = dialog.getByRole("button", { name: /^Black & white/ });
+    assert.equal(await natural.getAttribute("aria-pressed"), "true");
+    pixels = await readPhotoCanvasPixels(page);
+    await warm.click();
+    assert.equal(await warm.getAttribute("aria-pressed"), "true");
+    assert.notDeepEqual(await readPhotoCanvasPixels(page), pixels);
+    pixels = await readPhotoCanvasPixels(page);
+    await crisp.click();
+    assert.equal(await crisp.getAttribute("aria-pressed"), "true");
+    assert.notDeepEqual(await readPhotoCanvasPixels(page), pixels);
+    await mono.click();
+    const monochrome = await preview.evaluate(element => Array.from(element.getContext("2d").getImageData(51,47,1,1).data).slice(0,3));
+    assert.ok(Math.max(...monochrome) - Math.min(...monochrome) <= 2, "Black & white must remove colour saturation.");
+    assert.equal(await mono.getAttribute("aria-pressed"), "true");
+    await setPhotoRange(dialog, "Brightness", 130);
+    assert.equal(await mono.getAttribute("aria-pressed"), "false", "Manual adjustments must clear the named-preset selection.");
+    await setPhotoRange(dialog, "Brightness", 70);
+    await setPhotoRange(dialog, "Contrast", 140);
+    await setPhotoRange(dialog, "Colour", 160);
+    pixels = await readPhotoCanvasPixels(page);
+    await dialog.getByRole("button", { name: "Reset", exact: true }).click();
+    assert.equal(await natural.getAttribute("aria-pressed"), "true");
+    assert.notDeepEqual(await readPhotoCanvasPixels(page), pixels);
+    await dialog.getByRole("button", { name: "Zoom in" }).click();
+    assert.equal(await dialog.locator(".zoomLabel").innerText(), "1.1×");
+    await dialog.getByRole("button", { name: "Zoom out" }).click();
+    assert.equal(await dialog.locator(".zoomLabel").innerText(), "1.0×");
+
+    // Edge-only sampled background replacement. A blank A4 margin must not be sampleable.
+    await dialog.getByRole("button", { name: "Background", exact: true }).click();
+    await dialog.getByRole("button", { name: "Pick background from photo" }).click();
+    const bounds = await preview.boundingBox();
+    assert.ok(bounds, "Photo canvas must be measurable for colour sampling.");
+    const clickAtMm = async (xMm,yMm) => {
+      await page.mouse.click(bounds.x + bounds.width*xMm/210, bounds.y + bounds.height*yMm/297);
+      await page.waitForTimeout(80);
+    };
+    await clickAtMm(5,10);
+    assert.equal(await dialog.getByText("Not selected", { exact: true }).count(), 1,
+      "Clicking the A4 safe margin must not sample a colour.");
+    assert.equal(await dialog.getByRole("button", { name: /Click the background in the preview/ }).count(), 1);
+    await clickAtMm(10,10);
+    assert.equal(await dialog.getByText("#D8E7F5", { exact: true }).count(), 1);
+    await setPhotoInputValue(dialog.getByLabel("Replacement background"), "#f3f6fa");
+    const replacedBackground = await preview.evaluate(element => Array.from(element.getContext("2d").getImageData(20,20,1,1).data).slice(0,3));
+    assert.deepEqual(replacedBackground, [243,246,250]);
+    const retainedFace = await preview.evaluate(element => Array.from(element.getContext("2d").getImageData(51,47,1,1).data).slice(0,3));
+    assert.ok(retainedFace[0] > 170 && retainedFace[1] > 130 && retainedFace[2] > 110,
+      "Foreground face pixels must not be replaced with the sampled background.");
+    await setPhotoRange(dialog, "Background tolerance", 5);
+    await setPhotoRange(dialog, "Background tolerance", 90);
+    await dialog.getByRole("button", { name: "Set background #dcecff" }).click();
+    assert.equal(await dialog.getByRole("button", { name: "Set background #dcecff" }).getAttribute("aria-pressed"), "true");
+    await dialog.getByRole("button", { name: "Reset background" }).click();
+    assert.equal(await dialog.getByText("Not selected", { exact: true }).count(), 1);
+    const restoredBackground = await preview.evaluate(element => Array.from(element.getContext("2d").getImageData(20,20,1,1).data).slice(0,3));
+    assert.deepEqual(restoredBackground, [216,231,245]);
+
+    // Optional form details, length/date constraints, font size and text colour.
+    await dialog.getByRole("button", { name: "Sheet", exact: true }).click();
+    const captionToggle = dialog.getByRole("checkbox", { name: /Add name and DOB to each photo/ });
+    assert.equal(await captionToggle.isChecked(), false, "Captions must be disabled by default.");
+    await captionToggle.check();
+    const nameInput = dialog.getByLabel("Name for form (optional)");
+    await nameInput.pressSequentially("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789");
+    assert.equal((await nameInput.inputValue()).length, 48, "Name must be capped at 48 characters.");
+    const dob = dialog.getByLabel("Date of birth (optional)");
+    assert.equal(await dob.getAttribute("min"), "1900-01-01");
+    assert.ok(await dob.getAttribute("max"), "Future DOB values must be disallowed.");
+    await dob.fill("2000-02-29");
+    assert.equal(await dob.inputValue(), "2000-02-29");
+    await dialog.getByRole("button", { name: "Text", exact: true }).click();
+    assert.equal(await dialog.getByLabel("Caption font size").inputValue(), "6");
+    await dialog.getByLabel("Caption font size").selectOption("5");
+    await dialog.getByLabel("Caption font size").selectOption("7");
+    await setPhotoInputValue(dialog.getByLabel("Caption colour"), "#ff0000");
+    pixels = await readPhotoCanvasPixels(page);
+    assert.ok(pixels.length > 0);
+    await dialog.getByRole("button", { name: "Sheet", exact: true }).click();
+    await captionToggle.uncheck();
+    assert.equal(await dialog.getByRole("button", { name: "Text", exact: true }).isDisabled(), true);
+    assert.equal(await dialog.getByText("Photo sheet & form details", { exact: true }).count(), 1,
+      "Disabling captions from Text must return to the Sheet tool.");
+    assert.equal(await dialog.getByLabel("Name for form (optional)").count(), 0,
+      "Turning captions off must clear the sensitive name/DOB inputs.");
+    await captionToggle.check();
+    await dialog.getByLabel("Name for form (optional)").fill("Photo Studio QA");
+    await dialog.getByLabel("Date of birth (optional)").fill("2000-01-02");
+    await dialog.getByRole("button", { name: "Text", exact: true }).click();
+    await dialog.getByLabel("Caption font size").selectOption("7");
+    await setPhotoInputValue(dialog.getByLabel("Caption colour"), "#ff0000");
+    const redPreviewPixels = await preview.evaluate(element => {
+      const data = element.getContext("2d").getImageData(16,106,70,16).data;
+      let count = 0;
+      for (let i=0; i<data.length; i+=4) if (data[i]>140 && data[i+1]<100 && data[i+2]<100) count += 1;
+      return count;
+    });
+    assert.ok(redPreviewPixels > 0, "Caption font/colour must render text below the photo.");
+    await dialog.getByRole("button", { name: "Sheet", exact: true }).click();
+
+    // Physical sizes, caption-aware maximum capacities and grid layouts.
+    const sizeSelect = dialog.getByLabel("Photo size");
+    const sizeCases = [
+      ["35x45","35 × 45 mm","25","5 × 5"],
+      ["25x35","25 × 35 mm","42","7 × 6"],
+      ["2x2","50.8 × 50.8 mm","12","3 × 4"],
+      ["4x6","101.6 × 152.4 mm","1","1 × 1"]
+    ];
+    const readSummary = async label => dialog.getByText(label,{exact:true}).locator("xpath=..").locator("strong").innerText();
+    for (const [code,dimensions,capacity,grid] of sizeCases) {
+      await sizeSelect.selectOption(code);
+      assert.equal(await readSummary("Photo dimensions"),dimensions);
+      assert.equal(await readSummary("Photos per A4 page"),capacity);
+      assert.equal(await readSummary("Grid alignment"),grid);
+    }
+    await sizeSelect.selectOption("35x45");
+    const density = dialog.getByLabel("Photos per A4 page");
+    await density.selectOption("1");
+    assert.equal(await readSummary("A4 pages in this job"),"8");
+    await density.selectOption("25");
+    assert.equal(await readSummary("A4 pages in this job"),"1");
+
+    // Quantity boundaries and explicit rejection of fractions.
+    const count = dialog.getByLabel("Number of photos");
+    await count.fill("101");
+    await count.blur();
+    assert.equal(await count.inputValue(),"100");
+    await count.fill("0");
+    await count.blur();
+    assert.equal(await count.inputValue(),"1");
+    await count.fill("1.5");
+    await count.blur();
+    assert.equal(await count.inputValue(),"1.5");
+    assert.equal(await dialog.getByText(/Enter a whole number from 1 to 100/).count(),1);
+    assert.equal(await dialog.getByRole("button",{name:"Prepare A4 sheet"}).isDisabled(),true);
+
+    // Manual density, ceil(N/q), navigation boundaries and partial last page.
+    await count.fill("50");
+    await density.selectOption("9");
+    assert.equal(await readSummary("Photos per A4 page"),"9");
+    assert.equal(await readSummary("A4 pages in this job"),"6");
+    assert.equal(await dialog.getByText("Final A4 page: 5 photos, with the remaining sheet area left blank.",{exact:true}).count(),1);
+    const nextPage = dialog.getByRole("button",{name:"Next A4 page"});
+    const previousPage = dialog.getByRole("button",{name:"Previous A4 page"});
+    assert.equal(await previousPage.isDisabled(),true);
+    for(let index=0; index<5; index+=1) await nextPage.click();
+    assert.equal(await dialog.getByText("Page 6 of 6",{exact:true}).count(),1);
+    assert.equal(await nextPage.isDisabled(),true);
+    assert.match(await dialog.locator(".canvasFooter").innerText(),/Page 6: 5 photos/);
+    await previousPage.click();
+    assert.equal(await dialog.getByText("Page 5 of 6",{exact:true}).count(),1);
+    await count.fill("8");
+    await count.blur();
+    await density.selectOption("auto");
+    assert.equal(await readSummary("A4 pages in this job"),"1");
+    await sizeSelect.selectOption("4x6");
+    assert.equal(await readSummary("Photos per A4 page"),"1");
+    assert.equal(await readSummary("A4 pages in this job"),"8");
+
+    // Generate 50 photos at nine/page after every editing operation.
+    await sizeSelect.selectOption("35x45");
+    await count.fill("50");
+    await density.selectOption("9");
+    await dialog.getByRole("button",{name:"Prepare A4 sheet"}).click();
+    await page.waitForFunction(() => document.querySelector("#photo-studio-result")?.textContent?.includes('"mediaType":"application/pdf"'), null, {timeout:30000});
+    const result = JSON.parse(await page.locator("#photo-studio-result").innerText());
+    assert.equal(result.photoCount,50);
+    assert.equal(result.photosPerPage,9);
+    assert.equal(result.pageCount,6);
+    assert.equal(result.mediaBoxCount,6);
+    assert.deepEqual(result.pdfImageSizes,Array.from({length:6},()=>[2480,3508]));
+    assert.equal(result.pixelProbes.length,50);
+    assert.ok(result.pixelProbes.every(probe=>probe.rgb.some(channel=>channel<245)));
+    assert.ok(result.pixelProbes[0].captionRedPixels>0,"Generated PDF pages must contain the opted-in red caption.");
+    assert.deepEqual(result.pixelProbes.filter(probe=>probe.page===6).map(probe=>probe.slot),[0,1,2,3,4]);
+    assert.ok(result.finalUnusedSlotRgb.every(channel=>channel>245),"Unused slots on the final page must stay blank.");
+    assert.ok(result.bytes>0 && result.bytes<=20*1024*1024);
+    await page.screenshot({path:join(artifactDirectory,"photo-studio-exhaustive-controls.png"),fullPage:false,animations:"disabled"});
+    console.log("[QA-CASE-END] PASS | Photo Studio full control matrix.");
+  } finally {
+    await context.close();
+  }
+}
+
+async function exercisePhotoStudioFailurePaths() {
+  console.log("[QA-STEP-START] Photo Studio failure/recovery matrix.");
+  for (const scenario of [
+    {query:"?mode=customer&source=invalid",expected:"This image could not be opened. Choose a JPG or PNG photo."},
+    {query:"?mode=customer&prices=disabled",expected:"Photo printing is not enabled for any size at this shop."}
+  ]) {
+    const context = await browser.newContext({viewport:{width:1024,height:820}});
+    try {
+      const page = await context.newPage();
+      const opened = await openPhotoStudioFixture(page,scenario.query);
+      await page.getByRole("alert").filter({hasText:scenario.expected}).waitFor({state:"visible"});
+      assert.equal(await opened.dialog.getByRole("button",{name:"Prepare A4 sheet"}).isDisabled(),true);
+    } finally {
+      await context.close();
+    }
+  }
+
+  const context = await browser.newContext({viewport:{width:1024,height:820}});
+  try {
+    const page = await context.newPage();
+    const opened = await openPhotoStudioFixture(page,"?mode=customer&failApply=1");
+    const apply = opened.dialog.getByRole("button",{name:"Prepare A4 sheet"});
+    await apply.click();
+    await opened.dialog.getByRole("alert").filter({hasText:"Simulated Photo Studio save failure"}).waitFor({state:"visible"});
+    assert.equal(await apply.isDisabled(),false,"A failed save must clear busy state so a deliberate retry is possible.");
+    assert.equal(await page.locator("#photo-studio-result").innerText(),"","A failed save must not report a prepared sheet.");
+    await apply.click();
+    await page.waitForFunction(() => document.querySelector("#photo-studio-result")?.textContent?.includes('"mediaType":"application/pdf"'));
+    const result=JSON.parse(await page.locator("#photo-studio-result").innerText());
+    assert.equal(result.photoCount,8);
+    assert.equal(result.pageCount,1);
+    console.log("[QA-CASE-END] PASS | Photo Studio malformed input, no-price state and apply retry.");
+  } finally {
+    await context.close();
+  }
+}
+
 async function assertThemeToggle(page) {
   const darkToggle = page.getByRole("button", { name: "Switch to dark theme" });
   const lightToggle = page.getByRole("button", { name: "Switch to light theme" });
@@ -925,7 +1246,9 @@ try {
   // Exercise the actual shared Photo Studio component on phone, tablet and desktop.
   console.log("[QA-STEP-START] Photo Studio browser acceptance | six customer/shop and light/dark viewport combinations.");
   await exercisePhotoStudioBrowser();
-  console.log("[QA-STEP-END] Photo Studio browser acceptance | all configured cases completed.");
+  await exercisePhotoStudioFeatureMatrix();
+  await exercisePhotoStudioFailurePaths();
+  console.log("[QA-STEP-END] Photo Studio browser acceptance | layout, control and failure paths completed.");
 
   // Exercise the Windows desktop webview at its declared minimum window size.
   {
