@@ -11,7 +11,7 @@ This is a supplement, not a replacement, for:
 - [Android physical-device acceptance](ANDROID_PHYSICAL_ACCEPTANCE.md) — physical camera, QR, shop-Wi-Fi and Windows-to-Android readiness workflow.
 - [Local native application QA](LOCAL_NATIVE_APP_QA.md) — local Windows Desktop build/smoke and side-by-side Android QA app execution.
 
-The 100 cases below add role-focused, cross-surface assertions for the newer Android customer account/document-studio workflows and for the actual Windows Desktop owner experience. They must be recorded independently. They are **not** counted as passed by the 262-case browser run or by a native build.
+The 130 cases below add role-focused, cross-surface assertions for the newer Android customer account/document-studio workflows and for the actual Windows Desktop owner experience. They must be recorded independently. They are **not** counted as passed by the 262-case browser run or by a native build.
 
 ## 1. Product and role contract
 
@@ -256,7 +256,78 @@ The existing local Photo Studio browser checks cover image selection/editing and
 
 **Release interpretation:** PHOX-001 through PHOX-003 verify the customer photo-print purchase path; PHOX-004 through PHOX-010 verify shop enhancement, safety, concurrency and photo refunds; PHOX-011 through PHOX-013 verify PDF footer and export-specific behaviour; PHOX-014 verifies Android-to-shop continuity. These are separate from the six local-only Photo Studio browser cases in the 262-case suite.
 
-## 11. Release gate
+## 11. Photo-sheet geometry, quantity, pagination and physical print acceptance
+
+This is a core selling-feature acceptance section, not a generic image-upload check. The product must prove that the number of physical photo tiles requested by the customer is exactly the number delivered, at the selected physical dimensions, on correctly positioned A4 sheets.
+
+### Current geometry contract observed in source
+
+The current studio offers these sizes and computes the following automatic A4 capacities with 8 mm safe margins and 3 mm gutters (before optional captions):
+
+| Selected photo size | Physical dimensions | Automatic grid | Photos per A4 page |
+|---|---:|---:|---:|
+| ID portrait | 35 × 45 mm | 5 columns × 5 rows | 25 |
+| Compact ID | 25 × 35 mm | 7 columns × 7 rows | 49 |
+| Square | 2 × 2 in (50.8 × 50.8 mm) | 3 columns × 5 rows | 15 |
+| Standard photo | 4 × 6 in (101.6 × 152.4 mm) | 1 column × 1 row | 1 |
+
+Optional name/DOB captions consume additional row height without shrinking the photo itself. In the current helper, expected maximum capacities with the default 7 mm caption area are 25, 42, 12 and 1 respectively. Manual density can be lower than the maximum. The PDF page count is calculated as ceil(requested photo count / selected photos per A4 page). The photo order is priced per photo, while its print job has the number of generated A4 pages and one PDF copy. Do not multiply photo count by PDF page count or printer copies a second time.
+
+The current generator creates each A4 page as a 2480 × 3508 pixel JPEG (nominal 300 DPI), then embeds that raster as a full-page image in an A4 PDF MediaBox (595.275590551 × 841.88976378 points). Each photo crop is rendered at its selected millimetre size. Physical output still needs ruler/caliper verification from the actual printer and print-dialog settings.
+
+### Layout rule recommended for the release
+
+For repeatable cutting, use one fixed A4 grid origin, fixed row/column coordinates, fixed gutters and fixed photo dimensions for **every page in the same order**. The last page should occupy the first N grid slots and leave all remaining slots blank. Do not move a partial last page or short row to a new centre position; that makes cutting coordinates change from sheet to sheet. If a different centred-last-page layout is intentionally desired, it must be an explicit, documented layout option with a separate preview and cutting workflow—not an invisible pagination side effect.
+
+**Implementation finding to resolve:** The getPhotoSheetLayout helper returns offsetYmm = 8, but drawPhotoSheetPage currently computes a new vertical centre from the number of populated rows on each page and does not use offsetYmm. It also centres a short row horizontally within the full content width. Therefore the existing helper-only assertions do not prove where pixels land in the generated PDF. This must be fixed or the physical-position specification deliberately changed before treating geometry as certified.
+
+| ID | Priority | Scenario and procedure | Expected result |
+|---|---:|---|---|
+| PSHT-001 | P0 | Select each of the four supported sizes and inspect the size value, dimensions and units in the UI, quote, job record and generated sheet. | 35×45 mm, 25×35 mm, 50.8×50.8 mm and 101.6×152.4 mm are interpreted consistently; inch/mm conversions have no material rounding drift. The UI clearly states that the sheet itself is A4. |
+| PSHT-002 | P0 | With captions OFF and automatic density, inspect the calculated grid for every supported size. | Exactly 25, 49, 15 and 1 photo slots respectively; no row/column exceeds the 8 mm safe margin or overlaps the 3 mm gutters. |
+| PSHT-003 | P0 | Turn optional name/DOB captions ON for each size and inspect automatic grid, dimensions and page count. | Caption rows reduce capacity only where required (expected 25, 42, 12 and 1); the selected physical photo rectangle remains unchanged; caption cannot push the row beyond printable page bounds. |
+| PSHT-004 | P0 | For every size, select manual photos-per-page values 1, 2, a middle value, maximum and maximum+1; include 0, negative, decimal, blank and non-numeric input. | Every valid integer from 1 through actual layout capacity is accepted; invalid values are rejected/normalised visibly; preview, PDF and server metadata use the same value. |
+| PSHT-005 | P0 | For each size and density q, request 1, q−1, q, q+1, 2q, 2q+1 and 100 photos. Compare requested count with computed pages. | Generated PDF pages always equal ceil(N/q); boundary transitions do not create an extra blank page or omit a photo. |
+| PSHT-006 | P0 | Use 50 photos at 9 per page, then 50 at 20 and 25 per page; inspect each page's tile count and final-page count. | At 9/page the PDF has 6 A4 pages with 9,9,9,9,9,5 photos; at 20/page it has 3 pages with 20,20,10; at 25/page it has 2 pages with 25,25. Sum of tiles is exactly 50. |
+| PSHT-007 | P0 | Create a machine-readable synthetic source image with unique corner marks/sequence number, request 1, 8, 25, 26, 49, 50 and 100 photos, then raster-inspect every generated PDF page. | Every requested tile exists exactly once per order copy; no missing, extra, overlapping, clipped or ghost tile; total visible tiles equals requested count. |
+| PSHT-008 | P0 | Compare requested photo quantity, PDF page count, PrintJob PageCount, Copies, PhotoCount, PhotosPerPage, quote amount and physical printer job copies. | PhotoCount=N; PDF/PrintJob page count=ceil(N/q); PDF/PrintJob copies=1; amount=N×saved per-photo rate. No formula multiplies N by page count or by copies again. |
+| PSHT-009 | P0 | Print one test sheet per size to a calibrated QA printer using Actual size/100% and measure several photos at top, middle, bottom, left and right with a ruler/caliper. | Each measured tile is within the agreed tolerance of its exact selected size; no browser preview or PDF viewer scaling is silently applied. Record tolerance and measured values per printer/driver. |
+| PSHT-010 | P0 | Inspect PDF page count and MediaBox/CropBox/BleedBox/TrimBox for every generated page using a PDF parser, not just the filename. | Every page is intended A4 portrait with exact A4 MediaBox; no unintended rotation, clipping box, extra page or non-A4 page. Unimplemented trim/bleed boxes are recorded explicitly. |
+| PSHT-011 | P0 | Parse each embedded page image's pixel dimensions, draw transform and PDF page dimensions; compare a known coordinate marker on the PDF with the canvas preview. | The full-page raster maps to the exact A4 MediaBox at nominal 300 DPI; preview-to-PDF x/y coordinates match within one raster pixel; no stretch or offset drift. |
+| PSHT-012 | P0 | Inspect generated raster positions for left/right safe margins, each column edge, gutter and overall grid centring for every size and selected density. | Photo rectangles remain inside the 8 mm safe area; horizontal gaps are 3 mm; positions are deterministic and non-overlapping; no last column is clipped. |
+| PSHT-013 | P0 | Compare the vertical coordinate of the first photo row in the layout helper, live preview, generated first PDF page, middle page and final partial page. | One documented vertical-origin rule is used everywhere. Under the recommended fixed-grid rule the top origin remains 8 mm on all pages; the current renderer's vertical-centre behaviour must fail until corrected or explicitly specified otherwise. |
+| PSHT-014 | P0 | Generate a multi-page order where the final page has only one photo and another where it has one short row; compare tile coordinates to page 1. | Under the recommended cut-friendly rule, each page uses identical grid-slot coordinates; the final page fills the first N slots and leaves the rest blank. No vertical recentering or variable row offset moves the final sheet's cut coordinates. |
+| PSHT-015 | P0 | Use a manual density that creates an incomplete row on every page (for example 9/page for 35×45 mm); compare first-row and second-row left edges. | Rows follow one documented column origin and consistent cut grid. The current renderer's automatic centring of short rows is not silently accepted as fixed-grid output. If centred rows are retained, show and test exact per-row cut positions. |
+| PSHT-016 | P0 | Use portrait, landscape and square source images for every selected output size; inspect crop boundary and a known circle/rectangle in the generated PDF. | Crop uses the selected physical aspect ratio; objects are not stretched, faces are not geometrically distorted, and crop never exceeds source bounds. Lost source area is visible in preview before submission. |
+| PSHT-017 | P1 | Repeat with EXIF orientations 1, 3, 6, 8 and mirrored orientation metadata; compare browser preview, prepared sheet and Android-imported source. | Orientation is applied once and consistently; no sideways, upside-down or double-rotated image; mirrored camera images are handled intentionally and documented. |
+| PSHT-018 | P1 | Move zoom and horizontal/vertical focus to min, max, centre and each corner; change size repeatedly and reset crop. | Crop rectangle remains inside source; face/subject focus matches preview; size changes recalculate aspect ratio; reset restores original framing; no stale crop from prior size. |
+| PSHT-019 | P1 | Test source resolutions below, exactly at and above nominal 300 DPI pixel requirements for every output size; include large and highly compressed files. | Resolution warning reflects selected physical size; no false “suitable” result for visibly undersampled images; output quality and warnings are stable across dimensions. |
+| PSHT-020 | P1 | Generate sheets from high-resolution, low-resolution, progressive JPEG, PNG and near-20 MB sources; inspect embedded raster dimensions, JPEG quality, colour and file size. | PDF remains under the 20 MB print-document limit or fails before upload with a useful message; compression never changes physical geometry; no blank, pixelated or corrupted sheet is accepted. |
+| PSHT-021 | P0 | Add name only, DOB only and both captions at each supported font size; test long names, Unicode, dates at min/max and a final partial page. | Captions are absent by default, included only after explicit opt-in, readable and clipped/wrapped by a defined rule; no caption overwrites the next photo/gutter or changes photo width/height; PII is not sent unless entered by customer. |
+| PSHT-022 | P1 | Sample/replace backgrounds on a flat background, textured background, hair, transparent PNG, skin-tone edge and photo with similar foreground/background colours. | Only edge-connected sampled colours are replaced; subject detail remains acceptable; reset restores original appearance; preview and PDF use identical processing. This is a colour-key tool, not AI segmentation. |
+| PSHT-023 | P0 | Request quantities 1, 99, 100 and 101; exceed per-image size and generated multi-page PDF size limits; force canvas/PDF generation failure mid-run. | Limits are enforced before server submission; failed generation leaves no orphan job/payment and never claims all N photos are ready; retry starts from a clean deterministic state. |
+| PSHT-024 | P0 | Change the shop's per-photo rate after preparation/quote; compare quote total and saved unit-rate/pricing-version snapshot. | Charge is based on server's locked per-photo rate at quote time; no standard document minimum charge is applied to photo quantity; later price changes affect only new quotes. |
+| PSHT-025 | P0 | Tamper with the submitted PDF while keeping PhotoCount, PhotosPerPage, expected page count and size metadata unchanged; submit wrong photo dimensions, blank pages, duplicate tiles and false metadata. | API rejects output that does not meet the declared photo-sheet contract, or the trust boundary is explicitly accepted as client-generated composition with independent audit/owner preview. A page-count-only check is not proof that each tile has declared dimensions or that the PDF contains exactly N photos. |
+| PSHT-026 | P0 | Reject one or more PDF sheet pages from a verified-paid photo order, especially the final partially filled page; inspect refund preview and saved page allocations. | Refund for each rejected A4 page equals only the number of photos on that page × locked unit price; last-page partial count is correct; cumulative refund is exact and cannot exceed paid amount. |
+| PSHT-027 | P0 | Place PHOTO jobs and ordinary DOCUMENT jobs in one multi-file batch; vary sizes, quantities, review decisions, quote expiry and payment state. | Each PHOTO job retains its photo-size/count/layout metadata and per-photo price; DOCUMENT jobs retain normal page/copy pricing; rejection/refund of one file does not alter the other; batch checkout reconciles correctly. |
+| PSHT-028 | P0 | Print to QA-PRINTER using PDF viewer/browser/Windows Desktop/Agent; test Actual size, Fit, Shrink oversized pages, borderless mode, driver margins and paper-size mismatch. | Supported print path explicitly selects intended A4 media and 100% scale; any Fit/Shrink/borderless scaling effect is detected and warned/blocked; exact tile dimensions are preserved in approved configuration. |
+| PSHT-029 | P0 | Select 4×6 inch size and inspect customer wording, PDF MediaBox, printer media selection and physical result. | UI clearly distinguishes a 4×6 inch photo tile placed on an A4 sheet (current design) from a PDF/page printed on 4×6 inch stock. No one should infer the latter unless a separate 4×6 page layout/output mode exists and is tested. |
+| PSHT-030 | P0 | Inspect dashed tile outlines/cut guides, 3 mm gutters, edge margins and colour in preview and physical print; cut several sample tiles using the intended shop process. | Guides are visible enough to cut accurately but do not intrude into photo area or alter measured photo size; margins/gutters remain safe for the designated cutter/printer. Record whether guides are printed trim marks or merely preview boundaries. |
+
+### Geometry implementation review findings
+
+| Finding | Current source behaviour | Required decision / closure |
+|---|---|---|
+| Vertical position mismatch | Layout helper reports an 8 mm top origin; page renderer vertically centres populated rows and ignores the helper's offsetYmm. | Adopt fixed 8 mm origin as the recommended cutting-safe rule, or define another one explicitly; make preview, raster and PDF agree. |
+| Short-row alignment | Renderer centres short rows in the full grid width. | Prefer fixed cell slots for cut consistency; if centred rows are deliberate, document and show the different cut positions. |
+| Final partial page | Renderer vertically centres only the populated row count, moving photos compared with a full page. | Keep the same page grid and leave unused slots blank, unless the product explicitly offers a different layout mode. |
+| Server composition trust | Current API validates size code, quantity, photos-per-page, PDF page count, file size and pricing, but does not inspect the raster PDF to verify every tile's dimensions/position/count. | Decide whether client-rendered sheets plus owner preview are the accepted trust model, or introduce server-side/PDF-geometry validation. Never describe page-count validation as physical-size proof. |
+| A4 versus 4×6 paper | All generated PDFs have A4 MediaBox; 4×6 refers to the photo tile, not page stock. | Keep labels explicit or build and certify separate 4×6-page output if that is promised. |
+| Physical scale | PDF geometry is exact in source, but printer drivers/viewers can apply Fit/Shrink and non-printable margins. | Maintain a named printer/driver/media/scale compatibility list with ruler-measured output and calibration evidence. |
+
+**Photo-print release gate:** No photo-printing feature is certified by the six browser Photo Studio tests alone. At minimum, all P0 PSHT cases must pass on each supported named printer/driver configuration, with actual PDF retained and physical measurements recorded. A generated PDF with the correct number of pages is not sufficient proof that the requested number of correctly sized, correctly positioned photos was physically printed.
+
+## 12. Release gate
 
 
 
@@ -265,7 +336,7 @@ The existing local Photo Studio browser checks cover image selection/editing and
 A candidate is not accepted merely because CI is green or the automated local runner exits successfully.
 
 - Every P0 case in the master plan and this supplement must PASS on the candidate, or be a confirmed NOT APPLICABLE with written approval. BLOCKED, NOT RUN, FAIL and NOT IMPLEMENTED are not passes.
-- All 100 supplemental cases must have an explicit result. The native Windows Desktop cases must be run in the native window; Android physical cases must be run on real supported hardware for their hardware-dependent scenarios.
+- All 130 supplemental cases must have an explicit result. The native Windows Desktop cases must be run in the native window; Android physical cases must be run on real supported hardware for their hardware-dependent scenarios.
 - No unresolved P0 defect is permitted. P1 issues require correction/retest or an explicit, time-bound risk decision by the release authority.
 - No claims of complete manager/operator roles, email verification/recovery, live gateway payments/refunds, encrypted direct-LAN payloads, malware scanning, offline printing, universal printer support, signed release readiness or physical-device compatibility beyond the evidence actually collected.
 - Any test involving an actual physical print must use synthetic content and a specifically designated QA printer. Output confirmation must be based on observed output, never spooler acceptance alone.
