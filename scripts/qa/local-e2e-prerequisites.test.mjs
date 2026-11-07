@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { getBlockingPrerequisites, validateRecordPrerequisites, HEALTH_CHECK_RECORD } from "./local-e2e-prerequisites.mjs";
-import { executeIsolatedQaRecord } from "./local-e2e-record-runner.mjs";
+import { executeIsolatedQaRecord, shouldFailQaRun } from "./local-e2e-record-runner.mjs";
 
 test("a Shop One pricing failure blocks quote-dependent work, not independent shop work", () => {
   const statuses = new Map([
@@ -289,4 +289,49 @@ test("a health failure safely skips all browser/API records instead of producing
   });
   assert.equal(result.status, "SKIPPED");
   assert.deepEqual(result.check.details.blockedBy, [HEALTH_CHECK_RECORD]);
+});
+
+
+test("the release gate fails on any failed, warned, skipped, unmapped or incomplete run", () => {
+  assert.equal(shouldFailQaRun({
+    failed: 0,
+    warnings: 0,
+    coverageGatePassed: true,
+    caseMappingErrors: 0
+  }), false);
+
+  assert.equal(shouldFailQaRun({
+    failed: 1,
+    warnings: 0,
+    coverageGatePassed: true,
+    caseMappingErrors: 0
+  }), true);
+
+  assert.equal(shouldFailQaRun({
+    failed: 0,
+    warnings: 1,
+    coverageGatePassed: true,
+    caseMappingErrors: 0
+  }), true);
+
+  assert.equal(shouldFailQaRun({
+    failed: 0,
+    warnings: 0,
+    coverageGatePassed: false,
+    caseMappingErrors: 0
+  }), true);
+
+  assert.equal(shouldFailQaRun({
+    failed: 0,
+    warnings: 0,
+    coverageGatePassed: true,
+    caseMappingErrors: 1
+  }), true);
+
+  assert.equal(shouldFailQaRun({
+    failed: 0,
+    warnings: 0,
+    coverageGatePassed: true,
+    caseMappingErrors: 0
+  }), false);
 });
