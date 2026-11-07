@@ -1336,7 +1336,6 @@ try {
       );
       shop1TenantId = one.tenantId;
       report.safety.qaPlanAssignedToShop1 = true;
-      report.safety.assignedQaOnlyFreePlan = true;
       return {
         shop: "Shop One",
         tenantId: one.tenantId,
@@ -1365,7 +1364,9 @@ try {
       );
       shop2TenantId = two.tenantId;
       report.safety.qaPlanAssignedToShop2 = true;
-      report.safety.assignedQaOnlyFreePlan = true;
+      report.safety.assignedQaOnlyFreePlan = Boolean(
+        report.safety.qaPlanAssignedToShop1 && report.safety.qaPlanAssignedToShop2
+      );
       return {
         shop: "Shop Two",
         tenantId: two.tenantId,
