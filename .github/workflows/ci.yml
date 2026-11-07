@@ -53,7 +53,15 @@ jobs:
       - name: Build native desktop frontend
         run: pnpm --filter @smart-print/desktop build
       - name: Validate portal Nginx proxy configuration
-        run: docker run --rm --add-host api:127.0.0.1 -v "$GITHUB_WORKSPACE/apps/portal/nginx.conf:/etc/nginx/conf.d/default.conf:ro" nginx:alpine nginx -t
+        run: docker run --rm --add-host smart-print-api:127.0.0.1 -v "$GITHUB_WORKSPACE/apps/portal/nginx.conf:/etc/nginx/conf.d/default.conf:ro" nginx:alpine nginx -t
+      - name: Enforce the dedicated SmartPrint API upstream
+        shell: bash
+        run: |
+          count="$(grep -Fc 'proxy_pass http://smart-print-api:8080' apps/portal/nginx.conf)"
+          if [[ "$count" -ne 3 ]] || grep -Fq 'proxy_pass http://api:8080' apps/portal/nginx.conf; then
+            echo "All Nginx API, downloads, and health routes must use smart-print-api." >&2
+            exit 1
+          fi
       - name: Validate production Compose configuration
         env:
           PUBLIC_BASE_URL: https://example.invalid
@@ -478,9 +486,23 @@ jobs:
           set -euo pipefail
           project="qrtoprint-smoke-${GITHUB_RUN_ID}"
           env_file=".env.ci"
-          trap 'docker compose --project-name "$project" --env-file "$env_file" -f compose.yml logs --tail 100 || true; docker compose --project-name "$project" --env-file "$env_file" -f compose.yml down -v || true; docker network rm cloudflare-edge || true; rm -f "$env_file"' EXIT
+          collision_api="smartprint-dns-collision-${GITHUB_RUN_ID}"
+          trap 'docker rm -f "$collision_api" >/dev/null 2>&1 || true; docker compose --project-name "$project" --env-file "$env_file" -f compose.yml logs --tail 100 || true; docker compose --project-name "$project" --env-file "$env_file" -f compose.yml down -v || true; docker network rm cloudflare-edge || true; rm -f "$env_file"' EXIT
 
           docker network create --driver bridge --attachable cloudflare-edge
+
+          # Reproduce the production-shaped DNS collision: the portal joins this
+          # shared edge network while SmartPrint's API stays on its private network.
+          docker run --detach --name "$collision_api" --network cloudflare-edge --network-alias api nginx:alpine sh -ec "printf '%s\\n' 'server {' '  listen 8080;' '  default_type application/json;' '  location / { return 401; }' '}' > /etc/nginx/conf.d/default.conf && exec nginx -g 'daemon off;'"
+          collision_ready=false
+          for attempt in $(seq 1 30); do
+            if docker exec "$collision_api" wget -S -O /dev/null http://127.0.0.1:8080/ 2>&1 | grep -q '401'; then
+              collision_ready=true
+              break
+            fi
+            sleep 1
+          done
+          test "$collision_ready" = "true"
 
           cat > "$env_file" <<EOF
           IMAGE_NAMESPACE="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}"
@@ -505,5 +527,22 @@ jobs:
           done
           test "$ready" = "true"
 
+          # Prove the generic name resolves to the deliberately conflicting
+          # edge-network service and returns the same class of 401 seen locally.
+          collision_response="$(docker compose --project-name "$project" --env-file "$env_file" -f compose.yml exec -T portal sh -lc 'wget -S -O - http://api:8080/health/live 2>&1 || true')"
+          if ! grep -q '401' <<< "$collision_response"; then
+            echo "The CI fixture did not reproduce the shared-network api alias collision:" >&2
+            echo "$collision_response" >&2
+            exit 1
+          fi
+
+          live_response="$(docker compose --project-name "$project" --env-file "$env_file" -f compose.yml exec -T portal wget -q -O - http://127.0.0.1/health/live)"
+          grep -Fq '"service":"qrtoprint-api"' <<< "$live_response"
+          grep -Fq '"status":"live"' <<< "$live_response"
+
+          ready_response="$(docker compose --project-name "$project" --env-file "$env_file" -f compose.yml exec -T portal wget -q -O - http://127.0.0.1/health/ready)"
+          grep -Fq '"status":"ready"' <<< "$ready_response"
+          grep -Fq '"database":"connected"' <<< "$ready_response"
+
           docker compose --project-name "$project" --env-file "$env_file" -f compose.yml exec -T portal wget -q -O /dev/null http://127.0.0.1/
-          echo "API migrations, API readiness and portal container smoke checks passed."
+          echo "API migrations, deliberate shared-network DNS collision, and Nginx liveness/readiness proxy smoke checks passed."

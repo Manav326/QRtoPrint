@@ -19,6 +19,10 @@ services:
       start_period: 10s
 
   api:
+    networks:
+      default:
+        aliases:
+          - smart-print-api
     image: localhost/smart-print/smart-print-api:local
     build:
       context: .
@@ -40,7 +44,7 @@ services:
       Cors__AllowedOrigins__1: "http://localhost:3000"
       Cors__AllowedOrigins__2: "http://127.0.0.1:3000"
     # Keep the API private to the Compose network. The portal proxies /api and /health
-    # to api:8080; publishing host port 8080 would collide with other local products.
+    # to smart-print-api:8080; publishing host port 8080 would collide with other local products.
     volumes:
       - qrtoprint_local_documents:/var/lib/qrtoprint/documents
     depends_on:

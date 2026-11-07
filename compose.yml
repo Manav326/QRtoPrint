@@ -19,6 +19,10 @@ services:
       start_period: 10s
 
   api:
+    networks:
+      default:
+        aliases:
+          - smart-print-api
     image: ${IMAGE_NAMESPACE:?Set IMAGE_NAMESPACE in .env}/smart-print-api:${IMAGE_TAG:-latest}
     build:
       context: .
