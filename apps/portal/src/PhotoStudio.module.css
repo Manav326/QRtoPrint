@@ -98,3 +98,6 @@
 .dark .backgroundPresets button{border-color:#64728a}
 .dark .pickInstruction{border-color:#8b7cdb;background:#302a4d;color:#e1dcff}
 .dark .errorToast{border-color:#874f56;background:#351f26;color:#ffd7da}
+
+/* Keep the panel title and its explanatory copy on distinct readable lines. */
+.panelHeading > div { display:grid; gap:6px; min-width:0; }
