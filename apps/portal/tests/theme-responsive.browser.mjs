@@ -800,7 +800,22 @@ async function exercisePhotoStudioBrowser() {
     assert.equal(output.mediaType, "application/pdf");
     assert.equal(output.photoCount, largePhotoBatch ? 50 : 8);
     assert.equal(output.photosPerPage, largePhotoBatch ? 9 : 25);
-    assert.equal(output.pageCount, largePhotoBatch ? 6 : 1);
+    assert.equal(output.previewPageCount, output.pageCount, "Every PDF page must have a matching inspected source raster.");
+    assert.equal(output.mediaBoxCount, output.pageCount, "Every generated page must be exact A4.");
+    assert.deepEqual(output.pdfImageSizes, Array.from({ length: output.pageCount }, () => [2480, 3508]), "Every page must embed the expected A4 raster size.");
+    assert.equal(output.fullPageImageTransforms, output.pageCount, "Every raster must map over the complete A4 MediaBox.");
+    assert.equal(output.pixelProbes.length, output.photoCount, "The generated raster pages must contain exactly the requested number of photo slots.");
+    for (let pageIndex = 0; pageIndex < output.pageCount; pageIndex += 1) {
+      const pageProbes = output.pixelProbes.filter(probe => probe.page === pageIndex + 1);
+      const expected = Math.min(output.photosPerPage, output.photoCount - pageIndex * output.photosPerPage);
+      assert.equal(pageProbes.length, expected, `A4 page ${pageIndex + 1} must contain exactly ${expected} photo tiles.`);
+      assert.equal(new Set(pageProbes.map(probe => probe.slot)).size, expected, `A4 page ${pageIndex + 1} must not duplicate a grid slot.`);
+      assert.ok(pageProbes.every(probe => probe.rgb.some(channel => channel < 245)), `A4 page ${pageIndex + 1} must contain visible pixels in every requested photo slot.`);
+    }
+    if (largePhotoBatch) {
+      assert.deepEqual(output.pixelProbes.filter(probe => probe.page === 6).map(probe => probe.slot), [0, 1, 2, 3, 4], "The final partial A4 page must occupy the first five stable grid slots.");
+      assert.ok(Array.isArray(output.finalUnusedSlotRgb) && output.finalUnusedSlotRgb.every(channel => channel > 245), "Unused final-page slots must remain blank rather than recentering or duplicating tiles.");
+    }
     assert.ok(output.bytes > 0 && output.bytes <= 20 * 1024 * 1024);
     await context.close();
     results.push({
