@@ -187,6 +187,77 @@ async function browserRangeProbe(path) {
 }
 
 
+
+async function browserFullDownloadProbe(path, expectedFileName) {
+  const requestUrl = new URL(path, origin).toString();
+  const result = await page.evaluate(async ({ requestUrl, expectedMaximumBytes }) => {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 120000);
+    try {
+      const response = await fetch(requestUrl, {
+        cache: 'no-store',
+        credentials: 'same-origin',
+        headers: { Accept: 'application/octet-stream' },
+        signal: controller.signal
+      });
+      const headers = {};
+      for (const [key, value] of response.headers.entries()) headers[key.toLowerCase()] = value;
+      if (!response.ok) {
+        await response.body?.cancel();
+        return { status: response.status, url: response.url, headers, bytesReceived: 0 };
+      }
+
+      const contentLength = Number(headers['content-length']);
+      if (Number.isFinite(contentLength) && contentLength > expectedMaximumBytes) {
+        await response.body?.cancel();
+        return { status: response.status, url: response.url, headers, bytesReceived: 0, tooLarge: true };
+      }
+
+      // Read the complete asset but discard each chunk immediately. This
+      // verifies a real browser transfer without retaining a 30–50 MB file
+      // in memory or saving release binaries onto a shop machine.
+      const reader = response.body?.getReader();
+      if (!reader) return { status: response.status, url: response.url, headers, bytesReceived: 0 };
+      let bytesReceived = 0;
+      while (true) {
+        const chunk = await reader.read();
+        if (chunk.done) break;
+        bytesReceived += chunk.value?.byteLength ?? 0;
+        if (bytesReceived > expectedMaximumBytes) {
+          await reader.cancel();
+          return { status: response.status, url: response.url, headers, bytesReceived, tooLarge: true };
+        }
+      }
+      return { status: response.status, url: response.url, headers, bytesReceived };
+    } finally {
+      clearTimeout(timer);
+    }
+  }, { requestUrl, expectedMaximumBytes: 256 * 1024 * 1024 });
+
+  assert.equal(new URL(result.url).origin, origin, path + ' redirected outside the SmartPrint origin.');
+  assert.equal(result.status, 200, path + ' should complete with HTTP 200.');
+  assert.equal(result.tooLarge, undefined, path + ' exceeded the 256 MiB QA safety limit.');
+  assert.ok(result.bytesReceived > 0, path + ' returned an empty download.');
+  assert.ok(
+    (result.headers['content-disposition'] || '').toLowerCase().includes(expectedFileName.toLowerCase()),
+    path + ' did not advertise the expected attachment name ' + expectedFileName + '.'
+  );
+
+  const contentLength = Number(result.headers['content-length']);
+  if (Number.isFinite(contentLength) && contentLength > 0) {
+    assert.equal(result.bytesReceived, contentLength, path + ' did not transfer its advertised Content-Length.');
+  }
+  return {
+    status: result.status,
+    fileName: expectedFileName,
+    bytesReceived: result.bytesReceived,
+    contentLength: Number.isFinite(contentLength) && contentLength > 0 ? contentLength : null,
+    contentType: result.headers['content-type'] || null,
+    contentDisposition: result.headers['content-disposition'] || null
+  };
+}
+
+
 function createSyntheticPdfBase64() {
   const stream = 'BT /F1 18 Tf 72 720 Td (SmartPrint QA synthetic test document) Tj ET';
   const objects = [
@@ -650,13 +721,23 @@ try {
   });
 
   await record('Windows download supports an exact one-byte range response', async () => {
-    if (releaseMetadata && !releaseMetadata.windowsAvailable) return { status: 'SKIPPED', reason: 'Windows installer is marked unavailable by release metadata.' };
+    if (!releaseMetadata || releaseMetadata.windowsAvailable !== true) return { status: 'SKIPPED', reason: 'Windows installer is not confirmed available by release metadata.' };
     return await browserRangeProbe('/downloads/windows');
   });
 
+  await record('Windows installer completes a full same-origin browser download', async () => {
+    if (!releaseMetadata || releaseMetadata.windowsAvailable !== true) return { status: 'SKIPPED', reason: 'Windows installer is not confirmed available by release metadata.' };
+    return await browserFullDownloadProbe('/downloads/windows', 'SmartPrint-Windows-Setup.exe');
+  });
+
   await record('Android download supports an exact one-byte range response when published', async () => {
-    if (!releaseMetadata || releaseMetadata.androidAvailable !== true) return { status: 'SKIPPED', reason: 'Android asset is marked unavailable by release metadata.' };
+    if (!releaseMetadata || releaseMetadata.androidAvailable !== true) return { status: 'SKIPPED', reason: 'Android asset is not confirmed available by release metadata.' };
     return await browserRangeProbe('/downloads/android');
+  });
+
+  await record('Android APK completes a full same-origin browser download', async () => {
+    if (!releaseMetadata || releaseMetadata.androidAvailable !== true) return { status: 'SKIPPED', reason: 'Android asset is not confirmed available by release metadata.' };
+    return await browserFullDownloadProbe('/downloads/android', 'SmartPrint-Android.apk');
   });
 
   await record('Shop sign-in route renders', async () => visitRoute('/shop', '.auth-screen', 'shop login'));
