@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
 import PhotoStudio, { type PreparedPhotoSheet } from "../src/PhotoStudio";
+import { getPhotoSheetPhotoPositions, type PhotoSheetSize } from "../src/photo-studio-layout";
 
 const query = new URLSearchParams(window.location.search);
 const mode = query.get("mode") === "shop" ? "shop" : "customer";
@@ -67,6 +68,47 @@ function PhotoStudioBrowserFixture() {
     const pdfBytes = new Uint8Array(await sheet.file.arrayBuffer());
     const pdfText = new TextDecoder("latin1").decode(pdfBytes);
     const pageCount = Number(pdfText.match(/\/Count (\d+)/)?.[1] ?? 0);
+    const mediaBoxCount = (pdfText.match(/\/MediaBox \[0 0 595\.275590551 841\.88976378\]/g) ?? []).length;
+    const pdfImageSizes = [...pdfText.matchAll(/\/Width (\d+) \/Height (\d+) \/ColorSpace/g)]
+      .map(match => [Number(match[1]), Number(match[2])]);
+    const fullPageImageTransforms = (pdfText.match(/595\.275590551 0 0 841\.88976378 0 0 cm/g) ?? []).length;
+    const sizeByCode: Record<string, PhotoSheetSize> = {
+      "35x45": { widthMm: 35, heightMm: 45 },
+      "25x35": { widthMm: 25, heightMm: 35 },
+      "2x2": { widthMm: 50.8, heightMm: 50.8 },
+      "4x6": { widthMm: 101.6, heightMm: 152.4 }
+    };
+    const photoSize = sizeByCode[sheet.sizeCode];
+    if (!photoSize) throw new Error("Photo Studio returned an unsupported photo size.");
+    const jpegPages = sheet.previewPages ?? [];
+    const captionHeightMm = mode === "customer" ? 7 : 0;
+    const pixelProbes: Array<{ page: number; slot: number; rgb: number[] }> = [];
+    let finalUnusedSlotRgb: number[] | null = null;
+    for (let pageIndex = 0; pageIndex < jpegPages.length; pageIndex++) {
+      const bitmap = await createImageBitmap(jpegPages[pageIndex]);
+      try {
+        const canvas = document.createElement("canvas");
+        canvas.width = bitmap.width;
+        canvas.height = bitmap.height;
+        const context = canvas.getContext("2d", { willReadFrequently: true });
+        if (!context) throw new Error("Could not inspect the prepared photo raster.");
+        context.drawImage(bitmap, 0, 0);
+        const countOnPage = Math.min(sheet.photosPerPage, sheet.photoCount - pageIndex * sheet.photosPerPage);
+        const positions = getPhotoSheetPhotoPositions(photoSize, captionHeightMm, sheet.photosPerPage, countOnPage);
+        const fullGrid = getPhotoSheetPhotoPositions(photoSize, captionHeightMm, sheet.photosPerPage, sheet.photosPerPage);
+        const sample = (position: { xMm: number; yMm: number }) => {
+          const x = Math.round((position.xMm + photoSize.widthMm / 2) * bitmap.width / 210);
+          const y = Math.round((position.yMm + photoSize.heightMm / 2) * bitmap.height / 297);
+          return Array.from(context.getImageData(x, y, 1, 1).data).slice(0, 3);
+        };
+        positions.forEach((position, slot) => pixelProbes.push({ page: pageIndex + 1, slot, rgb: sample(position) }));
+        if (pageIndex === jpegPages.length - 1 && countOnPage < sheet.photosPerPage) {
+          finalUnusedSlotRgb = sample(fullGrid[countOnPage]);
+        }
+      } finally {
+        bitmap.close();
+      }
+    }
     setResult(JSON.stringify({
       mode,
       mediaType: sheet.file.type,
@@ -75,6 +117,12 @@ function PhotoStudioBrowserFixture() {
       photoCount: sheet.photoCount,
       photosPerPage: sheet.photosPerPage,
       pageCount,
+      mediaBoxCount,
+      pdfImageSizes,
+      fullPageImageTransforms,
+      previewPageCount: jpegPages.length,
+      pixelProbes,
+      finalUnusedSlotRgb,
       bytes: sheet.file.size
     }));
     setOpen(false);
