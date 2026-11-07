@@ -851,7 +851,11 @@ async function setupShopResources(page, tokens, shopLabel, onResourcesReady = ()
     photo4x6Minor: 1000
   };
   await clickShopSection(page, "Pricing");
-  await page.getByLabel("Black & white", { exact: true }).fill("2.00");
+  const pricingPanel = page.locator(".pricing-page");
+  await pricingPanel.waitFor({ state: "visible", timeout: 15000 });
+  assert.equal(await pricingPanel.locator('input[type="number"]').count(), 9,
+    shopLabel + " pricing page did not render all nine rate inputs.");
+  await pricingPanel.getByLabel("Black & white", { exact: true }).fill("2.00");
   await page.getByLabel("Colour", { exact: true }).fill("5.00");
   await page.getByLabel("Black & white duplex", { exact: true }).fill("3.00");
   await page.getByLabel("Colour duplex", { exact: true }).fill("7.00");
@@ -2747,7 +2751,7 @@ try {
   }, ["JOB-010"]);
 
   await record("JOB: a signed-in customer cannot read another customer's job history entry", async () => {
-    const response = await request(customerPage, "GET", "/api/v1/customer/jobs/" + crypto.randomUUID() + "/status", { token: customerTokens.accessToken });
+    const response = await request(page, "GET", "/api/v1/customer/jobs/" + crypto.randomUUID() + "/status", { token: customerTokens.accessToken });
     assertExpectedHttpStatus(response, 404, "Customer account job status must hide jobs not owned by that customer.");
     return { foreignOrUnknownCustomerJob: response.status, jobDataReturned: false };
   }, ["JOB-011"]);
