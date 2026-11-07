@@ -100,6 +100,10 @@ function PhotoStudioBrowserFixture() {
     const pdfBytes = new Uint8Array(await sheet.file.arrayBuffer());
     const pdfText = new TextDecoder("latin1").decode(pdfBytes);
     const pageCount = Number(pdfText.match(/\/Count (\d+)/)?.[1] ?? 0);
+    const embeddedPreviewPages = await Promise.all((sheet.previewPages ?? []).map(async pageBlob => {
+      const pageBytes = new Uint8Array(await pageBlob.arrayBuffer());
+      return pdfText.includes(new TextDecoder("latin1").decode(pageBytes));
+    }));
     const mediaBoxCount = (pdfText.match(/\/MediaBox \[0 0 595\.275590551 841\.88976378\]/g) ?? []).length;
     const pdfImageSizes = [...pdfText.matchAll(/\/Width (\d+) \/Height (\d+) \/ColorSpace/g)]
       .map(match => [Number(match[1]), Number(match[2])]);
@@ -176,6 +180,7 @@ function PhotoStudioBrowserFixture() {
       pdfImageSizes,
       fullPageImageTransforms,
       previewPageCount: jpegPages.length,
+      embeddedPreviewPages,
       pixelProbes,
       finalUnusedSlotRgb,
       applyAttempts: applyAttempts.current,
