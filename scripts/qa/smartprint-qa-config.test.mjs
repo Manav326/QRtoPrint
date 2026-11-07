@@ -100,13 +100,12 @@ test('Android-only published app mode does not download or run Windows acceptanc
   assert.match(publishedAppsSource, /no Windows installer was downloaded/);
 });
 
-test('Android-only acceptance cannot pass when the emulator/app launch check is skipped', () => {
+test('Android-only acceptance cannot pass when required live app checks are skipped or warn', () => {
   assert.match(publishedAppsSource, /Android-only completion gate/);
-  assert.match(publishedAppsSource, /\$androidAcceptance\.Count -ne 1/);
-  assert.match(publishedAppsSource, /a skipped device\/app check is not a successful QA run/);
+  assert.match(publishedAppsSource, /\$requiredAndroidChecks=@\(/);
+  assert.match(publishedAppsSource, /\$checkResults\.Count -ne 1 -or \$checkResults\[0\]\.status -ne "PASS"/);
+  assert.match(publishedAppsSource, /A skipped or warning result is not a successful app QA run/);
 });
-
-
 test('Android-only published app mode supports explicit physical-device serial targeting', () => {
   assert.match(runnerSource, /\[string\]\$AndroidDeviceSerial/);
   assert.match(runnerSource, /-AndroidDeviceSerial \$AndroidDeviceSerial/);
