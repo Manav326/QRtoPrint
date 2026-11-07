@@ -4,6 +4,7 @@ import { getBlockingPrerequisites } from "./local-e2e-prerequisites.mjs";
 
 test("a shop setup failure blocks only the tests that depend on that shop", () => {
   const statuses = new Map([
+    ["Local portal and API health", "PASS"],
     ["Create or sign in to the first real QA shop through the shop UI", "PASS"],
     ["Create or sign in to the second real QA shop through the shop UI", "PASS"],
     ["Create and publish a free QA-only plan, then assign it through the platform UI", "PASS"],
@@ -22,6 +23,7 @@ test("a shop setup failure blocks only the tests that depend on that shop", () =
 
 test("customer upload and batch tests are blocked when their station prerequisite failed", () => {
   const statuses = new Map([
+    ["Local portal and API health", "PASS"],
     ["Shop one configures real QA printer/station, pricing and payment methods", "FAIL"],
     ["Create or sign in to the real global customer account", "PASS"]
   ]);
@@ -41,6 +43,7 @@ test("customer upload and batch tests are blocked when their station prerequisit
 
 test("unrelated negative security checks remain runnable", () => {
   const statuses = new Map([
+    ["Local portal and API health", "PASS"],
     ["Shop one configures real QA printer/station, pricing and payment methods", "FAIL"]
   ]);
   assert.deepEqual(
