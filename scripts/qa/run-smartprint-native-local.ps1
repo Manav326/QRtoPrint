@@ -389,6 +389,7 @@ if ($androidDevice) {
             "-p", "apps/android",
             "-PsmartPrintServiceUrl=$publicOrigin",
             "-PsmartPrintLocalQa=true",
+            "-PsmartPrintPhotoStudioQaEnabled=true",
             "-PsmartPrintVersionCode=$versionCode",
             "-PsmartPrintVersionName=$versionName",
             ":app:assembleDebug"
@@ -437,6 +438,7 @@ if ($androidDevice) {
                     "-p", "apps/android",
                     "-PsmartPrintServiceUrl=$publicOrigin",
                     "-PsmartPrintLocalQa=true",
+                    "-PsmartPrintPhotoStudioQaEnabled=true",
                     "-PsmartPrintVersionCode=$versionCode",
                     "-PsmartPrintVersionName=$versionName",
                     "--info", ":app:connectedDebugAndroidTest",
