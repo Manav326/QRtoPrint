@@ -63,7 +63,8 @@ const widths = [
   { label: "laptop-1024", width: 1024, height: 900 },
   { label: "tablet-768", width: 768, height: 1024 },
   { label: "mobile-520", width: 520, height: 900 },
-  { label: "mobile-390", width: 390, height: 844 }
+  { label: "mobile-390", width: 390, height: 844 },
+  { label: "mobile-320", width: 320, height: 568 }
 ];
 
 const shopPayload = Buffer.from(JSON.stringify({ sub: "e2e-shop", tenant_id: "e2e-tenant" })).toString("base64url");
@@ -394,6 +395,22 @@ async function assertRouteContrast(page, route) {
           });
         }
       }
+      // Token contrast alone does not catch a component that forgot to override
+      // a light-only heading when its containing card changes to dark mode.
+      const downloadCard = landing.querySelector(".sp-download-card");
+      const downloadCardStyle = downloadCard ? getComputedStyle(downloadCard) : null;
+      for (const selector of [".sp-download-card h3", ".sp-download-platform", ".sp-download-card p"]) {
+        const element = landing.querySelector(selector);
+        if (!element || !downloadCardStyle) continue;
+        checks.push({
+          scope: "landing download card",
+          foreground: selector,
+          background: "download card",
+          foregroundColor: getComputedStyle(element).color,
+          backgroundColor: downloadCardStyle.backgroundColor,
+          ratio: contrast(getComputedStyle(element).color, downloadCardStyle.backgroundColor)
+        });
+      }
     }
     const customer = document.querySelector(".customer-entry");
     if (customer) {
@@ -422,6 +439,29 @@ async function assertRouteContrast(page, route) {
           backgroundColor: background,
           ratio: contrast(getComputedStyle(element).color, background)
         });
+      }
+      // The local-agent readiness card is a nested surface with its own
+      // background. Check its real copy, not the page/card palette tokens.
+      const localAgent = customer.querySelector(".entry-local-agent");
+      if (localAgent) {
+        const localAgentBackground = getComputedStyle(localAgent).backgroundColor;
+        for (const selector of [
+          ".entry-local-agent-head strong",
+          ".entry-local-agent-head>div>span",
+          ".entry-local-agent>p",
+          ".entry-local-agent-message"
+        ]) {
+          const element = localAgent.querySelector(selector);
+          if (!element) continue;
+          checks.push({
+            scope: "customer local-agent card",
+            foreground: selector,
+            background: "local-agent card",
+            foregroundColor: getComputedStyle(element).color,
+            backgroundColor: localAgentBackground,
+            ratio: contrast(getComputedStyle(element).color, localAgentBackground)
+          });
+        }
       }
     }
     const auth = document.querySelector(".auth-screen");
