@@ -212,7 +212,7 @@ function createSyntheticPdfBase64() {
   return Buffer.from(pdf, 'ascii').toString('base64');
 }
 
-async async function uploadSyntheticPdf(sessionToken, batchId, idempotencyKey, fileName, base64) {
+async function uploadSyntheticPdf(sessionToken, batchId, idempotencyKey, fileName, base64) {
   const result = await page.evaluate(async ({ sessionToken, batchId, idempotencyKey, fileName, base64 }) => {
     const bytes = Uint8Array.from(atob(base64), character => character.charCodeAt(0));
     const form = new FormData();
