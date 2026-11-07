@@ -268,6 +268,7 @@ function assertHttp(result, expected, label) {
 
 async function request(page, method, path, { token, sessionToken, body, headers = {}, expectedOrigin = baseUrl.origin } = {}) {
   assert.ok(page && typeof page.url === "function", "QA request requires an initialised browser page.");
+  await page.bringToFront();
   const currentPageUrl = page.url();
   assert.ok(currentPageUrl && currentPageUrl !== "about:blank",
     "QA request blocked: browser page is still about:blank. A required station/session navigation did not complete.");
@@ -352,6 +353,7 @@ function watchPage(targetPage) {
 }
 
 async function screenshot(page, name) {
+  await page.bringToFront();
   await page.screenshot({
     path: join(screenshotsDirectory, name.replace(/[^a-z0-9-]/gi, "-").toLowerCase() + ".png"),
     fullPage: true,
@@ -363,6 +365,8 @@ async function screenshot(page, name) {
 }
 
 async function openRoute(page, path, selector, label) {
+  await page.bringToFront();
+  console.log("[QA-VISIBLE] " + label + " | " + path);
   const response = await page.goto(new URL(path, baseUrl).toString(), {
     waitUntil: "domcontentloaded",
     timeout: 30000
@@ -477,6 +481,7 @@ async function signInPlatformAdmin(page, email, password) {
 }
 
 async function navigateSidebarSection(page, label, progressContext = "") {
+  await page.bringToFront();
   if (progressContext) console.log("[QA-PROGRESS] " + progressContext + " | opening " + label);
   const viewportWidth = await page.evaluate(() => window.innerWidth);
   const mobile = viewportWidth <= 850;
@@ -572,6 +577,7 @@ function syntheticPdf(pageCount = 2, label = "SmartPrint local QA synthetic docu
 }
 
 async function uploadSyntheticPdf(page, sessionToken, batchId, idempotencyKey, fileName, bytes) {
+  await page.bringToFront();
   const base64 = bytes.toString("base64");
   return await page.evaluate(async ({ sessionToken, batchId, idempotencyKey, fileName, base64 }) => {
     const content = Uint8Array.from(atob(base64), character => character.charCodeAt(0));
@@ -1143,13 +1149,22 @@ async function runAuthenticatedResponsiveMatrix(page, sections, label) {
 }
 
 try {
-  browser = await chromium.launch({ headless: false });
+  browser = await chromium.launch({
+    headless: false,
+    args: ["--start-maximized"]
+  });
   report.browser = "Playwright Chromium headed";
   report.browserVersion = browser.version();
   report.browserExecutablePath = chromium.executablePath();
   context = await browser.newContext({ viewport: { width: 1440, height: 1000 }, acceptDownloads: false });
-  context.on("page", watchPage);
+  context.on("page", targetPage => {
+    watchPage(targetPage);
+    targetPage.bringToFront().catch(error => {
+      console.warn("[QA-VISIBLE-WARN] Could not foreground a new Chromium tab: " + String(error?.message || error).slice(0, 200));
+    });
+  });
   page = await context.newPage();
+  await page.bringToFront();
   page.setDefaultTimeout(15000);
 
   await record("Local portal and API health", async () => {
