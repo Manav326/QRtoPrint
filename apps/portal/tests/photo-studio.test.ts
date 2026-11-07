@@ -56,7 +56,7 @@ test("name and DOB are opt-in and are absent from the default photo sheet",()=>{
  assert.match(studio,/const hasCaption=includeFormDetails&&Boolean\(photoName\.trim\(\)\|\|dateOfBirth\.trim\(\)\)/);
  assert.match(studio,/checked=\{includeFormDetails\}/);
  assert.match(studio,/\{includeFormDetails&&<>[\s\S]*?Name for form[\s\S]*?Date of birth/);
- assert.match(studio,/if\(!enabled\)\{setPhotoName\(""\);setDateOfBirth\(""\);\}/);
+ assert.match(studio,/if\(!enabled\)\{setPhotoName\("");setDateOfBirth\("");if\(activeTool==="text"\)setActiveTool\("sheet"\);}/);
 });
 
 
