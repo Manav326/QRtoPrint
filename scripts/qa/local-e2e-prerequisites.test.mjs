@@ -373,6 +373,10 @@ test("records declare cross-tenant and produced-document fixture dependencies", 
     ["Customer opens the shop-one station with authenticated customer identity", "PASS"],
     ["Create or sign in to the first real QA shop through the shop UI", "PASS"],
     ["Create or sign in to the second real QA shop through the shop UI", "PASS"],
+    ["Bootstrap-created platform administrator signs in through the real admin UI", "PASS"],
+    ["Create and publish a free QA-only plan through the platform UI", "PASS"],
+    ["Assign the QA-only plan to Shop One through the platform UI", "FAIL"],
+    ["Assign the QA-only plan to Shop Two through the platform UI", "FAIL"],
     ["Customer uploads a synthetic two-page PDF through the real portal UI", "FAIL"],
     ["Shop one provisions real QA printer and QR station", "PASS"],
     ["Shop one configures print pricing through the real UI", "PASS"],
@@ -380,6 +384,11 @@ test("records declare cross-tenant and produced-document fixture dependencies", 
     ["Shop one configures payment methods through the real UI", "PASS"],
     ["Real UPI payment intent, synthetic QA reference, and shop rejection without marking money received", "PASS"]
   ]);
+
+  assert.deepEqual(getBlockingPrerequisites(
+    "Platform admin navigates every real control-centre section",
+    statuses
+  ), [], "Read-only admin navigation must continue if either shop assignment fails.");
 
   assert.ok(getBlockingPrerequisites(
     "QR/UPLOAD: session renewal, scoped resume and invalid local-upload metadata are safely rejected",
