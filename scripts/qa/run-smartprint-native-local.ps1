@@ -434,7 +434,8 @@ if ($androidDevice) {
                     "-PsmartPrintLocalQa=true",
                     "-PsmartPrintVersionCode=$versionCode",
                     "-PsmartPrintVersionName=$versionName",
-                    "--info", ":app:connectedDebugAndroidTest"
+                    "--info", ":app:connectedDebugAndroidTest",
+                    "--serial", $androidDevice
                 )
                 $androidInstrumentationOk = Invoke-NativeStep -Name "Run the full Android Espresso instrumentation suite on the selected physical phone (.localqa only)" -Evidence (Join-Path $outputRoot "android-physical-instrumentation.log") -Action {
                     & $gradle.Source @androidInstrumentationArgs
