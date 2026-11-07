@@ -2,6 +2,8 @@
 
 **Status: Not yet physically verified.** CI and emulator results are development evidence only. Complete this checklist on real supported hardware before treating the Android customer/owner journeys as release-ready.
 
+**Photo Studio requirement:** The Android customer app renders the shared PhotoStudio inside its native WebView. Complete APHO-001–036 and repeat the full PSHT-001–031 geometry matrix using Android-generated PDFs; a successful WebView launch or desktop browser run is not physical Android acceptance.
+
 ## Acceptance principles
 
 ### QR link and session-transfer contract
