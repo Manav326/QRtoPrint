@@ -23,7 +23,7 @@ This is the master production-readiness suite for the capabilities currently rep
 
 One P0 failure blocks release. P1 failures require a fix/retest or a documented, time-bound risk acceptance by the release authority.
 
-**Mandatory role/surface supplement:** In addition to the 333 baseline catalogue cases in this file, execute the 70 role-based cases in [ROLE_BASED_CROSS_PLATFORM_QA.md](ROLE_BASED_CROSS_PLATFORM_QA.md). That supplement specifically verifies the current Android customer account/document studio, the actual Windows Desktop owner window, Web owner/customer journeys and complete cross-platform owner-to-customer continuity. The 70 cases are separate and are not implicitly passed by CI or the 262-case local Playwright gate.
+**Mandatory role/surface supplement:** In addition to the 333 baseline catalogue cases in this file, execute the 75 role-based cases in [ROLE_BASED_CROSS_PLATFORM_QA.md](ROLE_BASED_CROSS_PLATFORM_QA.md). That supplement specifically verifies the current Android customer account/document studio, the actual Windows Desktop owner window, Web owner/customer journeys and complete cross-platform owner-to-customer continuity. The 75 cases are separate and are not implicitly passed by CI or the 262-case local Playwright gate. History-based session continuity, restoration from customer Print History, terminal-job reprint rules and token/session isolation are separately covered by HST-001 through HST-005. A valid current-session/draft restore must not be confused with history-driven restoration; the latter is not currently implemented in the Android Activity history UI.
 
 ## 2. Product scope and known limitations
 
