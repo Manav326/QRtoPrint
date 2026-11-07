@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
-import { getBlockingPrerequisites } from "./local-e2e-prerequisites.mjs";
+import { executeIsolatedQaRecord } from "./local-e2e-record-runner.mjs";
 import { getUnexpectedHttpResponses } from "./local-e2e-http-audit.mjs";
 
 const moduleDirectory = process.env.PLAYWRIGHT_MODULE_DIR;
@@ -188,7 +188,6 @@ const recordCaseIdOwners = new Map();
 const plannedCaseIdSet = new Set(PLANNED_CASE_IDS);
 
 async function record(name, action, caseIds = CASE_IDS_BY_RECORD_NAME.get(name) ?? []) {
-  const started = Date.now();
   const checkId = "SP-LOCAL-" + String(report.checks.length + 1).padStart(3, "0");
   const seenInThisRecord = new Set();
   const duplicateCaseIds = [];
@@ -212,56 +211,29 @@ async function record(name, action, caseIds = CASE_IDS_BY_RECORD_NAME.get(name) 
     report.caseMappingErrors.push(mappingError);
     console.error("CASE MAPPING ERROR " + name + ": " + JSON.stringify(mappingError));
   }
-  const blockedBy = getBlockingPrerequisites(name, recordStatuses);
-  if (blockedBy.length > 0) {
-    const details = {
-      status: "SKIPPED",
-      reason: "Required setup did not pass.",
-      blockedBy
-    };
-    report.checks.push({
-      id: checkId,
-      name,
-      caseIds,
-      status: "SKIPPED",
-      durationMs: Date.now() - started,
-      details
-    });
-    recordStatuses.set(name, "SKIPPED");
-    console.warn("SKIPPED " + name + " (blocked by: " + blockedBy.join("; ") + ")");
-    return null;
+
+  const outcome = await executeIsolatedQaRecord({
+    name,
+    action,
+    caseIds,
+    checkId,
+    recordStatuses
+  });
+  report.checks.push(outcome.check);
+
+  if (outcome.status === "WARN") {
+    report.warnings.push({ name, message: outcome.warning || "The check completed with a warning." });
+    console.warn("WARN " + name + ": " + (outcome.warning || "The check completed with a warning."));
+  } else if (outcome.status === "FAIL") {
+    report.errors.push({ name, message: outcome.errorMessage || outcome.check.error || "The check failed." });
+    console.error("FAIL " + name + ": " + (outcome.errorMessage || outcome.check.error || "The check failed."));
+  } else if (outcome.status === "SKIPPED") {
+    console.warn("SKIPPED " + name + " (blocked by: " + (outcome.check.details?.blockedBy || []).join("; ") + ")");
+  } else {
+    console.log("PASS " + name);
   }
 
-  try {
-    const details = await action();
-    const status = details?.status === "SKIPPED" ? "SKIPPED" : details?.warning ? "WARN" : "PASS";
-    if (status === "WARN") report.warnings.push({ name, message: details.warning });
-    recordStatuses.set(name, status);
-    report.checks.push({
-      id: checkId,
-      name,
-      caseIds,
-      status,
-      durationMs: Date.now() - started,
-      details: details ?? null
-    });
-    console.log(status + " " + name);
-    return details;
-  } catch (error) {
-    const message = String(error instanceof Error ? error.message : error).slice(0, 1600);
-    report.checks.push({
-      id: checkId,
-      name,
-      caseIds,
-      status: "FAIL",
-      durationMs: Date.now() - started,
-      error: message
-    });
-    report.errors.push({ name, message });
-    recordStatuses.set(name, "FAIL");
-    console.error("FAIL " + name + ": " + message);
-    return null;
-  }
+  return outcome.check.details ?? null;
 }
 
 function markExpectedHttpError(result) {
