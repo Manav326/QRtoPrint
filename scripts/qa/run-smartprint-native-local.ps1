@@ -46,12 +46,13 @@ $results = [System.Collections.Generic.List[object]]::new()
 $runStamp = Get-Date -Format "yyyyMMdd-HHmmss"
 $script:stepNumber = 0
 
-function Add-NativeResult([string]$Name, [string]$Status, [string]$Detail = "", [string]$Evidence = "") {
+function Add-NativeResult([string]$Name, [string]$Status, [string]$Detail = "", [string]$Evidence = "", [string]$Log = "") {
     $script:results.Add([PSCustomObject]@{
         name = $Name
         status = $Status
         detail = $Detail
         evidence = $Evidence
+        log = $Log
     })
     $colour = switch ($Status) {
         "PASS" { "Green" }
@@ -70,12 +71,17 @@ function Invoke-NativeStep {
     )
     $script:stepNumber++
     $timer = [Diagnostics.Stopwatch]::StartNew()
+    $logSlug = [regex]::Replace($Name.ToLowerInvariant(), "[^a-z0-9]+", "-").Trim("-")
+    $logPath = Join-Path $outputRoot ("{0:00}-{1}.log" -f $script:stepNumber, $logSlug)
     Write-QA ("[QA-STEP-START] {0:00} | {1}" -f $script:stepNumber, $Name)
+    Write-QA ("Live output and full details: " + $logPath) "DarkCyan"
     $status = "PASS"
     $detail = ""
     try {
         $global:LASTEXITCODE = 0
-        & $Action
+        & $Action 2>&1 | Tee-Object -FilePath $logPath -ErrorAction Stop | ForEach-Object {
+            Write-Host $_
+        }
         if ($null -ne $LASTEXITCODE -and [int]$LASTEXITCODE -ne 0) {
             throw "Native command exited with code $LASTEXITCODE."
         }
@@ -83,12 +89,13 @@ function Invoke-NativeStep {
     } catch {
         $status = "FAIL"
         $detail = $_.Exception.Message
+        ($_ | Out-String) | Add-Content -LiteralPath $logPath
         Write-Host ($_.Exception | Out-String) -ForegroundColor Red
     } finally {
         $timer.Stop()
         Write-QA ("[QA-STEP-END] {0} | {1} | elapsed={2:n1}s" -f $status, $Name, $timer.Elapsed.TotalSeconds) $(if ($status -eq "PASS") { "Green" } else { "Red" })
     }
-    Add-NativeResult $Name $status $detail $Evidence
+    Add-NativeResult $Name $status $detail $Evidence $logPath
     return ($status -eq "PASS")
 }
 
