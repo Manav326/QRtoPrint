@@ -226,7 +226,12 @@ if ($desktopBuildNativeOk -and (Test-Path -LiteralPath $desktopExe -PathType Lea
     try {
         # Do not launch a second copy when the installed app or a previous QA
         # copy is already open, even when its executable path differs.
-        $existingDesktop = @(Get-CimInstance -ClassName Win32_Process -Filter "Name='smartprint-desktop.exe'" -ErrorAction Stop)
+        $desktopProcessNames = @(
+            [string]$qaConfig.apps.windows.nativeExecutableName,
+            [string]$qaConfig.apps.windows.executableName
+        )
+        $existingDesktop = @(Get-CimInstance -ClassName Win32_Process -ErrorAction Stop |
+            Where-Object { $desktopProcessNames -contains $_.Name })
     } catch {
         $desktopProcessInspectionSucceeded = $false
         Write-QA "Could not safely inspect running SmartPrint Desktop processes." "Yellow"
@@ -235,7 +240,7 @@ if ($desktopBuildNativeOk -and (Test-Path -LiteralPath $desktopExe -PathType Lea
     if (-not $desktopProcessInspectionSucceeded) {
         Add-NativeResult "Windows Desktop native window and rendered workspace" "SKIPPED" "Process inspection failed. The QA runner will not launch a second Desktop session when it cannot prove the workspace is closed."
     } elseif ($existingDesktop.Count -gt 0) {
-        Add-NativeResult "Windows Desktop native window and rendered workspace" "SKIPPED" "A SmartPrint Desktop session is already running. Close it manually and rerun this step; QA will not take over or close the user's active workspace."
+        Add-NativeResult "Windows Desktop native window and rendered workspace" "SKIPPED" "A SmartPrint Desktop session is already running under either the native or installed executable name. Close it manually and rerun this step; QA will not take over or close the user's active workspace."
     } else {
         $smokeScript = Join-Path $PSScriptRoot "desktop-open-smoke.ps1"
         if (Test-Path -LiteralPath $smokeScript -PathType Leaf) {
