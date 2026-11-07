@@ -2261,13 +2261,13 @@ try {
       await studio.getByRole("button", { name: "Set background #f3f6fa" }).click();
       assert.equal(await studio.getByRole("button", { name: "Set background #f3f6fa" }).getAttribute("aria-pressed"), "true");
 
-      await studio.getByRole("button", { name: "Sheet" }).click();
+      await studio.getByRole("button", { name: "Sheet", exact: true }).click();
       await studio.getByRole("checkbox", { name: /Add name and DOB to each photo/ }).check();
       await studio.getByLabel("Name for form (optional)").fill("SmartPrint QA Photo");
       await studio.getByLabel("Date of birth (optional)").fill("1990-01-02");
       await studio.getByRole("button", { name: "Text" }).click();
       await studio.getByLabel("Caption font size").selectOption("7");
-      await studio.getByRole("button", { name: "Sheet" }).click();
+      await studio.getByRole("button", { name: "Sheet", exact: true }).click();
 
       await studio.getByLabel("Photo size").selectOption("25x35");
       const photoCount = studio.getByLabel("Number of photos");
