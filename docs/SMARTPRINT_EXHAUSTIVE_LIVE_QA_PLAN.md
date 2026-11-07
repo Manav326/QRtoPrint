@@ -52,6 +52,7 @@ For routine test-harness changes, use the incremental runner instead of rebuildi
 The runner fetches the current checked-out branch from origin and fast-forwards only when the working tree is clean. It does not stash, reset, rebase, or discard local changes. It compares the files changed by that pull:
 
 - Changes limited to scripts/qa/, test folders, docs/, .github/, or Markdown files: it reuses the running API, Portal, PostgreSQL and Agent. **No Docker image build and no container restart.** It also uses the already cached Playwright package/browser rather than installing them again.
+- Before Chromium starts, it syntax-checks every QA JavaScript module and runs the existing prerequisite/isolation and HTTP-audit regression tests with Node's built-in test runner. A failure stops before the live journey.
 - Any other changed path is conservatively treated as application/runtime-affecting. Only the existing API and Portal services are built/refreshed; PostgreSQL and its data volume, QA identities and Agent remain untouched.
 - If the existing services are missing, stopped, or unhealthy in reuse mode, the runner stops with a diagnostic instead of recreating them.
 
