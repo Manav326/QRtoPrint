@@ -25,6 +25,8 @@ public static class PhotoSheetPdfRules
                 if (page.ValueKind != JsonValueKind.Object ||
                     !page.TryGetProperty("widthPoints", out var widthElement) ||
                     !page.TryGetProperty("heightPoints", out var heightElement) ||
+                    widthElement.ValueKind != JsonValueKind.Number ||
+                    heightElement.ValueKind != JsonValueKind.Number ||
                     !widthElement.TryGetDouble(out var width) ||
                     !heightElement.TryGetDouble(out var height) ||
                     Math.Abs(width - A4WidthPoints) > MediaBoxTolerancePoints ||
