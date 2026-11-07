@@ -2615,6 +2615,27 @@ shop.MapPost("/photo-jobs", async (
             DuplicateRequest = false
         });
     }
+    catch (DbUpdateException)
+    {
+        await transaction.RollbackAsync(ct);
+        if (stored is not null)
+        {
+            await storage.DeleteAsync(stored.StorageKey);
+            stored = null;
+        }
+
+        // A concurrent request may have won the unique (TenantId, IdempotencyKey)
+        // insert. Do not create another job/payment or surface a generic 500.
+        var concurrentJobExists = await db.PrintJobs.AsNoTracking().AnyAsync(
+            item => item.TenantId == tenantId && item.IdempotencyKey == idempotencyKey, ct);
+        if (concurrentJobExists)
+            return Results.Conflict(new
+            {
+                code = "photo_order_created_concurrently",
+                message = "This photo order was submitted at the same time in another window. Refresh the Print Queue; retry with the same request key to retrieve the created order."
+            });
+        throw;
+    }
     catch
     {
         await transaction.RollbackAsync(ct);
