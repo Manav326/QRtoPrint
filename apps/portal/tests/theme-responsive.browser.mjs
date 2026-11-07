@@ -543,6 +543,9 @@ async function exerciseWorkspaceSections(page, route, viewport, themeLabel) {
     ? ["Order Journey", "Overview", "Print Queue", "Customers", "Printers", "QR Stations", "Print Agent", "Pricing", "Payments", "Reports"]
     : ["Overview", "Shop tenants", "Plans & entitlements", "Shop subscriptions", "Operations & retention"];
   for (const section of sections) {
+    const caseName = `${route.label} / ${section} / ${themeLabel} / ${viewport.width}px`;
+    const caseStartedAt = Date.now();
+    console.log(`[QA-CASE-START] ${caseName} | activating navigation and checking section layout/contrast`);
     if (viewport.width <= 850) await page.getByRole("button", { name: "Open navigation" }).click();
     const destination = page.locator(".sidebar").getByRole("button", { name: section, exact: true });
     await destination.click();
@@ -556,7 +559,7 @@ async function exerciseWorkspaceSections(page, route, viewport, themeLabel) {
     }
     // The native desktop shell intentionally hides the web breadcrumb; verify
     // the selected navigation item instead of waiting for hidden header text.
-    console.log(`[workspace QA] ${route.label} / ${section} / ${viewport.width}px / ${themeLabel}`);
+    console.log(`[QA-PROGRESS] ${caseName} | navigation activated; verifying selected state`);
     try {
       await page.waitForFunction(
         label => [...document.querySelectorAll(".sidebar .nav-item")]
@@ -571,7 +574,8 @@ async function exerciseWorkspaceSections(page, route, viewport, themeLabel) {
     }
     await assertNoHorizontalOverflow(page, route, viewport);
     await assertRouteContrast(page, route);
-    results.push({ check: `${route.label} / ${section} / ${themeLabel} / ${viewport.width}px`, passed: true });
+    results.push({ check: caseName, passed: true });
+    console.log(`[QA-CASE-END] PASS | elapsed=${((Date.now() - caseStartedAt) / 1000).toFixed(1)}s | ${caseName}`);
   }
 
   if (route.auth === "shop") {
