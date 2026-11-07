@@ -233,6 +233,8 @@ test("Android stable resource IDs are preferred, with semantic fallback for the 
   assert.match(publishedAppsSource, /function Find-AndroidUiNodeByResourceId/);
   assert.match(publishedAppsSource, /function Find-AndroidUiNodeByLabel/);
   assert.match(publishedAppsSource, /return \(Find-AndroidUiNodeByLabel/);
-  assert.match(publishedAppsSource, /smartprint_home_heading/);
-  assert.match(publishedAppsSource, /smartprint_files_heading/);
+  assert.match(publishedAppsSource, /Settings\.uiAutomationIds\.homeHeading/);
+  assert.match(publishedAppsSource, /Settings\.uiAutomationIds\.filesHeading/);
+  assert.equal(config.apps.android.uiAutomationIds.homeHeading, "smartprint_home_heading");
+  assert.equal(config.apps.android.uiAutomationIds.filesHeading, "smartprint_files_heading");
 });
