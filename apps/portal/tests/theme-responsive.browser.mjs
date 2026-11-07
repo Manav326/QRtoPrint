@@ -838,6 +838,7 @@ async function setPhotoInputValue(locator, value) {
     element.dispatchEvent(new Event("input", { bubbles: true }));
     element.dispatchEvent(new Event("change", { bubbles: true }));
   }, value);
+  await locator.page().waitForTimeout(60);
 }
 
 async function setPhotoRange(dialog, label, value) {
@@ -845,6 +846,7 @@ async function setPhotoRange(dialog, label, value) {
   assert.equal(await range.count(), 1, "Photo Studio must expose exactly one " + label + " range.");
   await setPhotoInputValue(range, value);
   await range.evaluate(element => element.blur());
+  await dialog.page().waitForTimeout(60);
   assert.equal(Number(await range.inputValue()), Number(value), label + " must accept its configured boundary.");
   return range;
 }
@@ -1139,35 +1141,47 @@ async function exercisePhotoStudioFailurePaths() {
     {query:"?mode=customer&source=invalid",expected:"This image could not be opened. Choose a JPG or PNG photo."},
     {query:"?mode=customer&prices=disabled",expected:"Photo printing is not enabled for any size at this shop."}
   ]) {
-    const context = await browser.newContext({viewport:{width:1024,height:820}});
+    for (const scenario of [
+    { query: "?mode=customer&failApply=1", error: "Simulated Photo Studio save failure", retry: true },
+    { query: "?mode=customer&failRender=1", error: "The photo sheet could not be rendered.", retry: true }
+  ]) {
+    const context = await browser.newContext({ viewport: { width: 1024, height: 820 } });
     try {
       const page = await context.newPage();
-      const opened = await openPhotoStudioFixture(page,scenario.query);
-      await page.getByRole("alert").filter({hasText:scenario.expected}).waitFor({state:"visible"});
-      assert.equal(await opened.dialog.getByRole("button",{name:"Prepare A4 sheet"}).isDisabled(),true);
+      const opened = await openPhotoStudioFixture(page, scenario.query);
+      const apply = opened.dialog.getByRole("button", { name: "Prepare A4 sheet" });
+      await apply.click();
+      await opened.dialog.getByRole("alert").filter({ hasText: scenario.error }).waitFor({ state: "visible" });
+      assert.equal(await apply.isDisabled(), false, "A failed apply/render must clear busy state so the customer can retry.");
+      assert.equal(await page.locator("#photo-studio-result").innerText(), "", "A failed operation must not report a prepared PDF.");
+      if (scenario.retry) {
+        await apply.click();
+        await page.waitForFunction(() => document.querySelector("#photo-studio-result")?.textContent?.includes('"mediaType":"application/pdf"'));
+        const result = JSON.parse(await page.locator("#photo-studio-result").innerText());
+        assert.equal(result.photoCount, 8);
+        assert.equal(result.pageCount, 1);
+        assert.match(result.fileName, /^photo-studio-qa-35x45-photos\.pdf$/);
+      }
     } finally {
       await context.close();
     }
   }
 
-  const context = await browser.newContext({viewport:{width:1024,height:820}});
+  const largeContext = await browser.newContext({ viewport: { width: 1024, height: 820 } });
   try {
-    const page = await context.newPage();
-    const opened = await openPhotoStudioFixture(page,"?mode=customer&failApply=1");
-    const apply = opened.dialog.getByRole("button",{name:"Prepare A4 sheet"});
+    const page = await largeContext.newPage();
+    const opened = await openPhotoStudioFixture(page, "?mode=customer&oversizeRaster=1");
+    const apply = opened.dialog.getByRole("button", { name: "Prepare A4 sheet" });
     await apply.click();
-    await opened.dialog.getByRole("alert").filter({hasText:"Simulated Photo Studio save failure"}).waitFor({state:"visible"});
-    assert.equal(await apply.isDisabled(),false,"A failed save must clear busy state so a deliberate retry is possible.");
-    assert.equal(await page.locator("#photo-studio-result").innerText(),"","A failed save must not report a prepared sheet.");
-    await apply.click();
-    await page.waitForFunction(() => document.querySelector("#photo-studio-result")?.textContent?.includes('"mediaType":"application/pdf"'));
-    const result=JSON.parse(await page.locator("#photo-studio-result").innerText());
-    assert.equal(result.photoCount,8);
-    assert.equal(result.pageCount,1);
-    console.log("[QA-CASE-END] PASS | Photo Studio malformed input, no-price state and apply retry.");
+    await opened.dialog.getByRole("alert").filter({ hasText: /20 MB file limit/ }).waitFor({ state: "visible" });
+    assert.equal(await apply.isDisabled(), false, "An over-limit PDF must fail before submission and release the editor.");
+    assert.equal(await page.locator("#photo-studio-result").innerText(), "",
+      "An oversized render must never be reported as prepared or submitted.");
   } finally {
-    await context.close();
+    await largeContext.close();
   }
+  console.log("[QA-CASE-END] PASS | Photo Studio malformed input, missing prices, save/render retry and 20 MB output limit.");
+
 }
 
 async function assertThemeToggle(page) {
