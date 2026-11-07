@@ -2259,6 +2259,19 @@ shop.MapPost("/photo-jobs", async (
             ["idempotencyKey"] = ["Refresh this form and retry with its original request key."]
         });
     var idempotencyKey = $"SHOP-PHOTO-{requestKey:N}";
+    var paymentMethod = form["paymentMethod"].FirstOrDefault();
+    if (paymentMethod is not ("UPI" or "CASH"))
+        return Results.ValidationProblem(new Dictionary<string, string[]>
+        {
+            ["paymentMethod"] = ["Choose UPI or cash at counter."]
+        });
+
+    var paymentSettings = await db.ShopPaymentProfiles.AsNoTracking()
+        .SingleOrDefaultAsync(item => item.TenantId == tenantId, ct);
+    if (paymentSettings is null ||
+        (paymentMethod == "UPI" && (!paymentSettings.UpiEnabled || string.IsNullOrWhiteSpace(paymentSettings.UpiId))) ||
+        (paymentMethod == "CASH" && !paymentSettings.CashEnabled))
+        return Results.Conflict(new { code = "payment_method_unavailable", message = "The selected payment method is not enabled for this shop. Update Payment Settings and try again." });
 
     var photoSizeCode = form["photoSizeCode"].FirstOrDefault() ?? string.Empty;
     if (photoSizeCode is not ("35x45" or "25x35" or "2x2" or "4x6") ||
@@ -2361,14 +2374,6 @@ shop.MapPost("/photo-jobs", async (
     StoredDocument? stored = null;
     try
     {
-        await entitlements.AcquireQuotaLockAsync(tenantId, TenantQuotaResource.MonthlyPrintJob, ct);
-        var quota = await entitlements.CheckCapacityAsync(tenantId, TenantQuotaResource.MonthlyPrintJob, ct);
-        if (!quota.Allowed)
-        {
-            await transaction.RollbackAsync(ct);
-            return Results.Conflict(new { code = quota.Code, message = quota.Message, current = quota.Current, maximum = quota.Maximum });
-        }
-
         var now = DateTimeOffset.UtcNow;
         var documentId = Guid.NewGuid();
         var jobId = Guid.NewGuid();
@@ -2457,6 +2462,16 @@ shop.MapPost("/photo-jobs", async (
             });
         }
 
+        await entitlements.AcquireQuotaLockAsync(tenantId, TenantQuotaResource.MonthlyPrintJob, ct);
+        var quota = await entitlements.CheckCapacityAsync(tenantId, TenantQuotaResource.MonthlyPrintJob, ct);
+        if (!quota.Allowed)
+        {
+            await storage.DeleteAsync(stored.StorageKey);
+            stored = null;
+            await transaction.RollbackAsync(ct);
+            return Results.Conflict(new { code = quota.Code, message = quota.Message, current = quota.Current, maximum = quota.Maximum });
+        }
+
         var job = new PrintJob
         {
             Id = jobId,
@@ -2468,7 +2483,7 @@ shop.MapPost("/photo-jobs", async (
             RecipientName = recipientName,
             RecipientPhone = recipientPhone,
             JobNumber = jobNumber,
-            Status = "AWAITING_SHOP_APPROVAL",
+            Status = paymentMethod == "UPI" ? "AWAITING_CUSTOMER_PAYMENT" : "AWAITING_COUNTER_PAYMENT",
             IdempotencyKey = idempotencyKey,
             PageCount = expectedPageCount,
             Copies = 1,
@@ -2516,7 +2531,32 @@ shop.MapPost("/photo-jobs", async (
             NewStatus = job.Status,
             ActorType = "ShopUser",
             ActorId = GetActorId(principal),
-            ReasonCode = "SHOP_PHOTO_ORDER_CREATED",
+            ReasonCode = "SHOP_PHOTO_ORDER_CREATED_AWAITING_PAYMENT",
+            CreatedUtc = now
+        });
+        var payment = new PrintPayment
+        {
+            TenantId = tenantId,
+            PrintJobId = job.Id,
+            Method = paymentMethod,
+            Status = paymentMethod == "UPI" ? "AWAITING_CUSTOMER_PAYMENT" : "CASH_AWAITING_PAYMENT",
+            AmountMinor = amount,
+            Currency = job.Currency,
+            UpiIdSnapshot = paymentMethod == "UPI" ? paymentSettings.UpiId : null,
+            PayeeNameSnapshot = paymentMethod == "UPI" ? paymentSettings.PayeeName : null,
+            CreatedUtc = now,
+            UpdatedUtc = now
+        };
+        db.PrintPayments.Add(payment);
+        db.PrintJobEvents.Add(new PrintJobEvent
+        {
+            TenantId = tenantId,
+            PrintJobId = job.Id,
+            PreviousStatus = job.Status,
+            NewStatus = job.Status,
+            ActorType = "ShopUser",
+            ActorId = GetActorId(principal),
+            ReasonCode = paymentMethod == "UPI" ? "SHOP_PHOTO_UPI_PAYMENT_PENDING" : "SHOP_PHOTO_CASH_PAYMENT_PENDING",
             CreatedUtc = now
         });
 
@@ -2543,6 +2583,7 @@ shop.MapPost("/photo-jobs", async (
                 job.QuoteExpiresUtc,
                 job.CreatedUtc
             },
+            Payment = new { payment.Id, payment.Method, payment.Status, payment.AmountMinor, payment.Currency, payment.UpiIdSnapshot, payment.PayeeNameSnapshot },
             Document = new
             {
                 document.Id,
