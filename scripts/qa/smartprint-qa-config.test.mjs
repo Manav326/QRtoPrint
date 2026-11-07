@@ -410,6 +410,12 @@ test('native QA logs each named step and produces separate machine-readable evid
   assert.match(nativeLocalRunnerSource, /results\.txt/);
 });
 
+test('native local QA propagates failure to the parent runner without terminating its summary/finally block', () => {
+  assert.match(nativeLocalRunnerSource, /throw "Local native application QA recorded \$failed failed check\(s\)\./);
+  assert.doesNotMatch(nativeLocalRunnerSource, /if \(\$failed -gt 0\) \{ exit 1 \}/);
+  assert.match(localNativeOrchestratorSource, /Invoke-QAStep .*Local Windows Desktop native tests and Android side-by-side device acceptance/);
+});
+
 test('physical Android QA runs the full existing Espresso instrumentation suite on one explicitly selected device', () => {
   assert.match(nativeLocalRunnerSource, /Run the full Android Espresso instrumentation suite on the selected physical phone/);
   assert.match(nativeLocalRunnerSource, /:app:connectedDebugAndroidTest/);
