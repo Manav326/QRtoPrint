@@ -276,20 +276,64 @@ jobs:
           Copy-Item -LiteralPath $nativeExe -Destination "artifacts/desktop/SmartPrint.Desktop.exe"
           Get-ChildItem -Path "apps/desktop/src-tauri/target/release" -Filter "*.dll" -File |
             Copy-Item -Destination "artifacts/desktop" -Force
-      - name: Smoke-test native desktop launch and rendered WebView2 frontend
-        if: ${{ !cancelled() && steps.desktop_executable_build.outcome == 'success' }}
-        shell: pwsh
-        run: ./scripts/qa/desktop-open-smoke.ps1 -ExecutablePath "apps/desktop/src-tauri/target/release/smartprint-desktop.exe"
-      - name: Bundle the Microsoft WebView2 Evergreen bootstrapper
+      - name: Install and bundle the Microsoft WebView2 Evergreen Runtime
+        id: webview2_runtime
         if: ${{ !cancelled() && steps.desktop_executable_build.outcome == 'success' }}
         shell: pwsh
         run: |
           $bootstrapper = "artifacts/desktop/MicrosoftEdgeWebView2RuntimeInstallerX64.exe"
+          New-Item -ItemType Directory -Force -Path "artifacts/desktop" | Out-Null
           Invoke-WebRequest -Uri "https://go.microsoft.com/fwlink/p/?LinkId=2124703" -OutFile $bootstrapper -MaximumRedirection 10
           $signature = Get-AuthenticodeSignature -LiteralPath $bootstrapper
           if ($signature.Status -ne [System.Management.Automation.SignatureStatus]::Valid -or $signature.SignerCertificate.Subject -notmatch "Microsoft") {
             throw "The downloaded WebView2 prerequisite did not pass Microsoft Authenticode verification."
           }
+
+          function Find-WebView2RuntimeExecutable {
+            $roots = @(
+              (Join-Path ${env:ProgramFiles(x86)} "Microsoft\EdgeWebView\Application"),
+              (Join-Path ${env:ProgramFiles} "Microsoft\EdgeWebView\Application"),
+              (Join-Path ${env:LOCALAPPDATA} "Microsoft\EdgeWebView\Application")
+            )
+            $candidates = @()
+            foreach ($root in $roots) {
+              if (-not (Test-Path -LiteralPath $root -PathType Container)) { continue }
+              foreach ($directory in Get-ChildItem -LiteralPath $root -Directory -ErrorAction SilentlyContinue) {
+                try { $version = [version]$directory.Name }
+                catch { continue }
+                $runtimePath = Join-Path $directory.FullName "msedgewebview2.exe"
+                if (Test-Path -LiteralPath $runtimePath -PathType Leaf) {
+                  $candidates += [PSCustomObject]@{ Version = $version; Path = $runtimePath }
+                }
+              }
+            }
+            return ($candidates | Sort-Object Version -Descending | Select-Object -First 1)
+          }
+
+          $runtime = Find-WebView2RuntimeExecutable
+          if (-not $runtime) {
+            Write-Host "No Evergreen WebView2 Runtime was installed on this runner; installing the verified Microsoft bootstrapper."
+            $installer = Start-Process -FilePath $bootstrapper -ArgumentList @("/silent", "/install") -Wait -PassThru
+            if ($installer.ExitCode -notin @(0, 3010)) {
+              throw "WebView2 Runtime installation failed with exit code $($installer.ExitCode)."
+            }
+            $deadline = [DateTime]::UtcNow.AddSeconds(45)
+            do {
+              $runtime = Find-WebView2RuntimeExecutable
+              if ($runtime) { break }
+              Start-Sleep -Seconds 1
+            } while ([DateTime]::UtcNow -lt $deadline)
+          }
+          if (-not $runtime) {
+            throw "Microsoft WebView2 Runtime is still not present after the signed bootstrapper completed."
+          }
+          $runtimeVersion = (Get-Item -LiteralPath $runtime.Path).VersionInfo.ProductVersion
+          Write-Host "PASS: WebView2 Runtime $runtimeVersion is installed at $($runtime.Path)."
+
+      - name: Smoke-test native desktop launch and rendered WebView2 frontend
+        if: ${{ !cancelled() && steps.desktop_executable_build.outcome == 'success' && steps.webview2_runtime.outcome == 'success' }}
+        shell: pwsh
+        run: ./scripts/qa/desktop-open-smoke.ps1 -ExecutablePath "apps/desktop/src-tauri/target/release/smartprint-desktop.exe"
       - name: Upload Windows desktop package
         id: desktop_package_upload
         if: ${{ always() && steps.desktop_executable_build.outcome == 'success' }}

@@ -12,6 +12,34 @@ if (-not (Test-Path -LiteralPath $executable -PathType Leaf)) {
     throw "SmartPrint Desktop executable does not exist: $executable"
 }
 
+function Find-WebView2RuntimeExecutable {
+    $roots = @(
+        (Join-Path ${env:ProgramFiles(x86)} "Microsoft\EdgeWebView\Application"),
+        (Join-Path ${env:ProgramFiles} "Microsoft\EdgeWebView\Application"),
+        (Join-Path ${env:LOCALAPPDATA} "Microsoft\EdgeWebView\Application")
+    )
+    $candidates = @()
+    foreach ($root in $roots) {
+        if (-not (Test-Path -LiteralPath $root -PathType Container)) { continue }
+        foreach ($directory in Get-ChildItem -LiteralPath $root -Directory -ErrorAction SilentlyContinue) {
+            try { $version = [version]$directory.Name }
+            catch { continue }
+            $runtimePath = Join-Path $directory.FullName "msedgewebview2.exe"
+            if (Test-Path -LiteralPath $runtimePath -PathType Leaf) {
+                $candidates += [PSCustomObject]@{ Version = $version; Path = $runtimePath }
+            }
+        }
+    }
+    return ($candidates | Sort-Object Version -Descending | Select-Object -First 1)
+}
+
+$webViewRuntime = Find-WebView2RuntimeExecutable
+if (-not $webViewRuntime) {
+    throw "Microsoft Edge WebView2 Runtime is not installed for this Windows user. Install the Evergreen Runtime before running the desktop smoke test."
+}
+$webViewRuntimeVersion = (Get-Item -LiteralPath $webViewRuntime.Path).VersionInfo.ProductVersion
+Write-Host "WebView2 Runtime: $webViewRuntimeVersion ($($webViewRuntime.Path))" -ForegroundColor Cyan
+
 # Give this smoke-test process a private WebView2 DevTools port so the test can
 # verify that the embedded frontend rendered, not merely that an EXE stayed alive.
 $listener = [System.Net.Sockets.TcpListener]::new([System.Net.IPAddress]::Loopback, 0)
