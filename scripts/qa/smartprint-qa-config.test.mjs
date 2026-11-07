@@ -395,11 +395,13 @@ test('native local QA refuses to mutate existing Agent pairing, network and prin
 });
 
 test('native local QA refuses to take over an already-running Desktop session', () => {
-  assert.match(nativeLocalRunnerSource, /Get-CimInstance -ClassName Win32_Process -Filter "Name='smartprint-desktop\.exe'"/);
-  assert.match(nativeLocalRunnerSource, /A SmartPrint Desktop session is already running/);
+  assert.match(nativeLocalRunnerSource, /apps\.windows\.nativeExecutableName/);
+  assert.match(nativeLocalRunnerSource, /apps\.windows\.executableName/);
+  assert.match(nativeLocalRunnerSource, /Get-CimInstance -ClassName Win32_Process -ErrorAction Stop/);
+  assert.match(nativeLocalRunnerSource, /desktopProcessNames -contains \$_.Name/);
+  assert.match(nativeLocalRunnerSource, /A SmartPrint Desktop session is already running under either the native or installed executable name/);
   assert.match(nativeLocalRunnerSource, /will not take over or close the user's active workspace/);
 });
-
 test('native QA logs each named step and produces separate machine-readable evidence', () => {
   assert.match(nativeLocalRunnerSource, /\[QA-STEP-START\]/);
   assert.match(nativeLocalRunnerSource, /\[QA-STEP-END\]/);
