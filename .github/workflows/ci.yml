@@ -496,7 +496,8 @@ jobs:
           docker run --detach --name "$collision_api" --network cloudflare-edge --network-alias api nginx:alpine sh -ec "printf '%s\\n' 'server {' '  listen 8080;' '  default_type application/json;' '  location / { return 401; }' '}' > /etc/nginx/conf.d/default.conf && exec nginx -g 'daemon off;'"
           collision_ready=false
           for attempt in $(seq 1 30); do
-            if docker exec "$collision_api" wget -S -O /dev/null http://127.0.0.1:8080/ 2>&1 | grep -q '401'; then
+            collision_probe="$(docker exec "$collision_api" wget -S -O /dev/null http://127.0.0.1:8080/ 2>&1 || true)"
+            if grep -q '401' <<< "$collision_probe"; then
               collision_ready=true
               break
             fi
