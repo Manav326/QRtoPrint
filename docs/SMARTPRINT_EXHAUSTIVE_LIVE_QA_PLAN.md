@@ -187,7 +187,7 @@ This is **not source-code line or branch coverage**. No 90% code-coverage claim 
 | Shop navigation/account tools | SHOPUI-001–027 | 27 | Both shop workspaces, all primary sections, account-menu tools and authenticated responsive navigation |
 | Shop reports | REPORT-001–004 | 4 | 7/30/90-day summaries, unsupported range rejection and both tenant report scopes |
 | Authorization and isolation | RBAC-001–010 | 10 | Shop/admin/customer role separation, customer/shop/platform cross-role denial, foreign tenant resource access and cross-tenant job-history denial |
-| QR station/session lifecycle | QR-001–013 | 13 | Session renewal/resume, session-to-station binding, station enable/disable, rotation invalidates old code and new code can create a session |
+| QR station/session lifecycle | QR-001–013 | 13 | Ordinary HTTPS link opens a guest station session; authenticated native-account header binds a session to the customer; session token never enters the URL; renewal/resume, station binding, enable/disable and code rotation are covered |
 | Customer account linkage | CUST-001–002 | 2 | QR print session tied to global customer identity and customer job-history endpoint |
 | Local upload validation | UPLOAD-001–004 | 4 | Invalid digest and unsupported extension fail closed before a local upload ticket can be issued |
 | Document upload | DOC-001–006 | 6 | Malformed PDF rejected without job creation, real synthetic PDF upload, two-page parsing, quote preparation and saved job metadata |

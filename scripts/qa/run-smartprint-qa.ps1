@@ -815,15 +815,25 @@ try {
         if (-not $gradle -or [string]::IsNullOrWhiteSpace($sdkRoot) -or -not (Test-Path -LiteralPath $sdkRoot -PathType Container)) {
             Add-QAResult -Name "Android local JVM and emulator suites" -Status "SKIPPED" -Detail "System Gradle and Android SDK are required; the script will not install to physical phones."
         } else {
+            $androidUnitTestArgs = @(
+                "--no-daemon", "-p", "apps/android",
+                "-PsmartPrintServiceUrl=http://10.0.2.2:3000",
+                ":app:testDebugUnitTest"
+            )
+            $androidUnitTestsOk = Invoke-QAStep -Name "Android native JVM unit tests against the local portal configuration" -LogName "android-unit-tests.log" -Action {
+                & $gradle.Source @androidUnitTestArgs
+            }
+            if (-not $androidUnitTestsOk) { $exitCode = 1 }
+
             $androidBuildArgs = @(
                 "--no-daemon", "-p", "apps/android",
                 "-PsmartPrintServiceUrl=http://10.0.2.2:3000",
-                ":app:testDebugUnitTest", ":app:assembleDebug"
+                ":app:assembleDebug"
             )
-            $androidBuildOk = Invoke-QAStep -Name "Android native JVM tests and local-portal debug APK build" -LogName "android-unit-build.log" -Action {
+            $androidApkBuildOk = Invoke-QAStep -Name "Build Android debug APK for emulator acceptance" -LogName "android-apk-build.log" -Action {
                 & $gradle.Source @androidBuildArgs
             }
-            if (-not $androidBuildOk) { $exitCode = 1 }
+            if (-not $androidApkBuildOk) { $exitCode = 1 }
 
             $adb = Get-Command adb.exe -ErrorAction SilentlyContinue
             if (-not $adb) { $adb = Get-Command adb -ErrorAction SilentlyContinue }
@@ -843,7 +853,7 @@ try {
                 $emulatorDevices = @()
             }
 
-            if ($androidBuildOk -and $emulatorDevices.Count -eq 1 -and $connectedDevices.Count -eq 1) {
+            if ($androidApkBuildOk -and $emulatorDevices.Count -eq 1 -and $connectedDevices.Count -eq 1) {
                 $instrumentationArgs = @(
                     "--no-daemon", "-p", "apps/android",
                     "-PsmartPrintServiceUrl=http://10.0.2.2:3000",
@@ -853,7 +863,7 @@ try {
                     & $gradle.Source @instrumentationArgs
                 }
                 if (-not $androidUiOk) { $exitCode = 1 }
-            } elseif ($androidBuildOk) {
+            } elseif ($androidApkBuildOk) {
                 $deviceReason = if ($connectedDevices.Count -eq 0) {
                     "No Android emulator is online."
                 } elseif ($connectedDevices.Count -gt 1) {
