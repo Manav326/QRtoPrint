@@ -456,7 +456,7 @@ export default function PhotoStudio({
               <input type="checkbox" checked={includeFormDetails} onChange={event=>{
                 const enabled=event.target.checked;
                 setIncludeFormDetails(enabled);
-                if(!enabled){setPhotoName("");setDateOfBirth("");if(activeTool==="text")setActiveTool("sheet");}
+                if(!enabled){setPhotoName("");setDateOfBirth("");}
               }}/>
               <span><strong>Add name and DOB to each photo</strong><small>Optional. Nothing is printed below the photos unless you switch this on.</small></span>
             </label>
