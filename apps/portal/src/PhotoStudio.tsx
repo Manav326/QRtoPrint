@@ -353,10 +353,10 @@ export default function PhotoStudio({
   }
 
   async function createPrintSheets(){
-    if(!image||busy)return;
+    if(!image||busyRef.current)return;
     const parsedCopies=Number(copiesInput);
     if(!Number.isInteger(parsedCopies)||parsedCopies<1||parsedCopies>maxCopies){setError("Choose between 1 and "+maxCopies+" photos. The A4 page count is calculated automatically.");return;}
-    setBusy(true);setError("");
+    busyRef.current=true;setBusy(true);setError("");
     try{
       const pages=Math.ceil(parsedCopies/photosPerPage),jpegPages:Uint8Array[]=[];
       let jpegByteLength=0;
@@ -381,7 +381,7 @@ export default function PhotoStudio({
       const output=new File([pdf],safeBaseName(source.name)+"-"+size.id+"-photos.pdf",{type:"application/pdf",lastModified:Date.now()});
       await onApply([{file:output,sizeCode:size.id,photoCount:parsedCopies,photosPerPage,previewPages:jpegPages.map(jpeg=>new Blob([jpeg],{type:"image/jpeg"}))}]);
     }catch(cause){setError(cause instanceof Error?cause.message:"Photo sheet creation failed. Try again with this photo.");}
-    finally{setBusy(false);}
+    finally{busyRef.current=false;setBusy(false);}
   }
 
   const resolutionMessage = image ? sourceResolutionNote(image, size, zoom) : "";
