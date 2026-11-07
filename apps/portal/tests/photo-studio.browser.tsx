@@ -11,6 +11,8 @@ const photoPrices = query.get("prices") === "disabled"
   : { "35x45": 2500, "25x35": 1800, "2x2": 3000, "4x6": 6000 };
 const failFirstApply = query.get("failApply") === "1";
 const invalidSource = query.get("source") === "invalid";
+const failRasterOnce = query.get("failRender") === "1";
+const oversizedRaster = query.get("oversizeRaster") === "1";
 
 function createFixturePhoto(): Promise<File> {
   if (invalidSource) {
@@ -61,7 +63,26 @@ function PhotoStudioBrowserFixture() {
   useEffect(() => {
     let active = true;
     void createFixturePhoto().then(file => {
-      if (active) setSource(file);
+      if (!active) return;
+      if (failRasterOnce || oversizedRaster) {
+        const originalToBlob = HTMLCanvasElement.prototype.toBlob;
+        let failureUsed = false;
+        HTMLCanvasElement.prototype.toBlob = function (callback, type, quality) {
+          if (this.width === 2480 && this.height === 3508) {
+            if (oversizedRaster) {
+              callback(new Blob([new Uint8Array(20 * 1024 * 1024 + 8192)], { type: type || "image/jpeg" }));
+              return;
+            }
+            if (failRasterOnce && !failureUsed) {
+              failureUsed = true;
+              callback(null);
+              return;
+            }
+          }
+          originalToBlob.call(this, callback, type, quality);
+        };
+      }
+      setSource(file);
     }).catch(reason => {
       if (active) setError(reason instanceof Error ? reason.message : String(reason));
     });
