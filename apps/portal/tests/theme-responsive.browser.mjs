@@ -1138,12 +1138,23 @@ async function exercisePhotoStudioFeatureMatrix() {
 async function exercisePhotoStudioFailurePaths() {
   console.log("[QA-STEP-START] Photo Studio failure/recovery matrix.");
   for (const scenario of [
-    {query:"?mode=customer&source=invalid",expected:"This image could not be opened. Choose a JPG or PNG photo."},
-    {query:"?mode=customer&prices=disabled",expected:"Photo printing is not enabled for any size at this shop."}
+    { query: "?mode=customer&source=invalid", expected: "This image could not be opened. Choose a JPG or PNG photo." },
+    { query: "?mode=customer&prices=disabled", expected: "Photo printing is not enabled for any size at this shop." }
   ]) {
-    for (const scenario of [
-    { query: "?mode=customer&failApply=1", error: "Simulated Photo Studio save failure", retry: true },
-    { query: "?mode=customer&failRender=1", error: "The photo sheet could not be rendered.", retry: true }
+    const context = await browser.newContext({ viewport: { width: 1024, height: 820 } });
+    try {
+      const page = await context.newPage();
+      const opened = await openPhotoStudioFixture(page, scenario.query);
+      await page.getByRole("alert").filter({ hasText: scenario.expected }).waitFor({ state: "visible" });
+      assert.equal(await opened.dialog.getByRole("button", { name: "Prepare A4 sheet" }).isDisabled(), true);
+    } finally {
+      await context.close();
+    }
+  }
+
+  for (const scenario of [
+    { query: "?mode=customer&failApply=1", error: "Simulated Photo Studio save failure" },
+    { query: "?mode=customer&failRender=1", error: "The photo sheet could not be rendered." }
   ]) {
     const context = await browser.newContext({ viewport: { width: 1024, height: 820 } });
     try {
@@ -1154,14 +1165,12 @@ async function exercisePhotoStudioFailurePaths() {
       await opened.dialog.getByRole("alert").filter({ hasText: scenario.error }).waitFor({ state: "visible" });
       assert.equal(await apply.isDisabled(), false, "A failed apply/render must clear busy state so the customer can retry.");
       assert.equal(await page.locator("#photo-studio-result").innerText(), "", "A failed operation must not report a prepared PDF.");
-      if (scenario.retry) {
-        await apply.click();
-        await page.waitForFunction(() => document.querySelector("#photo-studio-result")?.textContent?.includes('"mediaType":"application/pdf"'));
-        const result = JSON.parse(await page.locator("#photo-studio-result").innerText());
-        assert.equal(result.photoCount, 8);
-        assert.equal(result.pageCount, 1);
-        assert.match(result.fileName, /^photo-studio-qa-35x45-photos\.pdf$/);
-      }
+      await apply.click();
+      await page.waitForFunction(() => document.querySelector("#photo-studio-result")?.textContent?.includes('"mediaType":"application/pdf"'));
+      const result = JSON.parse(await page.locator("#photo-studio-result").innerText());
+      assert.equal(result.photoCount, 8);
+      assert.equal(result.pageCount, 1);
+      assert.match(result.fileName, /^photo-studio-qa-35x45-photos\.pdf$/);
     } finally {
       await context.close();
     }
@@ -1181,8 +1190,8 @@ async function exercisePhotoStudioFailurePaths() {
     await largeContext.close();
   }
   console.log("[QA-CASE-END] PASS | Photo Studio malformed input, missing prices, save/render retry and 20 MB output limit.");
-
 }
+
 
 async function assertThemeToggle(page) {
   const darkToggle = page.getByRole("button", { name: "Switch to dark theme" });
