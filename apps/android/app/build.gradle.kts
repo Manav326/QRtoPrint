@@ -14,6 +14,7 @@ val smartPrintServiceUrl = providers.gradleProperty("smartPrintServiceUrl")
 val smartPrintVersionCode = providers.gradleProperty("smartPrintVersionCode").orNull?.toIntOrNull() ?: 1
 val smartPrintVersionName = providers.gradleProperty("smartPrintVersionName").orElse("0.1.0").get()
 val smartPrintLocalQa = providers.gradleProperty("smartPrintLocalQa").orNull?.toBooleanStrictOrNull() ?: false
+val smartPrintPhotoStudioQaEnabled = providers.gradleProperty("smartPrintPhotoStudioQaEnabled").orNull?.toBooleanStrictOrNull() ?: false
 val smartPrintApplicationId = if (smartPrintLocalQa) {
     "com.quantaedge.smartprint.localqa"
 } else {
@@ -38,6 +39,7 @@ android {
         versionCode = smartPrintVersionCode
         versionName = smartPrintVersionName
         buildConfigField("String", "SERVICE_BASE_URL", "\"$smartPrintServiceUrl\"")
+        buildConfigField("Boolean", "PHOTO_STUDIO_QA_ENABLED", smartPrintPhotoStudioQaEnabled.toString())
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
     signingConfigs {
