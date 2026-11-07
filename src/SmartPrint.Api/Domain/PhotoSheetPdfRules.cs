@@ -22,7 +22,8 @@ public static class PhotoSheetPdfRules
 
             foreach (var page in document.RootElement.EnumerateArray())
             {
-                if (!page.TryGetProperty("widthPoints", out var widthElement) ||
+                if (page.ValueKind != JsonValueKind.Object ||
+                    !page.TryGetProperty("widthPoints", out var widthElement) ||
                     !page.TryGetProperty("heightPoints", out var heightElement) ||
                     !widthElement.TryGetDouble(out var width) ||
                     !heightElement.TryGetDouble(out var height) ||
