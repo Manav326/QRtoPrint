@@ -88,7 +88,7 @@ if (-not $webViewRuntime) {
     throw "Microsoft Edge WebView2 Runtime is not installed for this Windows user. Install the Evergreen Runtime before running the desktop smoke test."
 }
 $webViewRuntimeVersion = (Get-Item -LiteralPath $webViewRuntime.Path).VersionInfo.ProductVersion
-Write-Host "WebView2 Runtime: $webViewRuntimeVersion ($($webViewRuntime.Path))" -ForegroundColor Cyan
+Write-Host "[QA-PREFLIGHT] WebView2 Runtime $webViewRuntimeVersion ($($webViewRuntime.Path))" -ForegroundColor Cyan
 
 # Read the DevTools port from the shared QA configuration. It is used only
 # by the dedicated CI diagnostic build. Published production apps are tested
@@ -126,14 +126,14 @@ $desktopSmokeEvidence = $null
 
 try {
     if ($RequireDevTools) {
-        Write-Host "Using CI-only Tauri WebView2 DevTools port $debugPort and an isolated temporary profile." -ForegroundColor DarkCyan
+        Write-Host "[QA-MODE] CI diagnostic build: private DevTools port $debugPort and isolated temporary profile." -ForegroundColor DarkCyan
         [Environment]::SetEnvironmentVariable($dataDirectoryEnvironmentName, $testWebViewDataDirectory, "Process")
     }
     else {
-        Write-Host "Using Windows UI Automation for the production desktop acceptance probe; the normal WebView2 profile is preserved." -ForegroundColor DarkCyan
+        Write-Host "[QA-MODE] Production acceptance: Windows UI Automation; normal WebView2 profile and signed-in session are preserved." -ForegroundColor DarkCyan
     }
 
-    Write-Host "Launching SmartPrint Desktop: $executable" -ForegroundColor Cyan
+    Write-Host "[QA-ACTION] Launch SmartPrint Desktop: $executable" -ForegroundColor Cyan
     $process = Start-Process -FilePath $executable -WorkingDirectory (Split-Path -Parent $executable) -PassThru
 
     $deadline = [DateTime]::UtcNow.AddSeconds($StartupTimeoutSeconds)
@@ -141,7 +141,9 @@ try {
     $mainWindowReady = $false
     $observedTargets = @()
 
+    $windowPoll = 0
     do {
+        $windowPoll++
         $process.Refresh()
         if ($process.HasExited) {
             throw "SmartPrint Desktop exited during startup with code $($process.ExitCode)."
@@ -185,6 +187,9 @@ try {
         }
 
         if ($mainWindowReady -and (-not $RequireDevTools -or $pageTarget)) { break }
+        if ($windowPoll -eq 1 -or $windowPoll % 10 -eq 0) {
+            Write-Host "[QA-PROGRESS] Waiting for native window/WebView2 startup; poll=$windowPoll elapsed=$([Math]::Round(($StartupTimeoutSeconds - [Math]::Max(0, ($deadline - [DateTime]::UtcNow).TotalSeconds)), 1))s." -ForegroundColor DarkCyan
+        }
         Start-Sleep -Milliseconds 400
     } while ([DateTime]::UtcNow -lt $deadline)
 
@@ -193,9 +198,10 @@ try {
         throw "SmartPrint Desktop did not create its native window with the expected title."
     }
 
-    Write-Host "PASS: Native desktop window opened." -ForegroundColor Green
+    Write-Host "[QA-CHECK-PASS] Native desktop window opened." -ForegroundColor Green
 
     if (-not $RequireDevTools) {
+        Write-Host "[QA-ACTION] Inspecting the production WebView2 accessibility tree for workspace/sign-in landmarks." -ForegroundColor Cyan
         # The installed production binary intentionally has no remote-debugging
         # endpoint. Verify visible, app-owned content through the Windows
         # accessibility tree instead of weakening production WebView2 flags.
@@ -218,6 +224,9 @@ try {
         # Poll for app-owned content rather than taking a single early snapshot.
         do {
             $uiAttempt++
+            if ($uiAttempt -eq 1 -or $uiAttempt % 10 -eq 0) {
+                Write-Host "[QA-PROGRESS] Waiting for React workspace/sign-in content via Windows UI Automation; attempt=$uiAttempt." -ForegroundColor DarkCyan
+            }
             try {
                 $accessibility = Get-DesktopAccessibilitySnapshot $process.MainWindowHandle
                 $matchedWorkspaceLabels.Clear()
@@ -279,8 +288,8 @@ try {
             throw "SmartPrint Desktop exited immediately after its visible interface was detected."
         }
 
-        Write-Host "PASS: Windows UI Automation exposed visible SmartPrint application content." -ForegroundColor Green
-        Write-Host "PASS: Production WebView2 rendered an app-owned workspace or sign-in screen." -ForegroundColor Green
+        Write-Host "[QA-CHECK-PASS] Windows UI Automation exposed visible SmartPrint application content." -ForegroundColor Green
+        Write-Host "[QA-CHECK-PASS] Production WebView2 rendered an app-owned workspace or sign-in screen." -ForegroundColor Green
         Write-Host "Desktop accessibility evidence: mode='$renderedMode', attempts=$uiAttempt, visibleNamedElements=$($accessibility.visibleNamedElementCount), matchedWorkspaceLabels=$($matchedWorkspaceLabels.Count), matchedSignInLabels=$($matchedAuthLabels.Count)"
         $desktopSmokeEvidence = [PSCustomObject]@{
             verification = "windows-ui-automation"
