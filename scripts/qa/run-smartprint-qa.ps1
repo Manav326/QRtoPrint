@@ -45,7 +45,28 @@ if ($PullLatest) {
         & $git.Source "merge" "--ff-only" $upstreamRef
         if ($LASTEXITCODE -ne 0) { throw "The update is not a fast-forward. No reset, rebase, or force update was attempted." }
     } else {
-        Write-Host "Local source is already at the GitHub branch head. Existing local modifications/untracked files are preserved; no merge is needed." -ForegroundColor Green
+        # A no-op fetch may preserve local QA/doc edits, but never test stale containers against dirty app source.
+        $localTrackedChanges = @(& $git.Source "diff" "--name-only" "HEAD" "--")
+        if ($LASTEXITCODE -ne 0) { throw "Could not inspect local tracked changes; no container operation was attempted." }
+        $localRuntimeChanges = @($localTrackedChanges | Where-Object {
+            $normalisedPath = ([string]$_).Replace([char]92, [char]47)
+            $parts = $normalisedPath.Split("/")
+            $isAppTest = $parts.Length -ge 3 -and $parts[0] -eq "apps" -and $parts[2] -eq "tests"
+            $qaOrDocsOnly = $normalisedPath.StartsWith("scripts/qa/") -or
+                $normalisedPath.StartsWith("docs/") -or
+                $normalisedPath.StartsWith(".github/") -or
+                $normalisedPath.StartsWith("tests/") -or
+                $isAppTest -or
+                $normalisedPath.EndsWith(".md") -or
+                $normalisedPath.EndsWith(".example")
+            -not $qaOrDocsOnly
+        })
+        if ($localRuntimeChanges.Count -gt 0) {
+            throw ("GitHub is current, but tracked application/runtime files are modified: " +
+                ($localRuntimeChanges -join ", ") +
+                ". No merge or container operation was attempted; preserve these edits and reconcile them before QA.")
+        }
+        Write-Host "Local source is already at the GitHub branch head. QA/docs-only tracked edits and unrelated untracked files are preserved; no merge is needed." -ForegroundColor Green
     }
     $sourceRevision = (& $git.Source "rev-parse" "HEAD").Trim()
     if ($LASTEXITCODE -ne 0 -or -not $sourceRevision) { throw "Could not verify the resulting source revision." }
