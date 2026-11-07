@@ -989,7 +989,7 @@ async function exercisePhotoStudioFeatureMatrix() {
     assert.equal(await dialog.getByRole("button", { name: "Set background #dcecff" }).getAttribute("aria-pressed"), "true");
     await dialog.getByRole("button", { name: "Reset background" }).click();
     assert.equal(await dialog.getByText("Not selected", { exact: true }).count(), 1);
-    const restoredBackground = await preview.evaluate(element => Array.from(element.getContext("2d").getImageData(20,20,1,1).data).slice(0,3));
+    const restoredBackground = await preview.evaluate(element => Array.from(element.getContext("2d").getImageData(27,20,1,1).data).slice(0,3));
     assert.deepEqual(restoredBackground, [216,231,245]);
 
     // Optional form details, length/date constraints, font size and text colour.
