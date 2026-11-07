@@ -88,6 +88,10 @@ test("light and dark palettes cover authentication, customer QR and public landi
     "The browser customer local-agent card must switch to a dark surface with readable copy.");
   assert.match(landing, /html\[data-theme="dark"\] \.sp-public \.sp-download-card h3\s*\{[^}]*color:\s*#edf1fa/s,
     "Download card titles must not retain dark foregrounds on dark card surfaces.");
+  assert.match(css, /html\[data-theme="dark"\] \.auth-input input::placeholder\s*\{[^}]*color:\s*#aab6ca/s,
+    "Dark authentication placeholders must remain readable on dark input surfaces.");
+  assert.match(css, /html\[data-theme="dark"\] \.auth-card-footer,[\s\S]*?color:\s*#aab6ca/s,
+    "Dark authentication helper text must not use the legacy low-contrast footer colour.");
 });
 
 test("web shell keeps navigation, header and workspace independently usable at desktop and mobile sizes", () => {
