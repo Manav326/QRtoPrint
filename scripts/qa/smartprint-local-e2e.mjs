@@ -1817,114 +1817,170 @@ try {
   });
 
   await record("Guest customer completes a no-account upload from the shop station link", async () => {
-    assert.ok(guestCustomerPage && guestCustomerSession?.sessionToken,
-      "A guest station link must be opened successfully before testing guest uploads.");
+    let guestJobId = null;
+    let guestJobSubmitted = false;
+    let guestJobRejected = false;
+    let guestUploadRequestHeaders = null;
+    try {
+      assert.ok(guestCustomerPage && guestCustomerSession?.sessionToken,
+        "A guest station link must be opened successfully before testing guest uploads.");
 
-    const session = assertHttp(await request(guestCustomerPage, "GET", "/api/v1/public/sessions/current", {
-      sessionToken: guestCustomerSession.sessionToken
-    }), 200, "Guest browser current session");
-    assert.equal(session.id, guestCustomerSession.id,
-      "The guest browser must keep using the server-issued station session.");
-    assert.equal(session.shop.displayName, process.env.SMARTPRINT_QA_SHOP1_NAME);
-    assert.ok(!guestCustomerPage.url().includes(guestCustomerSession.sessionToken),
-      "The opaque guest session token must never be present in the station URL.");
+      const session = assertHttp(await request(guestCustomerPage, "GET", "/api/v1/public/sessions/current", {
+        sessionToken: guestCustomerSession.sessionToken
+      }), 200, "Guest browser current session");
+      assert.equal(session.id, guestCustomerSession.id,
+        "The guest browser must keep using the server-issued station session.");
+      assert.equal(session.shop.displayName, process.env.SMARTPRINT_QA_SHOP1_NAME);
+      assert.ok(!guestCustomerPage.url().includes(guestCustomerSession.sessionToken),
+        "The opaque guest session token must never be present in the station URL.");
 
-    const customerQuery = "/api/v1/shop/customers?search=" +
-      encodeURIComponent(process.env.SMARTPRINT_QA_CUSTOMER_EMAIL) + "&page=1&pageSize=50";
-    const customersBefore = assertHttp(await request(shop1Page, "GET", customerQuery, {
-      token: shop1Tokens.accessToken
-    }), 200, "Shop customer directory before guest upload");
-    const customerBefore = customersBefore.items.find(item =>
-      item.displayName === process.env.SMARTPRINT_QA_CUSTOMER_NAME
-    );
-    const customerSessionCountBefore = customerBefore?.sessionCount ?? 0;
-    const customerJobsBefore = assertHttp(await request(customerPage, "GET", "/api/v1/customer/jobs", {
-      token: customerTokens.accessToken
-    }), 200, "Signed-in customer's history before guest upload");
-    assert.ok(Array.isArray(customerJobsBefore.jobs));
+      const customerQuery = "/api/v1/shop/customers?search=" +
+        encodeURIComponent(process.env.SMARTPRINT_QA_CUSTOMER_EMAIL) + "&page=1&pageSize=50";
+      const customersBefore = assertHttp(await request(shop1Page, "GET", customerQuery, {
+        token: shop1Tokens.accessToken
+      }), 200, "Shop customer directory before guest upload");
+      const customerBefore = customersBefore.items.find(item =>
+        item.displayName === process.env.SMARTPRINT_QA_CUSTOMER_NAME
+      );
+      const customerSessionCountBefore = customerBefore?.sessionCount ?? 0;
+      const customerJobsBefore = assertHttp(await request(customerPage, "GET", "/api/v1/customer/jobs", {
+        token: customerTokens.accessToken
+      }), 200, "Signed-in customer's history before guest upload");
+      assert.ok(Array.isArray(customerJobsBefore.jobs));
 
-    await guestCustomerPage.locator('input[type="file"][accept*="application/pdf"]').first().setInputFiles({
-      name: "smartprint-guest-qa-" + runId + ".pdf",
-      mimeType: "application/pdf",
-      buffer: syntheticPdf(2, "SmartPrint guest-only QA upload")
-    });
-    const uploadButton = guestCustomerPage.getByRole("button", { name: /Upload 1 file/ });
-    await uploadButton.waitFor({ state: "visible", timeout: 10000 });
-    await uploadButton.click();
-    await guestCustomerPage.locator(".customer-batch-quote-action").waitFor({
-      state: "visible",
-      timeout: 45000
-    });
-    await guestCustomerPage.getByRole("button", { name: "Calculate batch quote" }).click();
-    await guestCustomerPage.locator(".customer-batch-quote-card").waitFor({
-      state: "visible",
-      timeout: 30000
-    });
+      guestCustomerPage.on("request", observedRequest => {
+        try {
+          const observedUrl = new URL(observedRequest.url());
+          if (observedRequest.method() === "POST" &&
+              observedUrl.origin === baseUrl.origin &&
+              observedUrl.pathname === "/api/v1/public/sessions/current/jobs") {
+            guestUploadRequestHeaders = observedRequest.headers();
+          }
+        } catch {}
+      });
 
-    const draft = await guestCustomerPage.evaluate(code => {
-      const raw = localStorage.getItem("qrtoprint.customer-active-job:" + code);
-      try { return raw ? JSON.parse(raw) : null; } catch { return null; }
-    }, guestCustomerSession.publicCode);
-    const job = draft?.uploaded?.job || draft?.uploadedBatch?.[0]?.job;
-    assert.ok(job?.id, "The guest browser did not persist the uploaded server job metadata.");
-    assert.equal(job.pageCount, 2);
-    assert.equal(job.status, "AWAITING_CONFIGURATION");
+      await guestCustomerPage.locator('input[type="file"][accept*="application/pdf"]').first().setInputFiles({
+        name: "smartprint-guest-qa-" + runId + ".pdf",
+        mimeType: "application/pdf",
+        buffer: syntheticPdf(2, "SmartPrint guest-only QA upload")
+      });
+      const uploadButton = guestCustomerPage.getByRole("button", { name: /Upload 1 file/ });
+      await uploadButton.waitFor({ state: "visible", timeout: 10000 });
+      await uploadButton.click();
+      await guestCustomerPage.locator(".customer-batch-quote-action").waitFor({
+        state: "visible",
+        timeout: 45000
+      });
+      await guestCustomerPage.getByRole("button", { name: "Calculate batch quote" }).click();
+      await guestCustomerPage.locator(".customer-batch-quote-card").waitFor({
+        state: "visible",
+        timeout: 30000
+      });
 
-    await guestCustomerPage.getByRole("button", { name: "Send batch to shop" }).click();
-    await guestCustomerPage.locator(".customer-job-state").waitFor({
-      state: "visible",
-      timeout: 25000
-    });
-    const queued = assertHttp(await request(guestCustomerPage, "GET",
-      "/api/v1/public/jobs/" + job.id + "/status",
-      { sessionToken: guestCustomerSession.sessionToken }), 200, "Guest customer submitted job status");
-    assert.equal(queued.job.status, "AWAITING_SHOP_APPROVAL");
+      const draft = await guestCustomerPage.evaluate(code => {
+        const raw = localStorage.getItem("qrtoprint.customer-active-job:" + code);
+        try { return raw ? JSON.parse(raw) : null; } catch { return null; }
+      }, guestCustomerSession.publicCode);
+      const job = draft?.uploaded?.job || draft?.uploadedBatch?.[0]?.job;
+      assert.ok(job?.id, "The guest browser did not persist the uploaded server job metadata.");
+      guestJobId = job.id;
+      assert.ok(guestUploadRequestHeaders,
+        "The guest browser did not send the expected real upload request.");
+      assert.equal(guestUploadRequestHeaders.authorization, undefined,
+        "Guest document upload must not send a customer Authorization bearer token.");
+      assert.equal(guestUploadRequestHeaders["x-print-session"], guestCustomerSession.sessionToken,
+        "Guest upload must carry only the opaque station-scoped print-session capability.");
+      assert.equal(job.pageCount, 2);
+      assert.equal(job.status, "AWAITING_CONFIGURATION");
 
-    const shopQueue = assertHttp(await request(shop1Page, "GET",
-      "/api/v1/shop/print-jobs?offset=0&take=100&search=" + encodeURIComponent(job.jobNumber),
-      { token: shop1Tokens.accessToken }), 200, "Shop queue for guest-uploaded job");
-    assert.ok(shopQueue.some(item => item.id === job.id),
-      "A guest-uploaded job must appear in the station owner's queue.");
+      await guestCustomerPage.getByRole("button", { name: "Send batch to shop" }).click();
+      guestJobSubmitted = true;
+      await guestCustomerPage.locator(".customer-job-state").waitFor({
+        state: "visible",
+        timeout: 25000
+      });
+      const queued = assertHttp(await request(guestCustomerPage, "GET",
+        "/api/v1/public/jobs/" + job.id + "/status",
+        { sessionToken: guestCustomerSession.sessionToken }), 200, "Guest customer submitted job status");
+      assert.equal(queued.job.status, "AWAITING_SHOP_APPROVAL");
 
-    const customerJobsAfter = assertHttp(await request(customerPage, "GET", "/api/v1/customer/jobs", {
-      token: customerTokens.accessToken
-    }), 200, "Signed-in customer's history after guest upload");
-    assert.ok(!customerJobsAfter.jobs.some(item => item.id === job.id),
-      "A guest job must not leak into an unrelated signed-in customer's global history.");
+      const shopQueue = assertHttp(await request(shop1Page, "GET",
+        "/api/v1/shop/print-jobs?offset=0&take=100&search=" + encodeURIComponent(job.jobNumber),
+        { token: shop1Tokens.accessToken }), 200, "Shop queue for guest-uploaded job");
+      assert.ok(shopQueue.some(item => item.id === job.id),
+        "A guest-uploaded job must appear in the station owner's queue.");
 
-    const customersAfter = assertHttp(await request(shop1Page, "GET", customerQuery, {
-      token: shop1Tokens.accessToken
-    }), 200, "Shop customer directory after guest upload");
-    const customerAfter = customersAfter.items.find(item =>
-      item.displayName === process.env.SMARTPRINT_QA_CUSTOMER_NAME
-    );
-    assert.equal(customerAfter?.sessionCount ?? 0, customerSessionCountBefore,
-      "A guest upload must not bind the guest session to the signed-in customer account.");
+      const customerJobsAfter = assertHttp(await request(customerPage, "GET", "/api/v1/customer/jobs", {
+        token: customerTokens.accessToken
+      }), 200, "Signed-in customer's history after guest upload");
+      assert.ok(!customerJobsAfter.jobs.some(item => item.id === job.id),
+        "A guest job must not leak into an unrelated signed-in customer's global history.");
 
-    const rejected = assertHttp(await request(shop1Page, "POST",
-      "/api/v1/shop/print-jobs/" + job.id + "/reject",
-      { token: shop1Tokens.accessToken }), 200, "Shop rejects unpaid guest QA job");
-    assert.equal(rejected.status, "REJECTED");
-    const guestStatusAfterRejection = assertHttp(await request(guestCustomerPage, "GET",
-      "/api/v1/public/jobs/" + job.id + "/status",
-      { sessionToken: guestCustomerSession.sessionToken }), 200, "Guest sees rejected job status");
-    assert.equal(guestStatusAfterRejection.job.status, "REJECTED");
+      const customersAfter = assertHttp(await request(shop1Page, "GET", customerQuery, {
+        token: shop1Tokens.accessToken
+      }), 200, "Shop customer directory after guest upload");
+      const customerAfter = customersAfter.items.find(item =>
+        item.displayName === process.env.SMARTPRINT_QA_CUSTOMER_NAME
+      );
+      assert.equal(customerAfter?.sessionCount ?? 0, customerSessionCountBefore,
+        "A guest upload must not bind the guest session to the signed-in customer account.");
 
-    report.safety.syntheticDocumentsUploaded = true;
-    report.safety.realLocalDatabaseJobsCreated = true;
-    guestCustomerSession.jobId = job.id;
-    return {
-      entryMode: "ordinary browser station link; no customer Authorization header",
-      guestSessionId: guestCustomerSession.id,
-      pageCount: job.pageCount,
-      jobNumber: job.jobNumber,
-      shopQueueVisible: true,
-      customerAccountHistoryLinked: false,
-      sessionCountChanged: false,
-      finalStatus: guestStatusAfterRejection.job.status,
-      paymentAttempted: false,
-      dispatchAttempted: false
-    };
+      const rejected = assertHttp(await request(shop1Page, "POST",
+        "/api/v1/shop/print-jobs/" + job.id + "/reject",
+        { token: shop1Tokens.accessToken }), 200, "Shop rejects unpaid guest QA job");
+      assert.equal(rejected.status, "REJECTED");
+      guestJobRejected = true;
+      const guestStatusAfterRejection = assertHttp(await request(guestCustomerPage, "GET",
+        "/api/v1/public/jobs/" + job.id + "/status",
+        { sessionToken: guestCustomerSession.sessionToken }), 200, "Guest sees rejected job status");
+      assert.equal(guestStatusAfterRejection.job.status, "REJECTED");
+
+      report.safety.syntheticDocumentsUploaded = true;
+      report.safety.realLocalDatabaseJobsCreated = true;
+      guestCustomerSession.jobId = job.id;
+      return {
+        entryMode: "ordinary browser station link; no customer Authorization header",
+        guestSessionId: guestCustomerSession.id,
+        pageCount: job.pageCount,
+        jobNumber: job.jobNumber,
+        shopQueueVisible: true,
+        customerAccountHistoryLinked: false,
+        sessionCountChanged: false,
+        uploadAuthorizationHeaderSent: false,
+        uploadUsedStationSessionCapability: true,
+        finalStatus: guestStatusAfterRejection.job.status,
+        paymentAttempted: false,
+        dispatchAttempted: false
+      };
+    } finally {
+      // A failure after submit must not leave an unattended unpaid job in the
+      // QA shop queue. Resolve only this exact disposable guest job; never touch
+      // another job, payment, customer account or printer.
+      if (guestJobSubmitted && guestJobId && !guestJobRejected) {
+        let current = null;
+        for (let attempt = 0; attempt < 10; attempt++) {
+          current = await request(guestCustomerPage, "GET",
+            "/api/v1/public/jobs/" + guestJobId + "/status",
+            { sessionToken: guestCustomerSession.sessionToken });
+          if (current.status === 200 &&
+              ["AWAITING_SHOP_APPROVAL", "REJECTED"].includes(current.json?.job?.status)) break;
+          await guestCustomerPage.waitForTimeout(500);
+        }
+        assertExpectedHttpStatus(current, 200, "QA cleanup reads the disposable guest job state");
+        if (current.json.job.status === "AWAITING_SHOP_APPROVAL") {
+          const cleanup = await request(shop1Page, "POST",
+            "/api/v1/shop/print-jobs/" + guestJobId + "/reject",
+            { token: shop1Tokens.accessToken });
+          assertExpectedHttpStatus(cleanup, 200, "QA cleanup rejects the unpaid guest job");
+          assert.equal(cleanup.json?.status, "REJECTED",
+            "QA cleanup must leave the guest job in a terminal rejected state.");
+        } else {
+          assert.equal(current.json.job.status, "REJECTED",
+            "QA cleanup found an unexpected guest job state and will not mutate it.");
+        }
+        guestJobRejected = true;
+      }
+    }
   }, ["GUEST-001", "GUEST-002", "GUEST-003", "GUEST-004", "GUEST-005", "GUEST-006", "GUEST-007"]);
 
   await record("PHOTO: customer Photo Studio edits and prepares a local multi-photo A4 PDF without creating a print job", async () => {
