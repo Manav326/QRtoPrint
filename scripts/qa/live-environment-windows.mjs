@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { mkdirSync, writeFileSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { createInterface } from 'node:readline/promises';
@@ -7,9 +7,12 @@ import { stdin as input, stdout as output } from 'node:process';
 
 const moduleDirectory = process.env.PLAYWRIGHT_MODULE_DIR;
 if (!moduleDirectory) throw new Error('PLAYWRIGHT_MODULE_DIR is required.');
-const baseUrl = new URL(process.env.SMARTPRINT_LIVE_QA_BASE_URL || 'https://smartprint.quantaedge.in');
-if (baseUrl.protocol !== 'https:' || baseUrl.hostname !== 'smartprint.quantaedge.in' || baseUrl.pathname !== '/' || baseUrl.search || baseUrl.hash) {
-  throw new Error('This suite is restricted to https://smartprint.quantaedge.in.');
+const qaConfig = JSON.parse(readFileSync(new URL('./smartprint-qa.config.json', import.meta.url), 'utf8'));
+const configuredPublicOrigin = new URL(qaConfig.origins.public);
+const baseUrl = new URL(process.env.SMARTPRINT_LIVE_QA_BASE_URL || configuredPublicOrigin.origin);
+if (baseUrl.protocol !== 'https:' || baseUrl.origin !== configuredPublicOrigin.origin ||
+    baseUrl.pathname !== '/' || baseUrl.search || baseUrl.hash || baseUrl.username || baseUrl.password) {
+  throw new Error('This suite is restricted to the configured SmartPrint public origin: ' + configuredPublicOrigin.origin);
 }
 const origin = baseUrl.origin;
 const outputDirectory = process.env.LIVE_QA_ARTIFACT_DIR || 'artifacts/live-environment-qa-windows-headed';
@@ -232,11 +235,11 @@ async function browserFullDownloadProbe(path, expectedFileName) {
     } finally {
       clearTimeout(timer);
     }
-  }, { requestUrl, expectedMaximumBytes: 256 * 1024 * 1024 });
+  }, { requestUrl, expectedMaximumBytes: qaConfig.downloads.maxTransferBytes });
 
   assert.equal(new URL(result.url).origin, origin, path + ' redirected outside the SmartPrint origin.');
   assert.equal(result.status, 200, path + ' should complete with HTTP 200.');
-  assert.equal(result.tooLarge, undefined, path + ' exceeded the 256 MiB QA safety limit.');
+  assert.equal(result.tooLarge, undefined, path + ' exceeded the configured QA safety limit.');
   assert.ok(result.bytesReceived > 0, path + ' returned an empty download.');
   assert.ok(
     (result.headers['content-disposition'] || '').toLowerCase().includes(expectedFileName.toLowerCase()),
@@ -708,7 +711,7 @@ try {
   });
 
   await record('Public release metadata and cache policy', async () => {
-    const response = await browserFetch('/downloads/status');
+    const response = await browserFetch(qaConfig.downloads.statusPath);
     assert.ok([200, 503].includes(response.status), `Unexpected release metadata HTTP ${response.status}.`);
     if (response.status === 503) return { status: response.status, warning: 'Upstream release metadata unavailable; retryable state is expected.' };
     const body = JSON.parse(response.body);
@@ -722,22 +725,22 @@ try {
 
   await record('Windows download supports an exact one-byte range response', async () => {
     if (!releaseMetadata || releaseMetadata.windowsAvailable !== true) return { status: 'SKIPPED', reason: 'Windows installer is not confirmed available by release metadata.' };
-    return await browserRangeProbe('/downloads/windows');
+    return await browserRangeProbe(qaConfig.downloads.windowsPath);
   });
 
   await record('Windows installer completes a full same-origin browser download', async () => {
     if (!releaseMetadata || releaseMetadata.windowsAvailable !== true) return { status: 'SKIPPED', reason: 'Windows installer is not confirmed available by release metadata.' };
-    return await browserFullDownloadProbe('/downloads/windows', 'SmartPrint-Windows-Setup.exe');
+    return await browserFullDownloadProbe(qaConfig.downloads.windowsPath, qaConfig.downloads.windowsAssetName);
   });
 
   await record('Android download supports an exact one-byte range response when published', async () => {
     if (!releaseMetadata || releaseMetadata.androidAvailable !== true) return { status: 'SKIPPED', reason: 'Android asset is not confirmed available by release metadata.' };
-    return await browserRangeProbe('/downloads/android');
+    return await browserRangeProbe(qaConfig.downloads.androidPath);
   });
 
   await record('Android APK completes a full same-origin browser download', async () => {
     if (!releaseMetadata || releaseMetadata.androidAvailable !== true) return { status: 'SKIPPED', reason: 'Android asset is not confirmed available by release metadata.' };
-    return await browserFullDownloadProbe('/downloads/android', 'SmartPrint-Android.apk');
+    return await browserFullDownloadProbe(qaConfig.downloads.androidPath, qaConfig.downloads.androidAssetName);
   });
 
   await record('Shop sign-in route renders', async () => visitRoute('/shop', '.auth-screen', 'shop login'));

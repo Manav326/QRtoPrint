@@ -88,8 +88,62 @@ if ($PullLatest -and $ReuseRunningStack -and $requiresAppRefresh) {
     throw "Application/runtime files changed in the pull. Refusing to test stale containers in reuse-only mode."
 }
 
-$target = "http://127.0.0.1:3000"
-$canonicalPublicUrl = "https://smartprint.quantaedge.in"
+$qaConfigPath = Join-Path $PSScriptRoot "smartprint-qa.config.json"
+if (-not (Test-Path -LiteralPath $qaConfigPath -PathType Leaf)) {
+    throw "The central SmartPrint QA configuration is missing: $qaConfigPath"
+}
+try {
+    $qaConfig = Get-Content -LiteralPath $qaConfigPath -Raw | ConvertFrom-Json -ErrorAction Stop
+} catch {
+    throw "The central SmartPrint QA configuration is invalid: $($_.Exception.Message)"
+}
+if ($qaConfig.schemaVersion -ne 1) { throw "Unsupported SmartPrint QA configuration schema version." }
+
+try {
+    $publicUri = [Uri]$qaConfig.origins.public
+    $localUri = [Uri]$qaConfig.origins.local
+    $androidEmulatorUri = [Uri]$qaConfig.origins.androidEmulator
+    $minimumNodeVersion = [Version]$qaConfig.runtime.minimumNodeVersion
+} catch {
+    throw "The central SmartPrint QA configuration contains an invalid origin or runtime version: $($_.Exception.Message)"
+}
+
+if (-not $publicUri.IsAbsoluteUri -or $publicUri.Scheme -ne "https" -or
+    -not [string]::IsNullOrEmpty($publicUri.UserInfo) -or
+    -not [string]::IsNullOrEmpty($publicUri.Query) -or
+    -not [string]::IsNullOrEmpty($publicUri.Fragment) -or $publicUri.AbsolutePath -ne "/") {
+    throw "QA public origin must be a plain HTTPS origin without credentials, path, query or fragment."
+}
+if (-not $localUri.IsAbsoluteUri -or $localUri.Scheme -ne "http" -or -not $localUri.IsLoopback -or
+    -not [string]::IsNullOrEmpty($localUri.UserInfo) -or
+    -not [string]::IsNullOrEmpty($localUri.Query) -or
+    -not [string]::IsNullOrEmpty($localUri.Fragment) -or $localUri.AbsolutePath -ne "/") {
+    throw "QA local origin must be a loopback HTTP origin without credentials, path, query or fragment."
+}
+if (-not $androidEmulatorUri.IsAbsoluteUri -or $androidEmulatorUri.Scheme -ne "http" -or
+    $androidEmulatorUri.Host -ne "10.0.2.2" -or $androidEmulatorUri.AbsolutePath -ne "/" -or
+    -not [string]::IsNullOrEmpty($androidEmulatorUri.Query) -or -not [string]::IsNullOrEmpty($androidEmulatorUri.Fragment)) {
+    throw "QA Android emulator origin must use the Android emulator host 10.0.2.2."
+}
+
+$target = $localUri.GetLeftPart([UriPartial]::Authority)
+$canonicalPublicUrl = $publicUri.GetLeftPart([UriPartial]::Authority)
+$androidEmulatorOrigin = $androidEmulatorUri.GetLeftPart([UriPartial]::Authority)
+$composeProjectName = [string]$qaConfig.composeProjectName
+$playwrightVersion = [string]$qaConfig.runtime.playwrightVersion
+if ($composeProjectName -notmatch '^[a-z0-9][a-z0-9_-]{1,62}$') { throw "Invalid Compose project name in the QA configuration." }
+if ($playwrightVersion -notmatch '^\d+\.\d+\.\d+$') { throw "Invalid Playwright version in the QA configuration." }
+if ($minimumNodeVersion -lt [Version]"22.6.0") { throw "The configured Node.js minimum cannot be lower than 22.6.0." }
+
+foreach ($downloadPath in @($qaConfig.downloads.statusPath, $qaConfig.downloads.windowsPath, $qaConfig.downloads.androidPath)) {
+    if ([string]$downloadPath -notmatch '^/downloads/[a-z]+$') { throw "Invalid public download path in the QA configuration." }
+}
+foreach ($assetName in @($qaConfig.downloads.windowsAssetName, $qaConfig.downloads.androidAssetName)) {
+    if ([string]$assetName -notmatch '^[A-Za-z0-9._-]+$') { throw "Invalid public download asset name in the QA configuration." }
+}
+if ([long]$qaConfig.downloads.maxTransferBytes -lt 1 -or [long]$qaConfig.downloads.maxTransferBytes -gt 536870912) {
+    throw "Public download QA transfer limit must be between 1 byte and 512 MiB."
+}
 $runStamp = Get-Date -Format "yyyyMMdd-HHmmss"
 $runSuffix = [Guid]::NewGuid().ToString("N").Substring(0, 8)
 $runId = "local-" + $runStamp + "-" + $runSuffix
@@ -313,11 +367,11 @@ function Install-OrLocatePlaywright {
     if (-not $SkipPlaywrightInstall -and -not $ForceSkipInstall) {
         # Capture npm's browser-download output so PowerShell does not return
         # those progress lines as part of this function's module-path result.
-        $installOutput = @(& $npm.Source "exec" "--yes" "--package=playwright@1.56.1" "--" "playwright" "install" "chromium" 2>&1)
+        $installOutput = @(& $npm.Source "exec" "--yes" "--package=playwright@$playwrightVersion" "--" "playwright" "install" "chromium" 2>&1)
         $installExitCode = $LASTEXITCODE
         if ($installExitCode -ne 0) {
             $installOutput | ForEach-Object { Write-Host $_ }
-            throw "Playwright 1.56.1 Chromium installation failed with exit code $installExitCode."
+            throw "Playwright $playwrightVersion Chromium installation failed with exit code $installExitCode."
         }
     }
 
@@ -337,17 +391,17 @@ function Install-OrLocatePlaywright {
             continue
         }
         $packageInfo = Get-Content -LiteralPath $packageJson -Raw | ConvertFrom-Json
-        if ($packageInfo.version -eq "1.56.1") {
+        if ($packageInfo.version -eq $playwrightVersion) {
             $module = $possible
             break
         }
     }
-    if (-not $module) { throw "Pinned Playwright 1.56.1 was not found under $npxRoot." }
+    if (-not $module) { throw "Pinned Playwright $playwrightVersion was not found under $npxRoot." }
     return $module
 }
 
 $environmentNames = @(
-    "PLAYWRIGHT_MODULE_DIR", "SMARTPRINT_QA_BASE_URL", "SMARTPRINT_QA_RUN_ID", "SMARTPRINT_QA_ARTIFACT_DIR",
+    "PLAYWRIGHT_MODULE_DIR", "SMARTPRINT_LOCAL_ORIGIN", "SMARTPRINT_QA_BASE_URL", "SMARTPRINT_QA_RUN_ID", "SMARTPRINT_QA_ARTIFACT_DIR",
     "SMARTPRINT_QA_SHOP1_EMAIL", "SMARTPRINT_QA_SHOP1_PASSWORD", "SMARTPRINT_QA_SHOP1_NAME",
     "SMARTPRINT_QA_SHOP2_EMAIL", "SMARTPRINT_QA_SHOP2_PASSWORD", "SMARTPRINT_QA_SHOP2_NAME",
     "SMARTPRINT_QA_ADMIN_EMAIL", "SMARTPRINT_QA_ADMIN_PASSWORD", "SMARTPRINT_QA_ADMIN_NAME",
@@ -359,6 +413,7 @@ $originalEnvironment = @{}
 foreach ($name in $environmentNames) {
     $originalEnvironment[$name] = [Environment]::GetEnvironmentVariable($name, "Process")
 }
+$env:SMARTPRINT_LOCAL_ORIGIN = $target
 
 Write-Host "SMARTPRINT LOCAL REAL-DATA ACCEPTANCE TEST" -ForegroundColor Green
 $gitCommand = Get-Command git.exe -ErrorAction SilentlyContinue
@@ -382,11 +437,10 @@ try {
     $node = Get-Command node.exe -ErrorAction SilentlyContinue
     if (-not $node) { $node = Get-Command node -ErrorAction Stop }
     $nodeVersion = (& $node.Source --version).Trim()
-    $nodeVersionMatch = [regex]::Match($nodeVersion, '^v(?<major>\d+)\.(?<minor>\d+)\.')
-    $nodeMajor = if ($nodeVersionMatch.Success) { [int]$nodeVersionMatch.Groups["major"].Value } else { 0 }
-    $nodeMinor = if ($nodeVersionMatch.Success) { [int]$nodeVersionMatch.Groups["minor"].Value } else { 0 }
-    if (-not $nodeVersionMatch.Success -or $nodeMajor -lt 22 -or ($nodeMajor -eq 22 -and $nodeMinor -lt 6)) {
-        throw "Node.js 22.6 or newer is required for the built-in TypeScript strip-types test runner. Found $nodeVersion."
+    $nodeVersionMatch = [regex]::Match($nodeVersion, '^v(?<version>\d+\.\d+\.\d+)')
+    $nodeActualVersion = if ($nodeVersionMatch.Success) { [Version]$nodeVersionMatch.Groups["version"].Value } else { [Version]"0.0.0" }
+    if (-not $nodeVersionMatch.Success -or $nodeActualVersion -lt $minimumNodeVersion) {
+        throw "Node.js $minimumNodeVersion or newer is required for the built-in TypeScript strip-types test runner. Found $nodeVersion."
     }
     Add-QAResult -Name "Node.js runtime" -Status "PASS" -Detail $nodeVersion
 
@@ -410,8 +464,7 @@ try {
         if (-not (Test-Path -LiteralPath $envPath -PathType Leaf)) { throw "E2E-only mode requires the existing .env.local file." }
         if (-not (Test-Path -LiteralPath $composeFile -PathType Leaf)) { throw "E2E-only mode requires compose.local.yml." }
 
-        $composeProjectName = "smart-print"
-        $composeBaseArgs = @("compose", "--project-name", $composeProjectName, "--env-file", $envPath, "-f", $composeFile)
+            $composeBaseArgs = @("compose", "--project-name", $composeProjectName, "--env-file", $envPath, "-f", $composeFile)
         $composeConfigArgs = $composeBaseArgs + @("config", "--quiet")
         $configOk = Invoke-QAStep -Name "Validate existing local Compose configuration" -LogName "compose-config.log" -Action {
             & $docker.Source @composeConfigArgs
@@ -501,7 +554,7 @@ try {
         Set-QAProcessEnvironment $accounts
 
         $script:playwrightModule = $null
-        $playwrightOk = Invoke-QAStep -Name "Locate pinned Playwright 1.56.1 for E2E-only run" -LogName "playwright-install.log" -Action {
+        $playwrightOk = Invoke-QAStep -Name "Locate pinned Playwright $playwrightVersion for E2E-only run" -LogName "playwright-install.log" -Action {
             $script:playwrightModule = Install-OrLocatePlaywright -ForceSkipInstall:$reuseExistingStack
             if (-not $script:playwrightModule) { throw "Playwright module resolution failed." }
             Write-Host ("Pinned Playwright module: " + $script:playwrightModule)
@@ -597,7 +650,6 @@ try {
 
     # Pin this stack to its own namespace even when the calling shell or
     # .env.local defines COMPOSE_PROJECT_NAME for QuantaEdge infrastructure.
-    $composeProjectName = "smart-print"
     $composeBaseArgs = @("compose", "--project-name", $composeProjectName, "--env-file", $envPath, "-f", $composeFile)
     $configArgs = $composeBaseArgs + @("config", "--quiet")
     $configOk = Invoke-QAStep -Name "Validate local SmartPrint Compose configuration (project: $composeProjectName)" -LogName "compose-config.log" -Action {
@@ -678,7 +730,7 @@ try {
         $healthRouteStart = $apiProgram.IndexOf('app.MapGet("/health/live"')
         $healthRouteAnonymousMarker = $apiProgram.IndexOf('})).AllowAnonymous();', $healthRouteStart)
         $healthRouteIsAnonymous = $healthRouteStart -ge 0 -and $healthRouteAnonymousMarker -ge $healthRouteStart
-        $loopbackCorsIsAllowed = $localCompose.Contains('Cors__AllowedOrigins__2: "http://127.0.0.1:3000"')
+        $loopbackCorsIsAllowed = $localCompose.Contains('Cors__AllowedOrigins__2: "${SMARTPRINT_LOCAL_ORIGIN:-http://127.0.0.1:3000}"')
         $portalUsesOfflineFonts = -not $publicLandingCss.Contains("fonts.googleapis.com") -and
             -not $publicLandingCss.Contains("fonts.gstatic.com")
         if (-not $healthRouteIsAnonymous -or -not $loopbackCorsIsAllowed -or -not $portalUsesOfflineFonts) {
@@ -803,7 +855,7 @@ try {
         $corsArgs = $composeBaseArgs + @(
             "exec", "-T", "api", "curl", "--noproxy", "*", "--silent", "--show-error",
             "--dump-header", "-", "--output", "/dev/null", "--request", "OPTIONS",
-            "--header", "Origin: http://127.0.0.1:3000",
+            "--header", "Origin: $target",
             "--header", "Access-Control-Request-Method: POST",
             "--header", "Access-Control-Request-Headers: content-type,authorization,idempotency-key,x-print-batch-id",
             "http://portal/api/v1/auth/register-customer"
@@ -813,7 +865,7 @@ try {
         $corsHeaders = $corsOutput -join [Environment]::NewLine
         $preflightStatusIs204 = $corsHeaders -match 'HTTP/.+ 204'
         $allowedOriginHeaderFound = $corsHeaders.IndexOf(
-            "Access-Control-Allow-Origin: http://127.0.0.1:3000",
+            "Access-Control-Allow-Origin: $target",
             [StringComparison]::OrdinalIgnoreCase
         ) -ge 0
         if (-not $preflightStatusIs204 -or -not $allowedOriginHeaderFound) {
@@ -853,7 +905,7 @@ try {
     if (-not $bootstrapOk) { throw "Local platform administrator bootstrap failed." }
 
     $script:playwrightModule = $null
-    $playwrightOk = Invoke-QAStep -Name "Install and locate pinned Playwright 1.56.1 with Chromium" -LogName "playwright-install.log" -Action {
+    $playwrightOk = Invoke-QAStep -Name "Install and locate pinned Playwright $playwrightVersion with Chromium" -LogName "playwright-install.log" -Action {
         $script:playwrightModule = Install-OrLocatePlaywright
         if (-not $script:playwrightModule) { throw "Playwright module resolution failed." }
         Write-Host ("Pinned Playwright module: " + $script:playwrightModule)
@@ -947,7 +999,7 @@ try {
         } else {
             $androidUnitTestArgs = @(
                 "--no-daemon", "-p", "apps/android",
-                "-PsmartPrintServiceUrl=http://10.0.2.2:3000",
+                "-PsmartPrintServiceUrl=$androidEmulatorOrigin",
                 ":app:testDebugUnitTest"
             )
             $androidUnitTestsOk = Invoke-QAStep -Name "Android native JVM unit tests against the local portal configuration" -LogName "android-unit-tests.log" -Action {
@@ -957,7 +1009,7 @@ try {
 
             $androidBuildArgs = @(
                 "--no-daemon", "-p", "apps/android",
-                "-PsmartPrintServiceUrl=http://10.0.2.2:3000",
+                "-PsmartPrintServiceUrl=$androidEmulatorOrigin",
                 ":app:assembleDebug"
             )
             $androidApkBuildOk = Invoke-QAStep -Name "Build Android debug APK for emulator acceptance" -LogName "android-apk-build.log" -Action {
@@ -986,7 +1038,7 @@ try {
             if ($androidApkBuildOk -and $emulatorDevices.Count -eq 1 -and $connectedDevices.Count -eq 1) {
                 $instrumentationArgs = @(
                     "--no-daemon", "-p", "apps/android",
-                    "-PsmartPrintServiceUrl=http://10.0.2.2:3000",
+                    "-PsmartPrintServiceUrl=$androidEmulatorOrigin",
                     ":app:connectedDebugAndroidTest"
                 )
                 $androidUiOk = Invoke-QAStep -Name "Android emulator instrumentation tests against local SmartPrint portal" -LogName "android-emulator-tests.log" -Action {

@@ -1,0 +1,21 @@
+{
+  "schemaVersion": 1,
+  "origins": {
+    "public": "https://smartprint.quantaedge.in",
+    "local": "http://127.0.0.1:3000",
+    "androidEmulator": "http://10.0.2.2:3000"
+  },
+  "composeProjectName": "smart-print",
+  "runtime": {
+    "minimumNodeVersion": "22.6.0",
+    "playwrightVersion": "1.56.1"
+  },
+  "downloads": {
+    "statusPath": "/downloads/status",
+    "windowsPath": "/downloads/windows",
+    "androidPath": "/downloads/android",
+    "windowsAssetName": "SmartPrint-Windows-Setup.exe",
+    "androidAssetName": "SmartPrint-Android.apk",
+    "maxTransferBytes": 268435456
+  }
+}

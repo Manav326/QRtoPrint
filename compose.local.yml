@@ -42,7 +42,7 @@ services:
       PublicDownloads__GitHubRepository: ${GITHUB_REPOSITORY:-Manav326/smart-print}
       Cors__AllowedOrigins__0: ${PUBLIC_BASE_URL:?Set PUBLIC_BASE_URL in .env.local}
       Cors__AllowedOrigins__1: "http://localhost:3000"
-      Cors__AllowedOrigins__2: "http://127.0.0.1:3000"
+      Cors__AllowedOrigins__2: "${SMARTPRINT_LOCAL_ORIGIN:-http://127.0.0.1:3000}"
     # Keep the API private to the Compose network. The portal proxies /api and /health
     # to smart-print-api:8080; publishing host port 8080 would collide with other local products.
     volumes:
