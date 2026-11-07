@@ -40,7 +40,7 @@ jobs:
           done
       - name: Test local E2E prerequisite and HTTP audit helpers
         if: ${{ !cancelled() && steps.portal_dependencies.outcome == 'success' }}
-        run: node --test --test-concurrency=1 --test-reporter=./scripts/qa/live-node-test-reporter.mjs scripts/qa/live-node-test-reporter.test.mjs scripts/qa/smartprint-qa-config.test.mjs scripts/qa/local-e2e-prerequisites.test.mjs scripts/qa/local-e2e-http-audit.test.mjs
+        run: node --test --test-concurrency=1 --test-reporter=./scripts/qa/live-node-test-reporter.mjs scripts/qa/live-node-test-reporter.test.mjs scripts/qa/production-qa-plan.test.mjs scripts/qa/smartprint-qa-config.test.mjs scripts/qa/local-e2e-prerequisites.test.mjs scripts/qa/local-e2e-http-audit.test.mjs
       - name: Test portal logic regression suite
         if: ${{ !cancelled() && steps.portal_dependencies.outcome == 'success' }}
         run: |
