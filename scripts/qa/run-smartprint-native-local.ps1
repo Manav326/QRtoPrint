@@ -198,7 +198,8 @@ if ($cargo) {
     Add-NativeResult "Windows Desktop native Rust host tests" "FAIL" "Rust cargo was not found. Install the stable MSVC Rust toolchain."
 }
 
-$desktopExe = Join-Path $repoRoot "apps/desktop/src-tauri/target/x86_64-pc-windows-msvc/release/smartprint-desktop.exe"
+$desktopBuildExe = Join-Path $repoRoot ("apps/desktop/src-tauri/target/release/" + [string]$qaConfig.apps.windows.nativeExecutableName)
+$desktopExe = Join-Path $outputRoot ([string]$qaConfig.apps.windows.nativeExecutableName)
 $desktopBuildNativeOk = $false
 if ($pnpm -and $desktopBuildOk -and $desktopRustOk) {
     $previousApiOrigin = [Environment]::GetEnvironmentVariable("VITE_API_BASE_URL", "Process")
@@ -206,11 +207,10 @@ if ($pnpm -and $desktopBuildOk -and $desktopRustOk) {
         [Environment]::SetEnvironmentVariable("VITE_API_BASE_URL", $publicOrigin, "Process")
         $desktopBuildNativeOk = Invoke-NativeStep -Name "Build native Windows SmartPrint Desktop executable against the local tunnel" -Evidence (Join-Path $outputRoot "desktop-native-build.log") -Action {
             & $pnpm.Source --filter "@smart-print/desktop" exec tauri build --no-bundle --ci
-            $builtExe = Join-Path $repoRoot "apps/desktop/src-tauri/target/release/smartprint-desktop.exe"
-            if (-not (Test-Path -LiteralPath $builtExe -PathType Leaf)) {
-                throw "Tauri returned without producing the Windows SmartPrint Desktop executable."
+            if (-not (Test-Path -LiteralPath $desktopBuildExe -PathType Leaf)) {
+                throw "Tauri returned without producing the configured Windows SmartPrint Desktop executable: $desktopBuildExe"
             }
-            Copy-Item -LiteralPath $builtExe -Destination $desktopExe -Force
+            Copy-Item -LiteralPath $desktopBuildExe -Destination $desktopExe -Force
             Write-QA ("Built local Desktop executable: " + $desktopExe) "Green"
         }
     } finally {
@@ -246,7 +246,7 @@ if ($desktopBuildNativeOk -and (Test-Path -LiteralPath $desktopExe -PathType Lea
             try {
                 [Environment]::SetEnvironmentVariable("WEBVIEW2_USER_DATA_FOLDER", $profilePath, "Process")
                 $desktopSmokeOk = Invoke-NativeStep -Name "Launch local Windows Desktop and verify native window plus accessible SmartPrint workspace" -Evidence (Join-Path $outputRoot "desktop-ui-smoke.json") -Action {
-                    $smokeEvidence = & $smokeScript -ExecutablePath $desktopExe -StartupTimeoutSeconds 60
+                    $smokeEvidence = & $smokeScript -ExecutablePath $desktopExe -StartupTimeoutSeconds ([int]$qaConfig.apps.windows.smokeTimeoutSeconds)
                     if (-not $smokeEvidence) {
                         throw "Desktop UI smoke test did not return structured UI Automation evidence."
                     }
@@ -341,7 +341,7 @@ function Find-AndroidUiNode($Document, [string]$ResourceSuffix, [string]$Label, 
 
 function Invoke-AndroidNavigation([string]$Device, [string]$AdbPath, [string]$Package, [string]$OutputRoot, [string]$Destination) {
     $docBefore = Get-AndroidUiDocument ("before-" + $Destination) $Device $AdbPath $OutputRoot
-    $resource = if ($Destination -eq "files") { "smartprint_nav_files" } else { "smartprint_nav_home" }
+    $resource = if ($Destination -eq "files") { ([string]$qaConfig.apps.android.uiAutomationIds.filesNavigation) } else { ([string]$qaConfig.apps.android.uiAutomationIds.homeNavigation) }
     $label = if ($Destination -eq "files") { "My Files" } else { "Home" }
     $node = Find-AndroidUiNode $docBefore $resource $label $Package
     if (-not $node) {
@@ -358,7 +358,7 @@ function Invoke-AndroidNavigation([string]$Device, [string]$AdbPath, [string]$Pa
     do {
         Start-Sleep -Milliseconds 350
         $docAfter = Get-AndroidUiDocument ("after-" + $Destination) $Device $AdbPath $OutputRoot
-        $expectedResource = if ($Destination -eq "files") { "smartprint_files_heading" } else { "smartprint_home_heading" }
+        $expectedResource = if ($Destination -eq "files") { ([string]$qaConfig.apps.android.uiAutomationIds.filesHeading) } else { ([string]$qaConfig.apps.android.uiAutomationIds.homeHeading) }
         $expectedLabel = if ($Destination -eq "files") { "Create a new folder" } else { "Your space" }
         if (Find-AndroidUiNode $docAfter $expectedResource $expectedLabel $Package) {
             return $true
@@ -372,8 +372,8 @@ if ($androidDevice) {
         Add-NativeResult "Android local QA APK build" "FAIL" "A system Gradle installation and Android SDK are required for physical-device acceptance."
         Add-NativeResult "Android local QA install and live UI acceptance" "SKIPPED" "Blocked by Android build prerequisites."
     } else {
-        $androidPackage = "com.quantaedge.smartprint.localqa"
-        $productionPackage = "com.quantaedge.smartprint"
+        $androidPackage = [string]$qaConfig.apps.android.localQaApplicationId
+        $productionPackage = [string]$qaConfig.apps.android.applicationId
         $productionBefore = @(& $adbCommand.Source -s $androidDevice shell pm path $productionPackage 2>&1)
         $productionInstalledBefore = ($LASTEXITCODE -eq 0 -and ($productionBefore -join " ") -match "package:")
 
@@ -422,7 +422,7 @@ if ($androidDevice) {
 
         if ($androidInstallOk) {
             $androidLaunchOk = Invoke-NativeStep -Name "Launch Android local QA app and verify the actual resumed Activity" -Evidence (Join-Path $outputRoot "android-local-qa-launch.log") -Action {
-                $component = "$androidPackage/com.quantaedge.smartprint.MainActivity"
+                $component = "$androidPackage/$([string]$qaConfig.apps.android.launcherActivity)"
                 $launchOutput = @(& $adbCommand.Source -s $androidDevice shell am start -W -n $component 2>&1)
                 if ($LASTEXITCODE -ne 0) { throw "Android could not launch the QA app: $($launchOutput -join ' ')" }
                 $deadline = [DateTime]::UtcNow.AddSeconds(30)
@@ -441,13 +441,13 @@ if ($androidDevice) {
             if ($androidLaunchOk) {
                 $androidNavigationOk = Invoke-NativeStep -Name "Android native Home and My Files navigation" -Evidence (Join-Path $outputRoot "android-local-qa-navigation.log") -Action {
                     $home = Get-AndroidUiDocument "initial-home" $androidDevice $adbCommand.Source $outputRoot
-                    if (-not (Find-AndroidUiNode $home "smartprint_native_root" "" $androidPackage)) {
+                    if (-not (Find-AndroidUiNode $home ([string]$qaConfig.apps.android.uiAutomationIds.nativeRoot) "" $androidPackage)) {
                         throw "Android native root landmark was not visible."
                     }
-                    if (-not (Find-AndroidUiNode $home "smartprint_nav_home" "Home" $androidPackage)) {
+                    if (-not (Find-AndroidUiNode $home ([string]$qaConfig.apps.android.uiAutomationIds.homeNavigation) "Home" $androidPackage)) {
                         throw "Android Home navigation control was not visible."
                     }
-                    if (-not (Find-AndroidUiNode $home "smartprint_nav_files" "My Files" $androidPackage)) {
+                    if (-not (Find-AndroidUiNode $home ([string]$qaConfig.apps.android.uiAutomationIds.filesNavigation) "My Files" $androidPackage)) {
                         throw "Android My Files navigation control was not visible."
                     }
                     if (-not (Invoke-AndroidNavigation $androidDevice $adbCommand.Source $androidPackage $outputRoot "files")) {
