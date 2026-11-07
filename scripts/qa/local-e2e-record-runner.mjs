@@ -64,7 +64,7 @@ export const RECORD_PREREQUISITES = Object.freeze({
   "TENANT: Shop One cannot rotate Shop Two's QR station code": ["Shop one provisions real QA printer and QR station", "Shop two configures isolated real QA printer/station"],
   "TENANT: printer listings expose only the authenticated shop's printers": ["Shop one provisions real QA printer and QR station", "Shop two configures isolated real QA printer/station"],
   "TENANT: QR station listings expose only the authenticated shop's stations": ["Shop one provisions real QA printer and QR station", "Shop two configures isolated real QA printer/station"],
-  "TENANT: revoked Agent identity remains visible only to its source shop": ["Disposable QA Agent enrolls, heartbeats, validates printer sync, rejects code replay and revokes safely"],
+  "TENANT: revoked Agent identity remains visible only to its source shop": ["Create or sign in to the second real QA shop through the shop UI", "Disposable QA Agent enrolls, heartbeats, validates printer sync, rejects code replay and revokes safely"],
   "UPLOAD: a print upload requires an Idempotency-Key": ["Customer opens the shop-one station with authenticated customer identity"],
   "UPLOAD: malformed batch identifiers are rejected before document ingestion": ["Customer opens the shop-one station with authenticated customer identity"],
   "DOC: cloud document upload rejects non-multipart requests": ["Customer opens the shop-one station with authenticated customer identity"],
