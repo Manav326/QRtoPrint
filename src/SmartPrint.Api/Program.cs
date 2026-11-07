@@ -933,12 +933,13 @@ customerApi.MapGet("/jobs", async (
 
     var jobs = await (
         from job in db.PrintJobs.AsNoTracking()
-        join session in db.CustomerPrintSessions.AsNoTracking()
-            on new { job.TenantId, SessionId = job.CustomerSessionId }
-            equals new { session.TenantId, SessionId = session.Id }
         join profile in db.ShopProfiles.AsNoTracking()
             on job.TenantId equals profile.TenantId
-        where session.CustomerUserId == customerId
+        where job.CustomerUserId == customerId ||
+              (job.CustomerSessionId != null && db.CustomerPrintSessions.Any(session =>
+                  session.TenantId == job.TenantId &&
+                  session.Id == job.CustomerSessionId &&
+                  session.CustomerUserId == customerId))
         orderby job.CreatedUtc descending
         select new
         {
@@ -1000,14 +1001,15 @@ customerApi.MapGet("/jobs/{jobId:guid}/status", async (
     // A signed-in customer owns the order through the customer identity attached
     // to the originating session. Do not require that the short-lived QR session
     // remains active: history tracking must survive app restarts and session expiry.
-    var ownedJob = await (
-        from trackedPrintJob in db.PrintJobs.AsNoTracking()
-        join session in db.CustomerPrintSessions.AsNoTracking()
-            on new { trackedPrintJob.TenantId, SessionId = trackedPrintJob.CustomerSessionId }
-            equals new { session.TenantId, SessionId = session.Id }
-        where trackedPrintJob.Id == jobId && session.CustomerUserId == customerId
-        select new { trackedPrintJob.TenantId, SessionId = session.Id }
-    ).SingleOrDefaultAsync(ct);
+    var ownedJob = await db.PrintJobs.AsNoTracking()
+        .Where(trackedPrintJob => trackedPrintJob.Id == jobId &&
+            (trackedPrintJob.CustomerUserId == customerId ||
+             (trackedPrintJob.CustomerSessionId != null && db.CustomerPrintSessions.Any(session =>
+                 session.TenantId == trackedPrintJob.TenantId &&
+                 session.Id == trackedPrintJob.CustomerSessionId &&
+                 session.CustomerUserId == customerId))))
+        .Select(trackedPrintJob => new { trackedPrintJob.TenantId })
+        .SingleOrDefaultAsync(ct);
 
     if (ownedJob is null)
     {
@@ -1016,7 +1018,11 @@ customerApi.MapGet("/jobs/{jobId:guid}/status", async (
 
     var jobStatus = await db.PrintJobs.AsNoTracking()
         .Where(item => item.Id == jobId && item.TenantId == ownedJob.TenantId &&
-                       item.CustomerSessionId == ownedJob.SessionId)
+            (item.CustomerUserId == customerId ||
+             (item.CustomerSessionId != null && db.CustomerPrintSessions.Any(session =>
+                 session.TenantId == item.TenantId &&
+                 session.Id == item.CustomerSessionId &&
+                 session.CustomerUserId == customerId))))
         .Select(item => new
         {
             item.Id,
@@ -1910,13 +1916,27 @@ shop.MapGet("/customers", async (
     var customerIds = customers.Select(item => item.CustomerId).ToArray();
     var jobStatistics = await (
         from job in db.PrintJobs.AsNoTracking()
-        join session in db.CustomerPrintSessions.AsNoTracking()
-            on new { job.TenantId, SessionId = job.CustomerSessionId }
-            equals new { session.TenantId, SessionId = session.Id }
         where job.TenantId == tenantId &&
-              session.CustomerUserId != null &&
-              customerIds.Contains(session.CustomerUserId.Value)
-        group job by session.CustomerUserId!.Value into customerJobs
+              ((job.CustomerUserId != null && customerIds.Contains(job.CustomerUserId.Value)) ||
+               (job.CustomerSessionId != null && db.CustomerPrintSessions.Any(session =>
+                   session.TenantId == tenantId &&
+                   session.Id == job.CustomerSessionId &&
+                   session.CustomerUserId != null &&
+                   customerIds.Contains(session.CustomerUserId.Value))))
+        select new
+        {
+            CustomerId = job.CustomerUserId ?? db.CustomerPrintSessions
+                .Where(session => session.TenantId == tenantId && session.Id == job.CustomerSessionId)
+                .Select(session => session.CustomerUserId)
+                .FirstOrDefault(),
+            job.Status,
+            job.OutputType,
+            job.OutputCompletedUtc,
+            job.OutputConfirmedUtc,
+            job.CreatedUtc
+        } into customerJob
+        where customerJob.CustomerId != null
+        group customerJob by customerJob.CustomerId!.Value into customerJobs
         select new
         {
             CustomerId = customerJobs.Key,
@@ -1987,13 +2007,15 @@ shop.MapGet("/customers/{customerId:guid}/jobs", async (
     var boundedTake = Math.Clamp(take ?? 50, 1, 100);
     var customerJobs =
         from job in db.PrintJobs.AsNoTracking()
-        join session in db.CustomerPrintSessions.AsNoTracking()
-            on new { job.TenantId, SessionId = job.CustomerSessionId }
-            equals new { session.TenantId, SessionId = session.Id }
         join document in db.PrintDocuments.AsNoTracking()
             on new { job.TenantId, PrintJobId = job.Id }
             equals new { document.TenantId, document.PrintJobId }
-        where job.TenantId == tenantId && session.CustomerUserId == customerId
+        where job.TenantId == tenantId &&
+              (job.CustomerUserId == customerId ||
+               (job.CustomerSessionId != null && db.CustomerPrintSessions.Any(session =>
+                   session.TenantId == tenantId &&
+                   session.Id == job.CustomerSessionId &&
+                   session.CustomerUserId == customerId)))
         select new
         {
             job.Id,
