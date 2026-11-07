@@ -225,6 +225,7 @@ function ShopConsole({ tokens, onSignOut, dark, onToggleTheme }: { tokens: AuthT
   }|null>(null);
   const [shopPhotoOrderOpen,setShopPhotoOrderOpen]=useState(false);
   const [shopPhotoOrderDraft,setShopPhotoOrderDraft]=useState<ShopPhotoOrderDraft|null>(null);
+  const [shopPhotoOrderReceipt,setShopPhotoOrderReceipt]=useState<Awaited<ReturnType<typeof createShopPhotoJob>>|null>(null);
   const [refundJob, setRefundJob] = useState<ShopPrintJob | null>(null);
   const [batchReviewJobs, setBatchReviewJobs] = useState<ShopPrintJob[] | null>(null);
   const [batchReviewDecisions, setBatchReviewDecisions] = useState<Record<string, boolean>>({});
@@ -1211,6 +1212,7 @@ function ShopConsole({ tokens, onSignOut, dark, onToggleTheme }: { tokens: AuthT
         paymentMethod:draft.paymentMethod,idempotencyKey:draft.idempotencyKey
       });
       setShopPhotoOrderDraft(null);
+      setShopPhotoOrderReceipt(result);
       const amount=formatMoney(result.job.quotedAmountMinor,result.job.currency);
       const paymentNote=result.payment.method==="UPI"
         ? `UPI payment is pending. Collect at ${result.payment.upiIdSnapshot||"the shop's configured UPI ID"} and verify actual credit in your UPI/bank app before authorising print.`
@@ -1602,6 +1604,7 @@ function ShopConsole({ tokens, onSignOut, dark, onToggleTheme }: { tokens: AuthT
             {batchReviewJobs && <BatchReviewModal jobs={batchReviewJobs} busy={busyJobId==="batch-review"} decisions={batchReviewDecisions} retrying={batchReviewRetry} onDecision={(jobId,accepted)=>setBatchReviewDecisions(current=>({...current,[jobId]:accepted}))} onClose={()=>setBatchReviewJobs(null)} onPreview={job=>void previewJob(job,true)} onApply={(acceptedIds,pdfBrandingEnabled)=>void applyBatchReview(batchReviewJobs,acceptedIds,pdfBrandingEnabled)}/>} 
       {preview && <DocumentPreviewModal name={preview.name} url={preview.url} mediaType={preview.mediaType} job={preview.job} readOnly={preview.readOnly} isSavedOutput={preview.isSavedOutput} focusEditOnMount={focusShopPhotoEdit} onEditPhoto={preview.mediaType.startsWith("image/")&&(preview.job.storageMode==="CLOUD"||preview.job.storageMode==="LOCAL_AGENT")&&preview.job.status==="AWAITING_SHOP_APPROVAL"&&[pricing?.photo35x45Minor,pricing?.photo25x35Minor,pricing?.photo2x2Minor,pricing?.photo4x6Minor].some(rate=>(rate??0)>0)?openShopPhotoStudio:undefined} onApprove={()=>void approveJob(preview.job)} onReject={()=>void rejectJob(preview.job)} onRefund={()=>setRefundJob(preview.job)} onClose={() => { URL.revokeObjectURL(preview.url); setPreview(null); setFocusShopPhotoEdit(false); }}/>} 
       {shopPhotoStudio && <PhotoStudio source={shopPhotoStudio.source} mode="shop" dark={dark} photoPrices={{"35x45":pricing?.photo35x45Minor??0,"25x35":pricing?.photo25x35Minor??0,"2x2":pricing?.photo2x2Minor??0,"4x6":pricing?.photo4x6Minor??0}} onCancel={cancelShopPhotoStudio} onApply={applyShopPhotoStudio}/>} 
+      {shopPhotoOrderReceipt&&<ShopPhotoOrderReceipt receipt={shopPhotoOrderReceipt} onClose={()=>setShopPhotoOrderReceipt(null)} onOpenPayments={()=>{setShopPhotoOrderReceipt(null);navAction("Payments");}}/>}
       {shopPhotoOrderOpen&&<ShopPhotoOrderModal token={tokens.accessToken} paymentSettings={paymentSettings} photoPrices={{"35x45":pricing?.photo35x45Minor??0,"25x35":pricing?.photo25x35Minor??0,"2x2":pricing?.photo2x2Minor??0,"4x6":pricing?.photo4x6Minor??0}} onClose={()=>setShopPhotoOrderOpen(false)} onContinue={draft=>{setShopPhotoOrderOpen(false);setShopPhotoOrderDraft(draft);}}/>}
       {shopPhotoOrderDraft&&<PhotoStudio source={shopPhotoOrderDraft.source} mode="shop-create" dark={dark} photoPrices={{"35x45":pricing?.photo35x45Minor??0,"25x35":pricing?.photo25x35Minor??0,"2x2":pricing?.photo2x2Minor??0,"4x6":pricing?.photo4x6Minor??0}} onCancel={()=>setShopPhotoOrderDraft(null)} onApply={applyShopCreatedPhotoStudio}/>} 
       {eventHistory && <JobHistoryModal job={eventHistory.job} events={eventHistory.events} onClose={() => setEventHistory(null)}/>}
@@ -1618,6 +1621,48 @@ type ShopPhotoOrderDraft = {
   source:File; recipientType:"EXISTING_CUSTOMER"|"WALK_IN"; customerUserId?:string;
   recipientName?:string; recipientPhone?:string; paymentMethod:"UPI"|"CASH"; idempotencyKey:string;
 };
+
+function ShopPhotoOrderReceipt({receipt,onClose,onOpenPayments}:{
+  receipt:Awaited<ReturnType<typeof createShopPhotoJob>>;
+  onClose:()=>void;
+  onOpenPayments:()=>void;
+}) {
+  const {job,payment}=receipt;
+  const amount=formatMoney(payment.amountMinor,payment.currency);
+  const upiIntent=payment.method==="UPI"&&payment.status!=="VERIFIED"
+    ? buildCustomerUpiIntent({
+        upiId:payment.upiIdSnapshot,
+        payeeName:payment.payeeNameSnapshot,
+        amountMinor:payment.amountMinor,
+        currency:payment.currency,
+        transactionReference:job.jobNumber,
+        description:`SmartPrint photo order ${job.jobNumber}`
+      })
+    : null;
+  return <Modal title="Photo order created" subtitle={`Job ${job.jobNumber} · ${job.recipientName}`} onClose={onClose}>
+    <div className="photo-order-receipt">
+      <div className="photo-order-receipt-summary">
+        <span>Server-calculated amount</span><strong>{amount}</strong>
+        <small>{job.photoCount} photos · {job.photoSizeCode} · {job.pageCount} A4 page(s)</small>
+      </div>
+      {payment.status==="VERIFIED"
+        ? <div className="file-review-note"><Check size={16}/><span>Payment is already verified. Continue from the Print Queue to assign a printer and explicitly dispatch the job.</span></div>
+        : payment.method==="UPI"
+          ? <div className="photo-order-upi">
+              {upiIntent?<QRCode value={upiIntent} size={184} level="M"/>:<p className="form-error">A UPI QR could not be prepared from the saved shop payment details. Open Payments and check the configured UPI ID.</p>}
+              <strong>{payment.payeeNameSnapshot||"Shop payment"}</strong>
+              <span>{payment.upiIdSnapshot||"UPI ID not available"}</span>
+              <small>Payment pending · Ask the customer to scan and pay the exact amount. Verify the actual credit in your UPI/bank app; this QR does not confirm payment.</small>
+            </div>
+          : <div className="file-review-note"><Wallet size={16}/><span>Cash payment pending. Collect {amount} at the counter and mark it received only after the cash is physically in the shop.</span></div>}
+      <div className="form-hint">The job is already in your Print Queue. It cannot be dispatched until payment has been manually verified. Printing must then be started explicitly.</div>
+      <div className="modal-actions">
+        <button type="button" className="secondary-button" onClick={onClose}>Done</button>
+        <button type="button" className="primary-button" onClick={onOpenPayments}>Open Payments <ArrowRight size={15}/></button>
+      </div>
+    </div>
+  </Modal>;
+}
 
 function ShopPhotoOrderModal({token,paymentSettings,photoPrices,onClose,onContinue}:{
   token:string; paymentSettings:ShopPaymentSettings|null; photoPrices:Record<string,number>;
