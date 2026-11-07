@@ -56,5 +56,13 @@ test("local Windows runner executes the isolated Photo Studio browser matrix in 
   assert.match(runner, /http:\/\/127\.0\.0\.1:4173/);
   assert.match(runner, /http:\/\/127\.0\.0\.1:1420/);
   assert.match(runner, /RESPONSIVE_ARTIFACT_DIR/);
-  assert.match(runner, /already in use\. The existing process was left untouched/);
+  assert.match(runner, /SMARTPRINT_PNPM_COMMAND/);
+  assert.match(runner, /SMARTPRINT_PNPM_PREFIX/);
+  assert.match(runner, /--frozen-lockfile/);
+  assert.match(runner, /--prefer-offline/);
+  assert.match(runner, /packageManager/);
+    assert.match(runner, /already in use\. The existing process was left untouched/);
+  const workspaceManifest = JSON.parse(readFileSync(new URL("../../package.json", import.meta.url), "utf8"));
+  assert.equal(workspaceManifest.packageManager, "pnpm@10.18.0",
+    "The visual suite must resolve the exact package-manager version pinned by the workspace.");
 });
