@@ -11,7 +11,7 @@ This is a supplement, not a replacement, for:
 - [Android physical-device acceptance](ANDROID_PHYSICAL_ACCEPTANCE.md) — physical camera, QR, shop-Wi-Fi and Windows-to-Android readiness workflow.
 - [Local native application QA](LOCAL_NATIVE_APP_QA.md) — local Windows Desktop build/smoke and side-by-side Android QA app execution.
 
-The 70 cases below add role-focused, cross-surface assertions for the newer Android customer account/document-studio workflows and for the actual Windows Desktop owner experience. They must be recorded independently. They are **not** counted as passed by the 262-case browser run or by a native build.
+The 75 cases below add role-focused, cross-surface assertions for the newer Android customer account/document-studio workflows and for the actual Windows Desktop owner experience. They must be recorded independently. They are **not** counted as passed by the 262-case browser run or by a native build.
 
 ## 1. Product and role contract
 
@@ -206,12 +206,27 @@ Case ID | Result | Exact commit/build | Role | Surface/device/OS | Steps actuall
 
 Evidence must prove persisted state and the visible experience where both matter. A 200 response, green dashboard tile, loaded screen, successful build or Agent heartbeat alone is insufficient. Keep a single evidence directory under the run's existing artifacts folder and redact secrets/customer data.
 
-## 9. Release gate
+## 9. History-based session restoration and reprint acceptance
+
+**Important distinction:** The current implementation supports continuity of an existing station session: Web checks the tab's station-scoped session token, then the Android native bridge's encrypted per-station token, validates it with the API, and restores the matching customer draft when its session marker matches. Android's Activity > Print history retrieves the signed-in customer's jobs and opens order details/timeline. The current Activity history view does **not** expose a command to restore an old session/draft or reprint a historical job. The Shop Print Queue's History action is an audit timeline, not a customer session restore.
+
+These cases must not be marked PASS merely because the history list or order details open:
+
+| ID | Priority | Scenario and procedure | Expected result |
+|---|---:|---|---|
+| HST-001 | P0 | Start a customer session at SHOP-A, upload a synthetic file or batch, configure its print settings, then reload the Web tab and force-stop/reopen the Android app while the original station session remains valid. | The same station-scoped session is resumed only after API validation; the saved draft is restored only when its session marker matches; original job/batch IDs, files, settings, upload idempotency and status are retained; no duplicate job/payment is created. If the token has expired/revoked, it is cleared and a safe fresh-session path is shown instead. |
+| HST-002 | P1 | Sign in as CUSTOMER-ACCOUNT, open Android Activity > Print history, search/filter a prior job, open View details, then let the access token expire and repeat after a safe app restart. | History and details are fetched from the authenticated server; one safe token refresh is performed; batch/job identity, shop, payment/refund summary and event timeline match server state. Viewing history does not mutate, reset or re-open the job. |
+| HST-003 | P1 | From customer Print history, attempt to restore an unfinished historical job/draft after the original browser tab/WebView/session has been closed. | **Current release capability check:** record NOT IMPLEMENTED because Activity history has View details but no Restore/Continue action or history-to-draft recovery contract. Do not simulate the action or count details viewing as restoration. If this capability is approved for implementation, its acceptance must restore the same authorised original job/batch and immutable settings without creating a second job, quote or payment, and must reject expired/revoked/foreign-customer sessions. |
+| HST-004 | P1 | From a completed, rejected, refunded or cancelled history entry, look for a Reprint/Use these files action; where a future approved flow exists, initiate a reprint and compare old/new records. | **Current release capability check:** record NOT IMPLEMENTED if no explicit reprint action exists. A future reprint must create a new station/customer session and new PrintJob/quote/payment lifecycle; it must never reuse the old payment, old authorisation, old dispatch or mark the old job as reopened. Original history remains immutable. |
+| HST-005 | P0 | Sign out, expire/revoke the station token, rotate/disable the old SHOP-A station code, then sign back in on the same or a different device and inspect customer history; separately try a different customer's job ID and SHOP-B context. | Account-linked history remains available only to the authenticated owning customer and returns only authorised job details. Old guest/session tokens cannot be resurrected from history or used after expiry/rotation; no stored document or draft is exposed to another account/shop; restoring access to a new print request requires a fresh valid station session. |
+
+**Release interpretation:** HST-001 and HST-002 verify current session continuity and history viewing. HST-003 and HST-004 are explicit feature gaps, not test failures in code that does not claim to implement them; however, they are not passes. Product/release owners must decide whether history-based restore/reprint is required for this release. HST-005 is a P0 privacy/session boundary.
+## 10. Release gate
 
 A candidate is not accepted merely because CI is green or the automated local runner exits successfully.
 
 - Every P0 case in the master plan and this supplement must PASS on the candidate, or be a confirmed NOT APPLICABLE with written approval. BLOCKED, NOT RUN, FAIL and NOT IMPLEMENTED are not passes.
-- All 70 supplemental cases must have an explicit result. The native Windows Desktop cases must be run in the native window; Android physical cases must be run on real supported hardware for their hardware-dependent scenarios.
+- All 75 supplemental cases must have an explicit result. The native Windows Desktop cases must be run in the native window; Android physical cases must be run on real supported hardware for their hardware-dependent scenarios.
 - No unresolved P0 defect is permitted. P1 issues require correction/retest or an explicit, time-bound risk decision by the release authority.
 - No claims of complete manager/operator roles, email verification/recovery, live gateway payments/refunds, encrypted direct-LAN payloads, malware scanning, offline printing, universal printer support, signed release readiness or physical-device compatibility beyond the evidence actually collected.
 - Any test involving an actual physical print must use synthetic content and a specifically designated QA printer. Output confirmation must be based on observed output, never spooler acceptance alone.
