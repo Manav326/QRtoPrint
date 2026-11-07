@@ -45,3 +45,16 @@ test("production QA plan defines live terminal progress and safe continuation ru
   assert.match(plan, /Continue executing independent test records/);
   assert.match(plan, /Final status: NOT SIGNED OFF/);
 });
+
+
+test("local Windows runner executes the isolated Photo Studio browser matrix in full and E2E-only modes", () => {
+  const runner = readFileSync(new URL("./run-smartprint-qa.ps1", import.meta.url), "utf8");
+  assert.match(runner, /function Invoke-PhotoStudioBrowserAcceptance/);
+  assert.equal((runner.match(/Invoke-PhotoStudioBrowserAcceptance -Node \$node/g) ?? []).length, 2,
+    "Both the full local run and incremental E2E-only run must execute the Photo Studio browser matrix.");
+  assert.match(runner, /apps\/portal\/tests\/theme-responsive\.browser\.mjs/);
+  assert.match(runner, /http:\/\/127\.0\.0\.1:4173/);
+  assert.match(runner, /http:\/\/127\.0\.0\.1:1420/);
+  assert.match(runner, /RESPONSIVE_ARTIFACT_DIR/);
+  assert.match(runner, /already in use\. The existing process was left untouched/);
+});
