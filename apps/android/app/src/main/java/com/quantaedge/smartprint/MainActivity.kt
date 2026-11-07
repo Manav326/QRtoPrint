@@ -117,6 +117,7 @@ class MainActivity : AppCompatActivity() {
     private var pendingImportDestinationPath = ""
     private var portalUrl: String? = null
     private var portalHost: String? = null
+    private var photoStudioOpen = false
     private var fileCallback: ValueCallback<Array<Uri>>? = null
     private val pendingLocalNetworkPermissionReplies = mutableListOf<JavaScriptReplyProxy>()
     private var localNetworkPermissionRequestInProgress = false
@@ -155,6 +156,8 @@ class MainActivity : AppCompatActivity() {
         // Restore the explicit app preference before AppCompat inflates theme-aware UI.
         SmartPrintThemePreference.apply(this)
         super.onCreate(savedInstanceState)
+        photoStudioOpen = savedInstanceState?.getBoolean("photoStudioOpen") ?: false
+        if (photoStudioOpen) window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
             override fun handleOnBackPressed() {
                 if (handleBackNavigation()) return
@@ -249,6 +252,7 @@ class MainActivity : AppCompatActivity() {
         outState.putInt("viewerPosition", documentViewer?.currentPosition() ?: 0)
         outState.putString("portalUrl", portalUrl)
         outState.putString("portalHost", portalHost)
+        outState.putBoolean("photoStudioOpen", photoStudioOpen)
         webView?.let { view ->
             val webState = Bundle()
             view.saveState(webState)
@@ -265,6 +269,12 @@ class MainActivity : AppCompatActivity() {
 
     private fun handleBackNavigation(): Boolean {
         when {
+            photoStudioOpen -> {
+                webView?.evaluateJavascript(
+                    "document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));",
+                    null
+                )
+            }
             profileVisible -> returnFromProfile()
             pickerMode && pickerPath.isNotBlank() -> { pickerPath = parent(pickerPath); refreshLibrary(preserveScroll = false) }
             pickerMode -> cancelPicker()
@@ -2477,6 +2487,15 @@ class MainActivity : AppCompatActivity() {
                     } else {
                         val parts = message.data.orEmpty().split("|", limit = 3)
                         when {
+                            parts.size == 2 && parts[0] == "setPhotoStudioOpen" &&
+                                parts[1] in setOf("on", "off") -> {
+                                runOnUiThread {
+                                    if (!isFinishing && !isDestroyed) {
+                                        photoStudioOpen = parts[1] == "on"
+                                        replyProxy.postMessage("OK")
+                                    }
+                                }
+                            }
                             parts.size == 2 && parts[0] == "setSensitivePreview" &&
                                 parts[1] in setOf("on", "off") -> {
                                 runOnUiThread {
