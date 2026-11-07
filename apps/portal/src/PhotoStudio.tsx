@@ -201,6 +201,8 @@ export default function PhotoStudio({
     ? requestedPhotosPerPage : maximumLayout.perSheet;
   const layout=useMemo(()=>getPhotoSheetLayout(size,captionHeightMm,photosPerPage),[size,captionHeightMm,photosPerPage]);
   const maxCopies=MAX_PHOTO_COUNT;
+  const parsedCopiesInput = Number(copiesInput);
+  const copiesInputValid = Number.isInteger(parsedCopiesInput) && parsedCopiesInput >= 1 && parsedCopiesInput <= maxCopies;
   const copies = Math.max(1, Math.min(maxCopies, Number(copiesInput) || 1));
   const sheetCount = Math.ceil(copies / photosPerPage);
   const previewPageIndex=Math.max(0,Math.min(previewPage,sheetCount-1));
@@ -473,8 +475,10 @@ export default function PhotoStudio({
               </select>
             </label>
             <label className={styles.fieldLabel}>Number of photos
-              <input type="number" min="1" max={maxCopies} step="1" inputMode="numeric" value={copiesInput} onChange={event => setCopiesInput(event.target.value)} onBlur={() => setCopiesInput(String(copies))}/>
+              <input type="number" min="1" max={maxCopies} step="1" inputMode="numeric" value={copiesInput} onChange={event => setCopiesInput(event.target.value)} onBlur={() => {if(copiesInputValid)setCopiesInput(String(copies));}}/>
             </label>
+            {!copiesInputValid&&<div className={styles.editorHelp} role="status">Enter a whole number from 1 to {maxCopies}. The sheet count is calculated automatically.</div>}
+            {availableSizes.length===0&&<div className={styles.editorHelp} role="alert">Photo printing is not enabled for any size at this shop. Ask the shop owner to configure a photo rate before preparing a sheet.</div>}
             <label className={styles.fieldLabel}>Photos per A4 page
               <select value={photosPerPageInput} onChange={event=>setPhotosPerPageInput(event.target.value)}>
                 <option value="auto">Fit as many as possible ({maximumLayout.perSheet})</option>
@@ -530,7 +534,7 @@ export default function PhotoStudio({
         <div className={styles.footerHint}><Check size={14}/> {footerHint}</div>
         <div className={styles.footerActions}>
           <button type="button" className={styles.cancelButton} onClick={onCancel} disabled={busy}>Cancel</button>
-          <button type="button" className={styles.applyButton} onClick={() => void createPrintSheets()} disabled={!image || busy || !!imageError || availableSizes.length === 0 || !Number.isInteger(Number(copiesInput)) || Number(copiesInput) < 1 || Number(copiesInput) > maxCopies}>
+          <button type="button" className={styles.applyButton} onClick={() => void createPrintSheets()} disabled={!image || busy || !!imageError || availableSizes.length === 0 || !copiesInputValid}>
             {busy ? busyLabel : actionLabel} <Check size={15}/>
           </button>
         </div>
