@@ -269,6 +269,40 @@ function Invoke-QAStep {
     return ($stepExit -eq 0)
 }
 
+function Invoke-PhotoStudioBrowserAcceptance {
+    param([Parameter(Mandatory)]$Node)
+
+    $suite = Join-Path $repoRoot "apps/portal/tests/theme-responsive.browser.mjs"
+    $env:SMARTPRINT_E2E_BASE_URL = "http://127.0.0.1:4173"
+    $env:SMARTPRINT_DESKTOP_E2E_URL = "http://127.0.0.1:1420"
+    $env:RESPONSIVE_ARTIFACT_DIR = Join-Path $artifactRelative "photo-studio-browser"
+
+    $syntaxOk = Invoke-QAStep -Name "Validate isolated browser visual and Photo Studio acceptance suite syntax" -LogName "photo-studio-browser-syntax.log" -Action {
+        if (-not (Test-Path -LiteralPath $suite -PathType Leaf)) {
+            throw "The isolated browser visual suite is missing: $suite"
+        }
+        & $Node.Source "--check" $suite
+    }
+    if (-not $syntaxOk) { return $false }
+
+    $browserOk = Invoke-QAStep -Name "Local Chromium visual and exhaustive Photo Studio browser acceptance (synthetic fixture; no live API, payments or print dispatch)" -LogName "photo-studio-browser.log" -Action {
+        foreach ($port in @(4173, 1420)) {
+            $probe = [System.Net.Sockets.TcpListener]::new([System.Net.IPAddress]::Loopback, [int]$port)
+            try {
+                $probe.Start()
+            } catch {
+                throw "Required isolated browser QA port $port is already in use. The existing process was left untouched; close its owner or choose another approved setup before retrying."
+            } finally {
+                $probe.Stop()
+            }
+        }
+        Write-Host "[QA-SUITE-START] Isolated Chromium visual matrix: responsive routes, light/dark, customer/shop Photo Studio tools, A4 PDF raster geometry, pagination, failure recovery and Windows Desktop WebView viewport." -ForegroundColor Cyan
+        Write-Host "[QA-SUITE-SAFETY] Synthetic photo fixture only; API requests are intercepted with 503 responses. No live customer data, payment, refund, print job or physical dispatch." -ForegroundColor Yellow
+        & $Node.Source $suite
+    }
+    return $browserOk
+}
+
 function Test-LocalSmartPrint {
     try {
         # Verify that the public portal origin serves the application.
@@ -465,7 +499,8 @@ $environmentNames = @(
     "SMARTPRINT_QA_ADMIN_EMAIL", "SMARTPRINT_QA_ADMIN_PASSWORD", "SMARTPRINT_QA_ADMIN_NAME",
     "SMARTPRINT_QA_CUSTOMER_EMAIL", "SMARTPRINT_QA_CUSTOMER_PASSWORD", "SMARTPRINT_QA_CUSTOMER_NAME",
     "QRTP_PLATFORM_ADMIN_EMAIL", "QRTP_PLATFORM_ADMIN_NAME", "QRTP_PLATFORM_ADMIN_PASSWORD",
-    "SMARTPRINT_TEST_POSTGRES", "SMARTPRINT_RUN_WINDOWS_SPOOLER_INTEGRATION", "SMARTPRINT_RUN_MULTI_QUEUE_INTEGRATION"
+    "SMARTPRINT_TEST_POSTGRES", "SMARTPRINT_RUN_WINDOWS_SPOOLER_INTEGRATION", "SMARTPRINT_RUN_MULTI_QUEUE_INTEGRATION",
+    "SMARTPRINT_E2E_BASE_URL", "SMARTPRINT_DESKTOP_E2E_URL", "RESPONSIVE_ARTIFACT_DIR"
 )
 $originalEnvironment = @{}
 foreach ($name in $environmentNames) {
@@ -680,6 +715,10 @@ try {
             & $node.Source $liveSuite
         }
         if (-not $e2eOk) { $exitCode = 1 }
+
+        $photoStudioBrowserOk = Invoke-PhotoStudioBrowserAcceptance -Node $node
+        if (-not $photoStudioBrowserOk) { $exitCode = 1 }
+
         Add-QAResult -Name "Portal/API/Agent/Android build and unit suites" -Status "SKIPPED" -Detail "E2E-only mode deliberately skips builds, platform unit tests, and device tests."
     } else {
     $docker = Get-Command docker.exe -ErrorAction SilentlyContinue
@@ -1008,6 +1047,9 @@ try {
         & $node.Source $liveSuite
     }
     if (-not $e2eOk) { $exitCode = 1 }
+
+    $photoStudioBrowserOk = Invoke-PhotoStudioBrowserAcceptance -Node $node
+    if (-not $photoStudioBrowserOk) { $exitCode = 1 }
 
     if ($SkipUnitTests) {
         Add-QAResult -Name "Existing portal/API/Agent logic suites" -Status "SKIPPED" -Detail "Skipped by -SkipUnitTests."
