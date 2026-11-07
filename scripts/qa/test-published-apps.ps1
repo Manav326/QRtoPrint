@@ -490,7 +490,7 @@ function Test-AndroidApp([string]$Apk,[bool]$ApkVerified,$Settings,[string]$Devi
         Where-Object {-not [string]::IsNullOrWhiteSpace($_)} | Select-Object -Unique | Select-Object -First 30)
       throw ("SmartPrint is foreground, but native UI landmarks are missing: " +
         ($missingIds -join ", ") + ". Visible app nodes: $($visibleAppNodes.Count). " +
-        "Observed resource IDs: $($resourceIds -join ', '); labels: $($observedLabels -join ' | '))
+        "Observed resource IDs: $($resourceIds -join ', '); labels: $($observedLabels -join ' | ')")
     }
     Add-Result "Android native UI rendered" "PASS" "UIAutomator confirmed the native app shell and both distinct Home/Files navigation controls." -Evidence @{
       serial=$serial
