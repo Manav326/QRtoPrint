@@ -1043,12 +1043,25 @@ async function exercisePhotoStudioFeatureMatrix() {
     await dialog.getByLabel("Caption font size").selectOption("7");
     await setPhotoInputValue(dialog.getByLabel("Caption colour"), "#ff0000");
     const redPreviewPixels = await preview.evaluate(element => {
-      const data = element.getContext("2d").getImageData(16,106,70,16).data;
+      const canvas = element as HTMLCanvasElement;
+      const context = canvas.getContext("2d");
+      if (!context) throw new Error("Photo preview canvas is unavailable for caption inspection.");
+      // First 35x45 mm tile is centred in the 5-column grid at x=11.5 mm,
+      // starts at the 8 mm top safe margin, and reserves 7 mm below the photo.
+      // Inspect the actual caption rectangle in A4 raster pixels, not a point
+      // near the canvas origin inside the photo's blank page margin.
+      const scaleX = canvas.width / 210;
+      const scaleY = canvas.height / 297;
+      const left = Math.floor(11.5 * scaleX);
+      const top = Math.floor((8 + 45) * scaleY);
+      const width = Math.ceil(35 * scaleX);
+      const height = Math.ceil(7 * scaleY);
+      const data = context.getImageData(left, top, width, height).data;
       let count = 0;
       for (let i=0; i<data.length; i+=4) if (data[i]>140 && data[i+1]<100 && data[i+2]<100) count += 1;
       return count;
     });
-    assert.ok(redPreviewPixels > 0, "Caption font/colour must render text below the photo.");
+    assert.ok(redPreviewPixels > 0, "Caption font/colour must render red text inside the reserved caption area below the photo.");
     await dialog.getByRole("button", { name: "Sheet", exact: true }).click();
 
     // Physical sizes, caption-aware maximum capacities and grid layouts.
@@ -1126,6 +1139,7 @@ async function exercisePhotoStudioFeatureMatrix() {
     assert.deepEqual(result.pdfImageSizes,Array.from({length:6},()=>[2480,3508]));
     assert.equal(result.pixelProbes.length,50);
     assert.ok(result.pixelProbes.every(probe=>probe.rgb.some(channel=>channel<245)));
+    assert.ok(result.pixelProbes[0].captionRedPixels>0,"Generated PDF must retain opted-in caption text inside the photo caption area.");
     assert.ok(result.pixelProbes[0].captionRedPixels>0,"Generated PDF pages must contain the opted-in red caption.");
     assert.deepEqual(result.pixelProbes.filter(probe=>probe.page===6).map(probe=>probe.slot),[0,1,2,3,4]);
     assert.ok(result.finalUnusedSlotRgb.every(channel=>channel>245),"Unused slots on the final page must stay blank.");
