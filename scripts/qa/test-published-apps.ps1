@@ -136,8 +136,10 @@ function Test-WindowsApp([string]$Installer,$Settings) {
     Write-QAProgress "Windows installer execution" "Clean-host-only path; existing install/service/machine data checks already passed."
     $process=Start-Process -FilePath $Installer -ArgumentList @("/VERYSILENT","/SUPPRESSMSGBOXES","/NORESTART","/SP-") -Wait -PassThru
     if($process.ExitCode -notin @(0,3010)){throw "Setup exited with code $($process.ExitCode)"}
-    $deadline=[DateTime]::UtcNow.AddSeconds(90);$serviceNow=$null
+    $deadline=[DateTime]::UtcNow.AddSeconds(90);$serviceNow=$null;$installPoll=0
     do {
+      $installPoll++
+      if($installPoll -eq 1 -or $installPoll % 10 -eq 0){Write-QAProgress "Windows installer post-install health" "Waiting for Desktop executable and Agent service Running; poll=$installPoll/90."}
       $serviceNow=Get-Service -Name $Settings.agentServiceName -ErrorAction SilentlyContinue
       if((Test-Path -LiteralPath $exe -PathType Leaf) -and $serviceNow -and $serviceNow.Status -eq "Running"){break}
       Start-Sleep -Seconds 1
@@ -468,8 +470,10 @@ function Test-AndroidApp([string]$Apk,[bool]$ApkVerified,$Settings,[string]$Devi
     Add-AndroidLaunchDependentSkips $reason
     return
   }
-  $started=$false;$deadline=[DateTime]::UtcNow.AddSeconds([int]$Settings.launchTimeoutSeconds);$appPid=$null
+  $started=$false;$deadline=[DateTime]::UtcNow.AddSeconds([int]$Settings.launchTimeoutSeconds);$appPid=$null;$launchPoll=0
   do {
+    $launchPoll++
+    if($launchPoll -eq 1 -or $launchPoll % 10 -eq 0){Write-QAProgress "Android foreground activity" "Waiting for SmartPrint resumed activity/process on $serial; poll=$launchPoll."}
     $activity=@(& $adb -s $serial shell dumpsys activity activities 2>&1) -join [Environment]::NewLine
     $resumedLine=@($activity -split "`r?`n" | Where-Object {$_ -match '(?i)mResumedActivity|topResumedActivity|ResumedActivity|mFocusedApp'}) -join ' '
     if($resumedLine -match [regex]::Escape($package)){
