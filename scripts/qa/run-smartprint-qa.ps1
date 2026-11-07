@@ -173,6 +173,12 @@ if ([IO.Path]::GetFileName([string]$windowsAppConfig.executableName) -ne [string
 if ([int]$windowsAppConfig.smokeTimeoutSeconds -lt 10 -or [int]$windowsAppConfig.smokeTimeoutSeconds -gt 120) {
     throw "Windows smoke timeout must be 10 to 120 seconds."
 }
+foreach ($idName in @("nativeRoot","homeNavigation","filesNavigation","homeHeading","filesHeading")) {
+    $resourceId = [string]$androidAppConfig.uiAutomationIds.$idName
+    if ($resourceId -notmatch '^[a-z][a-z0-9_]{2,63}$') {
+        throw "Invalid Android UI automation resource ID '$idName' in central QA configuration."
+    }
+}
 if ([string]$androidAppConfig.applicationId -notmatch '^[A-Za-z][A-Za-z0-9_]*(\.[A-Za-z][A-Za-z0-9_]*)+$') { throw "Invalid Android application ID." }
 try { [void][regex]::new([string]$androidAppConfig.emulatorSerialPattern) } catch { throw "Invalid emulator serial pattern." }
 foreach ($timeoutName in @("launchTimeoutSeconds","uiNavigationTimeoutSeconds")) {

@@ -132,9 +132,10 @@ test('Android-only completion gate requires artifact verification and all live a
 });
 
 
-test('Android published app launch uses ActivityManager instead of Monkey CLI parsing', () => {
-  assert.match(publishedAppsSource, /shell am start -W -a android\.intent\.action\.MAIN -c android\.intent\.category\.LAUNCHER -p \$package/);
+test('Android published app launch uses the exact resolved ActivityManager component', () => {
+  assert.match(publishedAppsSource, /shell am start -W --user \$installedInfo\.currentUser -n \$launcherComponent/);
   assert.match(publishedAppsSource, /Status:\\s\*ok/);
+  assert.match(publishedAppsSource, /launchComponent=\$launcherComponent/);
   assert.doesNotMatch(publishedAppsSource, /shell monkey -p \$package/);
 });
 
@@ -161,12 +162,12 @@ test('published Android APK identity, version and launcher metadata are all veri
   assert.match(publishedAppsSource, /Verify Android APK launcher activity/);
 });
 
-test('installed Android package is read-only compared with the published APK before launch', () => {
+test('installed Android package preflight is read-only unless explicit update consent is supplied', () => {
   assert.match(publishedAppsSource, /dumpsys package \$Package/);
   assert.match(publishedAppsSource, /cmd package resolve-activity/);
   assert.match(publishedAppsSource, /Android installed package matches published APK and launcher/);
-  assert.match(publishedAppsSource, /No uninstall, reinstall, update or data clear was attempted/);
-  assert.doesNotMatch(publishedAppsSource, /adb\s+-s\s+\$serial\s+install\s+-r/);
+  assert.match(publishedAppsSource, /No uninstall or data clear was attempted/);
+  assert.doesNotMatch(publishedAppsSource, /shell pm clear|adb\s+-s\s+\$serial\s+uninstall/);
 });
 
 
@@ -189,17 +190,38 @@ test("Android live launch targets the exact Package Manager-resolved component a
 });
 
 
-test("Android UIAutomator node visibility supports standard dumps without visible-to-user", () => {
+test("Android native UI automation uses stable resource IDs and tolerates UIAutomator visibility-attribute omissions", () => {
   assert.match(publishedAppsSource, /function Test-AndroidUiNodeVisible/);
-  assert.match(publishedAppsSource, /Android.s standard uiautomator dump commonly omits visible-to-user entirely/);
-  assert.match(publishedAppsSource, /GetAttribute\("bounds"\)/);
-  assert.match(publishedAppsSource, /Find-AndroidUiNode\$before \$Label \$Package/);
+  assert.match(publishedAppsSource, /visible-to-user/);
+  assert.match(publishedAppsSource, /function Find-AndroidUiNodeByResourceId/);
+  assert.match(publishedAppsSource, /GetAttribute\("resource-id"\)/);
+  assert.match(publishedAppsSource, /uiAutomationIds\.nativeRoot/);
+  assert.match(publishedAppsSource, /uiAutomationIds\.homeNavigation/);
+  assert.match(publishedAppsSource, /uiAutomationIds\.filesNavigation/);
   assert.doesNotMatch(publishedAppsSource, /GetAttribute\("visible-to-user"\) -ne "true"/);
 });
+
 
 test("Android live smoke accepts a restored connected-shop Print screen before navigating Home and Files", () => {
   assert.match(publishedAppsSource, /saved shop connection intentionally restores the Print\/WebView tab/);
   assert.match(publishedAppsSource, /"SmartPrint".*"Your space"/);
   assert.match(publishedAppsSource, /Invoke-AndroidUiNavigation \$adb \$serial "My Files" "New folder"/);
   assert.match(publishedAppsSource, /Invoke-AndroidUiNavigation \$adb \$serial "Home" "Your space"/);
+});
+
+
+test("central Android automation IDs match app resource IDs", () => {
+  const idsSource = readFileSync(new URL('../../apps/android/app/src/main/res/values/ids.xml', import.meta.url), 'utf8');
+  for (const id of Object.values(config.apps.android.uiAutomationIds)) {
+    assert.ok(idsSource.includes('name="' + id + '"'), 'Missing Android resource ID: ' + id);
+  }
+  assert.match(runnerSource, /androidAppConfig\.uiAutomationIds/);
+});
+
+test("Android instrumented tests assert stable Home and Files landmarks", () => {
+  const instrumented = readFileSync(new URL('../../apps/android/app/src/androidTest/java/com/quantaedge/smartprint/MainActivityInstrumentedTest.kt', import.meta.url), 'utf8');
+  assert.match(instrumented, /R\.id\.smartprint_home_heading/);
+  assert.match(instrumented, /R\.id\.smartprint_files_heading/);
+  assert.match(instrumented, /R\.id\.smartprint_nav_home/);
+  assert.match(instrumented, /R\.id\.smartprint_nav_files/);
 });

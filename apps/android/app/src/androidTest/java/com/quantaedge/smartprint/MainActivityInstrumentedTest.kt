@@ -71,8 +71,9 @@ class MainActivityInstrumentedTest {
     }
 
     private fun openFilesTab() {
-        // Target the actual menu item, then verify that the Files screen is visible.
+        // Target the actual menu item, then verify both user-facing content and its stable QA landmark.
         openNavigationDestination(2, "New folder")
+        onView(withId(R.id.smartprint_files_heading)).check(matches(isDisplayed()))
     }
 
     @Test
@@ -501,6 +502,7 @@ class MainActivityInstrumentedTest {
     fun rendersCompactSmartPrintHomeAndFourDestinations() {
         ActivityScenario.launch(MainActivity::class.java).use { scenario ->
             onView(withText("Your space")).check(matches(isDisplayed()))
+            onView(withId(R.id.smartprint_home_heading)).check(matches(isDisplayed()))
             onView(withText("Recent")).check(matches(isDisplayed()))
             onView(withText("Scan document")).check(matches(isDisplayed()))
             onView(withText("Choose from phone")).check(matches(isDisplayed()))
@@ -509,6 +511,10 @@ class MainActivityInstrumentedTest {
                 val customBar = MainActivity::class.java.getDeclaredField("bottomNavigationContent").apply {
                     isAccessible = true
                 }.get(activity) as LinearLayout
+                assertNotNull(activity.findViewById<View>(R.id.smartprint_native_root))
+                assertNotNull(activity.findViewById<View>(R.id.smartprint_nav_home))
+                assertNotNull(activity.findViewById<View>(R.id.smartprint_nav_files))
+                assertNotNull(activity.findViewById<View>(R.id.smartprint_home_heading))
                 assertEquals(4, customBar.childCount)
                 val labels = (0 until customBar.childCount).map { index ->
                     (customBar.getChildAt(index) as LinearLayout).getChildAt(1)

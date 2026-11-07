@@ -32,7 +32,14 @@
       "emulatorSerialPattern": "^emulator-\\d+\\s+device(?:\\s|$)",
       "launchTimeoutSeconds": 25,
       "uiNavigationTimeoutSeconds": 10,
-      "crashLogLineCount": 300
+      "crashLogLineCount": 300,
+      "uiAutomationIds": {
+        "nativeRoot": "smartprint_native_root",
+        "homeNavigation": "smartprint_nav_home",
+        "filesNavigation": "smartprint_nav_files",
+        "homeHeading": "smartprint_home_heading",
+        "filesHeading": "smartprint_files_heading"
+      }
     }
   }
 }

@@ -608,6 +608,7 @@ class MainActivity : AppCompatActivity() {
             foreground = SmartPrintGlass.edge(this@MainActivity)
             if (!useRail) addView(bottomNavigationContent, FrameLayout.LayoutParams(-1, dp(66), Gravity.BOTTOM))
         }
+        navigation.post { applyNavigationAutomationIds() }
         if (useRail) {
             root.addView(navigation, FrameLayout.LayoutParams(dp(80), -1, Gravity.START or Gravity.TOP).apply {
                 topMargin = dp(64)
@@ -634,6 +635,11 @@ class MainActivity : AppCompatActivity() {
             setPadding(dp(11), 0, dp(11), 0)
             minimumWidth = dp(48)
             minimumHeight = dp(48)
+            id = when (id) {
+                HOME -> R.id.smartprint_nav_home
+                FILES -> R.id.smartprint_nav_files
+                else -> View.NO_ID
+            }
             contentDescription = description
             isClickable = true
             isFocusable = true
@@ -659,6 +665,22 @@ class MainActivity : AppCompatActivity() {
         item.addView(title, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT))
         bottomNavigationItemViews[id] = Triple(item, icon, title)
         bottomNavigationContent.addView(item, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, dp(52)))
+    }
+
+    private fun applyNavigationAutomationIds() {
+        val destinationIds = mapOf(
+            HOME to R.id.smartprint_nav_home,
+            FILES to R.id.smartprint_nav_files
+        )
+        fun applyTo(view: View) {
+            destinationIds[view.id]?.let { stableId -> view.id = stableId }
+            if (view is ViewGroup) {
+                for (index in 0 until view.childCount) {
+                    applyTo(view.getChildAt(index))
+                }
+            }
+        }
+        applyTo(navigation)
     }
 
     private fun updateBottomNavigationSelection(selectedId: Int) {
@@ -968,7 +990,9 @@ class MainActivity : AppCompatActivity() {
         val heading = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
         }
-        heading.addView(text("Your space", 23, R.color.qp_text, true))
+        heading.addView(text("Your space", 23, R.color.qp_text, true).apply {
+            id = R.id.smartprint_home_heading
+        })
         heading.addView(text("${recentFiles.size} files · $used used", 12, R.color.qp_muted, false).apply {
             setPadding(0, dp(3), 0, 0)
         })
@@ -1532,7 +1556,9 @@ class MainActivity : AppCompatActivity() {
         copy.addView(text(
             if (!isPicker) "My Files" else if (fileChooserSelectFolders) "Choose folders" else "Choose files",
             21, R.color.qp_text, true
-        ))
+        ).apply {
+            if (!isPicker) id = R.id.smartprint_files_heading
+        })
         copy.addView(text(
             when {
                 !isPicker -> "${allEntries.count { it.isDirectory }} folders · ${allEntries.count { !it.isDirectory }} files"
