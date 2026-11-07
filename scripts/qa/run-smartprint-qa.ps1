@@ -1032,7 +1032,7 @@ try {
             $env:SMARTPRINT_TEST_POSTGRES = $null
             $apiTestOk = Invoke-QAStep -Name "Existing SmartPrint API unit/regression tests (destructive migration DB test disabled)" -LogName "api-dotnet-tests.log" -Action {
                 Write-Host "[QA-SUITE-START] API .NET tests | xUnit verbose reporter announces each case start/end; StopOnFail=false." -ForegroundColor Cyan
-                & $dotnet.Source "test" "tests/SmartPrint.Api.Tests/SmartPrint.Api.Tests.csproj" "--configuration" "Release" "--logger" "console;verbosity=normal" "--" "xUnit.ReporterSwitch=verbose" "xUnit.ShowLiveOutput=true" "xUnit.StopOnFail=false"
+                & $dotnet.Source "test" "tests/SmartPrint.Api.Tests/SmartPrint.Api.Tests.csproj" "--configuration" "Release" "--logger" "console;verbosity=normal" "--" "xUnit.ReporterSwitch=verbose" "xUnit.ShowLiveOutput=true" "xUnit.StopOnFail=false" "xUnit.ParallelizeTestCollections=false" "xUnit.MaxParallelThreads=1"
             }
             if (-not $apiTestOk) { $exitCode = 1 }
 
@@ -1051,7 +1051,7 @@ try {
             $env:SMARTPRINT_RUN_MULTI_QUEUE_INTEGRATION = $null
             $agentTestOk = Invoke-QAStep -Name "Existing SmartPrint Windows Agent unit/regression tests and optional virtual spooler integration" -LogName "agent-dotnet-tests.log" -Action {
                 Write-Host "[QA-SUITE-START] Windows Agent .NET tests | xUnit verbose reporter announces each case start/end; StopOnFail=false." -ForegroundColor Cyan
-                & $dotnet.Source "test" "tests/SmartPrint.Agent.Tests/SmartPrint.Agent.Tests.csproj" "--configuration" "Release" "--logger" "console;verbosity=normal" "--" "xUnit.ReporterSwitch=verbose" "xUnit.ShowLiveOutput=true" "xUnit.StopOnFail=false"
+                & $dotnet.Source "test" "tests/SmartPrint.Agent.Tests/SmartPrint.Agent.Tests.csproj" "--configuration" "Release" "--logger" "console;verbosity=normal" "--" "xUnit.ReporterSwitch=verbose" "xUnit.ShowLiveOutput=true" "xUnit.StopOnFail=false" "xUnit.ParallelizeTestCollections=false" "xUnit.MaxParallelThreads=1"
             }
             if (-not $agentTestOk) { $exitCode = 1 }
             if ($pdfPrinterAvailable -and $agentTestOk) {
