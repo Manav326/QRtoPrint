@@ -125,8 +125,8 @@ The responsive checks navigate real pages using real local data; they do not ins
 
 ### Customer QR, documents and batch review
 
-- Open the generated QA station route on the local portal and create a real server-issued, customer-bound session.
-- Verify the real session API and shop binding.
+- Open the generated QA station route both as an ordinary browser guest and with the native-account Authorization header; create real server-issued sessions and verify the correct session binding.
+- Verify the real session API and shop binding for both entry modes. Guest browser uploads must remain guest-scoped and must not attach to an unrelated global customer identity.
 - Confirm that an invalid PDF is rejected with HTTP 422 before creating a print job.
 - Upload a synthetic two-page PDF through the actual customer file picker and upload UI.
 - Calculate a quote, send it to the shop, verify the customer status/history and shop queue, and confirm the shop can reject an unpaid job.
@@ -162,13 +162,19 @@ The suite also reads payments/refunds, verifies refund preview is blocked withou
 - Verify that Shop One cannot access or mutate Shop Two's resources and job history.
 - Verify that customer/shop/admin tokens cannot cross their respective scopes.
 
-## Expanded functional acceptance catalogue and 90% gate
+## Expanded functional acceptance catalogue and 100% release gate
 
-The local real-data Playwright runner now carries **255 uniquely identified functional acceptance cases**. Case IDs are grouped under E2E records. At the end of a run, report.json and report.txt show IDs mapped to attempted checks, IDs whose entire owning check completed successfully, IDs associated with failed/incomplete checks, the completion percentage, the pass rate, and IDs not mapped to a reached check.
+The local real-data Playwright runner now carries **262 uniquely identified functional acceptance cases**. Case IDs are grouped under E2E records. At the end of a run, report.json and report.txt show IDs mapped to attempted checks, IDs whose entire owning check completed successfully, IDs associated with failed/incomplete checks, the completion percentage, the pass rate, and IDs not mapped to a reached check.
 
-**Coverage definition:** functional case completion coverage = case IDs belonging to records that completed all their assertions successfully ÷ 255. This is deliberately conservative: when a grouped record aborts on a failed assertion, the runner does not count every case ID attached to that record as fully completed because it cannot prove that the remaining assertions ran. The runner exits with a failure when this coverage is below **90%**; any failed record also fails the run. A release-quality run should complete all 255 cases with 100% of their assertions passing.
+**Coverage definition:** functional case completion coverage = case IDs belonging to records that completed all their assertions successfully ÷ 262. This is deliberately conservative: when a grouped record aborts on a failed assertion, the runner does not count every case ID attached to that record as fully completed because it cannot prove that the remaining assertions ran. The runner exits with a failure when this coverage is below **90%**; any failed record also fails the run. A release-quality run should complete all 262 cases with 100% of their assertions passing.
 
 This is **not source-code line or branch coverage**. No 90% code-coverage claim is made. Measuring line/branch coverage requires a separate instrumented Coverlet/Node coverage run and generated coverage reports; it must not be inferred from the count of functional cases.
+
+### Failure isolation and prerequisite contracts
+
+Every E2E record is declared either with explicit prerequisite record names or as intentionally independent. The health check is the common root. CI validates that every record is declared, all dependency names exist, and each dependency appears before its dependent record. A new record without a contract fails closed as an individual check; it is never silently treated as independent.
+
+Each record runs through `scripts/qa/local-e2e-record-runner.mjs`. An assertion failure is recorded against that check and does not abort later independent records. Dependent checks are marked SKIPPED with the failed prerequisite IDs/names; other shop, role and security suites continue. WARN is not a pass and also blocks dependants and the final release gate. Cleanup for disposable resources remains inside each test action's `finally` block.
 
 ### Case catalogue
 
@@ -188,6 +194,7 @@ This is **not source-code line or branch coverage**. No 90% code-coverage claim 
 | Shop reports | REPORT-001–004 | 4 | 7/30/90-day summaries, unsupported range rejection and both tenant report scopes |
 | Authorization and isolation | RBAC-001–010 | 10 | Shop/admin/customer role separation, customer/shop/platform cross-role denial, foreign tenant resource access and cross-tenant job-history denial |
 | QR station/session lifecycle | QR-001–013 | 13 | Ordinary HTTPS link opens a guest station session; authenticated native-account header binds a session to the customer; session token never enters the URL; renewal/resume, station binding, enable/disable and code rotation are covered |
+| Guest-only customer journey | GUEST-001–007 | 7 | Browser link creates a guest session; guest uploads a synthetic PDF without Authorization; quote and job reach the correct shop queue; guest sees rejection; job is not attached to a different signed-in customer's history or session count |
 | Customer account linkage | CUST-001–002 | 2 | QR print session tied to global customer identity and customer job-history endpoint |
 | Local upload validation | UPLOAD-001–004 | 4 | Invalid digest and unsupported extension fail closed before a local upload ticket can be issued |
 | Document upload | DOC-001–006 | 6 | Malformed PDF rejected without job creation, real synthetic PDF upload, two-page parsing, quote preparation and saved job metadata |
@@ -221,12 +228,12 @@ The extra cases are intentionally run against QA-only identities and records:
 
 ### Coverage boundaries that remain separate
 
-The 255-case gate measures the documented local functional catalogue. It does not replace these additional suites or acceptance requirements:
+The 262-case gate measures the documented local functional catalogue. It does not replace these additional suites or acceptance requirements:
 
 - The portal Node regression suite and the API/Agent .NET unit suites remain separate test results. They provide domain/logic regression coverage beyond the mapped browser/API acceptance cases.
 - The Windows Agent executable's full live machine lifecycle—actual service enrollment, local queue claim/receipt, spooler accepted/failed/unconfirmed states, PDF export and output confirmation—is not exercised by the protocol test client. The E2E does exercise the server's real one-time enrollment, heartbeat, printer-sync validation, revocation and auth protections with a disposable QA identity. The Agent unit suite and optional Microsoft Print to PDF integration remain separate.
-- The Android emulator test suite is conditional on an installed SDK and an already running emulator. Physical Android camera, permission, local-network and Wi-Fi readiness tests remain in docs/ANDROID_PHYSICAL_ACCEPTANCE.md.
-- Real LAN direct upload, Windows service identity, a physical printer, printed paper, power/network interruption recovery, concurrency/load, backup/restore rehearsal and payment-provider settlement require separate dedicated acceptance. They are not counted as passed by this 255-case browser suite.
+- The Android emulator test suite is conditional on an installed SDK and an already running emulator. Physical Android camera, permission, external-link opening, process-death recovery, local-network and Wi-Fi readiness tests remain in docs/ANDROID_PHYSICAL_ACCEPTANCE.md.
+- Real LAN direct upload, Windows service identity, a physical printer, printed paper, power/network interruption recovery, concurrency/load, backup/restore rehearsal and payment-provider settlement require separate dedicated acceptance. They are not counted as passed by this 262-case browser suite.
 - No destructive tenant deactivation, data deletion, storage cleanup, real payment, actual refund, permanent printer pairing or physical print is performed by this runner.
 
 ## Android and Windows execution
