@@ -1089,15 +1089,15 @@ async function exercisePhotoStudioFeatureMatrix() {
     // Quantity boundaries and explicit rejection of fractions.
     const count = dialog.getByLabel("Number of photos");
     await count.fill("101");
-    await count.blur();
+    await count.evaluate(element => element.blur());
     assert.equal(await count.inputValue(),"100");
     assert.equal(await readSummary("A4 pages in this job"), "4",
       "100 photos at 25 per A4 page must produce four sheets.");
     await count.fill("0");
-    await count.blur();
+    await count.evaluate(element => element.blur());
     assert.equal(await count.inputValue(),"1");
     await count.fill("1.5");
-    await count.blur();
+    await count.evaluate(element => element.blur());
     assert.equal(await count.inputValue(),"1.5");
     assert.equal(await dialog.getByText(/Enter a whole number from 1 to 100/).count(),1);
     assert.equal(await dialog.getByRole("button",{name:"Prepare A4 sheet"}).isDisabled(),true);
@@ -1118,7 +1118,7 @@ async function exercisePhotoStudioFeatureMatrix() {
     await previousPage.click();
     assert.equal(await dialog.getByText("Page 5 of 6",{exact:true}).count(),1);
     await count.fill("8");
-    await count.blur();
+    await count.evaluate(element => element.blur());
     await density.selectOption("auto");
     assert.equal(await readSummary("A4 pages in this job"),"1");
     await sizeSelect.selectOption("4x6");
