@@ -397,3 +397,10 @@ html[data-theme="light"] .sp-public {
   --sp-ink: #202638;
   --sp-muted: #5f6b80;
 }
+
+
+/* The download-card title was still using its light-mode ink colour on the
+   dark card surface, making the platform name difficult to read. */
+html[data-theme="dark"] .sp-public .sp-download-card h3 {
+  color: #edf1fa;
+}
