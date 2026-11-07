@@ -202,3 +202,10 @@ test("Photo Studio returns preview-only JPEG pages and the customer UI brands pr
  assert.match(app,/customer-edited-photo-frame/);
  assert.match(app,/SmartPrint by QuantaEdge/);
 });
+
+test("live Photo Studio QA reads summary rows by accessible labels, not unhashed CSS Module names",()=>{
+ const qa=readFileSync(new URL("../../../scripts/qa/smartprint-local-e2e.mjs",import.meta.url),"utf8");
+ assert.match(qa,/getByText\("Photo dimensions", \{ exact: true \}\)/);
+ assert.match(qa,/getByText\("A4 pages in this job", \{ exact: true \}\)/);
+ assert.doesNotMatch(qa,/locator\(["']\.sheetSummary["']\)/);
+});
