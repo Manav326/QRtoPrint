@@ -478,12 +478,22 @@ async function fillQaPlanVersion(page) {
   await page.getByLabel("Print jobs / month").fill("500");
   await page.getByLabel("Maximum document size · bytes").fill("52428800");
 
-  const cloudFeature = page.locator(".platform-plan-feature").filter({ hasText: "Cloud-assisted printing" }).locator('input[type="checkbox"]');
-  const whiteLabelFeature = page.locator(".platform-plan-feature").filter({ hasText: "White-label experience" }).locator('input[type="checkbox"]');
-  const reportsFeature = page.locator(".platform-plan-feature").filter({ hasText: "Advanced reports" }).locator('input[type="checkbox"]');
-  if (!(await cloudFeature.isChecked())) await cloudFeature.check();
-  if (await whiteLabelFeature.isChecked()) await whiteLabelFeature.uncheck();
-  if (!(await reportsFeature.isChecked())) await reportsFeature.check();
+  async function setFeature(label, enabled) {
+    const card = page.locator(".platform-plan-feature").filter({ hasText: label });
+    const checkbox = card.locator('input[type="checkbox"]');
+    const current = await checkbox.isChecked();
+    if (current !== enabled) {
+      // The checkbox is intentionally visually hidden and pointer-transparent.
+      // Exercise the real label/card interaction instead of clicking the hidden
+      // input's centre (which can land on the decorative SVG icon).
+      await card.locator(".platform-plan-feature-copy").click();
+    }
+    assert.equal(await checkbox.isChecked(), enabled, label + " feature toggle did not update through its visible label.");
+  }
+
+  await setFeature("Cloud-assisted printing", true);
+  await setFeature("White-label experience", false);
+  await setFeature("Advanced reports", true);
 }
 
 async function ensureQaPlanThroughPlatformUi(adminPage, adminToken) {
@@ -720,15 +730,15 @@ async function setupShopResources(page, tokens, shopLabel) {
     photo4x6Minor: 1000
   };
   await clickShopSection(page, "Pricing");
-  await page.getByLabel("Black & white").fill("2.00");
-  await page.getByLabel("Colour").fill("5.00");
-  await page.getByLabel("Black & white duplex").fill("3.00");
-  await page.getByLabel("Colour duplex").fill("7.00");
-  await page.getByLabel("Minimum job charge").fill("1.00");
-  await page.getByLabel("35 × 45 mm").fill("5.00");
-  await page.getByLabel("25 × 35 mm").fill("5.00");
-  await page.getByLabel("2 × 2 inch").fill("7.00");
-  await page.getByLabel("4 × 6 inch").fill("10.00");
+  await page.getByLabel("Black & white", { exact: true }).fill("2.00");
+  await page.getByLabel("Colour", { exact: true }).fill("5.00");
+  await page.getByLabel("Black & white duplex", { exact: true }).fill("3.00");
+  await page.getByLabel("Colour duplex", { exact: true }).fill("7.00");
+  await page.getByLabel("Minimum job charge", { exact: true }).fill("1.00");
+  await page.getByLabel("35 × 45 mm", { exact: true }).fill("5.00");
+  await page.getByLabel("25 × 35 mm", { exact: true }).fill("5.00");
+  await page.getByLabel("2 × 2 inch", { exact: true }).fill("7.00");
+  await page.getByLabel("4 × 6 inch", { exact: true }).fill("10.00");
   await page.getByRole("button", { name: "Save print prices" }).click();
   await page.getByText(/Rate card version/i).waitFor({ state: "visible", timeout: 15000 });
 
