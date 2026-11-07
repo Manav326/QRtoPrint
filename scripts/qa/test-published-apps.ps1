@@ -9,10 +9,15 @@ param(
 )
 $ErrorActionPreference = "Stop"
 Add-Type -AssemblyName System.Net.Http
+function Write-QAProgress([string]$Action,[string]$Detail="") {
+  $line = "[QA-ACTION] {0} | {1}" -f (Get-Date -Format "HH:mm:ss"), $Action
+  if($Detail){$line += " | " + $Detail}
+  Write-Host $line -ForegroundColor Cyan
+}
 function Add-Result {
   param([string]$Name,[ValidateSet("PASS","FAIL","SKIPPED","WARN")][string]$Status,[string]$Detail="",[hashtable]$Evidence=@{})
   $script:results.Add([pscustomobject]@{name=$Name;status=$Status;detail=$Detail;evidence=$Evidence})
-  Write-Host ("{0} - {1}" -f $Status,$Name)
+  Write-Host ("[QA-RESULT] {0} | {1} - {2}" -f (Get-Date -Format "HH:mm:ss"),$Status,$Name)
   if($Detail){Write-Host ("  "+$Detail)}
 }
 function Assert-SameOrigin([Uri]$Actual,[Uri]$Expected,[string]$Label) {
@@ -61,6 +66,7 @@ function Test-Admin {
   return $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
 }
 function Run-DesktopSmoke([string]$Exe,[int]$Timeout) {
+  Write-QAProgress "Windows Desktop production UI acceptance" "Launching the installed executable; checking native window and app-owned accessible workspace content."
   $smoke=Join-Path $PSScriptRoot "desktop-open-smoke.ps1"
   if(-not (Test-Path -LiteralPath $smoke -PathType Leaf)){throw "Desktop smoke script missing: $smoke"}
   $evidence = & $smoke -ExecutablePath ([IO.Path]::GetFullPath($Exe)) -StartupTimeoutSeconds $Timeout
@@ -68,6 +74,7 @@ function Run-DesktopSmoke([string]$Exe,[int]$Timeout) {
   return $evidence
 }
 function Test-WindowsApp([string]$Installer,$Settings) {
+  Write-QAProgress "Windows installation and Agent service preflight" "Inspecting existing install/service first; no existing installation or service will be modified."
   $pf=[Environment]::GetFolderPath([Environment+SpecialFolder]::ProgramFiles)
   $root=Join-Path $pf $Settings.installDirectoryName
   $exe=Join-Path $root $Settings.executableName
@@ -75,6 +82,7 @@ function Test-WindowsApp([string]$Installer,$Settings) {
   $machineData=Join-Path $env:ProgramData $Settings.programDataDirectoryName
   if(Test-Path -LiteralPath $exe -PathType Leaf){
     Add-Result "Existing Windows installation" "PASS" "Existing app detected; no installer will be run."
+    Write-QAProgress "Windows Agent service health" "Checking service state without starting, stopping or reconfiguring it."
     if(-not $service){
       Add-Result "Windows SmartPrint Agent service" "FAIL" "Desktop installation exists, but the expected Agent service is missing."
     } elseif($service.Status -eq "Running"){
@@ -82,6 +90,7 @@ function Test-WindowsApp([string]$Installer,$Settings) {
     } else {
       Add-Result "Windows SmartPrint Agent service" "FAIL" "Agent service is $($service.Status); QA will not start or modify it."
     }
+    Write-QAProgress "Windows Desktop process preflight" "Checking whether the installed app is already running so a user session is never taken over."
     try {
       $running=@(Get-CimInstance Win32_Process -Filter "Name='$($Settings.executableName)'" -ErrorAction Stop | Where-Object {$_.ExecutablePath -and $_.ExecutablePath.Equals($exe,[StringComparison]::OrdinalIgnoreCase)})
     } catch {
@@ -124,6 +133,7 @@ function Test-WindowsApp([string]$Installer,$Settings) {
     return
   }
   try {
+    Write-QAProgress "Windows installer execution" "Clean-host-only path; existing install/service/machine data checks already passed."
     $process=Start-Process -FilePath $Installer -ArgumentList @("/VERYSILENT","/SUPPRESSMSGBOXES","/NORESTART","/SP-") -Wait -PassThru
     if($process.ExitCode -notin @(0,3010)){throw "Setup exited with code $($process.ExitCode)"}
     $deadline=[DateTime]::UtcNow.AddSeconds(90);$serviceNow=$null
@@ -323,6 +333,7 @@ function Get-AndroidInstalledPackageDiagnostics([string]$Adb,[string]$Serial,[st
 }
 
 function Test-AndroidApp([string]$Apk,[bool]$ApkVerified,$Settings,[string]$DeviceSerial="",[hashtable]$ApkMetadata=@{},[bool]$AllowInPlaceUpdate=$false) {
+  Write-QAProgress "Android device and installed-package preflight" "Selecting only the explicitly authorised device; inspecting package/version before launch."
   $adb=Resolve-Adb
   if(-not $adb){Add-Result "Android app live device launch" "SKIPPED" "ADB unavailable.";return}
   $list=@(& $adb devices -l)
@@ -362,6 +373,7 @@ function Test-AndroidApp([string]$Apk,[bool]$ApkVerified,$Settings,[string]$Devi
   $newInstall=$false
   $updatedInstall=$false
   if(-not $installed){
+    Write-QAProgress "Android fresh install" "Package is absent; installing only after published APK identity and metadata have been verified."
     if(-not $Apk -or -not (Test-Path -LiteralPath $Apk -PathType Leaf) -or -not $ApkVerified){
       Add-Result "Android app live device launch" "SKIPPED" "App absent; APK is unavailable or its package ID has not been verified."
       return
@@ -387,6 +399,7 @@ function Test-AndroidApp([string]$Apk,[bool]$ApkVerified,$Settings,[string]$Devi
 
   # Compare installed package against the exact public release. Updating an
   # existing app requires explicit caller consent; uninstall/data-clear fallback is forbidden.
+  Write-QAProgress "Android installed package identity" "Comparing installed version and launcher to the exact downloaded release; no uninstall/data-clear fallback is allowed."
   $installedInfo=Get-AndroidInstalledPackageDiagnostics $adb $serial $package
   $versionMismatch = $installed -and $installedInfo.installedVersionCode -and
     ([string]$installedInfo.installedVersionCode -ne [string]$ApkMetadata.versionCode -or
@@ -445,6 +458,7 @@ function Test-AndroidApp([string]$Apk,[bool]$ApkVerified,$Settings,[string]$Devi
   # Android user. An explicit ComponentName avoids OEM differences in implicit
   # MAIN/LAUNCHER resolution while still testing the actual published launcher.
   $launcherComponent="$package/$publishedActivity"
+  Write-QAProgress "Android live app launch" "Starting the resolved MAIN/LAUNCHER component on device $serial and verifying foreground process."
   $launch=@(& $adb -s $serial shell am start -W --user $installedInfo.currentUser -n $launcherComponent 2>&1)
   $launchExit=$LASTEXITCODE
   $launchText=$launch -join [Environment]::NewLine
@@ -468,6 +482,7 @@ function Test-AndroidApp([string]$Apk,[bool]$ApkVerified,$Settings,[string]$Devi
   if(-not $started){Add-Result "Android app live device launch" "FAIL" "SmartPrint did not become the resumed foreground activity with a running process.";return}
   Add-Result "Android app live device launch" "PASS" "SmartPrint is the resumed foreground activity on the $deviceKind; existing app data was not intentionally cleared; updatedDuringQa=$updatedInstall." -Evidence @{serial=$serial;deviceKind=$deviceKind;packageId=$package;installedDuringQa=$newInstall;updatedDuringQa=$updatedInstall;installationReplaced=$false;dataClearAttempted=$false;processId=$appPid}
 
+  Write-QAProgress "Android native UI hierarchy" "Capturing visible native landmarks for the SmartPrint shell and navigation controls."
   $uiPath="/sdcard/smartprint-qa-ui-$([Guid]::NewGuid().ToString('N')).xml"
   try {
     $ui=Get-AndroidUiHierarchy $adb $serial $uiPath
@@ -519,6 +534,7 @@ function Test-AndroidApp([string]$Apk,[bool]$ApkVerified,$Settings,[string]$Devi
 
   # Each live interaction is recorded independently. One failed screen does not
   # prevent the remaining native navigation or process-health checks from running.
+  Write-QAProgress "Android native Files navigation" "Tapping the actual Files control and verifying the destination heading."
   try {
     $filesOpened=Invoke-AndroidUiNavigation $adb $serial ([string]$Settings.uiAutomationIds.filesNavigation) "My Files" ([string]$Settings.uiAutomationIds.filesHeading) "Create a new folder" $package ([int]$Settings.uiNavigationTimeoutSeconds) -ExpectedScreenContentDescriptionOnly
     if(-not $filesOpened){throw "My Files navigation did not complete."}
@@ -526,6 +542,7 @@ function Test-AndroidApp([string]$Apk,[bool]$ApkVerified,$Settings,[string]$Devi
   } catch {
     Add-Result "Android native Files navigation" "FAIL" $_.Exception.Message
   }
+  Write-QAProgress "Android native Home navigation" "Returning through the actual Home control and verifying the destination heading."
   try {
     $homeOpened=Invoke-AndroidUiNavigation $adb $serial ([string]$Settings.uiAutomationIds.homeNavigation) "Home" ([string]$Settings.uiAutomationIds.homeHeading) "Your space" $package ([int]$Settings.uiNavigationTimeoutSeconds)
     if(-not $homeOpened){throw "Home navigation did not complete."}
@@ -534,6 +551,7 @@ function Test-AndroidApp([string]$Apk,[bool]$ApkVerified,$Settings,[string]$Devi
     Add-Result "Android native Home navigation" "FAIL" $_.Exception.Message
   }
 
+  Write-QAProgress "Android process crash-log probe" "Inspecting recent logcat for this SmartPrint PID only."
   $currentPid=($appPid -split '\s+')[0]
   $logcat=@(& $adb -s $serial logcat -d --pid=$currentPid -t ([int]$Settings.crashLogLineCount) 2>&1)
   if($LASTEXITCODE -ne 0){
@@ -566,6 +584,7 @@ $script:androidDeviceWasPhysical=$false
 $script:androidExistingInstallWasUpdated=$false
 try {
   try {
+    Write-QAProgress "Public release metadata" "Reading the website release contract before choosing any download URL."
     $url=[Uri]::new($origin,[string]$config.downloads.statusPath)
     $response=$client.GetAsync($url).GetAwaiter().GetResult()
     try {
@@ -587,6 +606,7 @@ try {
 
   $platformsToCheck = if($AndroidOnly){ @("android") } else { @("windows","android") }
   foreach($platform in $platformsToCheck){
+    Write-QAProgress ("Published " + $platform + " release asset") "Checking availability and downloading the current asset only when release metadata confirms it."
     if(-not $release){
       Add-Result ("Download current "+$platform+" asset") "SKIPPED" "No verified release metadata; no hard-coded URL used."
       continue
