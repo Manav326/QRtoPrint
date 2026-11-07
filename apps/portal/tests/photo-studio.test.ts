@@ -402,10 +402,10 @@ test("Photo Studio identifies custom manual image adjustments instead of marking
 
 test("Photo Studio prevents apply without a whole-number quantity or any shop photo rates",()=>{
  const studio=readFileSync(new URL("../src/PhotoStudio.tsx",import.meta.url),"utf8");
- assert.match(studio,/const copiesInputValid = Number\\.isInteger\\(parsedCopiesInput\\) && parsedCopiesInput >= 1 && parsedCopiesInput <= maxCopies/);
- assert.match(studio,/Enter a whole number from 1 to \\{maxCopies\\}/);
+ assert.ok(studio.includes("const copiesInputValid = Number.isInteger(parsedCopiesInput) && parsedCopiesInput >= 1 && parsedCopiesInput <= maxCopies"));
+ assert.ok(studio.includes("Enter a whole number from 1 to {maxCopies}"));
  assert.match(studio,/Photo printing is not enabled for any size at this shop/);
- assert.match(studio,/availableSizes\\.length === 0 \\|\\| !copiesInputValid/);
+ assert.ok(studio.includes("availableSizes.length === 0 || !copiesInputValid"));
 });
 
 test("Photo Studio browser fixture inspects generated PDF page boxes and rendered pixel evidence",()=>{
@@ -424,8 +424,8 @@ test("Photo Studio browser acceptance covers every editor tool and failure recov
   "Photo size","Number of photos","Photos per A4 page","Caption font size","Caption colour",
   "Replacement background","Background tolerance","Pick background from photo","Prepare A4 sheet"
  ]) assert.ok(browser.includes(label),"Missing browser coverage for Photo Studio control: "+label);
- assert.match(browser,/exercisePhotoStudioFeatureMatrix\\(\\)/);
- assert.match(browser,/exercisePhotoStudioFailurePaths\\(\\)/);
+ assert.ok(browser.includes("exercisePhotoStudioFeatureMatrix()"));
+ assert.ok(browser.includes("exercisePhotoStudioFailurePaths()"));
  assert.match(browser,/failRender=1/);
  assert.match(browser,/oversizeRaster=1/);
 });
