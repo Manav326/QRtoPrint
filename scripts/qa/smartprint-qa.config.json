@@ -26,7 +26,8 @@
       "programDataDirectoryName": "QRtoPrint",
       "agentIdentityFileName": "agent.identity",
       "smokeTimeoutSeconds": 45,
-      "webViewDevToolsPort": 9237
+      "webViewDevToolsPort": 9237,
+      "nativeExecutableName": "smartprint-desktop.exe"
     },
     "android": {
       "applicationId": "com.quantaedge.smartprint",
@@ -40,7 +41,9 @@
         "filesNavigation": "smartprint_nav_files",
         "homeHeading": "smartprint_home_heading",
         "filesHeading": "smartprint_files_heading"
-      }
+      },
+      "localQaApplicationId": "com.quantaedge.smartprint.localqa",
+      "launcherActivity": "com.quantaedge.smartprint.MainActivity"
     }
   }
 }
