@@ -268,17 +268,40 @@ jobs:
             throw "Configure the SMARTPRINT_PUBLIC_BASE_URL Actions variable before building the desktop application."
           }
           $env:VITE_API_BASE_URL = $env:SMARTPRINT_PUBLIC_BASE_URL
-          $desktopSmokeConfig = Join-Path $env:RUNNER_TEMP "smartprint-desktop-smoke-tauri.conf.json"
-          ./scripts/qa/prepare-desktop-smoke-config.ps1 -OutputPath $desktopSmokeConfig
-          if ($LASTEXITCODE -ne 0) { throw "Could not prepare the isolated desktop smoke configuration." }
-          pnpm --filter @smart-print/desktop exec tauri build --config "$desktopSmokeConfig" --no-bundle --ci
-          if ($LASTEXITCODE -ne 0) { throw "SmartPrint native desktop build failed." }
+
+          # Build the distributable executable with the production Tauri config.
+          # This binary must never contain the CI-only remote-debugging port.
+          pnpm --filter @smart-print/desktop exec tauri build --no-bundle --ci
+          if ($LASTEXITCODE -ne 0) { throw "SmartPrint production desktop build failed." }
           $nativeExe = "apps/desktop/src-tauri/target/release/smartprint-desktop.exe"
-          if (-not (Test-Path -LiteralPath $nativeExe)) { throw "The SmartPrint native desktop executable was not produced." }
+          if (-not (Test-Path -LiteralPath $nativeExe)) { throw "The SmartPrint production desktop executable was not produced." }
           New-Item -ItemType Directory -Force -Path artifacts/desktop | Out-Null
           Copy-Item -LiteralPath $nativeExe -Destination "artifacts/desktop/SmartPrint.Desktop.exe"
           Get-ChildItem -Path "apps/desktop/src-tauri/target/release" -Filter "*.dll" -File |
             Copy-Item -Destination "artifacts/desktop" -Force
+
+          # Build a separate, non-distributable executable with WebView2 DevTools
+          # enabled only for this CI smoke test. Keep it in a temporary Cargo
+          # target directory so it cannot overwrite or leak into the installer.
+          $desktopSmokeConfig = Join-Path $env:RUNNER_TEMP "smartprint-desktop-smoke-tauri.conf.json"
+          ./scripts/qa/prepare-desktop-smoke-config.ps1 -OutputPath $desktopSmokeConfig
+          if ($LASTEXITCODE -ne 0) { throw "Could not prepare the isolated desktop smoke configuration." }
+          $desktopSmokeTarget = Join-Path $env:RUNNER_TEMP "smartprint-desktop-smoke-target"
+          $previousCargoTargetDir = $env:CARGO_TARGET_DIR
+          try {
+            $env:CARGO_TARGET_DIR = $desktopSmokeTarget
+            pnpm --filter @smart-print/desktop exec tauri build --config "$desktopSmokeConfig" --no-bundle --ci
+            if ($LASTEXITCODE -ne 0) { throw "SmartPrint CI-only desktop smoke build failed." }
+          }
+          finally {
+            if ([string]::IsNullOrWhiteSpace($previousCargoTargetDir)) {
+              Remove-Item Env:CARGO_TARGET_DIR -ErrorAction SilentlyContinue
+            } else {
+              $env:CARGO_TARGET_DIR = $previousCargoTargetDir
+            }
+          }
+          $smokeExe = Join-Path $desktopSmokeTarget "release/smartprint-desktop.exe"
+          if (-not (Test-Path -LiteralPath $smokeExe)) { throw "The isolated SmartPrint desktop smoke executable was not produced." }
       - name: Install and bundle the Microsoft WebView2 Evergreen Runtime
         id: webview2_runtime
         if: ${{ !cancelled() && steps.desktop_executable_build.outcome == 'success' }}
@@ -336,7 +359,7 @@ jobs:
       - name: Smoke-test native desktop launch and rendered WebView2 frontend
         if: ${{ !cancelled() && steps.desktop_executable_build.outcome == 'success' && steps.webview2_runtime.outcome == 'success' }}
         shell: pwsh
-        run: ./scripts/qa/desktop-open-smoke.ps1 -ExecutablePath "apps/desktop/src-tauri/target/release/smartprint-desktop.exe"
+        run: ./scripts/qa/desktop-open-smoke.ps1 -ExecutablePath (Join-Path $env:RUNNER_TEMP "smartprint-desktop-smoke-target/release/smartprint-desktop.exe")
       - name: Upload Windows desktop package
         id: desktop_package_upload
         if: ${{ always() && steps.desktop_executable_build.outcome == 'success' }}

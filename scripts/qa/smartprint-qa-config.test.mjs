@@ -257,6 +257,11 @@ test("Windows desktop CI injects WebView2 DevTools args through Tauri config rat
   assert.match(desktopConfigScript, /--remote-debugging-port=\$debugPort/);
   assert.match(desktopConfigScript, /--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection/);
   assert.match(workflow, /prepare-desktop-smoke-config\.ps1/);
+  assert.match(workflow, /production desktop build failed/);
+  assert.match(workflow, /CI-only desktop smoke build failed/);
+  assert.match(workflow, /CARGO_TARGET_DIR = \$desktopSmokeTarget/);
+  assert.match(workflow, /artifacts\/desktop\/SmartPrint\.Desktop\.exe/);
+  assert.match(workflow, /smartprint-desktop-smoke-target\/release\/smartprint-desktop\.exe/);
   assert.match(workflow, /tauri build --config "\$desktopSmokeConfig"/);
   assert.match(desktopSmokeScript, /webViewDevToolsPort/);
   assert.doesNotMatch(desktopSmokeScript, /SetEnvironmentVariable\(\$environmentName/);
