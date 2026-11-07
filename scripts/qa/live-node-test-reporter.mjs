@@ -1,15 +1,5 @@
 import path from "node:path";
 
-function eventKey(data) {
-  return [
-    data.file ?? "",
-    data.line ?? "",
-    data.column ?? "",
-    data.nesting ?? "",
-    data.name ?? ""
-  ].join("|");
-}
-
 function displayLocation(data) {
   if (!data.file) return "";
   const relativePath = path.relative(process.cwd(), data.file) || path.basename(data.file);
