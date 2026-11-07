@@ -265,9 +265,15 @@ export default function PhotoStudio({
 
   useEffect(()=>{
     const bridge=(window as Window & {SmartPrintNative?:{postMessage:(value:string)=>void}}).SmartPrintNative;
-    try{bridge?.postMessage("setSensitivePreview|on");}catch{/* Native screenshot protection is best-effort outside supported desktop builds. */}
+    try {
+      bridge?.postMessage("setPhotoStudioOpen|on");
+      bridge?.postMessage("setSensitivePreview|on");
+    } catch {/* Native modal state and screenshot protection are best-effort outside supported Android builds. */}
     return ()=>{
-      try{bridge?.postMessage("setSensitivePreview|off");}catch{/* The WebView may already be closing. */}
+      try {
+        bridge?.postMessage("setSensitivePreview|off");
+        bridge?.postMessage("setPhotoStudioOpen|off");
+      } catch {/* The WebView may already be closing. */}
     };
   },[]);
 
