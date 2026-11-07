@@ -11,7 +11,7 @@ This is a supplement, not a replacement, for:
 - [Android physical-device acceptance](ANDROID_PHYSICAL_ACCEPTANCE.md) — physical camera, QR, shop-Wi-Fi and Windows-to-Android readiness workflow.
 - [Local native application QA](LOCAL_NATIVE_APP_QA.md) — local Windows Desktop build/smoke and side-by-side Android QA app execution.
 
-The 98 cases below add role-focused, cross-surface assertions for the newer Android customer account/document-studio workflows and for the actual Windows Desktop owner experience. They must be recorded independently. They are **not** counted as passed by the 262-case browser run or by a native build.
+The 99 cases below add role-focused, cross-surface assertions for the newer Android customer account/document-studio workflows and for the actual Windows Desktop owner experience. They must be recorded independently. They are **not** counted as passed by the 262-case browser run or by a native build.
 
 ## 1. Product and role contract
 
@@ -82,6 +82,7 @@ These supplement the SHOP, AGT, JOB, REF, PAY, CUS, RPT and UX cases in the mast
 | WOWN-006 | P0 | Register/enable a QA printer and station, set the intended default, then disable the station and re-open its old QR. | Owner sees the correct printer/Agent association; disabled station cannot start a new customer session; old station code cannot route a customer to another shop. |
 | WOWN-007 | P0 | From the real owner Web queue, open BATCH-A, preview each file, reject one file, undo it, reject it again, apply review, and inspect the accepted remainder. | Review is per file; undo works only before apply; the rejected file is excluded from payable/printable work; each job and batch relationship remains correct. |
 | WOWN-008 | P1 | Compare customer directory, payment list, report totals and job detail for SHOP-A with SHOP-B using the same global customer identity. | SHOP-A sees only its own customer-linked sessions/jobs and masked account information; payment/report totals reconcile to SHOP-A records; SHOP-B remains isolated. |
+| WOWN-009 | P0 | In the Personal details screen, update OWNER-A's display name, then change the sign-in email with a wrong current password, a valid current password, an address already owned by another QA identity, and a valid unused address. Sign out and sign back in. | Display-name edits stay within SHOP-A; email change requires the current password, rejects duplicates/rate-limit abuse, updates the same owner identity (not a new shop), and the new email authenticates while the old email no longer does; no other tenant or customer identity is overwritten. |
 
 ## 4. Customer Web/PWA acceptance
 
@@ -263,7 +264,7 @@ The existing local Photo Studio browser checks cover image selection/editing and
 A candidate is not accepted merely because CI is green or the automated local runner exits successfully.
 
 - Every P0 case in the master plan and this supplement must PASS on the candidate, or be a confirmed NOT APPLICABLE with written approval. BLOCKED, NOT RUN, FAIL and NOT IMPLEMENTED are not passes.
-- All 98 supplemental cases must have an explicit result. The native Windows Desktop cases must be run in the native window; Android physical cases must be run on real supported hardware for their hardware-dependent scenarios.
+- All 99 supplemental cases must have an explicit result. The native Windows Desktop cases must be run in the native window; Android physical cases must be run on real supported hardware for their hardware-dependent scenarios.
 - No unresolved P0 defect is permitted. P1 issues require correction/retest or an explicit, time-bound risk decision by the release authority.
 - No claims of complete manager/operator roles, email verification/recovery, live gateway payments/refunds, encrypted direct-LAN payloads, malware scanning, offline printing, universal printer support, signed release readiness or physical-device compatibility beyond the evidence actually collected.
 - Any test involving an actual physical print must use synthetic content and a specifically designated QA printer. Output confirmation must be based on observed output, never spooler acceptance alone.
