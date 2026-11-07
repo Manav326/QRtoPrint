@@ -2113,6 +2113,10 @@ shop.MapGet("/print-jobs", async (
             job.BatchName,
             job.RejectedPageNumbersJson,
             job.PdfBrandingEnabled,
+            job.Origin,
+            job.CustomerUserId,
+            job.RecipientName,
+            job.RecipientPhone,
             job.JobNumber,
             job.Status,
             job.PageCount,
@@ -2411,7 +2415,13 @@ shop.MapPost("/photo-jobs", async (
         {
             var existingDocument = await db.PrintDocuments.AsNoTracking()
                 .SingleOrDefaultAsync(item => item.TenantId == tenantId && item.PrintJobId == existingJob.Id, ct);
-            var isSameRequest = existingDocument is not null &&
+            var existingPayment = await db.PrintPayments.AsNoTracking()
+                .Where(item => item.TenantId == tenantId && item.PrintJobId == existingJob.Id)
+                .OrderByDescending(item => item.CreatedUtc)
+                .Select(item => new { item.Id, item.Method, item.Status, item.AmountMinor, item.Currency, item.UpiIdSnapshot, item.PayeeNameSnapshot })
+                .FirstOrDefaultAsync(ct);
+            var isSameRequest = existingDocument is not null && existingPayment is not null &&
+                existingPayment.Method == paymentMethod &&
                 existingJob.Origin == "SHOP_OWNER" &&
                 existingJob.CustomerUserId == customerUserId &&
                 existingJob.RecipientName == recipientName &&
@@ -2459,6 +2469,7 @@ shop.MapPost("/photo-jobs", async (
                     existingDocument.Sha256,
                     existingDocument.PageSizesJson
                 },
+                Payment = existingPayment,
                 DuplicateRequest = true
             });
         }
