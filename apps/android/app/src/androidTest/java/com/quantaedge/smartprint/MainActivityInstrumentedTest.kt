@@ -355,6 +355,41 @@ class MainActivityInstrumentedTest {
     }
 
     @Test
+    fun launcherIntentOpensMainActivityAndInflatesSmartPrintShell() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val launcherIntent = context.packageManager.getLaunchIntentForPackage(context.packageName)
+
+        assertNotNull("SmartPrint must be discoverable through an Android launcher intent.", launcherIntent)
+        assertEquals(android.content.Intent.ACTION_MAIN, launcherIntent!!.action)
+        assertTrue(
+            "The app's launch intent must include CATEGORY_LAUNCHER.",
+            launcherIntent.hasCategory(android.content.Intent.CATEGORY_LAUNCHER)
+        )
+        assertEquals(
+            "The launcher must resolve to MainActivity.",
+            MainActivity::class.java.name,
+            launcherIntent.component?.className
+        )
+
+        ActivityScenario.launch<MainActivity>(launcherIntent).use { scenario ->
+            scenario.onActivity { activity ->
+                assertTrue("MainActivity must remain open after launcher startup.", !activity.isFinishing)
+                assertTrue("MainActivity must not be destroyed during startup.", !activity.isDestroyed)
+
+                val content = activity.findViewById<ViewGroup>(android.R.id.content)
+                assertNotNull("The launcher must inflate the native SmartPrint content root.", content)
+                assertTrue("The native content root must be visible.", content.isShown)
+                assertTrue("The native content root must contain the SmartPrint shell.", content.childCount > 0)
+
+                val toolbar = MainActivity::class.java.getDeclaredField("toolbar")
+                    .apply { isAccessible = true }
+                    .get(activity) as com.google.android.material.appbar.MaterialToolbar
+                assertEquals("SmartPrint", toolbar.title.toString())
+            }
+        }
+    }
+
+    @Test
     fun rendersCompactSmartPrintHomeAndFourDestinations() {
         ActivityScenario.launch(MainActivity::class.java).use { scenario ->
             onView(withText("Your space")).check(matches(isDisplayed()))
