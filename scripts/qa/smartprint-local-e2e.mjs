@@ -229,6 +229,8 @@ async function record(name, action, caseIds = CASE_IDS_BY_RECORD_NAME.get(name) 
     console.error("CASE MAPPING ERROR " + name + ": " + JSON.stringify(mappingError));
   }
 
+  const caseLabel = caseIds.length > 0 ? " | cases=" + caseIds.join(",") : " | cases=UNMAPPED";
+  console.log("[QA-CASE-START] " + checkId + caseLabel + " | " + name);
   console.log("[QA-START] " + name);
   const outcome = await executeIsolatedQaRecord({
     name,
@@ -250,9 +252,7 @@ async function record(name, action, caseIds = CASE_IDS_BY_RECORD_NAME.get(name) 
   } else {
     console.log("PASS " + name + " (" + outcome.check.durationMs + " ms)");
   }
-  if (outcome.status !== "PASS") {
-    console.log("[QA-END] " + name + " | " + outcome.status + " | " + outcome.check.durationMs + " ms");
-  }
+  console.log("[QA-CASE-END] " + checkId + caseLabel + " | " + outcome.status + " | " + outcome.check.durationMs + " ms | " + name);
 
   return outcome.check.details ?? null;
 }
