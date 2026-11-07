@@ -801,6 +801,8 @@ async function exercisePhotoStudioBrowser() {
     assert.equal(output.photoCount, largePhotoBatch ? 50 : 8);
     assert.equal(output.photosPerPage, largePhotoBatch ? 9 : 25);
     assert.equal(output.previewPageCount, output.pageCount, "Every PDF page must have a matching inspected source raster.");
+    assert.ok(output.embeddedPreviewPages.length === output.pageCount && output.embeddedPreviewPages.every(Boolean),
+      "The PDF must embed the exact same JPEG raster that Photo Studio previewed for each A4 page.");
     assert.equal(output.mediaBoxCount, output.pageCount, "Every generated page must be exact A4.");
     assert.deepEqual(output.pdfImageSizes, Array.from({ length: output.pageCount }, () => [2480, 3508]), "Every page must embed the expected A4 raster size.");
     assert.equal(output.fullPageImageTransforms, output.pageCount, "Every raster must map over the complete A4 MediaBox.");
