@@ -2,7 +2,7 @@
 
 This guide explains the native-app portion of the local production acceptance runner. It does not download or test the latest public Windows installer or public Android APK.
 
-After the automated local run, complete the [role-based cross-platform acceptance matrix](ROLE_BASED_CROSS_PLATFORM_QA.md). In particular, the native Desktop startup/accessibility smoke is not a full owner-workflow test, and Android instrumentation is not a substitute for physical camera, file-provider, Local Network Access or shop-Wi-Fi acceptance. The APHO-001–036 Photo Studio cases are also a separate physical-device gate; the local native runner and generic WebView smoke do not execute every editor control, provider path, touch interaction or device-lifecycle scenario.
+The full local Windows runner now executes the isolated Chromium visual suite for the shared customer/shop Photo Studio: all editor tools, responsive/light-dark layouts, synthetic A4 PDF raster geometry, copy/page arithmetic and injected rendering/retry failures are reported as a dedicated terminal step. It uses synthetic photos and mocked API responses; it does not replace real-data E2E or physical print evidence. After the automated local run, complete the [role-based cross-platform acceptance matrix](ROLE_BASED_CROSS_PLATFORM_QA.md). The native Desktop startup/accessibility smoke is not a full owner-workflow test. Android WebView instrumentation exercises native touch controls, PDF output and secure-window lifecycle when an Android emulator/device test target is available, but APHO-001–036 remain a separate physical-device gate for picker/provider, phone hardware, touch, keyboard, rotation, memory and device-lifecycle scenarios.
 
 ## One-command full local run
 
