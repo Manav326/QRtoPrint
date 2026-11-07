@@ -17,7 +17,7 @@ type PhotoSize = {
   heightMm: number;
 };
 
-type LookPreset = "natural" | "warm" | "crisp" | "mono";
+type LookPreset = "natural" | "warm" | "crisp" | "mono" | "custom";
 type Tool = "crop" | "look" | "sheet" | "text" | "background";
 
 type Adjustments = {
@@ -424,13 +424,13 @@ export default function PhotoStudio({
 
           {lookPanel && <>
             <div className={styles.lookGrid}>
-              {LOOKS.map(item => <button type="button" key={item.id} className={look === item.id ? styles.lookActive : styles.lookButton} onClick={() => selectLook(item.id)}>
+              {LOOKS.map(item => <button type="button" key={item.id} className={look === item.id ? styles.lookActive : styles.lookButton} onClick={() => selectLook(item.id)} aria-pressed={look === item.id}>
                 <span className={styles.lookSwatch + " " + styles["look_" + item.id]}/><strong>{item.label}</strong><small>{item.note}</small>
               </button>)}
             </div>
-            <label className={styles.rangeControl}>Brightness <output>{adjustments.brightness}%</output><input type="range" min="70" max="130" value={adjustments.brightness} onChange={event => { setLook("natural"); setAdjustments(current => ({ ...current, brightness: Number(event.target.value) })); }}/></label>
-            <label className={styles.rangeControl}>Contrast <output>{adjustments.contrast}%</output><input type="range" min="70" max="140" value={adjustments.contrast} onChange={event => { setLook("natural"); setAdjustments(current => ({ ...current, contrast: Number(event.target.value) })); }}/></label>
-            <label className={styles.rangeControl}>Colour <output>{adjustments.saturation}%</output><input type="range" min="0" max="160" value={adjustments.saturation} onChange={event => { setLook("natural"); setAdjustments(current => ({ ...current, saturation: Number(event.target.value) })); }}/></label>
+            <label className={styles.rangeControl}>Brightness <output>{adjustments.brightness}%</output><input type="range" min="70" max="130" value={adjustments.brightness} onChange={event => { setLook("custom"); setAdjustments(current => ({ ...current, brightness: Number(event.target.value) })); }}/></label>
+            <label className={styles.rangeControl}>Contrast <output>{adjustments.contrast}%</output><input type="range" min="70" max="140" value={adjustments.contrast} onChange={event => { setLook("custom"); setAdjustments(current => ({ ...current, contrast: Number(event.target.value) })); }}/></label>
+            <label className={styles.rangeControl}>Colour <output>{adjustments.saturation}%</output><input type="range" min="0" max="160" value={adjustments.saturation} onChange={event => { setLook("custom"); setAdjustments(current => ({ ...current, saturation: Number(event.target.value) })); }}/></label>
           </>}
 
           {textPanel && <>
@@ -454,7 +454,7 @@ export default function PhotoStudio({
               <input type="checkbox" checked={includeFormDetails} onChange={event=>{
                 const enabled=event.target.checked;
                 setIncludeFormDetails(enabled);
-                if(!enabled){setPhotoName("");setDateOfBirth("");}
+                if(!enabled){setPhotoName("");setDateOfBirth("");if(activeTool==="text")setActiveTool("sheet");}
               }}/>
               <span><strong>Add name and DOB to each photo</strong><small>Optional. Nothing is printed below the photos unless you switch this on.</small></span>
             </label>
