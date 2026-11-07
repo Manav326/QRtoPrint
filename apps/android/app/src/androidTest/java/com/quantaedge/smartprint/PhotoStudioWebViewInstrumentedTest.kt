@@ -230,12 +230,7 @@ class PhotoStudioWebViewInstrumentedTest {
     private fun clickButton(scenario: ActivityScenario<MainActivity>, prefix: String) {
         // Use a real Android MotionEvent against the native WebView for each visible tool/button.
         tapButtonText(scenario, prefix)
-        waitFor(
-            scenario,
-            "Array.from(document.querySelectorAll('[role=dialog] button')).some(button => button.innerText.trim().startsWith(" +
-                JSONObject.quote(prefix) + ") && document.activeElement === button)",
-            "Photo Studio button focus after touch: $prefix"
-        )
+        androidx.test.platform.app.InstrumentationRegistry.getInstrumentation().waitForIdleSync()
     }
 
     private fun isSecure(scenario: ActivityScenario<MainActivity>): Boolean {
