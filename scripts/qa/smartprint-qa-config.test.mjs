@@ -142,7 +142,8 @@ test('Android live smoke timeouts and crash-log bounds are centrally configured'
   assert.equal(config.apps.android.launchTimeoutSeconds, 25);
   assert.equal(config.apps.android.uiNavigationTimeoutSeconds, 10);
   assert.equal(config.apps.android.crashLogLineCount, 300);
-  assert.match(runnerSource, /Android launchTimeoutSeconds must be between/);
+  assert.match(runnerSource, /timeoutName in @\("launchTimeoutSeconds","uiNavigationTimeoutSeconds"\)/);
+  assert.match(runnerSource, /crashLogLineCount -lt 50/);
 });
 
 test('Android dependent checks are skipped after launch failure instead of multiplying the root failure', () => {

@@ -439,7 +439,7 @@ try {
       $checkResults=@($script:results | Where-Object {$_.name -eq $requiredCheck})
       if($checkResults.Count -ne 1 -or $checkResults[0].status -ne "PASS"){$notPassing += $requiredCheck}
     }
-    $alreadyFailed=@($script:results | Where-Object {$_.name -in $requiredAndroidChecks -and $_.status -eq "FAIL"})
+    $alreadyFailed=@($script:results | Where-Object {$_.status -eq "FAIL"})
     if($notPassing.Count -gt 0 -and $alreadyFailed.Count -eq 0){
       Add-Result "Android-only completion gate" "FAIL" ("Required checks did not PASS: "+($notPassing -join ", ")+". A skipped or warning result is not a successful app QA run.")
     }
