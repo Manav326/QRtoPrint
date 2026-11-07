@@ -118,7 +118,7 @@ jobs:
         run: dotnet build src/SmartPrint.Api/SmartPrint.Api.csproj --configuration Release
       - name: Run API unit and model tests
         if: ${{ !cancelled() && steps.setup_dotnet.outcome == 'success' }}
-        run: dotnet test tests/SmartPrint.Api.Tests/SmartPrint.Api.Tests.csproj --configuration Release
+        run: dotnet test tests/SmartPrint.Api.Tests/SmartPrint.Api.Tests.csproj --configuration Release --logger "console;verbosity=normal" -- "xUnit.ReporterSwitch=verbose" "xUnit.ShowLiveOutput=true" "xUnit.StopOnFail=false" "xUnit.ParallelizeTestCollections=false" "xUnit.MaxParallelThreads=1"
 
   agent_dotnet:
     outputs:
@@ -198,7 +198,7 @@ jobs:
         env:
           SMARTPRINT_RUN_WINDOWS_SPOOLER_INTEGRATION: ${{ steps.pdf_queue.outcome == 'success' && '1' || '0' }}
           SMARTPRINT_RUN_MULTI_QUEUE_INTEGRATION: ${{ steps.secondary_queue.outcome == 'success' && '1' || '0' }}
-        run: dotnet test tests/SmartPrint.Agent.Tests/SmartPrint.Agent.Tests.csproj --configuration Release
+        run: dotnet test tests/SmartPrint.Agent.Tests/SmartPrint.Agent.Tests.csproj --configuration Release --logger "console;verbosity=normal" -- "xUnit.ReporterSwitch=verbose" "xUnit.ShowLiveOutput=true" "xUnit.StopOnFail=false" "xUnit.ParallelizeTestCollections=false" "xUnit.MaxParallelThreads=1"
       - name: Remove the temporary secondary Windows queue
         if: always()
         shell: pwsh
@@ -477,7 +477,7 @@ jobs:
         with:
           dotnet-version: 10.0.x
       - name: Upgrade a historical PostgreSQL schema and verify operational defaults
-        run: dotnet test tests/SmartPrint.Api.Tests/SmartPrint.Api.Tests.csproj --configuration Release
+        run: dotnet test tests/SmartPrint.Api.Tests/SmartPrint.Api.Tests.csproj --configuration Release --logger "console;verbosity=normal" -- "xUnit.ReporterSwitch=verbose" "xUnit.ShowLiveOutput=true" "xUnit.StopOnFail=false" "xUnit.ParallelizeTestCollections=false" "xUnit.MaxParallelThreads=1"
 
   android:
     runs-on: ubuntu-latest
@@ -522,11 +522,11 @@ jobs:
         run: sdkmanager "platforms;android-36" "build-tools;36.0.0"
       - name: Run Android JVM unit tests
         if: ${{ !cancelled() && steps.android_sdk_install.outcome == 'success' }}
-        run: gradle --no-daemon -p apps/android -PsmartPrintServiceUrl="$SMARTPRINT_PUBLIC_BASE_URL" :app:testDebugUnitTest
+        run: gradle --no-daemon --console=plain -p apps/android -PsmartPrintServiceUrl="$SMARTPRINT_PUBLIC_BASE_URL" :app:testDebugUnitTest
       - name: Build Android debug APK
         id: android_apk_build
         if: ${{ !cancelled() && steps.android_sdk_install.outcome == 'success' }}
-        run: gradle --no-daemon -p apps/android -PsmartPrintServiceUrl="$SMARTPRINT_PUBLIC_BASE_URL" :app:assembleDebug
+        run: gradle --no-daemon --console=plain -p apps/android -PsmartPrintServiceUrl="$SMARTPRINT_PUBLIC_BASE_URL" :app:assembleDebug
       - name: Enable KVM for Android emulator
         id: android_kvm
         if: ${{ !cancelled() && steps.android_sdk_install.outcome == 'success' }}
