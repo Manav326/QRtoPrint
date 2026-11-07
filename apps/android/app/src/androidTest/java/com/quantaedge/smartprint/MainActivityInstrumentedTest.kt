@@ -376,10 +376,10 @@ class MainActivityInstrumentedTest {
                 assertTrue("MainActivity must remain open after launcher startup.", !activity.isFinishing)
                 assertTrue("MainActivity must not be destroyed during startup.", !activity.isDestroyed)
 
-                val content = activity.findViewById<ViewGroup>(android.R.id.content)
-                assertNotNull("The launcher must inflate the native SmartPrint content root.", content)
-                assertTrue("The native content root must be visible.", content.isShown)
-                assertTrue("The native content root must contain the SmartPrint shell.", content.childCount > 0)
+                val nativeRoot = activity.findViewById<ViewGroup>(R.id.smartprint_native_root)
+                    ?: throw AssertionError("The launcher must inflate #smartprint_native_root.")
+                assertTrue("#smartprint_native_root must be visible after launcher startup.", nativeRoot.isShown)
+                assertTrue("#smartprint_native_root must contain the native SmartPrint shell.", nativeRoot.childCount > 0)
 
                 val toolbar = MainActivity::class.java.getDeclaredField("toolbar")
                     .apply { isAccessible = true }

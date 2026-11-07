@@ -475,6 +475,7 @@ class MainActivity : AppCompatActivity() {
         window.navigationBarColor = getColor(R.color.qp_surface)
         val backdrop = SmartPrintGlass.backdrop(this)
         val root = FrameLayout(this).apply {
+            id = R.id.smartprint_native_root
             clipChildren = false
             clipToPadding = false
             background = backdrop

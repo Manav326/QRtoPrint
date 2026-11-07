@@ -84,11 +84,32 @@ try {
     $webSocket.ConnectAsync([Uri]$pageTarget.webSocketDebuggerUrl, [Threading.CancellationToken]::None).GetAwaiter().GetResult()
 
     $probeExpression = @"
-JSON.stringify({
-  title: document.title,
-  appShell: document.body ? document.body.dataset.appShell : null,
-  rootChildCount: document.querySelector('#root') ? document.querySelector('#root').childElementCount : 0,
-  rootTextLength: document.querySelector('#root') ? (document.querySelector('#root').innerText || '').trim().length : 0
+new Promise(resolve => {
+  const started = Date.now();
+  const inspect = () => {
+    const root = document.getElementById("smartprint-desktop-root");
+    const result = {
+      title: document.title,
+      appShell: document.body ? document.body.dataset.appShell : null,
+      rootId: root ? root.id : null,
+      rootChildCount: root ? root.childElementCount : 0,
+      rootTextLength: root ? (root.innerText || "").trim().length : 0
+    };
+    if (
+      result.title === "SmartPrint by QuantaEdge" &&
+      result.appShell === "desktop" &&
+      result.rootId === "smartprint-desktop-root" &&
+      result.rootChildCount > 0 &&
+      result.rootTextLength > 0
+    ) {
+      resolve(JSON.stringify(result));
+    } else if (Date.now() - started >= 15000) {
+      resolve(JSON.stringify(result));
+    } else {
+      window.setTimeout(inspect, 100);
+    }
+  };
+  inspect();
 })
 "@.Trim()
 
@@ -107,7 +128,7 @@ JSON.stringify({
 
     $responseText = [Text.StringBuilder]::new()
     $buffer = New-Object byte[] 8192
-    $responseDeadline = [DateTime]::UtcNow.AddSeconds(10)
+    $responseDeadline = [DateTime]::UtcNow.AddSeconds(20)
     $probeResponse = $null
 
     do {
@@ -146,6 +167,7 @@ JSON.stringify({
 
     if ($probe.title -ne "SmartPrint by QuantaEdge" -or
         $probe.appShell -ne "desktop" -or
+        $probe.rootId -ne "smartprint-desktop-root" -or
         [int]$probe.rootChildCount -lt 1 -or
         [int]$probe.rootTextLength -lt 1) {
         throw "Desktop frontend did not render correctly. Probe: $probeJson"
