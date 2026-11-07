@@ -10,6 +10,7 @@ const photoPrices = query.get("prices") === "disabled"
   ? { "35x45": 0, "25x35": 0, "2x2": 0, "4x6": 0 }
   : { "35x45": 2500, "25x35": 1800, "2x2": 3000, "4x6": 6000 };
 const failFirstApply = query.get("failApply") === "1";
+const delayApply = query.get("delayApply") === "1";
 const invalidSource = query.get("source") === "invalid";
 const failRasterOnce = query.get("failRender") === "1";
 const oversizedRaster = query.get("oversizeRaster") === "1";
@@ -92,6 +93,7 @@ function PhotoStudioBrowserFixture() {
   async function apply(sheets: PreparedPhotoSheet[]) {
     const sheet = sheets[0];
     applyAttempts.current += 1;
+    if (delayApply) await new Promise(resolve => window.setTimeout(resolve, 600));
     if (failFirstApply && applyAttempts.current === 1) {
       throw new Error("Simulated Photo Studio save failure. Your original photo is unchanged; retry is safe.");
     }
@@ -176,6 +178,7 @@ function PhotoStudioBrowserFixture() {
       previewPageCount: jpegPages.length,
       pixelProbes,
       finalUnusedSlotRgb,
+      applyAttempts: applyAttempts.current,
       bytes: sheet.file.size
     }));
     setOpen(false);
