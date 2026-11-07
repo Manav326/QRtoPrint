@@ -187,3 +187,19 @@ test("Android live launch targets the exact Package Manager-resolved component a
   assert.match(publishedAppsSource, /shell am start -W --user \$installedInfo\.currentUser -n \$launcherComponent/);
   assert.match(publishedAppsSource, /launchComponent=\$launcherComponent/);
 });
+
+
+test("Android UIAutomator node visibility supports standard dumps without visible-to-user", () => {
+  assert.match(publishedAppsSource, /function Test-AndroidUiNodeVisible/);
+  assert.match(publishedAppsSource, /Android.s standard uiautomator dump commonly omits visible-to-user entirely/);
+  assert.match(publishedAppsSource, /GetAttribute\("bounds"\)/);
+  assert.match(publishedAppsSource, /Find-AndroidUiNode\$before \$Label \$Package/);
+  assert.doesNotMatch(publishedAppsSource, /GetAttribute\("visible-to-user"\) -ne "true"/);
+});
+
+test("Android live smoke accepts a restored connected-shop Print screen before navigating Home and Files", () => {
+  assert.match(publishedAppsSource, /saved shop connection intentionally restores the Print\/WebView tab/);
+  assert.match(publishedAppsSource, /"SmartPrint".*"Your space"/);
+  assert.match(publishedAppsSource, /Invoke-AndroidUiNavigation \$adb \$serial "My Files" "New folder"/);
+  assert.match(publishedAppsSource, /Invoke-AndroidUiNavigation \$adb \$serial "Home" "Your space"/);
+});

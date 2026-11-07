@@ -187,9 +187,444 @@ function Get-AndroidUiHierarchy([string]$Adb,[string]$Serial,[string]$RemotePath
   $document.LoadXml($xmlText)
   return $document
 }
-function Find-AndroidUiNode($Document,[string]$Label) {
+function Test-AndroidUiNodeVisible($Node) {
+  # Android's standard uiautomator dump commonly omits visible-to-user entirely.
+  # Honour it when present; otherwise use the node's on-screen bounds.
+  $visibility=$Node.GetAttribute("visible-to-user")
+  if($visibility -eq "false"){return $false}
+  $bounds=[regex]::Match($Node.GetAttribute("bounds"),'^\[(-?\d+),(-?\d+)\]\[(-?\d+),(-?\d+)\]
+function Invoke-AndroidUiNavigation([string]$Adb,[string]$Serial,[string]$Label,[string]$ExpectedScreen,[int]$TimeoutSeconds=10,[string]$Package="") {
+  $beforePath="/sdcard/smartprint-qa-ui-before-$([Guid]::NewGuid().ToString('N')).xml"
+  $afterPath="/sdcard/smartprint-qa-ui-after-$([Guid]::NewGuid().ToString('N')).xml"
+  try {
+    $before=Get-AndroidUiHierarchy $Adb $Serial $beforePath
+    $navNode=Find-AndroidUiNode $before $Label $Package
+    if(-not $navNode){throw "The live app does not expose the expected '$Label' navigation control."}
+    $bounds=[regex]::Match($navNode.GetAttribute("bounds"),'^\[(\d+),(\d+)\]\[(\d+),(\d+)\]$')
+    if(-not $bounds.Success){throw "Android did not expose usable bounds for the '$Label' navigation control."}
+    $x=[int][math]::Floor(([int]$bounds.Groups[1].Value+[int]$bounds.Groups[3].Value)/2)
+    $y=[int][math]::Floor(([int]$bounds.Groups[2].Value+[int]$bounds.Groups[4].Value)/2)
+    $tap=@(& $Adb -s $Serial shell input tap $x $y 2>&1)
+    if($LASTEXITCODE -ne 0){throw "Could not tap the '$Label' navigation control: $($tap -join ' ')"}
+    $deadline=[DateTime]::UtcNow.AddSeconds($TimeoutSeconds)
+    do {
+      Start-Sleep -Milliseconds 350
+      $after=Get-AndroidUiHierarchy $Adb $Serial $afterPath
+      if(Find-AndroidUiNode $after $ExpectedScreen $Package){return $true}
+    } while([DateTime]::UtcNow -lt $deadline)
+    throw "Tapping '$Label' did not show the expected '$ExpectedScreen' screen."
+  } finally {
+    & $Adb -s $Serial shell rm -f $beforePath $afterPath 2>$null | Out-Null
+  }
+}
+function Normalize-AndroidActivityClass([string]$Package,[string]$Activity) {
+  if([string]::IsNullOrWhiteSpace($Activity)){return ""}
+  $value=$Activity.Trim()
+  if($value.StartsWith(".")){return ($Package+$value)}
+  if($value -notmatch "\."){return ($Package+"."+$value)}
+  return $value
+}
+function Get-AndroidInstalledPackageDiagnostics([string]$Adb,[string]$Serial,[string]$Package) {
+  $dump=@(& $Adb -s $Serial shell dumpsys package $Package 2>&1)
+  $dumpExit=$LASTEXITCODE
+  $dumpText=$dump -join [Environment]::NewLine
+  $versionCodeMatch=[regex]::Match($dumpText,"(?m)\bversionCode=(\d+)")
+  $versionNameMatch=[regex]::Match($dumpText,"(?m)\bversionName=([^\s]+)")
+  $installedVersionCode=if($versionCodeMatch.Success){$versionCodeMatch.Groups[1].Value}else{""}
+  $installedVersionName=if($versionNameMatch.Success){$versionNameMatch.Groups[1].Value}else{""}
+
+  $userOutput=@(& $Adb -s $Serial shell am get-current-user 2>&1)
+  $currentUser=if($LASTEXITCODE -eq 0 -and ($userOutput -join "").Trim() -match "^\d+$"){($userOutput -join "").Trim()}else{"0"}
+  $userStateMatch=[regex]::Match($dumpText,"(?m)^\s*User\s+$([regex]::Escape($currentUser)):\s*(.+)$")
+  $userState=if($userStateMatch.Success){$userStateMatch.Groups[0].Value.Trim()}else{""}
+  $disabledOutput=@(& $Adb -s $Serial shell pm list packages -d --user $currentUser 2>&1)
+  $disabledExit=$LASTEXITCODE
+  $isDisabled=$disabledExit -eq 0 -and (($disabledOutput -join [Environment]::NewLine) -match ("(?m)^package:"+[regex]::Escape($Package)+"\s*$"))
+
+  $resolveOutput=@(& $Adb -s $Serial shell cmd package resolve-activity --brief --user $currentUser -a android.intent.action.MAIN -c android.intent.category.LAUNCHER -p $Package 2>&1)
+  $resolveExit=$LASTEXITCODE
+  $resolveText=$resolveOutput -join [Environment]::NewLine
+  $componentMatch=[regex]::Match($resolveText,"(?m)^\s*"+[regex]::Escape($Package)+"/([A-Za-z0-9_.$]+)\s*$")
+  $resolvedActivity=if($componentMatch.Success){Normalize-AndroidActivityClass $Package $componentMatch.Groups[1].Value}else{""}
+
+  return [pscustomobject]@{
+    dumpExitCode=$dumpExit
+    installedVersionCode=$installedVersionCode
+    installedVersionName=$installedVersionName
+    currentUser=$currentUser
+    userState=$userState
+    disabledPackageQueryExitCode=$disabledExit
+    packageDisabledForCurrentUser=$isDisabled
+    launcherResolveExitCode=$resolveExit
+    resolvedLauncherActivity=$resolvedActivity
+    launcherResolveOutput=$resolveText
+  }
+}
+
+function Test-AndroidApp([string]$Apk,[bool]$ApkVerified,$Settings,[string]$DeviceSerial="",[hashtable]$ApkMetadata=@{},[bool]$AllowInPlaceUpdate=$false) {
+  $adb=Resolve-Adb
+  if(-not $adb){Add-Result "Android app live device launch" "SKIPPED" "ADB unavailable.";return}
+  $list=@(& $adb devices -l)
+  if($LASTEXITCODE -ne 0){Add-Result "Android app live device launch" "FAIL" "ADB could not enumerate devices.";return}
+  $deviceRows=@($list | Where-Object {$_ -match '^\S+\s+\S+'})
+  if(-not [string]::IsNullOrWhiteSpace($DeviceSerial)) {
+    $matchingRows=@($deviceRows | Where-Object {([string]($_ -split '\s+')[0]) -ceq $DeviceSerial})
+    if($matchingRows.Count -ne 1){
+      Add-Result "Android app live device launch" "FAIL" "The explicitly selected ADB serial '$DeviceSerial' was not present exactly once. No other device was selected."
+      return
+    }
+    $line=[string]$matchingRows[0]
+    if($line -notmatch '^\S+\s+device(?:\s|$)'){
+      Add-Result "Android app live device launch" "FAIL" "The explicitly selected device is not authorised/online: $line"
+      return
+    }
+  } else {
+    $devices=@($deviceRows | Where-Object {$_ -match '^\S+\s+device(?:\s|$)'})
+    if($devices.Count -ne 1){
+      $why=if($devices.Count -eq 0){"No online Android device."}else{"Multiple Android devices are online. Supply -AndroidDeviceSerial to select exactly one device."}
+      Add-Result "Android app live device launch" "SKIPPED" "$why No device targeted."
+      return
+    }
+    $line=[string]$devices[0]
+    if($line -notmatch [string]$Settings.emulatorSerialPattern){
+      Add-Result "Android app live device launch" "SKIPPED" "The only device is a physical phone. Supply -AndroidDeviceSerial with its exact adb devices serial to explicitly target it."
+      return
+    }
+  }
+  $serial=([string]$line -split '\s+')[0]
+  $isEmulator=$serial -match [string]$Settings.emulatorSerialPattern
+  $deviceKind=if($isEmulator){"emulator"}else{"physical device explicitly selected"}
+  $script:androidDeviceWasPhysical = -not $isEmulator
+  $package=[string]$Settings.applicationId
+  $check=@(& $adb -s $serial shell pm path $package 2>&1)
+  $installed=$LASTEXITCODE -eq 0 -and (($check -join [Environment]::NewLine) -match '(?m)^package:')
+  $newInstall=$false
+  $updatedInstall=$false
+  if(-not $installed){
+    if(-not $Apk -or -not (Test-Path -LiteralPath $Apk -PathType Leaf) -or -not $ApkVerified){
+      Add-Result "Android app live device launch" "SKIPPED" "App absent; APK is unavailable or its package ID has not been verified."
+      return
+    }
+    # No -r: never replace an existing package.
+    $installOutput=@(& $adb -s $serial install $Apk 2>&1);$installExit=$LASTEXITCODE
+    if($installExit -eq 0){$newInstall=$true}
+    else {
+      $check=@(& $adb -s $serial shell pm path $package 2>&1)
+      $installed=$LASTEXITCODE -eq 0 -and (($check -join [Environment]::NewLine) -match '(?m)^package:')
+      if(-not $installed){Add-Result "Android app live device launch" "FAIL" ("Install failed without replacement: "+($installOutput -join " "));return}
+    }
+  }
+  $verify=@(& $adb -s $serial shell pm path $package 2>&1)
+  if($LASTEXITCODE -ne 0 -or (($verify -join [Environment]::NewLine) -notmatch '(?m)^package:')){Add-Result "Android app live device launch" "FAIL" "Package missing after install check.";return}
+  if(-not $ApkVerified -or -not $ApkMetadata -or -not $ApkMetadata.versionCode -or -not $ApkMetadata.versionName -or -not $ApkMetadata.launcherActivity) {
+    $reason="The downloaded APK did not pass package, version and launcher metadata verification."
+    Add-Result "Android installed package matches published APK and launcher" "SKIPPED" $reason
+    Add-Result "Android app live device launch" "SKIPPED" $reason
+    Add-AndroidLaunchDependentSkips $reason
+    return
+  }
+
+  # Compare installed package against the exact public release. Updating an
+  # existing app requires explicit caller consent; uninstall/data-clear fallback is forbidden.
+  $installedInfo=Get-AndroidInstalledPackageDiagnostics $adb $serial $package
+  $versionMismatch = $installed -and $installedInfo.installedVersionCode -and
+    ([string]$installedInfo.installedVersionCode -ne [string]$ApkMetadata.versionCode -or
+     [string]$installedInfo.installedVersionName -ne [string]$ApkMetadata.versionName)
+  if($versionMismatch -and $AllowInPlaceUpdate) {
+    Write-Host "Explicit update consent supplied. Attempting an in-place Android package update; no uninstall or data clear."
+    $updateOutput=@(& $adb -s $serial install -r $Apk 2>&1)
+    $updateExit=$LASTEXITCODE
+    if($updateExit -ne 0) {
+      $reason=("In-place APK update failed (exit {0}); Android may have rejected signing identity or package compatibility. No uninstall fallback was attempted. Device response: {1}" -f $updateExit,($updateOutput -join " " -replace "[\r\n]+"," ").Trim())
+      Add-Result "Android published APK in-place update" "FAIL" $reason -Evidence @{serial=$serial;updateAttempted=$true;updateExitCode=$updateExit;uninstallAttempted=$false;dataClearAttempted=$false}
+      Add-Result "Android installed package matches published APK and launcher" "SKIPPED" $reason
+      Add-Result "Android app live device launch" "SKIPPED" $reason
+      Add-AndroidLaunchDependentSkips $reason
+      return
+    }
+    $updatedInstall=$true
+    $script:androidExistingInstallWasUpdated=$true
+    $installedInfo=Get-AndroidInstalledPackageDiagnostics $adb $serial $package
+    Add-Result "Android published APK in-place update" "PASS" "Android accepted adb install -r. Post-update package verification follows; no uninstall or data clear was attempted." -Evidence @{serial=$serial;updateAttempted=$true;updateExitCode=0;uninstallAttempted=$false;dataClearAttempted=$false}
+  } elseif($versionMismatch) {
+    Add-Result "Android published APK in-place update" "SKIPPED" "Installed version differs from the published APK. Re-run with -InstallPublishedAndroidApk to explicitly authorise an in-place update; no app or data was changed." -Evidence @{serial=$serial;updateAttempted=$false;uninstallAttempted=$false;dataClearAttempted=$false}
+  }
+  $publishedActivity=Normalize-AndroidActivityClass $package ([string]$ApkMetadata.launcherActivity)
+  $preflightProblems=@()
+  if($installedInfo.dumpExitCode -ne 0){$preflightProblems += "Android could not read the installed package metadata."}
+  if(-not $installedInfo.installedVersionCode){$preflightProblems += "Installed versionCode could not be read."}
+  elseif($installedInfo.installedVersionCode -ne [string]$ApkMetadata.versionCode){$preflightProblems += "Installed versionCode $($installedInfo.installedVersionCode) differs from published APK versionCode $($ApkMetadata.versionCode)."}
+  if(-not $installedInfo.installedVersionName){$preflightProblems += "Installed versionName could not be read."}
+  elseif($installedInfo.installedVersionName -ne [string]$ApkMetadata.versionName){$preflightProblems += "Installed versionName '$($installedInfo.installedVersionName)' differs from published APK versionName '$($ApkMetadata.versionName)'."}
+  if($installedInfo.packageDisabledForCurrentUser){$preflightProblems += "SmartPrint is disabled for Android user $($installedInfo.currentUser)."}
+  if(-not $installedInfo.resolvedLauncherActivity){$preflightProblems += "Android Package Manager cannot resolve a MAIN/LAUNCHER activity for the installed package. Resolver output: $($installedInfo.launcherResolveOutput -replace '[\r\n]+',' ')."}
+  elseif($installedInfo.resolvedLauncherActivity -ne $publishedActivity){$preflightProblems += "Resolved launcher '$($installedInfo.resolvedLauncherActivity)' differs from the published APK launcher '$publishedActivity'."}
+  $preflightEvidence=@{
+    serial=$serial;deviceKind=$deviceKind;packageId=$package
+    publishedVersionCode=[string]$ApkMetadata.versionCode;publishedVersionName=[string]$ApkMetadata.versionName
+    publishedLauncherActivity=$publishedActivity
+    installedVersionCode=$installedInfo.installedVersionCode;installedVersionName=$installedInfo.installedVersionName
+    currentAndroidUser=$installedInfo.currentUser;userPackageState=$installedInfo.userState
+    packageDisabledForCurrentUser=$installedInfo.packageDisabledForCurrentUser
+    resolvedLauncherActivity=$installedInfo.resolvedLauncherActivity
+    launcherResolveExitCode=$installedInfo.launcherResolveExitCode
+    launcherResolveOutput=$installedInfo.launcherResolveOutput
+    installedDuringQa=$newInstall;updatedDuringQa=$updatedInstall;installationReplaced=$false;dataClearAttempted=$false
+  }
+  if($preflightProblems.Count -gt 0) {
+    $reason=$preflightProblems -join " "
+    Add-Result "Android installed package matches published APK and launcher" "FAIL" ($reason+" No uninstall or data clear was attempted.") -Evidence $preflightEvidence
+    Add-Result "Android app live device launch" "SKIPPED" ("Blocked by the installed-package preflight failure. "+$reason)
+    Add-AndroidLaunchDependentSkips $reason
+    return
+  }
+  Add-Result "Android installed package matches published APK and launcher" "PASS" "Installed version $($installedInfo.installedVersionName) (code $($installedInfo.installedVersionCode)) resolves the published launcher $publishedActivity for Android user $($installedInfo.currentUser)." -Evidence $preflightEvidence
+
+  # Start the exact component already resolved by Package Manager for the active
+  # Android user. An explicit ComponentName avoids OEM differences in implicit
+  # MAIN/LAUNCHER resolution while still testing the actual published launcher.
+  $launcherComponent="$package/$publishedActivity"
+  $launch=@(& $adb -s $serial shell am start -W --user $installedInfo.currentUser -n $launcherComponent 2>&1)
+  $launchExit=$LASTEXITCODE
+  $launchText=$launch -join [Environment]::NewLine
+  if($launchExit -ne 0 -or $launchText -notmatch '(?im)^\s*Status:\s*ok\s*') {
+    $reason=("ActivityManager could not launch resolved SmartPrint component {0} for Android user {1} (exit {2}). Device response: {3}" -f $launcherComponent,$installedInfo.currentUser,$launchExit,($launchText -replace '[\r\n]+',' ').Trim())
+    Add-Result "Android app live device launch" "FAIL" $reason -Evidence @{serial=$serial;androidUser=$installedInfo.currentUser;resolvedLauncherActivity=$publishedActivity;launchComponent=$launcherComponent;launchExitCode=$launchExit;deviceResponse=$launchText}
+    Add-AndroidLaunchDependentSkips $reason
+    return
+  }
+  $started=$false;$deadline=[DateTime]::UtcNow.AddSeconds([int]$Settings.launchTimeoutSeconds);$appPid=$null
+  do {
+    $activity=@(& $adb -s $serial shell dumpsys activity activities 2>&1) -join [Environment]::NewLine
+    $resumedLine=@($activity -split "`r?`n" | Where-Object {$_ -match '(?i)mResumedActivity|topResumedActivity|ResumedActivity|mFocusedApp'}) -join ' '
+    if($resumedLine -match [regex]::Escape($package)){
+      $appPidOutput=@(& $adb -s $serial shell pidof $package 2>$null)
+      $appPid=($appPidOutput -join '').Trim()
+      if($LASTEXITCODE -eq 0 -and $appPid){$started=$true;break}
+    }
+    Start-Sleep -Milliseconds 500
+  } while([DateTime]::UtcNow -lt $deadline)
+  if(-not $started){Add-Result "Android app live device launch" "FAIL" "SmartPrint did not become the resumed foreground activity with a running process.";return}
+  Add-Result "Android app live device launch" "PASS" "SmartPrint is the resumed foreground activity on the $deviceKind; existing app data was not intentionally cleared; updatedDuringQa=$updatedInstall." -Evidence @{serial=$serial;deviceKind=$deviceKind;packageId=$package;installedDuringQa=$newInstall;updatedDuringQa=$updatedInstall;installationReplaced=$false;dataClearAttempted=$false;processId=$appPid}
+
+  $uiPath="/sdcard/smartprint-qa-ui-$([Guid]::NewGuid().ToString('N')).xml"
+  try {
+    $ui=Get-AndroidUiHierarchy $adb $serial $uiPath
+    $visibleNodes=@($ui.SelectNodes("//node") | Where-Object {Test-AndroidUiNodeVisible $_})
+    $packageNodes=@($visibleNodes | Where-Object {$_.GetAttribute("package") -eq $package})
+    $visibleLabels=@($packageNodes | ForEach-Object {@($_.GetAttribute("text"),$_.GetAttribute("content-desc"))} | Where-Object {-not [string]::IsNullOrWhiteSpace($_)} | Select-Object -Unique)
+    # A saved shop connection intentionally restores the Print/WebView tab on a
+    # cold start. SmartPrint's native toolbar remains present in that valid state.
+    $expectedAppLabels=@("SmartPrint","smartprint","Your space","Scan document","Choose from phone","Files","My Files","Print","Print history","Activity","Connect to a shop","New folder","Scan QR code","Open My Files")
+    $matchedLabels=@($expectedAppLabels | Where-Object {$visibleLabels -contains $_})
+    if($packageNodes.Count -lt 1 -or $matchedLabels.Count -lt 1){
+      $packageNames=@($visibleNodes | ForEach-Object {$_.GetAttribute("package")} | Where-Object {$_} | Select-Object -Unique)
+      $sampleLabels=@($visibleNodes | ForEach-Object {@($_.GetAttribute("text"),$_.GetAttribute("content-desc"))} | Where-Object {-not [string]::IsNullOrWhiteSpace($_)} | Select-Object -Unique | Select-Object -First 30)
+      throw ("The Android window is foreground, but SmartPrint UI could not be confirmed. " +
+        "Visible nodes: $($visibleNodes.Count); app-package nodes: $($packageNodes.Count); " +
+        "packages: $($packageNames -join ', '); visible labels: $($sampleLabels -join ' | ').")
+    }
+    Add-Result "Android native UI rendered" "PASS" "Android accessibility hierarchy confirms visible SmartPrint UI; matched navigation/screen labels: $($matchedLabels -join ', ')." -Evidence @{serial=$serial;visibleSmartPrintNodes=$packageNodes.Count;matchedLabels=$matchedLabels}
+  } catch {
+    Add-Result "Android native UI rendered" "FAIL" $_.Exception.Message
+  } finally {
+    & $adb -s $serial shell rm -f $uiPath 2>$null | Out-Null
+  }
+
+  # Each live interaction is recorded independently. One failed screen does not
+  # prevent the remaining native navigation or process-health checks from running.
+  try {
+    $filesOpened=Invoke-AndroidUiNavigation $adb $serial "My Files" "New folder" ([int]$Settings.uiNavigationTimeoutSeconds) $package
+    if(-not $filesOpened){throw "My Files navigation did not complete."}
+    Add-Result "Android native Files navigation" "PASS" "Tapped the actual My Files navigation control and verified the native Files screen." -Evidence @{serial=$serial;screen="Files"}
+  } catch {
+    Add-Result "Android native Files navigation" "FAIL" $_.Exception.Message
+  }
+  try {
+    $homeOpened=Invoke-AndroidUiNavigation $adb $serial "Home" "Your space" ([int]$Settings.uiNavigationTimeoutSeconds) $package
+    if(-not $homeOpened){throw "Home navigation did not complete."}
+    Add-Result "Android native Home navigation" "PASS" "Returned to Home using the actual native navigation control." -Evidence @{serial=$serial;screen="Home"}
+  } catch {
+    Add-Result "Android native Home navigation" "FAIL" $_.Exception.Message
+  }
+
+  $currentPid=($appPid -split '\s+')[0]
+  $logcat=@(& $adb -s $serial logcat -d --pid=$currentPid -t ([int]$Settings.crashLogLineCount) 2>&1)
+  if($LASTEXITCODE -ne 0){
+    Add-Result "Android app crash-log probe" "WARN" "Could not read the current app process logcat; foreground UI checks remain recorded."
+  } elseif(($logcat -join [Environment]::NewLine) -match '(?i)FATAL EXCEPTION|Fatal signal'){
+    Add-Result "Android app crash-log probe" "FAIL" "A fatal exception or native fatal signal was recorded for the running SmartPrint process."
+  } else {
+    Add-Result "Android app crash-log probe" "PASS" "No fatal exception or native fatal signal was found for the live SmartPrint process."
+  }
+}
+
+$config=Get-Content -LiteralPath $ConfigPath -Raw | ConvertFrom-Json -ErrorAction Stop
+if($config.schemaVersion -ne 1){throw "Unsupported QA config version."}
+$origin=[Uri]$PublicOrigin;$configured=[Uri]$config.origins.public
+if($origin.Scheme -ne "https" -or $origin.GetLeftPart([UriPartial]::Authority) -ne $configured.GetLeftPart([UriPartial]::Authority) -or $origin.AbsolutePath -ne "/" -or $origin.UserInfo -or $origin.Query -or $origin.Fragment){
+  throw "Published-app QA only accepts the configured SmartPrint HTTPS origin."
+}
+$outputRoot=[IO.Path]::GetFullPath($OutputDirectory)
+New-Item -ItemType Directory -Force -Path $outputRoot | Out-Null
+$script:results=[System.Collections.Generic.List[object]]::new()
+$downloads=@{windows=$null;android=$null}
+$androidApkVerified=$false
+$androidApkMetadata=@{}
+$handler=[System.Net.Http.HttpClientHandler]::new()
+$handler.AllowAutoRedirect=$true;$handler.MaxAutomaticRedirections=5
+$client=[System.Net.Http.HttpClient]::new($handler);$client.Timeout=[TimeSpan]::FromMinutes(3)
+$release=$null;$summary=$null
+$script:androidDeviceWasPhysical=$false
+$script:androidExistingInstallWasUpdated=$false
+try {
+  try {
+    $url=[Uri]::new($origin,[string]$config.downloads.statusPath)
+    $response=$client.GetAsync($url).GetAwaiter().GetResult()
+    try {
+      Assert-SameOrigin $response.RequestMessage.RequestUri $origin "Release metadata request"
+      if([int]$response.StatusCode -ne 200){
+        Add-Result "Public release metadata" "WARN" "Website returned HTTP $([int]$response.StatusCode); installed apps will still be tested."
+      } else {
+        $json=$response.Content.ReadAsStringAsync().GetAwaiter().GetResult()
+        $release=ConvertFrom-Json -InputObject $json -ErrorAction Stop
+        if($release.version -isnot [string] -or $release.version -notmatch '^v?\d+\.\d+\.\d+' -or $release.windowsAvailable -isnot [bool] -or $release.androidAvailable -isnot [bool]){
+          throw "Release metadata did not match the expected contract."
+        }
+        Add-Result "Public release metadata" "PASS" ("Published version "+$release.version) @{windowsAvailable=$release.windowsAvailable;androidAvailable=$release.androidAvailable}
+      }
+    } finally {$response.Dispose()}
+  } catch {
+    Add-Result "Public release metadata" "WARN" ("Could not retrieve release metadata: "+$_.Exception.Message)
+  }
+
+  $platformsToCheck = if($AndroidOnly){ @("android") } else { @("windows","android") }
+  foreach($platform in $platformsToCheck){
+    if(-not $release){
+      Add-Result ("Download current "+$platform+" asset") "SKIPPED" "No verified release metadata; no hard-coded URL used."
+      continue
+    }
+    $available=[bool]$release.($platform+"Available")
+    if(-not $available){
+      Add-Result ("Download current "+$platform+" asset") "SKIPPED" "Release metadata marks this asset unavailable."
+      continue
+    }
+    $name=[string]$config.downloads.($platform+"AssetName")
+    $path=[string]$config.downloads.($platform+"Path")
+    try {
+      $download=Download-Asset $client $origin $path $name (Join-Path $outputRoot $name) ([long]$config.downloads.maxTransferBytes)
+      $downloads[$platform]=$download.path
+      Add-Result -Name ("Download current "+$platform+" asset from website") -Status "PASS" -Detail "Complete same-origin transfer verified." -Evidence @{
+        version=$release.version;fileName=$download.name;bytesReceived=$download.bytes;sha256=$download.sha256;contentType=$download.contentType
+      }
+      if($platform -eq "android"){
+        Add-Type -AssemblyName System.IO.Compression.FileSystem
+        $archive=[IO.Compression.ZipFile]::OpenRead($download.path)
+        try {
+          $entries=@($archive.Entries | ForEach-Object {$_.FullName})
+          $dex=@($entries | Where-Object {$_ -match '^classes(\d*)?\.dex$'})
+          if(($entries -notcontains "AndroidManifest.xml") -or $dex.Count -lt 1){throw "APK lacks AndroidManifest.xml or classes*.dex."}
+        } finally {$archive.Dispose()}
+
+        $aapt=Resolve-Aapt
+        if(-not $aapt){
+          Add-Result "Verify Android APK application ID" "SKIPPED" "Android SDK aapt.exe is unavailable; the APK will not be installed."
+          Add-Result "Verify Android APK build metadata" "SKIPPED" "Android SDK aapt.exe is unavailable; version metadata cannot be verified."
+          Add-Result "Verify Android APK launcher activity" "SKIPPED" "Android SDK aapt.exe is unavailable; launcher metadata cannot be verified."
+        } else {
+          $badging=@(& $aapt dump badging $download.path 2>&1)
+          if($LASTEXITCODE -ne 0){throw "Android SDK could not read APK manifest: $($badging -join ' ')"}
+          $badgingText=$badging -join [Environment]::NewLine
+          $packageMatch=[regex]::Match($badgingText,"(?m)^package:\s+name='([^']+)'")
+          if(-not $packageMatch.Success -or $packageMatch.Groups[1].Value -ne [string]$config.apps.android.applicationId){
+            Add-Result "Verify Android APK application ID" "FAIL" "Downloaded APK package ID does not match the configured SmartPrint application."
+            Add-Result "Verify Android APK build metadata" "SKIPPED" "APK package identity did not match; version metadata cannot be trusted."
+            Add-Result "Verify Android APK launcher activity" "SKIPPED" "APK package identity did not match; launcher metadata cannot be trusted."
+          } else {
+            Add-Result "Verify Android APK application ID" "PASS" "APK package ID matches $($config.apps.android.applicationId)."
+            $versionCodeMatch=[regex]::Match($badgingText,"(?m)^package:.*?\bversionCode='([^']+)'")
+            $versionNameMatch=[regex]::Match($badgingText,"(?m)^package:.*?\bversionName='([^']*)'")
+            $launcherMatch=[regex]::Match($badgingText,"(?m)^launchable-activity:\s+name='([^']+)'")
+            if($versionCodeMatch.Success -and $versionNameMatch.Success -and $versionNameMatch.Groups[1].Value) {
+              Add-Result "Verify Android APK build metadata" "PASS" "Published APK version $($versionNameMatch.Groups[1].Value), code $($versionCodeMatch.Groups[1].Value)." -Evidence @{versionCode=$versionCodeMatch.Groups[1].Value;versionName=$versionNameMatch.Groups[1].Value}
+            } else {
+              Add-Result "Verify Android APK build metadata" "FAIL" "aapt did not expose a valid versionCode and versionName for the published APK."
+            }
+            if($launcherMatch.Success) {
+              Add-Result "Verify Android APK launcher activity" "PASS" "Published APK declares launcher activity $($launcherMatch.Groups[1].Value)." -Evidence @{launcherActivity=$launcherMatch.Groups[1].Value}
+            } else {
+              Add-Result "Verify Android APK launcher activity" "FAIL" "Published APK has no aapt launchable-activity entry; it cannot be accepted as a launcher app."
+            }
+            if($versionCodeMatch.Success -and $versionNameMatch.Success -and $versionNameMatch.Groups[1].Value -and $launcherMatch.Success) {
+              $androidApkVerified=$true
+              $androidApkMetadata=@{
+                packageId=$packageMatch.Groups[1].Value
+                versionCode=$versionCodeMatch.Groups[1].Value
+                versionName=$versionNameMatch.Groups[1].Value
+                launcherActivity=$launcherMatch.Groups[1].Value
+                sha256=$download.sha256
+              }
+            }
+          }
+        }
+      }
+    } catch {
+      Add-Result ("Download current "+$platform+" asset from website") "FAIL" $_.Exception.Message
+    }
+  }
+  if($AndroidOnly){
+    Add-Result "Windows installer/app acceptance" "SKIPPED" "Android-only mode; no Windows installer was downloaded, installed, launched or modified."
+  } else {
+    try {Test-WindowsApp $downloads.windows $config.apps.windows}
+    catch {Add-Result "Windows installed-app acceptance" "FAIL" $_.Exception.Message}
+  }
+  try {Test-AndroidApp $downloads.android $androidApkVerified $config.apps.android $AndroidDeviceSerial $androidApkMetadata ([bool]$InstallPublishedAndroidApk)}
+  catch {Add-Result "Android app live acceptance" "FAIL" $_.Exception.Message}
+  if($AndroidOnly){
+    $requiredAndroidChecks=@("Public release metadata","Download current android asset from website","Verify Android APK application ID","Verify Android APK build metadata","Verify Android APK launcher activity","Android installed package matches published APK and launcher","Android app live device launch","Android native UI rendered","Android native Files navigation","Android native Home navigation","Android app crash-log probe")
+    $notPassing=@()
+    foreach($requiredCheck in $requiredAndroidChecks){
+      $checkResults=@($script:results | Where-Object {$_.name -eq $requiredCheck})
+      if($checkResults.Count -ne 1 -or $checkResults[0].status -ne "PASS"){$notPassing += $requiredCheck}
+    }
+    $alreadyFailed=@($script:results | Where-Object {$_.status -eq "FAIL"})
+    if($notPassing.Count -gt 0 -and $alreadyFailed.Count -eq 0){
+      Add-Result "Android-only completion gate" "FAIL" ("Required checks did not PASS: "+($notPassing -join ", ")+". A skipped or warning result is not a successful app QA run.")
+    }
+  }
+}
+finally {
+  $client.Dispose()
+  $failed=@($script:results | Where-Object status -eq "FAIL").Count
+  $summary=[pscustomobject]@{
+    product="SmartPrint";scope=if($AndroidOnly){"ANDROID_ONLY"}else{"WINDOWS_AND_ANDROID"};androidDeviceSerial=if($AndroidDeviceSerial){$AndroidDeviceSerial}else{$null};publicOrigin=$origin.GetLeftPart([UriPartial]::Authority);completedUtc=[DateTime]::UtcNow.ToString("o")
+    result=if($failed -eq 0){"PASS"}else{"FAIL"}
+    passed=@($script:results | Where-Object status -eq "PASS").Count
+    failed=$failed
+    skipped=@($script:results | Where-Object status -eq "SKIPPED").Count
+    warnings=@($script:results | Where-Object status -eq "WARN").Count
+    safety=@{windowsChecksPerformed=(-not [bool]$AndroidOnly);windowsExistingInstallReplaced=$false;androidExistingInstallReplaced=$false;androidExistingInstallUpdated=[bool]$script:androidExistingInstallWasUpdated;androidDataClearAttempted=$false;physicalAndroidDevicesTargeted=[bool]$script:androidDeviceWasPhysical;shopPairingAttempted=$false;printerConfigurationChanged=$false}
+    results=@($script:results)
+  }
+  $summary | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath (Join-Path $outputRoot "results.json") -Encoding UTF8
+  $summary | Format-List | Out-String | Set-Content -LiteralPath (Join-Path $outputRoot "results.txt") -Encoding UTF8
+  Write-Host "=== SMARTPRINT PUBLISHED APPS QA SUMMARY ==="
+  Write-Host ($summary | Format-Table result,passed,failed,skipped,warnings -AutoSize | Out-String)
+  Write-Host "Evidence: $outputRoot"
+}
+if($summary.failed -gt 0){throw "Published Windows/Android QA recorded $($summary.failed) failures. Review $outputRoot."}
+)
+  if(-not $bounds.Success){return $false}
+  $left=[int]$bounds.Groups[1].Value
+  $top=[int]$bounds.Groups[2].Value
+  $right=[int]$bounds.Groups[3].Value
+  $bottom=[int]$bounds.Groups[4].Value
+  return ($right -gt $left -and $bottom -gt $top)
+}
+function Find-AndroidUiNode($Document,[string]$Label,[string]$Package="") {
   foreach($node in $Document.SelectNodes("//node")) {
-    if($node.GetAttribute("visible-to-user") -ne "true"){continue}
+    if(-not (Test-AndroidUiNodeVisible $node)){continue}
+    if($Package -and $node.GetAttribute("package") -ne $Package){continue}
     if($node.GetAttribute("text") -eq $Label -or $node.GetAttribute("content-desc") -eq $Label){return $node}
   }
   return $null
