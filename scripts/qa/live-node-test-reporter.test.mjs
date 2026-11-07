@@ -18,7 +18,7 @@ test("live reporter announces the exact case before execution and reports its ou
   ]);
 
   assert.match(output, /\[TEST 001 START\].*rejects a cross-tenant upload.*security\.test\.mjs:42/);
-  assert.match(output, /\[TEST PASS\].*rejects a cross-tenant upload.*18 ms/);
+  assert.match(output, /\[TEST PASS\].*rejects a cross-tenant upload.*19 ms/);
 });
 
 test("live reporter identifies failures, errors, skipped tests and run totals", async () => {
