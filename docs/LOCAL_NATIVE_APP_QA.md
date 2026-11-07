@@ -2,6 +2,8 @@
 
 This guide explains the native-app portion of the local production acceptance runner. It does not download or test the latest public Windows installer or public Android APK.
 
+After the automated local run, complete the [role-based cross-platform acceptance matrix](ROLE_BASED_CROSS_PLATFORM_QA.md). In particular, the native Desktop startup/accessibility smoke is not a full owner-workflow test, and Android instrumentation is not a substitute for physical camera, file-provider, Local Network Access or shop-Wi-Fi acceptance.
+
 ## One-command full local run
 
 From the existing Windows checkout:
