@@ -2235,6 +2235,337 @@ shop.MapGet("/print-jobs", async (
 
 
 
+
+shop.MapPost("/photo-jobs", async (
+    ClaimsPrincipal principal,
+    SmartPrintDbContext db,
+    DocumentStorage storage,
+    HttpContext context,
+    CancellationToken ct) =>
+{
+    if (!IsShopOwner(principal) || !TryGetTenantId(principal, out var tenantId))
+        return Results.Forbid();
+
+    if (!context.Request.HasFormContentType)
+        return Results.BadRequest(new { code = "photo_order_form_required", message = "Select a photo, prepare its A4 sheet and save the photo order." });
+
+    var form = await context.Request.ReadFormAsync(ct);
+    if (form.Files.Count != 1)
+        return Results.BadRequest(new { code = "one_photo_sheet_required", message = "Save exactly one prepared multi-page A4 photo PDF." });
+
+    if (!Guid.TryParse(form["idempotencyKey"].FirstOrDefault(), out var requestKey))
+        return Results.ValidationProblem(new Dictionary<string, string[]>
+        {
+            ["idempotencyKey"] = ["Refresh this form and retry with its original request key."]
+        });
+    var idempotencyKey = $"SHOP-PHOTO-{requestKey:N}";
+
+    var photoSizeCode = form["photoSizeCode"].FirstOrDefault() ?? string.Empty;
+    if (photoSizeCode is not ("35x45" or "25x35" or "2x2" or "4x6") ||
+        !int.TryParse(form["photoCount"].FirstOrDefault(), out var photoCount) ||
+        photoCount is < 1 or > 100 ||
+        !int.TryParse(form["photosPerPage"].FirstOrDefault(), out var photosPerPage) ||
+        photosPerPage < 1 ||
+        photosPerPage > PricingCalculator.MaximumPhotosPerA4Sheet(photoSizeCode))
+    {
+        return Results.ValidationProblem(new Dictionary<string, string[]>
+        {
+            ["photoDetails"] = ["Choose a supported photo size, 1–100 photos and a valid photos-per-page layout."]
+        });
+    }
+
+    var recipientType = form["recipientType"].FirstOrDefault();
+    Guid? customerUserId = null;
+    string recipientName;
+    string? recipientPhone = null;
+
+    if (recipientType == "EXISTING_CUSTOMER")
+    {
+        if (!Guid.TryParse(form["customerUserId"].FirstOrDefault(), out var selectedCustomerId))
+            return Results.ValidationProblem(new Dictionary<string, string[]>
+            {
+                ["customerUserId"] = ["Choose a customer from this shop's customer list."]
+            });
+
+        var customer = await db.Users.AsNoTracking()
+            .Where(user => user.Id == selectedCustomerId &&
+                           user.TenantId == null &&
+                           db.CustomerPrintSessions.Any(session =>
+                               session.TenantId == tenantId && session.CustomerUserId == user.Id))
+            .Select(user => new { user.Id, user.DisplayName, user.PhoneNumber })
+            .SingleOrDefaultAsync(ct);
+
+        if (customer is null)
+            return Results.NotFound(new { code = "shop_customer_not_found", message = "That customer is not associated with this shop. Refresh the customer list and choose again." });
+
+        customerUserId = customer.Id;
+        recipientName = customer.DisplayName.Trim();
+        recipientPhone = string.IsNullOrWhiteSpace(customer.PhoneNumber) ? null : customer.PhoneNumber.Trim();
+    }
+    else if (recipientType == "WALK_IN")
+    {
+        recipientName = form["recipientName"].FirstOrDefault()?.Trim() ?? string.Empty;
+        recipientPhone = form["recipientPhone"].FirstOrDefault()?.Trim();
+        if (recipientName.Length is < 1 or > 160)
+            return Results.ValidationProblem(new Dictionary<string, string[]>
+            {
+                ["recipientName"] = ["Enter the walk-in customer's name (up to 160 characters)."]
+            });
+        if (string.IsNullOrWhiteSpace(recipientPhone)) recipientPhone = null;
+        if (recipientPhone is { Length: > 40 } ||
+            recipientPhone is not null && recipientPhone.Any(character =>
+                !char.IsDigit(character) && character is not ('+' or '(' or ')' or '-' or ' ')))
+            return Results.ValidationProblem(new Dictionary<string, string[]>
+            {
+                ["recipientPhone"] = ["Enter a valid contact number using digits and common phone punctuation, or leave it blank."]
+            });
+    }
+    else
+    {
+        return Results.ValidationProblem(new Dictionary<string, string[]>
+        {
+            ["recipientType"] = ["Choose an existing customer or a walk-in customer."]
+        });
+    }
+
+    var pricing = await db.ShopPricingProfiles.AsNoTracking()
+        .SingleOrDefaultAsync(item => item.TenantId == tenantId && item.IsConfigured, ct);
+    if (pricing is null)
+        return Results.Conflict(new { code = "shop_pricing_not_configured", message = "Configure the shop's photo sizes and per-photo prices before creating a photo order." });
+
+    long unitPrice;
+    long amount;
+    try
+    {
+        unitPrice = PricingCalculator.PhotoUnitRate(photoSizeCode, pricing);
+        amount = PricingCalculator.CalculatePhoto(photoCount, photoSizeCode, pricing);
+    }
+    catch (Exception exception) when (exception is ArgumentException or InvalidOperationException or OverflowException)
+    {
+        return Results.Conflict(new { code = "photo_pricing_unavailable", message = exception.Message });
+    }
+
+    var upload = form.Files[0];
+    if (upload.Length is <= 0 or > 20 * 1024 * 1024 ||
+        !string.Equals(Path.GetExtension(upload.FileName), ".pdf", StringComparison.OrdinalIgnoreCase))
+    {
+        return Results.UnprocessableEntity(new
+        {
+            code = "photo_sheet_invalid",
+            message = "The prepared photo sheet must be a PDF between 1 byte and 20 MB."
+        });
+    }
+
+    var expectedPageCount = PricingCalculator.PhotoPageCount(photoCount, photoSizeCode, photosPerPage);
+    await using var transaction = await db.Database.BeginTransactionAsync(ct);
+    StoredDocument? stored = null;
+    try
+    {
+        await entitlements.AcquireQuotaLockAsync(tenantId, TenantQuotaResource.MonthlyPrintJob, ct);
+        var quota = await entitlements.CheckCapacityAsync(tenantId, TenantQuotaResource.MonthlyPrintJob, ct);
+        if (!quota.Allowed)
+        {
+            await transaction.RollbackAsync(ct);
+            return Results.Conflict(new { code = quota.Code, message = quota.Message, current = quota.Current, maximum = quota.Maximum });
+        }
+
+        var now = DateTimeOffset.UtcNow;
+        var documentId = Guid.NewGuid();
+        var jobId = Guid.NewGuid();
+        var jobNumber = $"SP-{now:yyMMdd}-{Guid.NewGuid().ToString("N")[..8].ToUpperInvariant()}";
+        var outputName = $"photo-sheet-{jobNumber}.pdf";
+
+        try
+        {
+            await using var input = upload.OpenReadStream();
+            stored = await storage.ValidateAndStoreAsync(tenantId, documentId, outputName, input, upload.Length, ct);
+        }
+        catch (DocumentValidationException exception)
+        {
+            await transaction.RollbackAsync(ct);
+            return Results.UnprocessableEntity(new { code = "photo_sheet_not_supported", message = exception.Message });
+        }
+
+        if (stored.Analysis.PageCount != expectedPageCount ||
+            !PhotoSheetPdfRules.HasExactlyA4PortraitPages(stored.Analysis.PageSizesJson, expectedPageCount))
+        {
+            await storage.DeleteAsync(stored.StorageKey);
+            stored = null;
+            await transaction.RollbackAsync(ct);
+            return Results.UnprocessableEntity(new
+            {
+                code = "photo_sheet_layout_invalid",
+                message = $"The prepared file must contain exactly {expectedPageCount} portrait A4 page(s). Check the sheet preview and prepare it again."
+            });
+        }
+
+        var existingJob = await db.PrintJobs.AsNoTracking()
+            .SingleOrDefaultAsync(item => item.TenantId == tenantId && item.IdempotencyKey == idempotencyKey, ct);
+        if (existingJob is not null)
+        {
+            var existingDocument = await db.PrintDocuments.AsNoTracking()
+                .SingleOrDefaultAsync(item => item.TenantId == tenantId && item.PrintJobId == existingJob.Id, ct);
+            var isSameRequest = existingDocument is not null &&
+                existingJob.Origin == "SHOP_OWNER" &&
+                existingJob.CustomerUserId == customerUserId &&
+                existingJob.RecipientName == recipientName &&
+                existingJob.RecipientPhone == recipientPhone &&
+                existingJob.PrintKind == "PHOTO" &&
+                existingJob.PhotoSizeCode == photoSizeCode &&
+                existingJob.PhotoCount == photoCount &&
+                existingJob.PhotosPerPage == photosPerPage &&
+                string.Equals(existingDocument.Sha256, stored.Sha256, StringComparison.OrdinalIgnoreCase);
+
+            await storage.DeleteAsync(stored.StorageKey);
+            stored = null;
+            await transaction.RollbackAsync(ct);
+
+            if (!isSameRequest)
+                return Results.Conflict(new { code = "idempotency_key_reused", message = "This request key already belongs to a different photo order. Start a new photo order instead of changing its original." });
+
+            return Results.Ok(new
+            {
+                Job = new
+                {
+                    existingJob.Id,
+                    existingJob.JobNumber,
+                    existingJob.Status,
+                    existingJob.Origin,
+                    existingJob.RecipientName,
+                    existingJob.RecipientPhone,
+                    existingJob.CustomerUserId,
+                    existingJob.PrintKind,
+                    existingJob.PhotoSizeCode,
+                    existingJob.PhotoCount,
+                    existingJob.PhotosPerPage,
+                    existingJob.PageCount,
+                    existingJob.PhotoUnitPriceMinorSnapshot,
+                    existingJob.QuotedAmountMinor,
+                    existingJob.QuoteExpiresUtc,
+                    existingJob.CreatedUtc
+                },
+                Document = new
+                {
+                    existingDocument!.Id,
+                    existingDocument.OriginalFileName,
+                    existingDocument.MediaType,
+                    existingDocument.SizeBytes,
+                    existingDocument.Sha256,
+                    existingDocument.PageSizesJson
+                },
+                DuplicateRequest = true
+            });
+        }
+
+        var job = new PrintJob
+        {
+            Id = jobId,
+            TenantId = tenantId,
+            QrStationId = null,
+            CustomerSessionId = null,
+            CustomerUserId = customerUserId,
+            Origin = "SHOP_OWNER",
+            RecipientName = recipientName,
+            RecipientPhone = recipientPhone,
+            JobNumber = jobNumber,
+            Status = "AWAITING_SHOP_APPROVAL",
+            IdempotencyKey = idempotencyKey,
+            PageCount = expectedPageCount,
+            Copies = 1,
+            ColourMode = "Colour",
+            PaperSize = "A4",
+            IsDuplex = false,
+            Orientation = "AUTO",
+            PrintKind = "PHOTO",
+            PhotoSizeCode = photoSizeCode,
+            PhotoCount = photoCount,
+            PhotosPerPage = photosPerPage,
+            PhotoUnitPriceMinorSnapshot = unitPrice,
+            PricingVersion = pricing.Version,
+            QuoteExpiresUtc = now.AddMinutes(30),
+            Currency = "INR",
+            QuotedAmountMinor = amount,
+            PageRefundAllocationsJson = JsonSerializer.Serialize(
+                PricingCalculator.CalculatePhotoPageRefundAllocations(photoCount, photoSizeCode, photosPerPage, unitPrice)),
+            CreatedUtc = now,
+            UpdatedUtc = now
+        };
+        var document = new PrintDocument
+        {
+            Id = documentId,
+            TenantId = tenantId,
+            PrintJobId = job.Id,
+            OriginalFileName = outputName,
+            MediaType = stored.Analysis.MediaType,
+            FileExtension = stored.Analysis.Extension,
+            SizeBytes = stored.SizeBytes,
+            Sha256 = stored.Sha256,
+            StorageKey = stored.StorageKey,
+            StorageMode = "CLOUD",
+            PageSizesJson = stored.Analysis.PageSizesJson,
+            CreatedUtc = now
+        };
+
+        db.PrintJobs.Add(job);
+        db.PrintDocuments.Add(document);
+        db.PrintJobEvents.Add(new PrintJobEvent
+        {
+            TenantId = tenantId,
+            PrintJobId = job.Id,
+            PreviousStatus = null,
+            NewStatus = job.Status,
+            ActorType = "ShopUser",
+            ActorId = GetActorId(principal),
+            ReasonCode = "SHOP_PHOTO_ORDER_CREATED",
+            CreatedUtc = now
+        });
+
+        await db.SaveChangesAsync(ct);
+        await transaction.CommitAsync(ct);
+        return Results.Created($"/api/v1/shop/print-jobs/{job.Id}", new
+        {
+            Job = new
+            {
+                job.Id,
+                job.JobNumber,
+                job.Status,
+                job.Origin,
+                job.RecipientName,
+                job.RecipientPhone,
+                job.CustomerUserId,
+                job.PrintKind,
+                job.PhotoSizeCode,
+                job.PhotoCount,
+                job.PhotosPerPage,
+                job.PageCount,
+                job.PhotoUnitPriceMinorSnapshot,
+                job.QuotedAmountMinor,
+                job.QuoteExpiresUtc,
+                job.CreatedUtc
+            },
+            Document = new
+            {
+                document.Id,
+                document.OriginalFileName,
+                document.MediaType,
+                document.SizeBytes,
+                document.Sha256,
+                document.PageSizesJson
+            },
+            DuplicateRequest = false
+        });
+    }
+    catch
+    {
+        await transaction.RollbackAsync(ct);
+        if (stored is not null)
+            await storage.DeleteAsync(stored.StorageKey);
+        throw;
+    }
+})
+.WithMetadata(new RequestSizeLimitAttribute(21 * 1024 * 1024))
+.RequireRateLimiting("document-upload");
+
 shop.MapGet("/reports/summary", async (
     ClaimsPrincipal principal,
     SmartPrintDbContext db,
