@@ -407,3 +407,13 @@ test('native QA logs each named step and produces separate machine-readable evid
   assert.match(nativeLocalRunnerSource, /results\.json/);
   assert.match(nativeLocalRunnerSource, /results\.txt/);
 });
+
+test('physical Android QA runs the full existing Espresso instrumentation suite on one explicitly selected device', () => {
+  assert.match(nativeLocalRunnerSource, /Run the full Android Espresso instrumentation suite on the selected physical phone/);
+  assert.match(nativeLocalRunnerSource, /:app:connectedDebugAndroidTest/);
+  assert.match(nativeLocalRunnerSource, /ANDROID_SERIAL/);
+  assert.match(nativeLocalRunnerSource, /-PsmartPrintLocalQa=true/);
+  assert.match(nativeLocalRunnerSource, /-PsmartPrintServiceUrl=\$publicOrigin/);
+  assert.match(nativeLocalRunnerSource, /-PsmartPrintVersionCode=\$versionCode/);
+  assert.match(nativeLocalRunnerSource, /-PsmartPrintVersionName=\$versionName/);
+});
