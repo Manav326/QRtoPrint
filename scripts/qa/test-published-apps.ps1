@@ -70,6 +70,13 @@ function Test-WindowsApp([string]$Installer,$Settings) {
   $machineData=Join-Path $env:ProgramData $Settings.programDataDirectoryName
   if(Test-Path -LiteralPath $exe -PathType Leaf){
     Add-Result "Existing Windows installation" "PASS" "Existing app detected; no installer will be run."
+    if(-not $service){
+      Add-Result "Windows SmartPrint Agent service" "FAIL" "Desktop installation exists, but the expected Agent service is missing."
+    } elseif($service.Status -eq "Running"){
+      Add-Result "Windows SmartPrint Agent service" "PASS" "Agent service is running; no service state was changed."
+    } else {
+      Add-Result "Windows SmartPrint Agent service" "FAIL" "Agent service is $($service.Status); QA will not start or modify it."
+    }
     try {
       $running=@(Get-CimInstance Win32_Process -Filter "Name='$($Settings.executableName)'" -ErrorAction Stop | Where-Object {$_.ExecutablePath -and $_.ExecutablePath.Equals($exe,[StringComparison]::OrdinalIgnoreCase)})
     } catch {

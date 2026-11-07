@@ -10,32 +10,32 @@ The exhaustive acceptance run targets only the local SmartPrint stack:
 - API through the portal reverse proxy: http://127.0.0.1:3000/api/...
 - Local PostgreSQL and document storage: the persistent volumes attached to compose.local.yml
 
-The test runner refuses any target other than the local loopback portal. Its browser and API requests are same-origin. It does not point the test browser at https://smartprint.quantaedge.in, does not use the production database, and does not use mock API routes, synthetic JWTs or fixture customer sessions.
+The main acceptance journey refuses any target other than the local loopback portal. Its browser and API requests are same-origin. It does not point the test browser at the public site, use the production database, or use mock API routes, synthetic JWTs or fixture customer sessions. The separate opt-in `-TestPublishedApps` check only reads the configured public release metadata and downloads published app assets; it does not access production customer data.
 
 The Cloudflare Free/Bot Fight Mode 403 issue is therefore irrelevant to this local run. No Cloudflare security changes are required.
 
 ## One-command run
 
-From a Windows PowerShell window opened in the local SmartPrint repository:
+From a Windows PowerShell window opened in the local SmartPrint repository, with the existing QA PR branch checked out:
 
 ~~~powershell
-git pull --ff-only origin main
+git pull --ff-only origin feature/smartprint-clean-qa-runtime
 .\scripts\qa\run-smartprint-qa.ps1
 ~~~
 
 The runner:
 
 1. Checks Node.js 22.6+, Docker Desktop and Docker Compose.
-2. Reuses the existing local .env.local and persistent volumes. Both scripts explicitly pin Docker Compose to project `qrtoprint-local` with `--project-name`, overriding any inherited `COMPOSE_PROJECT_NAME`; SmartPrint cannot reuse the `quantaedge-site` project namespace. The bootstrap never uses `--remove-orphans` and the runner never runs `docker compose down -v`.
-3. Verifies localhost port 3000 is not held by another Docker Compose project (and never stops foreign containers), rebuilds the current portal/API containers under the isolated `qrtoprint-local` project name, checks the portal at `127.0.0.1:3000`, and probes the private API `/health/ready` endpoint from inside the API container. API host port 8080 is not published.
+2. Reuses the existing local .env.local and persistent volumes. The runner pins Docker Compose to project `smart-print` with `--project-name`, overriding any inherited `COMPOSE_PROJECT_NAME`. The existing PostgreSQL and document volumes retain their explicit legacy names (`qrtoprint-local_qrtoprint_local_database` and `qrtoprint-local_qrtoprint_local_documents`) and are mounted as external volumes, so the project rename does not create or reset a new database. The bootstrap never uses `--remove-orphans` and the runner never runs `docker compose down -v`.
+3. Verifies localhost port 3000 is not held by another Docker Compose project (and never stops foreign containers), rebuilds the current portal/API containers under the isolated `smart-print` project name, checks the portal at `127.0.0.1:3000`, and probes the private API `/health/ready` endpoint from inside the API container. API host port 8080 is not published.
 4. **Before starting the long browser suite**, checks that running API and portal container image IDs match the images just built, API liveness succeeds directly and through Nginx, a preflight accepts the exact `http://127.0.0.1:3000` origin, and the compiled portal contains no Google Fonts network references. A failed prerequisite stops before QA account bootstrap or Playwright and records a diagnostic log.
-4. Creates or reuses four clearly labelled QA identities: two shop owners, one global customer and one platform administrator. Shop/customer registration uses the real app registration path; the platform administrator uses the existing protected one-time bootstrap command in the local API container. The bootstrap refuses to elevate a shop user.
-5. Stores generated passwords in .secrets/smartprint-qa/qa-accounts.dpapi.json, protected with Windows DPAPI for the current Windows user. Passwords are not printed, placed in test reports or committed to Git.
-6. Installs/locates the pinned Playwright package and Chromium in the npm cache.
-7. Validates the E2E JavaScript syntax and runs the headed Playwright-managed Chromium browser against the real local portal and API. It does not launch or fall back to the system-installed Microsoft Edge.
-8. Runs the existing portal logic tests, API/.NET tests and Windows Agent tests when the corresponding SDKs are installed. The destructive PostgreSQL migration test is excluded from the local application database by leaving SMARTPRINT_TEST_POSTGRES unset.
-9. If the Microsoft Print to PDF virtual queue is installed, opts in to the Agent's real GDI spooler integration test. That test verifies the Windows virtual printer produced a PDF; it does not send paper to a physical printer.
-10. If system Gradle and the Android SDK are installed, runs Android JVM tests and builds a local-portal debug APK. If an Android emulator is already running, it also runs connected instrumentation tests. It never installs the APK on an attached physical phone.
+5. Creates or reuses four clearly labelled QA identities: two shop owners, one global customer and one platform administrator. Shop/customer registration uses the real app registration path; the platform administrator uses the existing protected one-time bootstrap command in the local API container. The bootstrap refuses to elevate a shop user.
+6. Stores generated passwords in .secrets/smartprint-qa/qa-accounts.dpapi.json, protected with Windows DPAPI for the current Windows user. Passwords are not printed, placed in test reports or committed to Git.
+7. Installs/locates the pinned Playwright package and Chromium in the npm cache.
+8. Validates the E2E JavaScript syntax and runs the headed Playwright-managed Chromium browser against the real local portal and API. It does not launch or fall back to the system-installed Microsoft Edge.
+9. Runs the existing portal logic tests, API/.NET tests and Windows Agent tests when the corresponding SDKs are installed. The destructive PostgreSQL migration test is excluded from the local application database by leaving SMARTPRINT_TEST_POSTGRES unset.
+10. If the Microsoft Print to PDF virtual queue is installed, opts in to the Agent's real GDI spooler integration test. That test verifies the Windows virtual printer produced a PDF; it does not send paper to a physical printer.
+11. If system Gradle and the Android SDK are installed, runs Android JVM tests and builds a local-portal debug APK. If an Android emulator is already running, it also runs connected instrumentation tests. It never installs the APK on an attached physical phone.
 
 Generated logs, screenshots and JSON/TXT reports are written under `artifacts/smartprint-qa/`; this directory is Git-ignored. QA account passwords remain DPAPI-protected under `.secrets/`.
 
