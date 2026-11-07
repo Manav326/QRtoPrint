@@ -227,14 +227,20 @@ public sealed class PrintJob
 {
     public Guid Id { get; set; } = Guid.NewGuid();
     public Guid TenantId { get; set; }
-    public Guid QrStationId { get; set; }
+    public Guid? QrStationId { get; set; }
+    // Shop-originated orders have no customer QR session. They remain tenant-scoped
+    // PrintJobs and use the same approval, payment and dispatch state machine.
+    public Guid? CustomerSessionId { get; set; }
+    public Guid? CustomerUserId { get; set; }
+    public string Origin { get; set; } = "CUSTOMER_QR";
+    public string? RecipientName { get; set; }
+    public string? RecipientPhone { get; set; }
     public Guid? PrinterDeviceId { get; set; }
     public string? PrinterNameSnapshot { get; set; }
     public string? PrinterQueueNameSnapshot { get; set; }
     public string? PrinterAgentNameSnapshot { get; set; }
     public DateTimeOffset? PrinterSnapshotUtc { get; set; }
     public Guid? ClaimedByAgentDeviceId { get; set; }
-    public Guid CustomerSessionId { get; set; }
     public Guid? BatchId { get; set; }
     public string? BatchGroupName { get; set; }
     public string? BatchName { get; set; }
