@@ -9,7 +9,7 @@ export const RECORD_PREREQUISITES = Object.freeze({
   "SHOP: invalid device, printer, profile, account and pricing inputs fail without changing saved settings": ["Shop one provisions real QA printer and QR station", "Shop one configures print pricing through the real UI"],
   "REPORTS: supported reporting windows return tenant-scoped summary data and invalid periods are rejected": ["Create or sign in to the first real QA shop through the shop UI","Create or sign in to the second real QA shop through the shop UI"],
   "Shop one navigates every real sidebar section and the account-menu-only tools": ["Create or sign in to the first real QA shop through the shop UI"],
-  "Shop two navigates every real sidebar section and account-menu-only tools": ["Shop two configures isolated real QA printer/station"],
+  "Shop two navigates every real sidebar section and account-menu-only tools": ["Create or sign in to the second real QA shop through the shop UI"],
   "Shop, platform-admin and cross-tenant authorization boundaries": ["Shop one provisions real QA printer and QR station","Shop two configures isolated real QA printer/station","Create or sign in to the real global customer account","Bootstrap-created platform administrator signs in through the real admin UI"],
   "Customer opens the shop-one station with authenticated customer identity": ["Shop one provisions real QA printer and QR station","Create or sign in to the real global customer account"],
   "QR/UPLOAD: session renewal, scoped resume and invalid local-upload metadata are safely rejected": ["Customer opens the shop-one station with authenticated customer identity"],

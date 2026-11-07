@@ -58,7 +58,7 @@ test("a station provisioning failure blocks its station journeys but not Shop Tw
     ["Create or sign in to the real global customer account", "PASS"],
     ["Create and publish a free QA-only plan, then assign it through the platform UI", "PASS"],
     ["Shop one provisions real QA printer and QR station", "FAIL"],
-    ["Shop two configures isolated real QA printer/station", "PASS"]
+    ["Shop two configures isolated real QA printer/station", "FAIL"]
   ]);
 
   assert.deepEqual(
