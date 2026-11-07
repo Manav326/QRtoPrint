@@ -120,6 +120,45 @@ Required fixtures:
 8. Before retrying an ambiguous payment, refund, dispatch, print or enrollment action, check authoritative state first.
 9. Mark missing features NOT IMPLEMENTED and leave them in the release blocker register.
 
+### 4.1 Live terminal progress contract
+
+Every executable QA runner must report the work **while it is happening**. Do not make the operator wait for a final summary to discover what the runner was doing.
+
+Required terminal behaviour:
+
+- Print a timestamped start line before each logical QA step or test case, with its exact name and, where available, case ID.
+- Print meaningful sub-actions during long work (for example, downloading the published installer, inspecting the Agent service without changing it, polling for Desktop UI Automation landmarks, selecting the Android device, opening Files navigation, reserving a document upload, or reconciling a payment record).
+- Print an immediate per-case PASS/FAIL/SKIP result and elapsed time when the case ends.
+- For blocked/skipped cases, state the prerequisite or safety reason. Never report a skipped case as a pass.
+- Stream Node, xUnit and Gradle test output live. The Node reporter prints case start/end, source path/line and failure detail; xUnit verbose mode is sequential and configured not to stop after the first test failure; Android Gradle test tasks report per-test lifecycle events.
+- Continue executing independent test records after an isolated test failure. Skip only records whose declared prerequisites did not pass. Stop only when a critical preflight, environment, security boundary or harness failure makes further execution unsafe or invalid.
+- Keep final machine-readable results and logs aligned with terminal output. Terminal progress is observability, not a substitute for evidence.
+
+Standard prefixes:
+
+| Prefix | Meaning |
+|---|---|
+| \`[QA-STEP-START]\` | A top-level QA step is starting. |
+| \`[QA-STEP-ACTION]\` / \`[QA-ACTION]\` | The exact operation currently being performed. |
+| \`[QA-CASE-START]\` / \`[TEST ... START]\` | A named test case is beginning. |
+| \`[QA-PROGRESS]\` | A long-running operation is still active, with current sub-stage/attempt. |
+| \`[QA-RESULT]\` / \`[QA-CASE-END]\` / \`[TEST PASS|FAIL|SKIP]\` | Individual result and elapsed time. |
+| \`[QA-STEP-END]\` | A top-level step completed with exit code and duration. |
+
+Example terminal output:
+
+\`\`\`text
+[QA-STEP-START] 08 | 14:12:06 | Portal logic regression tests
+[TEST 001 START] rejects an expired accepted quote — batch-checkout-state.test.ts:5
+[TEST PASS] rejects an expired accepted quote — batch-checkout-state.test.ts:5 (8 ms)
+[TEST 002 START] keeps verified batch payment visible — batch-checkout-state.test.ts:9
+[TEST FAIL] keeps verified batch payment visible — batch-checkout-state.test.ts:9 (22 ms)
+  [TEST ERROR] Expected payment state VERIFIED, received PENDING
+[QA-STEP-END] 14:12:07 | FAIL | exit=1 | elapsed=1.1s
+\`\`\`
+
+A failed test stays visible in the run report, but does not by itself cancel unrelated independent cases.
+
 Per-case execution record: Case ID | Result | Actual result | Evidence path | Defect ID | Retest build/commit | Retest result | Tester/time.
 
 ---
