@@ -32,7 +32,6 @@ jobs:
               per_page: 100,
             });
             let tag = tags.find(({ name }) => /^v\d+\.\d+\.\d+$/.test(name))?.name;
-            let createdTag = false;
             if (!tag) {
               const gradleFile = fs.readFileSync("apps/android/app/build.gradle.kts", "utf8");
               const match = gradleFile.match(
@@ -51,8 +50,7 @@ jobs:
                   ref: `refs/tags/${tag}`,
                   sha: context.sha,
                 });
-                createdTag = true;
-                core.notice(`Created ${tag} at ${context.sha}; its tag-push event will trigger the release workflow.`);
+                core.notice(`Created ${tag} at ${context.sha}.`);
               } catch (error) {
                 if (error.status !== 422) throw error;
                 core.notice(`Tag ${tag} already exists; leaving the existing tag untouched.`);
@@ -61,11 +59,23 @@ jobs:
               core.notice(`Found existing stable tag ${tag}; checking whether its release still needs publishing.`);
             }
 
-            if (createdTag) {
-              // Creating the tag already emits a push event that starts release.yml.
-              // A workflow_dispatch here would race the tag-triggered release and both
-              // runs would attempt to publish the same immutable version.
-              core.notice(`Tag ${tag} was just created; skipping duplicate workflow dispatch.`);
+            // GITHUB_TOKEN-created tags do not start workflows automatically. We must
+            // dispatch once for a new tag, but avoid racing a release run that another
+            // main-branch workflow has already queued for the same version.
+            const { data: releaseRuns } = await github.rest.actions.listWorkflowRuns({
+              owner,
+              repo,
+              workflow_id: "release.yml",
+              per_page: 100,
+            });
+            const activeReleaseRun = releaseRuns.workflow_runs.find((item) =>
+              (item.head_branch === tag || item.head_branch === "main") &&
+              (item.status === "queued" || item.status === "in_progress")
+            );
+            if (activeReleaseRun) {
+              core.notice(
+                `Release workflow run ${activeReleaseRun.id} is already ${activeReleaseRun.status} for ${tag}; skipping duplicate dispatch.`
+              );
               return;
             }
 
@@ -84,7 +94,7 @@ jobs:
               owner,
               repo,
               workflow_id: "release.yml",
-              ref: "main",
+              ref: tag,
               inputs: { release_tag: tag },
             });
             core.notice(`Dispatched the signed release workflow for ${tag}.`);
