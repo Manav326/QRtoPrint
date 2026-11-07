@@ -41,8 +41,6 @@ export const RECORD_PREREQUISITES = Object.freeze({
   "TENANT: printer listings expose only the authenticated shop's printers": ["Shop one configures real QA printer/station, pricing and payment methods", "Shop two configures isolated real QA printer/station"],
   "TENANT: QR station listings expose only the authenticated shop's stations": ["Shop one configures real QA printer/station, pricing and payment methods", "Shop two configures isolated real QA printer/station"],
   "TENANT: revoked Agent identity remains visible only to its source shop": ["Disposable QA Agent enrolls, heartbeats, validates printer sync, rejects code replay and revokes safely"],
-  "QR: invalid opaque session token cannot read current session data": ["Customer opens shop-one QR station and receives a customer-bound real session"],
-  "QR: invalid opaque session token cannot renew a session": ["Customer opens shop-one QR station and receives a customer-bound real session"],
   "UPLOAD: a print upload requires an Idempotency-Key": ["Customer opens shop-one QR station and receives a customer-bound real session"],
   "UPLOAD: malformed batch identifiers are rejected before document ingestion": ["Customer opens shop-one QR station and receives a customer-bound real session"],
   "DOC: cloud document upload rejects non-multipart requests": ["Customer opens shop-one QR station and receives a customer-bound real session"],

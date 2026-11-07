@@ -1471,7 +1471,7 @@ try {
     const customerCannotSeePlatform = await request(page, "GET", "/api/v1/platform/overview", {
       token: customerTokens.accessToken
     });
-    assert.ok([401, 403].includes(customerCannotSeePlatform.status));
+    assertExpectedHttpStatus(customerCannotSeePlatform, [401, 403], "A global customer must not access the platform control plane.");
     return { shopToPlatform: shopCannotSeePlatform.status, adminToShop: adminCannotSeeShopProfile.status, crossTenantPrinter: shopOneCannotSeeShopTwoPrinter.status, customerToPlatform: customerCannotSeePlatform.status };
   });
 
