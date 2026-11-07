@@ -855,23 +855,62 @@ async function setupShopResources(page, tokens, shopLabel, onResourcesReady = ()
   await pricingPanel.waitFor({ state: "visible", timeout: 15000 });
   assert.equal(await pricingPanel.locator('input[type="number"]').count(), 9,
     shopLabel + " pricing page did not render all nine rate inputs.");
-  const pricingInputs = ["pricing-mono-per-side","pricing-colour-per-side","pricing-mono-duplex","pricing-colour-duplex","pricing-minimum-charge","pricing-photo-35x45","pricing-photo-25x35","pricing-photo-2x2","pricing-photo-4x6"];
-  for (const inputId of pricingInputs) {
-    const input = pricingPanel.locator("#" + inputId);
-    await input.waitFor({ state: "visible", timeout: 10000 });
-    assert.equal(await input.count(), 1, shopLabel + " expected exactly one #" + inputId + " pricing input.");
+  const pricingInputs = [
+  {
+    "id": "pricing-mono-per-side",
+    "label": "Black & white",
+    "value": "2.00"
+  },
+  {
+    "id": "pricing-colour-per-side",
+    "label": "Colour",
+    "value": "5.00"
+  },
+  {
+    "id": "pricing-mono-duplex",
+    "label": "Black & white duplex",
+    "value": "3.00"
+  },
+  {
+    "id": "pricing-colour-duplex",
+    "label": "Colour duplex",
+    "value": "7.00"
+  },
+  {
+    "id": "pricing-minimum-charge",
+    "label": "Minimum job charge",
+    "value": "1.00"
+  },
+  {
+    "id": "pricing-photo-35x45",
+    "label": "35 × 45 mm",
+    "value": "5.00"
+  },
+  {
+    "id": "pricing-photo-25x35",
+    "label": "25 × 35 mm",
+    "value": "5.00"
+  },
+  {
+    "id": "pricing-photo-2x2",
+    "label": "2 × 2 inch",
+    "value": "7.00"
+  },
+  {
+    "id": "pricing-photo-4x6",
+    "label": "4 × 6 inch",
+    "value": "10.00"
   }
-  assert.equal(await pricingPanel.getByLabel("Black & white", { exact: true }).count(), 1,
-    shopLabel + " pricing input lost its associated accessible label.");
-  await pricingPanel.locator("#pricing-mono-per-side").fill("2.00");
-  await pricingPanel.locator("#pricing-colour-per-side").fill("5.00");
-  await pricingPanel.locator("#pricing-mono-duplex").fill("3.00");
-  await pricingPanel.locator("#pricing-colour-duplex").fill("7.00");
-  await pricingPanel.locator("#pricing-minimum-charge").fill("1.00");
-  await pricingPanel.locator("#pricing-photo-35x45").fill("5.00");
-  await pricingPanel.locator("#pricing-photo-25x35").fill("5.00");
-  await pricingPanel.locator("#pricing-photo-2x2").fill("7.00");
-  await pricingPanel.locator("#pricing-photo-4x6").fill("10.00");
+];
+  for (const pricingInput of pricingInputs) {
+    const input = pricingPanel.locator("#" + pricingInput.id);
+    await input.waitFor({ state: "visible", timeout: 10000 });
+    assert.equal(await input.count(), 1,
+      shopLabel + " expected exactly one #" + pricingInput.id + " pricing input.");
+    assert.equal(await pricingPanel.getByLabel(pricingInput.label, { exact: true }).count(), 1,
+      shopLabel + " #" + pricingInput.id + " is missing its associated accessible label.");
+    await input.fill(pricingInput.value);
+  }
   await page.getByRole("button", { name: "Save print prices" }).click();
   await page.getByText(/Rate card version/i).waitFor({ state: "visible", timeout: 15000 });
 
