@@ -711,6 +711,15 @@ export interface ShopPhotoJobResult {
     quoteExpiresUtc: string;
     createdUtc: string;
   };
+  payment: {
+    id: string;
+    method: "UPI" | "CASH";
+    status: string;
+    amountMinor: number;
+    currency: string;
+    upiIdSnapshot?: string | null;
+    payeeNameSnapshot?: string | null;
+  };
   document: {
     id: string;
     originalFileName: string;
@@ -730,6 +739,7 @@ export async function createShopPhotoJob(token: string, file: File, values: {
   customerUserId?: string;
   recipientName?: string;
   recipientPhone?: string;
+  paymentMethod: "UPI" | "CASH";
   idempotencyKey: string;
 }) {
   const form = new FormData();
@@ -738,7 +748,8 @@ export async function createShopPhotoJob(token: string, file: File, values: {
   form.append("photoCount", String(values.photoCount));
   form.append("photosPerPage", String(values.photosPerPage));
   form.append("recipientType", values.recipientType);
-  form.append("idempotencyKey", values.idempotencyKey);
+  form.append("paymentMethod", values.paymentMethod);
+    form.append("idempotencyKey", values.idempotencyKey);
   if (values.customerUserId) form.append("customerUserId", values.customerUserId);
   if (values.recipientName) form.append("recipientName", values.recipientName);
   if (values.recipientPhone) form.append("recipientPhone", values.recipientPhone);
